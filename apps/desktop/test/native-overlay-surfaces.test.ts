@@ -90,6 +90,42 @@ it('keeps document blur separate from App departure before sibling focus settles
   expect(owner.hasProjectionInFocusedWindow()).toBe(false)
 })
 
+it('keeps attached projection focus separate from a moved frame input readiness', async () => {
+  const { owner, window, contents, warning } = fixture()
+  let finishContent!: () => void
+  let repaint: Promise<unknown> | undefined
+  try {
+    await owner.update([float])
+    const view = fake.views[0]
+    fake.image = new Promise(resolve => { finishContent = resolve })
+    const moved = { ...float, bounds: { ...float.bounds, x: 200, y: 230 } }
+    repaint = owner.update([moved])
+    await vi.waitFor(() => expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(2))
+    expect(view.getBounds()).toEqual(float.bounds)
+    expect(window.contentView.children).toContain(view)
+    expect(owner.hasProjectionInFocusedWindow()).toBe(true)
+    view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
+    view.listeners['input-event']({}, { type: 'mouseUp', x: 5, y: 7, button: 'left' })
+    expect(contents.sendInputEvent).not.toHaveBeenCalled()
+    expect(contents.focus).not.toHaveBeenCalled()
+    window.isFocused.mockReturnValue(false)
+    expect(owner.hasProjectionInFocusedWindow()).toBe(false)
+    window.isFocused.mockReturnValue(true)
+    expect(owner.hasProjectionInFocusedWindow()).toBe(true)
+    finishContent()
+    await repaint
+    expect(view.getBounds()).toEqual(moved.bounds)
+    expect(owner.hasProjectionInFocusedWindow()).toBe(true)
+    await owner.update([])
+    expect(owner.hasProjectionInFocusedWindow()).toBe(false)
+    expect(warning).not.toHaveBeenCalled()
+  } finally {
+    finishContent?.()
+    await repaint?.catch(() => {})
+    owner.dispose()
+  }
+})
+
 // A separate process observes real unhandled-rejection delivery without changing Vitest's
 // own handler. It compiles the current production module; only Electron's native boundary is modeled.
 function lateDocumentAfterRemoval(): {
@@ -296,11 +332,12 @@ describe('actual native Chrome owner', () => {
       const view = fake.views[0], point = { x: 5, y: 7 }
       expect(view.ownerWindow).toBe(phase === 'image' ? window : null)
       expect(view.getVisible()).toBe(true)
+      // Attachment establishes same-window focus ownership, not paint or input readiness.
+      expect(owner.hasProjectionInFocusedWindow()).toBe(phase === 'image')
       if (phase === 'image') {
         const preparing = view.getBounds()
         expect(preparing.x + preparing.width).toBeLessThanOrEqual(0)
         expect(preparing.y + preparing.height).toBeLessThanOrEqual(0)
-        expect(owner.hasProjectionInFocusedWindow()).toBe(false)
       }
       const input = (type: 'mouseDown' | 'mouseUp') => ({ type, ...point, button: 'left', clickCount: 1 })
       const originalInput = (type: 'mouseDown' | 'mouseUp') => ({ ...input(type), x: float.bounds.x + point.x, y: float.bounds.y + point.y })
@@ -702,6 +739,7 @@ describe('actual native Chrome owner', () => {
     const receipt = await owner.update([float])
     expect(receipt.projected).toBe(0)
     expect(receipt.warning).toContain('Browser remains available')
+    expect(owner.hasProjectionInFocusedWindow()).toBe(false)
     expect(fake.views).toHaveLength(1)
     expect(fake.views[0].webContents.close).toHaveBeenCalledTimes(1)
   })
@@ -719,6 +757,7 @@ describe('actual native Chrome owner', () => {
     expect(contents.sendInputEvent).not.toHaveBeenCalled()
     reject(new Error('Compositor unavailable'))
     expect(await moved).toMatchObject({ projected: 0, warning: expect.stringContaining('Browser remains available') })
+    expect(owner.hasProjectionInFocusedWindow()).toBe(false)
     view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
     expect(contents.sendInputEvent).not.toHaveBeenCalled()
     expect(view.webContents.close).toHaveBeenCalledTimes(1)
