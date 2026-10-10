@@ -91,7 +91,7 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
       <h3>What the next recovery may send</h3>
       <p>{reminder ? 'Reminder enabled. ' : 'Reminder off. '}{draft.value.continuationEnabled ? 'Continuation enabled. ' : 'Continuation off. '}
         The selected reminder becomes a platform note and joins the continuation prompt. Selected nonempty content is sent in one new input; either part can supply it. If neither part has content, no input is sent.</p>
-      <p>The parts remain separately inspectable and share the same original input key and Provider acceptance record. This input may use an ordinary User role and open one turn. A native system role is not guaranteed; Provider acceptance does not mean the model completed the task.</p>
+      <p>The parts remain separately inspectable and share the same original input key and actual transport or delivery receipt. A native launch argument receipt confirms Runtime carriage only; Provider consumption requires separate evidence. This input may use an ordinary User role and open one turn. A native system role is not guaranteed; delivery does not mean the model completed the task.</p>
       <p>This input follows confirmed native resume of interrupted work and current input readiness. An unknown prior input is never replayed. Saving here does not send this input.</p>
     </section>
     {!valid && <p className="settings-inline-error" role="alert">Enter nonnegative seconds (up to millisecond precision) and a whole-number recheck count within the safe integer range.</p>}
