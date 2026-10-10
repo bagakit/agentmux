@@ -92,6 +92,8 @@ it('preserves title commit/cancel and moves the exact original through the same 
   await act(async () => title.focus()); await input(title, 'A durable finding')
   await act(async () => title.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
   await vi.waitFor(async () => expect((await owner.read()).pages.original!.title).toBe('A durable finding'))
+  // Owner publication can precede the original operation's UI completion.
+  await vi.waitFor(() => expect(title.disabled).toBe(false))
   expect(readNoteDocument(await readFile(join(directory, 'original.note.md'), 'utf8'))).toMatchObject({ status: 'valid', note: { title: 'A durable finding' } })
   await choose('Move page')
   expect(dom.container.querySelector('[aria-label="Move Note page"] h3')?.textContent).toBe('Move page')
