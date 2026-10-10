@@ -1,3 +1,6 @@
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { useIconFeedback } from '../lib/use-icon-feedback'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
@@ -11,6 +14,8 @@ import { openNotebookPage } from '../lib/recall-notebooks'
 import { saveSurveyToRecall, type SurveyRecallCapture as CaptureTarget } from '../lib/survey-recall-capture'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
+const ThemeObjectSurveyIcon = semanticIconComponent('object.survey')
+
 /** A result destination, separate from Survey's browser navigation and Recall's directory. */
 export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget | null; onClose(): void }) {
   const library = useNotebookLibrary(state => state.state)
@@ -18,13 +23,16 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
   const draft = useLauncherState(state => target ? state.drafts[target.draftId] ?? EMPTY_LAUNCHER_DRAFT : EMPTY_LAUNCHER_DRAFT)
   const persistenceIssue = useLauncherState(state => state.persistenceIssue)
   const receipt = draft.noteCreation
+  const active = useWorkbenchPresentationActive()
+  const content = useRef<HTMLDivElement>(null)
+  const cue = useIconFeedback(target?.draftId ?? 'closed', active, content)
   const [notebookId, setNotebookId] = useState(DEFAULT_NOTEBOOK_ID)
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const current = useRef(target); current.current = target
   const source = receipt?.notebook?.source ?? target?.source
   useEffect(() => {
     if (!target) return
-    setError(null)
+    setError(null); cue.stop()
     const original = useLauncherState.getState().drafts[target.draftId]
     setNotebookId(original?.noteCreation?.notebook?.notebookId ?? DEFAULT_NOTEBOOK_ID)
     if (!original) useLauncherState.getState().setDraft(target.draftId, 'note', target.source.title ?? '')
@@ -34,10 +42,17 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
   async function save() {
     if (!target || busy) return
     const captured = target
+    const before = useLauncherState.getState().drafts[captured.draftId]?.noteCreation
+    const alreadySaved = before?.status === 'written' && before.notebookRegistered
     setBusy(true); setError(null)
     try {
       const result = await saveSurveyToRecall(captured, notebookId, draft.note)
       if (current.current === captured && result.issue) setError(result.issue)
+      const original = useLauncherState.getState().drafts[captured.draftId]?.noteCreation
+      if (!alreadySaved && current.current === captured && !result.issue && result.status === 'written' && result.notebookRegistered &&
+        original?.intentId === result.intentId && original.noteId === result.noteId && original.path === result.path) {
+        cue.play(captured.draftId, result.intentId)
+      }
     } catch (cause) { if (current.current === captured) setError(presentError(cause)) }
     finally { setBusy(false) }
   }
@@ -63,13 +78,13 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
         const { noteCreation: _saved, ...retained } = original
         return { drafts: { ...state.drafts, [target.draftId]: { ...retained, note: original.note === receipt.draft ? '' : original.note } } }
       })
-      setError(null)
+      setError(null); cue.stop()
     } catch (cause) { setError(presentError(cause) + ' The saved page and current draft are kept.') }
   }
   const saved = receipt?.status === 'written' && receipt.notebookRegistered
   return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
-      <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog survey-recall-capture"
+      <Dialog.Content ref={content} className="confirmation-dialog dialog-surface topic-dialog survey-recall-capture"
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">Save to Recall</Dialog.Title>
@@ -80,7 +95,7 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
         <label>Finding<ComposerTextarea aria-label="Recall finding" value={draft.note} rows={6} placeholder="What do you want to remember?"
           onValueChange={value => { if (target) useLauncherState.getState().setDraft(target.draftId, 'note', value) }} /></label>
         {source ? <details className="topic-knowledge-sources"><summary>{source.title || 'Original source'}</summary><p>{source.url}</p></details> : null}
-        {saved ? <p role="status" className="survey-relation-notice">Saved to {library?.notebooks[receipt.notebook?.notebookId ?? '']?.name ?? 'Recall'}.
+        {saved ? <p role="status" className="survey-relation-notice"><ThemeObjectSurveyIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} /> Saved to {library?.notebooks[receipt.notebook?.notebookId ?? '']?.name ?? 'Recall'}.
           {draft.note !== receipt.draft ? ' Your newer input is still kept as a draft.' : ''}</p> : null}
         {error || receipt?.notebookIssue || libraryIssue || persistenceIssue ? <p role="status" className="surface-inline-error">{error ?? receipt?.notebookIssue ?? libraryIssue ?? persistenceIssue}</p> : null}
         <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>{saved ? 'Done' : 'Cancel'}</button>
