@@ -178,6 +178,22 @@ it('does not interpret a missing list result as permission to repeat an unknown 
   } finally { await h.close() }
 })
 
+it('does not reconcile an unknown original launch to another lifecycle operation with identical launch arguments', async () => {
+  const h = await fixture({ lostStart: true })
+  try {
+    await h.client.ensureAgentContinuity(h.request)
+    const foreignRun = { ...h.currentRun(), runId: 'foreign-run', lifecycleOperationId: 'foreign-lifecycle-operation' }
+    h.core.kernel.list = vi.fn(async () => [foreignRun])
+    const result = await h.client.ensureAgentContinuity(h.request)
+    expect(result).toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed' })
+    expect(h.client.agentSession('recipient').run).toEqual(h.request.expectedRun)
+    expect(h.op()!.launchInput).toMatchObject({ state: 'unknown', input: fresh })
+    expect(h.op()!.launchInput?.key).toBeUndefined(); expect(h.op()!.launchInput?.receipt).toBeUndefined()
+    expect((await h.store.readMetadata('recipient'))!.run).toEqual(h.request.expectedRun)
+    expect(h.started).toHaveLength(1); expect(h.core.kernel.input).not.toHaveBeenCalled(); expect(h.core.kernel.stop).not.toHaveBeenCalled()
+  } finally { await h.close() }
+})
+
 it.each(['body', 'source'] as const)('rejects changed %s under the original prepared input identity', async change => {
   const h = await fixture({ lostStart: true })
   try {

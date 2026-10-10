@@ -20,7 +20,15 @@ const mutations: Record<string, { file?: string; before: string; after: string }
   'launch-rpc-inspect': { file: 'packages/core/src/rpc-native-codec.ts', before: 'original.terminalPromptSubmission?.submissionId ?? original.launch?.input.submissionId', after: 'original.terminalPromptSubmission?.submissionId' },
   'launch-carrier': { file: 'packages/core/src/client.ts', before: '...(receipt.launchInput ? { prompt: receipt.launchInput.input.prompt,', after: '...(false ? { prompt: receipt.launchInput!.input.prompt,' },
   'launch-atomic-receipt': { file: 'packages/core/src/client.ts', before: '        bindContinuityLaunchInput(next.continuity, next.run)', after: '        void next.continuity' },
-  'launch-unknown-restart': { file: 'packages/core/src/client.ts', before: "if (prior?.kind === 'starting' || prior?.reason === 'operation-unconfirmed') {", after: 'if (false) {' },
+  'launch-reconcile-operation': { file: 'packages/core/src/client.ts',
+    before: `private async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
+    runs: readonly CtxmuxAdapterRun[]): Promise<AgentMuxStoredAgentSession | null> {
+    const prepared = reservation.preparedSession
+    const candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)`,
+    after: `private async completePreparedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
+    runs: readonly CtxmuxAdapterRun[]): Promise<AgentMuxStoredAgentSession | null> {
+    const prepared = reservation.preparedSession
+    const candidates = [...runs]` },
   'launch-frozen-source': { file: 'packages/core/src/client.ts', before: 'if (prior && (!prior.launchInput || !isDeepStrictEqual(prior.launchInput.input, input.input)))', after: 'if (false)' },
   'launch-record': { file: 'packages/core/src/agent-session-store.ts', before: "if (launch?.delivery === 'launch' && launch.state === 'launch-carried' && launch.key) originals.push({", after: 'if (false) originals.push({' },
   'launch-reconcile-args': { file: 'packages/core/src/client.ts', before: 'if (launched && (!launched.launchPlan || launched.launchPlan.program !== run.program ||', after: 'if (false && (!launched!.launchPlan || launched!.launchPlan.program !== run.program ||' },

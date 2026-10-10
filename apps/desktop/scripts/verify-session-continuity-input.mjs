@@ -25,7 +25,7 @@ const mutations = [
   ['launch-rpc-inspect', 'reads the original launch key through the real public RPC input.inspect wire'],
   ['launch-carrier', 'carries the original fresh input by the actual Provider resume argv contract'],
   ['launch-atomic-receipt', 'carries the original fresh input by the actual Provider resume argv contract'],
-  ['launch-unknown-restart', 'does not interpret a missing list result'],
+  ['launch-reconcile-operation', 'does not reconcile an unknown original launch to another lifecycle operation'],
   ['launch-frozen-source', 'under the original prepared input identity'],
   ['launch-record', 'carries the original fresh input by the actual Provider resume argv contract'],
   ['launch-reconcile-args', 'does not adopt different Runtime arguments'],
