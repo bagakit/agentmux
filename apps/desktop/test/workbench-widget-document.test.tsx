@@ -1,7 +1,7 @@
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { AgentInformationPreviewHost, useAgentInformationPreview } from '../src/renderer/src/components/AgentInformationPreview'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
-import { workbenchDocumentReturning } from '../src/renderer/src/lib/workbench-window-registry'
+import { workbenchDocumentReturning, registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-window-registry'
 import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 // @vitest-environment happy-dom
 import { act, useState, type ReactNode } from 'react'
@@ -10,6 +10,7 @@ import type { Editor } from '@tiptap/core'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'
+import { ComposerCompletionEditor } from '@agentmux/client-ui/components/ComposerCompletionEditor'
 import { InlineComposer } from '@agentmux/client-ui/components/InlineComposer'
 import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
 import { NoteBlockEditor } from '../src/renderer/src/components/NoteBlockEditor'
@@ -19,14 +20,15 @@ import { SelectionField } from '../src/renderer/src/components/SelectionField'
 import * as HoverMenu from '../src/renderer/src/components/HoverDropdownMenu'
 import { WindowOverlayPortal } from '../src/renderer/src/components/WindowOverlayHost'
 
-let host: HTMLDivElement, frame: HTMLIFrameElement, root: Root
+let host: HTMLDivElement, frame: HTMLIFrameElement, root: Root, releaseReadingDocument: (() => void) | undefined
 beforeEach(() => {
+  releaseReadingDocument = undefined
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   document.getSelection()?.removeAllRanges()
   host = document.createElement('div'); frame = document.createElement('iframe')
   document.body.append(host, frame); root = createRoot(host)
 })
-afterEach(async () => { await act(async () => { const preview=agentInformationPreview.get();if(preview)agentInformationPreview.dismiss(preview.token,true);root.unmount() }); host.remove(); frame.remove(); document.querySelector('#agentmux-window-overlay-host')?.remove(); vi.restoreAllMocks() })
+afterEach(async () => { await act(async () => { const preview=agentInformationPreview.get();if(preview)agentInformationPreview.dismiss(preview.token,true);root.unmount() }); releaseReadingDocument?.(); host.remove(); frame.remove(); document.querySelector('#agentmux-window-overlay-host')?.remove(); vi.restoreAllMocks() })
 const scope = (ownerDocument: Document, children: ReactNode) => <WorkbenchDocumentContext.Provider value={{document:ownerDocument, window:null}}>{children}</WorkbenchDocumentContext.Provider>
 async function render(ownerDocument: Document, children: ReactNode) { await act(async () => root.render(scope(ownerDocument, children))) }
 async function migrate(ownerDocument: Document, children: ReactNode) { ownerDocument.body.append(ownerDocument.adoptNode(host)); await render(ownerDocument, children) }
@@ -118,6 +120,7 @@ it('places the original Agent disclosure in its workface and listens for dismiss
 
 it.each(['reading', 'metadata', 'hidden'])('keeps the pinned original reading DOM, scroll, Range and focus when its actual native document returns: %s', async mode => {
  const child=frame.contentDocument!
+ releaseReadingDocument=registerWorkbenchDocument(child,{windowId:'original-reading-window',documentGeneration:'original-reading-document'})
  await act(async()=>root.unmount());host.remove();host=child.createElement('div');child.body.append(host);root=createRoot(host)
  const context: FocusContext={id:'original-source',name:'Original Agent',detail:'Original source',state:'running',stateLabel:'Running',processState:'running',bucket:'working',kind:'terminal',providerId:null,hostId:'local',topicId:null,workspaceId:'workspace',workspaceName:'Workspace',workspacePath:fixturePath('workbench'),liveAgent:false,actionable:true,lastActivityAt:null,runId:'original-run',workingEnteredAt:null,workspace:undefined,recap:{text:'Original reading text',reading:{text:'Original reading text',truncated:false},source:'Last assistant message',origin:'timeline'},detailIsRecap:true}
  function Trigger(){const preview=useAgentInformationPreview(context,true,undefined,undefined,()=>{});return <button ref={preview.anchor} {...preview.triggerEvents}>Read original source</button>}
@@ -146,4 +149,28 @@ it.each(['reading', 'metadata', 'hidden'])('keeps the pinned original reading DO
  // A closed source document cannot keep dismissing the returned reading.
  await act(async()=>child.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true})))
  expect(document.querySelector('.agent-information-reader')).toBe(panel)
+})
+
+
+it('routes an already open completion panel and its original keyboard choice after its document changes', async () => {
+  function Completion({ ownerDocument }: { ownerDocument: Document }) {
+    const [draft, setDraft] = useState('')
+    return <DesktopClientUiProvider document={ownerDocument}><ComposerCompletionEditor value={draft} onValueChange={setDraft} disabled={false} placeholder="Message" aria-label="Draft" onKeyDown={() => {}} commands={[{ text: '/first', description: 'First original command' }, { text: '/second', description: 'Second original command' }]} /></DesktopClientUiProvider>
+  }
+  await render(document, <Completion ownerDocument={document}/>)
+  const original = editor('.tiptap'), view = original.view
+  await act(async () => { original.commands.insertContent('/'); original.view.focus() })
+  await vi.waitFor(() => expect(document.querySelector<HTMLElement>('.composer-completion-popover')?.style.visibility).toBe('visible'))
+  const child = frame.contentDocument!
+  await migrate(child, <Completion ownerDocument={child}/>)
+  expect(editor('.tiptap')).toBe(original); expect(original.view).toBe(view); expect(view.root).toBe(child)
+  expect(document.querySelector('.composer-completion-popover')).toBeNull()
+  await vi.waitFor(() => expect(child.querySelector<HTMLElement>('.composer-completion-popover')?.style.visibility).toBe('visible'))
+  const options = [...child.querySelectorAll<HTMLButtonElement>('[role=option]')]
+  expect(options).toHaveLength(2)
+  await act(async () => options[0]!.focus())
+  await act(async () => options[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+  expect(child.activeElement).toBe(options[1])
+  await act(async () => options[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+  expect(original.getText()).toBe('/second ')
 })
