@@ -49,6 +49,11 @@ export function useMarkdownCopyText(): ClientUiPlatform['copyText'] | undefined 
   return useMemo(() => platform?.copyText ? platform.copyText.bind(platform) : undefined, [platform, platform?.copyText])
 }
 
+/** Optional presentation scope; standalone content can still observe its own DOM document. */
+export function useClientUiOwnerDocument(): Document | undefined {
+  return useContext(PlatformContext)?.ownerDocument
+}
+
 /** Each application supplies one explicit adapter; there is no Desktop or browser IO default. */
 export function ClientUiProvider({ platform, children }: { platform: ClientUiPlatform; children: ReactNode }) {
   return <PlatformContext.Provider value={platform}>{children}</PlatformContext.Provider>
