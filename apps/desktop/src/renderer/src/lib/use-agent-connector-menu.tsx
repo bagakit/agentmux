@@ -6,10 +6,14 @@ import { sessionPresentationById } from './session-presentation'
 import { AgentConnectorDialog, type AgentConnectorTarget } from '../components/AgentConnectorDialog'
 import { SettingsNavigation } from '../components/SettingsNavigation'
 import { agentMoteConnectionSource } from './mote-connection-default'
+import { readConnectorService } from './connector-service-observation'
 
 /** The existing Region menu owns this transient presentation; opening it reads only configuration. */
 export function useAgentConnectorMenu(regionId: string, sessionId: string | null, tabId?: string) {
-  const [enabled, setEnabled] = useState(false), [issue, setIssue] = useState('')
+  const [botEnabled, setBotEnabled] = useState(false), [issue, setIssue] = useState('')
+  const observation = useAppStore(state => sessionId ? state.connectorServiceObservation : null)
+  const observed = observation?.source === api.connections.call ? observation : null
+  const service = observed?.state
   const [dialog, setDialog] = useState<{ original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details' } | null>(null)
   const selection = useRef<typeof dialog>(null), menuOpen = useRef(false)
   const settings = useContext(SettingsNavigation), returned = useRef<HTMLElement | null>(null), read = useRef(0)
@@ -21,8 +25,9 @@ export function useAgentConnectorMenu(regionId: string, sessionId: string | null
     const generation = ++read.current
     if (!open || !sessionId) return
     returned.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    void readConnectorService(() => generation === read.current).catch(() => {})
     void api.connections.call('connection.ls', {}).then(result => {
-      if (generation === read.current) { setEnabled(result.connections.some(item => item.config.enabled)); setIssue('') }
+      if (generation === read.current) { setBotEnabled(result.connections.some(item => item.config.enabled)); setIssue('') }
     }).catch(error => { if (generation === read.current) setIssue(presentError(error)) })
   }
   function open(mode: 'create' | 'existing' | 'details') {
@@ -41,8 +46,13 @@ export function useAgentConnectorMenu(regionId: string, sessionId: string | null
     if (menuOpen.current) selection.current = selected
     else setDialog(selected)
   }
-  return { onOpen, dialogOpen: dialog !== null, issue, entries: !sessionId ? [] : [
-    ...(enabled ? [{ label: 'Create group chat', onSelect: () => open('create') }, { label: 'Bind existing group chat', onSelect: () => open('existing') }, { label: 'Shared group details', onSelect: () => open('details') }] : []),
-    ...(settings ? [{ label: enabled ? 'Chat application settings' : 'Enable a chat application', onSelect: () => settings.open('chat-connections') }] : [])
-  ], dialog: dialog ? <AgentConnectorDialog key={JSON.stringify(dialog.original.target)} {...dialog} returnFocus={() => returned.current} onClose={() => setDialog(null)} /> : null }
+  const available = service?.enabled === true && botEnabled
+  return { onOpen, dialogOpen: dialog !== null, group: !sessionId || service?.enabled === false ? null : {
+    label: 'Agent Conversation Connector',
+    entries: [
+      ...(available ? [{ label: 'Create group chat', onSelect: () => open('create') }, { label: 'Bind existing group chat', onSelect: () => open('existing') }, { label: 'Shared group details', onSelect: () => open('details') }] : []),
+      ...(settings ? [{ label: !service ? 'Connector settings' : available ? 'Chat application settings' : 'Enable a chat application', onSelect: () => settings.open('chat-connections') }] : [])
+    ],
+    issue: [!service ? 'Connector service state is not confirmed. Open Connector settings to check it.' : '', observed?.issue ? `Current service check unconfirmed; keeping the last confirmed policy. ${observed.issue}` : '', issue].filter(Boolean).join(' ')
+  }, dialog: dialog ? <AgentConnectorDialog key={JSON.stringify(dialog.original.target)} {...dialog} returnFocus={() => returned.current} onClose={() => setDialog(null)} /> : null }
 }

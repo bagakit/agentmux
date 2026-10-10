@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { createContext, useContext, type ReactNode } from 'react'
+import { createContext, useContext, useId, type ReactNode } from 'react'
 import { formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
@@ -21,13 +21,14 @@ type RegionCopyAction = {
 export type RegionMenuEntry =
   | { kind: 'action'; action: RegionCopyAction }
   | { kind: 'separator' }
-  | { kind: 'connector'; action: { label: string; onSelect(): void } }
+  | { kind: 'connector-group'; group: ConnectorMenuGroup }
   | { kind: 'split'; entry: WorkbenchSplitMenuEntry }
   | { kind: 'swap'; entry: RegionSwapMenuEntry }
   | { kind: 'promote'; onSelect(): void }
 
-export type RegionConnectorControls = { entries: readonly { label: string; onSelect(): void }[]; onOpen(open: boolean): void; dialogOpen: boolean; issue: string }
-const NO_CONNECTOR: RegionConnectorControls = { entries: [], onOpen: () => {}, dialogOpen: false, issue: '' }
+type ConnectorMenuGroup = { label: string; entries: readonly { label: string; onSelect(): void }[]; issue: string }
+export type RegionConnectorControls = { group: ConnectorMenuGroup | null; onOpen(open: boolean): void; dialogOpen: boolean }
+const NO_CONNECTOR: RegionConnectorControls = { group: null, onOpen: () => {}, dialogOpen: false }
 
 /** Links target the clicked Region and its stable semantic Agent separately. */
 export type RegionCopyModel = {
@@ -104,20 +105,28 @@ const REGION_MENU_ICONS: Record<RegionCopyAction['label'], typeof ThemeActionCop
   'Copy Agent Link': ThemeActionCopyIcon
 }
 
-const RegionMenuContext = createContext<{ entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean; issue: string }>({ entries: [], onOpen: () => {}, dialogOpen: false, issue: '' })
+const RegionMenuContext = createContext<{ entries: readonly RegionMenuEntry[]; onOpen(open: boolean): void; dialogOpen: boolean }>({ entries: [], onOpen: () => {}, dialogOpen: false })
 
 export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
   return useContext(RegionMenuContext).entries
 }
 export const useRegionMenuObservation = () => useContext(RegionMenuContext)
 
-export function RegionMenuEntryView({ entry, index, Item, Separator }: {
+export function RegionMenuEntryView({ entry, index, Item, Separator, Group = ContextMenu.Group, Label = ContextMenu.Label }: {
   entry: RegionMenuEntry
   index: number
   Item: typeof ContextMenu.Item
   Separator: typeof ContextMenu.Separator
+  Group?: typeof ContextMenu.Group
+  Label?: typeof ContextMenu.Label
 }) {
-  if (entry.kind === 'connector') return <Item className="tab-context-menu__item" onSelect={entry.action.onSelect}><ThemeObjectConversationsIcon size={14} /><span>{entry.action.label}</span></Item>
+  const labelId = useId()
+  if (entry.kind === 'connector-group') return <Group aria-labelledby={labelId} data-connector-menu-group="">
+    <Separator className="tab-context-menu__separator" data-connector-menu-separator="" />
+    <Label id={labelId} className="agent-connector-menu__label">{entry.group.label}</Label>
+    {entry.group.entries.map(action => <Item key={action.label} className="tab-context-menu__item" onSelect={action.onSelect}><ThemeObjectConversationsIcon size={14} /><span>{action.label}</span></Item>)}
+    {entry.group.issue ? <Label className="agent-region-menu__context" role="status">{entry.group.issue}</Label> : null}
+  </Group>
   if (entry.kind === 'separator') {
     return (
       <Separator
@@ -208,12 +217,12 @@ export function RegionContextMenu({
     swapMenu,
     promote
   })
-  const model = { ...base, entries: [...base.entries, ...(connector.entries.length ? [{ kind: 'separator' as const }, ...connector.entries.map(action => ({ kind: 'connector' as const, action }))] : [])] }
+  const model = { ...base, entries: [...base.entries, ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
   // 让位不在这里接线：原生视图的让位由 App 的那一个 MutationObserver 按 Radix 的 DOM 协议
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-surface-overlay.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
-    <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: connector.onOpen, dialogOpen: connector.dialogOpen, issue: connector.issue }}>
+    <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: connector.onOpen, dialogOpen: connector.dialogOpen }}>
       <ContextMenu.Root onOpenChange={connector.onOpen}>
         <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
         <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
@@ -222,7 +231,6 @@ export function RegionContextMenu({
               key={index} entry={entry} index={index}
               Item={ContextMenu.Item} Separator={ContextMenu.Separator}
             />)}
-            {connector.issue ? <ContextMenu.Label className="agent-region-menu__context" role="status">{connector.issue}</ContextMenu.Label> : null}
           </ContextMenu.Content>
         </ContextMenu.Portal>
       </ContextMenu.Root>

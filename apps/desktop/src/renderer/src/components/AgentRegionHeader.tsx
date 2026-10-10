@@ -91,7 +91,6 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           <span>Host ID: {executionHost.id ?? 'Unknown'}</span>
           <span>Directory: {executionHost.cwd || 'Unknown'}</span>
         </DropdownMenu.Label>
-        {menuObservation.issue ? <DropdownMenu.Label className="agent-region-menu__context" role="status">{menuObservation.issue}</DropdownMenu.Label> : null}
         {nativeSourceActions}
         {currentConversationActions}
         {onHistory || onTakeOver || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}
@@ -108,7 +107,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           <ThemeObjectHistoryIcon size={14} /><span>Conversation history</span>
         </DropdownMenu.Item>{entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}</> : null}
         {entries.map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index}
-          Item={DropdownMenu.Item} Separator={DropdownMenu.Separator} />)}
+          Item={DropdownMenu.Item} Separator={DropdownMenu.Separator} Group={DropdownMenu.Group} Label={DropdownMenu.Label} />)}
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
   </header>
