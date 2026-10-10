@@ -110,7 +110,7 @@ async function fixture(focused = true) {
     expect(result).toHaveLength(1)
     return result[0]
   }
-  return { manager, app, frame, source, views, register, events, request, browser, addChildView }
+  return { manager, app, frame, source, views, register, events, request, browser, addChildView, window }
 }
 
 it('prepares a never-selected passive source below the Renderer and hides it after acquisition', async () => {
@@ -492,4 +492,34 @@ it('an invalid selection leaves an already-visible original and prepared human p
   expect(f.source.webContents.dead).toBe(false)
   expect(await f.commit()).toEqual({ outcome: 'input-dispatched', inputScopeId: f.prepared.inputScopeId })
   expect(f.source.webContents.sendInputEvent).toHaveBeenCalledTimes(2)
+})
+
+
+it('selects the exact child lease before rehosting the same native page and scopes its return notifications', async () => {
+  const f = await fixture(), childViews: InstanceType<typeof native.View>[] = []
+  const child = { webContents: new native.Contents(), isDestroyed: () => false, isFocused: () => true, contentView: {
+    get children() { return childViews },
+    addChildView: (view: InstanceType<typeof native.View>) => { const previous=childViews.indexOf(view); if(previous!==-1)childViews.splice(previous,1); childViews.push(view) },
+    removeChildView: (view: InstanceType<typeof native.View>) => { const index=childViews.indexOf(view); if(index!==-1)childViews.splice(index,1) }
+  } }
+  const identity = { windowId: 'child', documentGeneration: 'original-document' }
+  f.manager.setPresentationWindowOwner(scope => scope?.windowId === identity.windowId && scope.documentGeneration === identity.documentGeneration ? child as never : f.window as never)
+  const notify = vi.fn(); f.manager.onNativeVisibilityChange = notify
+  const original = f.register('A')
+  await f.manager.activatePresentation(f.app as never, f.frame as never, original.leaseId, { kind: 'select' })
+  const borrowed = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser', occurrence: occurrence('B'), geometry, window: identity })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, borrowed.leaseId, { kind: 'select' })
+  expect(childViews).toEqual([f.source]); expect(f.views).not.toContain(f.source)
+  expect(f.manager.windowForView(f.source as never)).toBe(child)
+  expect(f.source.webContents.dead).toBe(false)
+  expect(f.source.webContents.getURL()).toBe('https://generic.example/one')
+  notify.mockClear()
+  await f.manager.returnWindow(child as never)
+  expect(f.views).toContain(f.source); expect(childViews).toEqual([])
+  expect(f.manager.windowForView(f.source as never)).toBe(f.window)
+  expect(notify.mock.calls.length).toBeGreaterThan(0)
+  expect(notify.mock.calls.every(([,window]) => window===f.window || window===child)).toBe(true)
+  expect(notify.mock.calls.some(([,window]) => window===f.window)).toBe(true)
+  expect(notify.mock.calls.some(([,window]) => window===child)).toBe(true)
+  expect(f.source.webContents.dead).toBe(false)
 })
