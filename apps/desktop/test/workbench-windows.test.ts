@@ -60,6 +60,7 @@ async function fixture(store?: Store) {
   const directory = await mkdtemp(join(tmpdir(), 'workbench-window-'))
   const persisted = store ?? new Store(join(directory, 'windows.json'))
   const main = new Window(), children: Window[] = [], tickets: Array<{ url: string; frameName: string }> = []
+  const admissions: Array<{ first: ReturnType<WorkbenchWindows['windowOpen']>; repeated: ReturnType<WorkbenchWindows['windowOpen']> }> = []
   const owner = new WorkbenchWindows(main as unknown as BrowserWindow, persisted, () => [{ x: 0, y: 0, width: 1800, height: 1100 }])
   owner.setNativeOwner({ beforeClosing: async () => {} })
   const outcomes: Array<'applied' | 'rejected' | 'unconfirmed'> = []
@@ -71,8 +72,7 @@ async function fixture(store?: Store) {
     queueMicrotask(() => {
       if (request.action === 'open') {
         const ticket = { url: request.url, frameName: request.frameName }; tickets.push(ticket)
-        expect(owner.windowOpen(ticket as never, () => {})).toMatchObject({ action: 'allow' })
-        expect(owner.windowOpen(ticket as never, () => {})).toMatchObject({ action: 'deny' })
+        admissions.push({ first: owner.windowOpen(ticket as never, () => {}), repeated: owner.windowOpen(ticket as never, () => {}) })
         const child = new Window(); children.push(child); owner.createdWindow(child as unknown as BrowserWindow, ticket)
       }
       owner.accept(event, { requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: request.action === 'return' ? outcomes.shift() ?? 'applied' : 'applied', message: null })
@@ -80,7 +80,7 @@ async function fixture(store?: Store) {
   })
   await owner.rendererReady(event)
   cleanup.push(async () => { owner.dispose(); await rm(directory, { recursive: true, force: true }) })
-  return { owner, store: persisted, main, children, tickets, directory, outcomes, nativeReturns }
+  return { owner, store: persisted, main, children, tickets, admissions, directory, outcomes, nativeReturns }
 }
 async function opened(f: Awaited<ReturnType<typeof fixture>>, operationId = 'open') {
   const page = await f.owner.call('app.window.open', { operationId, target }, context)
@@ -126,6 +126,7 @@ describe('original workface native presentation owner', () => {
   })
   it('guards one-use shells, original overlap and exact native Browser scope', async () => {
     const f = await fixture(), identity = await opened(f)
+    expect(f.admissions).toMatchObject([{ first: { action: 'allow' }, repeated: { action: 'deny' } }])
     expect(f.owner.windowOpen(f.tickets[0] as never, () => {})).toEqual({ action: 'deny' })
     const overlap = await f.owner.call('app.window.open', { operationId: 'region', target: { ...target, kind: 'region', regionId: 'region' } }, context)
     expect(overlap.recordedOperation).toMatchObject({ state: 'rejected', ...identity }); expect(f.children).toHaveLength(1)
