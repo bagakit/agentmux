@@ -3382,11 +3382,11 @@ export function restorePersistedUiState(
 
 // The durable-input whitelist lives here once. Runtime semantic changes retain these immutable
 // references, so they can reuse the projection without visiting unrelated workbench / file content.
-function selectPersistedInputs(state: AppState) {
+function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
   return {
     workbenchSpaceSelection: state.workbenchSpaceSelection,
-    projectGroups: state.projectGroups,
-    spaceZoneBindings: state.spaceZoneBindings,
+    projectGroups: coreSpatialReady ? undefined : state.projectGroups,
+    spaceZoneBindings: coreSpatialReady ? undefined : state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
     goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
@@ -3413,8 +3413,8 @@ function selectPersistedInputs(state: AppState) {
     noteBlockSelections: state.noteBlockSelections,
     noteCanvasLayouts: state.noteCanvasLayouts,
     dirtyDocuments: state.dirtyDocuments,
-    tabs: state.tabs,
-    layouts: state.layouts,
+    tabs: coreSpatialReady ? undefined : state.tabs,
+    layouts: coreSpatialReady ? undefined : state.layouts,
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
     scratchTopicOrder: state.scratchTopicOrder,
@@ -3474,11 +3474,12 @@ let previousPersistedProjection: PersistedAppState | null = null
 
 let previousCoreSpatialReady=false
 function partializeAppState(state: AppState): PersistedAppState {
-  const inputs = selectPersistedInputs(state)
-  if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===Boolean(coreSpatialPersistence?.ready) && shallow(previousPersistedInputs, inputs)) {
+  const coreSpatialReady = Boolean(coreSpatialPersistence?.ready)
+  const inputs = selectPersistedInputs(state, coreSpatialReady)
+  if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===coreSpatialReady && shallow(previousPersistedInputs, inputs)) {
     return previousPersistedProjection
   }
-  const { tabs, layouts, documents, dirtyDocuments, ...presentation } = inputs
+  const { tabs, layouts, projectGroups, spaceZoneBindings, documents, dirtyDocuments, ...presentation } = inputs
   const projection: PersistedAppState = {
     ...presentation,
     recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,
@@ -3486,9 +3487,9 @@ function partializeAppState(state: AppState): PersistedAppState {
     surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
     documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input)),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
-    restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
+    ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings!,
+      restoredWorkbench: projectPersistedWorkbench({ tabs: tabs!, layouts: layouts! }) } : {})
   }
-  if(coreSpatialPersistence?.ready) { delete projection.restoredWorkbench;delete projection.spaceZoneBindings;delete projection.projectGroups }
   if (state.nameAuthorityRevision > 0) {
     // A name document revision confirms its exact targets, not an unrelated startup handoff.
     projection.agentNames = Object.fromEntries(Object.entries(projection.agentNames ?? {})
@@ -3498,7 +3499,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     if (!Object.keys(projection.agentNames).length) delete projection.agentNames
     if (!Object.keys(projection.surveyExplorationNames).length) delete projection.surveyExplorationNames
   }
-  previousCoreSpatialReady=Boolean(coreSpatialPersistence?.ready)
+  previousCoreSpatialReady=coreSpatialReady
   previousPersistedInputs = inputs
   previousPersistedProjection = projection
   return projection
