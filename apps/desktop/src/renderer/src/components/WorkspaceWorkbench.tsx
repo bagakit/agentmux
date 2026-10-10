@@ -33,7 +33,7 @@ import { createPortal } from 'react-dom'
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import { useWorkbenchActivityPresentation, useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { useWorkbenchActivityPresentation, useWorkbenchRegionLabels, useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { WorkbenchSplitHandle } from './WorkbenchSplitHandle'
 import { BrowserPane } from './BrowserPane'
@@ -69,7 +69,6 @@ import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
 import { SplitRatioCommitter, synchronizeSplitLayout } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
-import { regionSurfaceLabel } from '../lib/region-display-name'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { TopRowLeadingChrome } from './TopRowChrome'
 import {
@@ -84,11 +83,10 @@ import {
   type WorkbenchRegionLayoutNode
 } from '@agentmux/layout'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { workbenchAgentFactsFor, workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
+import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { useNoteFileName } from '../lib/note-source-name'
 import {
   activeWorkbenchSurface,
-  agentDisplayName,
   documentKey,
   sessionIdsWithoutViewsAfterClosingTabs,
   titleWorkbenchSurface,
@@ -685,19 +683,9 @@ function WorkbenchRegionTree(props: {
   const { tab } = props
   const documentVisible = useWorkbenchDocumentVisibility(useWorkbenchDocument())
   const [dragging, setDragging] = useState(false)
-  const sessions = useWorkbenchTabSessions(tab)
-  const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
-  const agentNames = useWorkbenchTabRecord('agentNames', tab)
-  const timelines = useWorkbenchTabRecord('timelines', tab)
-  const swapTargets = useMemo(() => {
-    const agentFactsFor = workbenchAgentFactsFor(sessions, agentNames, timelines, sessionNameMetadata)
-    return regionIds(tab.layout.root).flatMap((regionId) => {
-      const region = tab.regions[regionId]
-      if (!region) return []
-      const facts = region.kind === 'agent' ? agentFactsFor(region.sessionId) : null
-      return [{ regionId, label: facts ? agentDisplayName(facts) : regionSurfaceLabel(region, sessions, sessionNameMetadata) }]
-    })
-  }, [sessions, agentNames, timelines, sessionNameMetadata, tab.regions, tab.layout.root])
+  const labels = useWorkbenchRegionLabels(tab)
+  const swapTargets = useMemo(() => regionIds(tab.layout.root).flatMap(regionId =>
+    tab.regions[regionId] ? [{ regionId, label: labels[regionId]! }] : []), [labels, tab.regions, tab.layout.root])
   // Layout slots may collapse or move; original Region content remains keyed by
   // its durable identity until that Region is actually removed.
   return <>
