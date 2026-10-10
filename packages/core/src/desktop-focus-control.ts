@@ -22,14 +22,17 @@ export type AgentMuxDesktopSelection = {
 export type AgentMuxDesktopProvenance = 'observed' | 'unavailable' | 'unknown'
 export type AgentMuxDesktopInput = {
   provenance: AgentMuxDesktopProvenance
-  scope: 'main' | 'floating' | 'overlay' | 'none' | 'unknown'
+  scope: 'main' | 'floating' | 'window' | 'overlay' | 'none' | 'unknown'
+  /** Native client document identity, when observed; never execution identity. */
+  windowId?: string; documentGeneration?: string
   ownerKind: 'terminal' | 'composer' | 'editor' | 'dialog' | 'other' | null
   tabId: string | null; regionId: string | null; sessionId: string | null
   connected: boolean | null; visible: boolean | null; inert: boolean | null
 }
 export type AgentMuxDesktopPresentation = {
   provenance: AgentMuxDesktopProvenance
-  state: 'main-visible' | 'floating' | 'covered' | 'pending' | 'unknown'
+  state: 'main-visible' | 'floating' | 'window' | 'covered' | 'pending' | 'unknown'
+  windowId?: string; documentGeneration?: string
   tabId: string | null; regionId: string | null
   blockers: ('settings' | 'quick-switcher')[]
 }
