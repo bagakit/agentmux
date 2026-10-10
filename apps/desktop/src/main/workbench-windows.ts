@@ -334,8 +334,8 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
       }
       return this.finish(operation, 'unknown', 'This original workface already has a pending or unconfirmed window. Reconcile its original window; no duplicate was opened.')
     }
-    const overlap = [...this.windows.values()].find(record => record.target.displayWorkspaceId === target.displayWorkspaceId &&
-      record.target.groupId === target.groupId && record.target.tabId === target.tabId && (record.target.kind === 'tab' || target.kind === 'tab'))
+    const overlap = [...this.windows.values()].find(record => record.target.tabId === target.tabId &&
+      (record.target.kind === 'tab' || target.kind === 'tab' || record.target.regionId === target.regionId))
     if (overlap) {
       operation.windowId = overlap.windowId; operation.documentGeneration = overlap.native ? overlap.generation : null
       return this.finish(operation, 'rejected', 'This original Tab or one of its Regions is already in the recorded window. Return it before moving the overlapping original workface.')
