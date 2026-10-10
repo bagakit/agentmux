@@ -27,7 +27,7 @@ export const FALLOUT_THEME: ThemeDocument = {
     'object.file': { kind: 'paths', paths: [{ d: 'M5 3 L14 3 L19 8 L19 21 L5 21 Z M14 3 L14 8 L19 8 M8 12 L16 12 M8 16 L16 16' }] },
     'object.folder': { kind: 'paths', paths: [{ d: 'M3 5 L9 5 L12 8 L21 8 L21 20 L3 20 Z M3 11 L21 11' }] },
     'object.browser': { kind: 'paths', paths: [{ d: 'M3 4 L21 4 L21 20 L3 20 Z M3 8 L21 8 M6 6 L7 6 M10 6 L11 6 M7 14 L17 14 M12 10 L12 18' }] },
-    'object.goal': { kind: 'paths', paths: [{ d: 'M4 4 L9 4 M4 4 L4 9 M20 4 L15 4 M20 4 L20 9 M4 20 L9 20 M4 20 L4 15 M20 20 L15 20 M20 20 L20 15 M8 8 L16 8 L16 16 L8 16 Z M12 2 L12 6 M12 18 L12 22 M2 12 L6 12 M18 12 L22 12' }] },
+    'object.goal': { kind: 'glyph', glyph: 'goal-consensus' },
     'status.completed': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M7 12 L11 16 L17 8' }] },
     'status.failed': { kind: 'paths', paths: [{ d: 'M7 3 L17 3 L21 7 L21 17 L17 21 L7 21 L3 17 L3 7 Z M8 8 L16 16 M16 8 L8 16' }] },
     'status.paused': { kind: 'paths', paths: [{ d: 'M4 4 L20 4 L20 20 L4 20 Z M9 8 L9 16 M15 8 L15 16' }] },

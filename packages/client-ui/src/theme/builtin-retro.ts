@@ -27,7 +27,7 @@ export const RETRO_THEME: ThemeDocument = {
     'object.file': { kind: 'paths', paths: [{ d: 'M7 3 L14 3 L19 8 L19 19 Q19 21 17 21 L7 21 Q5 21 5 19 L5 5 Q5 3 7 3 M14 3 L14 8 L19 8 M8 13 L16 13 M8 17 L13 17' }] },
     'object.folder': { kind: 'paths', paths: [{ d: 'M5 5 L9 5 L12 8 L19 8 Q21 8 21 10 L21 18 Q21 20 19 20 L5 20 Q3 20 3 18 L3 7 Q3 5 5 5' }] },
     'object.browser': { kind: 'paths', paths: [{ d: 'M20 12 A8 8 0 1 1 4 12 A8 8 0 1 1 20 12 M4 12 L20 12 M12 4 Q6 12 12 20 Q18 12 12 4' }] },
-    'object.goal': { kind: 'paths', paths: [{ d: 'M20 12 A8 8 0 1 1 4 12 A8 8 0 1 1 20 12 M16 12 A4 4 0 1 1 8 12 A4 4 0 1 1 16 12 M12 12 L18 6 M17 3 L18 6 L21 7' }] },
+    'object.goal': { kind: 'glyph', glyph: 'goal-consensus' },
     'status.completed': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M7 12 L11 16 L17 8' }] },
     'status.failed': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M8 8 L16 16 M16 8 L8 16' }] },
     'status.paused': { kind: 'paths', paths: [{ d: 'M21 12 A9 9 0 1 1 3 12 A9 9 0 1 1 21 12 M9 8 L9 16 M15 8 L15 16' }] },
