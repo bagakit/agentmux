@@ -18,7 +18,7 @@ function checkedSetupMessage(operation: ConnectionEnrollmentOperation): string {
     ? 'Still waiting for platform confirmation. Give it a moment, then check again.'
     : 'Still waiting for platform confirmation. Complete the confirmation on the platform, then check again.'
   if (operation.authorization === 'not-started') return 'This setup has not started on the platform. Its original details are kept.'
-  if (operation.authorization === 'authorized' && !operation.configured) return 'The application was created. Its local connection setup is still incomplete.'
+  if (operation.authorization === 'authorized' && !operation.configured) return 'This check did not confirm a completed local connection. Your original setup is kept.'
   return ''
 }
 
