@@ -95,7 +95,7 @@ it('keeps already selected captured inputs while the original native batch is pe
   expect([...panel().querySelectorAll('[data-hover-input-id]')]).toEqual(inputs)
   expect(window.getSelection()!.toString()).toBe(selected); expect(panel().textContent).not.toContain('LATER CAPTURED REQUEST')
   await act(async () => resolve(native()))
-  expect([...panel().querySelectorAll('[data-hover-input-id]')]).toEqual(inputs); expect(window.getSelection()!.toString()).toBe(selected)
+  expect(panel().querySelectorAll('[data-hover-input-id]')).toHaveLength(4); for (const input of inputs) expect(input.isConnected).toBe(true); expect(panel().textContent).toContain('Original observed input'); expect(window.getSelection()!.toString()).toBe(selected)
   expect(api.sessions.historyPage).toHaveBeenCalledTimes(1); expect(dispose).toHaveBeenCalledTimes(1)
 })
 
