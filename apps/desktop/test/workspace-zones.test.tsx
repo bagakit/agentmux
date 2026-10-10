@@ -67,6 +67,9 @@ describe('Workspace Zones original Store projection and navigation', () => {
     return found!
   }
   async function clickZone(zoneId: string): Promise<void> { await act(async () => row(zoneId).click()) }
+  function rowName(zoneId: string): string {
+    return row(zoneId).querySelector('.workspace-zone-entry__name')!.textContent!
+  }
 
   it('projects every Space binding without merging same-name or same-resource Zones or using Agent cwd', async () => {
     const catalog = workbenchSelectionCatalog(useAppStore.getState())
@@ -77,16 +80,171 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(context.zones.map(zone => zone.zoneId)).toEqual([rootZone, firstZone, secondZone, remoteZone, duplicateZone, unknownZone])
     for (const zone of context.zones) expect(catalog.zones).toContain(zone)
     const refs = vi.spyOn(api.workspaces, 'listBranches')
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={vi.fn()} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     expect(dom.container.querySelectorAll('[data-zone-id]')).toHaveLength(6)
     expect(row(rootZone).getAttribute('aria-pressed')).toBe('true')
-    expect(row(firstZone).textContent).toContain('same')
-    expect(row(secondZone).textContent).toContain('same')
-    expect(row(firstZone).textContent).toContain(first.path)
-    expect(row(secondZone).textContent).toContain(second.path)
-    expect(row(unknownZone).textContent).toContain('Resource unknown')
+    expect(rowName(firstZone)).toBe(first.name)
+    expect(rowName(secondZone)).toBe(second.name)
+    expect(row(firstZone).querySelector('.workspace-zone-entry__branch')?.textContent).toBe('same')
+    expect(row(secondZone).querySelector('.workspace-zone-entry__branch')?.textContent).toBe('same')
+    expect(row(firstZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe('../first')
+    expect(row(secondZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe('../second')
+    expect(row(firstZone).querySelector('small')?.title).toBe(`${first.path} · local`)
+    expect(row(secondZone).querySelector('small')?.title).toBe(`${second.path} · local`)
+    expect(row(unknownZone).querySelector('.workspace-zone-entry__kind')?.textContent).toBe('Unknown')
     expect(dom.container.textContent).not.toContain('Branches')
     expect(refs).not.toHaveBeenCalled()
+  })
+
+  it('keeps registered names separate from original Home and nested Folder directory facts', async () => {
+    const nested = nestedFilesZone(), folderZone = 'retained-nested-folder'
+    useAppStore.setState(state => ({ spaceZoneBindings: { ...state.spaceZoneBindings,
+      [folderZone]: { spaceId, workspaceId: display.id, directoryPath: `${display.path}/nested-folder` } } }))
+    const refs = vi.spyOn(api.workspaces, 'listBranches')
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
+    expect([rootZone, firstZone, secondZone, remoteZone, duplicateZone, unknownZone, nested.zoneId, folderZone]
+      .map(zoneId => row(zoneId).querySelector('.workspace-zone-entry__kind')?.textContent))
+      .toEqual(['Folder', 'Worktree', 'Worktree', 'Folder', 'Worktree', 'Unknown', 'Home', 'Folder'])
+    expect([rootZone, firstZone, secondZone, remoteZone, duplicateZone, unknownZone, nested.zoneId, folderZone].map(rowName))
+      .toEqual(['Project', 'Same', 'Same', 'Remote directory', 'Same', 'missing-resource', 'Project', 'Project'])
+    expect(row(nested.zoneId).getAttribute('aria-pressed')).toBe('true')
+    expect(row(nested.zoneId).querySelector('[aria-label="Selected Zone"]')).not.toBeNull()
+    expect(row(rootZone).querySelector('[aria-label="Selected Zone"]')).toBeNull()
+    expect(row(nested.zoneId).querySelector('.workspace-zone-entry__path')?.textContent).toBe(nested.directoryPath)
+    expect(row(folderZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe(`${display.path}/nested-folder`)
+    expect(workspaceZoneContext(useAppStore.getState(), display)).toMatchObject({ resource: null,
+      files: { workspace: display, rootPath: 'topic', directoryPath: nested.directoryPath } })
+    expect(row(unknownZone).title).toContain(unknownZone)
+    expect(refs).not.toHaveBeenCalled()
+  })
+
+  it('retains an existing Workspace name for conflicting unknown Zone facts and preserves the original ambiguous focus refusal', async () => {
+    useAppStore.setState(state => ({ spaceZoneBindings: { ...state.spaceZoneBindings,
+      [firstZone]: { spaceId, workspaceId: second.id } },
+      layouts: { ...state.layouts, [display.id]: createWorkspaceLayout('second-location', ['first-tab']) } }))
+    choose(firstZone)
+    const context = workspaceZoneContext(useAppStore.getState(), display)
+    expect(context.zones.find(zone => zone.zoneId === firstZone)).toMatchObject({ workspaceId: first.id,
+      kind: 'unknown', hostId: null, directoryPath: null, issue: expect.stringContaining('conflict') })
+    expect(context.resource).toBeNull()
+    expect(context.files).toBeNull()
+    const before = useAppStore.getState(), execute = vi.spyOn(before, 'executeControl'), report = vi.spyOn(before, 'reportError')
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
+    expect(rowName(firstZone)).toBe(first.name)
+    expect(row(firstZone).querySelector('.workspace-zone-entry__kind')?.textContent).toBe('Unknown')
+    expect(row(firstZone).querySelector('.workspace-zone-entry__path')).toBeNull()
+    expect(row(firstZone).title).toContain('conflict')
+    expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('conflict')
+    expect(row(firstZone).disabled).toBe(false)
+    await clickZone(firstZone)
+    const result = await execute.mock.results[0]!.value
+    expect(result.operation).toBe('focus')
+    if (result.operation !== 'focus') throw new Error('The original focus receipt is missing.')
+    expect(result.navigation.state).toBe('rejected')
+    expect(report).toHaveBeenCalledTimes(1)
+    expect(String(report.mock.calls[0]![0])).toContain('exact display Workspace and Group')
+    expect(workspaceZoneContext(useAppStore.getState(), display).resource).toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(useAppStore.getState().regionCaretFocus).toBe(before.regionCaretFocus)
+  })
+
+  it('only abbreviates confirmed same-project Host paths and keeps complete resource tooltips and visible remote Hosts', async () => {
+    useAppStore.setState({ localHome: fixturePath('zones') })
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
+    expect(row(firstZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe('~/first')
+    expect(row(firstZone).querySelector('small')?.title).toBe('~/first · local')
+    expect(row(firstZone).querySelector('small')?.textContent).not.toContain('local')
+    expect(row(remoteZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe(remote.path)
+    expect(row(remoteZone).querySelector('small')?.title).toBe(`${remote.path} · remote`)
+    expect(row(remoteZone).querySelector('.workspace-zone-entry__host')?.textContent).toBe(remote.hostId)
+    const unrelated: WorkspaceRecord = { id: 'unrelated', hostId: display.hostId, path: fixturePath('zones/unrelated'), name: 'Independent folder', kind: 'folder' }
+    const unrelatedSpace = directoryIdentity(unrelated.hostId, unrelated.path), unrelatedZone = workspaceZoneId(unrelatedSpace, unrelated.id)
+    await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, unrelated] },
+      spaceZoneBindings: { ...state.spaceZoneBindings, [unrelatedZone]: { spaceId: unrelatedSpace, workspaceId: unrelated.id, relations: { [spaceId]: true } } } })))
+    expect(row(unrelatedZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe('~/unrelated')
+    expect(row(unrelatedZone).querySelector('small')?.title).toBe('~/unrelated · local')
+    await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, copyPathsAsAbsolute: true } })))
+    expect(row(firstZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe('../first')
+    expect(row(firstZone).querySelector('small')?.title).toBe(`${first.path} · local`)
+    expect(row(unrelatedZone).querySelector('.workspace-zone-entry__path')?.textContent).toBe(unrelated.path)
+    expect(workspaceZoneContext(useAppStore.getState(), display).zones.find(zone => zone.zoneId === firstZone)?.directoryPath).toBe(first.path)
+  })
+
+  it('does not repeat a branch equal to its registered name or invent a local Host label', async () => {
+    await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.map(workspace =>
+      workspace.id === first.id ? { ...workspace, name: first.branch! } : workspace) } })))
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
+    expect(rowName(firstZone)).toBe('same')
+    expect(row(firstZone).querySelector('.workspace-zone-entry__branch')).toBeNull()
+    expect(row(firstZone).querySelector('.workspace-zone-entry__host')).toBeNull()
+    expect(row(secondZone).querySelector('.workspace-zone-entry__branch')?.textContent).toBe('same')
+    expect(row(remoteZone).querySelector('.workspace-zone-entry__host')?.textContent).toBe(remote.hostId)
+  })
+
+  it('moves directory keyboard focus without navigating or replacing the selected Zone, input or original workface', async () => {
+    const before = useAppStore.getState(), execute = vi.spyOn(before, 'executeControl')
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
+    await act(async () => row(rootZone).focus())
+    for (const [key, expectedZone] of [['ArrowUp', rootZone], ['ArrowDown', firstZone], ['ArrowDown', secondZone], ['ArrowUp', firstZone],
+      ['End', unknownZone], ['ArrowDown', unknownZone], ['Home', rootZone]] as const) {
+      await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })))
+      expect(document.activeElement).toBe(row(expectedZone))
+      expect(row(rootZone).getAttribute('aria-pressed')).toBe('true')
+      expect(dom.container.querySelectorAll('[data-zone-id][aria-pressed="true"]')).toHaveLength(1)
+      expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+      expect(useAppStore.getState().tabs).toBe(before.tabs)
+      expect(useAppStore.getState().layouts).toBe(before.layouts)
+      expect(useAppStore.getState().sessions).toBe(before.sessions)
+      expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+      expect(useAppStore.getState().regionCaretFocus).toBe(before.regionCaretFocus)
+      expect(execute).not.toHaveBeenCalled()
+    }
+  })
+
+  it('leaves modified and composing directory keys to their original input owner', async () => {
+    const execute = vi.spyOn(useAppStore.getState(), 'executeControl')
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
+    const target = row(rootZone), before = useAppStore.getState()
+    await act(async () => target.focus())
+    for (const options of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { isComposing: true }]) {
+      const event = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true, ...options })
+      await act(async () => expect(target.dispatchEvent(event)).toBe(true))
+      expect(event.defaultPrevented).toBe(false)
+      expect(document.activeElement).toBe(target)
+      expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+      expect(useAppStore.getState().tabs).toBe(before.tabs)
+    }
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it.each(['Enter', ' '] as const)('dispatches real %j events and models the uncancelled browser-default button click through the exact Zone owner', async key => {
+    const execute = vi.spyOn(useAppStore.getState(), 'executeControl')
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
+    const target = row(firstZone)
+    expect(target.tagName).toBe('BUTTON')
+    expect(target.type).toBe('button')
+    expect(target.disabled).toBe(false)
+    await act(async () => target.focus())
+    const down = new KeyboardEvent('keydown', { key, code: key === ' ' ? 'Space' : 'Enter', bubbles: true, cancelable: true })
+    const up = new KeyboardEvent('keyup', { key, code: key === ' ' ? 'Space' : 'Enter', bubbles: true, cancelable: true })
+    await act(async () => {
+      expect(target.dispatchEvent(down)).toBe(true)
+      expect(down.defaultPrevented).toBe(false)
+      expect(execute).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(target)
+      if (key === 'Enter') target.click()
+      expect(target.dispatchEvent(up)).toBe(true)
+      expect(up.defaultPrevented).toBe(false)
+      if (key === ' ') target.click()
+    })
+    expect(execute).toHaveBeenCalledExactlyOnceWith({ schemaVersion: 5, requestId: expect.any(String), operation: 'focus',
+      target: { kind: 'space', spaceId, zoneId: firstZone }, inputPolicy: 'preserve' })
+    expect(useAppStore.getState().workbenchSpaceSelection?.zoneId).toBe(firstZone)
+    expect(row(firstZone).getAttribute('aria-pressed')).toBe('true')
   })
 
   it('resolves a cross-bound Zone to its original Workspace, Host and path, not its display context', () => {
@@ -108,7 +266,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(context.files).toEqual({ workspace: remote, rootPath: 'nested', directoryPath })
     expect(context.files?.workspace).toBe(remote)
     expect(context.issue).toContain('Git scope is unsupported')
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={vi.fn()} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     expect(row(nestedZone).disabled).toBe(false)
     expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('Files remain available')
     expect(useAppStore.getState().config?.workspaces.find(value => value.id === remote.id)).toBe(remote)
@@ -150,7 +308,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(context.resource).toBe(first)
     useAppStore.setState(state => ({ spaceZoneBindings: { ...state.spaceZoneBindings,
       [rootZone]: { spaceId, workspaceId: display.id, relations: { [spaceId]: false } } } }))
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={vi.fn()} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     expect(workspaceZoneContext(useAppStore.getState(), display).selectedZoneId).toBeNull()
     expect(workspaceZoneContext(useAppStore.getState(), display).resource).toBe(display)
     expect(dom.container.querySelectorAll('[data-zone-id]')).toHaveLength(5)
@@ -164,7 +322,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     const openBranch = vi.spyOn(api.workspaces, 'openBranch')
     const activate = vi.spyOn(before, 'activateWorkspaceSelection')
     const create = vi.fn()
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={create} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={create} />)
     await clickZone(firstZone)
     expect(execute).toHaveBeenCalledTimes(1)
     expect(execute.mock.calls[0]![0]).toEqual({ schemaVersion: 5, requestId: expect.any(String), operation: 'focus',
@@ -185,7 +343,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
 
   it('can select a plain non-Git directory Zone and highlights the exact Zone rather than its resource', async () => {
     choose(duplicateZone)
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={vi.fn()} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     expect(row(duplicateZone).getAttribute('aria-pressed')).toBe('true')
     expect(row(firstZone).getAttribute('aria-pressed')).toBe('false')
     await clickZone(rootZone)
@@ -200,7 +358,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
       [display.id]: createWorkspaceLayout('second-location', ['first-tab']) } })
     const report = vi.spyOn(useAppStore.getState(), 'reportError')
     const before = useAppStore.getState()
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={vi.fn()} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     await clickZone(firstZone)
     expect(report).toHaveBeenCalledTimes(1)
     expect(String(report.mock.calls[0]![0])).toContain('exact display Workspace and Group')
@@ -211,7 +369,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
 
   it('keeps unknown Zones selectable and keeps a persistent unknown resource explanation', async () => {
     choose(unknownZone)
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={vi.fn()} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     expect(row(unknownZone).disabled).toBe(false)
     expect(row(unknownZone).getAttribute('aria-pressed')).toBe('true')
     expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('unavailable')
@@ -221,21 +379,26 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(workspaceZoneContext(useAppStore.getState(), display).resource).toBeNull()
   })
 
-  it('the create action only delegates to Git management and hidden panels expose no rows', async () => {
+  it('the Worktrees management action only delegates to its consumer and hidden panels expose no rows or footer', async () => {
     const create = vi.fn(), execute = vi.spyOn(useAppStore.getState(), 'executeControl')
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={create} />)
-    await dom.click('button[aria-label="Create worktree"]')
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={create} footer={<span>Original scope footer</span>} />)
+    const manage = dom.container.querySelector<HTMLButtonElement>('button[aria-label="Manage worktrees"]')!
+    expect(manage.textContent).toBe('Worktrees')
+    expect(dom.container.querySelector('[aria-label="Create worktree"]')).toBeNull()
+    expect(dom.container.querySelector('.workspace-zones-panel')?.textContent).toContain('Original scope footer')
+    await dom.click('button[aria-label="Manage worktrees"]')
     expect(create).toHaveBeenCalledExactlyOnceWith()
     expect(execute).not.toHaveBeenCalled()
-    await dom.render(<WorkspaceZonesPanel workspace={display} onCreateWorktree={create} visible={false} />)
+    await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={create} footer={<span>Original scope footer</span>} visible={false} />)
     expect(dom.container.querySelector('[data-zone-id]')).toBeNull()
+    expect(dom.container.textContent).not.toContain('Original scope footer')
   })
 
   it('reuses the structural projection and does not rerender consumers on unrelated Session output', async () => {
     const rendered = vi.fn(), values: ReturnType<typeof workspaceZoneContext>[] = []
     function Consumer() { values.push(useWorkspaceZoneContext(display)); return <span>Resource consumer</span> }
     await dom.render(<><Consumer /><Profiler id="zones" onRender={rendered}>
-      <WorkspaceZonesPanel workspace={display} onCreateWorktree={vi.fn()} /></Profiler></>)
+      <WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} /></Profiler></>)
     const original = workspaceZoneContext(useAppStore.getState(), display)
     const catalog = workbenchSelectionCatalog(useAppStore.getState())
     const commits = rendered.mock.calls.length, consumed = values.length, originalRow = row(firstZone)

@@ -1,6 +1,17 @@
+import { win32 as _historyWin32 } from 'node:path'
+// Derive synthetic directory labels from this fixture module; only drive/UNC grammar is fixed.
+function _historyWindowsFixturePath(volume: string, relative: string): string {
+  const label = _historyFixturePath('windows-path-cases').split(/[\\/]/u).filter(Boolean).map(segment => segment.replace(/[<>:"|?*]/gu, '-')).join('-')
+  const [head, ...tail] = relative.split('/')
+  const sep = _historyWin32.sep
+  const root = volume === 'unc' ? sep.repeat(2) + label + '-server' + sep + label + '-' + head + sep : volume + ':' + sep + label + '-' + head
+  return _historyWin32.join(root, ...tail)
+}
+
+import { fixturePath as _historyFixturePath } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
-import { abbreviateHomePath, applyCopyPathStyle } from '../src/renderer/src/lib/copy-path-display.js'
+import { abbreviateHomePath, applyCopyPathStyle, summarizeRelatedPath } from '../src/renderer/src/lib/copy-path-display.js'
 
 /**
  * 复制路径的家目录缩写。设计 SSOT《寻址与复制》「复制出来的路径默认用 `~`」那几条的可执行判据：
@@ -39,6 +50,25 @@ describe('abbreviateHomePath: 缩写只按真实 home 值判边界', () => {
 
   it('home 为空（本机 home 未知）→ 一律原样，绝不拿空串去猜', () => {
     expect(abbreviateHomePath(_hygiene_fixturePath("tmp/alice-home/proj"), '')).toBe(_hygiene_fixturePath("tmp/alice-home/proj"))
+  })
+})
+
+describe('summarizeRelatedPath: confirmed related paths retain the original display fallback', () => {
+  it.each([
+    ['same directory', _hygiene_fixturePath('projects/repo'), _hygiene_fixturePath('projects/repo'), '~/projects/repo', '.'],
+    ['nested directory', _hygiene_fixturePath('projects/repo/topic'), _hygiene_fixturePath('projects/repo'), '~/projects/repo/topic', './topic'],
+    ['sibling worktree', _hygiene_fixturePath('projects/topic'), _hygiene_fixturePath('projects/repo'), '~/projects/topic', '../topic'],
+    ['shared filesystem root only', _hygiene_fixturePath('other/topic'), _hygiene_fixturePath('projects/repo'), '~/other/topic', '~/other/topic'],
+    ['relative source', 'projects/topic', _hygiene_fixturePath('projects/repo'), 'projects/topic', 'projects/topic'],
+    ['relative base', _hygiene_fixturePath('projects/topic'), 'projects/repo', '~/projects/topic', '~/projects/topic'],
+    ['shorter original display', _hygiene_fixturePath('projects/topic'), _hygiene_fixturePath('projects/repo'), 'topic', 'topic'],
+    ['Windows sibling', _historyWindowsFixturePath("C", "projects/topic"), _historyWindowsFixturePath("C", "projects/repo"), _historyWindowsFixturePath("C", "projects/topic"), '../topic'],
+    ['shared drive only', _historyWindowsFixturePath("C", "other/topic"), _historyWindowsFixturePath("C", "projects/repo"), _historyWindowsFixturePath("C", "other/topic"), _historyWindowsFixturePath("C", "other/topic")],
+    ['different drives', _historyWindowsFixturePath("D", "projects/topic"), _historyWindowsFixturePath("C", "projects/repo"), _historyWindowsFixturePath("D", "projects/topic"), _historyWindowsFixturePath("D", "projects/topic")],
+    ['UNC sibling', _historyWindowsFixturePath("unc", "share/topic"), _historyWindowsFixturePath("unc", "share/repo"), _historyWindowsFixturePath("unc", "share/topic"), '../topic'],
+    ['different UNC shares', _historyWindowsFixturePath("unc", "other/topic"), _historyWindowsFixturePath("unc", "share/repo"), _historyWindowsFixturePath("unc", "other/topic"), _historyWindowsFixturePath("unc", "other/topic")]
+  ])('%s', (_label, path, base, displayed, expected) => {
+    expect(summarizeRelatedPath(path!, base!, displayed!)).toBe(expected)
   })
 })
 
