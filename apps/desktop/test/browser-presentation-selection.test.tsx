@@ -103,7 +103,10 @@ it('does not treat a pending older selection as the selected current lease', asy
   expect(bridge.activatePresentation).toHaveBeenCalledTimes(2)
 })
 it('cancels selection when the intent reverses before geometry confirmation', async () => {
-  await render(false); const pending = deferred<void>(); bridge.updatePresentation.mockReturnValueOnce(pending.promise)
+  await render(false)
+  await vi.waitFor(() => expect(bridge.registerPresentation).toHaveBeenCalledTimes(1))
+  await vi.waitFor(() => expect(bridge.updatePresentation).toHaveBeenCalled())
+  const pending = deferred<void>(); bridge.updatePresentation.mockReturnValueOnce(pending.promise)
   await render(true); await render(false); await act(async () => pending.resolve(undefined))
   expect(bridge.activatePresentation).not.toHaveBeenCalled()
 })
@@ -135,6 +138,7 @@ it('does not select a queued presentation that becomes hidden', async () => {
 
 it('does not reclaim a later human input owner on ordinary geometry changes', async () => {
   await render(true)
+  await vi.waitFor(() => expect(bridge.activatePresentation).toHaveBeenCalledTimes(1))
   await act(async () => events({ type: 'input-owner-changed', browserId: 'browser', leaseId: 'human-mote-lease' }))
   width = 720
   await act(async () => window.dispatchEvent(new Event('resize')))
