@@ -5029,7 +5029,7 @@ export class AgentMuxClient {
       if (continuity?.launchInput?.delivery === 'post-launch') {
         readySession = await this.updateExactAgentSession(current.agentSessionId, next.run, value => {
           const operation = value.continuityOperations?.[input.operationId]
-          if (!operation?.launchInput || operation.launchInput.state === 'terminal-confirmed') return value
+          if (!operation?.launchInput || ['terminal-confirmed', 'not-applied'].includes(operation.launchInput.state)) return value
           const updated = { ...operation, launchInput: { ...operation.launchInput, state: promptConfirmed ? 'terminal-confirmed' as const : 'unknown' as const } }
           return { ...value, ...(value.continuity?.operationId === input.operationId ? { continuity: updated } : {}),
             continuityOperations: { ...value.continuityOperations, [input.operationId]: updated }, updatedAt: Math.max(value.updatedAt, Date.now()) }
@@ -5189,7 +5189,7 @@ export class AgentMuxClient {
       const saved = value.continuityOperations?.[receipt.operationId]?.launchInput
       if (saved && receipt.launchInput && !isDeepStrictEqual(saved.input, receipt.launchInput.input)) throw new AgentMuxError(
         'This original recovery input already has another frozen body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-      return saved && (['launch-carried', 'terminal-confirmed'].includes(saved.state) ||
+      return saved && (['launch-carried', 'terminal-confirmed', 'not-applied'].includes(saved.state) ||
         receipt.launchInput?.state === 'prepared' && saved.state !== 'prepared') ? saved : receipt.launchInput ?? saved
     }
     const record = async (result: AgentMuxAgentContinuityResult, reason?: string): Promise<AgentMuxAgentContinuityResult> => {
@@ -7482,14 +7482,25 @@ export class AgentMuxClient {
   /** Rejoin only this original deferred packet; existing unknown claims are read-only. */
   private async settleContinuityPostLaunchInput(session: AgentMuxStoredAgentSession, operationId: string): Promise<AgentMuxStoredAgentSession> {
     const input = session.continuityOperations?.[operationId]?.launchInput
-    if (!input?.key || input.delivery !== 'post-launch' || input.state === 'terminal-confirmed') return session
+    if (!input?.key || input.delivery !== 'post-launch' || ['terminal-confirmed', 'not-applied'].includes(input.state)) return session
     const run = await this.requireCurrentAgentRun(session)
     const confirmed = run.state.type === 'running' && await this.deliverPostLaunchPrompt(this.providers.get(session.providerId),
       session, run, input.lifecycleOperationId, input.prompt, input.message, input.input.submissionId)
+    let state: 'terminal-confirmed' | 'not-applied' | 'unknown' = confirmed ? 'terminal-confirmed' : 'unknown'
+    if (!confirmed) {
+      try {
+        const original = await this.inspectAgentPromptSubmission(input.key), claim = original?.admission
+        if (original && claim?.intent && isDeepStrictEqual(claim.inputKey, input.key) &&
+            sameRun(original.run, input.key.expectedRun) && claim.intent.prompt === input.prompt &&
+            isDeepStrictEqual(claim.intent.message, input.message) &&
+            agentPromptNotApplied({ run: original.run, promptCompletionAdmission: claim,
+              ...(original.terminalPromptSubmission ? { terminalPromptSubmission: original.terminalPromptSubmission } : {}) })) state = 'not-applied'
+      } catch { /* Missing observation remains unknown; it cannot prove the original input was refused. */ }
+    }
     const settled = await this.updateExactAgentSession(session.agentSessionId, session.run, value => {
       const operation = value.continuityOperations?.[operationId]
-      if (!operation?.launchInput || operation.launchInput.state === 'terminal-confirmed') return value
-      const next = { ...operation, launchInput: { ...operation.launchInput, state: confirmed ? 'terminal-confirmed' as const : 'unknown' as const } }
+      if (!operation?.launchInput || ['terminal-confirmed', 'not-applied'].includes(operation.launchInput.state)) return value
+      const next = { ...operation, launchInput: { ...operation.launchInput, state } }
       return { ...value, ...(value.continuity?.operationId === operationId ? { continuity: next } : {}),
         continuityOperations: { ...value.continuityOperations, [operationId]: next }, updatedAt: Math.max(value.updatedAt, Date.now()) }
     })
