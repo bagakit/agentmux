@@ -482,6 +482,9 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
 
   private retain(record: ManagedWindow): void { this.windows.set(record.windowId, record); this.byTarget.set(targetKey(record.target), record) }
   private remove(record: ManagedWindow): void {
+    if (this.focusIssue?.windowId === record.windowId && this.focusIssue.documentGeneration === record.generation) {
+      this.focusIssue = null; this.issue = null
+    }
     this.windows.delete(record.windowId); this.byTarget.delete(targetKey(record.target))
     for (const [id, pending] of this.pending) if (pending.request.windowId === record.windowId) {
       clearTimeout(pending.timer); this.pending.delete(id)
