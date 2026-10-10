@@ -92,6 +92,8 @@ export async function moteConnectionJourney() {
     await moteClick(found!)
   }
   async function choose(label: string, accessibleName = 'Mote chat bot') {
+    const disclosure = document.querySelector<HTMLDetailsElement>('.mote-bot-existing')
+    if (accessibleName === 'Mote chat bot' && disclosure && !disclosure.open) await moteClick(disclosure.querySelector('summary')!)
     await moteClick(document.querySelector<HTMLButtonElement>('[aria-label="' + accessibleName + '"]')!)
     await vi.waitFor(() => expect([...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent?.includes(label)), document.body.textContent).toBeDefined())
     await moteClick([...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent?.includes(label))!)
