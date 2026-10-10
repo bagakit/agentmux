@@ -1556,9 +1556,37 @@ export function normalizeInteractionOperationReceipt(value: unknown): AgentMuxIn
     ...(nativeCompleted === undefined ? {} : { nativeCompleted }) }
 }
 
+function nativeTurnEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession['nativeTurnEnds']> {
+  const source = record(value, 'nativeTurnEnds')
+  if (Object.keys(source).some(key => !['run', 'providerId', 'nativeHandle', 'turns'].includes(key))) {
+    throw new AgentMuxError('Native turn ends contain an unknown field.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const handle = nativeHandle(source.nativeHandle)
+  const rawHandle = record(source.nativeHandle, 'nativeTurnEnds.nativeHandle')
+  if (!isDeepStrictEqual(rawHandle, handle)) {
+    throw new AgentMuxError('Native turn ends must retain the exact source locator.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const providerId = string(source.providerId, 'nativeTurnEnds.providerId')
+  if (handle.kind === 'provider' && handle.providerId !== providerId) {
+    throw new AgentMuxError('Native turn ends conflict with their Provider.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { run: runRef(source.run), providerId, nativeHandle: handle,
+    turns: Object.fromEntries(Object.entries(record(source.turns, 'nativeTurnEnds.turns')).map(([turnId, value]) => {
+      string(turnId, 'nativeTurnEnds native turn ID')
+      const end = record(value, 'nativeTurnEnds end')
+      if (Object.keys(end).some(key => !['recordId', 'observedAt', 'nativeObservedAt'].includes(key))) {
+        throw new AgentMuxError('Native turn end contains an unknown field.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return [turnId, { recordId: string(end.recordId, 'nativeTurnEnds.recordId'),
+        observedAt: timestamp(end.observedAt, 'nativeTurnEnds.observedAt'),
+        ...(end.nativeObservedAt === undefined ? {} : { nativeObservedAt: timestamp(end.nativeObservedAt, 'nativeTurnEnds.nativeObservedAt') }) }]
+    })) }
+}
+
 export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
   const source = record(value, 'Agent Session')
   return { ...normalizeAgentSession(source),
+    ...(source.nativeTurnEnds === undefined ? {} : { nativeTurnEnds: nativeTurnEnds(source.nativeTurnEnds) }),
     ...(source.interactionOperations === undefined ? {} : { interactionOperations: Object.fromEntries(Object.entries(record(source.interactionOperations, 'interaction operations')).map(([id, receipt]) => {
       const normalized = normalizeInteractionOperationReceipt(receipt)
       if (id !== normalized.operationId || normalized.agentSessionId !== source.agentSessionId) throw new AgentMuxError('Interaction operation identity mismatch.', 'INVALID_AGENT_SESSION_STORE')
