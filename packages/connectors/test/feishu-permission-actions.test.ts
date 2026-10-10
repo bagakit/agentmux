@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
-import { appendFile } from 'node:fs/promises'
+import { appendFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { agentInteractionIntentDigest, agentInteractionRequestDigest } from '../../core/dist/index.js'
 import { permissionActionsFixture } from './fixtures/permission-actions.js'
@@ -346,18 +346,27 @@ it('recovers a missing original permission observation without restarting the Ag
 }, 20_000)
 
 it('resolves original action and operation claims through actual SQLite indexes instead of unrelated ingress history', async () => {
-  const f = await fixture(); await f.grant(); const original = await f.open()
+  const f = await fixture()
+  const database = f.services.database!, prepare = database.prepare.bind(database), queries = new Set<string>(), projectionQueries = new Map<string, any[]>()
+  vi.spyOn(database, 'prepare').mockImplementation(sql => {
+    queries.add(sql); const statement = prepare(sql), get = statement.get.bind(statement)
+    if (sql.startsWith('SELECT') && sql.includes('FROM connection_ingress_action_reference') && sql.includes('projection_id=?')) vi.spyOn(statement, 'get').mockImplementation((...args) => { projectionQueries.set(sql, args); return get(...args) })
+    return statement
+  })
+  await f.grant(); const original = await f.open()
   await vi.waitFor(() => expect(f.buttons().length).toBeGreaterThan(0), { timeout: 8_000 })
   const ref = f.buttons().find(value => /deny|reject/i.test(value.text.content))!.value.actionRef
-  const database = f.services.database!, prepare = database.prepare.bind(database), queries = new Set<string>()
-  vi.spyOn(database, 'prepare').mockImplementation(sql => { queries.add(sql); return prepare(sql) })
   await f.sdk.receive(f.action(ref)); await original.callback
   const claimed = (await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])).ingresses[0]
-  const authority = [...queries].find(sql => sql.startsWith('SELECT ingress_id FROM ('))!
+  const authority = [...queries].find(sql => sql.startsWith('SELECT ingress_id FROM (') && sql.includes("'$.input.operationId')=?"))!
   const duplicate = [...queries].find(sql => sql.startsWith('SELECT record_json FROM connection_ingress_event WHERE json_extract'))!
   expect(authority).toBeDefined(); expect(duplicate).toBeDefined()
   const authorityPlan = database.prepare('EXPLAIN QUERY PLAN ' + authority).all(claimed.input.operationId).map(row => String(row.detail))
   const duplicatePlan = database.prepare('EXPLAIN QUERY PLAN ' + duplicate).all(ref, JSON.stringify(f.actor), 1).map(row => String(row.detail))
   expect(authorityPlan.some(detail => detail.includes('connection_ingress_action_operation'))).toBe(true)
   expect(duplicatePlan.some(detail => detail.includes('connection_ingress_action_original'))).toBe(true)
+  expect(projectionQueries.size, 'Both original projection and authorization queries actually execute').toBe(2)
+  const projectionPlans = [...projectionQueries].map(([sql, args]) => ({ sql, args, plan: prepare('EXPLAIN QUERY PLAN ' + sql).all(...args).map(row => String(row.detail)) }))
+  await writeFile('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/permission-actions/projection-query-plans.json', JSON.stringify({ projectionPlans }, null, 2) + '\n')
+  for (const query of projectionPlans) expect(query.plan.some(detail => detail.startsWith('SEARCH ') && detail.includes('connection_ingress_action_audience') && detail.includes('binding_id=? AND binding_revision=? AND projection_id=?')), 'Projection reads must search only the exact Binding revision').toBe(true)
 }, 20_000)
