@@ -453,6 +453,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   private departRenderer(): void {
     if (!this.rendererAvailable) return
     this.rendererAvailable = false
+    this.retireFocus({ windowId: this.mainId, documentGeneration: this.mainGeneration })
     this.mainGeneration = randomUUID()
     this.navigationCleanup = this.navigationCleanup.then(() => this.rendererDeparted()).then(async () => { await Promise.all(this.childDepartures.values()) })
   }
@@ -470,6 +471,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
         try { await this.returnNative(native); record.native = null; delete record.retiredNative; delete record.retiredGeneration; this.mayClose.add(native.id); native.destroy() }
         catch (error) { record.phase = 'unknown'; this.warn(String(error)); continue }
       }
+      this.retireFocus({ windowId: record.windowId, documentGeneration: record.generation })
       record.generation = randomUUID(); record.ticket = null; record.phase = 'pending'
     }
     this.changed()
@@ -482,9 +484,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
 
   private retain(record: ManagedWindow): void { this.windows.set(record.windowId, record); this.byTarget.set(targetKey(record.target), record) }
   private remove(record: ManagedWindow): void {
-    if (this.focusIssue?.windowId === record.windowId && this.focusIssue.documentGeneration === record.generation) {
-      this.focusIssue = null; this.issue = null
-    }
+    this.retireFocus({ windowId: record.windowId, documentGeneration: record.generation })
     this.windows.delete(record.windowId); this.byTarget.delete(targetKey(record.target))
     for (const [id, pending] of this.pending) if (pending.request.windowId === record.windowId) {
       clearTimeout(pending.timer); this.pending.delete(id)
@@ -528,6 +528,11 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     const current = native === this.main ? scope.windowId === this.mainId && scope.documentGeneration === this.mainGeneration
       : this.windows.get(scope.windowId)?.native === native && this.windows.get(scope.windowId)?.generation === scope.documentGeneration
     if (!current) return false
+    return this.retireFocus(scope)
+  }
+  private retireFocus(scope: WorkbenchWindowDocument): boolean {
+    const cause = this.focusIssue
+    if (!cause || cause.windowId !== scope.windowId || cause.documentGeneration !== scope.documentGeneration) return false
     this.focusIssue = null; this.issue = null
     return true
   }
