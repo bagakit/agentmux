@@ -38,6 +38,7 @@ import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
 import { createRendererHistoryObservation } from './history-observation'
 import { createRendererSearchRead } from './search-read'
+import { unwrapBrowserRunResult } from '../../../shared/browser-run-result'
 import { createRendererHistoryRead } from './history-read'
 import {
   DEFAULT_TOPIC_WIKI,
@@ -1480,6 +1481,10 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       return Object.assign(result.topics, result.issues.length ? { issues: result.issues } : {})
     } },
     control: createRendererControlApi(preload.control),
+    browser: {
+      ...preload.browser,
+      runScript: (...args) => preload.browser.runScript(...args).then(unwrapBrowserRunResult)
+    },
     search: { query: createRendererSearchRead((input, context) => preload.search.query(input, context)) },
     sessions: {
       ...preload.sessions,

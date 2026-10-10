@@ -1313,6 +1313,15 @@ export class BrowserViewManager {
         : localOperation
     } catch (error) {
       entry.runInFlight = false
+      const cleanupWarning = session.detach()
+      if (cleanupWarning) {
+        entry.activity = { ...entry.activity, warning: [entry.activity.warning, cleanupWarning].filter(Boolean).join(' ') }
+        const failure = error instanceof Error ? error : new Error(String(error))
+        failure.message += ` ${cleanupWarning}`
+        // A failed warning projection must not replace the original typed refusal.
+        try { this.emit(entry) } catch { /* The refusal still carries the actual cleanup warning. */ }
+        throw failure
+      }
       throw error
     }
     entry.activity = { operation, control: 'agent' }

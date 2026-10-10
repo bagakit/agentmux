@@ -2063,7 +2063,10 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser'> & {
+  browser: Omit<AgentMuxDesktopApi['browser'], 'runScript'> & {
+    runScript(...args: Parameters<AgentMuxDesktopApi['browser']['runScript']>): Promise<import('./browser-run-result').BrowserRunResult>
+  }
   search: {
     query(input: import('@agentmux/core/search').AgentMuxSearchInput, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core/search').AgentMuxSearchPage>>
   }
