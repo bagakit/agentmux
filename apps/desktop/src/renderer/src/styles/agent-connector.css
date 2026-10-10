@@ -74,3 +74,5 @@
 .agent-connector-service { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--text-3); background: var(--surface-1); }
 .agent-connector-service > strong { color: var(--text); font-size: var(--fs-meta); font-weight: 500; }
 .agent-connector-menu__label { padding: var(--sp-3) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); font-weight: 500; }
+
+.agent-connector-access-member { display: grid; justify-items: start; gap: var(--sp-2); min-width: 0; }
