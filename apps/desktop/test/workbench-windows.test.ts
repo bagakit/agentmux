@@ -167,6 +167,20 @@ describe('original workface native presentation owner', () => {
     native.focused = true; native.emit('focus')
     expect(f.owner.focusDocument(identity)).toBe(true)
     expect(snapshot(f).issue).toBe(issue)
+    f.store.journalFailure = 'none'
+    expect((await f.owner.call('app.window.return', { operationId: 'return-with-original-receipt-warning', ...identity }, context)).recordedOperation?.state).toBe('confirmed')
+    expect(snapshot(f).issue).toBe(issue)
+  })
+  it('retires only the exact focus cause after its original window has returned', async () => {
+    const f = await fixture(), identity = await opened(f), native = f.children[0]!
+    native.focused = false; native.focus = () => {}
+    expect(f.owner.focusDocument(identity)).toBe(false)
+    expect(snapshot(f).issue).not.toBeNull()
+    const returned = await f.owner.call('app.window.return', { operationId: 'return-original-focus-cause', ...identity }, context)
+    expect(returned.recordedOperation?.state).toBe('confirmed')
+    expect(native.destroyed).toBe(true)
+    expect(snapshot(f).windows.some(window => window.windowId === identity.windowId)).toBe(false)
+    expect(snapshot(f).issue).toBeNull()
   })
   it('ignores a retired native focus event and stale document when the current focus is unknown', async () => {
     const f = await fixture(), original = await opened(f), retired = f.children[0]!
