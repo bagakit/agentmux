@@ -1,5 +1,6 @@
 import { gzipSync } from 'node:zlib'
-import type { ConnectionEnrollmentAdapter, EnrollmentAdapterInput, EnrollmentChallengeReceipt, EnrollmentPollReceipt } from '../../connection-enrollment-adapter.js'
+import type { ConnectionEnrollmentDiagnostic } from '@agentmux/core/connections'
+import type { ConnectionEnrollmentAdapter, EnrollmentAdapterInput, EnrollmentChallengeReceipt, EnrollmentPollReceipt, EnrollmentUnknownReceipt } from '../../connection-enrollment-adapter.js'
 
 const issuers = {
   'open.feishu.cn': { accounts: 'accounts.feishu.cn', brand: 'feishu', label: 'Feishu' },
@@ -68,20 +69,25 @@ function readState(input: EnrollmentAdapterInput & { privateState: string }): St
     typeof value.interval !== 'number' || !Number.isSafeInteger(value.interval) || value.interval <= 0) return null
   return value as State
 }
-async function request(scope: Domain, fields: Record<string, string>, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
-  if (signal?.aborted) return null
+function unknown(diagnostic: ConnectionEnrollmentDiagnostic): EnrollmentUnknownReceipt { return { kind: 'unknown', diagnostic } }
+type RegistrationResponse = { kind: 'received'; value: Record<string, unknown>; httpStatus: number } | EnrollmentUnknownReceipt
+async function request(scope: Domain, fields: Record<string, string>, signal?: AbortSignal): Promise<RegistrationResponse> {
+  if (signal?.aborted) return unknown({ stage: 'request', code: 'cancelled' })
+  let response: Response
   try {
-    const response = await fetch(`https://${issuers[scope].accounts}/oauth/v1/app/registration`, {
+    response = await fetch(`https://${issuers[scope].accounts}/oauth/v1/app/registration`, {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams(fields).toString(), redirect: 'error', ...(signal ? { signal } : {})
     })
-    // The published SDK also reads OAuth errors from HTTP 400. Other failures
-    // cannot certify a rejected or unapplied registration, even if JSON exists.
-    if (!response.ok && response.status !== 400) return null
-    const result = object(await response.json())
-    if (!response.ok && (typeof result?.error !== 'string' || result.client_id !== undefined || result.client_secret !== undefined)) return null
-    return result
-  } catch { return null }
+  } catch { return unknown({ stage: 'request', code: signal?.aborted ? 'cancelled' : 'transport-unconfirmed' }) }
+  const httpStatus = response.status
+  // A received HTTP failure does not prove that this registration was unapplied.
+  if (!response.ok && httpStatus !== 400) return unknown({ stage: 'response', code: 'http-status', httpStatus })
+  let decoded: unknown
+  try { decoded = await response.json() } catch { return unknown({ stage: 'response', code: 'invalid-json', httpStatus }) }
+  const value = object(decoded)
+  if (!value || !response.ok && (typeof value.error !== 'string' || value.client_id !== undefined || value.client_secret !== undefined)) return unknown({ stage: 'response', code: 'invalid-response', httpStatus })
+  return { kind: 'received', value, httpStatus }
 }
 
 /** Finite public SDK wire protocol. The original Host owns every claim and secret. */
@@ -90,18 +96,30 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
     domains: Object.entries(issuers).map(([scope, issuer]) => ({ domain: scope, label: issuer.label })),
     async begin(input, signal) {
       if (!domain(input.domain) || !text(input.operationId) || !text(input.connectionId) || !text(input.label)) return { kind: 'unknown' }
-      const result = await request(input.domain, { action: 'begin', archetype: 'PersonalAgent', auth_method: 'client_secret', request_user_info: 'open_id' }, signal)
-      if (!result || result.error !== undefined || !text(result.device_code)) return { kind: 'unknown' }
+      const response = await request(input.domain, { action: 'begin', archetype: 'PersonalAgent', auth_method: 'client_secret', request_user_info: 'open_id' }, signal)
+      if (response.kind === 'unknown') return response
+      const { value: result, httpStatus } = response
+      if (result.error !== undefined) return unknown({ stage: 'response', code: text(result.error) ? 'platform-error' : 'invalid-response', httpStatus })
+      if (!text(result.device_code)) return unknown({ stage: 'response', code: 'invalid-response', httpStatus })
       const received = Date.now()
-      const url = verification(result.verification_uri_complete, input.domain, result.device_code)
+      let url: URL | null
+      if (result.verification_uri_complete === undefined) {
+        // The official CLI builds this exact issuer-owned page from the public
+        // user code. A supplied unsafe URI cannot be hidden by its missing peer.
+        if (result.verification_uri !== undefined && !verification(result.verification_uri, input.domain, result.device_code)) return unknown({ stage: 'challenge', code: 'unsafe-verification' })
+        if (!text(result.user_code) || result.user_code.includes(result.device_code)) return unknown({ stage: 'challenge', code: 'missing-verification' })
+        url = new URL(`https://${input.domain}/page/cli`)
+        url.searchParams.set('user_code', result.user_code)
+      } else url = verification(result.verification_uri_complete, input.domain, result.device_code)
       const interval = result.interval === undefined ? 5_000 : milliseconds(result.interval)
-      if (!url || interval === null || (result.user_code !== undefined && (!text(result.user_code) || result.user_code.includes(result.device_code)))) return { kind: 'unknown' }
+      if (!url) return unknown({ stage: 'challenge', code: 'unsafe-verification' })
+      if (interval === null || (result.user_code !== undefined && (!text(result.user_code) || result.user_code.includes(result.device_code)))) return unknown({ stage: 'challenge', code: 'invalid-challenge' })
       // Both spellings exist in the original SDK/installer. Missing is unknown;
       // their local default timeout is not an authoritative platform expiry.
-      if (result.expires_in !== undefined && result.expire_in !== undefined && result.expires_in !== result.expire_in) return { kind: 'unknown' }
+      if (result.expires_in !== undefined && result.expire_in !== undefined && result.expires_in !== result.expire_in) return unknown({ stage: 'challenge', code: 'invalid-challenge' })
       const expiry = result.expires_in !== undefined ? result.expires_in : result.expire_in
       const lifetime = expiry === undefined ? null : milliseconds(expiry, true)
-      if (expiry !== undefined && lifetime === null || lifetime !== null && !Number.isSafeInteger(received + lifetime)) return { kind: 'unknown' }
+      if (expiry !== undefined && lifetime === null || lifetime !== null && !Number.isSafeInteger(received + lifetime)) return unknown({ stage: 'challenge', code: 'invalid-challenge' })
       url.searchParams.set('from', 'sdk')
       url.searchParams.set('source', 'node-sdk/agentmux')
       url.searchParams.set('tp', 'sdk')
@@ -110,7 +128,7 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
       url.searchParams.set('name', input.preset?.name ?? input.label)
       url.searchParams.set('desc', input.preset?.description ?? (input.preset ? '' : 'Connect this bot to AgentMux'))
       url.searchParams.set('addons', addons)
-      if (!verification(url.toString(), input.domain, result.device_code)) return { kind: 'unknown' }
+      if (!verification(url.toString(), input.domain, result.device_code)) return unknown({ stage: 'challenge', code: 'unsafe-verification' })
       return receipt({ version: 1, operationId: input.operationId, connectionId: input.connectionId, domain: input.domain, label: input.label,
         deviceCode: result.device_code, verificationUrl: url.toString(), ...(typeof result.user_code === 'string' ? { userCode: result.user_code } : {}),
         deadline: lifetime === null ? null : received + lifetime, interval })
@@ -118,17 +136,18 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
     async poll(input, signal): Promise<EnrollmentPollReceipt> {
       const state = readState(input)
       if (!state || state.deadline !== null && state.deadline <= Date.now()) return { kind: 'unknown' }
-      const result = await request(state.domain, { action: 'poll', device_code: state.deviceCode }, signal)
-      if (!result) return { kind: 'unknown' }
+      const response = await request(state.domain, { action: 'poll', device_code: state.deviceCode }, signal)
+      if (response.kind === 'unknown') return response
+      const { value: result, httpStatus } = response
       const user = result.user_info === undefined ? null : object(result.user_info)
       // The SDK's implicit Lark switch sends another HTTP request. A finite
       // preclaimed poll must never change the frozen issuer or perform that hop.
-      if (result.user_info !== undefined && !user || user?.tenant_brand !== undefined && user.tenant_brand !== issuers[state.domain].brand) return { kind: 'unknown' }
+      if (result.user_info !== undefined && !user || user?.tenant_brand !== undefined && user.tenant_brand !== issuers[state.domain].brand) return unknown({ stage: 'response', code: 'invalid-response', httpStatus })
       if (result.client_id !== undefined || result.client_secret !== undefined) {
         // Match the original ConnectionApplication identifier contract before
         // exposing an authorized identity to the Host's secure handoff.
         if (result.error !== undefined || !text(result.client_id) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(result.client_id) ||
-          typeof result.client_secret !== 'string' || result.client_secret.length === 0) return { kind: 'unknown' }
+          typeof result.client_secret !== 'string' || result.client_secret.length === 0) return unknown({ stage: 'response', code: 'invalid-response', httpStatus })
         // Preserve a validated late response for this original attempt: aborting
         // the observer does not revoke a remotely created app or its secret.
         return { kind: 'authorized', application: { domain: state.domain, appId: result.client_id }, secret: result.client_secret }
@@ -141,7 +160,7 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
         }
         case 'access_denied': return { kind: 'denied' }
         case 'expired_token': return { kind: 'expired' }
-        default: return { kind: 'unknown' }
+        default: return unknown({ stage: 'response', code: text(result.error) ? 'platform-error' : 'invalid-response', httpStatus })
       }
     }
   }
