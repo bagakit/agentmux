@@ -676,3 +676,34 @@ it('keeps the original reachable viewport when the selected native child refuses
   expect(f.source.getVisible()).toBe(true); expect(f.source.webContents.dead).toBe(false)
   expect(f.manager.nativeOwner('browser')?.view).toBe(f.source)
 })
+
+it('closed workbench owners revoke late media requests and release the exact original Session', async () => {
+  const f = await fixture(), lease = f.register('departing-document')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  expect(capture.captureId).toBeTruthy()
+  const requesterSession = f.app.session, lateRequest = requesterSession.display!
+  let departed = false
+  Object.defineProperty(f.window, 'webContents', { configurable: true, get() {
+    if (departed) throw new Error('Object has been destroyed')
+    return f.app
+  } })
+  Object.defineProperty(f.app, 'session', { configurable: true, get() {
+    if (departed) throw new Error('Object has been destroyed')
+    return requesterSession
+  } })
+  vi.spyOn(f.window, 'isDestroyed').mockImplementation(() => departed)
+  try {
+    departed = true; f.app.dead = true
+    const granted = vi.fn()
+    expect(() => lateRequest({ frame: f.frame, securityOrigin: 'file://', videoRequested: true, audioRequested: false }, granted)).not.toThrow()
+    expect(granted).toHaveBeenCalledExactlyOnceWith(null)
+    expect(() => f.manager.dispose()).not.toThrow()
+    expect(requesterSession.setDisplayMediaRequestHandler).toHaveBeenLastCalledWith(null)
+    for (const event of ['did-start-navigation', 'did-navigate-in-page', 'render-process-gone', 'destroyed']) {
+      expect(f.app.listeners.get(event)?.size ?? 0).toBe(0)
+    }
+  } finally {
+    Object.defineProperty(f.window, 'webContents', { configurable: true, writable: true, value: f.app })
+    Object.defineProperty(f.app, 'session', { configurable: true, writable: true, value: requesterSession })
+  }
+})

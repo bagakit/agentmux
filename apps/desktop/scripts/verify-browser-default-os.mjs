@@ -276,6 +276,24 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const reopened = await observation()
     assert.equal(reopened.main.pid, initial.main.pid, 'No-window ingress reuses original Main')
     assert.ok(regions(reopened).some(region => region.control?.run.runId === run.region.runId && region.processState === 'running'), 'No-window ingress retains the original Run')
+    const browsersBeforeObjectReopen = regions(reopened).filter(region => region.kind === 'browser')
+      .map(({ browserId, profileId, mode, url }) => ({ browserId, profileId, mode, url })).sort((left, right) => left.browserId.localeCompare(right.browserId))
+    await page.evaluate('window.close()').catch(() => {})
+    await eventually(async () => !await rootTarget(), 'Original Main has no window before exact-object reentry')
+    assert.doesNotThrow(() => process.kill(initial.main.pid, 0), 'Exact-object reentry keeps the same private Main')
+    await command('/usr/bin/open', ['-a', app, internalUrl], { env: cleanEnvironment })
+    target = await attachPage()
+    const objectReopened = await eventually(async () => {
+      const value = await observation()
+      return !value.workbench.loading && value.workbench.desktop.selection.space?.regionId === original.regionId && value
+    }, 'No-window amux reentry reaches the exact original Core Region')
+    assert.equal(objectReopened.main.pid, initial.main.pid, 'Both no-window protocols reuse the original Main')
+    assert.deepEqual(regions(objectReopened).filter(region => region.kind === 'browser')
+      .map(({ browserId, profileId, mode, url }) => ({ browserId, profileId, mode, url })).sort((left, right) => left.browserId.localeCompare(right.browserId)),
+    browsersBeforeObjectReopen, 'Exact-object reentry preserves every original Browser and Profile without a new URL intent')
+    assert.ok(regions(objectReopened).some(region => region.control?.run.runId === run.region.runId && region.processState === 'running'), 'Both no-window protocols retain the original healthy Run')
+    receipt.cases.push({ name: 'no-window-amux-restores-original-region-main-and-run', mainPid: objectReopened.main.pid,
+      runId: run.region.runId, selection: objectReopened.workbench.desktop.selection, browsers: browsersBeforeObjectReopen })
     const currentWindow = await browser.call('Browser.getWindowForTarget', { targetId: target.id })
     await openSurveySettings()
     const originalTitle = await page.evaluate('document.querySelector(' + JSON.stringify(startPageTitleSelector) + ').value')
