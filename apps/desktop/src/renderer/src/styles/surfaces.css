@@ -36,7 +36,7 @@
 .settings-sidebar nav > button.selected { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
 .settings-sidebar nav > button.selected > svg { color: var(--green); }
 .settings-sidebar nav > button > span { min-width: 0; display: block; }
-.settings-sidebar nav > button strong { font-size: var(--fs-body); font-weight: 450; }
+.settings-sidebar nav > button strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 450; }
 .settings-sidebar nav > button.selected strong { font-weight: 650; }
 .settings-nav-empty { display: block; padding: var(--sp-4); color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
 .settings-content { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); padding-top: 34px; background: var(--surface-0); }
