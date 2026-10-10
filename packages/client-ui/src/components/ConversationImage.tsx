@@ -6,6 +6,7 @@ import { useClientUiPlatform } from '../platform.js'
 import { ConversationImageGallery } from './ConversationImageGallery.js'
 import { useConversationImageCollection } from './ConversationImageCollection.js'
 import type { ConversationImageReference } from '../lib/conversation-image-references.js'
+import { useVisibleWork } from '../lib/use-visible-work.js'
 
 /** App-pasted references retain their confined byte reader; native references use Core's exact-record reader. */
 export type ReadPastedImage = (path: string) => Promise<PastedImage | null>
@@ -16,20 +17,24 @@ type LoadedImage = { attempt: number; path: string; reader: ReadPastedImage; ima
  * authorization; bytes, failures and open state stay bound to that exact reference and reader. */
 export function ConversationImage({
   active = true,
+  interactive = true,
   text,
   path,
   label,
   readImage
 }: {
   active?: boolean
+  interactive?: boolean
   text: string
   path: string
   label?: string
   readImage: ReadPastedImage
 }) {
   const dormantClose = useRef(false)
-  if (!active) dormantClose.current = true
+  if (!active || !interactive) dormantClose.current = true
   const platform = useClientUiPlatform()
+  const viewport = useVisibleWork<HTMLSpanElement>(active && !interactive)
+  const readActive = active && (interactive || viewport.visible)
   const scope = useConversationImageCollection()
   const related = scope?.readImage === readImage ? scope.references : undefined
   const references = useMemo(() => related?.some(reference => reference.path === path) ? related : [{ path, text, ...(label === undefined ? {} : { label }) }], [related, path, text, label])
@@ -43,7 +48,7 @@ export function ConversationImage({
 
   useEffect(() => {
     let alive = true
-    if (!active || loaded?.path === path && loaded.reader === readImage && loaded.attempt === attempt) return
+    if (!readActive || loaded?.path === path && loaded.reader === readImage && loaded.attempt === attempt) return
     setLoaded(null)
     setFailed(null)
     setOpen(null)
@@ -60,9 +65,9 @@ export function ConversationImage({
     return () => {
       alive = false
     }
-  }, [path, readImage, attempt, active])
+  }, [path, readImage, attempt, readActive])
   useEffect(() => { setOpen(null) }, [references])
-  useEffect(() => { if (!active) setOpen(null) }, [active])
+  useEffect(() => { if (!active || !interactive) setOpen(null) }, [active, interactive])
 
   // Bind both the bytes and decode/open state to this exact read. A changed source cannot render
   // the previous image during the commit before effect cleanup, or inherit a late decode error.
@@ -71,8 +76,12 @@ export function ConversationImage({
   currentImage.current = image ? loaded : null
   const failure = readFailure?.path === path && readFailure.reader === readImage ? readFailure.message
     : failed?.path === path && failed.reader === readImage ? 'Recorded image could not be decoded.' : null
-  if (!image) return <><span className="md-conversation-image__reference">{text}</span>{failure ? <small className="md-conversation-image__failure" role="status">{failure}<button type="button" className="md-conversation-image__retry" aria-label="Retry image" title="Retry image" onClick={() => setAttempt(value => value + 1)}><SemanticIcon name="action.retry" size={12} aria-hidden="true" /></button></small> : null}</>
+  const fallback = <><span className="md-conversation-image__reference">{text}</span>{failure ? <small className="md-conversation-image__failure" role="status">{failure}{interactive ? <button type="button" className="md-conversation-image__retry" aria-label="Retry image" title="Retry image" onClick={() => setAttempt(value => value + 1)}><SemanticIcon name="action.retry" size={12} aria-hidden="true" /></button> : null}</small> : null}</>
   const decodeFailed = () => { if (currentImage.current === loaded) setFailed(loaded) }
+  if (!interactive) return <span ref={viewport.ref} style={{ display: 'inline-block', maxWidth: '100%' }}>
+    {image ? <img className="md-conversation-image__thumb" src={image.dataUrl} alt={label ?? path} title={label ?? path} onError={decodeFailed} /> : fallback}
+  </span>
+  if (!image) return fallback
 
   return (
     <Dialog.Root open={active && open?.image === loaded && open.references === references} onOpenChange={next => {

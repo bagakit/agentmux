@@ -7,8 +7,9 @@ export type ConversationHistoryResourceReader = SessionHistoryResourceReader
 export type ConversationNativeResourceRecord = Pick<AgentSessionHistoryResourceRequest, 'source' | 'recordId' | 'turnId'>
 
 /** The existing image face reads an exact original resource, not a path supplied by the viewer. */
-export function ConversationResourceImage({ active = true, part, partIndex, record, readResource }: {
+export function ConversationResourceImage({ active = true, interactive = true, part, partIndex, record, readResource }: {
   active?: boolean
+  interactive?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>
   partIndex: number
   record: ConversationNativeResourceRecord
@@ -29,6 +30,6 @@ export function ConversationResourceImage({ active = true, part, partIndex, reco
   }, [readResource, source.providerId, source.nativeSessionId, recordId, turnId, partIndex, reference])
   return <div className="log-turn__resource log-turn__resource--image">
     {part.label ? <span>{part.label}</span> : null}
-    <ConversationImage active={active} text={reference.startsWith('data:') ? 'Recorded inline image' : reference} path={reference} label={part.label ?? 'Recorded image'} readImage={readImage} />
+    <ConversationImage active={active} interactive={interactive} text={reference.startsWith('data:') ? 'Recorded inline image' : reference} path={reference} label={part.label ?? 'Recorded image'} readImage={readImage} />
   </div>
 }

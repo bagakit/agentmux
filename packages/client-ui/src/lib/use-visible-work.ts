@@ -1,31 +1,40 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useClientUiOwnerDocument } from '../platform.js'
 
 /** Host activity and the actual viewport both own expensive block work. Source text stays mounted. */
 export function useVisibleWork<T extends HTMLElement>(active = true) {
-  const ref = useRef<T>(null)
-  const [intersecting, setIntersecting] = useState(false)
-  const [foreground, setForeground] = useState(() => typeof document !== 'undefined' && document.visibilityState !== 'hidden')
+  const platformDocument = useClientUiOwnerDocument()
+  const [target, setTarget] = useState<T | null>(null)
+  const ref = useCallback((node: T | null) => { setTarget(node) }, [])
+  const [viewport, setViewport] = useState<{ target: T; document: Document; intersecting: boolean } | null>(null)
+  const [foreground, setForeground] = useState<{ document: Document; visible: boolean } | null>(null)
   useEffect(() => {
-    const target = ref.current
-    setIntersecting(false)
     if (!active || !target) return
-    if (typeof IntersectionObserver === 'undefined') {
-      const rect = target.getBoundingClientRect()
-      setIntersecting(rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < window.innerHeight && rect.right > 0 && rect.left < window.innerWidth)
-      return
+    const owner = target.ownerDocument, view = owner.defaultView
+    let alive = true
+    const update = (intersecting: boolean) => {
+      if (alive && target.ownerDocument === owner) setViewport({ target, document: owner, intersecting })
     }
-    const observer = new IntersectionObserver(entries => setIntersecting(entries.some(entry => entry.target === target && entry.isIntersecting)), { rootMargin: '0px' })
+    update(false)
+    const Observer = view?.IntersectionObserver
+    if (!Observer) {
+      const rect = target.getBoundingClientRect()
+      update(Boolean(view && rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < view.innerHeight && rect.right > 0 && rect.left < view.innerWidth))
+      return () => { alive = false }
+    }
+    const observer = new Observer(entries => update(entries.some(entry => entry.target === target && entry.isIntersecting)))
     observer.observe(target)
-    return () => observer.disconnect()
-  }, [active])
+    return () => { alive = false; observer.disconnect() }
+  }, [active, target, platformDocument])
+  const current = viewport?.target === target && viewport.document === target?.ownerDocument ? viewport : null
   useEffect(() => {
-    if (!active || !intersecting) return
-    const update = () => setForeground(document.visibilityState !== 'hidden')
+    if (!active || !current?.intersecting) return
+    const owner = current.document
+    const update = () => setForeground({ document: owner, visible: owner.visibilityState !== 'hidden' })
     update()
-    document.addEventListener('visibilitychange', update)
-    return () => document.removeEventListener('visibilitychange', update)
-  }, [active, intersecting])
-  // The visibility listener is parked offscreen; reject a stale foreground bit
-  // synchronously when a hidden document's element re-enters the viewport.
-  return { ref, visible: active && foreground && intersecting && typeof document !== 'undefined' && document.visibilityState !== 'hidden' }
+    owner.addEventListener('visibilitychange', update)
+    return () => owner.removeEventListener('visibilitychange', update)
+  }, [active, current?.document, current?.intersecting])
+  // A stale realm or parked foreground bit cannot authorize work after adoption or hiding.
+  return { ref, visible: Boolean(active && current?.intersecting && foreground?.document === current.document && foreground.visible && current.document.visibilityState !== 'hidden') }
 }
