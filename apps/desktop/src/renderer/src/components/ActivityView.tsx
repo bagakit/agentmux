@@ -667,7 +667,7 @@ export function ActivityView({
   }
 
   const returnToLatest = (): void => {
-    if (conversationReading?.opened || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held || readingWindow.error) {
+    if (readingWindow.historical || readingWindow.newerOutside || readingWindow.held) {
       readingWindow.showCurrent()
     } else jumpToLatest()
   }
@@ -1016,15 +1016,18 @@ export function ActivityView({
       traceDisclosure.collapse()
     }}><ThemeLayoutCollapseAllIcon size={13} aria-hidden="true" /></button> : null
 
-  const latestControl = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held || readingWindow.error ? (
+  // A recent source update can lead the committed window for one render. It is
+  // independent of the reader's position and must not flash a scroll affordance.
+  const needsReturnToLatest = showJump || readingWindow.historical
+  const latestControl = needsReturnToLatest || readingWindow.held ? (
     <div className="activity-feed__latest-layer" data-conversation-current-entry>
       {readingWindow.held ? <span className="activity-feed__latest-held" role="status">保留阅读位置</span> : null}
-      <button type="button" className="activity-feed__jump" data-message-tool-control="jump-to-latest"
-        aria-label="Return to latest messages" disabled={!readingEnabled}
-        title={readingWindow.held ? '原阅读位置和选区已保留，取消选择或移开当前阅读位置后可查看最新消息' : 'Read and follow the latest messages in this conversation'}
+      {needsReturnToLatest ? <button type="button" className="activity-feed__jump" data-message-tool-control="jump-to-latest"
+        aria-label="滚动到最新" disabled={!readingEnabled}
+        title={readingWindow.held ? '原阅读位置和选区已保留，取消选择或移开当前阅读位置后可滚动到最新' : '滚动到最新'}
         onMouseDown={event => event.preventDefault()} onClick={returnToLatest}>
-        <ThemeActionCurrentIcon size={12} aria-hidden="true" />最新消息
-      </button>
+        <ThemeActionCurrentIcon size={12} aria-hidden="true" />滚动到最新
+      </button> : null}
     </div>
   ) : null
 
