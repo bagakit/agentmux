@@ -12,6 +12,7 @@ import { useMonacoTheme } from '../hooks/useMonacoTheme'
 import { useEditorTypography } from '../hooks/useEditorTypography'
 import { bindingById, monacoKeybindingFor } from '../lib/shortcut-registry'
 import { regionCaretFocusTargets } from '../lib/region-focus'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -33,6 +34,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   tabId: string; surface: FileWorkbenchSurface; visible?: boolean
   viewState: RefObject<FileEditorViewState | null>
 }) {
+  const hostDocument = useWorkbenchDocument()
   const key = documentKey(surface.workspaceId, surface.path)
   const document = useAppStore(state => state.documents[key])
   const revealTarget = useAppStore(state => state.documentRevealTargets[key])
@@ -47,6 +49,12 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   const typography = useEditorTypography()
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
   const unregisterFormatter = useRef<(() => void) | null>(null)
+  const editorDocument = useRef(hostDocument)
+  useLayoutEffect(() => {
+    if (editorDocument.current === hostDocument) return
+    editorDocument.current = hostDocument
+    editorRef.current?.layout()
+  }, [hostDocument])
   // Per-Region URIs keep a preview switch from disposing another Region's model.
   const modelPath = `agentmux-file:///${encodeURIComponent(surface.regionId)}/${encodeURIComponent(key)}`
   const visibleRef = useRef(visible)
@@ -95,7 +103,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     const host = editor?.getContainerDomNode()
     if (!editor || !desktopElementVisible(host ?? null)) return
     editor.focus()
-    if (host?.contains(window.document.activeElement)) clearRegionCaretFocus(request.nonce)
+    if (host?.contains(host.ownerDocument.activeElement)) clearRegionCaretFocus(request.nonce)
   }
 
   useEffect(() => {
@@ -103,14 +111,14 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     const nonce = regionCaretFocus?.nonce
     if (nonce === undefined || useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
     // Only the exact pending editor observes mount/inert changes; a later intent cancels it.
-    const observer = new MutationObserver(() => {
+    const observer = new (hostDocument.defaultView?.MutationObserver ?? MutationObserver)(() => {
       if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return observer.disconnect()
       consumeCaretFocus()
       if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) observer.disconnect()
     })
-    observer.observe(window.document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'aria-hidden'] })
+    observer.observe(hostDocument.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'aria-hidden'] })
     return () => observer.disconnect()
-  }, [regionCaretFocus, visible])
+  }, [regionCaretFocus, visible, hostDocument])
 
   // Cmd/Ctrl+S. Registered as a Monaco command rather than a window listener so it fires only for
   // the editor that actually has focus — with several file Regions open at once, a window-level

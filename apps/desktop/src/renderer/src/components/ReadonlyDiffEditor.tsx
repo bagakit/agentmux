@@ -1,5 +1,6 @@
 import '../monaco'
-import { useEffect, useId, useRef } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef } from 'react'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as monaco from 'monaco-editor'
 import type { MonacoThemeId } from '../lib/monaco-theme'
 import { wordWrapOption } from '../lib/editor-diff'
@@ -9,10 +10,12 @@ import { useEditorTypography } from '../hooks/useEditorTypography'
 export function ReadonlyDiffEditor({ original, modified, wordWrap, language, theme }: {
   original: string; modified: string; wordWrap: boolean; language: string; theme: MonacoThemeId
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const typography = useEditorTypography()
   const instanceId = useId(), host = useRef<HTMLDivElement | null>(null)
   const widget = useRef<monaco.editor.IStandaloneDiffEditor | null>(null)
   const models = useRef<monaco.editor.IDiffEditorModel | null>(null)
+  useLayoutEffect(() => { widget.current?.layout() }, [ownerDocument])
   const initial = useRef({ original, modified, wordWrap, language, typography })
   const originalPath = `agentmux-diff:///${encodeURIComponent(instanceId)}/original`
   const modifiedPath = `agentmux-diff:///${encodeURIComponent(instanceId)}/modified`
