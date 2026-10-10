@@ -5,6 +5,7 @@ import { AgentMuxFileAgentSessionStore, AgentMuxError,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
   type AgentProvider, type AgentMuxRpcMobileAccessState } from '@agentmux/core'
+import { isAppWindowMethod } from '@agentmux/core/control'
 import { DeviceAuthority } from './device-authority.js'
 import { networkInterfaces } from 'node:os'
 import { startLocalRelay } from '@agentmux/relay/local'
@@ -59,6 +60,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       return offerUrl()
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
+      if (isAppWindowMethod(method) && !context.caller && context.principal?.kind === 'device') {
+        throw new AgentMuxError('This desktop bridge cannot preserve the authenticated device identity for window control. Use the original desktop workface; original workfaces and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      }
       const desktop = await desktopClient(context)
       try { return await desktop.call(method, params, context.signal ? { signal: context.signal } : {}) }
       finally { await desktop.dispose() }
