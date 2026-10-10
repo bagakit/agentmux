@@ -176,11 +176,12 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
       await page.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
       await page.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
     }
+    const startPageTitleSelector = 'input[aria-label="Start page title"]'
     const openSurveySettings = async () => {
       await click('button[aria-label="Settings"]')
       await eventually(() => page.evaluate('!!document.querySelector(".settings-page:not([hidden])")'), 'Actual Settings surface')
       await click('button[data-settings-target="survey"]')
-      await eventually(() => page.evaluate('!!document.querySelector(".settings-page[data-settings-page=survey] input[aria-label=\"Start page title\"]")'), 'Existing Survey Settings module')
+      await eventually(() => page.evaluate('!!document.querySelector(' + JSON.stringify('.settings-page[data-settings-page=survey] ' + startPageTitleSelector) + ')'), 'Existing Survey Settings module')
     }
     const regions = value => value.workbench.tabs.flatMap(tab => tab.regions.map(region => ({ ...region, tabId: tab.id })))
     const assertSurveyPage = async (url, minimum = 1) => {
@@ -221,11 +222,11 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     receipt.runtime = await eventually(() => scope.observeOwner(), 'Exact private Runtime owner after actual Terminal launch')
     await openSurveySettings()
     const draft = 'Unsubmitted research title ' + token
-    await click('input[aria-label="Start page title"]')
+    await click(startPageTitleSelector)
     await page.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 4 })
     await page.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 4 })
     await page.call('Input.insertText', { text: draft })
-    assert.equal(await page.evaluate('document.querySelector("input[aria-label=\"Start page title\"]").value'), draft, 'Original Settings owns the real unsubmitted draft')
+    assert.equal(await page.evaluate('document.querySelector(' + JSON.stringify(startPageTitleSelector) + ').value'), draft, 'Original Settings owns the real unsubmitted draft')
     const beforeWarm = await observation()
     const warmUrl = origin + '/alternate?request=' + token + '#section-b'
     // Two OS requests, rather than relying on duplicate arguments surviving
@@ -237,7 +238,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const afterWarm = await observation(), keptOriginal = regions(afterWarm).find(item => item.browserId === original.browserId)
     assert.deepEqual(keptOriginal, regions(beforeWarm).find(item => item.browserId === original.browserId), 'Original URL/Profile/navigation stay untouched')
     assert.ok(regions(afterWarm).some(region => region.control?.run.runId === run.region.runId && region.processState === 'running'), 'Original healthy Run survives URL burst')
-    assert.equal(await page.evaluate('document.querySelector("input[aria-label=\"Start page title\"]").value'), draft, 'OS URL burst must keep the original unsubmitted Settings draft')
+    assert.equal(await page.evaluate('document.querySelector(' + JSON.stringify(startPageTitleSelector) + ').value'), draft, 'OS URL burst must keep the original unsubmitted Settings draft')
     const inspection = await rpc.call('settings.browser-default.inspect', {})
     assert.deepEqual(await cli(['settings', 'browser-default', 'inspect']), inspection, 'Actual packaged SDK and CLI share Main facts')
     assert.deepEqual(await page.evaluate('window.agentmux.ui.inspectDefaultBrowser()'), inspection, 'Original preload shares the same Main owner')
@@ -272,7 +273,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     assert.ok(regions(reopened).some(region => region.control?.run.runId === run.region.runId && region.processState === 'running'), 'No-window ingress retains the original Run')
     const currentWindow = await browser.call('Browser.getWindowForTarget', { targetId: target.id })
     await openSurveySettings()
-    const originalTitle = await page.evaluate('document.querySelector("input[aria-label=\"Start page title\"]").value')
+    const originalTitle = await page.evaluate('document.querySelector(' + JSON.stringify(startPageTitleSelector) + ').value')
     assert.notEqual(originalTitle, draft, 'An unsubmitted start-page draft must not have been silently saved')
     const settingsButton = '[data-settings-pane="survey"] .settings-group button.small-button:first-of-type'
     await click(settingsButton)
