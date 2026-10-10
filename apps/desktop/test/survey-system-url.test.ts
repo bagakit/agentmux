@@ -29,7 +29,7 @@ const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'or
 it('the system URL consumer uses the real Survey preparation and exact Scratch Browser creation without changing the original page', async () => {
   const f = fixture(), result = await openSystemUrlInSurvey(f.host, request, new AbortController().signal)
   expect(result).toMatchObject({ state: 'opened', browserId: 'new-region', reference: { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'scratch-group', tabId: 'new-tab', regionId: 'new-region' } })
-  expect(f.state.createBrowser).toHaveBeenCalledExactlyOnceWith('scratch-group', { tabId: 'new-tab', regionId: 'new-region' }, request.url, undefined, SCRATCH_WORKSPACE_ID)
+  expect(f.state.createBrowser).toHaveBeenCalledExactlyOnceWith('scratch-group', { tabId: 'new-tab', regionId: 'new-region' }, request.url, undefined, SCRATCH_WORKSPACE_ID, undefined, 'normal')
   expect(f.state.setSurveyZoneSelection).toHaveBeenCalledTimes(1); expect(f.state.mainSurface).toBe('survey')
   expect(f.state.tabs.original.regions.original).toBe(f.original); expect(f.original.draft).toBe('Keep original draft'); expect(f.original.profileId).toBe('ordinary-profile')
   expect(f.listeners.size).toBe(0)
