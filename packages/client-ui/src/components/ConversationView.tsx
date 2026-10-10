@@ -11,10 +11,10 @@ import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyn
 import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionReplyState } from '../lib/conversation-question-reply.js'
 import { projectConversationQuestions } from '@agentmux/core/conversation'
 import { completedNativeReply } from '../lib/conversation-files.js'
-import { conversationItemRef } from '@agentmux/core/conversation'
+import { conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
+  'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
 
 type Props = ReadingProps & {
   questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
@@ -36,6 +36,7 @@ type Props = ReadingProps & {
   locatedMessageKey?: string | null
   recordBoundary?: ConversationRecordBoundary
   renderProcess?: ConversationProcessRenderer
+  renderRecordActions?: (reference: ConversationItemRef, active: boolean) => ReactNode
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   /** Hosts may retain an existing annotation/disclosure identity without replacing presentation. */
   messageIdForRecord?: (item: AgentSessionHistoryItem) => string
@@ -44,7 +45,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, messageIdForRecord, showSource = false, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
+  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
 }: Props) {
   const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
     [page, sessionId, reading.executionHostId])
@@ -80,9 +81,8 @@ export const ConversationView = memo(function ConversationView({
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
           {...(user && onContinue ? { onContinue: () => onContinue(buildNativeContinuationPrompt(page, item)) } : {})}
-          {...(renderMessageActions && item.kind === 'assistant-message'
-            ? { messageActions: renderMessageActions({ kind: 'native', agentSessionId: sessionId,
-              providerId: page.source.providerId, nativeSessionId: page.source.nativeSessionId, recordId: item.id }) } : {})}
+          messageActions={<>{itemRef && renderRecordActions?.(itemRef, reading.active !== false)}{item.kind === 'assistant-message' && renderMessageActions?.({ kind: 'native', agentSessionId: sessionId,
+              providerId: page.source.providerId, nativeSessionId: page.source.nativeSessionId, recordId: item.id })}</>}
           {...reading} />
       return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}

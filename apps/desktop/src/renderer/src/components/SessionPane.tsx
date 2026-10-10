@@ -1,3 +1,4 @@
+import { ConversationLandmarkList, renderConversationLandmarkAction } from './ConversationLandmarks'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { useSessionLinkOpening } from '../lib/session-link-opening'
@@ -833,6 +834,8 @@ export function SessionPane({
     const retainedConversation = <ActivityView sessionId={sessionId} executionHostId={reference.hostId} items={timeline} capability="complete-events"
           conversationReading={{ reference, identity: JSON.stringify([reference.hostId, reference.agentSessionId]),
             enabled: visible && !parked, opened: true, readCaptured: true }}
+          renderRecordActions={renderConversationLandmarkAction}
+          renderReadingTools={(active, revealLoaded) => <ConversationLandmarkList reference={reference} active={active} reveal={revealLoaded}/>}
           readingAction={resumeAction} readingNotice={reopenNotice ?? <div className="activity-feed__read-notice" role="status">
             {metadata ? `${identityLabel}. This Session is closed; its original conversation remains readable.`
               : 'Core confirmed this Session was closed. Its saved identity is retained.'}</div>}
@@ -948,6 +951,8 @@ export function SessionPane({
     readPastedImage, readHistoryResource, openHttpLink: onProseLinkClick,
     ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
     moteConversation: moteOwner !== null, renderMessageActions,
+    ...(session.kind === 'agent' ? { renderRecordActions: renderConversationLandmarkAction,
+      renderReadingTools: (active: boolean) => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference)}/> } : {}),
     ...(hasAgentComposer ? { questionReplyRoute: session.capabilities.asyncQuestionReply,
       questionTerminalTarget: !session.nativeSourceObservation && session.nativeHandle?.kind === 'provider' ? {
         source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.control.run
@@ -990,7 +995,7 @@ export function SessionPane({
       target={target} regionId={linkOrigin.regionId!} sourceKey={activitySourceKey}
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
       executionHost={regionExecutionHost(session, configuredExecutionHost)}
-      activity={{ ...activityProps, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={viewMode !== 'terminal' && !pendingAgentRestore}
+      activity={{ ...activityProps, renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={viewMode !== 'terminal' && !pendingAgentRestore}
       recovery={pendingAgentRestore ? cloneElement(restoreSurface, { supplement: null }) : undefined}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}

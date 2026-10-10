@@ -1,3 +1,4 @@
+import type { ConversationItemRef } from '@agentmux/core/conversation'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import { ConversationToolPayload } from '@agentmux/client-ui/components/ConversationToolPayload'
@@ -50,7 +51,7 @@ import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow }
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
-import type { ConversationRevealRequest } from '../lib/mailbox-message-navigation'
+import type { ConversationRevealRequest, RevealConversationItem } from '../lib/mailbox-message-navigation'
 
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
@@ -403,7 +404,7 @@ export function ActivityView({
   describeSpeaker,
   moteConversation = false,
   questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange,
-  renderMessageActions
+  renderMessageActions, renderRecordActions, renderReadingTools
 }: {
   sessionId: string
   executionHostId?: string
@@ -441,6 +442,8 @@ export function ActivityView({
    */
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
+  renderRecordActions?: (reference: ConversationItemRef, active: boolean) => ReactNode
+  renderReadingTools?: (active: boolean, revealLoaded: RevealConversationItem) => ReactNode
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   questionReplyRoute?: ComponentProps<typeof ConversationView>['questionReplyRoute']
   questionTerminalTarget?: ComponentProps<typeof ConversationView>['questionTerminalTarget']
@@ -778,26 +781,35 @@ export function ActivityView({
   }, [conversationReading?.enabled, readingWindow.newerOutside, readingWindow.historical,
     readingWindow.loading, readingWindow.error, recentNativePage, showJump, feedEl])
 
+  // This same exact rendered-record owner also serves closed Sessions with no Run.
+  function locateLoadedRecord(sourceKey: string, isCurrent: () => boolean): boolean {
+    if (!readingEnabled || !feedEl?.isConnected || !isCurrent()) return false
+    const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]')).filter(node => node.dataset.messageSourceKey === sourceKey)
+    if (matches.length !== 1) return false
+    const node = matches[0]!, head = node.querySelector<HTMLElement>('.log-turn__head') ?? node
+    followRef.current = { ...followRef.current, following: false }
+    head.scrollIntoView({ block: 'center', behavior: 'instant' })
+    anchorRef.current = captureReadingAnchor(feedEl, node)
+    markProgrammaticReadingScroll(feedEl, 'navigation')
+    if (!isCurrent()) return false
+    node.focus({ preventScroll: true })
+    const r = head.getBoundingClientRect(), viewport = feedEl.getBoundingClientRect()
+    const inView = r.width > 0 && r.height > 0 && r.bottom > viewport.top && r.top < viewport.bottom
+    if (inView) setLocatedMessageKey(sourceKey)
+    return inView
+  }
+  const revealLoadedRecord: RevealConversationItem = async reference => {
+    if (reference.hostId !== executionHostId || reference.agentSessionId !== sessionId) return { kind: 'unavailable', message: 'This point belongs to another original conversation. Its reference is kept.' }
+    const sourceKey = conversationMessageSourceKey(reference.agentSessionId, reference.source)
+    return sourceKey && locateLoadedRecord(sourceKey, () => readingEnabled)
+      ? { kind: 'located' } : { kind: 'unavailable', message: 'The exact original record is not in this loaded reading window. The point is kept; read earlier records or reconnect its original source, then try again.' }
+  }
+
   useEffect(() => {
     if (!readingEnabled || !revealRequest || !feedEl) return
     const frame = requestAnimationFrame(() => {
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
-      const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
-        .filter(node => node.dataset.messageSourceKey === revealRequest.sourceKey)
-      if (matches.length !== 1) { revealRequest.complete(false); return }
-      const node = matches[0]!
-      const head = node.querySelector<HTMLElement>('.log-turn__head') ?? node
-      followRef.current = { ...followRef.current, following: false }
-      // No smooth scrolling or animation, including under reduced-motion preferences.
-      head.scrollIntoView({ block: 'center', behavior: 'instant' })
-      anchorRef.current = captureReadingAnchor(feedEl, node)
-      markProgrammaticReadingScroll(feedEl, 'navigation')
-      if (!revealRequest.isCurrent()) { revealRequest.complete(false); return }
-      node.focus({ preventScroll: true })
-      const r = head.getBoundingClientRect(), viewport = feedEl.getBoundingClientRect()
-      const inView = r.width > 0 && r.height > 0 && r.bottom > viewport.top && r.top < viewport.bottom
-      if (inView) setLocatedMessageKey(revealRequest.sourceKey)
-      revealRequest.complete(inView)
+      revealRequest.complete(locateLoadedRecord(revealRequest.sourceKey, revealRequest.isCurrent))
     })
     return () => cancelAnimationFrame(frame)
   }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage, readingEnabled])
@@ -1103,6 +1115,8 @@ export function ActivityView({
           {...(executionHostId ? { itemRef: { hostId: executionHostId, agentSessionId: entry.message.agentSessionId,
             source: entry.message.source.kind === 'native' ? entry.message.source : { kind: 'captured' as const, recordId: entry.message.source.submissionId }
           } } : {})}
+          messageActions={executionHostId ? renderRecordActions?.({ hostId: executionHostId, agentSessionId: entry.message.agentSessionId,
+            source: entry.message.source.kind === 'native' ? entry.message.source : { kind: 'captured', recordId: entry.message.source.submissionId } }, readingEnabled) : undefined}
           inputSource={entry.message.source}
           publicContent={entry.message.publicContent}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
@@ -1132,9 +1146,9 @@ export function ActivityView({
       ) : speaker ? (
         <CapturedConversationMessage
           item={entry.item}
-          {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
+          messageActions={<>{executionHostId && renderRecordActions?.({ hostId: executionHostId, agentSessionId: entry.item.agentSessionId, source: { kind: 'captured', recordId: entry.item.id } }, readingEnabled)}{entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
             !entry.item.authorAgentSessionId && entry.item.authorHuman !== true && entry.item.authorExternal === undefined && entry.item.source !== 'user'
-            ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
+            ? renderMessageActions?.({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) : null}</>}
           conversationSessionId={sessionId}
           {...(executionHostId ? { executionHostId } : {})}
           {...(entry.item.kind === 'user_message' ? { publicContent: entry.item.publicContent ?? 'unknown' } : {})}
@@ -1181,7 +1195,7 @@ export function ActivityView({
         activity={activity.segments}
         controls={close => <><ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
           untimed={ruler.untimed} onSelect={selectRulerRecord} describe={describeSpeaker ?? (() => ({ name: 'Recorded input' }))}
-          onOpen={() => { close() }} />{collapseTraces}{findTrigger}</>}
+          onOpen={() => { close() }} />{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>}
         onSelect={index => selectRulerRecord(ruler.items[index]!)}
         axes={({ width, onPeek, onPeekEnd }) =>
           describeSpeaker ? (
@@ -1192,7 +1206,7 @@ export function ActivityView({
               onSelect={index => selectRulerRecord(ruler.items[index]!)} onPeek={onPeek} onPeekEnd={onPeekEnd} />
           ) : null
         }
-      /> : <><div className="reading-find__floating-trigger">{collapseTraces}{findTrigger}</div>{emptyReadStatus}</>}
+      /> : <><div className="reading-find__floating-trigger">{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</div>{emptyReadStatus}</>}
       {readingEntry}
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
@@ -1212,6 +1226,8 @@ export function ActivityView({
         {...(questionReplyState ? { questionReplyState } : {})}
         {...(questionReplyDraft ? { questionReplyDraft } : {})}
         {...(onQuestionDraftChange ? { onQuestionDraftChange } : {})}
+        active={readingEnabled}
+        {...(renderRecordActions ? { renderRecordActions } : {})}
         {...(renderMessageActions ? { renderMessageActions } : {})}
         renderProcess={(props) => <NativeProcessObservation {...props} compact={true} />}
         sessionId={sessionId}
