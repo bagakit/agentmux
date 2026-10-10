@@ -68,6 +68,7 @@ it('keeps inspected original DOM and selection across pin and metadata, then dis
   await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
   await act(async () => panel().querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
   expect(detail()).toBe(original); expect(original.querySelector('p')).toBe(prose); expect(document.getSelection()!.toString()).toBe(selection)
+  expect(document.activeElement).toBe(original.querySelector('[data-agent-input-reading]'))
   await act(async () => useAppStore.setState({ sessions: [{ ...agent, control: { ...agent.control, run: { runId: 'replacement-recall-run' } } }, neighbor] }))
   expect(detail()).toBeNull(); expect(panel().textContent).toContain('Original Run or source is no longer confirmed')
   await act(async () => useAppStore.setState({ sessions: [agent, neighbor] }))
