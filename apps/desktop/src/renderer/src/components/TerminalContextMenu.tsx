@@ -10,7 +10,7 @@ import {
   terminalSelectionSuppressionHint,
   type MouseTrackingMode
 } from '../lib/terminal-selection-mode'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeObjectDocumentIcon = semanticIconComponent('object.document')
@@ -89,7 +89,7 @@ export function TerminalContextMenu({
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={ContextMenu.Portal}>
         <ContextMenu.Content
           className="tab-context-menu terminal-context-menu"
           collisionPadding={8}
@@ -169,7 +169,7 @@ export function TerminalContextMenu({
             <ThemeActionEraseIcon size={14} /><span>Clear terminal</span><kbd>{chords.clear}</kbd>
           </ContextMenu.Item>
         </ContextMenu.Content>
-      </ContextMenu.Portal>
+      </DocumentOverlayPortal>
     </ContextMenu.Root>
   )
 }

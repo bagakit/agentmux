@@ -1,6 +1,6 @@
 import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary } from '../lib/notebook-library'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
@@ -415,9 +415,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button>
         <Menu.Root modal={false} open={visible && !controlsCoverPage && createMenuOpen} onOpenChange={setCreateMenuOpen}>
           <Menu.Trigger asChild><button type="button" className="survey-icon-button" aria-label="New browser options" title="New browser options" disabled={opening}><ThemeNavigationDisclosureIcon size={12} /></button></Menu.Trigger>
-          <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
+          <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="start" side="top" sideOffset={4} collisionPadding={8}>
             <Menu.Item className="tab-context-menu__item" onSelect={() => void openBrowser('about:blank', true, 'private')}><ThemeObjectBrowserIcon size={14} /><span>New private page</span></Menu.Item>
-          </Menu.Content></Menu.Portal>
+          </Menu.Content></DocumentOverlayPortal>
         </Menu.Root>
       </div>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">{options}

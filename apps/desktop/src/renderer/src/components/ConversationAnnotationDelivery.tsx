@@ -11,7 +11,7 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
@@ -128,7 +128,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
           {current ? <RecipientAvatar recipient={current} /> : <ThemeActionCreateAgentIcon size={16} aria-hidden="true" />}
           <span>{recipient.kind === 'new' ? '新建 Agent' : current?.name ?? recipient.id}{current?.current ? <small>当前</small> : null}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" />
         </button></Menu.Trigger>
-        <Menu.Portal container={resolveOverlayContainer()}><div className="window-overlay-host__entry" data-overlay-layer="dialog">
+        <DocumentOverlayPortal component={Menu.Portal}><div className="window-overlay-host__entry" data-overlay-layer="dialog">
           <Menu.Content className="tab-context-menu conversation-annotation-delivery__menu" align="start" sideOffset={5} collisionPadding={8} aria-label="批注接收者">
             <Menu.RadioGroup value={recipient.kind === 'new' ? 'new-agent' : `agent:${recipient.id}`} onValueChange={value => {
               if (locked || !activeRef.current) return
@@ -151,7 +151,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
               </Menu.Group>)}
             </Menu.RadioGroup>
           </Menu.Content>
-        </div></Menu.Portal>
+        </div></DocumentOverlayPortal>
       </Menu.Root>
       <button type="button" className="conversation-annotation-delivery__send" aria-label={request ? '检查原批注请求' : '发送批注'}
         disabled={!active || busy || !annotation.note.trim() || (recipient.kind === 'new' && !request && !executor)} onClick={() => void send()}>

@@ -7,7 +7,7 @@ import {
   type FileExplorerMoveTarget
 } from '../../lib/file-explorer-move'
 import { isMacPlatform, revealInFileManagerLabel } from '../../lib/host-platform'
-import { resolveOverlayContainer } from '../WindowOverlayHost'
+import { DocumentOverlayPortal } from '../WindowOverlayHost'
 
 const ThemeActionCreateFileIcon = semanticIconComponent('action.create-file')
 const ThemeActionCreateFolderIcon = semanticIconComponent('action.create-folder')
@@ -80,7 +80,7 @@ export function FileTreeContextMenu({
   return (
     <ContextMenu.Root onOpenChange={(nextOpen) => { setOpen(nextOpen); onOpenChange(nextOpen) }}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={ContextMenu.Portal}>
         <ContextMenu.Content
           className="tab-context-menu file-context-menu"
           collisionPadding={8}
@@ -134,7 +134,7 @@ export function FileTreeContextMenu({
             <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={moveTargets.length === 0}>
               <ThemeActionMoveToFolderIcon size={14} /><span>Move This Item to</span><span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
             </ContextMenu.SubTrigger>
-            <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+            <DocumentOverlayPortal component={ContextMenu.Portal}>
               <ContextMenu.SubContent className="tab-context-menu file-context-menu" collisionPadding={8} sideOffset={4}>
                 {moveTargets.map((target) => (
                   <ContextMenu.Item
@@ -146,13 +146,13 @@ export function FileTreeContextMenu({
                   </ContextMenu.Item>
                 ))}
               </ContextMenu.SubContent>
-            </ContextMenu.Portal>
+            </DocumentOverlayPortal>
           </ContextMenu.Sub>
           <ContextMenu.Item className="tab-context-menu__item file-context-menu__danger" onSelect={onDelete}>
             <ThemeActionRemoveIcon size={14} /><span>Delete</span><kbd>{FILE_EXPLORER_DELETE_KEY.label(isMac)}</kbd>
           </ContextMenu.Item>
         </ContextMenu.Content>
-      </ContextMenu.Portal>
+      </DocumentOverlayPortal>
     </ContextMenu.Root>
   )
 }

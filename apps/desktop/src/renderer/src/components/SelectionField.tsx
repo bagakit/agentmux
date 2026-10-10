@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -48,7 +48,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
         <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{triggerLabel ?? currentLabel}</span></span><span id={descriptionId} hidden>{selected ? currentDescription : `${currentLabel}: ${value}`}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
       </button>
     </Menu.Trigger>
-    <Menu.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Menu.Portal}>
       <div className="window-overlay-host__entry" data-overlay-layer={layer}><Menu.Content ref={menu} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onKeyDown={event => {
         if (canSearch && event.target !== search.current && !isImeOwnedKeyboardEvent(event) && event.key === 'Tab') {
           event.preventDefault()
@@ -85,6 +85,6 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
         {canSearch && !visibleOptions.length ? <p className="selection-field__empty" role="status">No matching options.</p> : null}
         </div>
       </Menu.Content></div>
-    </Menu.Portal>
+    </DocumentOverlayPortal>
   </Menu.Root>
 }

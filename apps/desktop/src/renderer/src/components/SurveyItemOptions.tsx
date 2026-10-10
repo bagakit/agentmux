@@ -4,7 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../../../shared/contracts'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
@@ -47,10 +47,10 @@ export function SurveyItemOptions(props: SurveyItemOptionsProps) {
   useEffect(() => setOpen(false), [zone?.zoneId])
   return <Menu.Root modal={false} open={visible && open} onOpenChange={setOpen}>
     <Menu.Trigger asChild><button type="button" className={`survey-item-options ${zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-compact={compact || undefined} aria-label="Exploration options" title="Exploration options"><ThemeActionMoreIcon size={16} aria-hidden="true" />{zone && !compact ? <span>Organize</span> : null}</button></Menu.Trigger>
-    <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}
+    <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
       <SurveyItemMenuItems {...props} primitives={Menu} />
-    </Menu.Content></Menu.Portal>
+    </Menu.Content></DocumentOverlayPortal>
   </Menu.Root>
 }
 
@@ -64,7 +64,7 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
     if (open) { pendingAction.current = null; outside.current = false }
   }}>
     {children}
-    {props.visible && props.zone ? <ContextMenu.Portal container={resolveOverlayContainer()}><ContextMenu.Content className="tab-context-menu survey-topic-menu survey-item-menu" data-survey-context-zone-id={props.zone.zoneId} collisionPadding={8}
+    {props.visible && props.zone ? <DocumentOverlayPortal component={ContextMenu.Portal}><ContextMenu.Content className="tab-context-menu survey-topic-menu survey-item-menu" data-survey-context-zone-id={props.zone.zoneId} collisionPadding={8}
       onPointerDownOutside={event => {
         // A second row's right-click updates this shared menu instead of racing its dismissal.
         if (event.detail.originalEvent.button === 2 && isItemTarget(event.target)) event.preventDefault()
@@ -80,7 +80,7 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
       }}
       onPointerUpCapture={event => { if (event.button === 2) { event.preventDefault(); event.stopPropagation() } }}>
       <SurveyItemMenuItems {...props} primitives={ContextMenu} run={action => { pendingAction.current = action }} />
-    </ContextMenu.Content></ContextMenu.Portal> : null}
+    </ContextMenu.Content></DocumentOverlayPortal> : null}
   </ContextMenu.Root>
 }
 
@@ -107,14 +107,14 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
       {workspace ? <M.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${workspace.name}, ${workspace.hostId}, ${displayPath(workspace.path, workspace.hostId)}`}
         onSelect={() => run(() => onOpenWorkspace(workspace.id))}><ThemeActionOpenExternalIcon size={14} /><span>Open resource in Space</span></M.Item> : null}
       <M.Sub><M.SubTrigger className="tab-context-menu__item" aria-label="Item details"><span className="survey-topic-menu__indicator" aria-hidden="true" /><span>Details</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>
-        <M.Portal container={resolveOverlayContainer()}><M.SubContent className="tab-context-menu survey-topic-menu" collisionPadding={8} sideOffset={4}>
+        <DocumentOverlayPortal component={M.Portal}><M.SubContent className="tab-context-menu survey-topic-menu" collisionPadding={8} sideOffset={4}>
           <div className="survey-item-details-content">
             <span>{workspace ? `${workspace.name}\n${workspace.hostId}\n${displayPath(workspace.path, workspace.hostId)}${workspace.branch ? `\nBranch: ${workspace.branch}` : ''}` : 'Resource Workspace is not confirmed. The original item is retained.'}</span>
             {zone ? <><span>{relatedSpaces === null ? 'Linked locations unknown' : relatedSpaces.length ? `${relatedSpaces.length} linked location${relatedSpaces.length === 1 ? '' : 's'}` : 'No linked locations'}</span>
               {relatedSpaces?.map(space => <span key={space.spaceId}>{space.name} · {space.hostId} · {displayPath(space.directoryPath, space.hostId)}</span>)}
               {relatedSpacesUnconfirmed ? <span role="status">Some linked locations are not confirmed. Original bindings are retained.</span> : null}{activityDetails}</> : null}
           </div>
-        </M.SubContent></M.Portal>
+        </M.SubContent></DocumentOverlayPortal>
       </M.Sub>
   </>
 }

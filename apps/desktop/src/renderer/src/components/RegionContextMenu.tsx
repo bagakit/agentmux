@@ -4,7 +4,7 @@ import { createContext, useContext, useId, type ReactNode } from 'react'
 import { formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
@@ -225,14 +225,14 @@ export function RegionContextMenu({
     <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: connector.onOpen, dialogOpen: connector.dialogOpen }}>
       <ContextMenu.Root onOpenChange={connector.onOpen}>
         <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-        <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+        <DocumentOverlayPortal component={ContextMenu.Portal}>
           <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8} onCloseAutoFocus={event => { if (connector.dialogOpen) event.preventDefault() }}>
             {model.entries.map((entry, index) => <RegionMenuEntryView
               key={index} entry={entry} index={index}
               Item={ContextMenu.Item} Separator={ContextMenu.Separator}
             />)}
           </ContextMenu.Content>
-        </ContextMenu.Portal>
+        </DocumentOverlayPortal>
       </ContextMenu.Root>
     </RegionMenuContext.Provider>
   )

@@ -2,7 +2,7 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { Notebook } from '@agentmux/core/notebook-catalog'
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const NotebookIcon = semanticIconComponent('object.notebook')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
@@ -23,7 +23,7 @@ export function NotebookSelector({ notebooks, selectedId, onSelect, onCreate, pe
     <DropdownMenu.Trigger asChild><button ref={triggerRef} className="recall-notebook-selector" aria-label="Switch notebook">
       <NotebookIcon size={18} strokeWidth={1.5} /><span><small>Notebook</small><strong>{current?.name ?? (selectedId ? 'Notebook unavailable' : 'Loading notebooks…')}</strong></span><ThemeNavigationDownIcon size={14} />
     </button></DropdownMenu.Trigger>
-    <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+    <DocumentOverlayPortal component={DropdownMenu.Portal}>
       <DropdownMenu.Content className="recall-notebook-menu" align="start" sideOffset={5} collisionPadding={8} aria-label="Choose notebook" onCloseAutoFocus={event => { if (!activeRef.current || creating.current) event.preventDefault(); creating.current = false }}>
         <DropdownMenu.Label className="recall-notebook-menu-label">Your notebooks</DropdownMenu.Label>
         <DropdownMenu.RadioGroup className="recall-notebook-menu-books" value={selectedId ?? ''} onValueChange={onSelect}>
@@ -34,6 +34,6 @@ export function NotebookSelector({ notebooks, selectedId, onSelect, onCreate, pe
         <DropdownMenu.Separator className="recall-notebook-menu-separator" />
         <DropdownMenu.Item className="recall-notebook-menu-item" aria-label="New notebook" disabled={pending} onSelect={() => { creating.current = true; onCreate() }}><ThemeActionCreateNotebookIcon size={14} /><span>New notebook</span></DropdownMenu.Item>
       </DropdownMenu.Content>
-    </DropdownMenu.Portal>
+    </DocumentOverlayPortal>
   </DropdownMenu.Root>
 }

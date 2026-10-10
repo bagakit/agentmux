@@ -5,7 +5,7 @@ import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { formatPathForDisplay } from '../lib/copy-path-display'
 import { revealInFileManagerLabel } from '../lib/host-platform'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useSpaceObjectMenu } from './SpaceObjectContextMenu'
 import { useAppStore } from '../store'
 
@@ -174,7 +174,7 @@ export function WorkspaceRowContextMenu({
   return (
     <ContextMenu.Root onOpenChange={menu.onOpenChange}>
       <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={ContextMenu.Portal}>
         <ContextMenu.Content
           className="tab-context-menu project-rail-context-menu"
           collisionPadding={8}
@@ -205,7 +205,7 @@ export function WorkspaceRowContextMenu({
             )
           })}
         </ContextMenu.Content>
-      </ContextMenu.Portal>
+      </DocumentOverlayPortal>
     </ContextMenu.Root>
   )
 }

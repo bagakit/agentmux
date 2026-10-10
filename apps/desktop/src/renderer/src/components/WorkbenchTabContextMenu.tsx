@@ -16,7 +16,7 @@ import {
   workbenchSplitMenuIcon,
   workbenchSplitMenuKey
 } from './workbench-split-menu-icons'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
@@ -219,7 +219,7 @@ export function WorkbenchTabContextMenu({
   return (
     <ContextMenu.Root onOpenChange={onOpenChange}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={ContextMenu.Portal}>
         <ContextMenu.Content
           className="tab-context-menu"
           collisionPadding={8}
@@ -252,7 +252,7 @@ export function WorkbenchTabContextMenu({
               <span>Link to Workspace / Group</span>
               <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
             </ContextMenu.SubTrigger>
-            <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+            <DocumentOverlayPortal component={ContextMenu.Portal}>
               <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                 {displayTargets.map((target) => (
                   <ContextMenu.CheckboxItem
@@ -269,7 +269,7 @@ export function WorkbenchTabContextMenu({
                   </ContextMenu.CheckboxItem>
                 ))}
               </ContextMenu.SubContent>
-            </ContextMenu.Portal>
+            </DocumentOverlayPortal>
           </ContextMenu.Sub>
           <ContextMenu.Sub>
             <ContextMenu.SubTrigger className="tab-context-menu__item" disabled={!canMoveToNewGroup}>
@@ -277,7 +277,7 @@ export function WorkbenchTabContextMenu({
               <span>Move Tab to New Group</span>
               <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
             </ContextMenu.SubTrigger>
-            <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+            <DocumentOverlayPortal component={ContextMenu.Portal}>
               <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                 {WORKBENCH_TAB_SPLIT_ACTIONS.map((action) => {
                   const Icon = workbenchSplitDirectionIcon(action.direction)
@@ -293,7 +293,7 @@ export function WorkbenchTabContextMenu({
                   )
                 })}
               </ContextMenu.SubContent>
-            </ContextMenu.Portal>
+            </DocumentOverlayPortal>
           </ContextMenu.Sub>
           {/*
             重排这张 Tab 的分格。清单来自 `workbenchRegionLayoutMenuEntries`——与 Tab 条上的 Split
@@ -312,7 +312,7 @@ export function WorkbenchTabContextMenu({
                 <span>Rearrange Splits</span>
                 <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
               </ContextMenu.SubTrigger>
-              <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+              <DocumentOverlayPortal component={ContextMenu.Portal}>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                   {layoutEntries.map((entry, index) => {
                     const Icon = workbenchSplitMenuIcon(entry)
@@ -328,7 +328,7 @@ export function WorkbenchTabContextMenu({
                     )
                   })}
                 </ContextMenu.SubContent>
-              </ContextMenu.Portal>
+              </DocumentOverlayPortal>
             </ContextMenu.Sub>
           ) : null}
           {moveSessionViewTargets.length > 0 ? (
@@ -338,7 +338,7 @@ export function WorkbenchTabContextMenu({
                 <span>Move to Workspace</span>
                 <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
               </ContextMenu.SubTrigger>
-              <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+              <DocumentOverlayPortal component={ContextMenu.Portal}>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
                   {moveSessionViewTargets.map((target) => (
                     <ContextMenu.Item
@@ -351,7 +351,7 @@ export function WorkbenchTabContextMenu({
                     </ContextMenu.Item>
                   ))}
                 </ContextMenu.SubContent>
-              </ContextMenu.Portal>
+              </DocumentOverlayPortal>
             </ContextMenu.Sub>
           ) : null}
           <ContextMenu.Separator className="tab-context-menu__separator" />
@@ -372,7 +372,7 @@ export function WorkbenchTabContextMenu({
             <span>Close Tabs to the Left</span>
           </ContextMenu.Item>
         </ContextMenu.Content>
-      </ContextMenu.Portal>
+      </DocumentOverlayPortal>
     </ContextMenu.Root>
   )
 }

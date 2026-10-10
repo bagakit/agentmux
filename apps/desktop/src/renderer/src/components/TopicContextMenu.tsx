@@ -2,7 +2,7 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ReactNode } from 'react'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useSpaceObjectActionsMenu, useSpaceObjectMenu } from './SpaceObjectContextMenu'
 
 const ThemeActionExchangeIcon = semanticIconComponent('action.exchange')
@@ -63,11 +63,11 @@ export function TopicContextMenu({ children, ...actions }: TopicMenuActions & { 
   const menu = useSpaceObjectMenu()
   return <ContextMenu.Root onOpenChange={menu.onOpenChange}>
     <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
-    <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+    <DocumentOverlayPortal component={ContextMenu.Portal}>
       <ContextMenu.Content className="tab-context-menu topic-context-menu" collisionPadding={8} onCloseAutoFocus={menu.onCloseAutoFocus}>
         {topicMenuItems(ContextMenu.Item, ContextMenu.Separator, actions, menu.changeIcon)}
       </ContextMenu.Content>
-    </ContextMenu.Portal>
+    </DocumentOverlayPortal>
   </ContextMenu.Root>
 }
 
@@ -78,11 +78,11 @@ export function TopicActionsMenu({ title, ...actions }: TopicMenuActions & { tit
     <DropdownMenu.Trigger asChild><button ref={menu.trigger} type="button" className="icon-button workspace-topic-entry__actions" aria-label={`Actions for ${title}`} title={`Actions for ${title}`}
       onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
       onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><ThemeActionMoreIcon size={15} /></button></DropdownMenu.Trigger>
-    <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+    <DocumentOverlayPortal component={DropdownMenu.Portal}>
       <DropdownMenu.Content className="tab-context-menu topic-context-menu" align="end" collisionPadding={8}
         onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onCloseAutoFocus={menu.onCloseAutoFocus}>
         {topicMenuItems(DropdownMenu.Item, DropdownMenu.Separator, actions, menu.openDialog)}
       </DropdownMenu.Content>
-    </DropdownMenu.Portal>
+    </DocumentOverlayPortal>
   </DropdownMenu.Root>
 }

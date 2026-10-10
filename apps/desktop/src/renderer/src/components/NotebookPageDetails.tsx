@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { notebookFingerprint, notebookPageArchiveRoot, type NotebookActor, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useNotebookLibrary } from '../lib/notebook-library'
 import { notebookDescendants, notebookPageRows } from '../lib/notebook-page-tree'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -117,7 +117,7 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, on
         <ThemeObjectTeamIcon size={13} /><span>Followers{followers.length ? ` · ${followers.length}` : ''}</span>
       </button>
       <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button ref={optionsTrigger} type="button" className="note-text-button" aria-label="Page options" title="Page options"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger>
-        <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
+        <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
           <Menu.Group aria-label="Page organization"><Menu.Item className="tab-context-menu__item" aria-label="Move page" onSelect={() => openPanel('move')}><ThemeActionMoveToFolderIcon size={14} /><span>Move page</span></Menu.Item></Menu.Group>
           <Menu.Separator className="tab-context-menu__separator" />
           <Menu.Group aria-label="Page information">
@@ -131,7 +131,7 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, on
             {archiveRoot ? <ThemeActionRestoreIcon size={14} /> : <ThemeActionArchiveIcon size={14} />}<span>{archiveRoot ? restoreLabel : 'Archive page'}</span>
           </Menu.Item>
           </Menu.Group>
-        </Menu.Content></Menu.Portal>
+        </Menu.Content></DocumentOverlayPortal>
       </Menu.Root>
     </div></div>
     <TextInput className="notebook-page-title" aria-label="Page title" title={title} value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}

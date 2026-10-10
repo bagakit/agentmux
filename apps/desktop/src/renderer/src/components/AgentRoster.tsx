@@ -8,7 +8,7 @@ import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { statusDotTier } from '../lib/attention-event'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { CONTEXT_PRESSURE_HINT } from '../lib/agent-usage'
 
 const ThemeStatusPermissionIcon = semanticIconComponent('status.permission')
@@ -124,7 +124,7 @@ export function RosterRowView({
           </span>
         </DropdownMenu.Item>
       </ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={ContextMenu.Portal}>
         <ContextMenu.Content className="tab-context-menu" collisionPadding={8}>
           {menuActions.map((action) => (
             <ContextMenu.Item
@@ -137,7 +137,7 @@ export function RosterRowView({
             </ContextMenu.Item>
           ))}
         </ContextMenu.Content>
-      </ContextMenu.Portal>
+      </DocumentOverlayPortal>
     </ContextMenu.Root>
   )
 }
