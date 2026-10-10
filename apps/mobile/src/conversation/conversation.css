@@ -80,7 +80,7 @@
 .mobile-app .mobile-conversation .log-turn__head { font-size: 11px; }
 .mobile-app .mobile-conversation .composer { border: 0; background: var(--surface-2); background-image: none; margin: 0; padding: 2px 4px; box-shadow: none; border-radius: 12px; }
 .mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: 44px minmax(0,1fr) max-content; min-height: 44px; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column: 2; grid-row: 1; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer-completion-editor { grid-column: 2; grid-row: 1; }
 .mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 1; padding: 0; }
 .mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 3; }
 .mobile-app .mobile-conversation .composer-tool { min-width: 44px; min-height: 44px; justify-content: center; padding: 0; }
