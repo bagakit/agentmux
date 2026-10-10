@@ -172,6 +172,8 @@
 .goals-alignment { padding: var(--sp-6) 0; border-top: 1px solid var(--line-soft); }
 .goals-grounding { padding: var(--sp-6) 0; border-top: 1px solid var(--line-soft); }
 .goals-section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-4); }
+.goals-alignment .goals-section-heading h2 { display: flex; align-items: center; gap: var(--sp-4); }
+.goals-alignment .goals-section-heading h2 > .semantic-icon-motion { color: inherit; }
 .goals-caption { color: var(--text-3); font-size: var(--fs-meta); }
 .goals-muted { margin: 0 0 var(--sp-5); color: var(--text-3); font-size: var(--fs-prose); line-height: 1.6; }
 .goals-service { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); padding: var(--sp-5) 0; margin: 0; color: var(--amber); font-size: var(--fs-body); line-height: 1.6; }
