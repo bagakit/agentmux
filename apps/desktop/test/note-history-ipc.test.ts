@@ -40,7 +40,7 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () =>
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ notify: () => ({ status: 'shown' }), dispose() {} }) }))
 vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 
@@ -71,6 +71,7 @@ beforeEach(async () => {
   const runtime = { resourceSampler: { setObservationSources: () => () => {} }, setContinuousProgressInputObserver: () => () => {}, setTerminalViewColors: () => {}, prepare: async () => ({}), commit: () => {}, attach: () => () => {}, executionHost: () => host,
     observeCoreEvents: () => () => {}, observeInputOccupation: () => () => {}, observeContinuousProgress: () => () => {}, reserveExecutorConfigEdit: async () => () => {}, reportBindingSaveFailure: vi.fn(), rpcClients: () => [] } as unknown as RuntimeController
   dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: fixture.sender } as unknown as BrowserWindow, runtime,
+    workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: value => value, save: async value => { config = value; return value } } as unknown as ConfigStore,
     scratchTopics: { setNameAudit: () => {} } as unknown as ScratchTopics, workspaceFiles: files,
     progressLoops: { subscribe: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['progressLoops'] })
@@ -86,6 +87,7 @@ async function seed() {
   const original = serializeNoteDocument(newNoteDocument('Original body', noteId, 'original-block', 'Original'))
   const created = await api.files.write('workspace', { path, expectedRevision: null, content: original })
   expect(created.status).toBe('written'); if (created.status !== 'written') throw Error('The original private body was not created')
+  expect(created.noteHistory, JSON.stringify(created.noteHistory)).toMatchObject({ status: 'committed', eventId: expect.any(String) })
   const read = await api.files.readPublic(readParams())
   expect(read.result.status).toBe('read'); if (read.result.status !== 'read' || !read.resource) throw Error('The original public resource was not read')
   return { original: read.result.document.content, created, target: { ...readParams(), expectedResource: read.resource, noteId }, document: read.result.document }
