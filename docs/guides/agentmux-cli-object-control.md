@@ -81,6 +81,22 @@ amux space commit --revision N --removed-project-groups removed.json < graph.jso
 
 仅在新图中省略组不构成解散授权。按 [Core 项目组删除意图](../design/behavior/spaces-and-layout.md#跨设备关联项目组)与 [`AgentMuxSpatialCommit`](../../packages/core/src/spatial-graph.ts)，仅移除本次组的组织关系，保留其他组及原 Space／Zone／Tab／Region、Session 与 Run；该示例不请求实体删除。
 
+## 在独立窗口继续原工作面
+
+独立窗口承载一个原 Tab 或 Region 的准确展示位置。它不新建 Session、Run 或内容副本；公共导航与输入回执仍由原 client owner 产生，行为合同见[工作面的独立窗口](../design/behavior/spaces-and-layout.md#工作面的独立窗口)。
+
+```sh
+amux app window ls
+amux app window open --kind region --display-workspace '<display-workspace-id>' --group '<group-id>' --tab '<tab-id>' --region '<region-id>' --operation-id '<operation-id>'
+amux app window focus --window '<window-id>' --document-generation '<document-generation>' --operation-id '<operation-id>'
+amux app window return --window '<window-id>' --document-generation '<document-generation>' --operation-id '<operation-id>'
+amux app window ls --operation-id '<operation-id>'
+```
+
+`windowId` 是展示宿主身份，`documentGeneration` 是该次原生文档的 opaque 身份；从实际窗口列表取得它们，不按标题、cwd 或当前焦点推断，重启后也不重用旧文档身份。开窗使用完整原展示位置；整 Tab 使用 `--kind tab` 且不传 `--region`。`return` 只返回原工作面，不关闭原实体或健康 Run。
+
+窗口列表描述当前观察，`recordedOperation` 保留原操作的 intent、作者与回执；历史确认不代表窗口当前仍在前台或持有输入。未确认结果先用同一个 operation 查询；不能换 ID 自动开另一个窗口。该能力需要实际 client owner；无桌面的 Host 明确报告 unavailable。Host 的原 Unix 桌面桥没有可信 device 身份转发时，在窗口动作前拒绝这一路径并保留原工作面；不将设备操作改记为本机用户。
+
 ## 打开文件，切换正文，交换格子
 
 ```sh
