@@ -656,8 +656,8 @@ try {
   await capture(first.cdp, 'git-changes-dark-wide')
   await capture(first.cdp, 'git-changes-light-narrow', 800, 'light')
   await click(first.cdp, selectors('button[data-space-tool="files-branches"]'))
-  await click(first.cdp, selectors('[aria-label="Zones"] button[aria-label="Create worktree"]'))
-  receipt.createWorktreeNavigation = await waitFor('worktree creation entry reaches the original Git Branches owner', async () => {
+  await click(first.cdp, selectors('[aria-label="Zones"] button[aria-label="Manage worktrees"]'))
+  receipt.worktreeManagementNavigation = await waitFor('worktree management entry reaches the original Git Branches owner', async () => {
     const selected = await toolSelection(first.cdp)
     return selected.tool === 'git' && selected.view === 'Branches' ? selected : null
   })
