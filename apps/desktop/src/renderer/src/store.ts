@@ -5184,7 +5184,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (isToolkitRequest(request)) {
       throw Object.assign(new Error('Toolkit requests belong to the Main execution owner.'), { code: 'CONTROL_FAILED' })
     }
-    if (request.operation === 'metrics.get' || request.operation === 'metrics.watch') {
+    if (request.operation === 'metrics.get' || request.operation === 'metrics.watch' || request.operation === 'metrics.profile.capture') {
       throw Object.assign(new Error('Metrics queries belong to the Main observation owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') {
