@@ -7,7 +7,7 @@ import { AgentMuxError } from './errors.js'
 import { observeRead as observe } from './observation-read.js'
 import { parseAgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { rpcString } from './rpc-business-codec.js'
-import { parseAgentExternalMessageAuthor, type AgentExternalInputAuthorityPort } from './external-author.js'
+import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, type AgentExternalInputAuthorityPort } from './external-author.js'
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedMethod, type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
@@ -314,10 +314,18 @@ export class AgentMuxHostedRuntimeService {
     } else {
       const operation = this.client[invocation.method] as (...args: unknown[]) => unknown
       const externalAuthor = controlledInput ? await this.externalAuthor(invocation) : undefined
+      const action = invocation.method === 'respondAgentInteraction' ? invocation.args[0].externalAction : undefined
+      const externalAction = action === undefined ? undefined : (() => {
+        const identity = parseAgentExternalInteractionAuthor(action), port = this.externalInputAuthority
+        if (!port?.assertInteractionCurrent) throw new AgentMuxError('The original external interaction authority is unavailable. Retain its original operation; local responses remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
+        return { identity, assertCurrent: (intent: import('./client.js').AgentMuxAgentInteractionInput) => port.assertInteractionCurrent!(structuredClone(identity), structuredClone(intent)) }
+      })()
+
       const pending = operation.apply(this.client, controlledInput ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
-        ...(externalAuthor ? { externalAuthor } : {})
+        ...(externalAuthor ? { externalAuthor } : {}),
+        ...(externalAction ? { externalAction } : {})
       } satisfies import('./agent-input-wait.js').AgentInputCallContext] : invocation.args)
       value = invocation.method === 'sessionHistorySources' ? await observe(Promise.resolve(pending), context.signal) : await pending
     }

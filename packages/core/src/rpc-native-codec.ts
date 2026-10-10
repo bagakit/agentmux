@@ -418,7 +418,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (raw === null && method === 'agent.interaction.inspect') break
         const receipt = normalizeInteractionOperationReceipt(raw)
         if (!isDeepStrictEqual(raw, receipt) || !rpcSessionTargetMatches(input.agentSessionId, receipt.agentSessionId) || receipt.operationId !== input.operationId) fail()
-        if (method === 'agent.interaction.respond' && (!isDeepStrictEqual(receipt.run, input.expectedRun) || !isDeepStrictEqual(receipt.response, input.response))) fail()
+        if (method === 'agent.interaction.respond' && (!isDeepStrictEqual(receipt.run, input.expectedRun) || !isDeepStrictEqual(receipt.response, input.response) || !isDeepStrictEqual(receipt.externalAction, input.externalAction))) fail()
         break
       }
       case 'agent.question.reply': {

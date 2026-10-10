@@ -1,3 +1,4 @@
+import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { normalizeAgentContinuityOperation } from './agent-session-continuity.js'
 import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
@@ -1537,7 +1538,7 @@ export function normalizeInteractionOperationReceipt(value: unknown): AgentMuxIn
   const source = record(value, 'interaction operation')
   const expectedRequest = normalizeAgentInteractionRequest(source.expectedRequest)
   const run = runRef(source.run), agentSessionId = string(source.agentSessionId, 'interaction Session')
-  if (Object.keys(source).some(key => !['operationId', 'agentSessionId', 'run', 'expectedRequest', 'response', 'delivery', 'inputByteRange', 'nativeAdoption', 'nativeHandle', 'nativeCompleted'].includes(key)) || expectedRequest.agentSessionId !== agentSessionId || expectedRequest.evidence.run?.runId !== run.runId) throw new AgentMuxError('Interaction operation target mismatch.', 'INVALID_AGENT_SESSION_STORE')
+  if (Object.keys(source).some(key => !['operationId', 'agentSessionId', 'run', 'expectedRequest', 'response', 'delivery', 'inputByteRange', 'nativeAdoption', 'nativeHandle', 'nativeCompleted', 'externalAction'].includes(key)) || expectedRequest.agentSessionId !== agentSessionId || expectedRequest.evidence.run?.runId !== run.runId) throw new AgentMuxError('Interaction operation target mismatch.', 'INVALID_AGENT_SESSION_STORE')
   const delivery = source.delivery
   if (!['saved', 'unknown', 'bytes-accepted', 'hook-written', 'acp-acknowledged'].includes(String(delivery)) ||
       source.nativeAdoption !== 'unknown') throw new AgentMuxError('Invalid interaction operation facts.', 'INVALID_AGENT_SESSION_STORE')
@@ -1548,6 +1549,7 @@ export function normalizeInteractionOperationReceipt(value: unknown): AgentMuxIn
   if (nativeCompleted && (nativeCompleted.source !== 'native-hook' || nativeCompleted.run?.runId !== run.runId) || delivery === 'bytes-accepted' && !inputByteRange || delivery === 'hook-written' && (expectedRequest.kind !== 'permission' || !expectedRequest.permissionHook) || delivery === 'acp-acknowledged' && expectedRequest.evidence.source !== 'acp') throw new AgentMuxError('Interaction operation receipt mismatch.', 'INVALID_AGENT_SESSION_STORE')
   return { operationId: string(source.operationId, 'interaction operation id'), agentSessionId, run,
     expectedRequest, response: interactionResponse(source.response, expectedRequest),
+    ...(source.externalAction === undefined ? {} : { externalAction: parseAgentExternalInteractionAuthor(source.externalAction) }),
     delivery: delivery as AgentMuxInteractionOperationReceipt['delivery'], nativeAdoption: 'unknown',
     ...(inputByteRange ? { inputByteRange } : {}),
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
