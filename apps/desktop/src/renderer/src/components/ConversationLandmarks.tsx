@@ -9,7 +9,7 @@ import { api } from '../lib/api'
 import { useAppStore, retainConversationLandmarkIntent, clearConversationLandmarkIntent } from '../store'
 import { conversationLandmarkIntentKey, conversationLandmarkRecordKey } from '../lib/conversation-landmark-intent'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 const BookmarkIcon = semanticIconComponent('object.bookmark'), CloseIcon = semanticIconComponent('action.close')
 const EditIcon = semanticIconComponent('action.edit'), RemoveIcon = semanticIconComponent('action.remove')
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -105,10 +105,10 @@ function LandmarkPopover({ title, trigger, active, onOpen, children }: {
   }, [open, active, anchor, content])
   return <Dialog.Root modal={false} open={open && active} onOpenChange={next => { focusPending.current = next; setOpen(next); if (next) onOpen?.() }}>
     <Dialog.Trigger asChild><button ref={setAnchor} type="button" className="conversation-landmark__trigger" aria-label={title} title={title}>{trigger}</button></Dialog.Trigger>
-    <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Content ref={setContent} className="conversation-landmark" style={{ visibility: 'hidden' }} aria-describedby={undefined} onOpenAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
+    <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Content ref={setContent} className="conversation-landmark" style={{ visibility: 'hidden' }} aria-describedby={undefined} onOpenAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
       <header><Dialog.Title>{title}</Dialog.Title><Dialog.Close type="button" className="icon-button" aria-label={`Close ${title}`}><CloseIcon size={13}/></Dialog.Close></header>
       {children}
-    </Dialog.Content></Dialog.Portal>
+    </Dialog.Content></DocumentOverlayPortal>
   </Dialog.Root>
 }
 function Pending({ state }: { state: ReturnType<typeof useLandmarks> }) {
