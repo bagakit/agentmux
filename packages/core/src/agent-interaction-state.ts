@@ -10,11 +10,16 @@ export function agentInteractionRequestTarget(request: AgentMuxInteractionReques
   return { ...target, permissionHook: hook }
 }
 
+/** Compare the original semantic request, independently of mutable dispatch observations. */
+export function agentInteractionRequestsMatch(left: AgentMuxInteractionRequest, right: AgentMuxInteractionRequest): boolean {
+  return dequal(agentInteractionRequestTarget(left), agentInteractionRequestTarget(right))
+}
+
 /** Match one original response intent; JSON property order and mutable Hook observations are not identity. */
 export function agentInteractionOperationReceiptMatches(input: AgentMuxAgentInteractionInput, receipt: AgentMuxInteractionOperationReceipt): boolean {
   return receipt.agentSessionId === input.agentSessionId && receipt.operationId === input.operationId &&
     receipt.run.runId === input.expectedRun.runId &&
-    dequal(agentInteractionRequestTarget(receipt.expectedRequest), agentInteractionRequestTarget(input.expectedRequest)) &&
+    agentInteractionRequestsMatch(receipt.expectedRequest, input.expectedRequest) &&
     dequal(receipt.response, input.response)
 }
 
