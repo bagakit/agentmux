@@ -21,12 +21,18 @@ import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import { useNotebookLibrary } from '../lib/notebook-library'
 import { useNoteSourceTitle } from '../lib/note-source-name'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+import { setNoteComposition } from '../lib/note-live-merge'
+import { NoteVersionHistory } from './NoteVersionHistory'
+import { NoteConflictReview } from './NoteConflictReview'
+import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 
 type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpaceLocation; displayName: string; tabName: string; position: string }
 
 /** Rich presentation on the original File surface and its original update/save/reveal owner. */
 export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
   const key = documentKey(surface.workspaceId, surface.path)
+  const compositionChanged = useCallback((active: boolean) => setNoteComposition(key, surface.regionId, active), [key, surface.regionId])
+  useEffect(() => () => setNoteComposition(key, surface.regionId, false), [key, surface.regionId])
   const document = useAppStore(state => state.documents[key])
   const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
   const notes = useAppStore(useShallow(state => noteFilesFromDocuments(state.documents)))
@@ -40,7 +46,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     [directory, config, notes, fileRevision, directoryIssues, surface.workspaceId])
   const reveal = useAppStore(state => state.documentRevealTargets[key])
   const focusRequest = useAppStore(state => regionCaretFocusTargets(state.regionCaretFocus, surface.regionId) ? state.regionCaretFocus?.nonce : undefined)
-  const update = useAppStore(state => state.updateDocument)
+  const update = useAppStore(state => state.updateNoteDocument)
   const presentation = useWorkbenchBrowserPresentation()
   const blockPresentation = useMemo(() => presentation.tabHostId && presentation.reference ? { tabHostId: presentation.tabHostId,
     reference: { ...presentation.reference, tabId, regionId: surface.regionId } } : undefined, [presentation.tabHostId, presentation.reference, tabId, surface.regionId])
@@ -170,7 +176,11 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     </button>)}</div>
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>
-    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={raw => update(tabId, raw, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage}
+    <NoteConflictReview tabId={tabId} regionId={surface.regionId} workspaceId={surface.workspaceId} path={surface.path} active={presentation.active} />
+    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={(raw, before) => update(tabId, raw, before ?? document.content, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage} onCompositionChange={compositionChanged}
+      onSnapshotIssue={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'retain') }}
+      onKeepDisplayedDraft={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'keep-displayed') }}
+      history={active => { const header = readNoteMarkdownHeader(document.content); return header.status === 'valid' ? <NoteVersionHistory tabId={tabId} regionId={surface.regionId} noteId={header.noteId} active={active} /> : null }}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />

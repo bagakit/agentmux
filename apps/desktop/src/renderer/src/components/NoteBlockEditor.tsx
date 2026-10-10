@@ -1,6 +1,6 @@
 import { RovingToolbar, RovingToolbarButton } from './RovingToolbar'
 import { TextInput } from '@agentmux/client-ui/input'
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
+import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
 import { desktopElementVisible } from '../lib/desktop-presentation'
@@ -9,13 +9,17 @@ import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, NoteInlineLinkNode, noteConte
 import { NoteInlineLinkView, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteInlineLink'
 import { noteWikiInputExtension } from '@agentmux/client-ui/note/note-wiki-input'
 import { noteWikiLiteralExtension } from '@agentmux/client-ui/note/note-wiki-view'
+import { NoteSnapshotSync } from '@agentmux/client-ui/note/note-snapshot-sync'
 import type { NoteInlineLinkAttributes, NoteLinkTarget } from '@agentmux/core/note-links'
 import { bindNoteWikiLink, noteInlineLinkContent, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
 import { useNoteWikiCompletion } from './NoteWikiCompletion'
-import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
+import { serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import { useNoteSourceTitle } from '../lib/note-source-name'
+import { MONACO_THEME_ID } from '../lib/monaco-theme'
+
+const ReadonlyDiffEditor = lazy(() => import('./ReadonlyDiffEditor').then(module => ({ default: module.ReadonlyDiffEditor })))
 
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
 const ThemeObjectHeadingIcon = semanticIconComponent('object.heading')
@@ -29,13 +33,6 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 type ReferenceContextValue = { knowledge: NoteKnowledge; trail: readonly string[]; sourceName: (source: NoteSource) => string | undefined; onOpen: (source: NoteSource, blockId: string) => void; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined }
 const ReferenceContext = createContext<ReferenceContextValue | null>(null)
 const targetKey = (target: NoteBlockTarget) => JSON.stringify([target.noteId, target.blockId])
-/** Only identity/metadata decoration may differ when reusing positions in this view. */
-function selectionContent(node: JSONContent): string {
-  const content = structuredClone(node)
-  const visit = (value: JSONContent) => { if (value.attrs) { delete value.attrs.blockId; delete value.attrs.provenance }; value.content?.forEach(visit) }
-  visit(content); return JSON.stringify(content)
-}
-
 function referenceExtension() {
   return NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(NoteReferenceView) } })
 }
@@ -92,36 +89,51 @@ function ReadOnlyBlock({ content }: { content: JSONContent }) {
   const context = useContext(ReferenceContext), openLink = useRef(context?.onOpenLink); openLink.current = context?.onOpenLink
   const editor = useEditor({ extensions: [...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
     editorProps: { attributes: { class: 'note-embedded-content', 'aria-label': 'Original block, read only' } } }, [])
-  useEffect(() => { if (editor && JSON.stringify(editor.getJSON()) !== JSON.stringify(doc)) editor.commands.setContent(doc, { emitUpdate: false }) }, [editor, doc])
-  return <EditorContent editor={editor} />
+  const [issue, setIssue] = useState<string | null>(null), snapshot = useRef<NoteSnapshotSync | null>(null)
+  useEffect(() => {
+    if (!editor) return
+    const sync = new NoteSnapshotSync(editor, () => false, setIssue); snapshot.current = sync
+    return () => { sync.destroy(); if (snapshot.current === sync) snapshot.current = null }
+  }, [editor])
+  useEffect(() => { snapshot.current?.update(doc) }, [editor, doc])
+  return <>{issue && <p role="status">{issue} <button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button></p>}<EditorContent editor={editor} /></>
 }
 
 export type NoteEditorHandle = { editor: Editor; focusBlock: (blockId: string, focus?: boolean, reveal?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
-export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock, onOpenLink, active = true, showBacklinks = true, sourceIdentity = note.noteId }: {
-  note: NoteDocument; knowledge: NoteKnowledge; onChange: (raw: string) => void; onOpen: (source: NoteSource, blockId: string) => void
+export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock, onOpenLink, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, active = true, showBacklinks = true, sourceIdentity = note.noteId }: {
+  note: NoteDocument; knowledge: NoteKnowledge; onChange: (raw: string, editorBefore?: string) => void; onOpen: (source: NoteSource, blockId: string) => void
   onSave: () => void; onIssue: (message: string | null) => void; handleRef?: Ref<NoteEditorHandle | null>; onSelectedBlock?: (target: NoteBlockTarget) => void
-  onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined; active?: boolean; showBacklinks?: boolean; sourceIdentity?: string
+  onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined; onCompositionChange?: ((composing: boolean) => void) | undefined; active?: boolean; showBacklinks?: boolean; sourceIdentity?: string
+  onSnapshotIssue?: ((displayedRaw: string, incomingRaw: string, reason: string) => void) | undefined
+  onKeepDisplayedDraft?: ((displayedRaw: string, incomingRaw: string) => void) | undefined
 }) {
   const sourceName = useNoteSourceTitle()
-  const props = useRef({ note, onChange, onSave, onIssue, onSelectedBlock })
-  props.current = { note, onChange, onSave, onIssue, onSelectedBlock }
+  const props = useRef({ note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft })
+  props.current = { note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }
+  const compositionBefore = useRef<JSONContent | null>(null)
+  const composing = useRef(false), snapshot = useRef<NoteSnapshotSync | null>(null)
+  const [mappingIssue, setMappingIssue] = useState<string | null>(null)
+  const [mappingDrafts, setMappingDrafts] = useState<{ displayed: string; incoming: string } | null>(null), [compareIncoming, setCompareIncoming] = useState(false)
   const [selected, setSelected] = useState<string | null>(null), [picker, setPicker] = useState(false), [query, setQuery] = useState('')
   const [, setFoldRevision] = useState(0)
   const folded = useRef(new Set<string>())
   const wikiHandlers = useRef<{ created(link: NoteInlineLinkAttributes, previousReferenceId?: string): void; keyDown(event: KeyboardEvent): boolean; open(link: NoteLinkOpenRequest): void }>({ created() {}, keyDown: () => false, open() {} })
   const extensions = useMemo(() => [...noteEditorExtensions(() => folded.current), noteWikiInputExtension((link, previous) => wikiHandlers.current.created(link, previous)), noteWikiLiteralExtension(link => wikiHandlers.current.open(link))], [])
-  const publishContent = (editor: Editor) => {
+  const publishContent = (editor: Editor, before: JSONContent) => {
     // The IME owns its intermediate text. Wiki attributes are canonicalized only
     // after composition ends, before this original onChange publishes a draft.
     if (editor.view.composing) return
     const current = props.current
-    let raw: string
-    try { raw = serializeNoteDocument({ ...current.note, content: editor.getJSON() }) }
+    let raw: string, editorBefore: string
+    // Serialization validates the original schema and identities. Re-parsing the
+    // emitted Markdown here would run the full reading pipeline on every key.
+    try {
+      raw = serializeNoteDocument({ ...current.note, content: editor.getJSON() })
+      editorBefore = serializeNoteDocument({ ...current.note, content: before })
+    }
     catch (error) { current.onIssue(error instanceof Error ? error.message : String(error)); return }
-    const read = readNoteDocument(raw)
-    if (read.status === 'invalid') { current.onIssue(read.message); return }
     current.onIssue(null)
-    current.onChange(raw)
+    current.onChange(raw, editorBefore)
     if (!editor.isDestroyed && editor.view.hasFocus()) {
       const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId ?? editor.state.doc.nodeAt(selection.from)?.attrs.blockId
       if (typeof blockId === 'string') current.onSelectedBlock?.({ noteId: current.note.noteId, blockId })
@@ -129,6 +141,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   }
   const editor = useEditor({ extensions, content: note.content, editorProps: {
     attributes: { class: 'note-block-content', role: 'textbox', 'aria-label': 'Note blocks', 'aria-multiline': 'true' },
+    handleDOMEvents: { compositionstart(view) { if (!composing.current) { compositionBefore.current = view.state.doc.toJSON(); composing.current = true; snapshot.current?.pause(); props.current.onCompositionChange?.(true) }; return false } },
     handleKeyDown(view, event) {
       if (event.isComposing || view.composing) return false
       if (wikiHandlers.current.keyDown(event)) return true
@@ -142,11 +155,17 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     if (!id) id = editor.state.doc.nodeAt(editor.state.selection.from)?.attrs.blockId ?? null
     setSelected(id)
     if (id && !transaction.getMeta('noteSelectionRestore') && !editor.isDestroyed && editor.view.hasFocus()) props.current.onSelectedBlock?.({ noteId: props.current.note.noteId, blockId: id })
-  }, onTransaction({ editor, transaction, appendedTransactions }) {
-    // Plain text IME may need no wiki-normalization step, so TipTap emits no
-    // update for this metadata-only completion. Publish that final draft here.
-    if (transaction.getMeta('noteWikiCompositionEnd') && !transaction.docChanged && !appendedTransactions.some(tr => tr.docChanged)) publishContent(editor)
-  }, onUpdate({ editor }) { publishContent(editor) } }, [note.noteId])
+  }, onTransaction({ editor, transaction }) {
+    // The original wiki plugin completes normalization before this event. Publish
+    // final local input before the owner recomputes a queued incoming snapshot.
+    if (transaction.getMeta('noteWikiCompositionEnd') && !editor.view.composing) {
+      publishContent(editor, compositionBefore.current ?? transaction.before.toJSON())
+      compositionBefore.current = null
+      if (composing.current) { composing.current = false; props.current.onCompositionChange?.(false) }
+    }
+  }, onUpdate({ editor, transaction }) {
+    if (!composing.current && !transaction.getMeta('noteWikiCompositionEnd')) publishContent(editor, transaction.before.toJSON())
+  } }, [note.noteId])
   const wiki = useNoteWikiCompletion(editor, active, sourceIdentity)
   wikiHandlers.current = { created: wiki.created, keyDown: wiki.keyDown, open: link => {
     if (!editor || editor.isDestroyed || !active) return
@@ -165,22 +184,33 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
 
   useEffect(() => {
     if (!editor) return
-    const syncContent = () => {
-      if (editor.isDestroyed || editor.state.doc.eq(editor.schema.nodeFromJSON(note.content))) return
-      const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId, offset = selection.$from.parentOffset
-      const canonical = editor.schema.nodeFromJSON(note.content)
-      const samePositions = selectionContent(editor.state.doc.toJSON()) === selectionContent(canonical.toJSON())
-      const bookmark = selection.getBookmark()
-      editor.chain().setMeta('noteSelectionRestore', true).setContent(note.content, { emitUpdate: false }).run()
-      if (samePositions && editor.state.doc.eq(canonical)) editor.view.dispatch(editor.state.tr.setSelection(bookmark.resolve(editor.state.doc)).setMeta('noteSelectionRestore', true))
-      else if (typeof blockId === 'string') editor.state.doc.descendants((node, pos) => {
-        if (node.attrs.blockId === blockId && node.isTextblock) { editor.chain().setMeta('noteSelectionRestore', true).setTextSelection(pos + 1 + Math.min(offset, node.content.size)).run(); return false }
-      })
-    }
-    syncContent()
-    editor.on('mount', syncContent)
-    return () => { editor.off('mount', syncContent) }
+    const noteId = note.noteId
+    const sync = new NoteSnapshotSync(editor, () => composing.current, (message, pair) => {
+      if (props.current.note.noteId !== noteId) return
+      setMappingIssue(message); props.current.onIssue(message)
+      if (!message) { setMappingDrafts(null); setCompareIncoming(false) }
+      else if (pair) {
+        try {
+          const current = props.current
+          const incoming = serializeNoteDocument({ ...current.note, content: pair.incoming })
+          if (incoming !== serializeNoteDocument(current.note)) return
+          const displayed = serializeNoteDocument({ ...current.note, content: pair.displayed })
+          setMappingDrafts({ displayed, incoming }); current.onSnapshotIssue?.(displayed, incoming, message)
+        } catch (error) { props.current.onIssue(error instanceof Error ? error.message : String(error)) }
+      }
+    })
+    snapshot.current = sync
+    return () => { sync.destroy(); if (snapshot.current === sync) snapshot.current = null }
+  }, [editor])
+  useEffect(() => {
+    if (!editor) return
+    snapshot.current?.update(note.content)
   }, [editor, note.content])
+  useEffect(() => {
+    const clear = () => { compositionBefore.current = null; if (composing.current) { composing.current = false; props.current.onCompositionChange?.(false) } }
+    editor?.on('unmount', clear)
+    return () => { editor?.off('unmount', clear); clear() }
+  }, [editor])
   useEffect(() => {
     const publish = (handle: NoteEditorHandle | null) => {
       if (typeof handleRef === 'function') handleRef(handle)
@@ -239,11 +269,11 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     return () => { editor.off('mount', attach).off('unmount', detach).off('destroy', detach); detach() }
   }, [editor, handleRef])
   const formatting = useEditorState({ editor, selector: ({ editor }) => ({
-    heading: editor?.isActive('heading', { level: 1 }) ?? false,
-    list: editor?.isActive('bulletList') ?? false,
-    quote: editor?.isActive('blockquote') ?? false,
-    indent: editor?.can().sinkListItem('listItem') ?? false,
-    outdent: editor?.can().liftListItem('listItem') ?? false,
+    heading: editor && !editor.isDestroyed ? editor.isActive('heading', { level: 1 }) : false,
+    list: editor && !editor.isDestroyed ? editor.isActive('bulletList') : false,
+    quote: editor && !editor.isDestroyed ? editor.isActive('blockquote') : false,
+    indent: editor && !editor.isDestroyed ? editor.can().sinkListItem('listItem') : false,
+    outdent: editor && !editor.isDestroyed ? editor.can().liftListItem('listItem') : false,
     from: editor?.state.selection.from, to: editor?.state.selection.to
   }) })
   const backlinks = selected ? noteBacklinks(knowledge, { noteId: note.noteId, blockId: selected }) : []
@@ -255,7 +285,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       `${sourceName(source) ?? ''} ${source.location.path} ${block.text}`.toLowerCase().includes(match) ? [{ source, block, target: { noteId: source.note.noteId, blockId: block.blockId } }] : []))
   }, [picker, knowledge, query, sourceName])
   const foldTarget = () => {
-    if (!editor) return null
+    if (!editor || editor.isDestroyed) return null
     const { $from } = editor.state.selection
     for (let depth = $from.depth; depth > 0; depth--) { const node = $from.node(depth); if (node.attrs.blockId && node.childCount > 1 && !node.isTextblock) return String(node.attrs.blockId) }
     return null
@@ -267,6 +297,20 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     setPicker(false); setQuery('')
   }
   return <ReferenceContext.Provider value={{ knowledge, trail: [], sourceName, onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
+    {mappingIssue && <section className="note-knowledge-notice" aria-label="Incoming update recovery">
+      <p>Both drafts are kept. If blocks moved or cannot be matched reliably, compare the drafts and choose which one to continue editing.</p>
+      <button type="button" className="small-button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button>
+      {mappingDrafts && <>
+        <button type="button" className="small-button" aria-expanded={compareIncoming} onClick={() => setCompareIncoming(value => !value)}>Compare incoming update</button>
+        {onKeepDisplayedDraft && <button type="button" className="small-button" onClick={() => {
+          if (!editor || editor.isDestroyed || composing.current || editor.view.composing) return
+          const current = props.current
+          if (mappingDrafts.incoming !== serializeNoteDocument(current.note)) return
+          current.onKeepDisplayedDraft?.(serializeNoteDocument({ ...current.note, content: editor.getJSON() }), mappingDrafts.incoming)
+        }}>Keep editing displayed draft</button>}
+        {compareIncoming && <><p>Displayed draft → incoming draft · read only. Source shows the incoming draft; retained drafts remain available.</p><div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening draft comparison…</p>}><ReadonlyDiffEditor original={mappingDrafts.displayed} modified={mappingDrafts.incoming} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div></>}
+      </>}
+    </section>}
     <RovingToolbar className="note-editor__tools" aria-label="Note block tools">
       <div className="note-editor__tool-group" role="group" aria-label="Block style">
         <RovingToolbarButton type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></RovingToolbarButton>

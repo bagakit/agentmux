@@ -1,3 +1,4 @@
+import { noteParsingAliases } from '../../packages/client-ui/scripts/note-parsing-aliases'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -10,7 +11,7 @@ export default defineConfig(({ command }) => ({
       content: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self'; connect-src 'self' https:; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }, injectTo: 'head-prepend' as const }] : []
   }],
-  resolve: { conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
+  resolve: { alias: noteParsingAliases, conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
   worker: { format: 'es' },
   server: { host: '127.0.0.1', port: 4321, strictPort: true },
   preview: { host: '127.0.0.1', port: 4321, strictPort: true },

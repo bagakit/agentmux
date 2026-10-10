@@ -145,3 +145,28 @@
 .note-view-snapshot { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); }
 .note-view-snapshot > span { color: var(--text-2); }
 @container (max-width: 420px) { .note-view-toolbar { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); } }
+.note-version-history { max-width: var(--note-content-width, 760px); margin: var(--sp-5) auto; padding-inline: var(--sp-8); color: var(--text-2); font: var(--fs-body)/1.6 var(--font-sans); }
+.note-version-history > summary { width: fit-content; cursor: pointer; color: var(--text); font-weight: 500; }
+.note-version-history__body { padding-block: var(--sp-4); min-width: 0; }
+.note-version-history__heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); justify-content: space-between; }
+.note-version-history__heading h3, .note-version-history__heading p { margin: 0; }
+.note-version-history__heading h3 { color: var(--text); font: 550 var(--fs-body)/1.6 var(--font-sans); }
+.note-version-history__heading p, .note-version-history__scope, .note-version-history__preview > p { color: var(--text-3); font-size: var(--fs-meta); }
+.note-version-history__issue { overflow-wrap: anywhere; color: var(--text-2); border-left: 2px solid var(--line); padding-left: var(--sp-3); }
+.note-version-history__activity { padding-block: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
+.note-version-history__activity > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); cursor: pointer; }
+.note-version-history__author { min-width: 0; overflow-wrap: anywhere; }
+.note-version-history__activity > summary > .note-version-history__author { flex: 1; color: var(--text); }
+.note-version-history__activity > summary > svg { flex: none; transition: transform 120ms; }
+.note-version-history__activity[open] > summary > svg { transform: rotate(90deg); }
+.note-version-history__activity time, .note-version-history__activity > summary > span:last-child { font-size: var(--fs-meta); color: var(--text-3); }
+.note-version-history small { display: block; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.note-version-history__revisions { display: grid; gap: var(--sp-2); padding-block: var(--sp-3); }
+.note-version-history__revision { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--sp-2) var(--sp-4); }
+.note-version-history .note-text-button { min-height: 28px; font: var(--fs-meta)/1.5 var(--font-sans); }
+.note-version-history__preview { margin-top: var(--sp-5); min-width: 0; }
+.note-version-history__diff { height: min(420px, 60vh); min-height: 220px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); overflow: hidden; }
+.note-version-history__confirm { margin-top: var(--sp-4); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); }
+.note-version-history__confirm p { margin: 0 0 var(--sp-2); }
+.note-version-history__confirm button + button { margin-left: var(--sp-4); }
+@container (max-width: 420px) { .note-version-history { padding-inline: var(--sp-4); } .note-version-history__activity > summary > .note-version-history__author { flex-basis: calc(100% - var(--sp-5)); } }

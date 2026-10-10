@@ -230,6 +230,9 @@ const api: AgentMuxPreloadApi = {
   files: {
     readPublic: (params: import('@agentmux/core').FileReadParams) => ipcRenderer.invoke('files:readPublic', params),
     createPublic: (params: import('@agentmux/core').FileCreateParams) => ipcRenderer.invoke('files:createPublic', params),
+    historyPublic: params => ipcRenderer.invoke('files:historyPublic', params),
+    restorePublic: params => ipcRenderer.invoke('files:restorePublic', params),
+    undoPublic: params => ipcRenderer.invoke('files:undoPublic', params),
     list: (workspaceId: string, path?: string, limit?: number) => ipcRenderer.invoke('files:list', workspaceId, path, limit),
     readDirectory: (workspaceId: string, path: string) =>
       ipcRenderer.invoke('files:readDirectory', workspaceId, path),

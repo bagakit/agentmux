@@ -384,6 +384,12 @@ importers:
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
         version: 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
+      decode-named-character-reference:
+        specifier: 1.3.0
+        version: 1.3.0
+      diff:
+        specifier: 9.0.0
+        version: 9.0.0
       entities:
         specifier: 7.0.1
         version: 7.0.1
