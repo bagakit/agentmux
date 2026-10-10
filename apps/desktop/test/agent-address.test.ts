@@ -200,6 +200,8 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       'MESSAGE_ENVELOPE_INVALID',
       // Prompt忙/未确认与Session store读未确认都不代表Agent终局，也不是换地址可恢复。
       'AGENT_PROMPT_INPUT_UNCONFIRMED',
+      // Prompt condition changes need observation, not another Agent address.
+      'AGENT_PROMPT_CONDITION_CHANGED',
       'AGENT_PROMPT_SUBMISSION_BUSY',
       'AGENT_SESSION_STORE_READ_UNCONFIRMED',
       'AGENT_EXECUTOR_NOT_CONFIGURED',
