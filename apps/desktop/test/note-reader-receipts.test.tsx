@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
 import { fixtureEpoch as _newTailFixtureEpoch, fixturePath as _newTailFixturePath } from "../../../test/fixture-values.mjs"
 import { act } from 'react'
-import { expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { Editor } from '@tiptap/core'
 import { NoteReader } from '@agentmux/client-ui/components/NoteReader'
 import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fileUploadRevision } from '@agentmux/core/files'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 const dom = composerDOM()
+beforeEach(() => { vi.stubGlobal('Worker', NoteSnapshotTestWorker) })
+afterEach(() => { vi.unstubAllGlobals() })
 const revision=(content:string)=>fileUploadRevision(new TextEncoder().encode(content))
 it('consumes recorded authorship from the actual shared editor canonical save receipt without a refresh',async()=>{
  const content=serializeNoteDocument(newNoteDocument('Original body','review-shared','review-block'))
