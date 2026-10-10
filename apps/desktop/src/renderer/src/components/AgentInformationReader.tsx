@@ -7,7 +7,7 @@ import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/d
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
-import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { AgentReadingBody as ReadingBody } from './AgentReadingBody'
 import { currentAgentSemanticStatus, msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { nativeBindingKey } from '../../../shared/agent-native-source'
@@ -30,14 +30,6 @@ const InfoIcon = semanticIconComponent('status.info')
 const CloseIcon = semanticIconComponent('action.close')
 const OpenIcon = semanticIconComponent('action.open-external')
 const PinIcon = semanticIconComponent('action.pin')
-
-/** Full held text stays readable; only bounded complete prose enters Markdown parsing. */
-function ReadingBody({ reading }: { reading: { text: string; truncated: boolean } }) {
-  const literal = reading.truncated || reading.text.length > 8000
-  return <div className="focus-context-hover__prose" data-reading-format={reading.truncated ? 'excerpt' : literal ? 'plain' : 'markdown'}>
-    {literal ? <p>{reading.text}</p> : <AgentMarkdown content={reading.text} readOnly />}
-  </div>
-}
 
 type InputReading = Pick<ReturnType<typeof useSessionUserMessages>, 'messages' | 'loading' | 'error' | 'observationError' | 'sourceChanged' | 'windowFrozen' | 'windowIncomplete'>
 function inputReading(reader: ReturnType<typeof useSessionUserMessages>): InputReading {
@@ -98,7 +90,7 @@ function FocusContextInputs({ request, enabled }: { request: PreviewRequest; ena
       return <li key={message.id} data-hover-input-id={message.id} data-input-author={message.author.kind}>
       <div className="focus-context-hover__input-meta"><strong>{describe(speakerOfUserMessage(message)).name}</strong>
         <time dateTime={date?.toISOString()} title={provenance} aria-label={`${time} · ${provenance}`}>{time}</time></div>
-      <ReadingBody reading={reading} />
+      <ReadingBody reading={reading} active={enabled} control={request.control} sourceKey={request.sourceKey} input={message} />
       {reading.truncated ? <small className="focus-context-hover__coverage">Excerpt</small> : null}
     </li>})}</ol> : <p className="focus-context-hover__coverage">{snapshot.loading ? enabled ? 'Loading recent messages…' : 'Input reading paused; observed content is kept.' : 'No user messages in the available reading window.'}</p>}
     {notice ? <p className="focus-context-hover__notice" role="status" title={snapshot.error?.message ?? snapshot.observationError?.message}>
@@ -137,7 +129,7 @@ const HeldReading = memo(function HeldReading({ request, enabled }: { request: P
         {context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}
         <span>{request.contentChanged ? 'Card content changed · Reading kept' : (context.recap.reading?.truncated ?? true) ? 'Excerpt at opening' : 'Observed at opening'}</span>
       </small>
-      <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} />
+      <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} active={enabled} />
     </section> : !context.detailIsRecap && context.detailKind !== 'service' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
     {context.kind === 'agent' ? <FocusContextInputs request={request} enabled={enabled} /> : null}
     <p className="agent-information-reader__end">End of this reading window <span>Earlier records remain in History.</span></p>
