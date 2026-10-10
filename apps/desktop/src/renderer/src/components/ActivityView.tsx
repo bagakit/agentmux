@@ -44,6 +44,7 @@ import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import type { ConversationProcessProps } from '@agentmux/client-ui/components/ConversationRecordSequence'
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
@@ -88,10 +89,10 @@ function Glyph({ kind, toolName, size = 12 }: { kind: AgentTimelineItem['kind'];
  * is the second level of folding: level one expands one step's payload, level two hides the whole
  * stretch of lifecycle noise that sits between a prompt and its answer.
  */
-type Segment =
+type Segment = (
   | { kind: 'item'; item: AgentTimelineItem }
   | { kind: 'run'; id: string; items: AgentTimelineItem[] }
-  | { kind: 'user-message'; message: AgentSessionUserMessage }
+  | { kind: 'user-message'; message: AgentSessionUserMessage }) & { beforeRecordId?: string }
 
 type RawEntry =
   | { type: 'timeline'; item: AgentTimelineItem; time: number }
@@ -99,7 +100,8 @@ type RawEntry =
 
 function buildActivityEntries(
   sourceItems: AgentTimelineItem[],
-  userMessages?: readonly AgentSessionUserMessage[]
+  userMessages?: readonly AgentSessionUserMessage[],
+  nativePage?: AgentSessionHistoryPage | null
 ): {
   unifiedItems: ConversationAxisItem[]
   segments: Segment[]
@@ -108,70 +110,61 @@ function buildActivityEntries(
   const items = sourceItems.filter(item => !(item.kind === 'system_message' && item.source === 'agentmux' && item.id.startsWith('device-operation:')))
   const segments: Segment[] = []
   let run: AgentTimelineItem[] = []
+  let runBefore: string | undefined
   const flush = (): void => {
     if (run.length === 0) return
     // A single hook step is cheaper to read inline than behind a disclosure.
-    if (run.length === 1) segments.push({ kind: 'item', item: run[0]! })
-    else segments.push({ kind: 'run', id: `run-${run[0]!.id}`, items: run })
+    const position = runBefore === undefined ? {} : { beforeRecordId: runBefore }
+    if (run.length === 1) segments.push({ kind: 'item', item: run[0]!, ...position })
+    else segments.push({ kind: 'run', id: `run-${run[0]!.id}`, items: run, ...position })
     run = []
   }
 
-  if (!userMessages || userMessages.length === 0) {
-    for (const item of items) {
-      if (item.source === 'native-hook' && !isConversationTurn(item)) run.push(item)
-      else {
-        flush()
-        segments.push({ kind: 'item', item })
-      }
-    }
-    flush()
-    return { unifiedItems: items, segments }
+  // Replace only the exact captured record with its richer input projection,
+  // retaining the original timeline order even when its clock moves backwards.
+  const captured = new Map((userMessages ?? []).filter(message => message.source.kind === 'captured').map(message => [message.rawId, message]))
+  const represented = new Set<string>()
+  const original: RawEntry[] = items.map(item => {
+    const message = (item.kind === 'user_message' || item.source === 'user') ? captured.get(item.id) : undefined
+    if (!message) return { type: 'timeline', item, time: item.createdAt }
+    represented.add(message.id)
+    return { type: 'user-message', message, time: item.createdAt }
+  })
+  const stream: RawEntry[] = []
+  let at = 0
+  for (const message of userMessages ?? []) {
+    if (represented.has(message.id)) continue
+    while (at < original.length && message.recordedAt !== undefined && original[at]!.time !== undefined && original[at]!.time! <= message.recordedAt) stream.push(original[at++]!)
+    stream.push({ type: 'user-message', message, ...(message.recordedAt === undefined ? {} : { time: message.recordedAt }) })
   }
-
-  // Only exclude captured user messages that are already represented in userMessages.
-  // Native rawId collision must NEVER erase an unrelated timeline receipt.
-  const capturedSubmissionIds = new Set(
-    userMessages
-      .filter((m) => m.source.kind === 'captured')
-      .map((m) => m.rawId)
-  )
-  const nonUserItems = items.filter((item) => {
-    if (item.kind === 'user_message' || item.source === 'user') {
-      return !capturedSubmissionIds.has(item.id)
-    }
-    return true
-  })
-
-  const stream: RawEntry[] = [
-    ...nonUserItems.map((item) => ({ type: 'timeline' as const, item, time: item.createdAt })),
-    ...userMessages.map((message) => ({
-      type: 'user-message' as const,
-      message,
-      ...(message.recordedAt !== undefined ? { time: message.recordedAt } : {})
-    }))
-  ]
-
-  stream.sort((a, b) => {
-    if (a.time !== undefined && b.time !== undefined) return a.time - b.time
-    if (a.time !== undefined) return 1
-    if (b.time !== undefined) return -1
-    return 0
-  })
+  stream.push(...original.slice(at))
 
   const unifiedItems: ConversationAxisItem[] = []
 
+  let nativeIndex = 0
   for (const entry of stream) {
+    // A monotonic merge preserves both original source sequences. A known time
+    // positions a foreign record; it never sorts or rewrites the native source.
+    if (entry.time !== undefined && Number.isFinite(entry.time)) while (nativeIndex < (nativePage?.items.length ?? 0)) {
+      const nativeTime = nativePage!.items[nativeIndex]!.startedAt
+      if (nativeTime !== undefined && Number.isFinite(nativeTime) && nativeTime > entry.time) break
+      nativeIndex++
+    }
+    const beforeRecordId = nativePage?.items[nativeIndex]?.id
+    const position = beforeRecordId === undefined ? {} : { beforeRecordId }
     if (entry.type === 'user-message') {
       flush()
-      segments.push({ kind: 'user-message', message: entry.message })
+      segments.push({ kind: 'user-message', message: entry.message, ...position })
       unifiedItems.push(entry.message)
     } else {
       unifiedItems.push(entry.item)
       if (entry.item.source === 'native-hook' && !isConversationTurn(entry.item)) {
+        if (run.length && beforeRecordId !== runBefore) flush()
+        runBefore = beforeRecordId
         run.push(entry.item)
       } else {
         flush()
-        segments.push({ kind: 'item', item: entry.item })
+        segments.push({ kind: 'item', item: entry.item, ...position })
       }
     }
   }
@@ -184,15 +177,20 @@ function Row({
   item,
   origin,
   showSource,
-  workspaceRoot
+  workspaceRoot,
+  expanded,
+  onExpandedChange
 }: {
   item: AgentTimelineItem
   origin: number
   showSource: boolean
   /** 用来把仓内绝对路径缩成相对路径，见 activity-step-summary 的 shortenPath。缺席则原样显示。 */
   workspaceRoot: string
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [localOpen, setOpen] = useState(false)
+  const open = expanded ?? localOpen
   const sourceIdentity = useMemo(() => ({}), [item])
   const payloadIdentity = useMemo(() => ({}), [sourceIdentity, item.toolInput, item.content])
   const outputIdentity = useMemo(() => ({}), [sourceIdentity, item.toolOutput])
@@ -227,7 +225,7 @@ function Row({
         source: item.source,
         persistentSource: showSource
       }} className={`log-row log-row--${item.kind}`} icon={<Glyph kind={item.kind} {...(item.toolName ? { toolName: item.toolName } : {})} />}
-        {...(expandable ? { expanded: open, onToggle: () => setOpen((value) => !value) } : {})} />
+        {...(expandable ? { expanded: open, onToggle: () => { setOpen(!open); onExpandedChange?.(!open) } } : {})} />
       {prose ? <p className="log-row__prose">{prose}</p> : null}
       {open ? <div className="wf-native-process__body">
         {diff ? <DiffBlock diff={diff} /> : null}
@@ -271,24 +269,26 @@ export function DiffBlock({ diff }: { diff: ToolDiff }): JSX.Element {
   )
 }
 
-function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; origin: number; workspaceRoot: string }) {
-  const [open, setOpen] = useState(false)
+function Run({ items, origin, workspaceRoot, disclosure }: { items: AgentTimelineItem[]; origin: number; workspaceRoot: string; disclosure?: ConversationProcessProps['disclosure'] }) {
+  const [localOpen, setOpen] = useState(false)
+  const open = disclosure?.expanded ?? localOpen
   const [showAll, setShowAll] = useState(false)
   const [presentedIds, setPresentedIds] = useState<Set<string>>(() => new Set())
   const visible = (item: AgentTimelineItem, index: number): boolean =>
-    showAll || items.length <= 10 || presentedIds.has(item.id) || index >= items.length - 6 || item.status !== 'complete'
+    showAll || items.length <= 10 || presentedIds.has(item.id) || disclosure?.steps.has(item.id) === true || index >= items.length - 6 || item.status !== 'complete'
   // Only disclosure intent is retained. Records stay in the original Timeline snapshot.
   // A status change must never remove a row the user has already read or selected.
   useLayoutEffect(() => {
-    if (!open || showAll) return
+    if (!open) return
+    disclosure?.onStepsPresented?.(items.filter(visible).map(item => item.id))
     setPresentedIds((previous) => {
       const next = new Set(previous)
       items.forEach((item, index) => {
-        if (items.length <= 10 || index >= items.length - 6 || item.status !== 'complete') next.add(item.id)
+        if (visible(item, index)) next.add(item.id)
       })
       return next.size === previous.size ? previous : next
     })
-  }, [items, open, showAll])
+  }, [items, open, showAll, disclosure])
   if (items.length === 0) return null
   const hiddenCount = items.filter((item, index) => !visible(item, index)).length
   const failed = items.some((item) => item.status === 'failed')
@@ -304,12 +304,13 @@ function Run({ items, origin, workspaceRoot }: { items: AgentTimelineItem[]; ori
     ...(failed ? { status: 'failed' as const } : streaming ? { status: 'streaming' as const } : complete ? { status: 'complete' as const } : {}),
     streaming,
     recordedTime
-  }} expanded={open} onExpandedChange={setOpen}>
+  }} expanded={open} onExpandedChange={expanded => { setOpen(expanded); disclosure?.onExpandedChange(expanded) }}>
     {hiddenCount > 0 ? <button type="button" className="wf-observation__more" onClick={() => setShowAll(true)}>
       <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />Show {hiddenCount} more recorded steps
     </button> : null}
     {items.map((item, index) => visible(item, index) ? <Row key={item.id} item={item} origin={origin}
-      showSource={index === 0} workspaceRoot={workspaceRoot} /> : null)}
+      showSource={index === 0} workspaceRoot={workspaceRoot}
+      {...(disclosure ? { ...(disclosure.steps.has(item.id) ? { expanded: disclosure.steps.get(item.id)! } : {}), onExpandedChange: expanded => disclosure.onStepExpandedChange(item.id, expanded) } : {})} /> : null)}
   </WorkflowCard>
 }
 
@@ -328,6 +329,29 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
     index += size
   }
   return placed
+}
+
+type SegmentLayout = { key: string; kind: Segment['kind']; id: string; ids: string[]; beforeRecordId?: string }
+function segmentLayout({ entry, key }: PlacedSegment): SegmentLayout {
+  return { key, kind: entry.kind,
+    id: entry.kind === 'run' ? entry.id : entry.kind === 'item' ? entry.item.id : entry.message.id,
+    ids: entry.kind === 'run' ? entry.items.map(item => item.id) : [entry.kind === 'item' ? entry.item.id : entry.message.id],
+    ...(entry.beforeRecordId === undefined ? {} : { beforeRecordId: entry.beforeRecordId }) }
+}
+/** Reuse committed grouping/placement choices, resolving bodies from current source records. */
+function retainSegmentLayout(layout: readonly SegmentLayout[], current: readonly Segment[]): Segment[] {
+  const timeline = new Map(current.flatMap(entry => entry.kind === 'run' ? entry.items.map(item => [item.id, item] as const) : entry.kind === 'item' ? [[entry.item.id, entry.item] as const] : []))
+  const messages = new Map(current.flatMap(entry => entry.kind === 'user-message' ? [[entry.message.id, entry.message] as const] : []))
+  return layout.flatMap((entry): Segment[] => {
+    const position = entry.beforeRecordId === undefined ? {} : { beforeRecordId: entry.beforeRecordId }
+    if (entry.kind === 'run') {
+      const items = entry.ids.flatMap(id => timeline.has(id) ? [timeline.get(id)!] : [])
+      return items.length ? [{ kind: 'run', id: entry.id, items, ...position }] : []
+    }
+    if (entry.kind === 'item') { const item = timeline.get(entry.id); return item ? [{ kind: 'item', item, ...position }] : [] }
+    const message = messages.get(entry.id)
+    return message ? [{ kind: 'user-message', message, ...position }] : []
+  })
 }
 
 /**
@@ -564,20 +588,37 @@ export function ActivityView({
       // Static/fallback consumers still own their independent input projection.
       return !sameSource || !conversationReading && !readingWindow.historical && !nativeIds.has(message.rawId)
     })
-    return buildActivityEntries(items, observedMessages)
+    return buildActivityEntries(items, observedMessages, page)
   }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, Boolean(conversationReading), Boolean(conversationReading?.nativeSourceFacts)])
-  const placed = useMemo(() => placeSegments(segments), [segments])
+  const proposedSegments = useMemo(() => placeSegments(segments), [segments])
+  const proposedLayout = proposedSegments.map(segmentLayout)
+  const layoutSource = JSON.stringify([sessionId, nativeHistoryPage?.source])
+  const committedLayout = useRef<{ source: string; entries: SegmentLayout[] }>({ source: layoutSource, entries: [] })
+  const segmentEls = useRef(new Map<string, HTMLElement>())
+  const [, selectionChanged] = useState(0)
+  const selection = feedEl?.ownerDocument.defaultView?.getSelection()
+  const incomingLayout = new Map(proposedLayout.map(entry => [entry.key, entry]))
+  const holdCapturedLayout = committedLayout.current.source === layoutSource && Boolean(selection && !selection.isCollapsed && selection.rangeCount && committedLayout.current.entries.some(entry => {
+    if (JSON.stringify(entry) === JSON.stringify(incomingLayout.get(entry.key))) return false
+    const node = segmentEls.current.get(entry.key)
+    if (!node) return false
+    try { return selection.getRangeAt(0).intersectsNode(node) } catch { return true }
+  }))
+  const placed = holdCapturedLayout ? placeSegments(retainSegmentLayout(committedLayout.current.entries, segments)) : proposedSegments
+  useLayoutEffect(() => { committedLayout.current = { source: layoutSource, entries: placed.map(segmentLayout) } })
+  useEffect(() => {
+    if (!holdCapturedLayout || !feedEl) return
+    const update = () => selectionChanged(value => value + 1)
+    feedEl.ownerDocument.addEventListener('selectionchange', update)
+    return () => feedEl.ownerDocument.removeEventListener('selectionchange', update)
+  }, [holdCapturedLayout, feedEl])
   function captureReadingAnchor(viewport: HTMLElement, target?: EventTarget | null): ReturnType<typeof conversationReadingAnchor> {
-    const captured = logRef.current
     const selection = viewport.ownerDocument.defaultView?.getSelection()
-    let selectedObserved = false
-    if (captured && selection && !selection.isCollapsed && selection.rangeCount) {
-      try { selectedObserved = captured.contains(selection.getRangeAt(0).startContainer) }
-      catch { /* A detached selection cannot supply a reading anchor. */ }
-    }
-    const observed = captured && (target instanceof Node ? captured.contains(target)
-      : selectedObserved || anchorRef.current?.kind === 'segment' || captured.getBoundingClientRect().top <= viewport.getBoundingClientRect().top)
-    return conversationReadingAnchor(viewport, observed ? captured : null)
+    const node = target instanceof Node ? target : selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0).startContainer : null
+    const element = node instanceof Element ? node : node?.parentElement
+    const segment = element?.closest<HTMLElement>('[data-segment-key]')
+    if (segment && viewport.contains(segment)) return { kind: 'segment', id: segment.dataset.segmentKey!, offset: segment.getBoundingClientRect().top - viewport.getBoundingClientRect().top }
+    return conversationReadingAnchor(viewport)
   }
   const readEntryImage = useCallback<ReadPastedImage>(path => readingEnabled && readPastedImage
     ? readPastedImage(path) : Promise.resolve(null), [readingEnabled, readPastedImage])
@@ -681,7 +722,7 @@ export function ActivityView({
   const requestReadingEdge = (direction: number, el: HTMLElement, delta = 0): void => {
     if (!conversationReading?.enabled) return
     if (direction < 0 && anchorRef.current?.kind === 'segment') {
-      const nativeAnchor = conversationReadingAnchor(el)
+      const nativeAnchor = conversationReadingAnchor(el, undefined, true)
       // Captured content has its own readable tail. Hand paging back only when
       // the original sequence is actually visible in this viewport.
       if (!nativeAnchor) return
@@ -819,7 +860,6 @@ export function ActivityView({
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.
-  const segmentEls = useRef(new Map<string, HTMLElement>())
 
   const segmentForIndex = (index: number): PlacedSegment | undefined =>
     placed.find((entry) => index >= entry.from && index <= entry.to)
@@ -930,18 +970,17 @@ export function ActivityView({
     if (record.target.kind === 'observed') { selectEvent(record.target.index); return }
     const target = record.target
     const page = nativeHistoryPage
-    const thread = [...(feedEl?.querySelectorAll<HTMLElement>('[data-native-source]') ?? [])]
-      .find(node => node.dataset.nativeSource === target.source)
+    const thread = feedEl?.querySelector<HTMLElement>('.conversation-native-thread')
     if (!thread) return
     const group = [...thread.querySelectorAll<HTMLElement>('[data-native-record-ids]')]
-      .find(node => (JSON.parse(node.dataset.nativeRecordIds ?? '[]') as string[]).includes(target.recordId))
+      .find(node => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === target.source && (JSON.parse(node.dataset.nativeRecordIds ?? '[]') as string[]).includes(target.recordId))
     const toggle = group?.querySelector<HTMLButtonElement>('.wf-head[aria-expanded="false"]')
     toggle?.click()
     locateRef.current.frame = requestAnimationFrame(() => {
       locateRef.current.frame = null
       if (locateRef.current.source !== page || !thread.isConnected) return
       const node = [...thread.querySelectorAll<HTMLElement>('[data-native-record-id], [data-native-step-id]')]
-        .find(node => node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId)
+        .find(node => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === target.source && (node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId))
       node?.scrollIntoView({ block: 'nearest' })
       const viewport = thread.closest<HTMLElement>('.activity-feed')
       if (viewport) {
@@ -1095,7 +1134,7 @@ export function ActivityView({
     }
   }
 
-  const renderPlaced = ({ entry, key }: PlacedSegment): JSX.Element => {
+  const renderPlaced = ({ entry, key }: PlacedSegment, disclosure?: ConversationProcessProps['disclosure']): JSX.Element => {
   // Identity is resolved once here; the shared message only renders that verdict.
   const speaker = entry.kind === 'run'
     ? null
@@ -1112,7 +1151,7 @@ export function ActivityView({
       ref={registerSegment(key)}
     >
       {entry.kind === 'run' ? (
-        <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} />
+        <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} {...(disclosure ? { disclosure } : {})} />
       ) : entry.kind === 'user-message' ? (
         <ConversationMessage
           messageId={entry.message.id}
@@ -1174,7 +1213,8 @@ export function ActivityView({
           {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
         />
       ) : (
-        <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot} />
+        <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot}
+          {...(disclosure ? { ...(disclosure.steps.has(entry.item.id) ? { expanded: disclosure.steps.get(entry.item.id)! } : {}), onExpandedChange: expanded => disclosure.onStepExpandedChange(entry.item.id, expanded) } : {})} />
       )}
     </div>
   )
@@ -1214,8 +1254,16 @@ export function ActivityView({
         }
       /> : <><div className="reading-find__floating-trigger">{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</div>{emptyReadStatus}</>}
       {readingEntry}
+      {holdCapturedLayout ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}
+      <div ref={logRef}>
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
+        insertions={[
+          { key: 'native-reading-tail', content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> },
+          ...placed.map(segment => ({ key: segment.key, ...(segment.entry.beforeRecordId === undefined ? {} : { beforeRecordId: segment.entry.beforeRecordId }),
+            recordIds: segment.entry.kind === 'run' ? segment.entry.items.map(item => item.id) : segment.entry.kind === 'item' ? [segment.entry.item.id] : [],
+            content: (disclosure: NonNullable<ConversationProcessProps['disclosure']>) => renderPlaced(segment, disclosure) }))
+        ]}
         traceDisclosure={traceDisclosure}
         questionAnswerContext={questionAnswerContext}
         {...(historyBoundary && boundaryIndex > 0 ? {
@@ -1248,9 +1296,8 @@ export function ActivityView({
         {...(readHistoryResource ? { readHistoryResource } : {})}
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-      /> : null}
-      <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" />
-      <div className="activity-log" ref={logRef}>{placed.map(renderPlaced)}</div>
+      /> : <div className="activity-log">{placed.map(segment => renderPlaced(segment))}<div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /></div>}
+      </div>
       <div ref={readingTailRef} data-conversation-reading-tail aria-hidden="true" />
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
       <div ref={readingSpaceRef} data-conversation-reading-space aria-hidden="true" />

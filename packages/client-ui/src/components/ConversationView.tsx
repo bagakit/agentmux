@@ -5,7 +5,7 @@ import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
 import { type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
-import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary } from './ConversationRecordSequence.js'
+import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary, type ConversationRecordInsertion } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
 import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionReplyState } from '../lib/conversation-question-reply.js'
@@ -41,11 +41,12 @@ type Props = ReadingProps & {
   /** Hosts may retain an existing annotation/disclosure identity without replacing presentation. */
   messageIdForRecord?: (item: AgentSessionHistoryItem) => string
   showSource?: boolean
+  insertions?: readonly ConversationRecordInsertion[]
 }
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
+  page, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
 }: Props) {
   const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
     [page, sessionId, reading.executionHostId])
@@ -84,7 +85,7 @@ export const ConversationView = memo(function ConversationView({
           messageActions={<>{itemRef && renderRecordActions?.(itemRef, reading.active !== false)}{item.kind === 'assistant-message' && renderMessageActions?.({ kind: 'native', agentSessionId: sessionId,
               providerId: page.source.providerId, nativeSessionId: page.source.nativeSessionId, recordId: item.id })}</>}
           {...reading} />
-      return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
+      return <div key={recordId} className="conversation-native-thread__record" data-native-source={JSON.stringify([page.source.providerId, page.source.nativeSessionId])} data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}
         {question ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId, reading.executionHostId, questionReplyContext])} request={question.request} recordedAnswers={question.recordedAnswers} terminalCurrent={terminalCurrent}
           {...(questionDraftNotice ? { draftNotice: questionDraftNotice } : {})}
@@ -100,13 +101,15 @@ export const ConversationView = memo(function ConversationView({
 
   }
   return <section className="conversation-native-thread" aria-label="Conversation"
-    data-native-provider={page.source.providerId} data-native-source={JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
+    data-native-provider={page.source.providerId} data-native-source={insertions?.length ? undefined : JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     {showSource ? <div className="conversation-native-thread__source" title={`Native session ${page.source.nativeSessionId}`}>
       <span>{page.source.providerId} · Native conversation</span>
       <span>{records.length} {records.length === 1 ? 'record' : 'records'} · Current window</span>
     </div> : null}
     <ConversationRecordSequence items={records}
       sourceKey={JSON.stringify([sessionId, page.source.providerId, page.source.nativeSessionId])}
+      nativeSourceKey={JSON.stringify([page.source.providerId, page.source.nativeSessionId])}
+      {...(insertions ? { insertions } : {})}
       renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} {...(recordBoundary ? { recordBoundary } : {})} />
   </section>
 })

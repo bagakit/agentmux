@@ -32,8 +32,9 @@ function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRec
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, items, renderRecord, metrics, compact = false }: ConversationProcessProps & { compact?: boolean }) {
-  const [expanded, setExpanded] = useState(!compact)
+export function NativeProcessObservation({ id, items, renderRecord, metrics, disclosure, compact = false }: ConversationProcessProps & { compact?: boolean }) {
+  const [localExpanded, setExpanded] = useState(!compact)
+  const expanded = disclosure?.expanded ?? localExpanded
   const states = items.map(recordedStatus)
   const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
@@ -47,20 +48,25 @@ export function NativeProcessObservation({ id, items, renderRecord, metrics, com
   return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: items.length,
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
-    expanded={expanded} onExpandedChange={setExpanded}>
+    expanded={expanded} onExpandedChange={open => { setExpanded(open); disclosure?.onExpandedChange(open) }}>
     {metrics ? <ConversationMetricsDetails observation={metrics} /> : null}
     {items.map(item => renderRecord(item, body =>
-      <NativeProcessStep item={item} {...(first.startedAt === undefined ? {} : { origin: first.startedAt })}>{body}</NativeProcessStep>))}
+      <NativeProcessStep item={item} {...(first.startedAt === undefined ? {} : { origin: first.startedAt })}
+        {...(disclosure?.steps.get(item.id) === undefined ? {} : { expanded: disclosure.steps.get(item.id)! })}
+        {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(item.id, open) } : {})}>{body}</NativeProcessStep>))}
   </WorkflowCard>{items.map(item => item.metricsDiagnostic
     ? <p key={item.id} className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null)}</div>
 }
 
-function NativeProcessStep({ item, origin, children }: {
+function NativeProcessStep({ item, origin, children, expanded: controlledExpanded, onExpandedChange }: {
   item: AgentSessionHistoryItem
   origin?: number
   children: ReactNode
+  expanded?: boolean
+  onExpandedChange?: (expanded: boolean) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
+  const [localExpanded, setExpanded] = useState(false)
+  const expanded = controlledExpanded ?? localExpanded
   const [readOnce, setReadOnce] = useState(false)
   const bodyId = useId()
   const collaboration = item.collaboration
@@ -77,7 +83,8 @@ function NativeProcessStep({ item, origin, children }: {
         : item.title ?? (item.contentParts.some(part => part.kind === 'reasoning') ? 'Reasoning' : 'Recorded activity')
   function toggle(): void {
     if (!expanded) setReadOnce(true)
-    setExpanded(value => !value)
+    setExpanded(!expanded)
+    onExpandedChange?.(!expanded)
   }
   return <div className="wf-native-process" data-native-step-id={item.id}>
     <WorkflowToolRow observation={{ id: item.id, title, source: 'Native', persistentSource: true,
