@@ -1,3 +1,5 @@
+import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
+import { parseConversationLandmarkWrite, type ConversationLandmarkWrite } from '@agentmux/core/conversation'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { restoredConnectorRoomIntents, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredMoteConnectionSaveIntents, type MoteConnectionSaveIntent } from './lib/mote-connection-save-intent'
@@ -782,6 +784,7 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   connectorRoomIntents: Record<string, ConnectorRoomIntent>
+  conversationLandmarkIntents: ConversationLandmarkIntents
   moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts: Record<string, string>
   agentComposerHistory: Record<string, readonly string[]>
@@ -2712,6 +2715,7 @@ type PersistedAppState = {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   connectorRoomIntents?: Record<string, ConnectorRoomIntent>
+  conversationLandmarkIntents?: ConversationLandmarkIntents
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
   agentComposerDrafts?: Record<string, string>
   agentComposerHistory?: Record<string, readonly string[]>
@@ -2964,6 +2968,7 @@ function selectPersistedInputs(state: AppState) {
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     connectorRoomIntents: state.connectorRoomIntents,
+    conversationLandmarkIntents: state.conversationLandmarkIntents,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
     agentComposerDrafts: state.agentComposerDrafts,
     agentComposerHistory: state.agentComposerHistory,
@@ -3298,6 +3303,23 @@ export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding
   if (useAppStore.getState().spatialRequests[binding.requestId]) return null
   useAppStore.setState(state => ({ spatialRequests: { ...state.spatialRequests, [binding.requestId]: binding } }))
   return await saveWorkbenchSelection(false)
+}
+/** Retain one unresolved exact reading-point input in the existing workbench draft writer. */
+export async function retainConversationLandmarkIntent(input: ConversationLandmarkWrite): Promise<AgentMuxSpatialSave> {
+  const parsed = parseConversationLandmarkWrite(input), key = conversationLandmarkIntentKey(parsed)
+  const previous = useAppStore.getState().conversationLandmarkIntents?.[key]
+  if (previous && JSON.stringify(previous) !== JSON.stringify(parsed)) throw new Error('The original reading-point intent is unresolved. Inspect it without replacing its source or operation.')
+  useAppStore.setState(state => ({ conversationLandmarkIntents: { ...state.conversationLandmarkIntents, [key]: parsed } }))
+  return await saveWorkbenchSelection(false)
+}
+export async function clearConversationLandmarkIntent(input: ConversationLandmarkWrite): Promise<void> {
+  const key = conversationLandmarkIntentKey(input)
+  useAppStore.setState(state => {
+    if (state.conversationLandmarkIntents?.[key]?.operationId !== input.operationId) return state
+    const conversationLandmarkIntents = { ...state.conversationLandmarkIntents }; delete conversationLandmarkIntents[key]
+    return { conversationLandmarkIntents }
+  })
+  await saveWorkbenchSelection(false)
 }
 /** Preserve the exact submitted connector operation before its original public effect. */
 export async function retainConnectorRoomIntent(intent: ConnectorRoomIntent): Promise<AgentMuxSpatialSave> {
@@ -3783,6 +3805,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   goalAgentSelectionDrafts: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
+  conversationLandmarkIntents: {},
   moteConnectionSaveIntents: {},
   retainedSpatialFocus: null,
   config: null,
