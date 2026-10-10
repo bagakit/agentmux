@@ -190,6 +190,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   const windowDocument = useWorkbenchWindowDocument()
   const element = useRef<HTMLDivElement | null>(null)
   const video = useRef<HTMLVideoElement>(null)
+  const still = useRef<HTMLCanvasElement>(null)
+  const retainedFrame = useRef<MediaStream | null>(null)
   const lease = useRef<BrowserPresentationLease | null>(null)
   const [notice, setNotice] = useState<{ source: 'registration' | 'presentation' | 'input'; message: string } | null>(null)
   const [registrationPending, setRegistrationPending] = useState(true)
@@ -301,28 +303,63 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     })
   }, [inputSelected, media.ownerClearedRevision, geometry])
   const [playbackRevision, setPlaybackRevision] = useState(0)
-  const [playback, setPlayback] = useState<{ stream: MediaStream | null; phase: 'idle' | 'starting' | 'first-frame' | 'ready' | 'failed'; message?: string }>({ stream: null, phase: 'idle' })
+  const [playback, setPlayback] = useState<{ stream: MediaStream | null; phase: 'idle' | 'starting' | 'first-frame' | 'ready' | 'failed'; message?: string; retentionFailed?: true }>({ stream: null, phase: 'idle' })
   const nativeCovered = media.nativeCoverage !== null && media.nativeCoverage.captureId === media.captureId &&
     media.nativeCoverage.leaseId === lease.current?.leaseId
   useLayoutEffect(() => {
-    const node = video.current, stream = media.stream
+    const node = video.current, canvas = still.current, stream = media.stream
+    return () => {
+      if (node?.srcObject === stream) node.srcObject = null
+      if (canvas) { canvas.hidden = true; canvas.width = 0; canvas.height = 0 }
+      retainedFrame.current = null
+    }
+  }, [media.stream])
+  useLayoutEffect(() => {
+    const node = video.current, canvas = still.current, stream = media.stream
     if (!node || !stream) { setPlayback({ stream: null, phase: 'idle' }); return }
-    let cancelled = false, playing = false
-    if (node.srcObject !== stream) node.srcObject = stream
+    let cancelled = false, playing = false, frameDelivered = false
+    let frameRequest: number | null = null
     if (nativeCovered) {
-      // Retain the node, last frame and shared tracks. Only this redundant sink
-      // pauses; a passive mirror still consumes the same live source.
+      // A paused MediaStream video can still receive and convert every frame.
+      // Retain one local frame, then release only this redundant receiver.
+      if (node.srcObject === stream && node.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && node.videoWidth > 0 && node.videoHeight > 0) {
+        try {
+          const context = canvas?.getContext('2d')
+          if (!canvas || !context) throw new Error('The preview frame could not be retained.')
+          canvas.width = node.videoWidth; canvas.height = node.videoHeight
+          context.drawImage(node, 0, 0)
+          canvas.hidden = false; retainedFrame.current = stream
+        } catch (error) {
+          if (canvas) { canvas.hidden = true; canvas.width = 0; canvas.height = 0 }
+          retainedFrame.current = null
+          setPlayback({ stream, phase: 'failed', retentionFailed: true, message: error instanceof Error ? error.message : String(error) })
+          return // Keep the original receiver and page available for local retry.
+        }
+      }
       node.pause()
-      setPlayback(current => current.stream === stream && (current.phase === 'ready' || current.phase === 'failed')
+      node.srcObject = null
+      setPlayback(current => current.stream === stream && (current.phase === 'ready' || current.phase === 'failed' && !current.retentionFailed)
         ? current : { stream, phase: 'idle' })
       return
     }
+    if (node.srcObject !== stream) node.srcObject = stream
     setPlayback({ stream, phase: 'starting' })
+    const ready = () => {
+      if (cancelled || node.srcObject !== stream || !playing) return
+      if (canvas) canvas.hidden = true
+      retainedFrame.current = null
+      setPlayback({ stream, phase: 'ready' })
+    }
     const frame = () => {
       if (cancelled || node.srcObject !== stream || !playing) return
-      if (node.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && node.videoWidth > 0 && node.videoHeight > 0)
-        setPlayback({ stream, phase: 'ready' })
+      if (node.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || node.videoWidth <= 0 || node.videoHeight <= 0) return
+      if (retainedFrame.current !== stream || frameDelivered) ready()
     }
+    // Register before play can present a static source's only fresh frame.
+    // Remember an early delivery until the same play request is confirmed.
+    if (retainedFrame.current === stream) frameRequest = node.requestVideoFrameCallback(() => {
+      frameRequest = null; frameDelivered = true; ready()
+    })
     node.addEventListener('loadeddata', frame); node.addEventListener('playing', frame)
     void node.play().then(() => {
       if (cancelled || node.srcObject !== stream) return
@@ -330,7 +367,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     }).catch(error => {
       if (!cancelled && node.srcObject === stream) setPlayback({ stream, phase: 'failed', message: error instanceof Error ? error.message : String(error) })
     })
-    return () => { cancelled = true; node.removeEventListener('loadeddata', frame); node.removeEventListener('playing', frame) }
+    return () => { cancelled = true; node.removeEventListener('loadeddata', frame); node.removeEventListener('playing', frame)
+      if (frameRequest !== null) node.cancelVideoFrameCallback(frameRequest) }
   }, [media.stream, playbackRevision, nativeCovered])
   const press = useRef<Promise<BrowserPresentationActivationReceipt> | null>(null)
   const point = (event: PointerEvent<HTMLDivElement>) => {
@@ -415,6 +453,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       ref={node => { element.current = node; if (typeof stageRef === 'function') stageRef(node); else if (stageRef) stageRef.current = node }}
       onPointerDown={down} onPointerUp={event => void up(event)} onPointerCancel={event => void up(event, true)}>
       {media.stream ? <video ref={video} muted playsInline style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
+      {media.stream ? <canvas ref={still} hidden aria-hidden="true" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
       {children}
     </div>
   </div>
