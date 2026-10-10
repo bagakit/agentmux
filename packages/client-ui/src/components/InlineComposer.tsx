@@ -158,13 +158,13 @@ export function composerExtensions(
           if (oldNode !== newNode) updateProps()
           return true
         },
-        stopEvent: ({ event }) => event.target instanceof Element && Boolean(event.target.closest('button'))
+        stopEvent: ({ event }) => Boolean(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('button'))
       })
       return props => {
         const { node, editor, getPos } = props
         if (node.attrs.kind === 'file' || node.attrs.kind === 'agent') return renderFile(props)
         const reference = node.attrs as ComposerSemanticReference
-        const dom = document.createElement('button')
+        const dom = props.view.dom.ownerDocument.createElement('button')
         dom.type = 'button'
         dom.contentEditable = 'false'
         dom.className = `composer-semantic-token composer-semantic-token--${reference.kind}`
@@ -313,6 +313,13 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     editorProps
   })
   editorRef.current = editor
+  useLayoutEffect(() => {
+    if (!editor || editor.isDestroyed) return
+    const updateRoot = () => { if (!editor.isDestroyed) editor.view.updateRoot() }
+    updateRoot()
+    editor.on('mount', updateRoot)
+    return () => { editor.off('mount', updateRoot) }
+  }, [editor, platform.ownerDocument])
   useEffect(() => {
     if (editor && !editor.isDestroyed) editor.setEditable(!props.disabled, false)
   }, [editor, props.disabled])
@@ -322,7 +329,7 @@ function PresentedInlineComposer(props: InlineComposerProps) {
       if (editor.isDestroyed || !editor.isEditable) return false
       editor.view.focus()
       const target = editor.view.dom
-      return target === document.activeElement || target.contains(document.activeElement)
+      return target === target.ownerDocument.activeElement || target.contains(target.ownerDocument.activeElement)
     })
   }, [editor, props.disabled, platform])
   useImperativeHandle(props.insertionRef, () => ({

@@ -39,8 +39,9 @@ export function ConversationImageGallery({ references, initial, onInitialError }
     focusDirection.current = null
     const preferred = direction === 1 ? nextButton.current : previousButton.current
     const other = direction === 1 ? previousButton.current : nextButton.current
-    const active = document.activeElement
-    if (active === document.body || !active?.isConnected) (preferred?.disabled ? other : preferred)?.focus({ preventScroll: true })
+    const ownerDocument = (preferred ?? other)?.ownerDocument
+    const active = ownerDocument?.activeElement
+    if (active === ownerDocument?.body || !active?.isConnected) (preferred?.disabled ? other : preferred)?.focus({ preventScroll: true })
   }, [index])
   const move = (direction: -1 | 1) => {
     focusDirection.current = direction
