@@ -640,14 +640,16 @@ export class BrowserViewManager {
   }
 
   private isPresentationDocumentCurrent(document: PresentationDocument): boolean {
+    if (this.presentationDisposed || this.window.isDestroyed()) return false
     const sender = this.window.webContents
-    return !this.presentationDisposed && !this.window.isDestroyed() && !sender.isDestroyed() &&
+    return !sender.isDestroyed() &&
       document === this.presentationDocument && sender.session === document.session &&
       !document.frame.detached && sender.mainFrame === document.frame &&
       !sender.isLoadingMainFrame() && document.frame.url === document.url && sender.getURL() === document.url
   }
 
   private attachPresentationRequester(sender: WebContents): void {
+    const requesterSession = sender.session
     const onNavigation = (details: Electron.Event<Electron.WebContentsDidStartNavigationEventParams>): void => {
       if (details.isMainFrame && !details.isSameDocument) this.invalidatePresentationRequester()
     }
@@ -659,7 +661,7 @@ export class BrowserViewManager {
     sender.on('did-navigate-in-page', onSameDocument)
     sender.on('render-process-gone', invalidate)
     sender.on('destroyed', invalidate)
-    sender.session.setDisplayMediaRequestHandler((request, callback) => {
+    requesterSession.setDisplayMediaRequestHandler((request, callback) => {
       const capture = this.pendingPresentationCapture
       let originMatches = false
       try { originMatches = new URL(request.securityOrigin).origin === new URL(capture?.document.url ?? '').origin } catch { /* reject opaque/invalid origins */ }
@@ -679,7 +681,7 @@ export class BrowserViewManager {
       sender.removeListener('did-navigate-in-page', onSameDocument)
       sender.removeListener('render-process-gone', invalidate)
       sender.removeListener('destroyed', invalidate)
-      sender.session.setDisplayMediaRequestHandler(null)
+      requesterSession.setDisplayMediaRequestHandler(null)
     }
   }
 

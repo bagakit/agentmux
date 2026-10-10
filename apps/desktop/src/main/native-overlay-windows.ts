@@ -80,6 +80,7 @@ export class NativeOverlayWindows {
     if (window.isDestroyed() || window.webContents.isDestroyed()) throw new Error('The exact native document is unavailable. Original work remains.')
     const existing = this.entries.get(window)
     if (existing) return existing
+    const contents = window.webContents
     const entry: Entry = {
       ...(document ? { document: { ...document } } : {}),
       surfaces: new NativeOverlaySurfaces(window, {
@@ -89,8 +90,8 @@ export class NativeOverlayWindows {
         { ...input, ...(entry.document ? { document: entry.document } : {}) })),
       release: () => {
         window.off('closed', release)
-        window.webContents.off('did-start-navigation', navigation)
-        window.webContents.off('render-process-gone', release)
+        contents.off('did-start-navigation', navigation)
+        contents.off('render-process-gone', release)
         entry.surfaces.dispose()
       }
     }
@@ -100,8 +101,8 @@ export class NativeOverlayWindows {
     }
     this.entries.set(window, entry)
     window.once('closed', release)
-    window.webContents.on('did-start-navigation', navigation)
-    window.webContents.on('render-process-gone', release)
+    contents.on('did-start-navigation', navigation)
+    contents.on('render-process-gone', release)
     return entry
   }
 
