@@ -208,7 +208,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
               <p className="settings-nav-group" data-settings-group={group.id}>{group.title}</p>
               {group.items.map((item) => {
                 const Icon = item.icon
-                return <button key={item.id} className={active === item.id && !showResults ? 'selected' : ''} aria-current={active === item.id && !showResults ? 'page' : undefined} title={item.description} data-settings-target={item.id} onClick={() => chooseSection(item.id)}><Icon size={15} /><span><strong>{item.title}</strong></span></button>
+                return <button key={item.id} className={active === item.id && !showResults ? 'selected' : ''} aria-current={active === item.id && !showResults ? 'page' : undefined} title={`${item.title}: ${item.description}`} data-settings-target={item.id} onClick={() => chooseSection(item.id)}><Icon size={15} /><span><strong>{item.title}</strong></span></button>
               })}
             </Fragment>
           ))}

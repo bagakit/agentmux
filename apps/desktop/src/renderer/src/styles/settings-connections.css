@@ -179,7 +179,8 @@
 .connector-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
 .connector-service-control { display: grid; gap: var(--sp-4); }
 .connector-service-control__heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
-.connector-service-control__heading h3 { margin: 0; }
+.connector-service-control__heading h3,
+.connector-library > .settings-pane-toolbar > strong { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.5; }
 .connector-service-control__heading > span { color: var(--text-3); font-size: var(--fs-meta); }
 .connector-service-requests { min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
 .connector-service-requests summary { cursor: pointer; }
