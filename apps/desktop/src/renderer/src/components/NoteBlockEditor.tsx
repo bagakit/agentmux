@@ -1,8 +1,9 @@
 import { RovingToolbar, RovingToolbarButton } from './RovingToolbar'
 import { TextInput } from '@agentmux/client-ui/input'
-import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
+import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, NoteInlineLinkNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
@@ -84,11 +85,13 @@ function NoteReferenceView({ node }: NodeViewProps) {
 }
 
 function ReadOnlyBlock({ content }: { content: JSONContent }) {
+  const ownerDocument = useWorkbenchDocument()
   // A list item requires its schema container even when its subtree is the requested projection.
   const doc = useMemo(() => ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content] }), [content])
   const context = useContext(ReferenceContext), openLink = useRef(context?.onOpenLink); openLink.current = context?.onOpenLink
   const editor = useEditor({ extensions: [...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
     editorProps: { attributes: { class: 'note-embedded-content', 'aria-label': 'Original block, read only' } } }, [])
+  useLayoutEffect(() => { if (editor && !editor.isDestroyed) editor.view.updateRoot() }, [editor, ownerDocument])
   const [issue, setIssue] = useState<string | null>(null), snapshot = useRef<NoteSnapshotSync | null>(null)
   useEffect(() => {
     if (!editor) return
@@ -107,6 +110,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   onSnapshotIssue?: ((displayedRaw: string, incomingRaw: string, reason: string) => void) | undefined
   onKeepDisplayedDraft?: ((displayedRaw: string, incomingRaw: string) => void) | undefined
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const sourceName = useNoteSourceTitle()
   const props = useRef({ note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft })
   props.current = { note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }
@@ -166,6 +170,13 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   }, onUpdate({ editor, transaction }) {
     if (!composing.current && !transaction.getMeta('noteWikiCompositionEnd')) publishContent(editor, transaction.before.toJSON())
   } }, [note.noteId])
+  useLayoutEffect(() => {
+    if (!editor || editor.isDestroyed) return
+    const updateRoot = () => { if (!editor.isDestroyed) editor.view.updateRoot() }
+    updateRoot()
+    editor.on('mount', updateRoot)
+    return () => { editor.off('mount', updateRoot) }
+  }, [editor, ownerDocument])
   const wiki = useNoteWikiCompletion(editor, active, sourceIdentity)
   wikiHandlers.current = { created: wiki.created, keyDown: wiki.keyDown, open: link => {
     if (!editor || editor.isDestroyed || !active) return
@@ -256,12 +267,13 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         // Explicit navigation reveals the DOM for the exact confirmed model position without taking caret focus.
         if (reveal && blockPosition !== null) {
           const element = editor.view.nodeDOM(blockPosition)
-          if (!(element instanceof HTMLElement) || !desktopElementVisible(element)) return false
-          element.scrollIntoView({ block: 'center', inline: 'nearest' })
+          if (!element || element.nodeType !== 1 || !desktopElementVisible(element as HTMLElement)) return false
+          const blockElement = element as HTMLElement
+          blockElement.scrollIntoView({ block: 'center', inline: 'nearest' })
         }
         if (!focus) return true
         editor.view.focus()
-        return editor.view.dom === document.activeElement || editor.view.dom.contains(document.activeElement)
+        return editor.view.dom === editor.view.dom.ownerDocument.activeElement || editor.view.dom.contains(editor.view.dom.ownerDocument.activeElement)
       } })
     }
     editor.on('mount', attach).on('unmount', detach).on('destroy', detach)

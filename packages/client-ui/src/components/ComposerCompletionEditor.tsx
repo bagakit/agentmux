@@ -85,7 +85,7 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
     if (shortcut !== 'message-tool.next' && shortcut !== 'message-tool.previous' && shortcut !== 'message-tool.send') return false
     const buttons = [...(panel.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
     if (!buttons.length) return false
-    const current = buttons.indexOf(document.activeElement as HTMLButtonElement)
+    const current = buttons.indexOf(panel.current?.ownerDocument.activeElement as HTMLButtonElement)
     if (shortcut === 'message-tool.send') {
       if (current < 0) return false
       event.preventDefault(); buttons[current]!.click(); return true
