@@ -221,6 +221,20 @@
 }
 
 /* The original application workface also owns its platform confirmation. */
+.connector-enrollment { gap: var(--sp-5); }
+.connector-enrollment__heading { display: grid; gap: var(--sp-3); min-width: 0; }
+.connector-enrollment__summary, .connector-enrollment__diagnosis { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.65; overflow-wrap: anywhere; }
+.connector-enrollment__diagnosis { padding-left: var(--sp-4); border-left: 2px solid var(--line); }
+.connector-enrollment__action { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.connector-enrollment__action > button { max-width: 100%; white-space: normal; text-align: left; }
+.connector-enrollment__action .connector-check-feedback { font-size: var(--fs-body); }
+.connector-enrollment__text-action { display: inline-flex; align-items: center; justify-self: start; gap: var(--sp-2); width: fit-content; max-width: 100%; min-height: 32px; padding: var(--sp-2) 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: var(--fs-body)/1.5 var(--font-sans); text-align: left; cursor: pointer; }
+.connector-enrollment__text-action > svg { flex: none; color: var(--text-3); }
+.connector-enrollment__text-action:hover { color: var(--text); }
+.connector-enrollment__text-action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 3px; }
+.connector-enrollment > .connector-diagnostics, .connector-enrollment > .connector-optional, .connector-enrollment > .connector-enrollment__history { padding-top: var(--sp-3); }
+.connector-enrollment > details > summary { padding-block: var(--sp-2); color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.connector-enrollment > .connector-optional > button { margin-top: var(--sp-3); }
 .connector-enrollment__identity { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0; }
 .connector-enrollment__identity strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
 .connector-enrollment__identity > span { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
