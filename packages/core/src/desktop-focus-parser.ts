@@ -197,7 +197,8 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       (navigation.state !== 'applied' && navigation.state !== 'unchanged') || observedInput.after.provenance !== 'observed' ||
       observedInput.after.connected !== true || observedInput.after.visible !== true || observedInput.after.inert !== false ||
       observedInput.after.regionId !== navigation.selection.space?.regionId || observedInput.after.tabId !== navigation.selection.space?.tabId ||
-      (result.presentation.state === 'window' && (observedInput.after.scope !== 'window' || observedInput.after.windowId !== result.presentation.windowId ||
+      (result.presentation.state === 'window' && observedInput.after.scope !== 'window') ||
+      (result.presentation.windowId !== undefined && (observedInput.after.windowId !== result.presentation.windowId ||
         observedInput.after.documentGeneration !== result.presentation.documentGeneration)))) ||
     (!result.partial && (navigation.state === 'rejected' || navigation.state === 'unconfirmed' || (result.presentation.state !== 'main-visible' && result.presentation.state !== 'window') ||
       observedInput.outcome === 'unavailable' || observedInput.outcome === 'unconfirmed'))) fail('Focus receipt confirmation is inconsistent.', code)
