@@ -2122,7 +2122,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath?: string,
     operationId: string = randomUUID(),
-    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride'>
+    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostLifecycleOperation(
       control.hostId,
@@ -2135,7 +2135,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath: string | undefined,
     operationId: string,
-    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride'>
+    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'terminal') {

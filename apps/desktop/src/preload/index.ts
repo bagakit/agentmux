@@ -543,7 +543,7 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),
     observeStorage: (session: SessionControl) => ipcRenderer.invoke('sessions:observeStorage', session),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
-    recover: (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride'>) =>
+    recover: (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) =>
       ipcRenderer.invoke('sessions:recover', session, workspacePath, operationId, request),
     // 唯一带超时的那条：等 Runtime 收尾必须有上限，否则一次没回执的握手会把关闭按钮永久锁死。
     // 理由与取值见 shared/session-stop-timeout.ts。

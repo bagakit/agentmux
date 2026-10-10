@@ -38,6 +38,7 @@ export type ComposerQueuedMessage = {
   /** The original control binding, including before its first typed receipt arrives. */
   inputControlled?: boolean
   inputReceipt?: AgentInputSubmissionReceipt
+  resumeInputReceipt?: NonNullable<NonNullable<import('@agentmux/core').AgentMuxAgentSession['continuity']>['launchInput']>
   inputStopReceipt?: AgentInputWaitStopReceipt
   preparing?: boolean
   sending?: boolean
@@ -52,6 +53,12 @@ export type ComposerQueuedMessage = {
 
 /** Labels describe the queue owner's facts, not native CLI rendering or model progress. */
 export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteraction = false) {
+  if (entry.resumeInputReceipt?.state === 'launch-carried') return { label: entry.archived ? '已归档 · 随恢复启动提交' : '随恢复启动提交',
+    detail: 'Runtime 已确认恢复启动携带这条原消息；CLI 是否采用、Agent 是否完成另行核对。不会再通过终端重发；归档不会撤回启动输入。', busy: false }
+  if (entry.resumeInputReceipt?.state === 'not-applied') return { label: '原恢复输入未应用',
+    detail: 'Core 已确认这条恢复输入未应用；原消息与已有草稿保留。可移至草稿，明确编辑并发送一条新消息。', busy: false }
+  if (entry.resumeInputReceipt?.state === 'terminal-confirmed') return { label: entry.archived ? '已归档 · 终端输入已确认' : '终端输入已确认',
+    detail: '原终端已确认恢复后的输入字节；Native 是否采用与任务完成另行核对。不会重新派发这条原输入。', busy: false }
   if (entry.inputReceipt?.status === 'terminal-confirmed') return { label: entry.archived ? '已归档 · 终端输入已确认' : '终端输入已确认',
     detail: '原终端已确认输入字节；Native 是否采用尚未确认。这不是任务完成回执。归档不撤回输入，不能恢复为待发重投。', busy: false }
   if (entry.inputReceipt && !entry.archived) {
@@ -98,6 +105,8 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
 
 /** A retained queue record is not a submission receipt or a conversation position. */
 export function queuedMessageLocation(entry: ComposerQueuedMessage) {
+  if (entry.resumeInputReceipt?.state === 'launch-carried') return '恢复启动参数已携带原消息；Native 采用与回复位置另行核对'
+  if (entry.resumeInputReceipt?.state === 'not-applied') return 'Core 已确认原恢复输入未应用'
   if (entry.inputReceipt?.status === 'terminal-confirmed') return '原终端输入字节已确认；Native 采用与回复位置尚未确认'
   if (entry.confirmed) return '原输入已确认，可读取原记录'
   if (entry.archived) return entry.unconfirmed ? '已归档；此前输入结果待核实' : '已归档；不会自动发送'

@@ -1,3 +1,4 @@
+import { normalizeAgentContinuityLaunchInput } from './agent-session-continuity.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
@@ -53,10 +54,13 @@ export function parsePromptSubmissionRecord(value: unknown): AgentPromptSubmissi
   const r = record(value, 'original prompt record'), run = runRef(r.run)
   const parsed: AgentPromptSubmissionRecord = {
     agentSessionId: string(r.agentSessionId, 'original prompt Session'), run,
+    ...(r.launch === undefined ? {} : { launch: normalizeAgentContinuityLaunchInput(r.launch) }),
     ...(r.admission === undefined ? {} : { admission: normalizePromptCompletionAdmission(r.admission) }),
     ...(r.terminalPromptSubmission === undefined ? {} : { terminalPromptSubmission: terminalPromptSubmission(r.terminalPromptSubmission, run) })
   }
-  if (!parsed.admission && !parsed.terminalPromptSubmission) throw new AgentMuxError('Original prompt record is empty.', 'INVALID_AGENT_SESSION_STORE')
+  if (parsed.launch && (parsed.launch.delivery !== 'launch' || parsed.launch.state !== 'launch-carried' ||
+      parsed.launch.key?.agentSessionId !== parsed.agentSessionId || parsed.launch.key.expectedRun.runId !== run.runId || parsed.admission || parsed.terminalPromptSubmission)) throw new AgentMuxError('Original launch input changed its carrier.', 'INVALID_AGENT_SESSION_STORE')
+  if (!parsed.launch && !parsed.admission && !parsed.terminalPromptSubmission) throw new AgentMuxError('Original prompt record is empty.', 'INVALID_AGENT_SESSION_STORE')
   if (parsed.admission && parsed.terminalPromptSubmission && parsed.admission.submissionId !== parsed.terminalPromptSubmission.submissionId) throw new AgentMuxError(
     'Original prompt phases name different logical inputs.', 'INVALID_AGENT_SESSION_STORE')
   const inputKey = parsed.admission?.inputKey
