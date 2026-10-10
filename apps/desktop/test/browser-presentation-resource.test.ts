@@ -523,3 +523,20 @@ it('selects the exact child lease before rehosting the same native page and scop
   expect(notify.mock.calls.some(([,window]) => window===child)).toBe(true)
   expect(f.source.webContents.dead).toBe(false)
 })
+
+
+it('keeps the original reachable viewport when the selected native child refuses admission', async () => {
+  const f = await fixture(), original = f.register('A')
+  await f.manager.activatePresentation(f.app as never, f.frame as never, original.leaseId, { kind: 'select' })
+  const child = { webContents: new native.Contents(), isDestroyed: () => false, isFocused: () => true, contentView: {
+    addChildView: () => { throw new Error('Native child admission unavailable') }, removeChildView: vi.fn()
+  } }
+  const identity = { windowId: 'child', documentGeneration: 'original-document' }
+  f.manager.setPresentationWindowOwner(scope => scope?.windowId === identity.windowId ? child as never : f.window as never)
+  const borrowed = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser', occurrence: occurrence('B'), geometry: { visible: true, bounds: { x: 5000, y: 4000, width: 200, height: 100 } }, window: identity })
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, borrowed.leaseId, { kind: 'select' })).rejects.toThrow('Native child admission unavailable')
+  expect(f.manager.windowForView(f.source as never)).toBe(f.window)
+  expect(f.views).toContain(f.source); expect(f.source.getBounds()).toEqual(geometry.bounds)
+  expect(f.source.getVisible()).toBe(true); expect(f.source.webContents.dead).toBe(false)
+  expect(f.manager.nativeOwner('browser')?.view).toBe(f.source)
+})
