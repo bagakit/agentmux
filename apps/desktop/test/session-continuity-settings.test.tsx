@@ -48,6 +48,9 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   expect(delivery).toContain('native launch argument receipt confirms Runtime carriage only; Provider consumption requires separate evidence')
   expect(delivery).toContain('ordinary User role and open one turn')
   expect(delivery).toContain('delivery does not mean the model completed the task')
+  expect(delivery).toContain('Selected content accompanies the original Provider native recovery/input plan')
+  expect(delivery).not.toContain('follows confirmed native resume')
+  expect(delivery).not.toContain('current input readiness')
   const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
     const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
     useAppStore.setState({ config: saved }); return saved
