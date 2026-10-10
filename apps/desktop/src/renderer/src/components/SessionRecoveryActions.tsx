@@ -3,7 +3,7 @@ import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -85,7 +85,7 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
     {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={onTakeOver}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
     <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><ThemeActionSearchIcon size={12} /> Analyze…</button>
     <Dialog.Root open={mode !== null} onOpenChange={next => { if (!next) close() }}>
-      <Dialog.Portal container={resolveOverlayContainer()}>
+      <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="dialog-scrim" />
         <Dialog.Content className="session-recovery-dialog dialog-surface" aria-busy={busy}
           onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; openedContent.current = event.target instanceof Element ? event.target : null; cancel.current?.focus() }}
@@ -118,7 +118,7 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
               {busy ? 'Checking…' : existing || result ? 'Check original request' : destination === 'mote' ? 'Send analysis' : 'Create analysis Agent'}
             </button></footer>
         </Dialog.Content>
-      </Dialog.Portal>
+      </DocumentOverlayPortal>
     </Dialog.Root>
   </div>
 }

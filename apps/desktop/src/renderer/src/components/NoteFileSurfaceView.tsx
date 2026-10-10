@@ -20,7 +20,7 @@ import { openNotebookPage } from '../lib/recall-notebooks'
 import type { NotebookPage } from '@agentmux/core/notebook-catalog'
 import { useNotebookLibrary } from '../lib/notebook-library'
 import { useNoteSourceTitle } from '../lib/note-source-name'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { setNoteComposition } from '../lib/note-live-merge'
 import { NoteVersionHistory } from './NoteVersionHistory'
 import { NoteConflictReview } from './NoteConflictReview'
@@ -160,7 +160,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     {!blockPresentation ? <div className="note-knowledge-notice" role="status">Block selection recovery is unconfirmed for this display. Editing continues; restore its exact display position to resume selection recovery.</div> : null}
     {notice && !choices.length ? <div className="note-knowledge-notice" role="status">{notice}</div> : null}
     <Dialog.Root open={presentation.active && choices.length > 0} onOpenChange={open => { if (!open) setChoices([]) }}>
-      <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="dialog-scrim" />
+      <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content className="notebook-create-dialog dialog-surface note-position-dialog" onCloseAutoFocus={event => {
         event.preventDefault()
         if (restoreChoiceFocus.current && presentation.active && choiceOpener.current?.isConnected) choiceOpener.current.focus({ preventScroll: true })
@@ -174,7 +174,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       key={JSON.stringify([choice.location.displayWorkspaceId, choice.location.groupId, choice.location.tabId, choice.location.regionId])} onClick={() => void openAt(choice)}>
       <span>{choice.displayName} · {choice.tabName}</span><small>{choice.position}</small>
     </button>)}</div>
-      </Dialog.Content></Dialog.Portal>
+      </Dialog.Content></DocumentOverlayPortal>
     </Dialog.Root>
     <NoteConflictReview tabId={tabId} regionId={surface.regionId} workspaceId={surface.workspaceId} path={surface.path} active={presentation.active} />
     <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={(raw, before) => update(tabId, raw, before ?? document.content, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage} onCompositionChange={compositionChanged}

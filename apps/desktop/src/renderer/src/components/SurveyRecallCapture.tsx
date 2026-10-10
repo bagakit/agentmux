@@ -9,7 +9,7 @@ import { EMPTY_LAUNCHER_DRAFT, useLauncherState } from '../lib/launcher-state'
 import { refreshNotebookLibrary, useNotebookLibrary } from '../lib/notebook-library'
 import { openNotebookPage } from '../lib/recall-notebooks'
 import { saveSurveyToRecall, type SurveyRecallCapture as CaptureTarget } from '../lib/survey-recall-capture'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** A result destination, separate from Survey's browser navigation and Recall's directory. */
 export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget | null; onClose(): void }) {
@@ -68,7 +68,7 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
   }
   const saved = receipt?.status === 'written' && receipt.notebookRegistered
   return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
+    <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog survey-recall-capture"
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}>
@@ -90,6 +90,6 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
               {busy ? 'Saving…' : receipt?.status === 'unknown' || receipt?.status === 'pending' ? 'Check this save' : receipt ? 'Continue this save' : 'Save finding'}</button>}
         </footer>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

@@ -17,7 +17,7 @@ import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { SelectionField } from './SelectionField'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import '../styles/mote-quick-mode.css'
 
 const ThemeActionQuickModeIcon = semanticIconComponent('action.quick-mode')
@@ -101,7 +101,7 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
     catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) setBusy(false) }
   }
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
+  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="dialog-scrim mote-behavior-overlay" />
     <Dialog.Content ref={content} className="dialog-surface mote-quick-mode-dialog" aria-busy={busy}
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLButtonElement>('.selection-field')?.focus() }}
@@ -129,5 +129,5 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
       </div>
       <footer className="mote-quick-mode-dialog__footer"><button className="icon-button" type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></button><span>Saving sends no message.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={loading || busy || !saved || Boolean(saved.issue)} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button></footer>
     </Dialog.Content>
-  </Dialog.Portal></Dialog.Root>
+  </DocumentOverlayPortal></Dialog.Root>
 }

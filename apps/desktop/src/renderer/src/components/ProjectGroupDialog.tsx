@@ -10,7 +10,7 @@ import { useAppStore } from '../store'
 import { projectGroupsFor, projectGroupMember } from '../lib/cross-device-project-groups'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import type { WorkspaceProject } from '../lib/workspace-projects'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeObjectLinkIcon = semanticIconComponent('object.link')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -52,7 +52,7 @@ export function ProjectGroupDialog({ projects, seed, editing, related, observati
     finally { setBusy(false) }
   }
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface project-group-dialog" aria-busy={busy}
         onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
@@ -80,6 +80,6 @@ export function ProjectGroupDialog({ projects, seed, editing, related, observati
             <button type="submit" className="small-button confirmation-dialog__confirm--neutral" disabled={busy}>{busy ? 'Saving…' : issue?.startsWith('Group applied.') ? 'Retry saving' : editing ? 'Save group' : 'Create group'}</button></footer>
         </form>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

@@ -8,7 +8,7 @@ import { api } from '../lib/api'
 import { moveKnowledgeTopic, refreshTopicSpatial } from '../lib/topic-knowledge-actions'
 import { useAppStore } from '../store'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCreateCategoryIcon = semanticIconComponent('action.create-category')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
@@ -81,7 +81,7 @@ function TopicMoveContent({ target, onClose, onMoved }: TopicMoveDialogProps & {
 
   return <>
     <Dialog.Root open onOpenChange={open => { if (!open && !moving.current && !creating) onClose() }}>
-      <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
+      <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
         <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog topic-move-dialog"
           onEscapeKeyDown={event => { if (moving.current || creating || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
           onInteractOutside={event => { if (moving.current || creating) event.preventDefault() }}>
@@ -105,7 +105,7 @@ function TopicMoveContent({ target, onClose, onMoved }: TopicMoveDialogProps & {
             <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={!canMove}>{busy ? 'Moving…' : 'Move Topic'}</button></footer>
           </form>
         </Dialog.Content>
-      </Dialog.Portal>
+      </DocumentOverlayPortal>
     </Dialog.Root>
     <TopicCategoryDialog target={creating ? 'create' : null} onClose={() => { setCreating(false); void reload() }} />
   </>

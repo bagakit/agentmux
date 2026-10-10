@@ -3,7 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { focusUtcOffset, type FocusRulerMode, type FocusRulerPreferences } from '../lib/focus-timeline-ruler'
 import '../styles/focus-timeline-ruler.css'
 
@@ -43,7 +43,7 @@ export function FocusTimelineRulerSettings({ active = true, preferences, onChang
   const valid = draft.mode !== 'uniform' || (intervalValid && phaseValid)
   return <Dialog.Root open={active && (open || dateChoice !== null)} onOpenChange={begin}>
     <Dialog.Trigger asChild><button data-focus-window-control type="button" className="icon-button" aria-label="Focus timeline settings" title="Time ruler and time zone"><ThemeActionAdjustIcon size={12} /></button></Dialog.Trigger>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content onCloseAutoFocus={event => { if (dormantClose.current) event.preventDefault() }} className="dialog-surface focus-ruler-settings" onPointerDownCapture={event => event.stopPropagation()}>
         <header><Dialog.Title>{dateChoice ? 'Choose this clock time' : 'Timeline settings'}</Dialog.Title><Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close timeline settings"><ThemeActionCloseIcon size={14} /></button></Dialog.Close></header>
@@ -55,6 +55,6 @@ export function FocusTimelineRulerSettings({ active = true, preferences, onChang
           <footer><Dialog.Close asChild><button type="button" className="small-button">Cancel</button></Dialog.Close><button type="button" className="small-button" disabled={!valid} onClick={() => { onChange({ ...draft, ...(draft.mode === 'uniform' ? { intervalMinutes: minutes, phaseMinutes: Number(phase.slice(0, 2)) * 60 + Number(phase.slice(3)) } : {}) }); setOpen(false) }}>Apply</button></footer>
         </>}
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

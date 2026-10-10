@@ -6,7 +6,7 @@ import { SCRATCH_TOPIC_TITLE_MAX_LENGTH } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** A name edits the original Topic title, never a Session or directory identity. */
 export function MoteRenameDialog({ target, onClose, returnFocus }: {
@@ -36,7 +36,7 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
     finally { if (isCurrent()) setBusy(false) }
   }
   return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface mote-rename" aria-busy={busy}
         onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus(); input.current?.select() }}
@@ -54,6 +54,6 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
             <button type="submit" className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save name'}</button></footer>
         </form>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

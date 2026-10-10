@@ -12,7 +12,7 @@ import { openMoteDiscussionDraft } from '../lib/mote-materials-actions'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
-import { resolveOverlayContainer, WindowOverlayPortal } from './WindowOverlayHost'
+import { DocumentOverlayPortal, WindowOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -94,7 +94,7 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
     } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
   }
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="dialog-scrim mote-behavior-overlay" />
       <Dialog.Content ref={content} className="dialog-surface mote-behavior-dialog" aria-busy={busy}
         onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLInputElement>('input[type="radio"]')?.focus() }}
@@ -156,6 +156,6 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
           <button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
         </div></footer>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

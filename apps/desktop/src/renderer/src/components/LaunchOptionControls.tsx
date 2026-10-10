@@ -3,7 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { LaunchOption, LaunchOptionSelection } from '@agentmux/core'
 import type { LauncherNames } from '../lib/launcher-name-draft'
@@ -74,7 +74,7 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
       {chosen.length ? <span className="launch-refine__summary">{chosen.map(choice => <span key={choice.optionId} data-tier={choice.tier ?? 'safe'}>{choice.label}</span>)}</span> : null}
       {names?.agentName || names?.tabName ? <ThemeStatusNamedIcon size={4} className="launch-refine__named" role="img" aria-hidden="false" aria-label="Custom names set" /> : null}
     </button></Dialog.Trigger>
-    {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><Dialog.Content ref={setContent} className="launch-refine__panel" inert={!expanded} style={{ visibility: 'hidden' }}
+    {active ? <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Content ref={setContent} className="launch-refine__panel" inert={!expanded} style={{ visibility: 'hidden' }}
       onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
       <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
       <Dialog.Description>For this launch. Unset values use Agent defaults.</Dialog.Description>
@@ -102,6 +102,6 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
           <label>Tab<TextInput aria-label="Tab name" placeholder="Automatic" value={names.tabName} disabled={disabled} onChange={event => onNameChange('tabName', event.target.value)} /></label>
         </fieldset> : null}
       </div>
-    </Dialog.Content></Dialog.Portal> : null}
+    </Dialog.Content></DocumentOverlayPortal> : null}
   </Dialog.Root>
 }

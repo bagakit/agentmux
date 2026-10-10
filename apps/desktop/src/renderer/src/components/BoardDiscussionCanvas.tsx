@@ -15,7 +15,7 @@ import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeObjectTopicIcon = semanticIconComponent('object.topic')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
@@ -121,7 +121,7 @@ export function BoardDiscussionCanvas({
 
   return (
     <Dialog.Root open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
-      <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="discussion-canvas__overlay dialog-scrim" />
         <Dialog.Content
           className="discussion-canvas dialog-surface"
@@ -236,7 +236,7 @@ export function BoardDiscussionCanvas({
             </button>
           </footer>
         </Dialog.Content>
-      </Dialog.Portal>
+      </DocumentOverlayPortal>
     </Dialog.Root>
   )
 }

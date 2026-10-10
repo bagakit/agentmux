@@ -2,7 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
-import { resolveOverlayContainer } from '../WindowOverlayHost'
+import { DocumentOverlayPortal } from '../WindowOverlayHost'
 
 export type AnnotationFileActionResult = { status: 'done' } |
   { status: 'error' | 'conflict' | 'unknown'; message: string }
@@ -62,7 +62,7 @@ export function AnnotationFileDialog({ mode, initialPath, onSubmit, onCheck, onC
 
   const blocked = unconfirmedPaths.current.has(path)
   return <Dialog.Root open onOpenChange={open => { if (!open) close() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface annotation-file-dialog" aria-busy={busy !== null}
         onOpenAutoFocus={event => {
@@ -100,6 +100,6 @@ export function AnnotationFileDialog({ mode, initialPath, onSubmit, onCheck, onC
           </footer>
         </form>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

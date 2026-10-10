@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
@@ -37,7 +37,7 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
     finally { setBusy(false) }
   }
   return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
+    <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog topic-knowledge-editor" onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">{target?.entry ? 'Edit knowledge note' : 'Create knowledge note'}</Dialog.Title>
@@ -52,7 +52,7 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
           {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
           <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !title.trim()}>{busy ? 'Saving…' : 'Save knowledge'}</button></footer>
         </form>
-      </Dialog.Content></Dialog.Portal>
+      </Dialog.Content></DocumentOverlayPortal>
   </Dialog.Root>
 }
 export function knowledgeSourceLabel(source: TopicKnowledgeSource): string {
@@ -94,7 +94,7 @@ export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { 
     } catch (cause) { setError(presentError(cause) + ' Your source and title are kept. Continuing again uses the same Topic identity.') }
     finally { setCreating(false) }
   }
-  return <><Dialog.Root open={Boolean(target) && !edit} onOpenChange={open => { if (!open && !edit && !creating) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
+  return <><Dialog.Root open={Boolean(target) && !edit} onOpenChange={open => { if (!open && !edit && !creating) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" /><Dialog.Content className="confirmation-dialog dialog-surface topic-dialog"
       onEscapeKeyDown={event => { if (creating || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (creating) event.preventDefault() }}>
       <Dialog.Title className="confirmation-dialog__title">Collect sources</Dialog.Title><Dialog.Description className="confirmation-dialog__description">Create a knowledge note with references to {target?.title || 'the selected content'}. The original content stays in place.</Dialog.Description>
@@ -103,7 +103,7 @@ export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { 
         <label>Category<select value={categoryId} disabled={creating} onChange={event => setCategoryId(event.target.value)}><option value="">未分类</option>{categories.filter(category => !category.readError).map(category => <option key={category.categoryId} value={category.categoryId}>{category.title}</option>)}</select></label></> : null}
       {error ? <p role="status" className="surface-inline-error">{error}</p> : null}{loading ? <p role="status">Reading Topics…</p> : null}
       <footer><button type="button" className="small-button" disabled={creating} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={creating || !topicId || (topicId === '__new_topic__' && !newTitle.trim())} onClick={() => void continueCapture()}>{creating ? 'Creating…' : 'Continue'}</button></footer>
-    </Dialog.Content></Dialog.Portal></Dialog.Root>
+    </Dialog.Content></DocumentOverlayPortal></Dialog.Root>
     <TopicKnowledgeEditor target={edit} onClose={() => setEdit(null)} onSaved={entry => { onSaved?.(entry); setEdit(null); onClose() }} />
   </>
 }
