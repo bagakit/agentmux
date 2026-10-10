@@ -1,10 +1,13 @@
 import { useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { regionIds } from '@agentmux/layout'
 import { agentRegionExecution, useAppStore } from '../store'
 import { sessionNamesForReferences } from './session-name-metadata'
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { createSessionViewModeSelector, sessionPresentationById, sessionPresentationsAtPath } from './session-presentation'
-import type { WorkbenchTab } from './workbench-tabs'
+import { agentDisplayName, type WorkbenchTab } from './workbench-tabs'
+import { workbenchAgentFactsFor } from './workbench-tab-presentation'
+import { regionSurfaceLabel } from './region-display-name'
 import { isSessionSurface } from './workbench-surface-kinds'
 import { useObservedAppStore } from './use-observed-app-store'
 
@@ -30,10 +33,8 @@ export function useWorkbenchTabSessions(tab: WorkbenchTab | undefined) {
   }))
 }
 
-/** Names read exact durable execution bindings; they never grant Session or Run capabilities. */
-export function useWorkbenchTabNameMetadata(tab: WorkbenchTab | undefined) {
-  const scope = useWorkbenchTabScope(tab)
-  return useObservedAppStore('workbenchTab', true, scope, useShallow(state => sessionNamesForReferences(state.sessionNameMetadata, tab ? Object.values(tab.regions).flatMap(region => {
+function nameMetadataForTab(state: Pick<ReturnType<typeof useAppStore.getState>, 'sessions' | 'sessionNameMetadata' | 'pendingAgentLaunches'>, tab: WorkbenchTab | undefined) {
+  return sessionNamesForReferences(state.sessionNameMetadata, tab ? Object.values(tab.regions).flatMap(region => {
     if (region.kind !== 'agent') return []
     const session = sessionPresentationById(state.sessions).get(region.sessionId)
     return [{agentSessionId: region.sessionId, hosts: [
@@ -41,7 +42,30 @@ export function useWorkbenchTabNameMetadata(tab: WorkbenchTab | undefined) {
       session?.hostId,
       state.pendingAgentLaunches[region.sessionId]?.request?.hostId
     ]}]
-  }) : [])))
+  }) : [])
+}
+
+/** Names read exact durable execution bindings; they never grant Session or Run capabilities. */
+export function useWorkbenchTabNameMetadata(tab: WorkbenchTab | undefined) {
+  const scope = useWorkbenchTabScope(tab)
+  return useObservedAppStore('workbenchTab', true, scope, useShallow(state => nameMetadataForTab(state, tab)))
+}
+
+/** Runtime changes only refresh the Region menu when its displayed labels change. */
+export function useWorkbenchRegionLabels(tab: WorkbenchTab) {
+  const scope = useWorkbenchTabScope(tab)
+  return useObservedAppStore('workbenchTab', true, scope, useShallow(state => {
+    const byId = sessionPresentationById(state.sessions)
+    const sessions = scope.sessionIds.flatMap(id => byId.get(id) ? [byId.get(id)!] : [])
+    const metadata = nameMetadataForTab(state, tab)
+    const agentFactsFor = workbenchAgentFactsFor(sessions, state.agentNames, state.timelines, metadata)
+    return Object.fromEntries(regionIds(tab.layout.root).flatMap(regionId => {
+      const region = tab.regions[regionId]
+      if (!region) return []
+      const facts = region.kind === 'agent' ? agentFactsFor(region.sessionId) : null
+      return [[regionId, facts ? agentDisplayName(facts) : regionSurfaceLabel(region, sessions, metadata)]]
+    }))
+  }))
 }
 
 /** The original per-Session records share the same admission as the Tab's identity. */
