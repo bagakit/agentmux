@@ -827,3 +827,25 @@ original preference-save intent with the same already-created application.
 `inspect/ls` read only the original parent journal; explicit `advance` can inspect
 or continue the fixed children, without replaying unknown registration, upload,
 PATCH or File writes. Independent Motes and original connections remain usable.
+
+The original Mote Profile exposes these parent operations from its bot row.
+The preview reads `topic.md` and the saved avatar through their original public
+owners; display summaries and editor drafts are not write sources. Creating a
+bot, changing the default choice and synchronizing an existing application's
+public profile are explicit, separate actions. Synchronization can affect other
+Motes and groups that use the same application.
+
+Before dispatch, the Workbench retains each complete original create or sync
+input under its operation ID. This is a client request, not another operation
+journal. A lost Renderer reply can be recovered from the same Mote's parent
+list or inspect route; a missing lookup never proves that nothing happened.
+Known unsent requests can be explicitly continued after local storage recovers.
+An independent new setup is separately named and keeps all previous requests.
+
+Settings remains the application identity library. Each exact application has
+a bounded public-profile observation and original-update view. Reading current
+profile data, inspecting a saved operation and explicitly advancing it retain
+their different meanings. No view submits a publication or treats a current
+profile/default value as an acknowledgement of an earlier unknown write.
+Browser clients consume `@agentmux/core/mote-connections`, the pure existing
+parent contract and codec leaf, without loading the Node Runtime.
