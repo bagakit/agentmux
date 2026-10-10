@@ -133,9 +133,11 @@ Focus 默认仍加载完整 Tab；用户明确选择“只看此 Region”时，
 
 Folder 的内容入口为 **Files + Zones**，原 Branches 区域表达的是 Zone 工作分区导航，不是通用 Git 分支浏览器。Zone 目录从同一空间图的实体与该 Space 的全部绑定派生，包含普通目录、worktree 及保留的未知资源上下文；不能从 Git 引用列表、分支名、当前 HEAD 或 Agent cwd 重新铸造 Zone。选择已有工作分区进入该 Zone 的原 Tabs/Regions，恢复其原工作面和成员偏好，不 checkout、不新建 Session。未绑定 worktree 的分支是创建工作目录的资源候选，不伪装成已经存在的 Zone；显式创建 worktree 仍沿原资源与空间 owner，创建和导航回执各自成立。
 
-Zone 导航须让人辨认其已确认的目录／worktree 类型、分支和准确位置，不能只显示内部标识或从路径长相猜类型。方向键及 Home／End 在目录内移动键盘焦点，Enter／Space 明确进入原工作分区；仅移动焦点不 checkout 或改变所选 Zone。工作目录管理入口明确说明进入 Git 的 worktree 管理，不能以未标明含义的加号暗示已经创建；创建仍由原 Git owner 完成。改动摘要与当前 Zone 的准确资源相邻并标明该范围，不以醒目的孤立数量充当导航主体；未知仍沿原说明和恢复路径。
+Folder 的 Zone 导航须让人辨认其已确认的目录／worktree 类型、分支和准确位置，不能只显示内部标识或从路径长相猜类型。方向键及 Home／End 在目录内移动键盘焦点，Enter／Space 明确进入原工作分区；仅移动焦点不 checkout 或改变所选 Zone。工作目录管理入口明确说明进入 Git 的 worktree 管理，不能以未标明含义的加号暗示已经创建；创建仍由原 Git owner 完成。改动摘要与当前 Zone 的准确资源相邻并标明该范围，不以醒目的孤立数量充当导航主体；未知仍沿原说明和恢复路径。
 
 Folder 的二级功能组为 Files + Zones、Agents 与 Git。Files + Zones 回答“在哪条工作线上工作”，Agents 回答“哪些 Agent 可继续协作”，Git 回答“准确资源改了什么、版本怎样演进”。切换功能组不切换 Zone 或工作目录，不创建或关闭原 Tab/Region/Session，不抢原输入。分支与 worktree 是 Git 项目下关联的资源事实，不取代 Zone 身份，也不把 Zone 限定为 Git；普通目录无需 Git 探测成功即可选择其 Zone。Git 引用筛选与 Zone 导航是不同意图，不能以历史或比较选择暗中切换工作分区；Git 资源范围、Changes 与完整操作只见[文件与 Git](files-and-git.md#git-源码控制与-pr)。Topic／Mote 继续使用各自原内容入口，不因新增 Folder Git 工具改变对象、布局或共享资源身份。
+
+共同框架统一对象上下文、成员 Zone、功能工具与准确资源的分工，不把 Folder 的 worktree 目录套给所有类型。知识分类以具体 Topic 作为成员 Zone，保原 Topics／Knowledge 与右侧 Tabstrip；Mote 内容入口说明当前持久对象，保原 Profile／Ideas 和资料，不因共用 Scratch 就称为全局 Topics。只有一个 Zone 不强加另一层选择，多个合法绑定不因简化而失去原入口。文件位置来自原内容 scope 的准确 Host／目录，不拿展示位置或共享 Scratch 根冒充对象目录；元数据未知时保原身份、工作面及已有可用内容，并持续说明原未知和恢复动作。
 
 主区域显示原 Zone 工作面，其内容可在其他位置按 Zone、Tab 或 Region 任一级加载。每次加载使用原实体与完整准确的展示位置引用（displayWorkspaceId/groupId/tabId/regionId），继续同一内容、输入与动作 owner；加载较低层级不带上层多余 chrome，具体边界见[《Zone→Tabs→Regions 的实体与展示绑定》](#zonetabsregions-的实体与展示绑定)。切换功能组本身不新建 Zone、Tab 或 Session，不清草稿；明确创建与文件动作仍由原能力消费用户意图，不把 Space 写成 Zone 的唯一父或为每处加载启动新 Agent。
 
@@ -348,6 +350,8 @@ Topics 是从日常讨论持续积累知识的入口。临时交流可以先开�
 **整个 Topic 可以转移分类。** 用户或已获授权的 Agent 能选择准确 Topic 和目标 Category，看清当前与目标归属，再改变同一 Topic 的分类关系。从分类二级目录可以直接对准确 Topic 发起此操作，不要求先打开其 Chat 或启动 Agent；具体 Topic 内也能发起同一操作，两处复用同一转移 owner 和公共能力，不能另存 UI 分类关系。转移后其所有 Chat、Thread、知识和来源在目标分类继续可达，源分类不再将其列作该次转移的原成员；这是归属转移，不是复制内容或 Agent 移动。原 Topic/Zone/Tab/Region、Session/Run、cwd、布局、草稿与其他合法展示绑定保持。取消不写入，保存未确认保原引用与当下工作并提供核对／重试；成功回执区分关系已应用与持久确认。跨分类引用不等同于转移，多分类同时作为主归属的规则另行确定。
 
 **讨论与可复用知识分开可读。** Topic 同时保有原 Chat 和已沉淀知识；知识可以是笔记、结论、资料或原内容引用，不要求每次交流先写文档。条目保可确认的来源 Topic/Chat/Thread、Note/Block、Notebook、Survey 或项目资源，以及确认范围与修订事实；事实、推测、提案与已确认决定不得混成同一种结论。可以回原来源继续讨论、更新原知识，内容正文仍由原文件／笔记 owner 持有。Wiki 注入与普通知识资料是不同用途，继续遵守[Topic Wiki 注入合同](motes-and-coordination.md#wiki-与应用协调指令)；新增条目不自动变成整库 prompt。
+
+知识发现的覆盖范围与读取健康分开表达。达到结果、候选或字节预算，以及原 Files 明确省略的候选，只证明本次发现不完整，不证明整个 Topic、原文件或 Agent 故障；显示已展示数量，不冒充完整总数，也不声称尚无回执的后续分页。沿原结构化原因区分部分发现、实际读取失败与未知，不从展示文案猜状态。混合结果保可读条目、原准确来源、失败与恢复说明；空的部分观察不冒充没有匹配。收窄查询和打开准确原文件仍可达，不以反复刷新、无界扫描、提高预算或隐藏错误消除提示。
 
 **其他工作面的内容能流入 Topic。** 在 Survey、Folder/项目、Mote 或其他讨论中，用户及已获授权的 Agent 可以选择有价值的原内容或研究范围，指定已有 Topic 或明确创建新 Topic，然后保存引用或派生知识。操作说明来源、目标、所选范围及是引用还是新内容，保原资源和未选内容；不因浏览、聊天或创建 Browser 自动收集全项目、全文历史或 Mote 记忆。Topic 内的 Agent 也可按真实授权访问相关项目，将所得结论及依据保存回同一明确 Topic；读取项目、得出结论、写入成功分别如实表达。
 
