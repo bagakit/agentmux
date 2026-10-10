@@ -1,0 +1,6 @@
+
+/* Native workface shells host the original retained tree and local window chrome. */
+body.workbench-detached-window { margin: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; background: var(--surface-0); color: var(--text); }
+.workbench-detached-window > [id^="workbench-window-"] { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; order: 1; }
+.workbench-window-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 6px 12px 6px 76px; -webkit-app-region: drag; border-bottom: 1px solid var(--line); }
+.workbench-window-toolbar button { -webkit-app-region: no-drag; }

@@ -1,15 +1,23 @@
+import { returnWorkbenchWindow, focusWorkbenchWindow, openWorkbenchWindow } from '../lib/workbench-windows'
+import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { Component, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
+import { WorkbenchDocumentContext } from '../lib/workbench-document'
+import { registerWorkbenchHost, workbenchDocumentIdentity, useWorkbenchDocumentVisibility, type WorkbenchWindowPlacement } from '../lib/workbench-window-registry'
+import type { AppWindowTarget } from '@agentmux/core/control'
 import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 
+function isHtmlElement(node: Node | null | undefined): node is HTMLElement {
+  return node?.nodeType === 1 && (node as Element).namespaceURI === 'http://www.w3.org/1999/xhtml'
+}
 type ReadingRange = { start: Node; startOffset: number; end: Node; endOffset: number }
 type ReadingScroll = { element: HTMLElement; top: number; left: number }
 type ReadingSnapshot = { ranges: ReadingRange[]; scrolls: ReadingScroll[]; activeElement: Element | null; parent: Element | null; interrupted: boolean; dispose(): void }
 function captureReadingRanges(host: HTMLElement): ReadingRange[] {
-  const selection = document.getSelection()
+  const selection = host.ownerDocument.getSelection()
   return selection ? Array.from({ length: selection.rangeCount }, (_, index) => {
     const range = selection.getRangeAt(index)
     return host.contains(range.startContainer) && host.contains(range.endContainer)
@@ -23,7 +31,7 @@ function captureReadingScrolls(host: HTMLElement, ranges: ReadingRange[], active
   // focused input. Read only those actual containers in this one retained host.
   const readers = host.querySelectorAll<HTMLElement>('[data-workbench-reading-scroll]')
   for (const node of [...readers, ...ranges.flatMap(range => [range.start, range.end]), activeElement]) {
-    let element = node instanceof HTMLElement ? node : node?.parentElement
+    let element = isHtmlElement(node) ? node : node?.parentElement
     while (element && host.contains(element)) {
       if (element.scrollTop || element.scrollLeft) scrolls.set(element, { element, top: element.scrollTop, left: element.scrollLeft })
       element = element.parentElement
@@ -32,11 +40,13 @@ function captureReadingScrolls(host: HTMLElement, ranges: ReadingRange[], active
   return [...scrolls.values()]
 }
 function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeElement: Element | null, active: boolean, reparentedWithoutInput = false): void {
-  const selection = document.getSelection()
-  if (!selection || ranges.length === 0 || !host.isConnected) return
+  const selection = host.ownerDocument.getSelection()
+  if (!selection || !host.isConnected) return
   if (!ranges.every(endpoints => host.contains(endpoints.start) && host.contains(endpoints.end))) return
+  const document = host.ownerDocument
   const currentInput = document.activeElement
-  if (currentInput !== activeElement && currentInput instanceof HTMLElement &&
+  if (ranges.length === 0 && !selection.isCollapsed && selection.anchorNode && !host.contains(selection.anchorNode)) return
+  if (currentInput !== activeElement && isHtmlElement(currentInput) &&
     currentInput !== document.body) return
   // A later selection is the user's current intent. Only repair a DOM-induced
   // collapse, or preserve the exact same already-restored endpoints.
@@ -48,11 +58,11 @@ function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeE
     const same = current.startContainer === original.start && current.startOffset === original.startOffset &&
       current.endContainer === original.end && current.endOffset === original.endOffset
     if (!same) unchanged = false
-    if (!same && (!current.collapsed || current.startContainer.nodeType === Node.TEXT_NODE && !reparentedWithoutInput)) return
+    if (!same && (!current.collapsed || current.startContainer.nodeType === 3 && !reparentedWithoutInput)) return
   }
   // Reparenting can blur a live editor to body. Restore only that exact input
   // in an active presentation; a later focused control remains the user's intent.
-  if (active && currentInput === document.body && activeElement instanceof HTMLElement && host.contains(activeElement) &&
+  if (active && currentInput === document.body && isHtmlElement(activeElement) && host.contains(activeElement) &&
     (activeElement.isContentEditable || activeElement.matches('input, textarea, [contenteditable="true"]')) &&
     !activeElement.closest('[hidden], [inert], [aria-hidden="true"]')) activeElement.focus({ preventScroll: true })
   if (unchanged) return
@@ -72,6 +82,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
     // Snapshot the outgoing presentation, before React moves or hides it.
     // A previously hidden host has no live reading to capture on this commit.
     if (!previous.visible) return null
+    const document = this.props.host.ownerDocument
     const ranges = captureReadingRanges(this.props.host), activeElement = document.activeElement
     const snapshot: ReadingSnapshot = { ranges, scrolls: captureReadingScrolls(this.props.host, ranges, activeElement), activeElement,
       parent: this.props.host.parentElement, interrupted: false, dispose() {} }
@@ -87,6 +98,7 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
   componentDidUpdate(_previous: Readonly<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }>, _state: unknown, snapshot: ReadingSnapshot | null): void {
     if (!snapshot || snapshot.ranges.length === 0 && snapshot.scrolls.length === 0) return
     const host = this.props.host
+    const document = host.ownerDocument
     // The parent layout effect reattaches this same host during this commit.
     queueMicrotask(() => {
       try {
@@ -142,8 +154,32 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     return element
   })
   const [placedHostId, setPlacedHostId] = useState(homeId)
-  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference }),
-    [active, retainedRegionId, placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference])
+  const [windowPlacement, setWindowPlacement] = useState<WorkbenchWindowPlacement | null>(null)
+  const [hostDocument, setHostDocument] = useState(host.ownerDocument)
+  const placementWaiters = useRef<Array<{ resolve(): void; reject(error: Error): void }>>([])
+  const frozenTarget = useRef<AppWindowTarget | null>(null)
+  const originalTarget = useMemo<AppWindowTarget | null>(() => frozenTarget.current ?? (reference && (kind === 'region' ? nativeRegionId : primaryTabId)
+    ? kind === 'region' ? { kind: 'region', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: nativeRegionId! }
+      : { kind: 'tab', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
+    : null), [kind, nativeRegionId, primaryTabId, reference?.displayWorkspaceId, reference?.groupId, reference?.tabId])
+  useLayoutEffect(() => {
+    if (!originalTarget) return
+    return registerWorkbenchHost({ target: originalTarget, host, place: placement => new Promise<void>((resolve, reject) => {
+      frozenTarget.current = placement ? originalTarget : null
+      placementWaiters.current.push({ resolve, reject }); setWindowPlacement(placement)
+    }) })
+  }, [originalTarget, host])
+  useLayoutEffect(() => () => { for (const waiter of placementWaiters.current.splice(0)) waiter.reject(new Error('Original workface host departed before placement confirmation.')) }, [])
+  const documentVisible = useWorkbenchDocumentVisibility(hostDocument)
+  const windowActive = windowPlacement !== null
+  const presentedActive = (windowActive || active) && documentVisible
+  const presentedVisible = (windowActive || visible) && documentVisible
+  const documentContext = useMemo(() => ({ document: hostDocument, window: windowPlacement?.window ?? workbenchDocumentIdentity(hostDocument) }), [hostDocument, windowPlacement])
+  const displayReference = useMemo(() => windowPlacement && frozenTarget.current && reference
+    ? { ...reference, displayWorkspaceId: frozenTarget.current.displayWorkspaceId, groupId: frozenTarget.current.groupId, tabId: frozenTarget.current.tabId,
+      ...(frozenTarget.current.kind === 'region' ? { regionId: frozenTarget.current.regionId } : {}) } : reference, [windowPlacement, reference])
+  const presentation = useMemo(() => ({ active: presentedActive, retainedRegionId, tabHostId: placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference: displayReference }),
+    [presentedActive, retainedRegionId, placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, displayReference])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
@@ -158,45 +194,56 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       host.parentElement?.id === placementFacts.current.destinationId && !host.closest('[hidden], [inert]'))
   }, [switchTarget, kind, projection?.entity.kind, host])
   useLayoutEffect(() => {
-    const destinationId = targetId ?? homeId
+    const destinationId = windowPlacement?.destination.id ?? targetId ?? homeId
     const attach = () => {
       // A Region's exact home is its sibling slot, including while its parent
       // View is being reparented. It need not wait in inert parking for body lookup.
       const siblingHome = kind === 'region' && targetId === null
         ? Array.from(parking.current?.parentElement?.children ?? []).find(element => element.id === destinationId) : undefined
-      const destination = siblingHome ?? document.getElementById(destinationId)
+      const destination = windowPlacement?.destination ?? siblingHome ?? host.ownerDocument.getElementById(destinationId) ?? document.getElementById(destinationId)
       if (!destination) return false
       if (host.parentElement !== destination) {
         // Reparenting an existing DOM host collapses Chromium's live Range.
         // Snapshot node endpoints, not cloned live Ranges, for this one move.
-        const ranges = captureReadingRanges(host), activeElement = document.activeElement
+        const oldDocument = host.ownerDocument, hadDocumentFocus = oldDocument.hasFocus()
+        const ranges = captureReadingRanges(host), activeElement = oldDocument.activeElement
+        const scrolls = captureReadingScrolls(host, ranges, activeElement)
         // Connected moves preserve the existing editor focus and browser state.
         // A detached slot still needs insertion before its parent can attach.
-        if (host.isConnected && destination.isConnected) destination.moveBefore(host, null)
+        const crossDocument = host.ownerDocument !== destination.ownerDocument
+        if (crossDocument) { destination.ownerDocument.adoptNode(host); destination.append(host) }
+        else if (host.isConnected && destination.isConnected) destination.moveBefore(host, null)
         else destination.append(host)
-        if (visible) restoreReadingRanges(host, ranges, activeElement, active)
+        if (crossDocument) for (const scroll of scrolls) { scroll.element.scrollTop = scroll.top; scroll.element.scrollLeft = scroll.left; markProgrammaticReadingScroll(scroll.element) }
+        setHostDocument(host.ownerDocument)
+        if (crossDocument && presentedVisible) restoreReadingRanges(host, ranges, activeElement, presentedActive && hadDocumentFocus, true)
       }
-      if (kind === 'tab' && reference) {
-        host.dataset.workbenchViewReference = workbenchRegionProjectionSlotId('view', reference)
+      if (kind === 'tab' && displayReference) {
+        host.dataset.workbenchViewReference = workbenchRegionProjectionSlotId('view', displayReference)
       } else {
         delete host.dataset.workbenchViewReference
       }
-      if (primaryTabId && reference?.tabId === primaryTabId) {
+      if (primaryTabId && displayReference?.tabId === primaryTabId) {
         host.dataset.workbenchPrimaryTabId = primaryTabId
-        host.dataset.workbenchPrimaryReference = workbenchRegionProjectionSlotId('primary', reference)
+        host.dataset.workbenchPrimaryReference = workbenchRegionProjectionSlotId('primary', displayReference)
       } else {
         delete host.dataset.workbenchPrimaryTabId
         delete host.dataset.workbenchPrimaryReference
       }
-      if (kind === 'region' && reference && nativeRegionId) {
-        host.dataset.workbenchRegionReference = workbenchRegionProjectionSlotId('primary', { ...reference, regionId: nativeRegionId })
+      if (kind === 'region' && displayReference && nativeRegionId) {
+        host.dataset.workbenchRegionReference = workbenchRegionProjectionSlotId('primary', { ...displayReference, regionId: nativeRegionId })
       } else {
         delete host.dataset.workbenchRegionReference
       }
+      setHostDocument(host.ownerDocument)
       setPlacedHostId(destinationId)
+      if (placementWaiters.current.length) {
+        const waiters = placementWaiters.current.splice(0)
+        queueMicrotask(() => host.ownerDocument.defaultView?.requestAnimationFrame(() => { for (const waiter of waiters) waiter.resolve() }))
+      }
       // Confirm the actual placement before describing it. Pending targets retain
       // the original View; a destination hint alone does not prove it moved.
-      setNoticeHome(showHomeNotice && targetId !== null ? document.getElementById(homeId) : null)
+      setNoticeHome(windowPlacement || showHomeNotice && targetId !== null ? document.getElementById(homeId) : null)
       if (switchTarget) tabSwitchObservation.observe(switchTarget)
       return true
     }
@@ -209,8 +256,12 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     return () => observer.disconnect()
   }) // The original layout can replace a slot without changing its exact address.
   useLayoutEffect(() => () => host.remove(), [host])
-  return <WorkbenchReadingSnapshot host={host} active={active} visible={visible}><WorkbenchPresentationContext.Provider value={presentation}>
-    <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(children, host)}
-    {targetId !== null && noticeHome && homeNotice ? createPortal(homeNotice, noticeHome) : null}
-  </WorkbenchPresentationContext.Provider></WorkbenchReadingSnapshot>
+  return <WorkbenchReadingSnapshot host={host} active={presentedActive} visible={presentedVisible}><WorkbenchDocumentContext.Provider value={documentContext}><WorkbenchPresentationContext.Provider value={presentation}>
+    <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(<DesktopClientUiProvider document={hostDocument}>{children}</DesktopClientUiProvider>, host)}
+    {windowPlacement && noticeHome ? createPortal(<div className="workbench-restore-notice" role="status">Original {kind === 'tab' ? 'Tab' : 'Region'} is in its independent window.
+      <button className="small-button" onClick={() => void focusWorkbenchWindow(windowPlacement.window)}>Show window</button>
+      <button className="small-button" onClick={() => void returnWorkbenchWindow(windowPlacement.window)}>Return here</button>
+      {originalTarget && workbenchDocumentIdentity(windowPlacement.destination.ownerDocument) === null ? <button className="small-button" onClick={() => void openWorkbenchWindow(originalTarget)}>Recover original window</button> : null}
+    </div>, noticeHome) : targetId !== null && noticeHome && homeNotice ? createPortal(homeNotice, noticeHome) : null}
+  </WorkbenchPresentationContext.Provider></WorkbenchDocumentContext.Provider></WorkbenchReadingSnapshot>
 }

@@ -1,3 +1,5 @@
+import { workbenchDocuments, subscribeWorkbenchWindows, workbenchDocumentIdentity } from './lib/workbench-window-registry'
+import { useWorkbenchWindows, WorkbenchWindowNotices, focusWorkbenchWindow } from './lib/workbench-windows'
 import { GitHistoryProvider } from './features/git/history/GitHistoryContext'
 import { workspaceZoneContext } from './lib/workspace-zone-context'
 import { observeNotebookLibrary } from './lib/notebook-library'
@@ -94,6 +96,7 @@ function DesktopApp() {
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
+  useWorkbenchWindows(!loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
   const startupAgentAvailability = useAppStore(state => state.startupAgentAvailability)
   const continueStartup = useAppStore(state => state.continueStartup)
@@ -499,25 +502,45 @@ function DesktopApp() {
       // 未被作用域门挡住的全局动作路由到正确 owner。判定是纯函数，这里只把 DOM 事实（标签名、contentEditable、是否在 .xterm
       // 子树内）折成一个布尔喂进去。
       const target = event.target
-      const editableTarget = target instanceof HTMLElement && isEditableChordTarget({
-        tagName: target.tagName,
-        isContentEditable: target.isContentEditable,
-        insideTerminal: target.closest('.xterm') !== null
+      const sourceDocument = event.currentTarget as Document
+      const element = target && (target as Node).nodeType === 1 ? target as HTMLElement : null
+      const editableTarget = element !== null && isEditableChordTarget({
+        tagName: element.tagName,
+        isContentEditable: element.isContentEditable,
+        insideTerminal: element.closest('.xterm') !== null
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
         toggleQuickSwitch: () => {
+          const navigation = fileNavigationSelection(useAppStore.getState())
           if (!presentationRef.current.overlays.quickSwitcher) quickSwitchOrigin.current = {
-            element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
-            navigation: fileNavigationSelection(useAppStore.getState())
+            element: sourceDocument.activeElement?.nodeType === 1 ? sourceDocument.activeElement as HTMLElement : null, navigation
           }
-          setQuickSwitchOpen(current => !current)
+          const show = () => { if (navigation === fileNavigationSelection(useAppStore.getState())) setQuickSwitchOpen(current => !current) }
+          if (sourceDocument === document) show()
+          else {
+            const main = workbenchDocumentIdentity(document)
+            if (main) void focusWorkbenchWindow(main).then(confirmed => { if (confirmed) show() })
+          }
         },
-        openShortcuts: () => openSettings('keyboard-shortcuts')
+        openShortcuts: () => {
+          if (sourceDocument === document) openSettings('keyboard-shortcuts')
+          else {
+            const main = workbenchDocumentIdentity(document), navigation = fileNavigationSelection(useAppStore.getState())
+            if (main) void focusWorkbenchWindow(main).then(confirmed => { if (confirmed && navigation === fileNavigationSelection(useAppStore.getState())) openSettings('keyboard-shortcuts') })
+          }
+        }
       })
       if (routeWindowShortcut(event, isMac, editableTarget, handlers)) event.preventDefault()
     }
-    window.addEventListener('keydown', onKeyDown, { capture: true })
-    return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
+    const attached = new Set<Document>()
+    const sync = () => {
+      const current = new Set([document, ...workbenchDocuments()])
+      for (const doc of attached) if (!current.has(doc)) { doc.removeEventListener('keydown', onKeyDown, true); attached.delete(doc) }
+      for (const doc of current) if (!attached.has(doc)) { doc.addEventListener('keydown', onKeyDown, true); attached.add(doc) }
+    }
+    sync()
+    const unsubscribe = subscribeWorkbenchWindows(sync)
+    return () => { unsubscribe(); for (const doc of attached) doc.removeEventListener('keydown', onKeyDown, true) }
   }, [])
 
   if (loading || startupAgentAvailability?.pending && startupAgentAvailability.waiting) {
@@ -532,7 +555,7 @@ function DesktopApp() {
   }
 
   return (
-    <GitHistoryProvider workspace={gitWorkspace}>
+    <GitHistoryProvider workspace={gitWorkspace}><WorkbenchWindowNotices />
     <SettingsNavigation.Provider value={settingsNavigation}>
     <WindowSidebarLayoutContext.Provider value={windowSidebars}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
@@ -657,7 +680,13 @@ function DesktopApp() {
       </footer>
       <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} returnFocus={() => {
         const original = quickSwitchOrigin.current
-        return original?.navigation === fileNavigationSelection(useAppStore.getState()) ? original.element : null
+        if (original?.navigation !== fileNavigationSelection(useAppStore.getState()) || !original.element?.isConnected) return null
+        const target = original.element, ownerDocument = target.ownerDocument, identity = workbenchDocumentIdentity(ownerDocument)
+        if (ownerDocument === document) return target
+        if (identity) void focusWorkbenchWindow(identity).then(confirmed => {
+          if (confirmed && target.isConnected && target.ownerDocument === ownerDocument && original.navigation === fileNavigationSelection(useAppStore.getState()) && workbenchDocumentIdentity(ownerDocument)?.documentGeneration === identity.documentGeneration) target.focus({ preventScroll: true })
+        })
+        return null
       }} />
       </div>
       <WindowOverlayHost><AgentInformationPreviewHost /></WindowOverlayHost>

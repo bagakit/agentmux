@@ -1,3 +1,4 @@
+@import './workbench-windows.css';
 /**
  * 样式入口。@import 的顺序就是层叠顺序：先 token，再全局原子，然后按表面由外向内。
  *

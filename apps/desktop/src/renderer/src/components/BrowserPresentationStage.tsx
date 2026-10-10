@@ -1,3 +1,4 @@
+import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type PointerEvent } from 'react'
 import type { BrowserPresentationOccurrence, BrowserPresentationLease, BrowserPresentationCapture, BrowserPresentationGeometry, BrowserPresentationActivationReceipt, BrowserPresentationMouseModifier, BrowserBounds } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -178,6 +179,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   browserId: string; navigationId: string; presentation: WorkbenchBrowserPresentation; inputSelected: boolean; blocked: boolean
   media: MediaOwner; stageRef?: Ref<HTMLDivElement> | undefined; onInputSelected?: (() => void) | undefined; children?: ReactNode
 }) {
+  const windowDocument = useWorkbenchWindowDocument()
   const element = useRef<HTMLDivElement | null>(null)
   const video = useRef<HTMLVideoElement>(null)
   const lease = useRef<BrowserPresentationLease | null>(null)
@@ -235,7 +237,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       attemptedNavigationId = attemptNavigationId
       let registered: BrowserPresentationLease
       try {
-        registered = await api.browser.registerPresentation({ browserId, occurrence: presentation.occurrence, geometry: geometry() })
+        registered = await api.browser.registerPresentation({ ...(windowDocument ? { window: windowDocument } : {}), browserId, occurrence: presentation.occurrence, geometry: geometry() })
       } catch (error) {
         registrationFailed = true
         failure(error, 'registration')
@@ -277,7 +279,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null; geometryWriter.current = null
       const current = lease.current; lease.current = null
       if (current) void api.browser.removePresentation(current.leaseId).catch(() => {}) }
-  }, [browserId, presentation.occurrence.presentationId, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
+  }, [browserId, windowDocument?.windowId, windowDocument?.documentGeneration, presentation.occurrence.presentationId, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
   useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
   useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, blocked, observe])
   useLayoutEffect(() => {
