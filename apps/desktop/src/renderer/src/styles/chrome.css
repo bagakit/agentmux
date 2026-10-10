@@ -221,9 +221,8 @@
   border-radius: var(--radius);
   color: var(--text-2);
   /* Surface fill plus elevation carries the layer; a border would be a second, competing edge. */
-  background: var(--overlay-surface);
+  background: var(--surface-2);
   box-shadow: var(--elev-3), var(--hl-strong), 0 0 0 1px var(--scrim-2);
-  backdrop-filter: blur(24px) saturate(140%);
   transform-origin: var(--radix-popper-transform-origin, 50% 0);
 }
 /* Growing from the pointer says the menu was summoned by that click, rather than dropped on top of
