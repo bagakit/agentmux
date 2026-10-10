@@ -1,3 +1,4 @@
+import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixtureEpoch as _tailRefreshFixtureEpoch, fixturePath as _tailRefreshFixturePath } from "../../../test/fixture-values.mjs"
@@ -25,6 +26,7 @@ const lookup = (text: string, blockId?: string): NotebookResolveResult => ({ mod
 beforeEach(() => {
   useNotebookLibrary.setState({ state: null, issue: null })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('Worker', NoteSnapshotTestWorker)
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   vi.spyOn(api.notebooks, 'resolve').mockImplementation(async params => params.mode === 'search' ? search(params.query) : lookup(params.text, params.select?.blockId))
 })
