@@ -13,9 +13,9 @@ export function ProjectFilesTool({ workspace, visible, onOpenPath, onOpenTermina
     useAppStore.getState().setWorkspaceGitView(view)
     useAppStore.getState().setWorkspaceTool('git')
   }
-  const zones = <WorkspaceZonesPanel workspace={workspace} visible={visible} onCreateWorktree={() => openGit('branches')} />
-  if (!context.files) return <div className="workspace-tool-explorer">
-    <div className="surface-inline-error" role="status">{context.issue}</div>
+  const zones = <WorkspaceZonesPanel workspace={workspace} visible={visible} onManageWorktrees={() => openGit('branches')}
+    footer={context.resource ? <WorkspaceChangesSummary workspace={context.resource} active={visible} onOpen={() => openGit('changes')} /> : null} />
+  if (!context.files) return <div className="workspace-tool-explorer workspace-tool-explorer--zones-only">
     {zones}
   </div>
   const files = context.files
@@ -25,8 +25,6 @@ export function ProjectFilesTool({ workspace, visible, onOpenPath, onOpenTermina
       onOpenPath: onOpenPath ?? (path => openWorkspaceZoneFile(workspace, path)),
       onOpenTerminal: onOpenTerminal ?? (path => openWorkspaceZoneTerminal(workspace, path)) }}>
     <div className="workspace-zone-content">
-      {context.resource ? <WorkspaceChangesSummary workspace={context.resource} active={visible} onOpen={() => openGit('changes')} />
-        : <div className="surface-inline-error" role="status">{context.issue}</div>}
       {zones}
     </div>
   </WorkspaceFilesFrame>

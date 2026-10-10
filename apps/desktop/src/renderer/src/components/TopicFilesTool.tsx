@@ -46,7 +46,7 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
     topics={topics ?? []} categorySpaceId={categorySpaceId} visible={visible} onRevealDirectory={path => {
       setReveal({ selection: selectedTopicId ?? null, categorySpaceId, request: { workspaceId: workspace.id, path, requestId: ++requestId.current } })
       useAppStore.getState().setExplorerCollapsed(workspace.id, false)
-    }} />) : frame(<WorkspaceZonesPanel workspace={workspace} visible={visible} onCreateWorktree={() => {
+    }} />) : frame(<WorkspaceZonesPanel workspace={workspace} visible={visible} onManageWorktrees={() => {
       useAppStore.getState().setWorkspaceGitView('branches')
       useAppStore.getState().setWorkspaceTool('git')
     }} />)

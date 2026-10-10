@@ -11,6 +11,7 @@ import type {
 import { useWorkspaceBranches } from '../hooks/useWorkspaceBranches'
 import { useGitAheadBehind } from '../hooks/useGitAheadBehind'
 import { usePathDisplay } from '../hooks/usePathDisplay'
+import { summarizeRelatedPath } from '../lib/copy-path-display'
 import { gitSyncBadge } from '../lib/git-sync-badge'
 import { MAX_FANOUT_LANES } from '../../../shared/fanout-limits'
 import { buildFanOutRequest } from '../lib/fanout-request'
@@ -162,17 +163,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
   function pathSummary(worktree: string): string {
     const shown = displayPath(worktree, workspace.hostId)
     if (snapshot?.kind !== 'git-repository' || snapshot.hostId !== workspace.hostId) return shown
-    const base = snapshot.repoPath.replace(/\\/gu, '/'), target = worktree.replace(/\\/gu, '/')
-    if (!/^(?:[a-z]:)?\//iu.test(base) || !/^(?:[a-z]:)?\//iu.test(target)) return shown
-    const from = base.split('/').filter(Boolean), to = target.split('/').filter(Boolean)
-    let common = 0
-    while (common < from.length && common < to.length && from[common] === to[common]) common++
-    // A filesystem root or drive alone does not make an unrelated checkout a useful relative path.
-    if (common === 0 || common === 1 && /^[a-z]:$/iu.test(from[0]!) ||
-      (base.startsWith('//') || target.startsWith('//')) && common < 2) return shown
-    const suffix = [...from.slice(common).map(() => '..'), ...to.slice(common)].join('/')
-    const relative = !suffix ? '.' : common === from.length ? `./${suffix}` : suffix
-    return relative.length < shown.length ? relative : shown
+    return summarizeRelatedPath(worktree, snapshot.repoPath, shown)
   }
 
   const matches = snapshot?.kind === 'git-repository' ? snapshot.branches.filter((branch) => {

@@ -34,6 +34,19 @@ export function formatPathForDisplay(
   return options.copyPathsAsAbsolute === true ? path : abbreviateHomePath(path, options.home)
 }
 
+export function summarizeRelatedPath(path: string, basePath: string, displayedPath: string): string {
+  const base = basePath.replace(/\\/gu, '/'), target = path.replace(/\\/gu, '/')
+  if (!/^(?:[a-z]:)?\//iu.test(base) || !/^(?:[a-z]:)?\//iu.test(target)) return displayedPath
+  const from = base.split('/').filter(Boolean), to = target.split('/').filter(Boolean)
+  let common = 0
+  while (common < from.length && common < to.length && from[common] === to[common]) common++
+  if (common === 0 || common === 1 && /^[a-z]:$/iu.test(from[0]!) ||
+    (base.startsWith('//') || target.startsWith('//')) && common < 2) return displayedPath
+  const suffix = [...from.slice(common).map(() => '..'), ...to.slice(common)].join('/')
+  const relative = !suffix ? '.' : common === from.length ? `./${suffix}` : suffix
+  return relative.length < displayedPath.length ? relative : displayedPath
+}
+
 /**
  * 复制多行路径文本时逐行套用缩写。`copyPathsAsAbsolute` 为 `true`（用户主动选了绝对路径）时原样返回；
  * 否则（默认档）把每一行里的本机家目录缩写掉。`home` 为空时同样不动——由 `abbreviateHomePath` 兜住。

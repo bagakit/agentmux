@@ -11,8 +11,11 @@
 .workspace-git-context > em { color: var(--text-3); }
 .workspace-git-context > svg { flex: 0 0 auto; color: var(--text-3); }
 .workspace-git-path { padding: 0 var(--sp-3) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-.workspace-changes-summary { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); width: 100%; padding: var(--sp-2) var(--sp-3); border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
-.workspace-changes-summary > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-changes-summary > small { color: var(--text-3); font-size: var(--fs-meta); }
+.workspace-changes-summary { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-3); width: 100%; padding: var(--sp-3) var(--sp-4); border: 0; background: transparent; color: var(--text-2); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.workspace-changes-summary > svg { flex: 0 0 auto; color: var(--text-3); }
+.workspace-changes-summary > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); line-height: 1.4; }
+.workspace-changes-summary strong, .workspace-changes-summary small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-changes-summary strong { font-size: var(--fs-meta); font-weight: 500; }
+.workspace-changes-summary small { color: var(--text-3); font-size: var(--fs-micro); }
 .workspace-changes-summary:hover { background: var(--hl); color: var(--text); }
 .workspace-changes-summary:focus-visible { outline: 1px solid var(--green); outline-offset: -2px; }
