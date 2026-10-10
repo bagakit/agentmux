@@ -38,6 +38,10 @@
       "types": "./dist/note-format.d.ts",
       "import": "./dist/note-format.js"
     },
+    "./mote-connections": {
+      "types": "./dist/mote-connections.d.ts",
+      "import": "./dist/mote-connections.js"
+    },
     "./mote-preferences": {
       "types": "./dist/mote-preferences.d.ts",
       "import": "./dist/mote-preferences.js"
