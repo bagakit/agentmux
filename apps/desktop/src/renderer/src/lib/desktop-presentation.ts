@@ -1,3 +1,4 @@
+import { workbenchDocuments, workbenchDocumentIdentity } from './workbench-window-registry'
 import type { AgentMuxDesktopFloating, AgentMuxDesktopInput, AgentMuxDesktopObservation,
   AgentMuxDesktopOverlays, AgentMuxDesktopPresentation, AgentMuxDesktopSelection } from '@agentmux/core'
 import type { WorkbenchTab } from './workbench-tabs'
@@ -22,7 +23,7 @@ export function desktopPresentationCommitted(): void {
 
 export function desktopElementVisible(element: HTMLElement | null): boolean {
   if (!element?.isConnected || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false
-  const style = window.getComputedStyle(element)
+  const style = element.ownerDocument.defaultView!.getComputedStyle(element)
   const rect = element.getBoundingClientRect()
   // Native text carriers may have no painted area while participating in the visible layout.
   const laidOutText = Boolean((element as HTMLElement & { editContext?: unknown }).editContext) && element.getClientRects().length > 0
@@ -39,7 +40,8 @@ function primaryRegion(selection: AgentMuxDesktopSelection['space'], tabs: Reado
   const reference = { displayWorkspaceId: selection.workspaceId, groupId: selection.groupId,
     tabId: selection.tabId, regionId: selection.regionId }
   const exactRegion = workbenchRegionProjectionSlotId('primary', reference)
-  const matches = Array.from(document.querySelectorAll<HTMLElement>(`[data-workbench-region-id=${CSS.escape(selection.regionId)}]`)).filter(region => {
+  const selectedRegionId = selection.regionId
+  const matches = [...new Set([document, ...workbenchDocuments()])].flatMap(doc => Array.from(doc.querySelectorAll<HTMLElement>(`[data-workbench-region-id=${CSS.escape(selectedRegionId)}]`))).filter(region => {
     const native = region.closest<HTMLElement>('.retained-workbench-region')
     if (native) return native.dataset.workbenchRegionReference === exactRegion
     const primary = region.closest<HTMLElement>('[data-workbench-primary-tab-id]')
@@ -56,10 +58,14 @@ export type DesktopInputCapture = { element: HTMLElement | null; fact: AgentMuxD
 /** One actual activeElement and its exact projection; no value, draft, selection text or bytes. */
 export function captureDesktopInput(tabs: Readonly<Record<string, WorkbenchTab>>): DesktopInputCapture {
   if (typeof document === 'undefined') return { element: null, fact: unknownInput() }
-  const element = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  const focused = [...new Set([document, ...workbenchDocuments()])].filter(doc => doc.hasFocus())
+  if (focused.length !== 1) return { element: null, fact: unknownInput() }
+  const inputDocument = focused[0]!, identity = workbenchDocumentIdentity(inputDocument)
+  const windowFact = identity ? { windowId: identity.windowId, documentGeneration: identity.documentGeneration } : {}
+  const element = inputDocument.activeElement?.nodeType === 1 ? inputDocument.activeElement as HTMLElement : null
   const acceptsText = element && (element.isContentEditable || element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' ||
     Boolean((element as HTMLElement & { editContext?: unknown }).editContext))
-  if (!element || element === document.body || !acceptsText) return { element: null, fact: { ...unknownInput(), provenance: 'observed', scope: 'none' } }
+  if (!element || element === inputDocument.body || !acceptsText) return { element: null, fact: { ...unknownInput(), provenance: 'observed', scope: 'none', ...windowFact } }
   const regionId = element.closest<HTMLElement>('[data-workbench-region-id]')?.dataset.workbenchRegionId ?? null
   const tabId = element.closest<HTMLElement>('[data-workbench-tab-id]')?.dataset.workbenchTabId ??
     (regionId ? Object.values(tabs).find(tab => Object.hasOwn(tab.regions, regionId))?.id : null) ?? null
@@ -68,7 +74,7 @@ export function captureDesktopInput(tabs: Readonly<Record<string, WorkbenchTab>>
   const overlay = Boolean(element.closest('[role="dialog"], .settings-page')) && !floating
   const ownerKind = element.closest('.xterm') ? 'terminal' : element.closest('.composer__editor') ? 'composer'
     : element.closest('.monaco-editor') ? 'editor' : overlay ? 'dialog' : 'other'
-  return { element, fact: { provenance: 'observed', scope: floating ? 'floating' : overlay ? 'overlay' : 'main',
+  return { element, fact: { provenance: 'observed', scope: floating ? 'floating' : overlay ? 'overlay' : identity && inputDocument !== document ? 'window' : 'main', ...windowFact,
     ownerKind, tabId, regionId, sessionId: surface?.kind === 'agent' || surface?.kind === 'terminal' ? surface.sessionId : null,
     connected: element.isConnected, visible: desktopElementVisible(element), inert: Boolean(element.closest('[inert]')) } }
 }
@@ -98,10 +104,14 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
   if (overlays.settings) blockers.push('settings')
   if (overlays.quickSwitcher) blockers.push('quick-switcher')
   const { tabId = null, regionId = null } = selection.surface === 'space' ? selection.space ?? {} : {}
+  const windowTarget = selection.surface === 'space' && regionId ? primaryRegion(selection.space, tabs) : null
+  const windowIdentity = windowTarget && windowTarget.ownerDocument !== document ? workbenchDocumentIdentity(windowTarget.ownerDocument) : null
+  if (windowIdentity) blockers.length = 0
   const base = { tabId, regionId, blockers }
   let presentation: AgentMuxDesktopPresentation = { ...base, provenance: 'unknown', state: 'unknown' }
   if (owner) {
     if (owner.loading) presentation = { ...base, provenance: 'observed', state: 'pending' }
+    else if (windowIdentity && desktopElementVisible(windowTarget)) presentation = { ...base, ...windowIdentity, provenance: 'observed', state: 'window' }
     else if (blockers.length) presentation = { ...base, provenance: 'observed', state: 'covered' }
     else {
       const main = document.querySelector<HTMLElement>(`[data-desktop-surface="${selection.surface}"]`)
@@ -144,6 +154,7 @@ export function desktopInputPreserved(before: DesktopInputCapture, after: Deskto
   return before.element !== null && before.element === after.element &&
     before.fact.provenance === 'observed' && after.fact.provenance === 'observed' &&
     after.fact.connected === true && after.fact.visible === true && after.fact.inert === false &&
+    before.fact.windowId === after.fact.windowId && before.fact.documentGeneration === after.fact.documentGeneration &&
     before.fact.scope === after.fact.scope && before.fact.ownerKind === after.fact.ownerKind &&
     before.fact.tabId === after.fact.tabId && before.fact.regionId === after.fact.regionId && before.fact.sessionId === after.fact.sessionId
 }

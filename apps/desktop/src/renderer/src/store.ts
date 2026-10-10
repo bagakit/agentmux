@@ -5882,7 +5882,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
         const observed = readDesktopPresentation(actual, get().tabs)
         return observed.presentation.state === 'covered' ||
-          ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating') &&
+          ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating' || observed.presentation.state === 'window') &&
             (request.inputPolicy === 'preserve' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
       }, signal)
       const save = navigationState === 'rejected' ? { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false,
@@ -5912,7 +5912,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (request.inputPolicy === 'target' && inputOutcome !== 'transferred' && caretIntentNonce !== undefined) {
         get().clearRegionCaretFocus(caretIntentNonce)
       }
-      const partial = navigationState === 'rejected' || navigationState === 'unconfirmed' || observed.presentation.state !== 'main-visible' ||
+      const partial = navigationState === 'rejected' || navigationState === 'unconfirmed' || (observed.presentation.state !== 'main-visible' && observed.presentation.state !== 'window' && observed.presentation.state !== 'floating') ||
         inputOutcome === 'unavailable' || inputOutcome === 'unconfirmed' || !save.localStorageWritten
       if (partial && navigationState !== 'rejected') {
         const notice = { step: 'presentation', code: 'DESKTOP_PRESENTATION_PARTIAL',
