@@ -34,7 +34,7 @@ export class PermissionActions implements PublicationPermissionsPort {
   }
   supports(event: VerifiedIngressAction): boolean {
     if (!event.actor || !event.actionRef || !event.externalConversationId || !event.sourceMessageId) return false
-    try { return !!this.reference(event.actionRef) } catch { return false }
+    return !!this.reference(event.actionRef)
   }
   observe(binding: RoomBinding, wake: () => void): () => void {
     const core = this.options.core(binding.executionHostId)
