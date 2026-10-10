@@ -11,13 +11,14 @@ export function observeNativeOverlayRegions(
   body: HTMLElement,
   zoomFactor: () => number,
   publish: (regions: NativeOverlayRegion[], warning?: string) => void,
-  observe?: (reading: RendererOverlayObservation) => void
+  observe?: (reading: RendererOverlayObservation) => void,
+  initialDemand?: NativeBrowserVisibility
 ): { dispose(): void; handleNativeInput(input: NativeBrowserInput): void; setNativeDemand(visibility: NativeBrowserVisibility): void } {
   const ids = new WeakMap<Element, string>()
   let nextId = 0
   let disposed = false
   let frame = 0
-  let nativeDemand: NativeBrowserVisibility | null = null
+  let nativeDemand: NativeBrowserVisibility | null = initialDemand ?? null
   let watched: Element[] = []
   let geometry: Element[] = []
   let hoveredStage: Element | undefined
@@ -25,8 +26,12 @@ export function observeNativeOverlayRegions(
   const topLayers = new Set<Element>()
   const topLayerSources = new WeakMap<Element, Element>()
   const win = body.ownerDocument.defaultView!
-  const resize = new ResizeObserver(() => schedule('resize'))
-  const portals = (): Element[] => Array.from(body.children).filter(node => node.id !== 'root')
+  // Adoption changes ownerDocument while preserving the node's original JS realm.
+  const element = (value: EventTarget | null | undefined): value is Element =>
+    value != null && (value as Node).nodeType === 1 && (value as Node).ownerDocument === body.ownerDocument
+  const html = (value: Element): value is HTMLElement => value.namespaceURI === body.namespaceURI
+  const resize = new win.ResizeObserver(() => schedule('resize'))
+  const portals = (): Element[] => Array.from(body.children).filter(node => node.id !== 'root' && !node.hasAttribute('data-workbench-document-root'))
   const collect = (): void => {
     frame = 0
     if (disposed || nativeDemand?.bounds.length === 0) return
@@ -139,15 +144,15 @@ export function observeNativeOverlayRegions(
     if (requested && !frame) frame = win.requestAnimationFrame(collect)
     observe?.({ reason, scheduled: requested && !coalesced, coalesced, nativeDemandCount: nativeDemand?.bounds.length ?? null })
   }
-  const observer = new MutationObserver(records => {
+  const observer = new win.MutationObserver(records => {
     if (records.some(record => record.target === body && record.type === 'childList')) bind()
     // Opening/closing/style mutations always refresh. Content below an explicitly
     // hidden scope cannot repaint native chrome; do not lay out another visible float for it.
     const relevant = records.some(record => {
       if (record.target === body || record.type === 'attributes' && ['style', 'class', 'data-state', 'hidden'].includes(record.attributeName ?? '')) return true
-      let node = record.target instanceof Element ? record.target : record.target.parentElement
+      let node = element(record.target) ? record.target : record.target.parentElement
       while (node && node !== body) {
-        if (node.hasAttribute('hidden') || node.getAttribute('data-state') === 'closed' || node instanceof win.HTMLElement &&
+        if (node.hasAttribute('hidden') || node.getAttribute('data-state') === 'closed' || html(node) &&
           (node.style.display === 'none' || node.style.visibility === 'hidden')) return false
         if (topLayers.has(node)) break
         node = node.parentElement
@@ -182,12 +187,12 @@ export function observeNativeOverlayRegions(
   }
   const onToggle = (event: Event): void => {
     const target = event.target
-    if (!(target instanceof Element) || !target.hasAttribute('popover')) return
+    if (!element(target) || !target.hasAttribute('popover')) return
     if ((event as ToggleEvent).newState === 'open') {
       topLayers.add(target)
       // ToggleEvent.source is the actual HTML popover invoker/implicit anchor; never scan #root.
       const source = (event as ToggleEvent & { source?: Element | null }).source
-      if (source instanceof Element) topLayerSources.set(target, source)
+      if (element(source)) topLayerSources.set(target, source)
       else topLayerSources.delete(target)
     } else {
       topLayers.delete(target)
@@ -201,7 +206,7 @@ export function observeNativeOverlayRegions(
     if (watched.length === 0) return
     const target = event.target
     if (target === event.currentTarget || target === body.ownerDocument) { schedule('scroll'); return }
-    if (!(target instanceof Element)) return
+    if (!element(target)) return
     if (watched.some(node => node.contains(target) || target.contains(node) || target.contains(topLayerSources.get(node) ?? null))) schedule('scroll')
   }
   const onResize = (): void => schedule('resize')
@@ -233,7 +238,7 @@ export function observeNativeOverlayRegions(
       if (!float || !ownedStage) return
       const event = new win.KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })
       ownedStage.dispatchEvent(event)
-      if (!event.defaultPrevented && float instanceof win.HTMLElement && (float.popover === 'auto' || float.popover === 'hint') && float.matches(':popover-open')) float.hidePopover()
+      if (!event.defaultPrevented && html(float) && (float.popover === 'auto' || float.popover === 'hint') && float.matches(':popover-open')) float.hidePopover()
       return
     }
     if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) return
@@ -274,7 +279,7 @@ export function observeNativeOverlayRegions(
     stage.dispatchEvent(pointer(input.type === 'pointerDown' ? 'pointerdown' : 'pointermove'))
     if (input.type !== 'pointerDown') return
     for (const node of topLayers) {
-      if (!(node instanceof win.HTMLElement) || (node.popover !== 'auto' && node.popover !== 'hint') || !node.matches(':popover-open')) continue
+      if (!html(node) || (node.popover !== 'auto' && node.popover !== 'hint') || !node.matches(':popover-open')) continue
       const rect = node.getBoundingClientRect()
       if (input.x < rect.left || input.x >= rect.right || input.y < rect.top || input.y >= rect.bottom) node.hidePopover()
     }
