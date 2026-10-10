@@ -83,6 +83,7 @@ it('discovers the one generic Connector from Mods, Overview and search and opens
   expect(dom.container.querySelector('.settings-content__header p')?.textContent).toContain('Feishu and Lark are included')
   expect(calls.some(call => call.method === 'connection.enrollment.ls')).toBe(true)
   expect(calls.some(call => call.method === 'connection.ls')).toBe(true)
+  expect(calls.some(call => call.method === 'connection.service.get')).toBe(true)
   expect(trusted.mock.calls.some(call => call[0] === 'connections:call')).toBe(true)
   for (const query of ['Agent 对话', 'Connector', '飞书', 'Lark']) {
     await input('Search settings', query)
@@ -92,7 +93,7 @@ it('discovers the one generic Connector from Mods, Overview and search and opens
     expect(currentPane().hidden).toBe(false)
   }
   expect(network).toEqual([])
-  expect(calls.every(call => call.method === 'connection.ls' || call.method === 'connection.enrollment.ls')).toBe(true)
+  expect(calls.every(call => call.method === 'connection.ls' || call.method === 'connection.enrollment.ls' || call.method === 'connection.service.get')).toBe(true)
 })
 
 it('uses the exact discovered Lark implementation through the original registration leaf and compiled receipt reader', async () => {
