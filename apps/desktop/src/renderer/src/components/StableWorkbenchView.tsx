@@ -40,11 +40,18 @@ function captureReadingScrolls(host: HTMLElement, ranges: ReadingRange[], active
   return [...scrolls.values()]
 }
 function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeElement: Element | null, active: boolean, reparentedWithoutInput = false): void {
-  const selection = host.ownerDocument.getSelection()
-  if (!selection || !host.isConnected) return
+  if (!host.isConnected) return
   if (!ranges.every(endpoints => host.contains(endpoints.start) && host.contains(endpoints.end))) return
   const document = host.ownerDocument
   const currentInput = document.activeElement
+  const restoreInput = active && currentInput === document.body && isHtmlElement(activeElement) && host.contains(activeElement) &&
+    (activeElement.isContentEditable || activeElement.matches('input, textarea, [contenteditable="true"]')) &&
+    !activeElement.closest('[hidden], [inert], [aria-hidden="true"]')
+  // A scroll-only snapshot has no selection to repair. Keep the original input
+  // repair path below, including its protection for a later selection elsewhere.
+  if (ranges.length === 0 && !restoreInput) return
+  const selection = document.getSelection()
+  if (!selection) return
   if (ranges.length === 0 && !selection.isCollapsed && selection.anchorNode && !host.contains(selection.anchorNode)) return
   if (currentInput !== activeElement && isHtmlElement(currentInput) &&
     currentInput !== document.body) return
@@ -62,9 +69,7 @@ function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeE
   }
   // Reparenting can blur a live editor to body. Restore only that exact input
   // in an active presentation; a later focused control remains the user's intent.
-  if (active && currentInput === document.body && isHtmlElement(activeElement) && host.contains(activeElement) &&
-    (activeElement.isContentEditable || activeElement.matches('input, textarea, [contenteditable="true"]')) &&
-    !activeElement.closest('[hidden], [inert], [aria-hidden="true"]')) activeElement.focus({ preventScroll: true })
+  if (restoreInput) activeElement.focus({ preventScroll: true })
   if (unchanged) return
   selection.removeAllRanges()
   for (const endpoints of ranges) {
