@@ -2,6 +2,9 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor } from './room-binding-codec.js'
 import type { ConnectionActor } from './connections-contract.js'
+import type { AgentMuxAgentInteractionInput } from './client.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { agentInteractionRequestTarget } from './agent-interaction-state.js'
 
 /** Recorded external attribution, never a serialized authorization or a local human identity. */
 export type AgentExternalMessageAuthor = {
@@ -22,6 +25,44 @@ export type AgentExternalInputIntent = {
 /** Original Host-owned claim/current-authority reader. Never serialized or inferred from a wire author. */
 export interface AgentExternalInputAuthorityPort {
   assertCurrent(author: AgentExternalMessageAuthor, intent: AgentExternalInputIntent): void | Promise<void>
+  /** The same original intake authority, with a distinct exact interaction intent. */
+  assertInteractionCurrent?(author: AgentExternalInteractionAuthor, intent: AgentMuxAgentInteractionInput): void | Promise<void>
+}
+
+/** Platform attribution is not permission; the executing Host resolves its original durable claim. */
+export type AgentExternalInteractionAuthor = {
+  kind: 'external-action'
+  connectionId: string
+  actor: ConnectionActor
+  externalConversationId: string
+  sourceMessageId: string
+  actionRef: string
+  bindingId: string
+  bindingRevision: number
+  grantId: string
+  grantRevision: number
+}
+
+export function parseAgentExternalInteractionAuthor(value: unknown): AgentExternalInteractionAuthor {
+  const p = rpcRecord(value, ['kind', 'connectionId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision'], 'INVALID_EXTERNAL_AUTHOR')
+  const fail = (): never => { throw new AgentMuxError('External interaction attribution is malformed.', 'INVALID_EXTERNAL_AUTHOR') }
+  const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail(); return v as string }
+  const revision = (v: unknown): number => { if (!Number.isSafeInteger(v) || Number(v) < 1) fail(); return v as number }
+  if (p.kind !== 'external-action') fail()
+  return { kind: 'external-action', connectionId: text(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), sourceMessageId: text(p.sourceMessageId), actionRef: text(p.actionRef), bindingId: text(p.bindingId), bindingRevision: revision(p.bindingRevision), grantId: text(p.grantId), grantRevision: revision(p.grantRevision) }
+}
+
+/** Exact machine intent correlation. Mutable observations and JSON key order cannot change the original target. */
+function canonicalDigest(value: unknown): string {
+  const canonical = (item: unknown): unknown => Array.isArray(item) ? item.map(canonical)
+    : item && typeof item === 'object' ? Object.fromEntries(Object.entries(item).filter(([, child]) => child !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, child]) => [key, canonical(child)])) : item
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical(value)))
+  return Array.from(sha256(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
+}
+export function agentInteractionRequestDigest(request: import('./types.js').AgentMuxInteractionRequest): string { return canonicalDigest(agentInteractionRequestTarget(request)) }
+export function agentInteractionIntentDigest(input: AgentMuxAgentInteractionInput): string {
+  return canonicalDigest({ agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
+    operationId: input.operationId, expectedRequest: agentInteractionRequestTarget(input.expectedRequest), response: input.response })
 }
 
 export function parseAgentExternalMessageAuthor(value: unknown): AgentExternalMessageAuthor {

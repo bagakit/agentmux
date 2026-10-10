@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
-import { parseAgentExternalMessageAuthor } from './external-author.js'
+import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import type { ConnectionIngressAddressing, ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
 
@@ -22,14 +22,20 @@ function addressing(value: unknown): ConnectionIngressAddressing {
 }
 export function parseConnectionIngressRecord(value: unknown): ConnectionIngressRecord {
   if (value && typeof value === 'object' && !Array.isArray(value) && Reflect.get(value, 'kind') === 'action') {
-    const p = object(value, ['kind', 'ingressId', 'connectionId', 'application', 'eventId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'state', 'code'])
+    const p = object(value, ['kind', 'ingressId', 'connectionId', 'application', 'eventId', 'actor', 'externalConversationId', 'sourceMessageId', 'actionRef', 'state', 'code', 'input'])
     const application = parseConnectionApplication(p.application)
     const actor = p.actor === undefined ? undefined : parseConnectionActor(p.actor)
-    if (p.state !== 'refused' || p.code !== 'INGRESS_ACTION_UNSUPPORTED' || actor && !equal(actor.application, application)) fail()
-    return { kind: 'action', ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId),
+    if (!['received', 'claimed', 'refused'].includes(String(p.state)) || actor && !equal(actor.application, application)) fail()
+    const base = { kind: 'action' as const, ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId),
       ...(actor === undefined ? {} : { actor }), ...(p.externalConversationId === undefined ? {} : { externalConversationId: text(p.externalConversationId) }),
       ...(p.sourceMessageId === undefined ? {} : { sourceMessageId: text(p.sourceMessageId) }), ...(p.actionRef === undefined ? {} : { actionRef: text(p.actionRef) }),
-      state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' }
+      }
+    if (p.state === 'refused') { if (p.input !== undefined || p.code !== 'INGRESS_ACTION_UNSUPPORTED' && !CONNECTION_INGRESS_AUTHORITY_CODES.includes(p.code as never)) fail(); return { ...base, state: 'refused', code: p.code as NonNullable<import('./ingress-contract.js').ConnectionIngressAction['code']> } }
+    if (!base.actor || !base.externalConversationId || !base.sourceMessageId || !base.actionRef || p.code !== undefined) fail()
+    if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...base, state: 'received' } }
+    const input = object(p.input, ['hostId','agentSessionId','expectedRun','operationId','intentDigest','author']), run = object(input.expectedRun, ['runId']), author = parseAgentExternalInteractionAuthor(input.author)
+    if (!/^[a-f0-9]{64}$/u.test(text(input.intentDigest)) || author.connectionId !== base.connectionId || !equal(author.actor, base.actor) || author.externalConversationId !== base.externalConversationId || author.sourceMessageId !== base.sourceMessageId || author.actionRef !== base.actionRef) fail()
+    return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId: text(input.operationId), intentDigest: text(input.intentDigest), author } }
   }
   const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'actor', 'body', 'state', 'code', 'input', 'addressing'])
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
@@ -62,10 +68,22 @@ export function parseIngressResult<M extends ConnectionIngressMethod>(method: M,
     return { ingress, authority: p.authority, ...(p.code === undefined ? {} : { code: p.code }) } as ConnectionIngressResultMap[M]
   }
   if (method === 'connection.ingress.inspect') {
-    const p = object(value, ['ingress', 'inputReceipt', 'observation']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
+    const p = object(value, ['ingress', 'inputReceipt', 'interactionReceipt', 'observation']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
     const receipt = p.inputReceipt === null ? null : parseAgentInputSubmissionReceipt(p.inputReceipt)
     if (ingress && ingress.ingressId !== (input as ConnectionIngressParamsMap['connection.ingress.inspect']).ingressId || !['not-started', 'observed', 'unavailable'].includes(String(p.observation))) fail()
     if (!ingress?.input && (receipt || p.observation !== 'not-started') || ingress?.input && p.observation === 'not-started' || p.observation === 'unavailable' && receipt) fail()
+    if (ingress?.kind === 'action') {
+      if (receipt) fail()
+      let interactionReceipt: import('./ingress-contract.js').ConnectionIngressInspection['interactionReceipt']
+      if (p.interactionReceipt === null) interactionReceipt = null
+      else if (p.interactionReceipt !== undefined) {
+        const value = object(p.interactionReceipt, ['operationId','agentSessionId','run','delivery','nativeAdoption']), run = object(value.run, ['runId'])
+        if (!ingress.input || value.operationId !== ingress.input.operationId || value.agentSessionId !== ingress.input.agentSessionId || run.runId !== ingress.input.expectedRun.runId || !['saved','unknown','bytes-accepted','hook-written','acp-acknowledged'].includes(String(value.delivery)) || value.nativeAdoption !== 'unknown' || p.observation !== 'observed') fail()
+        interactionReceipt = { operationId: text(value.operationId), agentSessionId: text(value.agentSessionId), run: { runId: text(run.runId) }, delivery: value.delivery as NonNullable<typeof interactionReceipt>['delivery'], nativeAdoption: 'unknown' }
+      }
+      return { ingress, inputReceipt: null, observation: p.observation, ...(interactionReceipt === undefined ? {} : { interactionReceipt }) } as ConnectionIngressResultMap[M]
+    }
+    if (p.interactionReceipt !== undefined) fail()
     if (receipt && (receipt.key.kind !== 'message' || receipt.key.messageId !== ingress?.input?.messageId || receipt.key.agentSessionId !== ingress?.input?.agentSessionId || !equal(receipt.key.expectedRun, ingress?.input?.expectedRun) || receipt.originalControlOperationId !== ingress?.input?.operationId)) fail()
     return { ingress, inputReceipt: receipt, observation: p.observation } as ConnectionIngressResultMap[M]
   }

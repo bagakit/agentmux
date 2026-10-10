@@ -18,9 +18,12 @@ function mapping(value: unknown): ConnectionDeliveryMapping {
   const p = object(value, ['messageId', 'threadId'])
   return { messageId: text(p.messageId), ...(p.threadId === undefined ? {} : { threadId: text(p.threadId) }) }
 }
-function reference(value: unknown): ConversationItemRef {
-  const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId'])
-  const ref = { hostId: text(p.hostId), agentSessionId: text(p.agentSessionId) }, recordId = text(source.recordId)
+function reference(value: unknown): import('./connection-delivery-contract.js').ConnectionDeliveryReference {
+  const p = object(value, ['hostId', 'agentSessionId', 'source']), source = object(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId', 'runId', 'requestId', 'requestDigest'])
+  const ref = { hostId: text(p.hostId), agentSessionId: text(p.agentSessionId) }
+  if (source.kind === 'interaction') { if (source.providerId !== undefined || source.nativeSessionId !== undefined || source.recordId !== undefined || !/^[a-f0-9]{64}$/u.test(text(source.requestDigest))) fail(); return { ...ref, source: { kind: 'interaction', runId: text(source.runId), requestId: text(source.requestId), requestDigest: text(source.requestDigest) } } }
+  if (source.runId !== undefined || source.requestId !== undefined || source.requestDigest !== undefined) fail()
+  const recordId = text(source.recordId)
   if (source.kind === 'native') return { ...ref, source: { kind: 'native', providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId), recordId } }
   if (source.kind !== 'captured' || source.providerId !== undefined || source.nativeSessionId !== undefined) fail()
   return { ...ref, source: { kind: 'captured', recordId } }

@@ -58,6 +58,7 @@ export type RoomPublicationAuthority = {
 }
 /** Synchronous reads can join the original connector database transaction. They never query a Region occupant. */
 export interface RoomBindingReadPort {
+  grants?(bindingId: string, revision: number): ConnectionGrant[]
   readExact(bindingId: string, revision: number): RoomBinding | null
   readCurrent(bindingId: string): RoomBinding | null
   listActive(input?: RoomBindingListInput): RoomBinding[]

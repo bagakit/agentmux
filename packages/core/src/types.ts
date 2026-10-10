@@ -1538,6 +1538,7 @@ export type AgentMuxInteractionResponse =
 
 /** Caller-owned identity and the exact typed request shown when the intent was composed. */
 export type AgentMuxInteractionOperationIntent = {
+  externalAction?: import('./external-author.js').AgentExternalInteractionAuthor
   operationId: string
   expectedRequest: AgentMuxInteractionRequest
 }

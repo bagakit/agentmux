@@ -1,5 +1,5 @@
 import type { ConnectionActor, ConnectionApplication } from './connections-contract.js'
-import type { AgentExternalMessageAuthor } from './external-author.js'
+import type { AgentExternalMessageAuthor, AgentExternalInteractionAuthor } from './external-author.js'
 import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
 
 /** A platform parent reference is retained even while its application author is unknown. */
@@ -28,7 +28,7 @@ export type ConnectionIngressMessage = {
     operationId: string; messageId: string; author: AgentExternalMessageAuthor
   }
 }
-/** Authenticated native action intake, currently unsupported. Missing context remains absent. */
+/** Authenticated native action intake. An opaque reference locates an original intent, never authority. */
 export type ConnectionIngressAction = {
   kind: 'action'
   ingressId: string
@@ -39,12 +39,12 @@ export type ConnectionIngressAction = {
   externalConversationId?: string
   sourceMessageId?: string
   actionRef?: string
-  state: 'refused'
-  code: 'INGRESS_ACTION_UNSUPPORTED'
+  state: 'received' | 'refused' | 'claimed'
+  code?: 'INGRESS_ACTION_UNSUPPORTED' | ConnectionIngressAuthorityCode
+  input?: { hostId: string; agentSessionId: string; expectedRun: { runId: string }; operationId: string; intentDigest: string; author: AgentExternalInteractionAuthor }
   body?: never
   externalMessageId?: never
   addressing?: never
-  input?: never
 }
 export type ConnectionIngressRecord = ConnectionIngressMessage | ConnectionIngressAction
 export type ConnectionIngressInspectInput = { ingressId: string }
@@ -53,6 +53,7 @@ export type ConnectionIngressInspection = {
   ingress: ConnectionIngressRecord | null
   /** Original Core read only. An absent receipt never licenses a replay. */
   inputReceipt: AgentInputSubmissionReceipt | null
+  interactionReceipt?: { operationId: string; agentSessionId: string; run: { runId: string }; delivery: 'saved' | 'unknown' | 'bytes-accepted' | 'hook-written' | 'acp-acknowledged'; nativeAdoption: 'unknown' } | null
   observation: 'not-started' | 'observed' | 'unavailable'
 }
 export type ConnectionIngressPage = { ingresses: ConnectionIngressRecord[]; nextAfterIngressId: string | null }
