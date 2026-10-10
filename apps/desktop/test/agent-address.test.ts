@@ -241,7 +241,9 @@ describe('寻址失败自带下一步命令，而不只是候选清单', () => {
       // （「恢复只能由人明确发起；Agent 不得靠重试静默夺回页面」）。给它叠一句"换个地址试试"
       // 正好是在教 Agent 做那件被禁的事。
       'BROWSER_SUBSCRIBE_UNSUPPORTED',
-      'BROWSER_HUMAN_CONTROL_ACTIVE'
+      'BROWSER_HUMAN_CONTROL_ACTIVE',
+      // The original operation read is the recovery path; another address is not a new intent.
+      'BROWSER_OPERATION_ALREADY_EXISTS'
     ]
 
     for (const code of AGENTMUX_CONTROL_ERROR_CODES) {
