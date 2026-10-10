@@ -26,9 +26,11 @@ function captureOwner() {
     executeJavaScriptInIsolatedWorld: vi.fn(async () => ({ width: 600, height: 400, deviceScaleFactor: 3 })),
     capturePage: vi.fn(async () => nativeImage)
   }
-  const entry = { view: { webContents: contents }, navigationId: 'original-navigation' }
+  const bounds = { x: 0, y: 0, width: 1200, height: 800 }
+  const entry = { id: 'original-browser', view: { webContents: contents, getBounds: () => bounds, getVisible: () => true },
+    navigationId: 'original-navigation', visible: true, bounds, inputLeaseId: null, initialDocument: null }
   const entries = new Map([['original-browser', entry]])
-  const owner = { entries, require: vi.fn(() => entry) } as unknown as BrowserViewManager
+  const owner = Object.assign(Object.create(BrowserViewManager.prototype), { entries, require: vi.fn(() => entry) }) as BrowserViewManager
   return { contents, entry, entries, nativeImage, capture: () => BrowserViewManager.prototype.captureScreenshot.call(owner, 'original-browser') }
 }
 
