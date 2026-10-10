@@ -6339,10 +6339,12 @@ export class AgentMuxClient {
         return { ...current, permissionHook: { ...current.permissionHook, response: { ...current.permissionHook.response, delivery: 'unknown' } } }
       })
       claimed = true
-      await this.registry.refresh(session.agentSessionId, session.run)
       await context?.assertCurrent?.()
       context?.requestSignal?.throwIfAborted()
-      const current = this.requireAgentSession(session.agentSessionId), pending = current.pendingInteraction
+      // Authority may await another Core owner. Read its exact durable target after that wait,
+      // then reach the original callback resolution without another unchecked await.
+      const current = await this.registry.refresh(session.agentSessionId, session.run), pending = current.pendingInteraction
+      context?.requestSignal?.throwIfAborted()
       const target = [pending?.request, ...(pending?.additionalRequests ?? [])].find(candidate => candidate?.id === request.id)
       if (!sameRun(current.run, session.run) || target?.kind !== 'permission' || !target.permissionHook || target.permissionHook.nativeTurnEnded || permissionNativeTurnEnd(current, target) ||
           current.nativeHandle?.kind === 'provider' && target.permissionHook.nativeSessionId !== undefined && target.permissionHook.nativeSessionId !== current.nativeHandle.sessionId) {
