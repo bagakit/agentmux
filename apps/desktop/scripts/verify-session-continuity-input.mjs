@@ -71,7 +71,7 @@ try {
     let code = 0, stdout = '', stderr = ''
     try {
       const result = await execute(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', config,
-        ...(pattern ? ['-t', pattern] : []), '--reporter=json', '--outputFile', output], { cwd: root,
+        ...(pattern ? ['-t', pattern] : []), '--reporter=default', '--reporter=json', '--outputFile', output], { cwd: root,
         env: { ...process.env, ...(variant === 'current' ? {} : { AGENTMUX_CONTINUITY_INPUT_MUTATION: variant }) }, maxBuffer: 8 * 1024 * 1024 })
       stdout = result.stdout; stderr = result.stderr
     } catch (error) { code = error.code; stdout = error.stdout ?? ''; stderr = error.stderr ?? '' }
