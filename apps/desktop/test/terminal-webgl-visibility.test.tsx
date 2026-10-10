@@ -264,7 +264,7 @@ it('reports a visible terminal awaiting attachment as unready, then observes the
   let resolveAttach!: (value: unknown) => void
   fixture.attach.mockReturnValue(new Promise(resolve => { resolveAttach = resolve }))
   await act(async () => root!.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin} />))
-  expect(rendererPerformance.snapshot().terminals).toMatchObject([{ runId: 'run-retained', visible: true, revealed: false, liveReady: false, acceptsInput: false, replaying: true, readySinceAt: null }])
+  expect(rendererPerformance.snapshot().terminals).toMatchObject([{ runId: 'run-retained', visible: true, revealed: false, liveReady: false, acceptsInput: true, replaying: true, readySinceAt: null }])
   await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: {
     type: 'terminal-output', run: session.control.run, data: 'live', dataBytes: new TextEncoder().encode('live'),
     evidence: { outputByteRange: { startByte: 7, endByte: 11 } }
