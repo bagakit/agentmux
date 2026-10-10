@@ -39,7 +39,7 @@ it('actual SurfaceSwitch consumes the original navigation plugins with new stati
   expect(BUILTIN_THEMES.length).toBeGreaterThan(0)
   for (const theme of BUILTIN_THEMES) for (const appearance of ['light', 'dark'] as const) {
     expect(previewTheme(theme, window, appearance).applied).toBe(true)
-    expectedDrawing('navigation.goals'); expectedDrawing('navigation.survey')
+    expectedDrawing('navigation.goals'); expectedDrawing('object.goal'); expectedDrawing('navigation.survey')
     expectStaticIcon(navigation, 'navigation.goals'); expectStaticIcon(navigation, 'navigation.survey')
   }
   const goals = navigation.querySelector<HTMLButtonElement>('button[aria-label="Goals: show goals and progress"]')!
