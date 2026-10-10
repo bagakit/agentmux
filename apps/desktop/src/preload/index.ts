@@ -9,6 +9,7 @@ import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { THEME_BOOTSTRAP_CHANNEL, type ThemeBootstrap } from '../shared/theme-bootstrap'
 import { projectInitialTheme } from './theme-bootstrap'
 import { installNativeOverlayBlurGuard } from './native-overlay-focus'
+import { NATIVE_OVERLAY_FOCUS_CHANNEL, sameNativeOverlayDocument } from '../shared/native-overlay'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 import { unwrapSessionLaunchResult } from '../shared/session-launch-result'
@@ -335,20 +336,27 @@ const api: AgentMuxPreloadApi = {
   },
   ui: {
     initialTheme,
-    onNativeBrowserInput(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, input: import('../shared/native-overlay').NativeBrowserInput): void => listener(input)
+    onNativeBrowserInput(listener, document) {
+      const wrapped = (_event: Electron.IpcRendererEvent, input: import('../shared/native-overlay').NativeBrowserInput): void => {
+        if (sameNativeOverlayDocument(input.document, document)) listener(input)
+      }
       ipcRenderer.on(NATIVE_BROWSER_INPUT_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_BROWSER_INPUT_CHANNEL, wrapped)
     },
-    nativeBrowserVisibility: () => ipcRenderer.invoke('ui:nativeBrowserVisibility'),
-    onNativeBrowserVisibility(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, visibility: import('../shared/native-overlay').NativeBrowserVisibility): void => listener(visibility)
+    nativeBrowserVisibility: document => document ? ipcRenderer.invoke('ui:nativeBrowserVisibility', document) : ipcRenderer.invoke('ui:nativeBrowserVisibility'),
+    onNativeBrowserVisibility(listener, document) {
+      const wrapped = (_event: Electron.IpcRendererEvent, visibility: import('../shared/native-overlay').NativeBrowserVisibility): void => {
+        if (sameNativeOverlayDocument(visibility.document, document)) listener(visibility)
+      }
       ipcRenderer.on(NATIVE_BROWSER_VISIBILITY_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_BROWSER_VISIBILITY_CHANNEL, wrapped)
     },
-    publishNativeOverlays: (regions) => ipcRenderer.invoke('ui:publishNativeOverlays', regions),
-    onNativeOverlayWarning(listener) {
-      const wrapped = (_event: Electron.IpcRendererEvent, warning: string): void => listener(warning)
+    publishNativeOverlays: (regions, document) => document ? ipcRenderer.invoke('ui:publishNativeOverlays', regions, document) : ipcRenderer.invoke('ui:publishNativeOverlays', regions),
+    nativeOverlayFocus: document => document ? ipcRenderer.sendSync(NATIVE_OVERLAY_FOCUS_CHANNEL, document) === true : ipcRenderer.sendSync(NATIVE_OVERLAY_FOCUS_CHANNEL) === true,
+    onNativeOverlayWarning(listener, document) {
+      const wrapped = (_event: Electron.IpcRendererEvent, warning: import('../shared/native-overlay').NativeOverlayWarning): void => {
+        if (sameNativeOverlayDocument(warning.document, document)) listener(warning.message)
+      }
       ipcRenderer.on(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
     },
