@@ -65,12 +65,12 @@ export class PermissionActions implements PublicationPermissionsPort {
         !request.permissionHook.nativeTurnEnded && !request.permissionHook.response && !request.responseUnavailableReason && grants.length) {
       const target = agentInteractionRequestTarget(request) as AgentMuxPermissionRequest
       const projectionId = 'permission-' + digest([binding.bindingId, binding.revision, session.run, agentInteractionRequestDigest(target), grants.map(grant => [grant.grantId, grant.revision])])
-      const prior = this.options.connections.database.prepare('SELECT 1 FROM connection_ingress_action_reference WHERE projection_id=? LIMIT 1').get(projectionId)
+      const prior = this.options.connections.database.prepare('SELECT 1 FROM connection_ingress_action_reference WHERE binding_id=? AND binding_revision=? AND projection_id=? LIMIT 1').get(binding.bindingId, binding.revision, projectionId)
       if (!prior) {
         const database = this.options.connections.database
         database.exec('BEGIN IMMEDIATE')
         try {
-          if (!database.prepare('SELECT 1 FROM connection_ingress_action_reference WHERE projection_id=? LIMIT 1').get(projectionId)) for (const option of target.options) {
+          if (!database.prepare('SELECT 1 FROM connection_ingress_action_reference WHERE binding_id=? AND binding_revision=? AND projection_id=? LIMIT 1').get(binding.bindingId, binding.revision, projectionId)) for (const option of target.options) {
             const reference: Reference = { actionRef: randomUUID(), projectionId, binding: structuredClone(binding), run: { ...session.run }, request: target,
               decision: { outcome: 'selected', optionId: option.id }, grants: structuredClone(grants) }
             database.prepare('INSERT INTO connection_ingress_action_reference VALUES (?,?,?,?,?)')
@@ -105,7 +105,7 @@ export class PermissionActions implements PublicationPermissionsPort {
   }
   authorized(operation: PublicationOperation): boolean {
     if (operation.payload.kind !== 'permission') return true
-    const row = this.options.connections.database.prepare('SELECT reference_json FROM connection_ingress_action_reference WHERE projection_id=? LIMIT 1').get(operation.projectionId)
+    const row = this.options.connections.database.prepare('SELECT reference_json FROM connection_ingress_action_reference WHERE binding_id=? AND binding_revision=? AND projection_id=? LIMIT 1').get(operation.bindingId, operation.bindingRevision, operation.projectionId)
     if (!row) return false
     // A redaction never contains old tool context or actions. It still uses the exact original audience and Mod policy.
     if (operation.payload.disclosure === 'redacted' && !operation.payload.context && !operation.payload.options.length) return true
