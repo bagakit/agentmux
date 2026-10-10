@@ -270,6 +270,7 @@ export function SessionPane({
     setHistoryOpen(false)
   }, [viewMode])
   const openHistory = (trigger?: HTMLButtonElement): void => {
+    const document = surfaceRef.current?.ownerDocument ?? globalThis.document
     const header = !readOnly && headerPortalTargetId
       ? document.getElementById(headerPortalTargetId)
       : surfaceRef.current
@@ -277,12 +278,13 @@ export function SessionPane({
     setHistoryOpen(true)
   }
   const closeHistory = (): void => {
+    const document = surfaceRef.current?.ownerDocument ?? globalThis.document
     const reader = surfaceRef.current?.querySelector('.activity-feed')
     const target = historyReturnFocusRef.current
     const closingFocus = document.activeElement
     setHistoryOpen(false)
     selectOwnRegion()
-    requestAnimationFrame(() => {
+    document.defaultView?.requestAnimationFrame(() => {
       if (historyReturnContextRef.current !== historyReturnContext || !visibleRef.current || historyOpenRef.current ||
         !surfaceRef.current?.isConnected || !target?.isConnected || target.disabled) return
       const active = document.activeElement
