@@ -70,6 +70,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'notesStorage:inspect': 'notes directory',
   'notesStorage:change': 'notes directory changes',
   'notebook:actor': 'notebook actor',
+  'conversationLandmarks:list': 'original conversation reading points',
+  'conversationLandmarks:apply': 'original conversation reading-point metadata',
   'notebook:read': 'notebook directory',
   'notebook:graph': 'original Note graph observation',
   'notebook:resolve': 'original Note link resolution',

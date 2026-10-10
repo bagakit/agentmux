@@ -1,3 +1,4 @@
+import { createConversationLandmarksApi } from './conversation-landmarks-api'
 import { createRendererNotebookObservation } from './notebook-observation-api'
 import { serializeThemeFile } from '@agentmux/client-ui/theme'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -361,6 +362,10 @@ async function mockHistorySources(options?: { observation: true }): Promise<Agen
 }
 
 const mockApi: AgentMuxDesktopApi = {
+  landmarks: {
+    list: async () => { throw new Error('The original reading-point owner is unavailable in web preview. Open Desktop to read your saved points.') },
+    apply: async () => { throw new Error('The original reading-point owner is unavailable in web preview. Your name and original save intent are retained.') }
+  },
   search: { query: async () => { throw new Error('Open Desktop to query the original global search owner.') } },
   readRendererMemory: () => ({ process: { pid: null, creationTime: null }, memory: { sampledAt: Date.now(),
     scope: 'renderer-v8-isolate', heap: null, unavailable: 'Renderer process observation requires the desktop app.' } }),
@@ -1456,6 +1461,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
+    landmarks: createConversationLandmarksApi(preload.landmarks),
     notebooks: { ...preload.notebooks, ...createRendererNotebookObservation(preload.notebooks) },
     scratch: { ...preload.scratch, listTopics: async workspaceId => {
       const result = await preload.scratch.listTopics(workspaceId)

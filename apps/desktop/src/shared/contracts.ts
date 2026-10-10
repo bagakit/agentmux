@@ -1606,6 +1606,7 @@ export type AgentMuxDesktopApi = {
   /** Fixed-size synchronous V8-isolate observation; no process dump or object scan. */
   readRendererMemory(): import('@agentmux/core/control').RendererMemorySnapshot
   git: import('./git-contracts').GitProjectIdentityApi
+  landmarks: import('@agentmux/core/conversation').ConversationLandmarkApi
   notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationApi
   notesStorage: import('@agentmux/core/notebook-store').NotesStorageApi
   spatial: {

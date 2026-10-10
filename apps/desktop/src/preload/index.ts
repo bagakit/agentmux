@@ -124,6 +124,10 @@ const api: AgentMuxPreloadApi = {
     change: input => ipcRenderer.invoke('notesStorage:change', input),
     onChange: listener => { const receive = (_event: unknown, snapshot: import('@agentmux/core/notebook-store').NotesStorageSnapshot) => listener(snapshot); ipcRenderer.on('notesStorage:changed', receive); return () => ipcRenderer.removeListener('notesStorage:changed', receive) }
   },
+  landmarks: {
+    list: async input => unwrapSessionObservationResult(await ipcRenderer.invoke('conversationLandmarks:list', input)),
+    apply: async input => unwrapSessionObservationResult(await ipcRenderer.invoke('conversationLandmarks:apply', input))
+  },
   notebooks: {
     ...createPreloadNotebookObservation((channel, ...values) => ipcRenderer.invoke(channel, ...values)),
     actor: () => ipcRenderer.invoke('notebook:actor'),
