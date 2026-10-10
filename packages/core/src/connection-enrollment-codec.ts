@@ -1,7 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionRecord } from './connection-record-codec.js'
-import type { ConnectionEnrollmentBeginInput, ConnectionEnrollmentCapability, ConnectionEnrollmentChallenge, ConnectionEnrollmentMethod, ConnectionEnrollmentOperation, ConnectionEnrollmentParamsMap, ConnectionEnrollmentReason, ConnectionEnrollmentResultMap } from './connection-enrollment-contract.js'
+import type { ConnectionEnrollmentBeginInput, ConnectionEnrollmentCapability, ConnectionEnrollmentChallenge, ConnectionEnrollmentDiagnostic, ConnectionEnrollmentMethod, ConnectionEnrollmentOperation, ConnectionEnrollmentParamsMap, ConnectionEnrollmentReason, ConnectionEnrollmentResultMap } from './connection-enrollment-contract.js'
 
 export const CONNECTION_ENROLLMENT_RPC_METHODS = { 'connection.enrollment.begin': 'long', 'connection.enrollment.advance': 'long', 'connection.enrollment.inspect': 'long', 'connection.enrollment.ls': 'long' } as const
 export const isConnectionEnrollmentMethod = (value: unknown): value is ConnectionEnrollmentMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_ENROLLMENT_RPC_METHODS, value)
@@ -22,8 +22,19 @@ export function parseConnectionEnrollmentChallenge(value: unknown): ConnectionEn
   try { const u = new URL(url); if (u.protocol !== 'https:' || u.username || u.password) fail() } catch { fail() }
   return { verificationUrl: url, ...(p.userCode === undefined ? {} : { userCode: text(p.userCode) }), expiresAt: p.expiresAt === null ? null : integer(p.expiresAt, 0), nextPollAt: integer(p.nextPollAt, 0) }
 }
+export function parseConnectionEnrollmentDiagnostic(value: unknown): ConnectionEnrollmentDiagnostic {
+  const p = object(value, ['stage', 'code', 'httpStatus'])
+  if (p.stage !== 'response' && p.httpStatus !== undefined) fail()
+  switch (p.stage) {
+    case 'request': return { stage: 'request', code: choice(p.code, ['transport-unconfirmed', 'cancelled']) }
+    case 'response': return { stage: 'response', code: choice(p.code, ['http-status', 'platform-error', 'invalid-json', 'invalid-response']), ...(p.httpStatus === undefined ? {} : { httpStatus: integer(p.httpStatus, 100, 599) }) }
+    case 'challenge': return { stage: 'challenge', code: choice(p.code, ['missing-verification', 'unsafe-verification', 'invalid-challenge']) }
+    case 'secure-storage': return { stage: 'secure-storage', code: choice(p.code, ['challenge-unconfirmed', 'credential-unconfirmed']) }
+    default: return fail()
+  }
+}
 export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEnrollmentOperation {
-  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset', 'revision', 'authorization', 'credential', 'configuration', 'application', 'challenge', 'configured', 'reason'])
+  const p = object(value, ['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset', 'revision', 'authorization', 'credential', 'configuration', 'application', 'challenge', 'configured', 'reason', 'diagnostic'])
   const input = parseConnectionEnrollmentBegin(Object.fromEntries(['operationId', 'connectionId', 'adapterId', 'domain', 'label', 'preset'].filter(k=>p[k]!==undefined).map(k => [k, p[k]])))
   const app = p.application === null ? null : object(p.application, ['domain', 'appId'])
   const application = app ? { domain: domain(app.domain), appId: id(app.appId) } : null
@@ -36,7 +47,7 @@ export function parseConnectionEnrollmentOperation(value: unknown): ConnectionEn
     const config = configured.connection.config
     if (!application || config.connectionId !== input.connectionId || config.adapterId !== input.adapterId || config.label !== input.label || config.application.domain !== application.domain || config.application.appId !== application.appId) fail()
   }
-  const result: ConnectionEnrollmentOperation = { ...input, revision: integer(p.revision, 1), authorization: choice(p.authorization, ['not-started', 'pending', 'authorized', 'denied', 'expired', 'unknown']), credential: choice(p.credential, ['not-started', 'storing', 'stored', 'unknown']), configuration: choice(p.configuration, ['not-started', 'saving', 'configured', 'unknown', 'refused']), application, challenge: p.challenge === null ? null : parseConnectionEnrollmentChallenge(p.challenge), configured, ...(p.reason === undefined ? {} : { reason: choice(p.reason, reasons) }) }
+  const result: ConnectionEnrollmentOperation = { ...input, revision: integer(p.revision, 1), authorization: choice(p.authorization, ['not-started', 'pending', 'authorized', 'denied', 'expired', 'unknown']), credential: choice(p.credential, ['not-started', 'storing', 'stored', 'unknown']), configuration: choice(p.configuration, ['not-started', 'saving', 'configured', 'unknown', 'refused']), application, challenge: p.challenge === null ? null : parseConnectionEnrollmentChallenge(p.challenge), configured, ...(p.reason === undefined ? {} : { reason: choice(p.reason, reasons) }), ...(p.diagnostic === undefined ? {} : { diagnostic: parseConnectionEnrollmentDiagnostic(p.diagnostic) }) }
   if (configured && (configured.connection.revision !== 1 || !configured.connection.config.enabled)) fail()
   if ((result.configuration === 'configured') !== (configured !== null) || configured && (result.credential !== 'stored' || result.authorization !== 'authorized') || result.authorization === 'authorized' && !application || result.credential === 'stored' && !application || result.authorization === 'pending' && !result.challenge) fail()
   return result
