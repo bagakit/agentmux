@@ -51,6 +51,16 @@ that exact input after a lost reply; current policy does not acknowledge the
 original operation. Service and application configure share the original
 configuration operation index and reject cross-method operation ID reuse.
 
+Desktop Settings → Mods → Agent Conversation Connector exposes the same policy
+through [the original settings module](../../apps/desktop/src/renderer/src/components/settings/modules/connections.tsx).
+Edit **Enable Agent Conversation Connector**, then choose **Save Connector service**.
+**Check current service** reads current policy; **Original service requests** keeps
+each submitted input and provides **Check original request** for its historical
+receipt. A new choice can explicitly use the current revision while earlier
+requests remain available. Read failures keep the last confirmed menu policy and
+leave application management reachable. The original Region context menu and
+Agent header menu show or withdraw one named Connector group together.
+
 Off prevents new automatic intake and publication without rewriting application
 enabled values, Bindings, grants, source cuts, retained inputs or delivery progress.
 An unclaimed received message stays received and continues with the same ingress
@@ -708,7 +718,7 @@ certify live credentials, platform permissions or delivery to a real group.
 
 ## Application enrollment
 
-Desktop Settings → Connections → Feishu & Lark consumes this same public
+Desktop Settings → Mods → Agent Conversation Connector consumes this same public
 service. **Create and connect a bot** opens the platform confirmation without
 asking the user to copy credentials. **Connect an existing bot** keeps the
 original credential-entry path. Opening Settings only reads local progress;
