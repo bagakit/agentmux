@@ -1,4 +1,4 @@
-import type { ConnectionApplication } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionEnrollmentDiagnostic } from '@agentmux/core/connections'
 import type { WritableSecretPort } from './connection-host.js'
 
 export interface EnrollmentSecrets extends WritableSecretPort {
@@ -16,8 +16,9 @@ export type EnrollmentChallengeReceipt = {
   /** Private opaque state; encrypted by the Host, never public JSON or diagnostics. */
   privateState: string
 }
-export type EnrollmentBeginReceipt = EnrollmentChallengeReceipt | { kind: 'not-applied' } | { kind: 'unknown' }
-export type EnrollmentPollReceipt = EnrollmentChallengeReceipt | { kind: 'authorized'; application: ConnectionApplication; secret: string } | { kind: 'denied' | 'expired' | 'unknown' }
+export type EnrollmentUnknownReceipt = { kind: 'unknown'; diagnostic?: ConnectionEnrollmentDiagnostic }
+export type EnrollmentBeginReceipt = EnrollmentChallengeReceipt | { kind: 'not-applied' } | EnrollmentUnknownReceipt
+export type EnrollmentPollReceipt = EnrollmentChallengeReceipt | { kind: 'authorized'; application: ConnectionApplication; secret: string } | { kind: 'denied' | 'expired' } | EnrollmentUnknownReceipt
 export interface ConnectionEnrollmentAdapter {
   readonly domains: readonly Readonly<{ domain: string; label: string }>[]
   /** One request only; no internal loop or issuer switching. */
