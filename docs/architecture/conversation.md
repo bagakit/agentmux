@@ -51,6 +51,8 @@ flowchart LR
 
 [`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 持有已提交窗口、返回位置与阅读锚点；更早／较新页仍调用同一 `readSessionConversationPage`，`protectsConversationWindow` 检查选区与已读节点。窗口是客户端阅读状态，事实仍来自 Core／Provider。当前 Activity 和 History 把已提交 page 交给同一 `ConversationView`；captured 原文在同一阅读面常显，保独立记录及来源，不再以总详情隐藏。退休 Session 的只读入口也使用 `ActivityView`。
 
+用户命名阅读点由 [`ConversationLandmarks`](../../apps/desktop/src/renderer/src/components/ConversationLandmarks.tsx) 接入原消息动作区与 Activity 阅读工具。Main 的原 IPC 与公共控制服务注入同一个 Core Store，preload 和 Renderer 严格解析同一请求及回执；列表仅显式打开或刷新时读取，消息动作不订阅元数据目录。返回沿 SessionPane 原导航 owner，已退休阅读面复用 Activity 的准确已加载记录定位。未确认的写入输入复用 [`AppStore`](../../apps/desktop/src/renderer/src/store.ts) 的原工作面保存机制暂存，按完整记录或准确 point 身份隔离，确认后只清除同一个 operation；它不持有已保存阅读点或正文的第二份事实。原记录离开窗口或重开后，阅读工具仍可查询或重试原操作。
+
 captured 输入沿既有 `AgentSessionUserMessage` 交共同 Message，captured 回复及系统原文经 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 薄适配到同一 Message，并在原消息详情保采集来源与原记录身份。Activity 的 Row／Run 只适配原 Timeline 事件：与 native 过程消费相同 [`RecordedStepsCard`／`RecordedToolRow`](../../packages/client-ui/src/components/WorkflowObservation.tsx)，使用紧凑呈现；参数和结果交共同 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)，编辑 diff 保原只读预览和完整原参数。Provider 专有的 native metrics／collaboration 与 captured 的原分组仍由各自准确适配表达，不能将 Timeline 强制转换成 native parts。
 
 原生分页尾 marker 与当前已呈现内容尾分别供分页、latest／follow 使用；captured 正文追加或增长也参与显示变化判定。可见 captured 段沿原 segment key 参与锚点、精确定位和图片可见性门，不持第二份正文。现有公共 Timeline 尚无通用 captured→native record 的准确关联，客户端既不按正文／时间删除副本，也不从内部 ID 解出一个回执键；查看消息详情不会产生接纳或执行事实。
