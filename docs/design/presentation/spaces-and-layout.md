@@ -270,6 +270,8 @@ Focus 在 Project Rail 缺席时，必要过滤控件从系统窗口控制区右
 
 ### Survey 的 Zone 工作面与液体玻璃
 
+Survey 的身份图形以开放浏览框与探查镜表达日常浏览和主动探查，与知识库书册及单纯 Browser 窗口可辨；导航、列表与旧成果静止。仅当前成果沿原准确意图写入并完成 Notebook 登记后，可在原保存反馈中让镜内短线轻扫一次；打开记录面、只有正文写入或未知登记均不表示已保存到 Recall。Browser 当前等待仍沿其原 operation，不能转成 Survey 整体循环。共享作者、用户资产、减少动态与停泊规则沿[语义图标合同](shared-rules.md#语义图标密度与性能)。
+
 Browser 的采集与显示告示留在当前 Browser 内容内，复用紧凑服务窗与详情，默认只占局部一行并保原地重试。告示不成为 Region 的横向兄弟面板、不挤窄网页；原地址栏、Tab 和内容边界保持。事实与恢复资格只见交互合同[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)。
 
 Survey 左侧以 Browser 的浏览／研究导航为起点，不在顶部提供 Browser／Notebook／Notes 模式切换，不混排 Notebook 或页面树。Recall 与 Survey 使用同一主导航语言，职责和切换目标直接可辨；Survey 保网页、地址／搜索和初步结果的轻量层级，知识目录与完整书写归[《Recall 的目录、阅读与来源》](#recall-的目录阅读与来源)。
@@ -304,6 +306,8 @@ Survey 左侧以 Browser 的浏览／研究导航为起点，不在顶部提供 
 - **Zone 的缺失状态整页表达。** 打开研究直接呈现原 Zone；不常驻显示地址、位置选择器或恢复术语。只有整个 Zone 暂不可用时显示克制的完整状态页：短标题、保留内容说明和一个可达起步动作；已知空 Zone 提供明确打开网页入口。局部内容故障仍留在原 Region。
 
 ### Recall 的目录、阅读与来源
+
+Note 使用有内容线的单页轮廓表达单份原记录，与 Notebook 集合、书册及关系图保持可辨；目录、返回与历史默认静止。原编辑面仅在本次准确资源与 revision 的正文写入回执后，可让一条内容线短描一次，纸框固定并归完整静止态；不从焦点、输入、切换 Note／Graph 或点击保存猜成功。正文写入、来源归属、历史和目录登记仍按[原 Note 行为](../behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑)分别表达，metadata 未确认提示不被局部反馈遮蔽。共享作者、用户资产和动态规则沿[语义图标合同](shared-rules.md#语义图标密度与性能)。
 
 Recall 与 Survey 并列，使用共享主导航的图标、字号、选中态和完整命中区；不以 Wiki 或 Notes 作为第二个顶级模块名称。进入后直接显示 Notebook 导航与页面阅读／编辑，不先进入 Survey 再通过侧栏切换。独立选择、内容与存储行为只见交互合同[《Recall、Notebook 与块知识》](../behavior/knowledge-workflows.md#recallnotebook-与块知识)，本层不复制内容或另定义动作 owner。
 
