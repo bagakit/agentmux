@@ -39,6 +39,33 @@ const SVG_NS = 'http://www.w3.org/2000/svg'
 const sprites = new WeakMap<Document, { element: SVGSVGElement; signature: string; nativeSignature: string; imageSignature: string }>()
 export function semanticIconHref(name: SemanticIconId): string { return `#agentmux-icon-${name}` }
 
+export const WORK_ICON_PARTS = ['body', 'pen'] as const
+export function workIconHref(name: SemanticIconId, part: typeof WORK_ICON_PARTS[number]): string {
+  return `${semanticIconHref(name)}${part === 'pen' ? '--work-pen' : ''}`
+}
+
+/** The work bone references live sprite geometry, including while detached. */
+function populateWorkIcon(element: SVGForeignObjectElement, name: SemanticIconId): void {
+  const document = element.ownerDocument
+  const model = document.createElement('div')
+  model.className = 'semantic-icon-work-model'
+  for (const part of WORK_ICON_PARTS) {
+    const layer = document.createElement('div')
+    layer.className = `semantic-icon-work-${part}`
+    if (part === 'pen') layer.setAttribute('data-semantic-icon-part', 'writing-pen')
+    const drawing = document.createElementNS(SVG_NS, 'svg')
+    drawing.setAttribute('viewBox', '0 0 24 24')
+    drawing.setAttribute('width', '24')
+    drawing.setAttribute('height', '24')
+    const use = document.createElementNS(SVG_NS, 'use')
+    use.setAttribute('href', workIconHref(name, part))
+    drawing.append(use)
+    layer.append(drawing)
+    model.append(layer)
+  }
+  element.replaceChildren(model)
+}
+
 /** The document root owns one sprite. Existing React and editor DOM keep stable references. */
 export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'icons' | 'iconStyle'>, nativeTextColor: string): void {
   let sprite = sprites.get(document)
@@ -71,17 +98,33 @@ export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'ic
   }
   if (sprite.signature === signature) return
   const symbols = document.createDocumentFragment()
+  const workRules: string[] = []
   for (const name of SEMANTIC_ICON_IDS) {
     const symbol = document.createElementNS(SVG_NS, 'symbol')
     symbol.id = semanticIconHref(name).slice(1)
     symbol.setAttribute('viewBox', '0 0 24 24')
+    const pen = document.createElementNS(SVG_NS, 'symbol')
+    pen.id = `${symbol.id}--work-pen`
+    pen.setAttribute('viewBox', '0 0 24 24')
     for (const [tag, attributes] of iconShapes(name, theme.icons)) {
       const shape = document.createElementNS(SVG_NS, tag)
       for (const [key, value] of Object.entries(attributes)) shape.setAttribute(key, value)
       symbol.append(shape)
+      if (attributes['data-semantic-icon-part'] === 'writing-pen') {
+        const drawing = shape.cloneNode(true) as SVGElement
+        drawing.removeAttribute('data-semantic-icon-part')
+        pen.append(drawing)
+      }
     }
     symbols.append(symbol)
+    if (pen.childElementCount) {
+      symbols.append(pen)
+      workRules.push(`.semantic-icon[data-semantic-icon="${name}"]{--icon-work-part-animation:semantic-icon-work-pen}`)
+    }
   }
+  const workStyle = document.createElementNS(SVG_NS, 'style')
+  workStyle.textContent = workRules.join('\n')
+  symbols.append(workStyle)
   sprite.element.replaceChildren(symbols)
   sprite.signature = signature
 }
@@ -111,9 +154,18 @@ export function createSemanticIconElement(name: SemanticIconId, document: Docume
   element.style.strokeWidth = String(options.strokeWidth ?? SEMANTIC_ICON_PEN.strokeWidth)
   element.style.strokeLinecap = options.strokeLinecap ?? SEMANTIC_ICON_PEN.strokeLinecap as 'round'
   element.style.strokeLinejoin = options.strokeLinejoin ?? SEMANTIC_ICON_PEN.strokeLinejoin as 'round'
-  const use = document.createElementNS(SVG_NS, 'use')
-  use.setAttribute('href', semanticIconHref(name))
-  element.append(use)
+  if (options.animation === 'work') {
+    const articulation = document.createElementNS(SVG_NS, 'foreignObject')
+    articulation.setAttribute('width', '24')
+    articulation.setAttribute('height', '24')
+    articulation.setAttribute('data-semantic-icon-work', name)
+    populateWorkIcon(articulation, name)
+    element.append(articulation)
+  } else {
+    const use = document.createElementNS(SVG_NS, 'use')
+    use.setAttribute('href', semanticIconHref(name))
+    element.append(use)
+  }
   if (!options.animation || options.animation === 'none') return element
   const carrier = document.createElement('span')
   carrier.className = 'semantic-icon-motion'
