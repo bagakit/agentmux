@@ -107,7 +107,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
   const receipt = { schema: 'agentmux.browser-default-os-proof.v1', status: 'running', app, packageIdentity,
     boundary: 'Exact non-installed production App; read-only OS handlers; explicit-app HTTP(S) routing is not proof of a changed default. Private user data, Scratch, Notes, Core and Runtime. No product replacement or automatic OS setter.', cases: [], images: [] }
   const writeReceipt = async () => { const file = join(evidence, 'receipt.tmp'); await writeFile(file, JSON.stringify(receipt, null, 2) + '\n'); await rename(file, join(evidence, 'receipt.json')) }
-  let page, browser, rpc, server, failure, terminalControl
+  let page, main, rpc, server, failure, terminalControl
   const cleanEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key)))
   const environment = { ...cleanEnvironment, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_DISABLE_CRASH_REPORTER: '1',
     AGENTMUX_RUNTIME_DIRECTORY: scope.directory, AGENTMUX_STATE_DIRECTORY: join(scope.directory, 'state'),
@@ -137,7 +137,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const coldUrl = origin + '/primary?request=' + token + '&q=one%20two#section-a'
     const launchArgs = ['-n', '-a', app, '--stdout', join(evidence, 'main.stdout.log'), '--stderr', join(evidence, 'main.stderr.log')]
     for (const [key, value] of Object.entries(environment).filter(([key]) => key.startsWith('AGENTMUX_'))) launchArgs.push('--env', key + '=' + value)
-    launchArgs.push(coldUrl, '--args', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', '--browser-default-proof=' + scope.directory)
+    launchArgs.push(coldUrl, '--args', '--inspect=0', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', '--browser-default-proof=' + scope.directory)
     await command('/usr/bin/open', launchArgs, { env: cleanEnvironment })
     const { connectAgentMuxRpc, formatAmuxObjectLink } = await import(pathToFileURL(join(core, 'dist/index.js')).href)
     rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(scope.directory, 'control.sock') } })
@@ -165,7 +165,6 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     }
     const attachPage = async () => { const target = await eventually(rootTarget, 'Actual bundled workbench target'); page = await cdp(target.webSocketDebuggerUrl); return target }
     let target = await attachPage()
-    browser = await cdp('ws://127.0.0.1:' + port + devtools[1])
     const profiles = await page.evaluate('window.agentmux.browser.listProfiles()'), defaultProfiles = profiles.filter(profile => profile.isDefault)
     assert.equal(defaultProfiles.length, 1, 'The actual normal Profile owner must confirm one default')
     const expectedProfileId = defaultProfiles[0].id
@@ -294,7 +293,35 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     assert.ok(regions(objectReopened).some(region => region.control?.run.runId === run.region.runId && region.processState === 'running'), 'Both no-window protocols retain the original healthy Run')
     receipt.cases.push({ name: 'no-window-amux-restores-original-region-main-and-run', mainPid: objectReopened.main.pid,
       runId: run.region.runId, selection: objectReopened.workbench.desktop.selection, browsers: browsersBeforeObjectReopen })
-    const currentWindow = await browser.call('Browser.getWindowForTarget', { targetId: target.id })
+    const inspectorUrl = await eventually(async () => {
+      const diagnostics = await readFile(join(evidence, 'main.stderr.log'), 'utf8')
+      return /Debugger listening on (ws:\/\/\S+)/.exec(diagnostics)?.[1]
+    }, 'Original isolated Main inspector')
+    const inspectorEndpoint = new URL(inspectorUrl)
+    assert.ok(inspectorEndpoint.protocol === 'ws:' && inspectorEndpoint.hostname === '127.0.0.1' &&
+      Number(inspectorEndpoint.port) > 0 && Number(inspectorEndpoint.port) < 65536, 'Only the original loopback Main inspector is eligible')
+    main = await cdp(inspectorUrl)
+    const electron = `process.getBuiltinModule('module').createRequire(${JSON.stringify(join(resources, 'package.json'))})('electron')`
+    const mainIdentity = await main.evaluate(`(() => { const {app}=${electron};
+      return {pid:process.pid,executable:process.execPath,appPath:app.getAppPath(),userData:app.getPath('userData')} })()`)
+    assert.equal(mainIdentity.pid, initial.main.pid, 'The inspector belongs to the exact original public Main')
+    assert.equal(await realpath(mainIdentity.executable), await realpath(executable))
+    assert.equal(await realpath(mainIdentity.appPath), await realpath(resources))
+    assert.equal(await realpath(mainIdentity.userData), userData)
+    const rendererUrl = await page.evaluate('location.href')
+    assert.equal(rendererUrl, target.url, 'The current CDP target is the original loaded Renderer')
+    const currentWindow = await main.evaluate(`(() => { const {BrowserWindow}=${electron};
+      const windows=BrowserWindow.getAllWindows().filter(win=>!win.isDestroyed()&&!win.webContents.isDestroyed()&&win.webContents.getURL()===${JSON.stringify(rendererUrl)});
+      if(windows.length!==1)throw new Error('The exact original Renderer must own one native Window');
+      const win=windows[0];return {windowId:win.id,webContentsId:win.webContents.id,url:win.webContents.getURL()} })()`)
+    const windowBounds = async requested => await main.evaluate(`(() => { const {BrowserWindow}=${electron};
+      const win=BrowserWindow.fromId(${currentWindow.windowId});
+      if(!win||win.isDestroyed())throw new Error('The exact original native Window ended');
+      const contents=win.webContents;
+      if(contents.isDestroyed()||contents.id!==${currentWindow.webContentsId}||contents.getURL()!==${JSON.stringify(rendererUrl)})throw new Error('The original native Renderer changed');
+      ${requested ? `win.setBounds(${JSON.stringify(requested)});` : ''}
+      return {bounds:win.getBounds(),contentBounds:win.getContentBounds(),zoomFactor:contents.getZoomFactor()} })()`)
+    receipt.mainInspector = { endpoint: inspectorUrl, identity: mainIdentity, window: currentWindow }
     await openSurveySettings()
     const originalTitle = await page.evaluate('document.querySelector(' + JSON.stringify(startPageTitleSelector) + ').value')
     assert.notEqual(originalTitle, draft, 'An unsubmitted start-page draft must not have been silently saved')
@@ -305,11 +332,16 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const systemSettings = await command('/usr/bin/osascript', ['-l', 'JavaScript', '-e', `ObjC.import('AppKit');function run(){const apps=$.NSWorkspace.sharedWorkspace.runningApplications;for(let i=0;i<apps.count;i++)if(apps.objectAtIndex(i).bundleIdentifier.js==='com.apple.systempreferences')return 'running';return 'not-running'}`])
     assert.equal(systemSettings.stdout.trim(), 'running', 'The original request must reach the actual system settings application')
     for (const [name, width, height] of [['normal', 1180, 820], ['narrow', 720, 760]]) {
-      await browser.call('Browser.setWindowBounds', { windowId: currentWindow.windowId, bounds: { width, height } })
+      const requestedBounds = { width, height }, applied = await windowBounds(requestedBounds)
+      await eventually(async () => Math.abs(await page.evaluate('innerWidth') - applied.contentBounds.width / applied.zoomFactor) <= 1, 'Original Renderer consumes the actual native width')
       await page.evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+      const rendererViewport = await page.evaluate('({url:location.href,innerWidth,innerHeight,devicePixelRatio})')
+      assert.equal(rendererViewport.url, rendererUrl, 'Settings capture keeps the same loaded Renderer')
       const screenshot = await page.call('Page.captureScreenshot', { format: 'png' }), bytes = Buffer.from(screenshot.data, 'base64'), file = 'settings-survey-' + name + '.png'
       await writeFile(join(evidence, file), bytes)
-      receipt.images.push({ file, sha256: hash(bytes), bounds: (await browser.call('Browser.getWindowBounds', { windowId: currentWindow.windowId })).bounds })
+      const actual = await windowBounds()
+      receipt.images.push({ file, sha256: hash(bytes), requestedBounds, bounds: actual.bounds,
+        contentBounds: actual.contentBounds, zoomFactor: actual.zoomFactor, rendererViewport, window: currentWindow })
     }
     const eligible = await systemHandlers()
     receipt.eligibility = eligible
@@ -337,7 +369,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
       } catch (error) { cleanup.push('Original private Terminal exit is unconfirmed: ' + error.message) }
     } else if (receipt.terminalRunId) cleanup.push('The created private Terminal control was not observed; its exit is unconfirmed.')
     try { await rpc?.dispose() } catch (error) { cleanup.push(error.message) }
-    try { page?.close(); browser?.close() } catch (error) { cleanup.push(error.message) }
+    try { page?.close(); main?.close() } catch (error) { cleanup.push(error.message) }
     if (server) await new Promise(done => server.close(done))
     try { await stopProbeProcesses(-1, scope.directory); receipt.cleanupProcesses = await listProbeProcesses(-1, scope.directory) } catch (error) { cleanup.push(error.message) }
     try { receipt.cleanupRuntime = await scope.cleanup() } catch (error) { cleanup.push(error.message) }
