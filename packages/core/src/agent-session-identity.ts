@@ -1,12 +1,31 @@
 import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
-import type { AgentHookReceipt, AgentMuxAgentSession, AgentMuxRunRef, AgentMuxStoredAgentSession } from './types.js'
+import type { AgentHookReceipt, AgentMuxAgentSession, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentNativeSessionHandle } from './types.js'
 
 export function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
   return left.runId === right.runId
 }
 
+/** The full locator includes its Provider source, not only the displayed native Session ID. */
+export function sameNativeHandle(a: AgentNativeSessionHandle | undefined, b: AgentNativeSessionHandle | undefined): boolean {
+  return a === b || a?.kind === 'provider' && b?.kind === 'provider' && a.providerId === b.providerId &&
+    a.sessionId === b.sessionId && a.transcriptPath === b.transcriptPath ||
+    a?.kind === 'acp' && b?.kind === 'acp' && a.adapterId === b.adapterId && a.sessionId === b.sessionId
+}
+
+export function nativeTurnEndScopeMatches(session: Pick<AgentMuxStoredAgentSession, 'providerId' | 'run' | 'nativeHandle' | 'nativeTurnEnds'>): boolean {
+  const ends = session.nativeTurnEnds
+  return ends !== undefined && sameRun(ends.run, session.run) && ends.providerId === session.providerId &&
+    sameNativeHandle(ends.nativeHandle, session.nativeHandle)
+}
+
+/** Only a retained exact end can deny this turn; an absent observation never denies a healthy callback. */
+export function agentNativeTurnEnd(session: Parameters<typeof nativeTurnEndScopeMatches>[0], nativeTurnId: string | undefined) {
+  return nativeTurnId !== undefined && nativeTurnEndScopeMatches(session) && Object.hasOwn(session.nativeTurnEnds!.turns, nativeTurnId)
+    ? session.nativeTurnEnds!.turns[nativeTurnId] : undefined
+}
+
 export function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
-  const { interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
+  const { nativeTurnEnds: _nativeTurnEnds, interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
   return structuredClone(publicSession)
 }
 

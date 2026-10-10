@@ -1384,6 +1384,14 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
   /** Original response operation index. Retained after the live request settles; never broadcast. */
   interactionOperations?: Record<string, AgentMuxInteractionOperationReceipt>
 
+  /** Exact ends for the original native-status source; private, independent of the current display state. */
+  nativeTurnEnds?: {
+    run: AgentMuxRunRef
+    providerId: AgentProviderId
+    nativeHandle: AgentNativeSessionHandle
+    turns: Record<string, { recordId: string; observedAt: number; nativeObservedAt?: number }>
+  }
+
   hookBindingId: string
   hookToken: string
   /** Agent 说话凭证的 sha256。raw 只在受管进程的 env 里，Core 侧只留 hash。 */

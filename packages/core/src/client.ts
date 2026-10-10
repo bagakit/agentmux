@@ -92,7 +92,7 @@ import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
   type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
-import { agentTurnEndEvidence, cloneSession, sameRun } from './agent-session-identity.js'
+import { agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
@@ -240,10 +240,11 @@ const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
 // A local event annotation, never serialized or retained as another Session fact owner.
 const localSessionObservation = Symbol('local-session-observation')
 type LocalSessionObservation = 'terminalOutputChannel' | 'terminalCapability'
-function sameNativeHandle(a: AgentNativeSessionHandle | undefined, b: AgentNativeSessionHandle | undefined): boolean {
-  return a === b || a?.kind === 'provider' && b?.kind === 'provider' && a.providerId === b.providerId &&
-    a.sessionId === b.sessionId && a.transcriptPath === b.transcriptPath ||
-    a?.kind === 'acp' && b?.kind === 'acp' && a.adapterId === b.adapterId && a.sessionId === b.sessionId
+function permissionNativeTurnEnd(session: AgentMuxStoredAgentSession, request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }>) {
+  const hook = request.permissionHook
+  return request.agentSessionId === session.agentSessionId && request.evidence.run?.runId === session.run.runId &&
+    session.nativeHandle?.kind === 'provider' && hook?.nativeSessionId === session.nativeHandle.sessionId
+    ? agentNativeTurnEnd(session, hook.nativeTurnId) : undefined
 }
 
 type NativeHistoryBinding = {
@@ -6270,7 +6271,7 @@ export class AgentMuxClient {
   }
 
   private async updatePermissionHookRequest(session: AgentMuxAgentSession, receiptId: string,
-    change: (request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }>) => AgentMuxInteractionRequest): Promise<AgentMuxStoredAgentSession> {
+    change: (request: Extract<AgentMuxInteractionRequest, { kind: 'permission' }>, session: AgentMuxStoredAgentSession) => AgentMuxInteractionRequest): Promise<AgentMuxStoredAgentSession> {
     const next = await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
       const pending = current.pendingInteraction
       if (!pending) throw new AgentMuxError('The original permission request is no longer retained.', 'UNKNOWN_AGENT_INTERACTION')
@@ -6278,7 +6279,7 @@ export class AgentMuxClient {
       const update = (request: AgentMuxInteractionRequest) => {
         if (request.kind !== 'permission' || request.permissionHook?.receiptId !== receiptId) return request
         found = true
-        return change(request)
+        return change(request, current)
       }
       const request = update(pending.request)
       const additionalRequests = pending.additionalRequests?.map(update)
@@ -6317,8 +6318,8 @@ export class AgentMuxClient {
     try {
       await this.registry.refresh(session.agentSessionId, session.run)
       await context?.assertCurrent?.()
-      await this.updatePermissionHookRequest(session, receiptId, current => {
-        if (current.permissionHook?.closed || current.permissionHook?.nativeTurnEnded || !this.hookServer.hasPermissionCallback(session.agentSessionId, session.run.runId, receiptId)) {
+      await this.updatePermissionHookRequest(session, receiptId, (current, saved) => {
+        if (current.permissionHook?.closed || current.permissionHook?.nativeTurnEnded || permissionNativeTurnEnd(saved, current) || !this.hookServer.hasPermissionCallback(session.agentSessionId, session.run.runId, receiptId)) {
           throw new AgentMuxError('The original permission Hook callback is closed. Use the original terminal.', 'AGENT_INTERACTION_UNCONFIRMED')
         }
         const previous = current.permissionHook?.response
@@ -6329,8 +6330,8 @@ export class AgentMuxClient {
       })
       // Only this existing saved-to-unknown CAS claims the original decision dispatch.
       // A concurrent save or claim loser never owns the original callback's None exit.
-      await this.updatePermissionHookRequest(session, receiptId, current => {
-        if (current.permissionHook?.closed || current.permissionHook?.nativeTurnEnded || current.permissionHook?.response?.operationId !== operationId ||
+      await this.updatePermissionHookRequest(session, receiptId, (current, saved) => {
+        if (current.permissionHook?.closed || current.permissionHook?.nativeTurnEnded || permissionNativeTurnEnd(saved, current) || current.permissionHook?.response?.operationId !== operationId ||
             current.permissionHook.response.delivery !== 'saved' ||
             !this.hookServer.hasPermissionCallback(session.agentSessionId, session.run.runId, receiptId)) {
           throw new AgentMuxError('The original permission callback changed before dispatch.', 'AGENT_INTERACTION_UNCONFIRMED')
@@ -6338,11 +6339,12 @@ export class AgentMuxClient {
         return { ...current, permissionHook: { ...current.permissionHook, response: { ...current.permissionHook.response, delivery: 'unknown' } } }
       })
       claimed = true
+      await this.registry.refresh(session.agentSessionId, session.run)
       await context?.assertCurrent?.()
       context?.requestSignal?.throwIfAborted()
       const current = this.requireAgentSession(session.agentSessionId), pending = current.pendingInteraction
       const target = [pending?.request, ...(pending?.additionalRequests ?? [])].find(candidate => candidate?.id === request.id)
-      if (!sameRun(current.run, session.run) || target?.kind !== 'permission' || !target.permissionHook || target.permissionHook.nativeTurnEnded ||
+      if (!sameRun(current.run, session.run) || target?.kind !== 'permission' || !target.permissionHook || target.permissionHook.nativeTurnEnded || permissionNativeTurnEnd(current, target) ||
           current.nativeHandle?.kind === 'provider' && target.permissionHook.nativeSessionId !== undefined && target.permissionHook.nativeSessionId !== current.nativeHandle.sessionId) {
         throw new AgentMuxError('The original permission target changed before dispatch.', 'AGENT_INTERACTION_UNCONFIRMED')
       }
@@ -7647,13 +7649,12 @@ export class AgentMuxClient {
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch ||
               observation.recordId === watch.recordId || (watch.sequence !== undefined && observation.sequence !== undefined && observation.sequence <= watch.sequence)) return
             const current = this.requireAgentSession(session.agentSessionId)
-            if (!sameRun(current.run, session.run) || !sameNativeHandle(current.nativeHandle, session.nativeHandle) || this.endedRuns.has(current.run.runId)) return
-            // A fresh input Hook can precede its native record. Never replay a prior turn's end over it.
-            const hook = current.hookReceipt
-            if (this.hookTurnPhases.get(session.run.runId) === 'in-turn' && hook?.nativeTurnId && hook.nativeTurnId !== observation.nativeTurnId &&
-              (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= hook.observedAt)) return
+            if (!sameRun(current.run, session.run) || current.providerId !== session.providerId || !sameNativeHandle(current.nativeHandle, session.nativeHandle) || this.endedRuns.has(current.run.runId)) return
             const ended = observation.state === 'done' || observation.state === 'error' ||
               observation.state === 'unknown' && observation.endReason === 'interrupted'
+            const hook = current.hookReceipt
+            if (!ended && this.hookTurnPhases.get(session.run.runId) === 'in-turn' && hook?.nativeTurnId && hook.nativeTurnId !== observation.nativeTurnId &&
+              (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= hook.observedAt)) return
             if (observation.state === 'unknown' && !ended) {
               watch.recordId = observation.recordId
               if (observation.sequence !== undefined) watch.sequence = observation.sequence
@@ -7664,8 +7665,28 @@ export class AgentMuxClient {
               return
             }
             let publishedState: AgentSemanticState = observation.state
+            let displayAccepted = false
             const next = await this.updateExactAgentSession(current.agentSessionId, current.run, saved => {
-              if (watch.controller.signal.aborted || !sameNativeHandle(saved.nativeHandle, session.nativeHandle)) return saved
+              displayAccepted = false
+              if (watch.controller.signal.aborted || saved.providerId !== session.providerId || !sameNativeHandle(saved.nativeHandle, session.nativeHandle)) return saved
+              if (ended) {
+                const previous = nativeTurnEndScopeMatches(saved) ? saved.nativeTurnEnds!.turns : {}
+                const end = Object.hasOwn(previous, observation.nativeTurnId) ? previous[observation.nativeTurnId]! : {
+                  recordId: observation.recordId, observedAt: Date.now(),
+                  ...(observation.nativeObservedAt === undefined ? {} : { nativeObservedAt: observation.nativeObservedAt }) }
+                saved = { ...saved, nativeTurnEnds: { run: { ...saved.run }, providerId: saved.providerId,
+                  nativeHandle: structuredClone(saved.nativeHandle!), turns: { ...previous, [observation.nativeTurnId]: end } } }
+                const pending = saved.pendingInteraction
+                const finishPermission = (request: AgentMuxInteractionRequest): AgentMuxInteractionRequest => {
+                  const end = request.kind === 'permission' ? permissionNativeTurnEnd(saved, request) : undefined
+                  return end && request.kind === 'permission' && request.permissionHook
+                    ? { ...request, permissionHook: { ...request.permissionHook, nativeTurnEnded: { recordId: end.recordId, observedAt: end.observedAt } } }
+                    : request
+                }
+                if (pending) saved = { ...saved, pendingInteraction: { ...pending, request: finishPermission(pending.request),
+                  ...(pending.additionalRequests ? { additionalRequests: pending.additionalRequests.map(finishPermission) } : {}) } }
+              }
+              // Suppress a prior turn's current display, without discarding its exact historical end.
               const savedHook = saved.hookReceipt
               if (this.hookTurnPhases.get(session.run.runId) === 'in-turn' && savedHook?.nativeTurnId && savedHook.nativeTurnId !== observation.nativeTurnId &&
                 (observation.nativeObservedAt === undefined || observation.nativeObservedAt <= savedHook.observedAt)) return saved
@@ -7684,16 +7705,8 @@ export class AgentMuxClient {
                 ...(observation.failure ? { failure: structuredClone(observation.failure),
                   detail: `[${observation.failure.code}] ${observation.failure.message}` } : {})
               })
-              const pending = saved.pendingInteraction
-              const finishPermission = (request: AgentMuxInteractionRequest): AgentMuxInteractionRequest =>
-                ended && request.kind === 'permission' && request.permissionHook &&
-                saved.nativeHandle?.kind === 'provider' && request.permissionHook.nativeSessionId === saved.nativeHandle.sessionId &&
-                request.permissionHook.nativeTurnId === observation.nativeTurnId
-                  ? { ...request, permissionHook: { ...request.permissionHook,
-                    nativeTurnEnded: { recordId: observation.recordId, observedAt: status.observedAt } } } : request
+              displayAccepted = true
               return { ...saved, semanticStatus: status, updatedAt: Math.max(saved.updatedAt, status.observedAt),
-                ...(pending ? { pendingInteraction: { ...pending, request: finishPermission(pending.request),
-                  ...(pending.additionalRequests ? { additionalRequests: pending.additionalRequests.map(finishPermission) } : {}) } } : {}),
                 ...(acceptsAgentActivityState(saved.activityCommit, saved.run, status) ? {
                   activityCommit: advanceAgentActivityCommit(saved.activityCommit, {
                     id: JSON.stringify(['activity-state', 'native-transcript', saved.run.runId, observation.recordId]),
@@ -7703,11 +7716,12 @@ export class AgentMuxClient {
                   })
                 } : {}) }
             })
-            if (watch.controller.signal.aborted || next.semanticStatus?.nativeTurnId !== observation.nativeTurnId) return
-            if (next.activityCommit && !next.activityCommit.latestCommitted) await this.flushAgentActivity(next)
-            if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
+            if (watch.controller.signal.aborted) return
             watch.recordId = observation.recordId
             if (observation.sequence !== undefined) watch.sequence = observation.sequence
+            if (!displayAccepted) { this.publishSession(next); return }
+            if (next.activityCommit && !next.activityCommit.latestCommitted) await this.flushAgentActivity(next)
+            if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
             if (observation.state === 'working' || ended)
               this.hookTurnPhases.set(session.run.runId, ended ? 'turn-ended' : 'in-turn')
             const status = next.semanticStatus!
@@ -8630,6 +8644,11 @@ export class AgentMuxClient {
             ...(current.nativeHandle?.kind === 'provider' ? { nativeSessionId: current.nativeHandle.sessionId } : {}),
             ...(normalized.nativeTurnId ? { nativeTurnId: normalized.nativeTurnId } : {}),
             ...(!this.hookServer.hasPermissionCallback(current.agentSessionId, current.run.runId, receipt.id) ? { closed: 'abstained' as const } : {}) } }
+          if (interaction.kind === 'permission') {
+            const end = permissionNativeTurnEnd(current, interaction)
+            if (end && interaction.permissionHook) interaction = { ...interaction,
+              permissionHook: { ...interaction.permissionHook, nativeTurnEnded: { recordId: end.recordId, observedAt: end.observedAt } } }
+          }
         }
         if (
           interaction.agentSessionId !== current.agentSessionId ||
