@@ -64,3 +64,24 @@ it('rejects forged IPC methods and untrusted senders without creating a setup', 
   await expect(f.handlers.get('moteConnections:call')!({ sender: f.sender }, 'connection.enrollment.begin', {})).rejects.toThrow('Unsupported')
   expect(f.beginCount).toBe(0)
 })
+
+it('keeps a newer online read feedback when an earlier original-update query fails late', async () => {
+  const original = await seed()
+  await details(original.connection!.connectionId)
+  await text('Saved public name · Written, publication separate')
+  await f.click('Saved public name · Written, publication separate'); await text('The original update is shown')
+  const forward = f.connectionCalls.getMockImplementation()!
+  let release!: () => void
+  f.connectionCalls.mockImplementation(async (method, input) => {
+    const result = await forward(method, input)
+    if (method === 'connection.profile.inspect') { await new Promise<void>(resolve => { release = resolve }); throw new Error('Controlled old update lookup failure') }
+    return result
+  })
+  await f.click('View original update')
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  await f.click('Read current profile'); await text('The current observation is shown below')
+  await act(async () => release()); await f.settle()
+  expect(document.body.textContent).not.toContain('Controlled old update lookup failure')
+  expect(document.body.textContent).toContain('The current observation is shown below')
+  expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(1)
+})
