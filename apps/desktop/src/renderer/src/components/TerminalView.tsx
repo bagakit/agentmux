@@ -20,6 +20,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 
 import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
@@ -222,6 +223,8 @@ export function TerminalView({
   const connectionWarnings = useAppStore(useShallow(state => (state.runtimeEndpointWarnings ?? [])
     .filter(warning => warning.hostId === session.control.hostId && warning.observationOrigin !== undefined)))
   const observationAvailable = connectionWarnings.length === 0
+  const hostDocument = useWorkbenchDocument()
+  const terminalDocumentRef = useRef<Document | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const observationReaderRef = useRef<(() => AgentMuxTerminalViewObservation | undefined) | null>(null)
@@ -432,17 +435,18 @@ export function TerminalView({
     // A retained View can still be in its private parking host when this child mounts.
     // focus() is a request, not confirmation; preserve the same intent until its actual
     // visible host can receive the caret. A later navigation replaces/clears the nonce.
-    if (element.contains(document.activeElement)) clearRegionCaretFocus(request.nonce)
+    if (element.contains(element.ownerDocument.activeElement)) clearRegionCaretFocus(request.nonce)
   }
 
   useEffect(() => {
     if (!regionCaretFocus || !visible) return
     const nonce = regionCaretFocus.nonce
+    const ownerWindow = hostDocument.defaultView!
     let observer: MutationObserver | undefined
     let frame: number | undefined
     const dispose = (): void => {
       observer?.disconnect()
-      if (frame !== undefined) cancelAnimationFrame(frame)
+      if (frame !== undefined) ownerWindow.cancelAnimationFrame(frame)
     }
     const attempt = (): void => {
       // An old effect must neither focus nor consume a later navigation's request.
@@ -454,11 +458,11 @@ export function TerminalView({
     if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
     // Only this exact pending consumer observes body attachment/inert changes, until
     // its request succeeds or is replaced. Ordinary terminals have no observer here.
-    observer = new MutationObserver(attempt)
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
-    frame = requestAnimationFrame(attempt)
+    observer = new ownerWindow.MutationObserver(attempt)
+    observer.observe(hostDocument.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
+    frame = ownerWindow.requestAnimationFrame(attempt)
     return dispose
-  }, [regionCaretFocus, visible, searchOpen, hydrating])
+  }, [regionCaretFocus, visible, searchOpen, hydrating, hostDocument])
 
   useLayoutEffect(() => {
     // reveal() schedules a commit. Before this commit, the actual xterm host is
@@ -469,6 +473,20 @@ export function TerminalView({
       !element?.isConnected || element.closest('[inert]')) return
     terminal.focus()
   }, [hydrating])
+
+  useLayoutEffect(() => {
+    const terminal = terminalRef.current, root = rootRef.current
+    if (!terminal || !root || terminalDocumentRef.current === root.ownerDocument) return
+    // Adopt only the retained public view. Attachment, parser, buffer and input owner stay alive.
+    webglVisibilityRef.current?.(false)
+    viewportRef.current?.setVisible(false)
+    terminal.open(root)
+    terminalDocumentRef.current = root.ownerDocument
+    viewportRef.current?.synchronizeCellMetrics()
+    viewportRef.current?.setVisible(visibleRef.current)
+    webglVisibilityRef.current?.(visibleRef.current)
+    consumeCaretFocus()
+  }, [hostDocument])
 
   useLayoutEffect(() => {
     viewportRef.current?.setInteractiveResize(interactiveResize)
@@ -523,12 +541,13 @@ export function TerminalView({
       terminal.refresh(0, terminal.rows - 1)
     }
     restore()
-    const frame = requestAnimationFrame(() => {
+    const ownerWindow = terminal.element!.ownerDocument.defaultView!
+    const frame = ownerWindow.requestAnimationFrame(() => {
       restore()
       releaseViewportMemoryMarker(terminal)
     })
-    return () => cancelAnimationFrame(frame)
-  }, [visible])
+    return () => ownerWindow.cancelAnimationFrame(frame)
+  }, [visible, hostDocument])
 
   // 变为 running 时启动 live 视口同步。attach effect 不再随 processState 重挂，
   // 所以这条独立小 effect 覆盖"attach 时非 running、随后恢复运行"的场景。
@@ -677,6 +696,7 @@ export function TerminalView({
     terminal.loadAddon(search)
     terminal.loadAddon(webLinks)
     terminal.open(root)
+    terminalDocumentRef.current = root.ownerDocument
     terminalRef.current = terminal
     consumeCaretFocus()
     searchAddonRef.current = search
@@ -945,6 +965,8 @@ export function TerminalView({
         selectionEnd?.dispose()
       }
     }
+    let nextViewportFrame = 0
+    const viewportFrames = new Map<number, { window: Window; id: number }>()
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
       fit: () => preserveRowResizeReading(() => fit.fit()),
@@ -960,8 +982,17 @@ export function TerminalView({
         if (!applied) return false
         return { cols: applied.cols, rows: applied.rows }
       },
-      requestFrame: (callback) => requestAnimationFrame(callback),
-      cancelFrame: (frameId) => cancelAnimationFrame(frameId),
+      requestFrame: (callback) => {
+        const ownerWindow = root.ownerDocument.defaultView!
+        const token = ++nextViewportFrame
+        const id = ownerWindow.requestAnimationFrame(at => { viewportFrames.delete(token); callback(at) })
+        viewportFrames.set(token, { window: ownerWindow, id })
+        return token
+      },
+      cancelFrame: (token) => {
+        const frame = viewportFrames.get(token)
+        if (frame) { frame.window.cancelAnimationFrame(frame.id); viewportFrames.delete(token) }
+      },
       // 容器 CSS 像素：仅当像素真的变化时才 fit，滤掉 WebGL/DOM cell-metric 抖动
       // 造成的一列 grid 摆动（否则 reflow→弹回会把 Codex 等 TUI 画花，见 viewport-sync）。
       measureViewport: () => {
@@ -1306,7 +1337,7 @@ export function TerminalView({
       })
     }
     const disposeEvents = api.sessions.onEvent(accept, session.control)
-    const resize = new ResizeObserver(() => {
+    const resize = new (root.ownerDocument.defaultView!.ResizeObserver)(() => {
       clearLinkPreview()
       viewport.observeViewport()
     })
@@ -1595,7 +1626,7 @@ export function TerminalView({
     onObservationRefreshRef.current?.(refreshObservation)
 
     viewport.observeViewport()
-    requestAnimationFrame(() => {
+    root.ownerDocument.defaultView!.requestAnimationFrame(() => {
       if (!disposed && autoFocusRef.current && visibleRef.current && terminal.element?.isConnected &&
         !terminal.element.closest('[inert]')) terminal.focus()
     })
@@ -1616,7 +1647,7 @@ export function TerminalView({
         linkRequestRef.current = next
         return next
       })
-      if (terminalRef.current === terminal) terminalRef.current = null
+      if (terminalRef.current === terminal) { terminalRef.current = null; terminalDocumentRef.current = null }
       if (viewportRef.current === viewport) viewportRef.current = null
       if (searchAddonRef.current === search) searchAddonRef.current = null
       viewport.dispose()
