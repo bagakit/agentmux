@@ -84,6 +84,7 @@
 .mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 1; padding: 0; }
 .mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 3; }
 .mobile-app .mobile-conversation .composer-tool { min-width: 44px; min-height: 44px; justify-content: center; padding: 0; }
+.mobile-app .mobile-conversation .md-conversation-image__retry { min-width: 44px; justify-content: center; }
 .mobile-app .mobile-conversation .composer__feedback { font-size: 11px; }
 .mobile-app .mobile-conversation .composer-send { min-width: 44px; padding: 0 8px; }
 .mobile-app .mobile-conversation .composer-session-controls { box-shadow: none; background: transparent; }
