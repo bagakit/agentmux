@@ -44,6 +44,29 @@ export function workbenchNavigationTabs(tabs: Tabs): Tabs {
 }
 
 type Facts = Omit<SpatialWorkbench, 'sessions' | 'tabs'> & { tabs: Tabs }
+
+function sameNavigationLayouts(left: Facts['layouts'], right: Facts['layouts']): boolean {
+  if (left === right) return true
+  const ids = Object.keys(left), otherIds = Object.keys(right)
+  if (ids.length !== otherIds.length) return false
+  return ids.every((id, index) => {
+    if (id !== otherIds[index]) return false
+    const a = left[id]!, b = right[id]!
+    if (a === b) return true
+    const keys = Object.keys(a) as (keyof typeof a)[]
+    if (keys.length !== Object.keys(b).length || keys.some(key => !Object.hasOwn(b, key) ||
+      key !== 'activeGroupId' && key !== 'groups' && a[key] !== b[key])) return false
+    return a.groups.length === b.groups.length && a.groups.every((group, index) => {
+      const other = b.groups[index]!
+      if (group === other) return true
+      const keys = Object.keys(group) as (keyof typeof group)[]
+      // Only focus and MRU are absent from the structural graph. Future fields invalidate it.
+      return keys.length === Object.keys(other).length && keys.every(key => Object.hasOwn(other, key) &&
+        (key === 'activeTabId' || key === 'recentTabIds' || group[key] === other[key]))
+    })
+  })
+}
+
 const NO_TOPICS: readonly ScratchTopicSnapshot[] = []
 const catalogs = new WeakMap<readonly ScratchTopicSnapshot[], { inputs: readonly unknown[]; value: AgentMuxSpaceCatalog }>()
 
@@ -53,7 +76,11 @@ export function workbenchNavigationCatalog(state: Facts, topics?: readonly Scrat
   const tabs = workbenchNavigationTabs(state.tabs)
   const inputs = [state.config, tabs, state.layouts, state.spaceZoneBindings, state.topicCategories, state.projectGroups]
   const known = catalogs.get(topicFacts)
-  if (known && inputs.every((input, index) => input === known.inputs[index])) return known.value
+  if (known && inputs.every((input, index) => input === known.inputs[index] ||
+    index === 2 && sameNavigationLayouts(state.layouts, known.inputs[index] as Facts['layouts']))) {
+    known.inputs = inputs
+    return known.value
+  }
   const value = spatialCatalog({ ...state, tabs, sessions: [] }, topicFacts)
   catalogs.set(topicFacts, { inputs, value })
   return value
