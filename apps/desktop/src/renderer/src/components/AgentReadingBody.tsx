@@ -3,6 +3,7 @@ import type { AgentSessionUserMessage } from '@agentmux/core'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { ConversationImage } from '@agentmux/client-ui/components/ConversationImage'
 import { ConversationResourceImage, type ConversationHistoryResourceReader } from '@agentmux/client-ui/components/ConversationResourceImage'
+import { parseAgentMarkdown } from '@agentmux/client-ui/agent-markdown'
 import { markdownImageReferences } from '@agentmux/client-ui/conversation-image-references'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -40,4 +41,14 @@ export function AgentReadingBody({ reading, active, control, sourceKey, input }:
     {input?.contentParts.map((part, partIndex) => part.kind === 'resource' && part.resourceType === 'image'
       ? <RecordedImage key={partIndex} active={active} control={control} sourceKey={sourceKey} input={input} part={part} partIndex={partIndex} /> : null)}
   </div>
+}
+
+/** A single original thumbnail supports recall without making every input a full rich body. */
+export function AgentReadingThumbnail({ reading, active, control, sourceKey, input }: MediaProps & { reading: Reading }) {
+  const first = useMemo(() => markdownImageReferences(reading.text, reading.text.length <= 8000 ? parseAgentMarkdown(reading.text) : undefined, false, () => false, { readOnlyImages: true })[0], [reading.text])
+  const index = input?.contentParts.findIndex(part => part.kind === 'resource' && part.resourceType === 'image') ?? -1
+  const part = input?.contentParts[index]
+  if (input && part?.kind === 'resource') return <span className="agent-input-recall__thumbnail"><RecordedImage active={active} control={control} sourceKey={sourceKey} input={input} part={part} partIndex={index} /></span>
+  return first ? <span className="agent-input-recall__thumbnail"><ConversationImage active={active} interactive={false}
+    text={first.text} path={first.path} readImage={readPastedImage} /></span> : null
 }

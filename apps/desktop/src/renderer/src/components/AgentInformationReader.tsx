@@ -5,15 +5,12 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
-import { clampStep } from '@agentmux/client-ui/activity-step-summary'
+import { AgentInputRecap } from './AgentInputRecap'
 import { AgentReadingBody as ReadingBody } from './AgentReadingBody'
 import { currentAgentSemanticStatus, msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
-import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { nativeBindingKey } from '../../../shared/agent-native-source'
 import { agentContextForSession, type FocusContext } from '../lib/focus-context'
 import { type AgentInformationPreview as PreviewRequest, agentInformationPreview } from '../lib/agent-information-preview'
-import { useSessionUserMessages } from '../lib/session-user-messages'
 import { captureReadingAnchor, restoreReadingAnchor } from '../lib/reading-anchor'
 import { useAppStore } from '../store'
 import { agentStateEnteredAt } from '../lib/agent-state-time'
@@ -31,74 +28,6 @@ const CloseIcon = semanticIconComponent('action.close')
 const OpenIcon = semanticIconComponent('action.open-external')
 const PinIcon = semanticIconComponent('action.pin')
 
-type InputReading = Pick<ReturnType<typeof useSessionUserMessages>, 'messages' | 'loading' | 'error' | 'observationError' | 'sourceChanged' | 'windowFrozen' | 'windowIncomplete'>
-function inputReading(reader: ReturnType<typeof useSessionUserMessages>): InputReading {
-  const ordered = reader.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
-  const messages = (ordered ? [...reader.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : reader.messages).slice(-3)
-  return { messages, loading: reader.loading, error: reader.error, observationError: reader.observationError,
-    sourceChanged: reader.sourceChanged, windowFrozen: reader.windowFrozen, windowIncomplete: reader.windowIncomplete }
-}
-
-/** The original reader supplies facts; a pin retains only the three presented inputs. */
-function FocusContextInputs({ request, enabled }: { request: PreviewRequest; enabled: boolean }) {
-  const [paused, setPaused] = useState(false), [frozen, setFrozen] = useState<InputReading | null>(null)
-  const reader = useSessionUserMessages(paused || frozen && !enabled ? undefined : request.control, { enabled: enabled && !paused })
-  const region = useRef<HTMLElement>(null), held = useRef<InputReading | null>(null)
-  const reflow = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
-  const current = inputReading(reader)
-  useLayoutEffect(() => {
-    if (enabled && !request.pinned && !frozen) held.current = current
-    if (request.pinned && !frozen) setFrozen(held.current ?? current)
-  })
-  useEffect(() => {
-    if (!enabled || !frozen || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
-    // Keep every already presented input. Only the original in-flight native batch
-    // may fill unused slots; later captured requests cannot evict selected text.
-    const ids = new Set(frozen.messages.map(message => message.id)), slots = Math.max(0, 3 - frozen.messages.length)
-    const arrivals = slots ? reader.messages.filter(message => message.source.kind === 'native' && !ids.has(message.id)).slice(-slots) : []
-    const messages = slots ? [...frozen.messages, ...arrivals.slice(-slots)] : frozen.messages
-    if (messages !== frozen.messages) {
-      const container = region.current?.closest<HTMLElement>('.agent-information-reader__reading')
-      if (container) reflow.current = { container, anchor: captureReadingAnchor(container) }
-    }
-    setFrozen({ ...current, messages }); setPaused(true)
-  }, [enabled, frozen, paused, reader.loading, reader.nativeHistoryPage, reader.error, reader.observationError])
-  useLayoutEffect(() => {
-    if (reflow.current) { restoreReadingAnchor(reflow.current.container, reflow.current.anchor); reflow.current = null }
-  }, [frozen])
-  const snapshot = frozen ?? (enabled ? current : held.current ?? current)
-  const ordered = snapshot.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
-  // Missing times retain the public source order; they cannot establish a cross-source chronology.
-  const messages = (ordered ? [...snapshot.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : snapshot.messages).slice(-3)
-  // Recorded authors carry a canonical SID, but no authoritative peer Host.
-  // Keep that reference rather than assigning a global first-match display name.
-  const describe = createSpeakerResolver()
-  const notice = !request.control || snapshot.error || snapshot.observationError ? 'Recent message reading unavailable'
-    : snapshot.sourceChanged ? 'Message source changed' : snapshot.windowFrozen ? 'Reading window paused'
-      : snapshot.windowIncomplete ? 'Reading window incomplete' : null
-  return <section ref={region} className="focus-context-hover__inputs" aria-label="Recent user messages">
-    <h4>Recent inputs</h4>
-    {!ordered ? <small className="focus-context-hover__coverage">Current reading window · Order unavailable</small> : null}
-    {messages.length ? <ol>{messages.map(message => {
-      const raw = message.content.trim()
-      const body = parseAgentMuxMessagePrefix(raw)?.body.trim() || raw
-      const reading = { text: body || 'Non-text input', truncated: false }
-      const recorded = message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? new Date(message.recordedAt) : null
-      const date = recorded && Number.isFinite(recorded.getTime()) ? recorded : null
-      const time = date ? date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Time unknown'
-      const provenance = `${message.source.kind === 'native' ? 'Native record' : 'Submission record'} · Current reading window · Record time, not a verified sender time · ${clampStep(raw.slice(0, 1000), 'head', 360)}`
-      return <li key={message.id} data-hover-input-id={message.id} data-input-author={message.author.kind}>
-      <div className="focus-context-hover__input-meta"><strong>{describe(speakerOfUserMessage(message)).name}</strong>
-        <time dateTime={date?.toISOString()} title={provenance} aria-label={`${time} · ${provenance}`}>{time}</time></div>
-      <ReadingBody reading={reading} active={enabled} control={request.control} sourceKey={request.sourceKey} input={message} />
-      {reading.truncated ? <small className="focus-context-hover__coverage">Excerpt</small> : null}
-    </li>})}</ol> : <p className="focus-context-hover__coverage">{snapshot.loading ? enabled ? 'Loading recent messages…' : 'Input reading paused; observed content is kept.' : 'No user messages in the available reading window.'}</p>}
-    {notice ? <p className="focus-context-hover__notice" role="status" title={snapshot.error?.message ?? snapshot.observationError?.message}>
-      {notice}. Open the Agent to read History.</p> : null}
-  </section>
-}
-
-/** The clock belongs only to this open header; held prose and input readers do not tick. */
 function FocusContextStateSummary({ context, explanationVisible }: { context: FocusContext; explanationVisible: boolean }) {
   const session = useAppStore(state => state.sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId))
   const [now, setNow] = useState(Date.now)
@@ -120,7 +49,7 @@ function FocusContextStateSummary({ context, explanationVisible }: { context: Fo
 }
 
 
-const HeldReading = memo(function HeldReading({ request, enabled }: { request: PreviewRequest; enabled: boolean }) {
+const HeldReading = memo(function HeldReading({ request, enabled, available }: { request: PreviewRequest; enabled: boolean; available: boolean }) {
   const context = request.context
   return <>
     {!context.recap && request.contentChanged ? <small className="agent-information-reader__change">Card content changed · Reading kept</small> : null}
@@ -131,7 +60,7 @@ const HeldReading = memo(function HeldReading({ request, enabled }: { request: P
       </small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} active={enabled} />
     </section> : !context.detailIsRecap && context.detailKind !== 'service' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
-    {context.kind === 'agent' ? <FocusContextInputs request={request} enabled={enabled} /> : null}
+    {context.kind === 'agent' ? <AgentInputRecap request={request} enabled={enabled} available={available} /> : null}
     <p className="agent-information-reader__end">End of this reading window <span>Earlier records remain in History.</span></p>
   </>
 })
@@ -348,7 +277,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     <div className="agent-information-reader__body">
       <div ref={reading} className="agent-information-reader__reading" tabIndex={0} aria-label="Original Agent content"
         style={tab ? { visibility: 'hidden' } : undefined} inert={tab !== null}>
-        <HeldReading request={request} enabled={visible && sameSource && tab === null} />
+        <HeldReading request={request} enabled={visible && sameSource && tab === null} available={visible && sameSource} />
       </div>
       {tab ? <div className="agent-information-reader__metadata">
         <div className="agent-information-reader__metadata-heading"><button ref={back} type="button" onClick={showReading} aria-label="Back to original content">←</button><h3>Agent information</h3></div>
