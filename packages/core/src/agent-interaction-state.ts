@@ -1,4 +1,6 @@
-import type { AgentMuxInteractionRequest, AgentMuxPendingInteraction } from './types.js'
+import { dequal } from 'dequal'
+import type { AgentMuxAgentInteractionInput } from './client.js'
+import type { AgentMuxInteractionOperationReceipt, AgentMuxInteractionRequest, AgentMuxPendingInteraction } from './types.js'
 
 /** Mutable dispatch observations never change the original request's semantic identity. */
 export function agentInteractionRequestTarget(request: AgentMuxInteractionRequest): AgentMuxInteractionRequest {
@@ -6,6 +8,14 @@ export function agentInteractionRequestTarget(request: AgentMuxInteractionReques
   if (target.kind !== 'permission' || !target.permissionHook) return target
   const { response: _response, closed: _closed, nativeTurnEnded: _ended, ...hook } = target.permissionHook
   return { ...target, permissionHook: hook }
+}
+
+/** Match one original response intent; JSON property order and mutable Hook observations are not identity. */
+export function agentInteractionOperationReceiptMatches(input: AgentMuxAgentInteractionInput, receipt: AgentMuxInteractionOperationReceipt): boolean {
+  return receipt.agentSessionId === input.agentSessionId && receipt.operationId === input.operationId &&
+    receipt.run.runId === input.expectedRun.runId &&
+    dequal(agentInteractionRequestTarget(receipt.expectedRequest), agentInteractionRequestTarget(input.expectedRequest)) &&
+    dequal(receipt.response, input.response)
 }
 
 /** The original Hook owner correlated completion to this request's native invocation. */
