@@ -314,4 +314,6 @@ Activity、Workflow、服务窗、权限卡与 Composer 沿[共同组件合同](
 
 桌面与外部入口操作同一原问题，原 owner 核准确请求和当前权限，不能按卡片状态或普通文本猜答案、权限决定或完成。机器人聊天授权、平台本人发言、账户工具与远程权限批准分别成立。既有私有上下文接入群须明确分享授权，本地正常对话不依赖外部授权和投递是否可用。
 
+已具备准确开放 responder 的原权限请求可独立接入外部决策，不能冒称已支持原生 question。远程权限默认关闭；只有原可信本地用户或设备对准确 actor／应用／群与当前 Binding 修订显式授予 permission，才允许该群接收原 typed 决策所需上下文并操作原选项。input／answer grant、入群、接入或普通 publication scope 不授予此能力；未获上下文分享授权、原回调已关闭或平台映射未确认时保只读及准确本地入口。完整 expectedRequest、原 actor、grant 修订与 operation 在原 owner 保全，跨进程仅沿原 authority seam 核原 claim，并在真正 Hook／ACP effect 前复核当前权限；未知仅查同原操作，不转 prompt 或重放 Hook。远程权限是后续独立能力，不成为原首版与既有交付的完成条件；最终明确包含本能力的联合候选另行消费，真实平台、原生采用与 question 资格分别验收。
+
 以上定义已确认的产品方向与边界，不代表任一 Provider 已支持全部结构化语义、连接器已接入或相关回执已完成验收。现有阅读沿[共同原生记录](#共同对话与原生记录)与[同一 History 阅读面](#history-使用共同对话阅读面)，呈现沿[对话呈现 SSOT](../presentation/conversation-mode.md)，原人机交互资格见[分层收敛](agent-capabilities-and-messaging.md#provider-与人机交互的分层收敛)。
