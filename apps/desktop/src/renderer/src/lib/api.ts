@@ -820,6 +820,11 @@ const mockApi: AgentMuxDesktopApi = {
   },
   ui: {
     initialTheme: null,
+    workbenchWindows: {
+      ready: async () => null,
+      call: async () => { throw new Error('Native workbench windows are available in Desktop.') },
+      onRequest: () => () => {}, respond: () => {}, onChanged: () => () => {}
+    },
     onNativeBrowserInput: () => () => {},
     nativeOverlayFocus: () => false,
     nativeBrowserVisibility: async () => ({ revision: 0, bounds: [] }),
