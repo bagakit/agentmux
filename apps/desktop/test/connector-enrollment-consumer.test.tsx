@@ -22,6 +22,7 @@ let server: AgentMuxControlServer
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>
 let calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
 let platformCalls: string[], authorize: boolean, loseBegin: boolean, clock: number
+let beginReply: (() => Response) | null
 let reopen: () => void
 let openOwner: () => Promise<void>
 
@@ -29,7 +30,7 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   original = await ingressFixture(true, feishuConfig); clean.push(() => original.close())
   sdk = defaultFeishuSdkTransport()
-  calls = []; platformCalls = []; authorize = false; loseBegin = false; clock = Date.now()
+  calls = []; platformCalls = []; authorize = false; loseBegin = false; beginReply = null; clock = Date.now()
   const actualNow = Date.now.bind(Date), anchor = clock
   vi.spyOn(Date, 'now').mockImplementation(() => actualNow() + clock - anchor)
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
@@ -38,6 +39,7 @@ beforeEach(async () => {
     platformCalls.push(action)
     if (action === 'begin') {
       if (loseBegin) throw new Error('Controlled registration acknowledgement loss')
+      if (beginReply) return beginReply()
       return Response.json({ device_code: privateDevice, user_code: 'BOT-CODE', verification_uri: 'https://open.feishu.cn/page/cli', verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=BOT-CODE', interval: 1, expires_in: 600 })
     }
     expect(action).toBe('poll'); expect(body.get('device_code')).toBe(privateDevice)
@@ -76,7 +78,14 @@ async function mount() {
 async function click(selector: string) {
   let button: HTMLElement | null = null
   await vi.waitFor(async () => { await act(async () => {}); button = dom.container.querySelector<HTMLElement>(selector); expect(button, selector).not.toBeNull(); if (button!.matches('button')) expect((button as HTMLButtonElement).disabled).toBe(false) })
+  const hiddenBy = button!.matches('summary') ? button!.parentElement?.parentElement?.closest('details:not([open])') : button!.closest('details:not([open])')
+  expect(hiddenBy ?? null, 'Open the actual disclosure before using its control').toBeNull()
   await act(async () => button!.click())
+}
+async function inspectOriginal() {
+  const button = dom.container.querySelector('[data-enrollment-inspect]')
+  if (button?.closest('details:not([open])')) await click('.connector-enrollment > .connector-diagnostics > summary')
+  await click('[data-enrollment-inspect]')
 }
 async function pending() {
   await click('[data-enrollment-create]')
@@ -111,6 +120,47 @@ it('mounted original Settings creates through trusted IPC and the default Host, 
   expect((await services.ingress!.list({ connectionId: record.config.connectionId })).ingresses).toHaveLength(1)
 })
 
+it('the official public-code response reaches the original confirmation UI without a complete URL field', async () => {
+  beginReply = () => Response.json({ device_code: privateDevice, user_code: 'BOT-CODE', verification_uri: 'https://open.feishu.cn/page/cli', interval: 1, expires_in: 600 })
+  await mount(); const operation = await pending()
+  expect(operation.authorization).toBe('pending')
+  const url = new URL(operation.challenge!.verificationUrl)
+  expect(url.origin).toBe('https://open.feishu.cn'); expect(url.pathname).toBe('/page/cli')
+  expect(url.searchParams.get('user_code')).toBe('BOT-CODE')
+  expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull()
+  expect(dom.container.querySelector('.connector-enrollment__heading')?.textContent).toContain('Confirm your bot in Feishu')
+  expect(dom.container.querySelectorAll('[data-bot-enrollment] .primary-button')).toHaveLength(1)
+  expect(platformCalls).toEqual(['begin'])
+  expect(JSON.stringify(calls)).not.toContain(privateDevice)
+})
+
+it.each([
+  ['http-status', () => new Response('private platform body', { status: 503 }), { stage: 'response', code: 'http-status', httpStatus: 503 }, 'The platform returned an unsuccessful response.'],
+  ['invalid-json', () => new Response('private platform body'), { stage: 'response', code: 'invalid-json' }, 'The platform response could not be read.'],
+  ['unsafe-verification', () => Response.json({ device_code: privateDevice, user_code: 'BOT-CODE', verification_uri_complete: 'https://unrelated.example.invalid/confirm', interval: 1 }), { stage: 'challenge', code: 'unsafe-verification' }, 'The confirmation link could not be accepted for this setup.']
+] as const)('shows the original %s diagnosis with one main action and no unsafe replay', async (_name, reply, diagnostic, message) => {
+  beginReply = reply
+  await mount(); const operation = await pending()
+  expect(operation).toMatchObject({ authorization: 'unknown', challenge: null, diagnostic })
+  const pane = dom.container.querySelector<HTMLElement>('[data-bot-enrollment]')!
+  expect(pane.querySelector('h3')?.textContent).toBe('Creation result unconfirmed')
+  expect(pane.querySelector('[data-enrollment-diagnosis]')?.textContent).toBe(message)
+  expect(pane.querySelectorAll('.primary-button')).toHaveLength(1)
+  expect(pane.querySelector('[data-enrollment-advance]')?.textContent).toBe('Check saved progress')
+  const details = pane.querySelector<HTMLDetailsElement>('.connector-diagnostics')!
+  expect(details.open).toBe(false)
+  expect(pane.querySelector('[data-enrollment-inspect]')?.closest('details')).toBe(details)
+  expect(pane.querySelector('[data-enrollment-existing]')?.classList.contains('primary-button')).toBe(false)
+  await inspectOriginal()
+  expect(details.textContent).toContain(diagnostic.stage); expect(details.textContent).toContain(diagnostic.code)
+  await click('[data-enrollment-advance]')
+  await vi.waitFor(() => expect(pane.querySelector<HTMLButtonElement>('[data-enrollment-advance]')?.disabled).toBe(false))
+  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation).toEqual(operation)
+  expect(platformCalls).toEqual(['begin'])
+  expect(JSON.stringify(calls)).not.toContain(privateDevice); expect(JSON.stringify(calls)).not.toContain('private platform body')
+  expect(pane.textContent).not.toContain(privateDevice); expect(pane.textContent).not.toContain('private platform body')
+})
+
 it('closing and reopening the original settings recovers the exact durable intent after the original Host owner reopens', async () => {
   await mount(); const operation = await pending()
   await click('[aria-label="Close settings"]')
@@ -134,7 +184,7 @@ it('an unchanged unknown registration explains each check and keeps the existing
   expect(operation.authorization).toBe('unknown')
   expect(dom.container.querySelector('[data-enrollment-code] svg')).toBeNull()
   expect(dom.container.querySelector('[data-enrollment-advance]')?.textContent).toBe('Check saved progress')
-  await click('[data-enrollment-inspect]')
+  await inspectOriginal()
   await vi.waitFor(() => expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('No new progress was found'))
   await click('[data-enrollment-advance]')
   await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-advance]')?.hasAttribute('disabled')).toBe(false))
@@ -232,8 +282,7 @@ it('a lost Renderer reply preserves the admitted original setup when returning a
   await click('[data-enrollment-resume]')
   expect(dom.container.querySelector('[data-enrollment-create]')).toBeNull()
   expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(original.operationId)
-  await click('.connector-enrollment > .connector-diagnostics > summary')
-  await click('[data-enrollment-inspect]')
+  await inspectOriginal()
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull() })
   expect(platformCalls).toEqual(['begin'])
   expect((await services.connections.enrollment!.list({})).operations.map(value => value.operationId)).toEqual([original.operationId])
@@ -325,7 +374,7 @@ it('explicit independent creation retains both lost original requests while the 
   await click('.connector-enrollment > .connector-back'); await click('.connector-enrollment__history > summary')
   for (const target of admitted) expect(dom.container.querySelector('[data-enrollment-select="' + target.operationId + '"]'), 'Every lost original request must remain reachable').not.toBeNull()
   for (const target of admitted) {
-    await click('[data-enrollment-select="' + target.operationId + '"]'); await click('[data-enrollment-inspect]')
+    await click('[data-enrollment-select="' + target.operationId + '"]'); await inspectOriginal()
     await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull())
     expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(target.operationId)
     expect((await services.connections.enrollment!.inspect({ operationId: target.operationId })).operation?.connectionId).toBe(target.connectionId)
