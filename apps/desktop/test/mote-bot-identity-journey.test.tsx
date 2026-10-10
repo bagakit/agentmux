@@ -14,6 +14,7 @@ async function create() { await f.open(); await text('Saved public name'); await
 
 it('creates from the saved public profile through original IPC/Core/Main/default Host and keeps every result separate', async () => {
   await create()
+  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Scan and confirm in Feishu')
   expect(document.body.textContent).not.toContain('DO-NOT-PUBLISH-DISPLAY')
   expect(f.beginCount).toBe(1); expect(f.pollCount).toBe(0)
   const input = original()
@@ -21,7 +22,7 @@ it('creates from the saved public profile through original IPC/Core/Main/default
   expect(input.source.target).toEqual(f.target())
   expect(input.avatar).toBe('include-saved')
   expect((await f.cli('ls', { target: f.target() })).operations[0].operationId).toBe(input.operationId)
-  f.afterPollInterval(); await f.click('Check platform confirmation')
+  f.afterPollInterval(); await f.click('Check Feishu confirmation')
   await text('Original save confirmed'); await text('Profile written. Check and publish it on the platform.')
   const saved = (await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation!
   expect(saved.defaultSave?.observedReceipt?.status).toBe('saved')
@@ -31,6 +32,39 @@ it('creates from the saved public profile through original IPC/Core/Main/default
   const wire = f.calls.find(r => r.method === 'PATCH')!.data
   expect(JSON.stringify(wire)).toContain('Saved public name'); expect(JSON.stringify(wire)).not.toContain('DO-NOT-PUBLISH')
   expect(f.calls.some(r => r.url?.endsWith('/publish'))).toBe(false)
+})
+
+it('names the original advertised platform in its confirmation surface', async () => {
+  await f.close(); f = await moteBotUi({ generic: true })
+  await create()
+  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Scan and confirm in Signed profile')
+  expect([...document.querySelectorAll('button')].some(node => node.textContent === 'Check Signed profile confirmation')).toBe(true)
+  expect(f.counts.begin).toBe(1); expect(f.counts.poll).toBe(0)
+})
+
+it.each(['missing', 'unobserved'] as const)('shows a %s saved bot before disclosure and opens recovery without replacing its original reference', async condition => {
+  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save confirmed')
+  const before = await f.preferences.read({ kind: 'connection', target: f.target() })
+  const writes = f.writes, forward = f.connectionCalls.getMockImplementation()!
+  f.connectionCalls.mockImplementation(async (method, input) => {
+    if (method === 'connection.ls' && condition === 'unobserved') throw new Error('Controlled bot-list observation gap')
+    const value = await forward(method, input)
+    return method === 'connection.ls' ? { ...value, connections: [] } as typeof value : value
+  })
+  await f.click('Close bot choice'); await f.remount()
+  const reason = condition === 'missing' ? 'The saved bot is unavailable here' : 'Controlled bot-list observation gap'
+  await text(reason)
+  const notice = document.querySelector('.mote-bot-saved-issue')!
+  expect(notice.textContent).toContain(reason)
+  expect(document.querySelector('.mote-connection-dialog')?.textContent?.split(reason)).toHaveLength(2)
+  expect(notice.textContent).toContain('open.feishu.cn')
+  expect(notice.textContent).toContain('cli_mote_1')
+  expect(notice.closest('details')).toBeNull()
+  expect(document.querySelector<HTMLDetailsElement>('.mote-bot-existing')?.open).toBe(false)
+  await text('Create another bot for this Mote'); await f.click('Review saved bot')
+  expect(document.querySelector<HTMLDetailsElement>('.mote-bot-existing')?.open).toBe(true)
+  expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values).toEqual(before.values)
+  expect(f.saves).not.toHaveBeenCalled(); expect(f.writes).toBe(writes); expect(f.beginCount).toBe(1)
 })
 
 it('retains original create before a lost Renderer reply, discovers the same parent after rehydrate and never begins again', async () => {
@@ -86,7 +120,7 @@ it('does not let a late Mote A create result populate Mote B and allows an indep
 })
 
 it('synchronizes only the exact selected bot and preserves an unknown patch without another upload or write', async () => {
-  await create(); f.afterPollInterval(); await f.click('Check platform confirmation'); await text('Original save confirmed')
+  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save confirmed')
   await f.click('Back to bot profile'); await text('Sync Mote profile')
   f.setUnknownPatch(); await f.click('Sync Mote profile'); await text('The profile write is not confirmed')
   const inputs = f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.sync')
@@ -100,7 +134,7 @@ it('synchronizes only the exact selected bot and preserves an unknown patch with
 
 it('keeps a lost default ACK separate from the current file and allows a new association of the same created app', async () => {
   await f.close(); f = await moteBotUi({ loseFileAck: true })
-  await create(); f.afterPollInterval(); await f.click('Check platform confirmation'); await text('Original save not confirmed')
+  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save not confirmed')
   const id = original().operationId
   const parent = (await f.client.call('space.mote.connection.inspect', { operationId: id })).operation!
   expect(parent.defaultSave?.observedReceipt?.status).toBe('unconfirmed')
@@ -113,7 +147,7 @@ it('keeps a lost default ACK separate from the current file and allows a new ass
 })
 
 it('changes the default through the original choice writer and reads the same exact file with the compiled CLI', async () => {
-  await create(); f.afterPollInterval(); await f.click('Check platform confirmation'); await text('Original save confirmed')
+  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save confirmed')
   await f.click('Back to bot profile'); await f.click('Change bot')
   await f.click('Mote chat bot')
   const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent?.includes('No default bot'))!
