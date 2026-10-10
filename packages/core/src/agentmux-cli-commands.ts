@@ -22,6 +22,7 @@ import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js
 import { parseSettingsCommand } from './settings-cli.js'
 import { parseFileReadCommand, readFileWriteBase } from './agentmux-cli-files.js'
 import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
+import { parseAppWindowParams } from './public-rpc-windows.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { parseFileHistoryParams, parseFileRestoreParams, parseFileUndoParams, parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
@@ -585,6 +586,20 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     'Managed Agents list their own participation. Continue with the returned nextSourceMessageId at the same original Host. Unavailable is not an empty directory; no Run or input is changed.'),
   command('message.dispatch.report', '--source-message ID --reply-message ID --kind KIND', 'Record an actual reply under the original participant and thread rules.', { '--source-message': 'data', '--reply-message': 'data', '--kind': 'value' }, f => ({ sourceMessageId: id(f, '--source-message'), replyMessageId: id(f, '--reply-message'), kind: value(f, '--kind', true) })),
   empty('app.inspect', 'Inspect actual Desktop selection, presentation and input facts.'),
+  command('app.window.ls', '[--operation-id ID]', 'Observe native windows and optionally the exact original presentation operation.',
+    { '--operation-id': 'data' }, f => parseAppWindowParams('app.window.ls', fields(f, { '--operation-id': 'operationId' })) as Record<string, unknown>,
+    'Window and document identities belong to the client. A recorded operation describes its original action, not current focus, input readiness or Run status. Unknown and unavailable observations retain original workfaces.'),
+  command('app.window.open', '--kind tab|region --display-workspace ID --group ID --tab ID [--region ID] [--operation-id ID]', 'Move an exact original Tab or Region workface into its own native window.',
+    { '--kind': 'value', '--display-workspace': 'data', '--group': 'data', '--tab': 'data', '--region': 'data', ...OP },
+    f => parseAppWindowParams('app.window.open', { ...operation(f), target: { kind: value(f, '--kind', true),
+      displayWorkspaceId: id(f, '--display-workspace', true), groupId: id(f, '--group', true), tabId: id(f, '--tab', true),
+      ...fields(f, { '--region': 'regionId' }) } }) as unknown as Record<string, unknown>,
+    'Use an original discovered occurrence; this does not clone a Tab, start a Run or change execution cwd. Retain the operation ID. After an unconfirmed result, inspect that same operation before any explicit retry; do not create a replacement window.'),
+  ...(['focus', 'return'] as const).map(action => command(`app.window.${action}`, '--window ID --document-generation ID [--operation-id ID]',
+    action === 'focus' ? 'Focus the exact observed native document.' : 'Return the original workface before closing only its native shell.',
+    { '--window': 'data', '--document-generation': 'data', ...OP },
+    f => parseAppWindowParams(`app.window.${action}`, { ...operation(f), windowId: id(f, '--window', true), documentGeneration: id(f, '--document-generation', true) }) as unknown as Record<string, unknown>,
+    'Discover the exact window and opaque document generation with app window ls. A stale document is not retargeted. Keep the same operation after a partial or unknown receipt; returning never closes the original Tab, Region or Run.')),
   command('app.search', '--mode metadata|history --query TEXT [--host ID --session ID] [--source captured|native] [--limit N] [--scan-limit N] [--max-bytes N] [--cursor CURSOR]',
     'Search original object metadata or retained conversation text through the shared Core owner.',
     { '--mode': 'value', '--query': 'data', '--host': 'data', '--session': 'data', '--source': 'value', '--limit': 'value', '--scan-limit': 'value', '--max-bytes': 'value', '--cursor': 'data' },
