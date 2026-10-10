@@ -6,6 +6,8 @@ import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '@agentmux/core/note
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import type { NotebookActor } from '@agentmux/core/notebook-catalog'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
+import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
+import { NotebookObservationOwner } from '../src/main/notebook-observation-owner'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { WorkspaceFiles } from '../src/main/workspace-files'
@@ -165,4 +167,44 @@ it('keeps an unavailable baseline unknown while ordinary CAS remains usable', as
   read.mockResolvedValueOnce({ status: 'error', code: 'READ_OBSERVATION_FAILED', message: 'Original file observation unavailable' })
   expect(await f.save({ path: f.path, content: f.base.replace('Alpha', 'Ordinary CAS still works'), expectedRevision: f.original.revision })).toMatchObject({ status: 'written' })
   expect(await readFile(join(f.directory, f.path), 'utf8')).toContain('Ordinary CAS still works')
+})
+
+it('lets an authenticated Core Agent discover file relationships and submit a concurrent edit through the real compiled CLI', async () => {
+  // Real registry/capability, server, CLI process, Files and SQLite; Runtime ports are deterministic, with no native Agent process started.
+  const f = await fixture(), h = await rpcOwnerFixture(['knowledge-agent'])
+  close.push(h.close)
+  const evidence = serializeNoteDocument(newNoteDocument('Needle evidence', 'evidence-note', 'evidence-block', 'Evidence'))
+  expect((await f.save({ path: 'evidence.note.md', expectedRevision: null, content: evidence })).status).toBe('written')
+  const linked = await f.save({ path: f.path, expectedRevision: f.original.revision, content: f.base.replace('Alpha', 'Alpha [[Evidence]]') })
+  expect(linked.status).toBe('written'); if (linked.status !== 'written' || !linked.content) throw Error('The exact linked baseline is required')
+  const baseline = linked.content, basePath = join(f.root, 'agent-base.md'); await writeFile(basePath, baseline)
+  const catalog = { zones: [{ zoneId: 'original-zone', workspaceId: f.workspace.id, kind: 'directory', hostId: 'local', directoryPath: f.directory }], bindings: [] }
+  const port = new FileReadOwner({ catalog: async () => catalog as never, workspace: () => f.workspace,
+    files: { read: f.writer.read.bind(f.writer), listFiles: f.files.listFiles.bind(f.files), history: f.writer.history.bind(f.writer),
+      write: (workspace, input, context) => f.notes.write(workspace, input, actual => f.writer.write(actual, input, context)) } })
+  const observation = new NotebookObservationOwner({ workspace: () => f.workspace, files: f.files })
+  const socketPath = join(f.root, 'agent-control.sock'), server = new AgentMuxControlServer({ socketPath, files: port, notebookStore: f.metadata, notebookObservation: observation, coreClients: h.coreClients })
+  await server.start(); close.push(() => server.stop())
+  const environment = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath, AGENTMUX_AGENT_SESSION_ID: h.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: h.capability })
+  const scanned = await runCompiledObjectCli(['notebook', 'scan', '--workspace', f.workspace.id, '--path', '.', '--query', 'Needle'], environment)
+  expect(scanned.code, scanned.stderr).toBe(0)
+  const graph = JSON.parse(scanned.stdout).result
+  expect(graph.references).toEqual(expect.arrayContaining([expect.objectContaining({ source: { noteId: 'original-note', blockId: 'first' }, target: { kind: 'page', noteId: 'evidence-note' }, resolution: 'resolved' })]))
+  expect(graph.search.hits).toEqual(expect.arrayContaining([expect.objectContaining({ noteId: 'evidence-note', blockId: 'evidence-block' })]))
+  const denied = await runCompiledObjectCli(['notebook', 'scan', '--workspace', f.workspace.id, '--path', '.'], { ...environment, AGENTMUX_AGENT_CAPABILITY: 'not-an-issued-capability' })
+  expect(denied.code).not.toBe(0)
+  expect(JSON.parse(denied.stderr).error.code).toBe('AGENT_CAPABILITY_INVALID')
+  expect((await f.save({ path: f.path, expectedRevision: linked.revision, content: baseline.replace('Alpha', 'Human Alpha') })).status).toBe('written')
+  const resource = { ...f.resource, zoneId: 'original-zone', zonePath: f.directory }, operationId = 'authenticated-agent-edit'
+  const args = ['file', 'write', '--zone', 'original-zone', '--path', f.path, '--resource', JSON.stringify(resource), '--expected-revision', linked.revision, '--base', basePath, '--operation-id', operationId]
+  const edited = await runCompiledObjectCli(args, environment, baseline.replace('Charlie', 'Agent Charlie'))
+  expect(edited.code, edited.stderr).toBe(0)
+  const saved = await readFile(join(f.directory, f.path), 'utf8')
+  expect(saved).toContain('Human Alpha'); expect(saved).toContain('Agent Charlie')
+  const history = await f.metadata.readHistory({ noteId: 'original-note', resource: f.resource })
+  expect(history.entries.filter(event => event.eventId === operationId)).toEqual([expect.objectContaining({ status: 'committed', actor: { kind: 'agent', id: h.credentials.agentSessionId } })])
+  const retry = await runCompiledObjectCli(args, environment, baseline.replace('Charlie', 'Agent Charlie'))
+  expect(retry.code, retry.stderr).toBe(0); expect(JSON.parse(retry.stdout).result.result.noteHistory.replayed).toBe(true)
+  expect((await f.metadata.readHistory({ noteId: 'original-note', resource: f.resource })).entries).toHaveLength(history.entries.length)
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
