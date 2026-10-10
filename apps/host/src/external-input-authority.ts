@@ -1,4 +1,4 @@
-import { AgentMuxError, connectAgentMuxRpc, parseAgentExternalMessageAuthor, type AgentExternalInputAuthorityPort } from '@agentmux/core'
+import { AgentMuxError, connectAgentMuxRpc, parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, type AgentExternalInputAuthorityPort } from '@agentmux/core'
 
 /** Original local Desktop business owner, separate from the semantic Host and its input journal. */
 export function createDesktopExternalInputAuthority(options: { desktopSocketPath: string; executionHostId: string }): AgentExternalInputAuthorityPort {
@@ -9,7 +9,7 @@ export function createDesktopExternalInputAuthority(options: { desktopSocketPath
       rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: options.desktopSocketPath } })
       const result = await rpc.call('connection.ingress.authority', { operationId: intent.operationId })
       const original = result.ingress, input = original?.input
-      if (!original || !input || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
+      if (!original || original.kind === 'action' || !input || !('messageId' in input) || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
         input.expectedRun.runId !== intent.expectedRun.runId || input.operationId !== intent.operationId || input.messageId !== intent.messageId || original.body !== intent.body ||
         JSON.stringify(parseAgentExternalMessageAuthor(input.author)) !== JSON.stringify(parseAgentExternalMessageAuthor(author))) throw unavailable()
       if (result.authority !== 'current') {
@@ -21,5 +21,19 @@ export function createDesktopExternalInputAuthority(options: { desktopSocketPath
       throw unavailable()
     }
     finally { try { await rpc?.dispose() } catch { /* Releasing this read cannot replace its safe authority outcome. */ } }
+  }, async assertInteractionCurrent(author, intent): Promise<void> {
+    let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+    const unavailable = () => new AgentMuxError('The original external permission authority is unconfirmed. Inspect its original operation; local responses remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
+    try {
+      rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: options.desktopSocketPath } })
+      const result = await rpc.call('connection.ingress.authority', { operationId: intent.operationId })
+      const original = result.ingress, input = original?.kind === 'action' ? original.input : undefined
+      if (!input || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
+          input.expectedRun.runId !== intent.expectedRun.runId || input.operationId !== intent.operationId ||
+          input.intentDigest !== agentInteractionIntentDigest(intent) ||
+          JSON.stringify(parseAgentExternalInteractionAuthor(input.author)) !== JSON.stringify(parseAgentExternalInteractionAuthor(author)) ||
+          JSON.stringify(parseAgentExternalInteractionAuthor(intent.externalAction)) !== JSON.stringify(parseAgentExternalInteractionAuthor(author)) || result.authority !== 'current') throw unavailable()
+    } catch { throw unavailable() }
+    finally { try { await rpc?.dispose() } catch { /* This read never controls the original permission operation. */ } }
   } }
 }

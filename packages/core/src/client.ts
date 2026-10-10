@@ -1,6 +1,6 @@
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
 import { missingExecutableCause } from './executable-diagnostics.js'
-import { parseAgentExternalMessageAuthor } from './external-author.js'
+import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
 import type { AgentConversationReadPage } from './conversation.js'
 import { SessionHistoryObservationPool } from './session-history-observation-pool.js'
@@ -6158,13 +6158,28 @@ export class AgentMuxClient {
       throw new AgentMuxError('A stable interaction operation ID is required.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     }
     input = { ...input, expectedRequest: normalizeAgentInteractionRequest(input.expectedRequest) }
+    if (input.externalAction !== undefined) {
+      const identity = parseAgentExternalInteractionAuthor(input.externalAction), originalContext = context
+      if (input.expectedRequest.kind !== 'permission' || !originalContext?.externalAction ||
+          !isDeepStrictEqual(identity, originalContext.externalAction.identity)) {
+        throw new AgentMuxError('The original external interaction authority is unavailable. Inspect the retained action; local responses remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
+      }
+      input = { ...input, externalAction: identity }
+      const frozen = structuredClone(input)
+      context = { ...originalContext, assertCurrent: async () => {
+        await originalContext.assertCurrent?.()
+        await originalContext.externalAction!.assertCurrent(structuredClone(frozen))
+      } }
+      await context.assertCurrent!()
+    }
+
     const expected = agentInteractionRequestTarget(input.expectedRequest)
     const response = normalizeAgentInteractionResponse(expected, input.response)
     if (!isDeepStrictEqual(response, input.response)) throw new AgentMuxError('The interaction response contains unknown fields.', 'INVALID_AGENT_INTERACTION_RESPONSE')
     const original = await this.inspectAgentInteractionOperation(input)
     if (original) {
       if (!sameRun(original.run, input.expectedRun) || !isDeepStrictEqual(agentInteractionRequestTarget(original.expectedRequest), expected) ||
-          !isDeepStrictEqual(original.response, response)) throw new AgentMuxError('The original response operation has different content.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
+          !isDeepStrictEqual(original.response, response) || !isDeepStrictEqual(original.externalAction, input.externalAction)) throw new AgentMuxError('The original response operation has different content.', 'AGENT_INTERACTION_RESPONSE_CONFLICT')
       // Only an explicit same-intent caller may join the original recoverable input operation.
       // Inspection and reconnection never turn unknown into a new input attempt.
       if (!['saved', 'unknown'].includes(original.delivery) || original.nativeCompleted || expected.evidence.source === 'acp' && original.delivery === 'unknown') return original
@@ -6185,6 +6200,7 @@ export class AgentMuxClient {
       return { ...current, interactionOperations: { ...current.interactionOperations, [input.operationId]: {
         operationId: input.operationId, agentSessionId: input.agentSessionId, run: input.expectedRun,
         expectedRequest: structuredClone(expected), response: structuredClone(response),
+        ...(input.externalAction ? { externalAction: structuredClone(input.externalAction) } : {}),
         ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}), delivery: 'saved', nativeAdoption: 'unknown' } }, updatedAt: Date.now() }
     })
     await this.dispatchAgentInteraction(input, context)
