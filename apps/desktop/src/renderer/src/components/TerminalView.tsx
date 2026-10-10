@@ -404,6 +404,17 @@ export function TerminalView({
     viewportMemoryMarkerRef.current = null
   }
 
+  function rememberViewport(terminal: Terminal): void {
+    releaseViewportMemoryMarker()
+    const buffer = terminal.buffer.active
+    const remembered = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
+    viewportMemoryRef.current = remembered
+    if (buffer.type === 'normal' && remembered.kind === 'line') {
+      const marker = terminal.registerMarker(remembered.line - buffer.baseY - buffer.cursorY)
+      if (marker) viewportMemoryMarkerRef.current = { terminal, buffer, marker }
+    }
+  }
+
   function restoreRememberedViewport(terminal: Terminal): void {
     const retained = viewportMemoryMarkerRef.current
     if (retained?.terminal === terminal && retained.buffer === terminal.buffer.active) {
@@ -478,6 +489,7 @@ export function TerminalView({
     const terminal = terminalRef.current, root = rootRef.current
     if (!terminal || !root || terminalDocumentRef.current === root.ownerDocument) return
     // Adopt only the retained public view. Attachment, parser, buffer and input owner stay alive.
+    rememberViewport(terminal)
     webglVisibilityRef.current?.(false)
     viewportRef.current?.setVisible(false)
     terminal.open(root)
@@ -520,16 +532,7 @@ export function TerminalView({
   useLayoutEffect(() => {
     const terminal = terminalRef.current
     if (!visible) clearLinkPreview()
-    if (!visible && terminal) {
-      releaseViewportMemoryMarker()
-      const buffer = terminal.buffer.active
-      const remembered = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
-      viewportMemoryRef.current = remembered
-      if (buffer.type === 'normal' && remembered.kind === 'line') {
-        const marker = terminal.registerMarker(remembered.line - buffer.baseY - buffer.cursorY)
-        if (marker) viewportMemoryMarkerRef.current = { terminal, buffer, marker }
-      }
-    }
+    if (!visible && terminal) rememberViewport(terminal)
     webglVisibilityRef.current?.(visible)
     viewportRef.current?.setVisible(visible)
     if (!visible || !terminal) return
@@ -542,11 +545,23 @@ export function TerminalView({
     }
     restore()
     const ownerWindow = terminal.element!.ownerDocument.defaultView!
+    const host = rootRef.current!
+    let laterIntent = false
+    const changedIntent = () => { laterIntent = true }
+    const events = ['wheel', 'pointerdown', 'keydown', 'touchstart'] as const
+    const options = { capture: true, passive: true }
+    const stopObserving = () => { for (const event of events) host.removeEventListener(event, changedIntent, options) }
+    for (const event of events) host.addEventListener(event, changedIntent, options)
     const frame = ownerWindow.requestAnimationFrame(() => {
-      restore()
+      if (!laterIntent) restore()
+      stopObserving()
       releaseViewportMemoryMarker(terminal)
     })
-    return () => ownerWindow.cancelAnimationFrame(frame)
+    return () => {
+      ownerWindow.cancelAnimationFrame(frame)
+      stopObserving()
+      releaseViewportMemoryMarker(terminal)
+    }
   }, [visible, hostDocument])
 
   // 变为 running 时启动 live 视口同步。attach effect 不再随 processState 重挂，
