@@ -107,7 +107,9 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   // （「Agent 不得靠重试静默夺回页面」）；`BROWSER_AUTOMATION_DISABLED` 说的是用户关了总开关，
   // 去改设置就能解，而这一条只能由人**明确交还控制**才解得开——两件事的恢复动作不一样，
   // 折成一个码就等于告诉调用方去做一件没用的事。
-  'BROWSER_HUMAN_CONTROL_ACTIVE'
+  'BROWSER_HUMAN_CONTROL_ACTIVE',
+  // An accepted identity belongs to its original receipt; repeating it is not a new run.
+  'BROWSER_OPERATION_ALREADY_EXISTS'
 ] as const
 export type AgentMuxControlErrorCode = typeof AGENTMUX_CONTROL_ERROR_CODES[number]
 

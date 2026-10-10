@@ -20,6 +20,12 @@ export const MAX_BROWSER_OPERATION_EVENTS = 512
 const MAX_FIELD_LENGTH = 240
 const MAX_REPLAY_ARGS = 12
 
+/** Only this duplicate operation is refused; its original receipt remains readable. */
+export function browserOperationAlreadyExistsError(): Error & { code: 'BROWSER_OPERATION_ALREADY_EXISTS' } {
+  return Object.assign(new Error('This Browser operation identity already has a retained record. The program was not rerun. Read the original with browser inspect --operation-id <id> or browser history.'),
+    { code: 'BROWSER_OPERATION_ALREADY_EXISTS' as const })
+}
+
 export type BrowserOperationEvent =
   | {
       type: 'operation-started'
@@ -189,6 +195,8 @@ export class BrowserOperationJournal {
       steps: [],
       ...(input.replayOf ? { replayOf: input.replayOf } : {})
     })
+    // The original map admits the sanitized identity synchronously before any persistence await.
+    if (this.operations.has(operation.id)) throw browserOperationAlreadyExistsError()
     this.document.operations.push(operation)
     this.indexOperation(operation)
     this.trim()

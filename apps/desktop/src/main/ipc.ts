@@ -175,7 +175,8 @@ import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
-import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-journal.js'
+import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from './browser-operation-journal.js'
+import { browserRunResult } from '../shared/browser-run-result.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import { BrowserStepEvidenceStore } from './browser-step-evidence.js'
 import { BrowserResultArtifactStore } from './browser-result-artifact.js'
@@ -1874,24 +1875,29 @@ export async function registerIpc(args: {
     operationId?: string
   ) => {
     requireTrustedSender('browser:runScript', event)
-    if (config.browser.agentAutomation !== true) {
-      // 码必须挂在 error 上，不能只留一句话。`control-host.ts:580` 是从 `error.code` 取的，
-      // 取不到就折成 `CONTROL_FAILED`——于是 `BROWSER_AUTOMATION_DISABLED` 进了码表、进了收据解析
-      // 的测试，却在生产路径上一次都发不出来（零调用者）。差别对 Agent 是实的：`CONTROL_FAILED`
-      // 读作"这次失败了，重试吧"，而这件事重试一万次也不通，要人去改设置。
-      throw Object.assign(
-        new Error('Agent browser automation is off. Turn it on in Settings › Browser.'),
-        { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode }
-      )
-    }
-    // 第四个位置是 `replayOf`，这条路上永远没有（回放走 `browser:runReplay`）。这个 undefined 洞
-    // 必须显式留着：少写一个位置就是把 operationId 喂进 replayOf，于是这次操作被记成"某个操作的
-    // 回放"，而调用方拿着的 id 谁也不认识——两边各自看起来都正常。
-    if (externalBrowsers.has(id)) {
-      workspace(config, externalBridge.require(id).workspaceId)
-      return await externalBrowsers.runScript(id, code, operator, operationId)
-    }
-    return await browsers.runScript(id, code, operator, undefined, operationId)
+    return browserRunResult(async () => {
+      if (config.browser.agentAutomation !== true) {
+        // 码必须挂在 error 上，不能只留一句话。`control-host.ts:580` 是从 `error.code` 取的，
+        // 取不到就折成 `CONTROL_FAILED`——于是 `BROWSER_AUTOMATION_DISABLED` 进了码表、进了收据解析
+        // 的测试，却在生产路径上一次都发不出来（零调用者）。差别对 Agent 是实的：`CONTROL_FAILED`
+        // 读作"这次失败了，重试吧"，而这件事重试一万次也不通，要人去改设置。
+        throw Object.assign(
+          new Error('Agent browser automation is off. Turn it on in Settings › Browser.'),
+          { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode }
+        )
+      }
+      // 第四个位置是 `replayOf`，这条路上永远没有（回放走 `browser:runReplay`）。这个 undefined 洞
+      // 必须显式留着：少写一个位置就是把 operationId 喂进 replayOf，于是这次操作被记成"某个操作的
+      // 回放"，而调用方拿着的 id 谁也不认识——两边各自看起来都正常。
+      // Read the original receipt before acquiring a cold page. Journal.start remains the
+      // final atomic arbiter when another request accepts this identity after the read.
+      if (operationId !== undefined && await browsers.getOperation(operationId)) throw browserOperationAlreadyExistsError()
+      if (externalBrowsers.has(id)) {
+        workspace(config, externalBridge.require(id).workspaceId)
+        return await externalBrowsers.runScript(id, code, operator, operationId)
+      }
+      return await browsers.runScript(id, code, operator, undefined, operationId)
+    })
   })
   handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('../shared/browser-outcome-criteria.js').BrowserOutcomeFieldRunInput) => {
     requireTrustedSender('browser:checkOutcomeFields', event)
