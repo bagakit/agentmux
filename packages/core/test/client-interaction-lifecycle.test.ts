@@ -451,7 +451,7 @@ it.each(['connect', 'author'])('does not apply an old ACP choice to a replacemen
     const result = await h.client.respondAgentInteraction(withInteractionOperation(h.client, { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID },
       response: { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: 'allow-once' } } }),
       { assertCurrent: async () => { if (phase === 'author') await replace() } }).then(() => null, error => error)
-    expect(result).toMatchObject({ code: 'UNKNOWN_AGENT_INTERACTION' })
+    expect(result).toMatchObject({ code: 'STALE_AGENT_SESSION' })
     expect(respond).not.toHaveBeenCalled()
     expect(h.writes).toEqual([])
   } finally { vi.restoreAllMocks(); await h.client.dispose() }
