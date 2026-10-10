@@ -105,3 +105,31 @@ window.continuityShowNotice = async () => {
 }
 createRoot(document.getElementById('root')).render(createElement(App))
 window.continuityReady = true
+
+// Read an actual original launch receipt from the retained idle workface. Only the
+// visible tab selection is temporary; Core records, queue receipts and drafts stay real.
+window.continuityShowLaunchReceipt = async () => {
+  const state = useAppStore.getState(), id = setup.ids.idle.sessionId
+  const entry = state.agentSteerQueues[id]?.find(one => one.resumeInputReceipt?.state === 'launch-carried')
+  if (!entry) throw new Error('The actual original launch input receipt is required')
+  const tab = Object.values(state.tabs).find(one => Object.values(one.regions).some(region => region.kind === 'agent' && region.sessionId === id))
+  if (!tab) throw new Error('The original retained idle tab is required')
+  const layouts = state.layouts
+  const next = Object.fromEntries(Object.entries(layouts).map(([workspaceId, layout]) => [workspaceId, { ...layout,
+    groups: layout.groups.map(group => group.tabOrder.includes(tab.id) ? { ...group, activeTabId: tab.id } : group) }]))
+  useAppStore.setState({ layouts: next })
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  const mailbox = document.querySelector('[data-workbench-region-id="continuity-idle"] .composer-mailbox')
+  if (!mailbox) throw new Error('The actual original idle mailbox is required')
+  mailbox.showPopover()
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  mailbox.querySelector('[role="tab"][id$="-outbox-tab"]').click()
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  const row = mailbox.querySelector(`[data-operation-id="${entry.operationId}"]`)
+  if (!row) throw new Error('The original carrier record must remain readable')
+  row.querySelector('button').click()
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  if (!row.textContent.includes('Runtime 已确认') || !row.textContent.includes('CLI 是否采用')) throw new Error('The actual carrier distinction is absent from the mailbox')
+  window.continuityHideLaunchReceipt = () => { mailbox.hidePopover(); useAppStore.setState({ layouts }) }
+  return { operationId: entry.operationId, inputKey: entry.resumeInputReceipt.key, text: row.textContent }
+}

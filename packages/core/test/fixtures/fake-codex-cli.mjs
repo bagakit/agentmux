@@ -389,3 +389,18 @@ if (process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
 }
 process.stdout.write(`codex-ready:${prompt}\n`)
 await settleTurn()
+// Opt-in native argv consumer: initialization owns the first prompt, rather than PTY timing.
+// The witness is emitted by this actual process after parsing its own argv and appending
+// the body to its retained native record; it is not a parent-provided acceptance marker.
+if (isResume && prompt && process.env.AGENTMUX_FAKE_NATIVE_LAUNCH_INPUT === '1') {
+  if (nativeRecordDescriptor === undefined) throw new Error('Native launch input requires the original conversation record')
+  const witness = { nativeSessionId: `native-${agentSessionId}`, prompt,
+    promptSha256: createHash('sha256').update(prompt).digest('hex'), carrier: 'launch-argv' }
+  writeSync(nativeRecordDescriptor, `${JSON.stringify({ timestamp: new Date().toISOString(), type: 'response_item', payload: {
+    type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }]
+  } })}\n`)
+  writeSync(nativeRecordDescriptor, `${JSON.stringify({ type: 'fixture_launch_input', payload: witness })}\n`)
+  nativeTurnGeneration += 1
+  writeNativeBoundary('task_started')
+  process.stdout.write(`codex-launch-input:${JSON.stringify(witness)}\n`)
+}

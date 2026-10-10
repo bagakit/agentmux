@@ -150,7 +150,7 @@ describe('actual Store cold start', () => {
       latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 })
     core.kernel.isConnected = () => true
     core.kernel.status = async (runId: string) => nativeRun(runId, runId === 'new-run')
-    const start = vi.fn(async () => nativeRun('new-run', true)); core.kernel.start = start
+    const start = vi.fn(async (_spec: { args: string[] }) => nativeRun('new-run', true)); core.kernel.start = start
     core.probeAgent = async () => ({ providerId: 'codex', executable: 'codex', installed: true,
       capabilities: new AgentProviderRegistry().get('codex').catalog.capabilities })
     core.ensureTerminalHandshakeOrDegrade = async (session: unknown) => session
@@ -165,35 +165,28 @@ describe('actual Store cold start', () => {
       continuity.push(result)
       if (result.kind !== 'resumed' && result.kind !== 'reattachable') return result
       current = { ...previous, processState: 'running', runUnobserved: false,
-        control: { ...previous.control, run: result.session.run }, continuity: result.continuity,
+        control: { ...previous.control, run: result.session.run }, continuity: result.continuity, continuityOperations: result.session.continuityOperations,
         promptSubmissionPredecessor: null, status: { state: 'running', source: 'run-process', observedAt: now } }
       return { kind: result.kind, session: current }
     })
     vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
-    const submitted = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, text, operationId, binding) => {
-      if (control.kind !== 'agent') throw new Error('Expected original Agent')
-      expect(text).toBe(authored)
-      expect(control.run).toEqual({ runId: 'new-run' })
-      expect(binding).toEqual({ expectedRun: { runId: 'new-run' }, admissionIntent: { kind: 'manual-actor' } })
-      const key = { kind: 'prompt' as const, agentSessionId: id, expectedRun: control.run, submissionId: operationId }, ref = { key, waitGeneration: 1 }
-      return { key, ref, persistence: 'confirmed', control: { ref, state: 'dispatch-authorized', at: now },
-        admission: null, status: 'admitted', observation: 'closed' }
-    })
+    const submitted = vi.spyOn(api.sessions, 'submitPrompt')
     try {
       await initialize()
       expect(continuity[0]).toMatchObject({ kind: 'pending', reason: mode === 'manual' ? 'active-manual' : 'active-delay' })
       expect(start).not.toHaveBeenCalled()
       const reject = vi.fn()
       expect(store.getState().send(id, authored, reject, 'manual', undefined, { execution: 'immediate' })).toBe(true)
-      await vi.waitFor(() => expect(submitted, JSON.stringify({ queues: store.getState().agentSteerQueues[id], recover: recover.mock.calls, continuity, reject: reject.mock.calls.map(([error]) => String(error)) })).toHaveBeenCalledTimes(1))
+      await vi.waitFor(() => expect(store.getState().agentSteerQueues[id]?.[0]?.resumeInputReceipt?.state).toBe('launch-carried'))
       expect(reject).not.toHaveBeenCalled()
       expect(recover.mock.calls.map(([, , , request]) => request?.trigger)).toEqual(['startup', 'input'])
       expect(continuity[1]).toMatchObject({ kind: 'resumed', continuity: { trigger: 'input', recoveryInputs: { reminder: '', continuation: '' } } })
-      expect(submitted.mock.calls[0]?.[2]).toBe(recover.mock.calls[1]?.[2])
+      expect(submitted).not.toHaveBeenCalled()
+      expect(start.mock.calls[0]![0].args).toContain(authored)
       expect(start).toHaveBeenCalledTimes(1)
       expect(store.getState().agentComposerDrafts).toEqual(workface.drafts)
       expect(store.getState().agentSteerQueues[id]?.filter(entry => entry.text === authored)).toMatchObject([{ archived: true,
-        operationId: submitted.mock.calls[0]?.[2], inputReceipt: { key: { expectedRun: { runId: 'new-run' } }, status: 'admitted' } }])
+        operationId: recover.mock.calls[1]?.[2], resumeInputReceipt: { key: { expectedRun: { runId: 'new-run' } }, state: 'launch-carried' } }])
     } finally { await client.dispose() }
   })
   it('consumes the native epoch through both ended and missing recovery paths', async () => {

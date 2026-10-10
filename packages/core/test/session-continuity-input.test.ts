@@ -14,6 +14,9 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; na
   const providerId = options.providerId ?? 'codex'
   const h = await rpcOwnerFixture(['recipient'], undefined, () => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'native-original' } }))
   const inner = h.client as any, provider = h.client.providers.get(providerId)
+  // This suite exercises the retained post-launch terminal owner. Native argv
+  // carriers are separately verified before any terminal side effect.
+  ;(provider as any).catalog = { ...provider.catalog, promptDelivery: 'post-launch-only' }
   const status = inner.kernel.status.bind(inner.kernel), input = inner.kernel.input
   let ready = options.ready !== false, handshakeBytes = 0, loseInputAck = options.loseInputAck === true
   inner.kernel.status = vi.fn(async (id: string) => ({ ...await status(id),
