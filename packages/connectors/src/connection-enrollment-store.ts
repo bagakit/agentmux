@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, type ConnectionEnrollmentBeginInput, type ConnectionEnrollmentCallContext, type ConnectionEnrollmentOperation } from '@agentmux/core/connections'
+import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, type ConnectionEnrollmentBeginInput, type ConnectionEnrollmentCallContext, type ConnectionEnrollmentDiagnostic, type ConnectionEnrollmentOperation } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 
 export type EnrollmentRow = { operation: ConnectionEnrollmentOperation; actor: ConnectionEnrollmentCallContext['actor']; credentialOperationId: string; configureOperationId: string; attemptId: string | null; attemptKind: 'begin' | 'poll' | null; snapshotOperationId: string | null; privateRef: string | null }
@@ -44,6 +44,14 @@ export class ConnectionEnrollmentStore {
       change(row); row.operation.revision++; return this.write(row)
     })
   }
+  diagnose(operationId: string, attemptId: string, diagnostic: ConnectionEnrollmentDiagnostic): EnrollmentRow {
+    return this.transaction(() => {
+      const row = this.read(operationId)!
+      if (row.attemptId !== attemptId || row.operation.authorization !== 'unknown' || JSON.stringify(row.operation.diagnostic) === JSON.stringify(diagnostic)) return row
+      row.operation.diagnostic = diagnostic; row.operation.revision++
+      return this.write(row)
+    })
+  }
   claim(operationId: string, kind: 'begin' | 'poll', owner: string, captured: EnrollmentRow): { row: EnrollmentRow; claimed: boolean } {
     return this.transaction(() => {
       const row = this.read(operationId)!
@@ -52,6 +60,7 @@ export class ConnectionEnrollmentStore {
       const attemptId = randomUUID()
       this.host.database.prepare('INSERT INTO connection_enrollment_attempt VALUES(?,?,?,?,?)').run(attemptId, operationId, kind, owner, 'claimed')
       row.attemptId = attemptId; row.attemptKind = kind; row.snapshotOperationId = randomUUID()
+      delete row.operation.diagnostic
       row.operation.authorization = 'unknown'; row.operation.reason = kind === 'begin' ? 'begin-unconfirmed' : 'poll-unconfirmed'; row.operation.revision++
       return { row: this.write(row), claimed: true }
     })
