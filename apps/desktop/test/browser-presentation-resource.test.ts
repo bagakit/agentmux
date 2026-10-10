@@ -67,14 +67,30 @@ const native = vi.hoisted(() => {
     setBounds(value: typeof this.bounds) { this.bounds = { ...value } }
     getBounds() { return this.bounds }
   }
-  return { Session, Contents, View }
+  const shells: BaseWindow[] = []
+  class BaseWindow {
+    readonly views: View[] = []
+    readonly contentView = {
+      children: this.views,
+      addChildView: (view: View) => { this.views.push(view) },
+      removeChildView: (view: View) => { const index = this.views.indexOf(view); if (index !== -1) this.views.splice(index, 1) }
+    }
+    dead = false
+    constructor(readonly options: Record<string, unknown>) { shells.push(this) }
+    isDestroyed = () => this.dead
+    destroy = vi.fn(() => { this.dead = true })
+  }
+  return { Session, Contents, View, BaseWindow, shells }
 })
-vi.mock('electron', () => ({ WebContentsView: native.View, app: { getPath: () => _hygiene_fixturePath("unused-private-ledger") } }))
+vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: native.View, app: { getPath: () => _hygiene_fixturePath("unused-private-ledger") } }))
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 
 const cleanup: Array<() => void> = []
-afterEach(() => { for (const release of cleanup.splice(0)) release() })
+afterEach(() => {
+  for (const release of cleanup.splice(0)) release()
+  expect(native.shells.filter(shell => !shell.isDestroyed())).toEqual([])
+})
 const geometry = { visible: true as const, bounds: { x: 24, y: 36, width: 480, height: 240 } }
 const occurrence = (id: string): BrowserPresentationOccurrence => ({ presentationId: id,
   location: { displayWorkspaceId: 'foreign-space', groupId: 'group-' + id, tabId: 'same-tab', regionId: 'same-region' } })
@@ -209,11 +225,10 @@ it('reconciles coverage after selection rolls back without replacing the origina
   f.manager.onNativeVisibilityChange = undefined
 })
 
-it('does not confirm a capture whose native preparation placement failed', async () => {
+it('keeps failed hidden source return observable without destroying the original page', async () => {
   const f = await fixture(), lease = f.register('A')
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
   f.request()
-  await f.manager.activatePresentation(f.app as never, f.frame as never, lease.leaseId, { kind: 'select', focus: 'preserve' })
   const failure = new Error('Native preparation placement failed')
   f.addChildView.mockImplementationOnce(() => { throw failure })
   expect(() => f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId,
@@ -241,19 +256,25 @@ it('keeps a stale native window document from confirming coverage without hiding
   } finally { warn.mockRestore() }
 })
 
-it('prepares a never-selected passive source below the Renderer and hides it after acquisition', async () => {
+it('prepares a never-selected source in a hidden native shell without covering the Renderer', async () => {
   const f = await fixture(), lease = f.register('A')
   expect(f.source.getBounds().width).toBe(0)
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
-  expect(f.source.getBounds()).toEqual(geometry.bounds)
+  const shell = native.shells.at(-1)!
+  expect(shell.options).toMatchObject({ show: false, focusable: false, width: geometry.bounds.width, height: geometry.bounds.height })
+  expect(shell.views).toEqual([f.source])
+  expect(f.views).toEqual([])
+  expect(f.manager.windowForView(f.source)).toBe(f.window)
+  expect(f.source.getBounds()).toEqual({ ...geometry.bounds, x: 0, y: 0 })
   expect(f.source.getVisible()).toBe(true)
-  expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 0)
   expect(f.manager.nativeOwner('browser')).toBeUndefined()
   expect(f.source.webContents.focus).not.toHaveBeenCalled()
   expect(f.events()).toEqual([])
   expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
   f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
   expect(f.source.getVisible()).toBe(false)
+  expect(shell.views).toEqual([])
+  expect(shell.destroy).toHaveBeenCalledOnce()
   expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 1)
   expect(f.views).toEqual([f.source])
 })
@@ -266,11 +287,34 @@ it.each(['failed', 'stopped', 'revoked'] as const)('ends passive source preparat
   else f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, outcome === 'failed'
     ? { outcome, message: 'Video source timed out' } : { outcome, trackIds: ['late-track'] })
   expect(f.source.getVisible()).toBe(false)
+  expect(native.shells.at(-1)!.isDestroyed()).toBe(true)
+  expect(f.views).toEqual([f.source])
   expect(f.manager.nativeOwner('browser')).toBeUndefined()
   expect(f.source.webContents.focus).not.toHaveBeenCalled()
   expect(f.source.webContents.getURL()).toBe('https://generic.example/one')
   expect(f.source.webContents.dead).toBe(false)
 })
+
+it.each(['release', 'profile-replacement', 'dispose', 'source-destroyed', 'host-destroyed'] as const)(
+  'releases a pending passive shell after %s without leaking a native window', async action => {
+    const f = await fixture(), lease = f.register('A')
+    const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+    const shell = native.shells.at(-1)!
+    if (action === 'release') await f.manager.release('browser')
+    else if (action === 'profile-replacement') await f.manager.switchProfile('browser', 'another')
+    else if (action === 'dispose') f.manager.dispose()
+    else if (action === 'source-destroyed') f.source.webContents.close()
+    else {
+      f.window.isDestroyed = () => true
+      f.app.emit('render-process-gone')
+    }
+    expect(shell.isDestroyed()).toBe(true)
+    expect(shell.views).toEqual([])
+    expect(f.source.webContents.focus).not.toHaveBeenCalled()
+    if (action === 'host-destroyed') expect(f.source.webContents.dead).toBe(false)
+    else expect(f.events().some(event => event.type === 'capture-revoked' && event.captureId === capture.captureId)).toBe(true)
+  }
+)
 
 it('keeps source viewport on passive rearm and preserves selection made during acquisition', async () => {
   const f = await fixture(), a = f.register('A')
@@ -280,29 +324,30 @@ it('keeps source viewport on passive rearm and preserves selection made during a
   const b = f.register('B', { visible: true, bounds: mirrorBounds })
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, b.leaseId)
   expect(capture.captureId).not.toBe(first.captureId)
-  expect(f.source.getBounds()).toEqual(geometry.bounds)
+  expect(f.source.getBounds()).toEqual({ ...geometry.bounds, x: 0, y: 0 })
   await f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId, { kind: 'select', focus: 'preserve' })
   expect(f.source.getBounds()).toEqual(mirrorBounds)
   expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 1)
   expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
   f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
   expect(f.source.getVisible()).toBe(true)
+  expect(native.shells.at(-1)!.isDestroyed()).toBe(true)
+  expect(f.source.getBounds()).toEqual(mirrorBounds)
   expect(f.manager.nativeOwner('browser')?.view).toBe(f.source)
   expect(f.source.webContents.focus).not.toHaveBeenCalled()
 })
 
 it('keeps revocation observable when preparation cleanup fails and permits explicit rearm', async () => {
   const f = await fixture(), lease = f.register('A')
-  const appRenderer = new native.View()
-  f.views.push(appRenderer)
   const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
   const hide = vi.spyOn(f.source, 'setVisible').mockImplementationOnce(() => { throw new Error('Native hide unavailable') })
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   try {
     f.manager.updatePresentation(f.app as never, f.frame as never, lease.leaseId, { visible: false })
     expect(f.events()).toEqual([{ type: 'capture-revoked', browserId: 'browser', captureId: capture.captureId, reason: 'no-visible-presentations' }])
-    expect(f.addChildView).toHaveBeenLastCalledWith(f.source, 0)
-    expect(f.views).toEqual([f.source, appRenderer])
+    expect(f.views).toEqual([])
+    expect(native.shells.at(-1)!.views).toEqual([])
+    expect(native.shells.at(-1)!.isDestroyed()).toBe(true)
     expect(warn).toHaveBeenCalledOnce()
     f.manager.updatePresentation(f.app as never, f.frame as never, lease.leaseId, geometry)
     const next = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
