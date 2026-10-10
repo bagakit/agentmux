@@ -76,30 +76,21 @@ function nativeSourceOption(source: AgentSessionHistorySource | undefined, facts
   throw new Error('This original conversation window is retained. Its source is no longer available for paging; explicitly open Current source or Previous source.')
 }
 
-export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null): ReadingAnchor | null {
+export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null, nativeOnly = false): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
-  if (observedScope) for (const row of observedScope.querySelectorAll<HTMLElement>('[data-segment-key]')) {
+  // Read the actual mixed DOM order. Source priority would choose a later native
+  // row over an earlier captured message once the sources share one sequence.
+  for (const row of (observedScope ?? viewport).querySelectorAll<HTMLElement>(nativeOnly
+    ? '[data-native-record-id], [data-native-record-ids]' : '[data-segment-key], [data-native-record-id], [data-native-record-ids]')) {
     const rect = row.getBoundingClientRect()
-    if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom) {
-      return { kind: 'segment', id: row.dataset.segmentKey!, offset: rect.top - bounds.top }
-    }
-  }
-  for (const row of viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')) {
-    const rect = row.getBoundingClientRect()
-    if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom) {
-      return { kind: 'record', id: row.dataset.nativeRecordId!, offset: rect.top - bounds.top }
-    }
-  }
-  // Only a truly collapsed group may provide geometry while its real raw rows are hidden.
-  for (const group of viewport.querySelectorAll<HTMLElement>('[data-native-record-ids]')) {
-    const head = group.querySelector<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')
-    if (!head) continue
-    const rect = head.getBoundingClientRect()
-    if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom) {
-      const id = head.parentElement?.dataset.observationId
-      if (id) return { kind: 'group', id, offset: rect.top - bounds.top }
-    }
+    if (rect.height <= 0 || rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue
+    if (row.dataset.segmentKey) return { kind: 'segment', id: row.dataset.segmentKey, offset: rect.top - bounds.top }
+    if (row.dataset.nativeRecordId) return { kind: 'record', id: row.dataset.nativeRecordId, offset: rect.top - bounds.top }
+    const head = row.querySelector<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')
+    const headRect = head?.getBoundingClientRect(), id = head?.parentElement?.dataset.observationId
+    if (id && headRect && headRect.height > 0 && headRect.bottom > bounds.top && headRect.top < bounds.bottom)
+      return { kind: 'group', id, offset: headRect.top - bounds.top }
   }
   return null
 }
@@ -132,7 +123,7 @@ export function protectsConversationWindow(viewport: HTMLElement | null, next: A
     && message.source.kind === 'native' && message.source.providerId === next.source.providerId
     && message.source.nativeSessionId === next.source.nativeSessionId)
     .map(message => conversationMessageSourceKey(message.agentSessionId, message.source)))
-  if (next.items.length && inputKeys.size) for (const row of viewport.querySelectorAll<HTMLElement>('.activity-log .log-turn[data-message-source-key]')) {
+  if (next.items.length && inputKeys.size) for (const row of viewport.querySelectorAll<HTMLElement>('[data-segment-key] .log-turn[data-message-source-key]')) {
     if (inputKeys.has(row.dataset.messageSourceKey) && rangeIntersectsElement(selection.getRangeAt(0), row)) return true
   }
   for (const row of viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')) {

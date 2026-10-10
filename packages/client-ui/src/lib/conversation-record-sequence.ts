@@ -8,7 +8,8 @@ type ConversationRecordSequenceRow =
 /** One source-order projection for rendering and checking retained reading nodes. */
 export function projectConversationRecordSequence(
   items: readonly AgentSessionHistoryItem[], sourceKey: string,
-  previous: ReadonlyMap<string, string> = new Map(), beforeRecordId?: string
+  previous: ReadonlyMap<string, string> = new Map(), beforeRecordId?: string,
+  interruptions?: ReadonlySet<string>
 ): { rows: ConversationRecordSequenceRow[]; groups: Map<string, string> } {
   const groups = new Map<string, string>()
   const usedGroups = new Set<string>()
@@ -34,6 +35,7 @@ export function projectConversationRecordSequence(
   for (const item of items) {
     if (seen.has(item.id)) continue
     seen.add(item.id)
+    if (interruptions?.has(item.id)) flush()
     if (beforeRecordId === item.id) {
       flush()
       rows.push({ kind: 'boundary' })
