@@ -100,20 +100,28 @@ function selection(value: unknown, code: Code): AgentMuxDesktopSelection {
   if (source.mainSurface !== mainSurfaces[surface]) fail('Public and internal Surface disagree.', code)
   return { surface, mainSurface: mainSurfaces[surface], space: spaceSelection(source.space, code), goalId: nullableId(source.goalId, 'Selected Goal', code) }
 }
+function documentIdentity(source: Record<string, unknown>, required: boolean, code: Code): { windowId?: string; documentGeneration?: string } {
+  const hasWindow = Object.hasOwn(source, 'windowId'), hasDocument = Object.hasOwn(source, 'documentGeneration')
+  if (hasWindow !== hasDocument || (required && !hasWindow)) fail('Native window and document identities must be paired.', code)
+  return hasWindow ? { windowId: spaceControlId(source.windowId, 'Window', code),
+    documentGeneration: spaceControlId(source.documentGeneration, 'Document generation', code) } : {}
+}
 function input(value: unknown, code: Code): AgentMuxDesktopInput {
-  const source = fields(value, ['provenance', 'scope', 'ownerKind', 'tabId', 'regionId', 'sessionId', 'connected', 'visible', 'inert'], code)
-  return { provenance: provenance(source.provenance, code), scope: member(source.scope, ['main', 'floating', 'overlay', 'none', 'unknown'], 'Input scope', code),
+  const source = fields(value, ['provenance', 'scope', 'ownerKind', 'tabId', 'regionId', 'sessionId', 'connected', 'visible', 'inert', 'windowId', 'documentGeneration'], code)
+  return { provenance: provenance(source.provenance, code), scope: member(source.scope, ['main', 'floating', 'window', 'overlay', 'none', 'unknown'], 'Input scope', code),
+    ...documentIdentity(source, source.scope === 'window', code),
     ownerKind: source.ownerKind === null ? null : member(source.ownerKind, ['terminal', 'composer', 'editor', 'dialog', 'other'] as const, 'Input owner', code),
     tabId: nullableId(source.tabId, 'Input Tab', code), regionId: nullableId(source.regionId, 'Input Region', code), sessionId: nullableId(source.sessionId, 'Input Session', code),
     connected: nullableBoolean(source.connected, 'Input connected', code), visible: nullableBoolean(source.visible, 'Input visible', code), inert: nullableBoolean(source.inert, 'Input inert', code) }
 }
 function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
-  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers'], code)
-  const result = { provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'covered', 'pending', 'unknown'], 'Presentation', code),
+  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers', 'windowId', 'documentGeneration'], code)
+  const result = { provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),
+    ...documentIdentity(source, source.state === 'window', code),
     tabId: nullableId(source.tabId, 'Presented Tab', code), regionId: nullableId(source.regionId, 'Presented Region', code),
     blockers: list(source.blockers, value => member(value, ['settings', 'quick-switcher'] as const, 'Overlay blocker', code), code) }
   if (new Set(result.blockers).size !== result.blockers.length ||
-    (result.state === 'main-visible' && (result.provenance !== 'observed' || result.blockers.length > 0)) ||
+    ((result.state === 'main-visible' || result.state === 'window') && (result.provenance !== 'observed' || result.blockers.length > 0)) ||
     (result.state === 'covered' && result.blockers.length === 0)) fail('Desktop presentation facts disagree.', code)
   return result
 }
@@ -174,7 +182,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       }
     }
   }
-  if (result.presentation.state === 'main-visible' || result.presentation.state === 'floating') {
+  if (result.presentation.state === 'main-visible' || result.presentation.state === 'floating' || result.presentation.state === 'window') {
     const presented = navigation.selection.surface === 'space' ? navigation.selection.space : null
     if (result.presentation.provenance !== 'observed' || result.presentation.tabId !== (presented?.tabId ?? null) ||
       result.presentation.regionId !== (presented?.regionId ?? null) ||
@@ -184,12 +192,14 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
   }
   if ((observedInput.outcome === 'preserved' && (observedInput.policy !== 'preserve' || observedInput.before.provenance !== 'observed' ||
     observedInput.after.provenance !== 'observed' || observedInput.after.connected !== true || observedInput.after.visible !== true || observedInput.after.inert !== false ||
-    ['scope', 'ownerKind', 'tabId', 'regionId', 'sessionId'].some(key => observedInput.before[key as keyof AgentMuxDesktopInput] !== observedInput.after[key as keyof AgentMuxDesktopInput]))) ||
+    ['scope', 'ownerKind', 'tabId', 'regionId', 'sessionId', 'windowId', 'documentGeneration'].some(key => observedInput.before[key as keyof AgentMuxDesktopInput] !== observedInput.after[key as keyof AgentMuxDesktopInput]))) ||
     (observedInput.outcome === 'transferred' && (observedInput.policy !== 'target' ||
       (navigation.state !== 'applied' && navigation.state !== 'unchanged') || observedInput.after.provenance !== 'observed' ||
       observedInput.after.connected !== true || observedInput.after.visible !== true || observedInput.after.inert !== false ||
-      observedInput.after.regionId !== navigation.selection.space?.regionId || observedInput.after.tabId !== navigation.selection.space?.tabId)) ||
-    (!result.partial && (navigation.state === 'rejected' || navigation.state === 'unconfirmed' || result.presentation.state !== 'main-visible' ||
+      observedInput.after.regionId !== navigation.selection.space?.regionId || observedInput.after.tabId !== navigation.selection.space?.tabId ||
+      (result.presentation.state === 'window' && (observedInput.after.scope !== 'window' || observedInput.after.windowId !== result.presentation.windowId ||
+        observedInput.after.documentGeneration !== result.presentation.documentGeneration)))) ||
+    (!result.partial && (navigation.state === 'rejected' || navigation.state === 'unconfirmed' || (result.presentation.state !== 'main-visible' && result.presentation.state !== 'window') ||
       observedInput.outcome === 'unavailable' || observedInput.outcome === 'unconfirmed'))) fail('Focus receipt confirmation is inconsistent.', code)
   const receipt = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Receipt Request', code), ok: true as const, operation: 'focus' as const, result }
   budget(receipt, code)
