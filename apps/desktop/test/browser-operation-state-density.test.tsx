@@ -30,7 +30,7 @@ describe('Browser operation status in existing controls', () => {
   it('renders four nonempty observed states with distinct glyphs and accessible facts', async () => {
     const cases: [BrowserOperationPhase, BrowserActivityState['control'], string, string][] = [
       ['running', 'agent', 'Operating page', '[data-semantic-icon="status.browser-running"]'],
-      ['waiting', 'agent', 'Waiting for page', '[data-semantic-icon="action.pause"]'],
+      ['waiting', 'agent', 'Waiting for page', '[data-semantic-icon="status.waiting"]'],
       ['human', 'human', 'Human has control', '[data-semantic-icon="object.user"]'],
       ['failed', 'human', 'Failed', '[data-semantic-icon="status.failed"]']
     ]
