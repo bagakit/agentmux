@@ -1,0 +1,18 @@
+.mote-bot-profile { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.mote-bot-profile img { flex: none; object-fit: cover; border-radius: var(--radius-md); }
+.mote-bot-profile > div { min-width: 0; display: grid; gap: var(--sp-1); }
+.mote-bot-profile p { margin: 0; color: var(--text-2); }
+.mote-bot-profile strong, .mote-bot-profile p { overflow-wrap: anywhere; }
+.bot-profile-result, .bot-profile-observation { display: grid; gap: var(--sp-3); min-width: 0; }
+.bot-profile-result > p, .bot-profile-observation > p { margin: 0; overflow-wrap: anywhere; }
+.bot-profile-result > .small-button, .bot-profile-observation > .small-button { justify-self: start; }
+.bot-profile-details { color: var(--text-2); font-size: var(--fs-body); }
+.bot-profile-details dl { display: grid; gap: var(--sp-2); }
+.bot-profile-details dl > div { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+.bot-profile-details dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.bot-profile-details code { white-space: normal; overflow-wrap: anywhere; }
+.connector-profile { padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
+.connector-profile > summary { color: var(--text); cursor: pointer; }
+.connector-profile[open] { display: grid; gap: var(--sp-3); }
+.bot-profile-operations { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.bot-profile-operations button { text-align: left; overflow-wrap: anywhere; white-space: normal; }
