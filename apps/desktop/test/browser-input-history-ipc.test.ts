@@ -79,6 +79,8 @@ async function fixture() {
   const sender = Object.assign(new EventEmitter(), { id: 732, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const dispose = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
     runtime, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
+    // History requests do not create a native workface window; retain the original IPC owner port.
+    workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
   const invoke = async (channel: string, values: unknown[], actualSender: unknown = sender) => {
     const handler = bridge.handlers.get(channel)
