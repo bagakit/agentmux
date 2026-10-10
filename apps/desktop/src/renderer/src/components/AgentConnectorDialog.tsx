@@ -238,13 +238,13 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     void work(() => execute(binding ? { method: 'connection.binding.relink', input: { ...input, expectedRevision: binding.revision }, target, phase: 'not-dispatched' } : { method: 'connection.bind', input, target, phase: 'not-dispatched' }))
   }
   function pause() { const previous = relevant.find(intent => intent.method === 'connection.binding.pause'); if (previous) { void work(async () => { await inspect(previous) }); return } if (binding) void work(() => execute({ method: 'connection.binding.pause', target, phase: 'not-dispatched', input: { operationId: crypto.randomUUID(), bindingId: binding.bindingId, expectedRevision: binding.revision } })) }
-  function currentGrantIntent(intent: ConnectorRoomIntent): intent is Extract<ConnectorRoomIntent, { method: 'connection.grant' }> {
+  function currentGrantIntent(intent: ConnectorRoomIntent): boolean {
     return intent.method === 'connection.grant' && !!binding && intent.input.bindingId === binding.bindingId &&
       intent.input.expectedBindingRevision === binding.revision && intent.input.actor.application.domain === binding.application.domain && intent.input.actor.application.appId === binding.application.appId
   }
   function grant() {
     if (!binding || !actorId || !actorType || !actorInput && !actorAnswer && !actorPermission) return
-    const previous = relevant.find(intent => currentGrantIntent(intent) && intent.input.actor.idType === actorType && intent.input.actor.userId === actorId)
+    const previous = relevant.find(intent => intent.method === 'connection.grant' && currentGrantIntent(intent) && intent.input.actor.idType === actorType && intent.input.actor.userId === actorId)
     const key = memberKey(actorType, actorId)
     if (previous) { void memberWork(key, async () => { await inspect(previous) }); return }
     void memberWork(key, () => execute({ method: 'connection.grant', target, phase: 'not-dispatched', input: {
@@ -258,7 +258,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     if (!binding) return
     if (grant.actor.idType === actorType && grant.actor.userId === actorId) setActorPermission(false)
     const key = memberKey(grant.actor.idType, grant.actor.userId), capabilities = grant.capabilities.filter(value => value !== 'permission')
-    const previous = relevant.find(intent => currentGrantIntent(intent) && intent.input.grantId === grant.grantId && intent.input.actor.idType === grant.actor.idType && intent.input.actor.userId === grant.actor.userId)
+    const previous = relevant.find(intent => intent.method === 'connection.grant' && currentGrantIntent(intent) && intent.input.grantId === grant.grantId && intent.input.actor.idType === grant.actor.idType && intent.input.actor.userId === grant.actor.userId)
     if (previous) { void memberWork(key, async () => { await inspect(previous) }); return }
     void memberWork(key, () => execute({ method: 'connection.grant', target, phase: 'not-dispatched', input: {
       operationId: crypto.randomUUID(), bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: grant.grantId, expectedRevision: grant.revision,
