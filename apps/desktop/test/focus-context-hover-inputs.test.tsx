@@ -36,19 +36,19 @@ beforeEach(async()=>{
  await setInputs([]);await act(async()=>root.render(createElement(GlobalFocusSurface)));input.focus();input.setSelectionRange(2,8)
 })
 afterEach(async()=>{await act(async()=>root.unmount());await act(async()=>new Promise(resolve=>setTimeout(resolve,0)));container.remove();input.remove();document.getElementById('agentmux-window-overlay-host')?.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()})
-it('reads only after intent and shows the latest three native/captured inputs beside the original reply',async()=>{
+it('reads only after intent and shows the available native/captured inputs beside the original reply',async()=>{
  await setInputs([captured('old','Older request',5),captured('human','Manual user request',30,{authorHuman:true}),captured('peer','Agent incoming request',40,{authorAgentSessionId:C})])
  vi.mocked(api.sessions.historyPage).mockImplementation(async control=>page(control.agentSessionId,[native('old-native','Old terminal request',10),native('latest-native','Terminal user request',20)]))
  const original=useAppStore.getState();await pointer(card(),'pointerover');await act(async()=>new Promise(resolve=>setTimeout(resolve,150)));expect(panel()).toBeNull();expect(api.sessions.historyPage).not.toHaveBeenCalled()
- await act(async()=>new Promise(resolve=>setTimeout(resolve,60)));await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(3)))
- expect(inputs().map(n=>n.dataset.hoverInputId)).toEqual(['native:claude:hover-hover-a:latest-native','captured:human','captured:peer'])
- expect(inputs().map(n=>n.dataset.inputAuthor)).toEqual(['unknown','human','agent']);expect(inputs()[2]!.textContent).toContain(C);expect(inputs()[0]!.querySelector('time')!.title).toContain('Native record');expect(inputs()[1]!.querySelector('time')!.title).toContain('Submission record')
+ await act(async()=>new Promise(resolve=>setTimeout(resolve,60)));await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(5)))
+ expect(inputs().map(n=>n.dataset.hoverInputId)).toEqual(['captured:old','native:claude:hover-hover-a:old-native','native:claude:hover-hover-a:latest-native','captured:human','captured:peer'])
+ expect(inputs().slice(-3).map(n=>n.dataset.inputAuthor)).toEqual(['unknown','human','agent']);expect(inputs()[4]!.textContent).toContain(C);expect(inputs()[2]!.querySelector('time')!.title).toContain('Native record');expect(inputs()[3]!.querySelector('time')!.title).toContain('Submission record')
  for(const row of inputs()){const time=row.querySelector('time')!;expect(time.getAttribute('aria-label')).toContain(time.textContent)}
  expect(panel()!.textContent).toContain(response);expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(original.sessions[0]!.control,{limit:30});expect(document.activeElement).toBe(input);expect([input.selectionStart,input.selectionEnd]).toEqual([2,8]);expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
  const count=vi.mocked(api.sessions.historyPage).mock.calls.length
  await act(async()=>root.render(<GlobalFocusSurface visible={false} />));expect(panel()).toBeNull()
  await act(async()=>notify({kind:'invalidated',agentSessionId:A,source:{providerId:'claude',nativeSessionId:'hover-'+A}}));await act(async()=>new Promise(resolve=>setTimeout(resolve,120)));expect(api.sessions.historyPage).toHaveBeenCalledTimes(count)
- await act(async()=>root.render(<GlobalFocusSurface visible={true} />));expect(panel()).toBeNull();await open();await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(3)));await close()
+ await act(async()=>root.render(<GlobalFocusSurface visible={true} />));expect(panel()).toBeNull();await open();await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(5)));await close()
  const closedCount=vi.mocked(api.sessions.historyPage).mock.calls.length;await act(async()=>new Promise(resolve=>setTimeout(resolve,200)));expect(api.sessions.historyPage).toHaveBeenCalledTimes(closedCount)
 })
 it('preserves different IDs with identical text and marks missing record time without guessing global order',async()=>{
@@ -88,7 +88,7 @@ it('keeps reply DOM and Range through input arrival and unrelated output without
  await pointer(card(),'pointerout',panel());await pointer(panel()!,'pointerover',card());await act(async()=>new Promise(resolve=>setTimeout(resolve,180)));expect(panel()).not.toBeNull()
  await act(async()=>panel()!.dispatchEvent(new Event('scroll')));expect(panel()).not.toBeNull()
 })
-it('preserves complete long and non-text inputs without reading older pages to fill three',async()=>{
+it('preserves complete long and non-text inputs without reading older pages to fill six',async()=>{
  vi.mocked(api.sessions.historyPage).mockResolvedValue({...page(A,[native('long','🙂'.repeat(800),20),{id:'resource',kind:'user-message',contentParts:[{kind:'resource',resourceType:'image',reference:_hygiene_fixturePath("recorded/image.png")}],startedAt:30}]),nextCursor:'earlier-real-cursor'})
  await open();await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(2)));expect(inputs()[0]!.querySelector('p')!.textContent).toBe('🙂'.repeat(800));expect(inputs()[1]!.textContent).toContain('Non-text input');expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
 })

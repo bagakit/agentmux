@@ -68,9 +68,12 @@ it.each(['workspace', 'focus'] as const)('loads visible original pasted and nati
 it('keeps structured original images when the full input uses the literal long-text path', async () => {
   const long = 'Original long input '.repeat(600) + 'COMPLETE IMAGE INPUT TAIL'
   vi.mocked(api.sessions.historyPage).mockResolvedValue({ ...page, items: [{ ...page.items[0]!, contentParts: [{ kind: 'text', text: long }, page.items[0]!.contentParts[1]!] }] })
-  await open(); await intersect()
+  await open()
+  const entry = panel().querySelector<HTMLElement>('.agent-input-recall__entry')!
+  await act(async () => { entry.focus(); entry.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+  await intersect()
   expect(panel().querySelector('[data-reading-format="plain"]')?.textContent).toContain('COMPLETE IMAGE INPUT TAIL')
-  expect(panel().querySelector('[data-hover-input-id] img')).not.toBeNull()
+  expect(panel().querySelector('.agent-input-recall__original img')).not.toBeNull()
   expect(api.sessions.historyResource).toHaveBeenCalledTimes(1)
 })
 
