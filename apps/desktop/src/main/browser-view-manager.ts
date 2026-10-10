@@ -6,7 +6,7 @@ import { parseBrowserStructuredOutputRequest } from './browser-structured-output
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '../shared/browser-outcome-criteria.js'
 import { randomUUID } from 'node:crypto'
-import { session, WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
+import { BaseWindow, session, WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget } from '@agentmux/core'
 import {
@@ -171,6 +171,7 @@ type PresentationCapture = {
   profileId: string | null
   granted: boolean
   preparingSource: boolean
+  preparationWindow: BaseWindow | null
   revoked: boolean
   trackIds: readonly string[] | null
 }
@@ -440,17 +441,21 @@ export class BrowserViewManager {
     const capture: PresentationCapture = {
       id: randomUUID(), entry: lease.entry, document: lease.document,
       source: lease.entry.view, profileId: lease.entry.storage.profileId,
-      granted: false, preparingSource: false, revoked: false, trackIds: null
+      granted: false, preparingSource: false, preparationWindow: null, revoked: false, trackIds: null
     }
-    // A never-shown native widget cannot start tab capture, even with positive bounds.
-    // Draw the original below the App Renderer until acquisition settles; this neither
-    // selects an occurrence nor exposes a native input target over the workface.
+    // BrowserWindow's Renderer is outside contentView: even child index 0 paints above it.
+    // Give a never-shown source an unclipped native viewport in a hidden shell instead.
+    // BaseWindow creates no WebContents; the original page and logical host stay unchanged.
     if (!lease.entry.visible) {
       lease.entry.bounds ??= { ...lease.geometry.bounds }
       capture.preparingSource = true
       try {
-        capture.source.setBounds(lease.entry.bounds)
-        this.placeView(capture.source, lease.window, 0)
+        const { width, height } = lease.entry.bounds
+        capture.preparationWindow = new BaseWindow({ show: false, focusable: false, frame: false,
+          skipTaskbar: true, useContentSize: true, width, height })
+        this.windowForView(capture.source).contentView.removeChildView(capture.source)
+        capture.preparationWindow.contentView.addChildView(capture.source)
+        capture.source.setBounds({ x: 0, y: 0, width, height })
         capture.source.setVisible(true)
       } catch (error) {
         try { this.finishPresentationCapturePreparation(capture) }
@@ -741,24 +746,33 @@ export class BrowserViewManager {
 
   private finishPresentationCapturePreparation(capture: PresentationCapture): void {
     if (!capture.preparingSource) return
-    if (!this.owns(capture.entry, capture.source) || capture.source.webContents.isDestroyed() || this.windowForView(capture.source).isDestroyed()) {
-      capture.preparingSource = false
-      return
-    }
-    // A real selection may have arrived while media acquisition was pending.
+    capture.preparingSource = false
+    const staging = capture.preparationWindow
+    capture.preparationWindow = null
     const errors: unknown[] = []
-    let canRestorePlacement = capture.entry.visible
-    if (!capture.entry.visible) {
-      try { capture.source.setVisible(false); canRestorePlacement = true }
-      catch (error) { errors.push(error) }
-    }
-    // A failed hide must leave the passive source below the Renderer. Profile
-    // replacement/release may already have detached the old source.
-    if (canRestorePlacement && this.windowForView(capture.source).contentView.children.includes(capture.source)) {
-      try { this.placeView(capture.source, this.windowForView(capture.source), 1) } catch (error) { errors.push(error) }
+    try {
+      // A real selection may already have moved this same source into its chosen host.
+      if (this.owns(capture.entry, capture.source) && !capture.source.webContents.isDestroyed() && !capture.entry.visible) {
+        let hidden = false
+        try { capture.source.setVisible(false); hidden = true } catch (error) { errors.push(error) }
+        if (staging?.contentView.children.includes(capture.source)) staging.contentView.removeChildView(capture.source)
+        // A failed hide leaves the original page detached and recoverable by explicit selection,
+        // never exposed over the workface. Keep the original logical host for that recovery.
+        const host = this.windowForView(capture.source)
+        if (hidden && !host.isDestroyed()) {
+          try { this.placeView(capture.source, host) } catch (error) { errors.push(error) }
+        }
+      }
+    } finally {
+      if (staging && !staging.isDestroyed()) {
+        try { if (staging.contentView.children.includes(capture.source)) staging.contentView.removeChildView(capture.source) }
+        catch (error) { errors.push(error) }
+        // BaseWindow does not own WebContents lifetime. Even a failed detach must not leave
+        // a hidden native shell alive after this capture ends; the Browser owner retains the page.
+        try { staging.destroy() } catch (error) { errors.push(error) }
+      }
     }
     if (errors.length) throw new AggregateError(errors, 'Browser preview preparation cleanup failed')
-    capture.preparingSource = false
   }
 
   private invalidatePresentationRequester(): void {
@@ -988,7 +1002,7 @@ export class BrowserViewManager {
     let childRegistrationAttempted = false
     try {
       childRegistrationAttempted = true
-      // BrowserWindow's original Renderer is child 0. Browsers sit above it and below native Chrome.
+      // BrowserWindow's original Renderer is below contentView. Native Chrome sits above Browsers.
       this.placeView(view, this.window)
       view.setVisible(false)
       this.attach(entry, view)
