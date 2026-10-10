@@ -22,7 +22,7 @@
 .mote-identity-motion[data-mote-motion="on"][data-mote-expression="tool"] .mote-face__mouth { animation: mote-tool-mouth 2.4s ease-in-out infinite; }
 .mote-identity-motion[data-mote-motion="on"][data-mote-expression="starting"] .mote-face__eyes { animation: mote-wake 2s ease-in-out infinite; }
 .mote-identity-motion[data-mote-motion="on"] .space-object-icon__avatar,
-.mote-identity-motion[data-mote-motion="on"] .space-object-icon svg:not(.mote-face):not(.mote-face__drawing) { transform-box: fill-box; transform-origin: center; animation: mote-presence 14s ease-in-out infinite; animation-delay: var(--mote-ambient-delay, 0ms); }
+.mote-identity-motion[data-mote-motion="on"] .space-object-icon svg:not(.mote-face):not(.mote-face__drawing):not([data-mote-icon-source="automatic"]) { transform-box: fill-box; transform-origin: center; animation: mote-presence 14s ease-in-out infinite; animation-delay: var(--mote-ambient-delay, 0ms); }
 /* A brief gesture, followed by a much longer rest. Small slots still show the same face. */
 @keyframes mote-blink { 0%, 78%, 81%, 100% { transform: scaleY(1); } 79%, 80% { transform: scaleY(.12); } }
 @keyframes mote-glance { 0%, 78%, 94%, 100% { transform: translateX(0); } 83%, 88% { transform: translateX(2.5px); } }
@@ -64,7 +64,7 @@
 .mote-identity-motion:is([data-mote-gesture="doze"], [data-mote-gesture="nod"], [data-mote-gesture="wake"]) .mote-face__gesture-head { animation: mote-gesture-nod 1.5s ease-in-out; }
 .mote-identity-motion[data-mote-gesture="focus"] .mote-face__gesture-gaze { animation: mote-gesture-focus 1.4s ease-in-out; }
 .mote-identity-motion[data-mote-gesture] .space-object-icon__avatar,
-.mote-identity-motion[data-mote-gesture] .space-object-icon svg:not(.mote-face):not(.mote-face__drawing) { animation: mote-gesture-presence 1.5s ease-in-out; }
+.mote-identity-motion[data-mote-gesture] .space-object-icon svg:not(.mote-face):not(.mote-face__drawing):not([data-mote-icon-source="automatic"]) { animation: mote-gesture-presence 1.5s ease-in-out; }
 .mote-identity-motion[data-mote-gaze="near"] .mote-face__gesture-gaze { animation: none; }
 .mote-identity-motion[data-mote-motion="off"] :is(.mote-face__gesture-head, .mote-face__gesture-eyes, .mote-face__gesture-gaze, .mote-face__gesture-brows, .mote-face__gesture-mouth) { animation: none; }
 @keyframes mote-gesture-blink { 0%, 100% { transform: scaleY(1); } 40%, 60% { transform: scaleY(.1); } }

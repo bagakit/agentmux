@@ -75,6 +75,20 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "loop", animation: "orbit", description: "只使短弧绕原静态圆轨走一圈，弧长不变化，不声称进度", trigger: "原 Workflow 状态为 running 且非 recorded 时显式选择；不以弧长表示完成比例。" }
     }
   },
+  "mote-identity": {
+    shapes: [["path",{"d":"M5.5 2.75H12.25C17.3 2.75 21.25 6.95 21.25 12C21.25 17.05 17.3 21.25 12.25 21.25C7.2 21.25 2.75 17.05 2.75 12V6C2.75 4.2 3.7 2.75 5.5 2.75ZM8 8.25C9.3 6.3 12 5.7 14.1 6.8C16.2 7.9 16.75 10.4 15.55 12.35C14.75 13.7 13.7 14 13.05 15.35C12.6 16.25 12.5 17.1 12.6 17.9C10 17.2 8 15.25 7.3 12.9C6.8 11.15 7.1 9.65 8 8.25Z","fill":"currentColor","stroke":"none","fill-rule":"evenodd"}]],
+    design: {
+      rest: "左上宽平肩、短直边与圆弧外壳形成偏置剪影，内凹负空间在12–24px保持清楚",
+      motion: { kind: "still", animation: "none", description: "类型与自动默认标记保持静止；已选头像姿态由原外观来源和宿主持有。", trigger: "身份不推导工作、在线、权限或完成事实。" }
+    }
+  },
+  "badge-token": {
+    shapes: [["path",{"d":"M11.3 3.5a1 1 0 0 1 1.4 0l7.8 7.8a1 1 0 0 1 0 1.4l-7.8 7.8a1 1 0 0 1-1.4 0l-7.8-7.8a1 1 0 0 1 0-1.4Z","fill":"currentColor","stroke":"none"}]],
+    design: {
+      rest: "单实体切角菱形，在6／8px徽标槽中保留清楚轮廓，不借用Mote身份",
+      motion: { kind: "still", animation: "none", description: "Executor装饰选择保持静止，与Provider品牌和运行状态独立。", trigger: "沿已保存spark徽标选择呈现，不授予运行或身份能力。" }
+    }
+  },
   "mote-mark": {
     shapes: [["path",{"d":"M7.1 3.8c1.6-1.6 4.5-2 6.5-.9l5 2.8c1.6.9 2.5 2.7 2.1 4.6l-.9 5.2c-.3 1.6-1.4 2.9-2.9 3.5l-4.5 2c-1.9.9-3.8.4-5.1-1.1l-3.6-4.2c-1.1-1.3-1.3-3.1-.7-4.7l2.2-5.1c.4-.8 1.1-1.5 1.9-2.1Zm8.2 2.9c-4.4 1.4-6.7 4.8-5.2 7.9.7 1.4 2 2.3 3.7 2.7-1.5-1.9-2.2-3.4-1.6-5.2.5-1.9 2-3.7 3.1-5.4Z","fill":"currentColor","fill-rule":"evenodd"}]],
     design: {
