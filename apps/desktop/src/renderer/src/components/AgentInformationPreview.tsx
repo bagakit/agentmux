@@ -1,3 +1,5 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import { useWorkbenchWindowRevision, workbenchDocuments } from '../lib/workbench-window-registry'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusGoalLinks } from '../lib/focus-goal-links'
@@ -9,20 +11,27 @@ import { AgentInformationReader } from './AgentInformationReader'
 
 /** Mounted once by App, outside transient, filtered and retained surface trees. */
 export function AgentInformationPreviewHost() {
+  useWorkbenchWindowRevision()
+  const observedDocuments = useRef<readonly Document[]>([])
+  const nextDocuments = [...new Set([document, ...workbenchDocuments()])]
+  if (nextDocuments.length !== observedDocuments.current.length || nextDocuments.some((doc, index) => observedDocuments.current[index] !== doc)) observedDocuments.current = nextDocuments
+  const documents = observedDocuments.current
   const request = useSyncExternalStore(agentInformationPreview.subscribe, agentInformationPreview.get, () => null)
   useEffect(() => {
     const cancel = () => agentInformationPreview.cancelIntent()
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') cancel() }
-    document.addEventListener('keydown', escape)
-    document.addEventListener('pointerdown', cancel, true)
-    document.addEventListener('visibilitychange', cancel)
-    window.addEventListener('scroll', cancel, true)
-    window.addEventListener('resize', cancel)
-    return () => {
-      cancel(); document.removeEventListener('keydown', escape); document.removeEventListener('pointerdown', cancel, true)
-      document.removeEventListener('visibilitychange', cancel); window.removeEventListener('scroll', cancel, true); window.removeEventListener('resize', cancel)
+    for (const doc of documents) {
+      doc.addEventListener('keydown', escape); doc.addEventListener('pointerdown', cancel, true); doc.addEventListener('visibilitychange', cancel)
+      doc.defaultView?.addEventListener('scroll', cancel, true); doc.defaultView?.addEventListener('resize', cancel)
     }
-  }, [])
+    return () => {
+      cancel()
+      for (const doc of documents) {
+        doc.removeEventListener('keydown', escape); doc.removeEventListener('pointerdown', cancel, true); doc.removeEventListener('visibilitychange', cancel)
+        doc.defaultView?.removeEventListener('scroll', cancel, true); doc.defaultView?.removeEventListener('resize', cancel)
+      }
+    }
+  }, [documents])
   useLayoutEffect(() => () => {
     const original = agentInformationPreview.get()
     if (original) agentInformationPreview.dismiss(original.token, true)
@@ -33,6 +42,7 @@ export function AgentInformationPreviewHost() {
 /** Each surface retains its own primary action; only a bounded reading intent is shared. */
 export function useAgentInformationPreview(context: FocusContext, requested: boolean, identity: FocusContextIdentity | undefined, goalLinks: FocusGoalLinks | undefined,
   openWorkface: () => void) {
+  const document = useWorkbenchDocument()
   const active = useWorkbenchPresentationActive(), enabled = requested && active
   const anchor = useRef<HTMLButtonElement>(null), token = useRef({}).current
   const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -69,12 +79,12 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
   }
   useLayoutEffect(() => { agentInformationPreview.noteContent(token, context); close() }, [context.id, context.hostId, context.runId, context.name, context.state, context.detail,
     context.recap?.text, context.recap?.source, context.recap?.origin, context.recap?.reading?.text,
-    context.recap?.reading?.truncated, context.workspacePath, context.originAddress, enabled, close])
+    context.recap?.reading?.truncated, context.workspacePath, context.originAddress, enabled, close, document])
   useLayoutEffect(() => () => { close() }, [close])
   const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
     aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
     onPointerEnter={close} onPointerLeave={event => {
-      if (event.relatedTarget instanceof Node && anchor.current?.contains(event.relatedTarget)) showSoon()
+      if (event.relatedTarget && (event.relatedTarget as Node).nodeType && anchor.current?.contains(event.relatedTarget as Node)) showSoon()
     }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={enabled && !open} /></span> : undefined
   return { anchor, position, describedBy: open ? id : undefined, close, suppressRestoredFocus,
     triggerEvents: { 'aria-keyshortcuts': enabled ? 'ArrowDown' : undefined, onPointerEnter: showSoon, onPointerLeave: hideSoon,

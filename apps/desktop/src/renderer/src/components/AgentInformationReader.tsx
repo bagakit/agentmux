@@ -1,3 +1,6 @@
+import { WorkbenchDocumentContext } from '../lib/workbench-document'
+import { observeWorkbenchDocumentReturn, workbenchDocumentIdentity } from '../lib/workbench-window-registry'
+import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
@@ -143,6 +146,10 @@ const HeldReading = memo(function HeldReading({ request, enabled }: { request: P
 
 /** From first peek onward this is the same window-owned tree, never a row's Portal. */
 export function AgentInformationReader({ request }: { request: PreviewRequest }) {
+  const [document, setDocument] = useState(() => request.anchor.ownerDocument)
+  // A stable Portal container preserves this reading tree when its native shell returns.
+  const [readingHost] = useState(() => { const host = request.anchor.ownerDocument.createElement('div'); host.style.display = 'contents'; return host })
+  const window = document.defaultView!
   const context = request.context
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -151,6 +158,41 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   const heldSelection = useRef<Range | null>(null), laterSelection = useRef(false)
   const [tab, setTab] = useState<AgentInformationTab | null>(null)
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
+  useLayoutEffect(() => { setVisible(document.visibilityState !== 'hidden') }, [document])
+  const transferredFocus = useRef<HTMLElement | null>(null)
+  const transferredSelection = useRef<{ start: Node; startOffset: number; end: Node; endOffset: number } | null>(null)
+  useLayoutEffect(() => {
+    getWindowOverlayHost(document)?.appendChild(readingHost)
+    const saved = transferredSelection.current
+    transferredSelection.current = null
+    transferredFocus.current?.focus({ preventScroll: true })
+    transferredFocus.current = null
+    if (saved) {
+      if (panel.current?.contains(saved.start) && panel.current.contains(saved.end)) {
+        const range = document.createRange(); range.setStart(saved.start, saved.startOffset); range.setEnd(saved.end, saved.endOffset)
+        const selection = document.getSelection(); selection?.removeAllRanges(); selection?.addRange(range)
+      }
+    }
+  }, [document, readingHost])
+  useLayoutEffect(() => observeWorkbenchDocumentReturn((source, destination) => {
+    if (source !== document) return
+    const selection = source.getSelection(), range = selection?.rangeCount ? selection.getRangeAt(0) : null
+    const active = source.activeElement
+    const focus = active && panel.current?.contains(active) ? active as HTMLElement : null
+    transferredFocus.current = focus
+    if (range && panel.current?.contains(range.startContainer) && panel.current.contains(range.endContainer)) transferredSelection.current = { start: range.startContainer, startOffset: range.startOffset, end: range.endContainer, endOffset: range.endOffset }
+    const held = heldSelection.current
+    const heldRange = held && panel.current?.contains(held.startContainer) && panel.current.contains(held.endContainer)
+      ? { start: held.startContainer, startOffset: held.startOffset, end: held.endContainer, endOffset: held.endOffset } : null
+    // Move before the old native shell may close; React keeps the exact same Portal target.
+    getWindowOverlayHost(destination)?.appendChild(readingHost)
+    if (heldRange) {
+      const rebound = destination.createRange(); rebound.setStart(heldRange.start, heldRange.startOffset); rebound.setEnd(heldRange.end, heldRange.endOffset)
+      heldSelection.current = rebound
+    }
+    setDocument(destination)
+  }), [document, readingHost])
+  useLayoutEffect(() => () => { readingHost.remove() }, [readingHost])
   const lastVisibleSession = useRef(request.session)
   const session = useAppStore(state => !visible ? lastVisibleSession.current : state.sessions.find(session => session.id === context.id && session.hostId === context.hostId &&
     session.control.run.runId === context.runId && (context.kind !== 'agent' || session.kind === 'agent' &&
@@ -197,7 +239,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     cancelDeparture()
     const focused = document.activeElement
     agentInformationPreview.dismiss(request.token, true)
-    if (restore && (focused === document.body || focused instanceof Node && panel.current?.contains(focused)) &&
+    if (restore && (focused === document.body || focused && panel.current?.contains(focused)) &&
       request.anchor.isConnected && !request.anchor.closest('[inert]')) request.restoreFocus()
   }
   function leave() {
@@ -238,7 +280,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       if (restore && selection) { selection.removeAllRanges(); selection.addRange(saved) }
       heldSelection.current = null
     }
-  }, [tab !== null])
+  }, [tab !== null, document])
   useEffect(() => {
     if (!tab) return
     const changed = () => {
@@ -247,7 +289,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     }
     document.addEventListener('selectionchange', changed)
     return () => document.removeEventListener('selectionchange', changed)
-  }, [tab !== null])
+  }, [tab !== null, document])
   useLayoutEffect(() => {
     const surface = panel.current
     if (!surface) return
@@ -272,12 +314,12 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     }
     const stop = autoUpdate(request.anchor, surface, () => { void update() })
     return () => { current = false; stop(); cancelDeparture() }
-  }, [request.token, request.pinned])
+  }, [request.token, request.pinned, document])
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.defaultPrevented || wasWindowOverlayDismissed(event)) return
       if (event.key.toLowerCase() === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && panel.current?.contains(document.activeElement) &&
-        !(event.target instanceof HTMLElement && event.target.closest('input, textarea, [contenteditable="true"]'))) { event.preventDefault(); togglePin(); return }
+        !(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('input, textarea, [contenteditable="true"]'))) { event.preventDefault(); togglePin(); return }
       if (event.key !== 'Escape') return
       if (request.pinned && !panel.current?.contains(document.activeElement)) return
       markWindowOverlayDismissal(event); event.preventDefault()
@@ -296,13 +338,11 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       document.removeEventListener('keydown', escape); document.removeEventListener('visibilitychange', hide)
       document.removeEventListener('pointerdown', outside, true); window.removeEventListener('scroll', outside, true); window.removeEventListener('resize', resize)
     }
-  }, [request, tab])
-  const host = getWindowOverlayHost()
-  if (!host) return null
-  return createPortal(<div ref={panel} id={request.id} className="focus-context-hover agent-information-reader" role="region"
+  }, [request, tab, document])
+  return createPortal(<WorkbenchDocumentContext.Provider value={{ document, window: workbenchDocumentIdentity(document) }}><DesktopClientUiProvider document={document}><div ref={panel} id={request.id} className="focus-context-hover agent-information-reader" role="region"
     data-state="open" data-pinned={request.pinned || undefined} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden' }}
     onPointerEnter={cancelDeparture} onPointerLeave={leave} onFocus={cancelDeparture} onBlur={event => {
-      if (event.relatedTarget instanceof Node && (panel.current?.contains(event.relatedTarget) || event.relatedTarget === request.anchor)) return
+      if (event.relatedTarget && (event.relatedTarget as Node).nodeType && (panel.current?.contains(event.relatedTarget as Node) || event.relatedTarget === request.anchor)) return
       leave()
     }}>
     <header className="agent-information-reader__header">
@@ -341,5 +381,5 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       }}>Open Agent <OpenIcon size={13} aria-hidden="true" /></button>
       <button type="button" className="agent-information-reader__close" onClick={() => close(true)} aria-label="Close Agent reading" title="Close · Esc"><CloseIcon size={15} aria-hidden="true" /></button>
     </footer>
-  </div>, host)
+  </div></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>, readingHost)
 }
