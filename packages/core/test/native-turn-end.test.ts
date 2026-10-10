@@ -101,7 +101,7 @@ it('keeps a suppressed old turn end without replacing the newer Hook current dis
   } finally { await h.close() }
 })
 
-it.each(['run', 'provider', 'subject', 'source'] as const)('does not borrow a retained end from another $s scope', async scope => {
+it.each(['run', 'provider', 'subject', 'source'] as const)('does not borrow a retained end from another %s scope', async scope => {
   const h = await nativeTurnEndFixture()
   try {
     await h.observe({ state: 'done', recordId: 'other-scope-end', nativeTurnId: 'turn-original' })
