@@ -352,8 +352,11 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     return { spaceId, ...(parts ? { parts } : {}), ...(image ? { image } : {}),
       ...(Object.hasOwn(item, 'preset') ? { preset: string(item.preset, 'Appearance preset', code, 64) } : {}),
       ...(Object.hasOwn(item, 'activities') ? { activities: unique(list(item.activities, value => {
-        const activity = fields(value, ['agentSessionId', 'runId', 'expression'], code)
-        return { agentSessionId: spaceControlId(activity.agentSessionId, 'Appearance Session', code), runId: spaceControlId(activity.runId, 'Appearance Run', code), expression: string(activity.expression, 'Appearance expression', code, 64) }
+        const activity = fields(value, ['agentSessionId', 'runId', 'expression', 'hostId', 'activeForMs'], code)
+        if (Object.hasOwn(activity, 'activeForMs') && (typeof activity.activeForMs !== 'number' || !Number.isFinite(activity.activeForMs) || activity.activeForMs < 0)) fail('Appearance activity validity is invalid.', code)
+        return { agentSessionId: spaceControlId(activity.agentSessionId, 'Appearance Session', code), runId: spaceControlId(activity.runId, 'Appearance Run', code), expression: string(activity.expression, 'Appearance expression', code, 64),
+          ...(Object.hasOwn(activity, 'hostId') ? { hostId: spaceControlId(activity.hostId, 'Appearance Host', code) } : {}),
+          ...(Object.hasOwn(activity, 'activeForMs') ? { activeForMs: activity.activeForMs as number } : {}) }
       }, 'Appearance activity', code), value => value.agentSessionId, 'Appearance activity', code) } : {}),
       ...(Object.hasOwn(item, 'expression') ? { expression: string(item.expression, 'Appearance expression', code, 64) } : {}),
       ...(Object.hasOwn(item, 'glyph') ? { glyph: string(item.glyph, 'Appearance glyph', code, 64) } : {}),

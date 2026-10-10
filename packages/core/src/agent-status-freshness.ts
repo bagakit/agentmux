@@ -240,6 +240,13 @@ export type AgentObservation = {
   lastKnownActivity?: { state: Exclude<AgentSemanticState, 'unknown'>; source: AgentMuxEvidenceSource; observedAt: number }
 }
 
+/** Remaining display validity of an already classified observation; never grants input or work. */
+export function agentActivityRemainingMs(observation: Pick<AgentObservation, 'semantic' | 'observedAt'>, now: number): number {
+  return observation.semantic === 'active'
+    ? msUntilSemanticStatusStale({ state: 'working', observedAt: observation.observedAt }, now)
+    : 0
+}
+
 /**
  * 把「Session 现在的三条事实」收敛成一份 {@link AgentObservation}——**唯一**的观察合同投影。
  *

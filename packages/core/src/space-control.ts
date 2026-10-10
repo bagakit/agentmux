@@ -80,7 +80,13 @@ export type AgentMuxSpaceAppearance = {
   glyph?: string
   preset?: string
   expression?: string
-  activities?: { agentSessionId: string; runId: string; expression: string }[]
+  activities?: {
+    agentSessionId: string; runId: string; expression: string
+    /** Exact source Host; these optional fields qualify decoration only. */
+    hostId?: string
+    /** Remaining validity at this read, not a cross-device epoch or a control lease. */
+    activeForMs?: number
+  }[]
   parts?: Record<string, string>
   image?: { dataUrl: string | null; revision?: string }
   issue?: string

@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxRpcResult } from '@agentmux/core'
 import type { AgentMuxMotePresentation, AgentMuxSpaceAddress } from '@agentmux/core/control'
@@ -17,7 +17,9 @@ export type MobileObjectIdentity = { name: string; project: string; context?: Ag
 export function MobileIdentity({ identity, session, client, connected, size = 32, visible = true }: {
   identity: MobileObjectIdentity; session?: AgentMuxAgentSession | undefined; client: AgentMuxHostedClient | null; connected: boolean; size?: number; visible?: boolean
 }) {
-  const [liveAppearance, setLiveAppearance] = useState<{ spaceId: string; value: NonNullable<Catalog['appearance']>[number] } | null>(null)
+  const observationOwner = useMemo(() => ({}), [client, identity.mote?.spaceId, session?.agentSessionId, session?.hostId, session?.run.runId, connected, visible])
+  const [liveAppearance, setLiveAppearance] = useState<{ spaceId: string; value: NonNullable<Catalog['appearance']>[number]; owner: object; requestStartedMono: number | null } | null>(null)
+  const [clock, wake] = useState(0)
   const selected = liveAppearance && liveAppearance.spaceId === identity.mote?.spaceId ? liveAppearance.value : identity.mote?.appearance
   const [image, setImage] = useState<{ spaceId: string; dataUrl: string; revision?: string | undefined } | null>(null)
   const confirmedImage = useRef<typeof image>(null)
@@ -27,17 +29,18 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
     if (!visible || !spaceId || !connected || !client?.forwardRpc || !session && !selected?.image) return
     let live = true, reading = false, dirty = false, epoch = 0
     let attemptedImage: string | undefined, imageIssue = ''
+    const invalidateActivity = () => setLiveAppearance(value => value?.owner === observationOwner ? { ...value, requestStartedMono: null } : value)
     async function read() {
       if (!live || document.hidden || !ref.current?.getClientRects().length) return
       if (reading) { dirty = true; epoch++; return }
       reading = true
-      const generation = epoch
+      const generation = epoch, requestStartedMono = performance.now()
       try {
         // Activity reads carry the original revision, without re-reading image bytes for every tool event.
         const value = await client!.forwardRpc!('space.ls', { target: { spaceId: spaceId! }, presentation: true })
         if (!live || generation !== epoch) return
         const original = value.catalog.appearance?.find(item => item.spaceId === spaceId)
-        if (!original) { setIssue('原头像外观尚未确认，已保存选择保留。'); return }
+        if (!original) { invalidateActivity(); setIssue('原头像外观尚未确认，已保存选择保留。'); return }
         const imageKey = original.image ? JSON.stringify([spaceId, original.image.revision ?? null]) : undefined
         const confirmed = original.image && confirmedImage.current?.spaceId === spaceId && confirmedImage.current?.revision === original.image.revision
         if (confirmed || !original.image) imageIssue = ''
@@ -47,16 +50,16 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
           if (!live || generation !== epoch) return
           const imageFact = detail.catalog.appearance?.find(item => item.spaceId === spaceId)
           if (!imageFact?.image?.dataUrl || imageFact.image.revision !== original.image.revision) {
-            setLiveAppearance({ spaceId: spaceId!, value: original })
+            setLiveAppearance({ spaceId: spaceId!, value: original, owner: observationOwner, requestStartedMono })
             imageIssue = imageFact?.issue ?? '原头像内容或修订尚未确认；已保存选择保留，可刷新原呈现。'
             setIssue(imageIssue); return
           }
           const next = { spaceId: spaceId!, dataUrl: imageFact.image.dataUrl, revision: imageFact.image.revision }
           confirmedImage.current = next; setImage(next); imageIssue = ''
         }
-        setLiveAppearance({ spaceId: spaceId!, value: original })
+        setLiveAppearance({ spaceId: spaceId!, value: original, owner: observationOwner, requestStartedMono })
         setIssue(original.issue ?? imageIssue)
-      } catch (error) { if (live && generation === epoch) { imageIssue = error instanceof Error ? error.message : '原头像暂不可读。'; setIssue(imageIssue) } }
+      } catch (error) { if (live && generation === epoch) { invalidateActivity(); imageIssue = error instanceof Error ? error.message : '原头像暂不可读。'; setIssue(imageIssue) } }
       finally { reading = false; if (live && dirty) { dirty = false; void read() } }
     }
     const release = client.onEvent(event => {
@@ -64,15 +67,28 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
           event.type === 'agent-session' && event.session.agentSessionId === session?.agentSessionId ||
           event.type === 'agent-timeline' && event.agentSessionId === session?.agentSessionId) void read()
     })
-    const foreground = () => { if (!document.hidden) void read() }
+    const foreground = () => { if (document.hidden) { epoch++; invalidateActivity() } else void read() }
     document.addEventListener('visibilitychange', foreground)
     void read()
-    return () => { live = false; release(); document.removeEventListener('visibilitychange', foreground) }
-  }, [spaceId, identity.mote?.appearance, client, connected, session?.agentSessionId, visible])
+    return () => { live = false; epoch++; release(); document.removeEventListener('visibilitychange', foreground) }
+  }, [spaceId, identity.mote?.appearance, client, connected, session?.agentSessionId, visible, observationOwner])
   const expressions = ['identity', 'sleep', 'idle', 'thinking', 'tool', 'starting', 'waiting', 'error', 'unknown', 'stopped']
-  const activity = session ? selected?.activities?.find(value => value.agentSessionId === session.agentSessionId && value.runId === session.run.runId) : undefined
+  const activitySource = liveAppearance?.owner === observationOwner ? liveAppearance : null
+  const activity = session ? activitySource?.value.activities?.find(value => value.agentSessionId === session.agentSessionId && value.runId === session.run.runId) : undefined
   const originalExpression = session ? activity?.expression : selected?.expression
-  const expression: MoteExpression = connected && originalExpression && expressions.includes(originalExpression) ? originalExpression as MoteExpression : 'unknown'
+  const working = originalExpression === 'thinking' || originalExpression === 'tool'
+  // The remote duration is anchored before this exact request. Deduct the whole RTT;
+  // phone and Host wall clocks need not agree, and cached props cannot renew activity.
+  const deadline = activitySource?.requestStartedMono !== null && activitySource?.requestStartedMono !== undefined &&
+    activity && session && activity.hostId === session.hostId && typeof activity.activeForMs === 'number'
+    ? activitySource.requestStartedMono + activity.activeForMs : null
+  const workCurrent = !working || deadline !== null && performance.now() < deadline
+  const expression: MoteExpression = connected && workCurrent && originalExpression && expressions.includes(originalExpression) ? originalExpression as MoteExpression : 'unknown'
+  useEffect(() => {
+    if (!working || !workCurrent || deadline === null || !connected || !visible || document.hidden) return
+    const timer = setTimeout(() => wake(value => value + 1), Math.max(1, deadline - performance.now()))
+    return () => clearTimeout(timer)
+  }, [working, workCurrent, deadline, connected, visible, clock])
   const ref = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
     if (!identity.mote || !ref.current) return
