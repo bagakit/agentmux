@@ -124,7 +124,7 @@ const diagnosticCopy: Record<ConnectionEnrollmentDiagnostic['code'], string> = {
   'missing-verification': 'The platform did not provide a usable confirmation link.',
   'unsafe-verification': 'The confirmation link could not be accepted for this setup.',
   'invalid-challenge': 'The platform’s confirmation information could not be validated.',
-  'challenge-unconfirmed': 'The confirmation information could not be saved securely here.',
+  'challenge-unconfirmed': 'Secure confirmation progress could not be checked or saved here.',
   'credential-unconfirmed': 'The bot’s credential storage is not confirmed here.'
 }
 
