@@ -37,9 +37,9 @@ export async function createDesktopConnections(options: { directory: string; enc
         if (bindings) connections.bindings = bindings
         const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial }) : undefined
         if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
-        publication = bindings && options.publication ? new PublicationHost({ connections, bindings, conversation: options.publication }) : undefined
-        if (publication) connections.delivery = publication
         const ingress = bindings && options.ingress ? new DurableIngressHost({ connections, bindings, authenticators: connections.ingressAuthenticators(), core: options.ingress.core }) : undefined
+        publication = bindings && options.publication ? new PublicationHost({ connections, bindings, conversation: options.publication, ...(ingress ? { permissions: ingress.permissions } : {}) }) : undefined
+        if (publication) connections.delivery = publication
         if (ingress) connections.ingress = ingress
         receivers = ingress ? new ConnectionReceivers(connections, ingress) : undefined
         if (closed) { receivers?.close(); publication?.close(); database.close(); throw new Error('Owner closed while opening.') }

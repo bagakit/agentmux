@@ -4,7 +4,7 @@ import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type Connecti
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
-import { PublicationStore, publicDelivery, type PublicationReceipt } from './publication-store.js'
+import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation } from './publication-store.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
 export interface PublicationConversationPort {
@@ -12,9 +12,14 @@ export interface PublicationConversationPort {
   observe(reference: ConversationRef, listener: (value: AgentSessionHistoryObservation) => void, signal: AbortSignal): Promise<AgentSessionHistoryObservationHandle>
   resource(reference: ConversationRef, input: AgentSessionHistoryResourceRequest, signal: AbortSignal): Promise<AgentSessionHistoryResourceReadResult>
 }
+export interface PublicationPermissionsPort {
+  observe(binding: RoomBinding, wake: () => void): () => void
+  project(binding: RoomBinding, store: PublicationStore): string[]
+  authorized(operation: PublicationOperation): boolean
+}
 export type PublicationObservation = ConnectionDeliveryObservation
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; work?: Promise<void> | undefined; watch?: AgentSessionHistoryObservationHandle | undefined; observation: PublicationObservation }
-export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort }
+type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; work?: Promise<void> | undefined; watch?: AgentSessionHistoryObservationHandle | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation }
+export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort }
 const sameSource = (a: { providerId: string; nativeSessionId: string }, b: { providerId: string; nativeSessionId: string }) => a.providerId === b.providerId && a.nativeSessionId === b.nativeSessionId
 
 /** Durable external publication. Each Binding has an independent read/effect lane, outside original Core input. */
@@ -38,7 +43,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const authority = this.authority(lane.binding)
       if (authority === null) { lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; continue }
       if (current.get(id)?.revision !== lane.binding.revision || !authority.authorized) {
-        lane.abort.abort(); try { lane.watch?.dispose() } catch { /* Cancels only this original reader. */ }; this.lanes.delete(id)
+        lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.dispose() } catch { /* Cancels only this original reader. */ }; this.lanes.delete(id)
       }
     }
     for (const binding of active) {
@@ -46,7 +51,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
       let lane = this.lanes.get(binding.bindingId)
       if (!lane) {
         lane = { binding, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
-        this.lanes.set(binding.bindingId, lane); this.wake(lane)
+        this.lanes.set(binding.bindingId, lane)
+        try { const current = lane; lane.permissionStop = this.options.permissions?.observe(binding, () => this.wake(current)) } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
+        this.wake(lane)
       } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch || lane.watch.closed?.aborted) this.wake(lane)
     }
   }
@@ -72,6 +79,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (!this.authorized(binding)) return
     const adapter = this.options.connections.publicationAdapter(binding.connectionId)
     if (!adapter) { lane.observation = { state: 'unavailable', reason: 'adapter-unavailable' }; return }
+    let permissionProjections: string[] = [], permissionsUnavailable = false
+    try { permissionProjections = this.options.permissions?.project(binding, this.store) ?? [] } catch { permissionsUnavailable = true }
+    for (const projection of permissionProjections) {
+      try { await this.drain(lane, adapter, projection) } catch { permissionsUnavailable = true }
+    }
     try { await this.catchUp(lane, adapter) }
     catch { if (!signal.aborted) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' } }
     if (!signal.aborted && this.authorized(binding)) {
@@ -81,6 +93,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       // Original effects may still settle or dispatch; their observation cannot hide an unresolved content gap.
       if (effectObservation && lane.observation.reason !== 'content-unconfirmed') lane.observation = effectObservation
     }
+    if (permissionsUnavailable && lane.observation.state === 'ready') lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }
   }
   private async catchUp(lane: Lane, adapter: PublicationAdapter): Promise<void> {
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
@@ -138,11 +151,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }
     lane.observation = lane.watch ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
   }
-  private async drain(lane: Lane, adapter: PublicationAdapter): Promise<PublicationObservation | undefined> {
+  private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
     for (let count = 0; count < 16; count++) {
       if (signal.aborted || !this.authorized(binding)) return
-      let original = this.store.next(binding)
+      let original = this.store.next(binding, projectionId)
       if (!original) return
       let credential: string | null
       try { credential = await this.options.connections.resolveCredential(binding.connectionId) } catch { credential = null }
@@ -158,9 +171,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (this.store.inspect(original.operationId)?.state === 'confirmed') continue
         return { state: 'unknown', reason: 'effect-unconfirmed' }
       }
-      const claimed = this.store.claimNext(binding, () => this.authorized(binding), adapter)
+      if (original.payload.kind === 'permission' && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
+      const claimed = this.store.claimNext(binding, () => this.authorized(binding) && (original!.payload.kind !== 'permission' || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
       if (!claimed) return
-      if (signal.aborted || !this.authorized(binding)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
+      if (signal.aborted || !this.authorized(binding) || claimed.payload.kind === 'permission' && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
       try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping)) }
@@ -216,7 +230,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   close(): void {
     if (this.closed) return
     this.closed = true; clearInterval(this.timer)
-    for (const lane of this.lanes.values()) { lane.abort.abort(); try { lane.watch?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
+    for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
     this.lanes.clear()
   }
 }
