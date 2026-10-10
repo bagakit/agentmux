@@ -6,12 +6,15 @@ import type { DemandProjection } from '../lib/global-demand-board'
 import { resolveWorkspaceRelativePath } from '@agentmux/client-ui/terminal-path-link'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { api } from '../lib/api'
+import { useIconFeedback } from '../lib/use-icon-feedback'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { goalResultExplanation } from '../lib/goal-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import dialogueArtworkUrl from '../../../../resources/artwork/demand-dialogue.png'
 
+const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
 const ThemeActionAcceptResultsIcon = semanticIconComponent('action.accept-results')
@@ -33,6 +36,9 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
     return workspaces?.find(workspace => workspace.id === project?.preferredWorkspaceId)
   }, [workspaces, demand.projectId])
   const alignment = demand.alignment, grounding = demand.grounding
+  const active = useWorkbenchPresentationActive()
+  const heading = useRef<HTMLHeadingElement>(null)
+  const cue = useIconFeedback(JSON.stringify([demand.id, alignment?.revision]), active, heading)
   const confirmIssue = alignmentConfirmationIssue(alignment)
   const acceptIssue = groundingAcceptanceIssue(alignment, grounding)
   const gapIssue = groundingAcceptanceIssue(alignment, grounding, true)
@@ -45,7 +51,14 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
     if (failure || pending || acknowledgementPending.current) return
     acknowledgementPending.current = true; onFeedbackChange({ pending: true, failure: null, reloadError: null })
     try {
-      if (attempt.kind === 'confirm') await confirmDemandGoal(demand.id, attempt.revision)
+      if (attempt.kind === 'confirm') {
+        await confirmDemandGoal(demand.id, attempt.revision)
+        const confirmed = useAppStore.getState().demands[demand.id]?.alignment
+        // Decoration consumes the original owner result; it never grants confirmation.
+        if (confirmed?.revision === attempt.revision && confirmed.confirmedAt != null) {
+          cue.play(JSON.stringify([demand.id, attempt.revision]), 'confirm')
+        }
+      }
       else await acceptDemandResult(demand.id, attempt.revision, attempt.submissionId, attempt.gaps)
     } catch (error) { onFeedbackChange({ failure: { attempt, message: error instanceof Error ? error.message : String(error) } }) }
     finally { acknowledgementPending.current = false; onFeedbackChange({ pending: false }) }
@@ -66,7 +79,7 @@ export function GoalAlignment({ demand, onGrill, onGrounding, onOpenMote, motePe
   const resultRequest = alignment?.confirmedAt ? <button type="button" className="goals-button" data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : grounding ? 'Ask agent to check again' : 'Ask agent to check work'}<ThemeActionOpenExternalIcon size={13} /></button> : null
   return <>
     {alignment ? <section className="goals-alignment" aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
-      <div className="goals-section-heading"><h2>Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? 'Confirmed by you' : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></div>
+      <div className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} /> Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? 'Confirmed by you' : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></div>
       <p className="goals-proposal" data-goal-summary>{alignment.summary}</p>
       <h3>Success criteria</h3>
       {alignment.criteria.length ? <ol className="goals-criteria">{alignment.criteria.map(criterion => <li key={criterion.id} data-goal-success-criterion={criterion.id}>{criterion.text}</li>)}</ol> : <p className="goals-muted">Define how to recognize success before confirming this goal.</p>}
