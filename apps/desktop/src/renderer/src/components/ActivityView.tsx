@@ -682,7 +682,10 @@ export function ActivityView({
     if (!conversationReading?.enabled) return
     if (direction < 0 && anchorRef.current?.kind === 'segment') {
       const nativeAnchor = conversationReadingAnchor(el)
-      if (nativeAnchor) anchorRef.current = nativeAnchor
+      // Captured content has its own readable tail. Hand paging back only when
+      // the original sequence is actually visible in this viewport.
+      if (!nativeAnchor) return
+      anchorRef.current = nativeAnchor
     }
     if (readingWindow.loading && !readingWindow.coverageLoading) return
     const edges = edgeRef.current
