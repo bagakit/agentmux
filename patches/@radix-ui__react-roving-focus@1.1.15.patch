@@ -1,0 +1,36 @@
+diff --git a/dist/index.js b/dist/index.js
+index fef385089d..f42ea0e3de 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -259,11 +259,11 @@ function getFocusIntent(event, orientation, dir) {
+   return MAP_KEY_TO_FOCUS_INTENT[key];
+ }
+ function focusFirst(candidates, preventScroll = false) {
+-  const PREVIOUSLY_FOCUSED_ELEMENT = document.activeElement;
++  const PREVIOUSLY_FOCUSED_ELEMENT = candidates[0]?.ownerDocument.activeElement;
+   for (const candidate of candidates) {
+     if (candidate === PREVIOUSLY_FOCUSED_ELEMENT) return;
+     candidate.focus({ preventScroll });
+-    if (document.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
++    if (candidate.ownerDocument.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
+   }
+ }
+ function wrapArray(array, startIndex) {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 366d9557d6..bac5145a36 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -220,11 +220,11 @@ function getFocusIntent(event, orientation, dir) {
+   return MAP_KEY_TO_FOCUS_INTENT[key];
+ }
+ function focusFirst(candidates, preventScroll = false) {
+-  const PREVIOUSLY_FOCUSED_ELEMENT = document.activeElement;
++  const PREVIOUSLY_FOCUSED_ELEMENT = candidates[0]?.ownerDocument.activeElement;
+   for (const candidate of candidates) {
+     if (candidate === PREVIOUSLY_FOCUSED_ELEMENT) return;
+     candidate.focus({ preventScroll });
+-    if (document.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
++    if (candidate.ownerDocument.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
+   }
+ }
+ function wrapArray(array, startIndex) {

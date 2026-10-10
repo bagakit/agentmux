@@ -24,5 +24,7 @@ minimumReleaseAgeExclude:
 
 patchedDependencies:
   '@radix-ui/react-menu@2.1.20': patches/@radix-ui__react-menu@2.1.20.patch
+  '@radix-ui/react-roving-focus@1.1.15': patches/@radix-ui__react-roving-focus@1.1.15.patch
+  monaco-editor@0.56.0: patches/monaco-editor@0.56.0.patch
   '@xterm/xterm@6.1.0-beta.303': patches/@xterm__xterm@6.1.0-beta.303.patch
   node-diff3@3.2.1: patches/node-diff3@3.2.1.patch

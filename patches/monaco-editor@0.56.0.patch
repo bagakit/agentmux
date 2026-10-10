@@ -1,0 +1,73 @@
+diff --git a/esm/vs/base/browser/dom.js b/esm/vs/base/browser/dom.js
+index 498ad6aefe..5c5138d668 100644
+--- a/esm/vs/base/browser/dom.js
++++ b/esm/vs/base/browser/dom.js
+@@ -32,14 +32,12 @@ const { getWindow, getDocument, getWindows, getWindowsCount, getWindowId, getWin
+         const window = typeof windowId === 'number' ? windows.get(windowId) : undefined;
+         return window ?? (fallbackToMain ? mainWindowRegistration : undefined);
+     }
+-    return {
+-        onDidRegisterWindow: onDidRegisterWindow.event,
+-        onWillUnregisterWindow: onWillUnregisterWindow.event,
+-        onDidUnregisterWindow: onDidUnregisterWindow.event,
+-        registerWindow(window) {
++    let auxiliaryWindowId = 1;
++    function registerWindow(window) {
+             if (windows.has(window.vscodeWindowId)) {
+                 return Disposable.None;
+             }
++            ensureCodeWindow(window, ++auxiliaryWindowId);
+             const disposables = new DisposableStore();
+             const registeredWindow = {
+                 window,
+@@ -53,9 +51,16 @@ const { getWindow, getDocument, getWindows, getWindowsCount, getWindowId, getWin
+             disposables.add(addDisposableListener(window, EventType.BEFORE_UNLOAD, () => {
+                 onWillUnregisterWindow.fire(window);
+             }));
++            disposables.add(addDisposableListener(window, 'unload', () => disposables.dispose()));
+             onDidRegisterWindow.fire(registeredWindow);
+             return disposables;
+-        },
++        }
++    function registeredWindow(window) { registerWindow(window); return window; }
++    return {
++        onDidRegisterWindow: onDidRegisterWindow.event,
++        onWillUnregisterWindow: onWillUnregisterWindow.event,
++        onDidUnregisterWindow: onDidUnregisterWindow.event,
++        registerWindow,
+         getWindows() {
+             return windows.values();
+         },
+@@ -72,11 +77,11 @@ const { getWindow, getDocument, getWindows, getWindowsCount, getWindowId, getWin
+         getWindow(e) {
+             const candidateNode = e;
+             if (candidateNode?.ownerDocument?.defaultView) {
+-                return candidateNode.ownerDocument.defaultView.window;
++                return registeredWindow(candidateNode.ownerDocument.defaultView.window);
+             }
+             const candidateEvent = e;
+             if (candidateEvent?.view) {
+-                return candidateEvent.view.window;
++                return registeredWindow(candidateEvent.view.window);
+             }
+             return mainWindow;
+         },
+diff --git a/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js b/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js
+index c5b97ef297..ced3d9cc8e 100644
+--- a/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js
++++ b/esm/vs/editor/browser/controller/editContext/native/nativeEditContextUtils.js
+@@ -1,4 +1,4 @@
+-import { addDisposableListener, getShadowRoot, getActiveElement } from '../../../../../base/browser/dom.js';
++import { addDisposableListener, getShadowRoot, getDocument } from '../../../../../base/browser/dom.js';
+ import { Disposable } from '../../../../../base/common/lifecycle.js';
+ import { ILogService } from '../../../../../platform/log/common/log.js';
+ 
+@@ -60,7 +60,7 @@ let FocusTracker = class FocusTracker extends Disposable {
+     }
+     refreshFocusState() {
+         const shadowRoot = getShadowRoot(this._domNode);
+-        const activeElement = shadowRoot ? shadowRoot.activeElement : getActiveElement();
++        const activeElement = shadowRoot ? shadowRoot.activeElement : getDocument(this._domNode).activeElement;
+         const focused = this._domNode === activeElement;
+         this._handleFocusedChanged(focused);
+     }
