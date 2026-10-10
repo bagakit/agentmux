@@ -60,6 +60,21 @@ it('authenticates the SDK callback, commits before ACK, restores real execution-
   expect(f.original.inner.kernel.input).not.toHaveBeenCalled(); expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
 }, 25_000)
 
+it('updates the original card after a local abstention without claiming a permission decision', async () => {
+  const f = await fixture(); await f.grant(); const original = await f.open()
+  await vi.waitFor(() => expect(f.buttons().length).toBeGreaterThan(0), { timeout: 8_000 })
+  const result = await f.hosted.respondAgentInteraction({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, operationId: 'local-abstention', expectedRequest: original.request,
+    response: { kind: 'permission', requestId: original.request.id, decision: { outcome: 'cancelled' } } })
+  expect(result.delivery).toBe('hook-written'); await expect(original.callback).resolves.toEqual({})
+  await vi.waitFor(() => { const observed = f.hosted.agentSession('original-agent').pendingInteraction?.request; expect(observed?.kind === 'permission' && observed.permissionHook?.response?.delivery).toBe('connection-written') })
+  await vi.waitFor(async () => { const lane = Reflect.get(f.services.publication!, 'lanes').get(f.binding.bindingId); expect(lane).toBeDefined(); await lane!.work; expect(lane!.work).toBeUndefined() })
+  expect(f.effects.some(value => value.method === 'PATCH')).toBe(true)
+  const card = JSON.stringify(f.card())
+  expect(card).toContain('Response returned. Native adoption and completion are not confirmed.')
+  expect(card).not.toContain('Decision returned')
+  expect(f.buttons()).toEqual([]); expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
+}, 20_000)
+
 it('keeps permission off for chat/answer grants and never exposes original tool context before explicit consent', async () => {
   const f = await fixture(); await f.grant(['input', 'answer'])
   const original = await f.open()
