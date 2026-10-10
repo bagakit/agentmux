@@ -486,7 +486,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.record !== null) {
           const original = parsePromptSubmissionRecord(p.record)
           if (original.agentSessionId !== key.agentSessionId || original.run.runId !== key.expectedRun.runId ||
-              (original.admission?.submissionId ?? original.terminalPromptSubmission?.submissionId ?? original.admission?.operationId) !== agentPromptInputId(key) ||
+              (original.admission?.submissionId ?? original.terminalPromptSubmission?.submissionId ?? original.launch?.input.submissionId ?? original.admission?.operationId) !== agentPromptInputId(key) ||
               original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) fail()
         }
         break

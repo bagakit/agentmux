@@ -220,6 +220,11 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
   if (admission) originals.push({ agentSessionId: session.agentSessionId, run: admission.intent?.run ?? session.run, admission,
     ...(shared ? { terminalPromptSubmission: terminal } : {}) })
   if (terminal && !shared) originals.push({ agentSessionId: session.agentSessionId, run: terminal.run, terminalPromptSubmission: terminal })
+  for (const operation of Object.values(session.continuityOperations ?? {})) {
+    const launch = operation.launchInput
+    if (launch?.delivery === 'launch' && launch.state === 'launch-carried' && launch.key) originals.push({
+      agentSessionId: session.agentSessionId, run: launch.key.expectedRun, launch })
+  }
   return structuredClone(originals)
 }
 function promptAdmissionRecord(session: AgentMuxStoredAgentSession | null | undefined): AgentPromptSubmissionRecord | null {
@@ -227,7 +232,7 @@ function promptAdmissionRecord(session: AgentMuxStoredAgentSession | null | unde
 }
 
 function promptRecordId(value: AgentPromptSubmissionRecord): string {
-  const id = value.admission?.submissionId ?? value.terminalPromptSubmission?.submissionId
+  const id = value.admission?.submissionId ?? value.terminalPromptSubmission?.submissionId ?? value.launch?.input.submissionId
   // A missing logical identity remains missing. This opaque location only keeps its original JSON.
   return id === undefined ? JSON.stringify(['original-slot', value.admission?.operationId]) : JSON.stringify(['submission', id])
 }
@@ -252,6 +257,7 @@ function assertPromptSettlement(expected: AgentPromptSubmissionRecord, next: Age
 /** Routine Session writes cannot rebind or restart an already claimed Native key. */
 function assertPromptRecordWrite(original: AgentPromptSubmissionRecord | undefined, next: AgentPromptSubmissionRecord, receipt = false): void {
   if (!original || isDeepStrictEqual(original, next)) return
+  if (original.launch || next.launch) throw new AgentMuxError('An original Runtime launch input cannot be replaced by another carrier or body.', 'AGENT_PROMPT_OPERATION_CONFLICT')
   if (original.admission?.transport !== 'native' && next.admission?.transport !== 'native') return
   if (!receipt || next.admission?.native?.outcome === 'claimed') throw new AgentMuxError(
     'The original Native input record can only be changed by its exact receipt owner.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -1914,6 +1920,13 @@ function claimedReopenReservation(current: AgentMuxLifecycleReservation | undefi
   return { ...retained, ownerId: claim.ownerId, ownerPid: claim.ownerPid, expiresAt: claim.expiresAt }
 }
 
+/** The lifecycle owns its one operation; concurrent decisions retain their original records. */
+function preserveContinuityOperations(previous: AgentMuxStoredAgentSession | undefined, next: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
+  if (!previous?.continuityOperations || !next.continuity?.newRun || next.continuity.newRun.runId !== next.run.runId) return next
+  return { ...next, continuityOperations: { ...next.continuityOperations, ...previous.continuityOperations,
+    [next.continuity.operationId]: next.continuity } }
+}
+
 function assertLifecycleCommit(
   reservation: AgentMuxLifecycleReservation,
   next: AgentMuxStoredAgentSession | null
@@ -2286,7 +2299,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.retiredAgentSessions
     )
     const previous = this.sessions.get(reservation.agentSessionId)
-    const normalized = next ? normalizeStoredAgentSession(next) : null
+    const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next)) : null
     assertLifecycleCommit(currentReservation, normalized)
     const values = [...this.sessions.values()].filter(
       (session) => session.agentSessionId !== reservation.agentSessionId
@@ -2966,7 +2979,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const previous = document.sessions.find(
         (session) => session.agentSessionId === reservation.agentSessionId
       )
-      const normalized = next ? normalizeStoredAgentSession(next) : null
+      const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next)) : null
       assertLifecycleCommit(currentReservation, normalized)
       const sessions = document.sessions.filter(
         (session) => session.agentSessionId !== reservation.agentSessionId

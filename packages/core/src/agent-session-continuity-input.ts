@@ -4,16 +4,52 @@ import { AgentMuxError } from './errors.js'
 import { agentPromptNotApplied } from './agent-prompt-condition.js'
 import type { AgentPromptInputKey } from './agent-prompt-condition.js'
 import type { AgentInputCallContext } from './agent-input-wait.js'
-import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation } from './agent-session-continuity.js'
+import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation, AgentMuxContinuityInputRequest, AgentMuxContinuityLaunchInput } from './agent-session-continuity.js'
 import type { AgentMuxAgentPromptInput } from './client.js'
-import type { AgentMuxStoredAgentSession, AgentPromptSubmissionRecord } from './types.js'
+import type { AgentMuxStoredAgentSession, AgentPromptSubmissionRecord, AgentCatalogEntry, AgentMuxRunRef } from './types.js'
 import type { AgentProviderRegistry } from './agent-provider.js'
 import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
+import { normalizeMessageChannel } from './message-origin.js'
+import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
 import { observePromptInput } from './prompt-submission.js'
 
 const digest = (text: string) => createHash('sha256').update(text).digest('base64url')
 const terminal = (phase: AgentMuxContinuityInputDelivery['phase']) => ['accepted', 'not-applied', 'superseded'].includes(phase)
+
+function recoveryReminder(operation: AgentMuxContinuityOperation): string {
+  const text = operation.recoveryInputs?.reminder ?? ''
+  if (!text.trim() || !operation.nativeTarget) return ''
+  const previous = operation.previousInput ?? { scope: 'typed-prompt' as const, outcome: 'unknown' as const }
+  return `Session recovery context:\nAgent Session: ${operation.agentSessionId}\nPrevious Run: ${operation.previousRun.runId}\nRecovery operation: ${operation.operationId}\nProvider native Session: ${operation.nativeTarget.providerId}/${operation.nativeTarget.sessionId}\nInterrupted activity: working.\nRecovery evidence: ${operation.evidence.kind}\nPrevious typed input: ${previous.outcome}${previous.key ? ' (' + JSON.stringify(previous.key) + ')' : ''}. Unknown earlier input is not replayed.\n\n${text}`
+}
+
+/** Freeze the original text before starting. A not-yet-created Run is never named in its body. */
+export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperation, catalog: AgentCatalogEntry,
+  lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest): AgentMuxContinuityLaunchInput | undefined {
+  const automatic = operation.trigger !== 'input' && operation.interruptedWorking && catalog.promptDelivery !== 'post-launch-only'
+  const input = fresh ?? (automatic ? { submissionId: 'continuity-' + digest(JSON.stringify([operation.agentSessionId, operation.operationId])),
+    prompt: operation.recoveryInputs?.continuation ?? '', agentMuxNote: recoveryReminder(operation) } : undefined)
+  if (!input) return
+  const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
+  if (!composed.text.trim()) return
+  return { input: structuredClone(input), prompt: composed.text, digest: digest(composed.text),
+    message: { ...(input.prompt.trim() ? { userContent: input.prompt } : {}), ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+      ...(input.authorHuman === true ? { authorHuman: true as const } : {}), sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
+      ...(input.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(input.sourceDevice) }) },
+    delivery: catalog.promptDelivery === 'post-launch-only' ? 'post-launch' : 'launch', lifecycleOperationId, state: 'prepared' }
+}
+
+/** The only successful launch receipt is this original lifecycle's authoritative Runtime Run. */
+export function bindContinuityLaunchInput(operation: AgentMuxContinuityOperation, run: AgentMuxRunRef): void {
+  const input = operation.launchInput
+  if (!input) return
+  input.key = { kind: 'prompt', agentSessionId: operation.agentSessionId, expectedRun: { ...run }, submissionId: input.input.submissionId }
+  if (input.delivery === 'launch') {
+    input.state = 'launch-carried'
+    input.receipt = { kind: 'runtime-launch', operationId: input.lifecycleOperationId, run: { ...run }, observedAt: Date.now() }
+  }
+}
 
 /** Called by the Run lifecycle commit, before another input can claim this Run. */
 export function createContinuityInputDelivery(operation: AgentMuxContinuityOperation, initialInputByte?: number): AgentMuxContinuityInputDelivery | undefined {
@@ -21,16 +57,20 @@ export function createContinuityInputDelivery(operation: AgentMuxContinuityOpera
   const inputs = operation.recoveryInputs
   if (!inputs?.reminder.trim() && !inputs?.continuation.trim()) return
   const previousInput = operation.previousInput ?? { scope: 'typed-prompt' as const, outcome: 'unknown' as const }
-  const reminder = inputs.reminder.trim() ? `Session recovery context:\nAgent Session: ${operation.agentSessionId}\nPrevious Run: ${operation.previousRun.runId}\nRecovered Run: ${operation.newRun.runId}\nProvider native Session: ${operation.nativeTarget.providerId}/${operation.nativeTarget.sessionId}\nInterrupted activity: working.\nRecovery evidence: ${operation.evidence.kind}\nPrevious typed input: ${previousInput.outcome}${previousInput.key ? ' (' + JSON.stringify(previousInput.key) + ')' : ''}. Unknown earlier input is not replayed.\n\n${inputs.reminder}` : ''
+  const reminder = operation.launchInput?.input.agentMuxNote ?? recoveryReminder(operation)
   const part = (text: string) => ({ selected: Boolean(text.trim()), status: text.trim() ? 'waiting' as const : 'not-selected' as const, text, digest: digest(text) })
   return {
     context: { agentSessionId: operation.agentSessionId, previousRun: { ...operation.previousRun }, newRun: { ...operation.newRun },
       nativeTarget: structuredClone(operation.nativeTarget), interruptedWorking: true, runEvidence: structuredClone(operation.evidence), previousInput: structuredClone(previousInput) },
-    key: { kind: 'prompt', agentSessionId: operation.agentSessionId, expectedRun: { ...operation.newRun },
+    key: operation.launchInput?.key ?? { kind: 'prompt', agentSessionId: operation.agentSessionId, expectedRun: { ...operation.newRun },
       submissionId: 'continuity-' + digest(JSON.stringify([operation.agentSessionId, operation.operationId, operation.newRun])) },
     ...(initialInputByte === undefined ? {} : { initialInputByte }),
-    phase: 'waiting', reason: 'original-input-admission-pending', observedAt: Date.now(),
-    reminder: part(reminder), continuation: part(inputs.continuation)
+    phase: operation.launchInput?.state === 'launch-carried' ? 'accepted' : 'waiting', reason: operation.launchInput?.state === 'launch-carried' ? 'original-input-launch-carried' : 'original-input-admission-pending', observedAt: Date.now(),
+    reminder: part(reminder), continuation: part(inputs.continuation),
+    ...(operation.launchInput?.state === 'launch-carried' && operation.launchInput.key ? {
+      receipt: { key: structuredClone(operation.launchInput.key), status: 'launch-carried' as const, observedAt: Date.now() },
+      reminder: { ...part(reminder), ...(reminder.trim() ? { status: 'accepted' as const, receiptRef: structuredClone(operation.launchInput.key) } : {}) },
+      continuation: { ...part(inputs.continuation), ...(inputs.continuation.trim() ? { status: 'accepted' as const, receiptRef: structuredClone(operation.launchInput.key) } : {}) } } : {})
   }
 }
 

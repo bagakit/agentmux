@@ -1715,7 +1715,7 @@ export async function registerIpc(args: {
   ))
   handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
-  handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride'>) => await args.runtime.recoverSession(session, config, workspacePath, operationId, request))
+  handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) => await args.runtime.recoverSession(session, config, workspacePath, operationId, request))
   handle('sessions:stop', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you stopped the Agent.'); await args.runtime.stopSession(session) })
   handle('browser:forgetAppLinkScheme', async (scheme: string, expected: AppLinkSchemeChoice) => {
     if (!APP_LINK_SCHEME_CHOICES.includes(expected)) {

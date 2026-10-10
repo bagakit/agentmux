@@ -1,4 +1,4 @@
-import { AgentSessionContinuityInputs, createContinuityInputDelivery } from './agent-session-continuity-input.js'
+import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
 import { missingExecutableCause } from './executable-diagnostics.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
@@ -4702,7 +4702,7 @@ export class AgentMuxClient {
   ): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     const previous = reopening ? undefined : this.requireAgentSession(input.agentSessionId)
-    const continuity = previous?.continuity
+    let continuity = previous?.continuity?.operationId === input.operationId ? structuredClone(previous.continuity) : undefined
     if (expectedRun && previous && !sameRun(previous.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before native resume.', 'STALE_AGENT_SESSION')
     }
@@ -4836,7 +4836,10 @@ export class AgentMuxClient {
           return null
         }) : null
       if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {
-        reservation = await this.registry.prepareResume(reservation, { ...current,
+        if (continuity.launchInput) continuity.launchInput.launchPlan = { program: plan.command,
+          argsDigest: createHash('sha256').update(JSON.stringify(plan.args)).digest('base64url') }
+        reservation = await this.registry.prepareResume(reservation, { ...current, continuity,
+          continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability) })
         this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
@@ -4884,6 +4887,7 @@ export class AgentMuxClient {
       }
       if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {
         next.continuity = { ...continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+        bindContinuityLaunchInput(next.continuity, next.run)
         const recoveryDelivery = createContinuityInputDelivery(next.continuity, run.acceptedInputBytes ?? undefined)
         if (recoveryDelivery) next.continuity.recoveryDelivery = recoveryDelivery
         next.continuityOperations = { ...previous?.continuityOperations, [input.operationId]: next.continuity }
@@ -5018,10 +5022,22 @@ export class AgentMuxClient {
       this.publisher.publishRunState(this.projectRun(run, readySession), readySession.agentSessionId)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
-      const promptConfirmed = await this.deliverPostLaunchPrompt(
-        provider, readySession, run, lifecycleOperationId, deferredResumePrompt, message
+      let promptConfirmed = await this.deliverPostLaunchPrompt(
+        provider, readySession, run, lifecycleOperationId, deferredResumePrompt, continuity?.launchInput?.message ?? message,
+        continuity?.launchInput?.input.submissionId
       )
-      await this.recordPromptMessageAfterSideEffect(readySession, lifecycleOperationId, 'Resume prompt', message,
+      if (continuity?.launchInput?.delivery === 'post-launch') {
+        readySession = await this.updateExactAgentSession(current.agentSessionId, next.run, value => {
+          const operation = value.continuityOperations?.[input.operationId]
+          if (!operation?.launchInput || operation.launchInput.state === 'terminal-confirmed') return value
+          const updated = { ...operation, launchInput: { ...operation.launchInput, state: promptConfirmed ? 'terminal-confirmed' as const : 'unknown' as const } }
+          return { ...value, ...(value.continuity?.operationId === input.operationId ? { continuity: updated } : {}),
+            continuityOperations: { ...value.continuityOperations, [input.operationId]: updated }, updatedAt: Math.max(value.updatedAt, Date.now()) }
+        })
+        this.publishSession(readySession)
+        if (readySession.continuityOperations?.[input.operationId]?.launchInput?.state === 'terminal-confirmed') promptConfirmed = true
+      }
+      await this.recordPromptMessageAfterSideEffect(readySession, continuity?.launchInput?.input.submissionId ?? lifecycleOperationId, 'Resume prompt', continuity?.launchInput?.message ?? message,
         promptConfirmed ? 'complete' : 'failed')
       return this.projectSession(readySession)
     } catch (error) {
@@ -5076,7 +5092,13 @@ export class AgentMuxClient {
       'terminalCapability', 'terminalPromptReadiness', 'promptCompletionAdmission', 'terminalPromptSubmission', 'terminalPromptDelivery',
       'terminalOutputChannel', 'semanticStatus', 'pendingInteraction'] as const) delete next[key]
     if (prepared.continuity) {
-      next.continuity = { ...prepared.continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+      next.continuity = { ...structuredClone(prepared.continuity), kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+      const launched = next.continuity.launchInput
+      if (launched && (!launched.launchPlan || launched.launchPlan.program !== run.program ||
+          launched.launchPlan.argsDigest !== createHash('sha256').update(JSON.stringify(run.args)).digest('base64url'))) {
+        throw new AgentMuxError('The original resume launch arguments are unconfirmed. The original Run and input are kept.', 'CONTINUITY_OPERATION_MISMATCH')
+      }
+      bindContinuityLaunchInput(next.continuity, next.run)
       const recoveryDelivery = createContinuityInputDelivery(next.continuity)
       if (recoveryDelivery) next.continuity.recoveryDelivery = recoveryDelivery
       delete next.continuity.nextActionAt
@@ -5089,7 +5111,15 @@ export class AgentMuxClient {
       await this.registry.load('local')
     }
     await this.restoreReopenObservation(this.registry.get(next.agentSessionId), run, reservation.operationId)
-    return this.registry.get(next.agentSessionId)
+    const restored = this.registry.get(next.agentSessionId)
+    const carried = prepared.continuity && restored.continuityOperations?.[prepared.continuity.operationId]?.launchInput
+    if (carried?.delivery === 'post-launch' && prepared.continuity) return await this.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)
+    if (carried?.delivery === 'launch' && carried.state === 'launch-carried') {
+      // The exact original Start is now known, so its frozen history can be
+      // recorded under the same input ID without dispatching any input again.
+      await this.recordPromptMessageAfterSideEffect(restored, carried.input.submissionId, 'Resume prompt', carried.message)
+    }
+    return restored
   }
 
   private scheduleAgentContinuity(input: AgentMuxAgentContinuityInput, receipt: AgentMuxContinuityOperation): void {
@@ -5119,6 +5149,9 @@ export class AgentMuxClient {
     let current: AgentMuxStoredAgentSession | null = null
     try { current = this.registry.get(input.agentSessionId) }
     catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error }
+    // A different public Core owner may already have frozen or completed this
+    // same operation. Read that durable fact before classifying a new input.
+    current = await this.store.readMetadata(input.agentSessionId) ?? current
     // A restarted observer rejoins the admitted automatic intent rather than recomposing its policy or delay.
     if (current?.continuity && !current.continuityOperations?.[input.operationId] &&
       input.trigger && !['manual', 'input'].includes(input.trigger) &&
@@ -5128,6 +5161,14 @@ export class AgentMuxClient {
       input = { ...input, operationId: current.continuity.operationId }
     }
     const prior = current?.continuityOperations?.[input.operationId]
+    if (input.input) {
+      if (input.trigger !== 'input' || typeof input.input.prompt !== 'string' ||
+          !composeAgentPrompt(input.input.prompt, input.input.agentMuxNote).text.trim()) throw new AgentMuxError('A new continuity input needs its original input trigger and nonempty content.', 'INVALID_AGENT_PROMPT')
+      safeId(input.input.submissionId, 'Original continuity input id')
+      assertAgentPromptSize(composeAgentPrompt(input.input.prompt, input.input.agentMuxNote).text)
+      if (prior && (!prior.launchInput || !isDeepStrictEqual(prior.launchInput.input, input.input))) throw new AgentMuxError(
+        'This original recovery operation has another frozen input. Its original body and Run are kept.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    }
     if (prior && !sameRun(prior.previousRun, input.expectedRun)) {
       throw new AgentMuxError('A continuity operation must retain its original Run.', 'CONTINUITY_OPERATION_MISMATCH')
     }
@@ -5138,29 +5179,50 @@ export class AgentMuxClient {
       previousRun: { ...input.expectedRun }, admittedAt: now, observedAt: now, rechecks: 0,
       kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown', observedAt: now, message: 'Not yet observed.' }
     }
+    // Freeze a new authored input even when Runtime/provider observation has not
+    // succeeded yet. A retry reads this same request rather than inventing one.
+    if (!prior && input.input && current) receipt.launchInput = prepareContinuityLaunchInput(receipt,
+      this.providers.get(current.providerId).catalog, agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)!
     receipt.observedAt = now
     delete receipt.nextActionAt
+    const originalLaunch = (value: AgentMuxStoredAgentSession) => {
+      const saved = value.continuityOperations?.[receipt.operationId]?.launchInput
+      if (saved && receipt.launchInput && !isDeepStrictEqual(saved.input, receipt.launchInput.input)) throw new AgentMuxError(
+        'This original recovery input already has another frozen body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      return saved && (['launch-carried', 'terminal-confirmed'].includes(saved.state) ||
+        receipt.launchInput?.state === 'prepared' && saved.state !== 'prepared') ? saved : receipt.launchInput ?? saved
+    }
     const record = async (result: AgentMuxAgentContinuityResult, reason?: string): Promise<AgentMuxAgentContinuityResult> => {
       receipt.kind = result.kind
       receipt.reason = reason ?? ('reason' in result ? result.reason : result.kind)
       receipt.evidence = result.evidence.kind === 'provider-native' ? result.evidence.previousRun : result.evidence
+      if (result.kind === 'conflict' && receipt.launchInput?.state === 'prepared' &&
+          (!prior || prior.kind === 'pending' && ['runtime-unverified', 'provider-unverified'].includes(prior.reason))) {
+        // This intent never attempted Start. A different operation's lease/Run
+        // cannot claim that it carried this input; unknown starts stay unknown.
+        receipt.launchInput.state = 'not-applied'
+      }
       if (result.kind === 'resumed') receipt.newRun = { ...result.run }
       if (result.kind === 'pending' && result.nextActionAt !== undefined) receipt.nextActionAt = result.nextActionAt
       if (current) {
         try {
-          current = await this.registry.update(current.agentSessionId, current.run, value => ({ ...value,
+          current = await this.updateExactAgentSession(current.agentSessionId, current.run, value => ({ ...value,
             continuity: { ...structuredClone(receipt), ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery
-              ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}) },
+              ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
+              ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}) },
             continuityOperations: { ...value.continuityOperations, [receipt.operationId]: { ...structuredClone(receipt),
-              ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}) } } }))
+              ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
+              ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}) } } }))
           this.publishSession(current)
         } catch (error) {
+          if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_OPERATION_CONFLICT') throw error
           receipt.error = `Continuity receipt persistence is unconfirmed. ${error instanceof Error ? error.message : String(error)}`
           this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED',
             message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
         }
       }
       if (current?.continuityOperations?.[receipt.operationId]?.recoveryDelivery) receipt.recoveryDelivery = structuredClone(current.continuityOperations[receipt.operationId]!.recoveryDelivery!)
+      if (current?.continuityOperations?.[receipt.operationId]?.launchInput) receipt.launchInput = structuredClone(current.continuityOperations[receipt.operationId]!.launchInput!)
       this.scheduleAgentContinuity(input, receipt)
       return { ...result, ...((result.kind === 'resumed' || result.kind === 'reattachable') && current ? { session: this.projectSession(current) } : {}), continuity: structuredClone(receipt) }
     }
@@ -5170,6 +5232,9 @@ export class AgentMuxClient {
         ...(nextActionAt === undefined ? {} : { nextActionAt }) })
     if (current && !sameRun(current.run, input.expectedRun)) {
       if (prior?.newRun && sameRun(prior.newRun, current.run) && prior.kind === 'resumed') {
+        if (prior.launchInput?.delivery === 'post-launch' && prior.launchInput.state !== 'terminal-confirmed') {
+          current = await this.settleContinuityPostLaunchInput(current, input.operationId)
+        }
         return record({ kind: 'resumed', session: this.projectSession(current), previousRun: { ...input.expectedRun }, run: { ...current.run },
           evidence: { kind: 'provider-native', providerId: current.providerId,
             nativeSessionId: current.nativeHandle?.sessionId ?? '', previousRun: prior.evidence as import('./agent-session-continuity.js').AgentMuxAgentContinuityRunEvidence } }, prior.reason)
@@ -5262,14 +5327,24 @@ export class AgentMuxClient {
     receipt.interruptedWorking = admission?.kind === 'resume' && admission.interruptedWorking
     receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking ? resolveAgentContinuityReminder(policy) : '',
       continuation: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking && policy.continuationEnabled ? policy.continuationPrompt : '' }
+    const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
+      agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)
+    if (launchInput) receipt.launchInput = launchInput
     // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
-    current = await this.registry.update(input.agentSessionId, input.expectedRun, value => ({ ...value,
-      continuity: structuredClone(receipt), continuityOperations: { ...value.continuityOperations, [receipt.operationId]: structuredClone(receipt) } }))
+    current = await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, value => {
+      const frozen = value.continuityOperations?.[receipt.operationId]?.launchInput
+      if (frozen && receipt.launchInput && !isDeepStrictEqual(frozen.input, receipt.launchInput.input)) throw new AgentMuxError(
+        'The original recovery input was already frozen with another body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      return { ...value, continuity: structuredClone(receipt),
+        continuityOperations: { ...value.continuityOperations, [receipt.operationId]: structuredClone(receipt) } }
+    })
     try {
       const session = await this.resumeAgentRun({ agentSessionId: input.agentSessionId, operationId: input.operationId,
         ...(input.args === undefined ? {} : { args: input.args }), ...(input.env === undefined ? {} : { env: input.env }),
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride }),
-        ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows })
+        ...(input.cols === undefined ? {} : { cols: input.cols }), ...(input.rows === undefined ? {} : { rows: input.rows }),
+        ...(receipt.launchInput ? { prompt: receipt.launchInput.input.prompt,
+          ...(receipt.launchInput.input.agentMuxNote === undefined ? {} : { agentMuxNote: receipt.launchInput.input.agentMuxNote }) } : {})
       }, input.expectedRun, capability ?? undefined)
       current = this.registry.get(input.agentSessionId)
       return record({ kind: 'resumed', session, previousRun: { ...input.expectedRun }, run: { ...session.run },
@@ -5285,6 +5360,7 @@ export class AgentMuxClient {
           reason: 'lifecycle-busy', evidence: { kind: 'agent-session-store' } })
       }
       receipt.error = error instanceof Error ? error.message : String(error)
+      if (receipt.launchInput?.state === 'prepared') receipt.launchInput.state = error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied' ? 'not-applied' : 'unknown'
       try { current = this.registry.get(input.agentSessionId) } catch {}
       return pending('operation-unconfirmed', evidence, policy.recheckMaxAttempts > 0 ? now + policy.recheckIntervalMs : undefined)
     }
@@ -5336,6 +5412,9 @@ export class AgentMuxClient {
     input = { ...input, expectedRun: { ...input.expectedRun },
       ...(input.admissionIntent ? { admissionIntent: { ...input.admissionIntent } } : {}) } as AgentMuxAgentPromptInput
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use submitAgentMessage.', 'MESSAGE_ENVELOPE_REQUIRED')
+    const launched = await this.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: input.agentSessionId,
+      expectedRun: input.expectedRun, submissionId: input.operationId })
+    if (launched?.launch) throw new AgentMuxError('This original input was carried by its native resume launch. Inspect its original launch receipt; it will not replay through the terminal.', 'AGENT_PROMPT_LAUNCH_CARRIED')
     if (input.admissionIntent?.kind === 'manual-actor') {
       this.validateControlledPrompt(input)
       const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
@@ -7393,16 +7472,48 @@ export class AgentMuxClient {
    * 但沉默会让界面看起来一切正常而投递结果未知。于是发 `agent-error`——Run 保留，用户被
    * 告知确认未完成，先检查 Agent 回复再决定是否重投。返回值让调用方按真实结果记录历史。
    */
+  private postLaunchPromptConfirmed(record: import('./types.js').AgentPromptSubmissionRecord | null,
+    text: string, message: AgentPromptMessageContent): boolean {
+    const claim = record?.admission
+    return Boolean(claim?.acknowledged && claim.transport !== 'native' && claim.intent?.prompt === text &&
+      isDeepStrictEqual(claim.intent.message, message))
+  }
+
+  /** Rejoin only this original deferred packet; existing unknown claims are read-only. */
+  private async settleContinuityPostLaunchInput(session: AgentMuxStoredAgentSession, operationId: string): Promise<AgentMuxStoredAgentSession> {
+    const input = session.continuityOperations?.[operationId]?.launchInput
+    if (!input?.key || input.delivery !== 'post-launch' || input.state === 'terminal-confirmed') return session
+    const run = await this.requireCurrentAgentRun(session)
+    const confirmed = run.state.type === 'running' && await this.deliverPostLaunchPrompt(this.providers.get(session.providerId),
+      session, run, input.lifecycleOperationId, input.prompt, input.message, input.input.submissionId)
+    const settled = await this.updateExactAgentSession(session.agentSessionId, session.run, value => {
+      const operation = value.continuityOperations?.[operationId]
+      if (!operation?.launchInput || operation.launchInput.state === 'terminal-confirmed') return value
+      const next = { ...operation, launchInput: { ...operation.launchInput, state: confirmed ? 'terminal-confirmed' as const : 'unknown' as const } }
+      return { ...value, ...(value.continuity?.operationId === operationId ? { continuity: next } : {}),
+        continuityOperations: { ...value.continuityOperations, [operationId]: next }, updatedAt: Math.max(value.updatedAt, Date.now()) }
+    })
+    this.publishSession(settled)
+    if (confirmed) await this.recordPromptMessageAfterSideEffect(settled, input.input.submissionId, 'Resume prompt', input.message)
+    return settled
+  }
+
   private async deliverPostLaunchPrompt(
     provider: AgentProvider,
     session: AgentMuxAgentSession,
     run: CtxmuxAdapterRun,
     lifecycleOperationId: string,
     text: string,
-    message: AgentPromptMessageContent
+    message: AgentPromptMessageContent,
+    originalSubmissionId?: string
   ): Promise<boolean> {
     if (!text.trim()) return true
+    const originalKey = originalSubmissionId ? { kind: 'prompt' as const, agentSessionId: session.agentSessionId, expectedRun: session.run, submissionId: originalSubmissionId } : undefined
     try {
+      if (originalKey) {
+        const record = await this.inspectAgentPromptSubmission(originalKey)
+        if (record) return this.postLaunchPromptConfirmed(record, text, message)
+      }
       // 走 serializeAgentInput，与 submitAgentPrompt 同一条队列——**不是**直接 submitInputPlan。
       // 理由是可复现的竞争：session 在这之前已经 publish 过 `agent-session`，渲染端此刻 composer
       // 就绪，用户可以在这次 await 返回前自己提交一条。两条 submitInputPlan 并发时 single-phase
@@ -7417,7 +7528,7 @@ export class AgentMuxClient {
         await this.promptSubmission.submitInputPlan(
           current,
           live,
-          `launch-prompt:${lifecycleOperationId}`,
+          originalSubmissionId ?? `launch-prompt:${lifecycleOperationId}`,
           text,
           provider.planPromptInput(text),
           agentPromptCondition(session),
@@ -7426,11 +7537,17 @@ export class AgentMuxClient {
           false,
           renderObservation.signal,
           undefined,
-          message
+          message,
+          undefined, undefined, undefined, undefined, originalKey,
+          originalKey ? { onlyIfUnclaimed: true } : undefined
         )
       }, { kind: 'semantic', bytes: null }, renderObservation)
       return true
     } catch (error) {
+      if (originalKey) {
+        try { if (this.postLaunchPromptConfirmed(await this.inspectAgentPromptSubmission(originalKey), text, message)) return true }
+        catch { /* Keep the original unknown input and its observable failure below. */ }
+      }
       // publish 本身若抛，异常会穿出这个方法，而调用点在 create/resume 的 try 内、且在内层 rollback
       // catch 之后——于是 Run 活着、hookBinding 已注册，调用方却收到「启动失败」。这个方法的合同是
       // **绝不抛**（进程已经起来了），所以兜到底。

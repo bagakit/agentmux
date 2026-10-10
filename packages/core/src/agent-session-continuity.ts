@@ -4,9 +4,12 @@ import type {
   AgentMuxAgentSession,
   AgentMuxRun,
   AgentMuxRunRef,
-  AgentNativeSessionHandle
+  AgentNativeSessionHandle,
+  AgentPromptMessageContent,
+  AgentMessageChannel,
+  AgentOperationDevice
 } from './types.js'
-import type { AgentPromptInputKey } from './agent-prompt-condition.js'
+import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { isAgentActivityStatusSource } from './agent-status-freshness.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
@@ -89,8 +92,32 @@ export type AgentMuxContinuityInputDelivery = {
   observedAt: number
   reminder: AgentMuxContinuityInputPart
   continuation: AgentMuxContinuityInputPart
-  receipt?: { key: AgentPromptInputKey; status: 'terminal-confirmed' | 'native-admitted' | 'not-applied' | 'unknown'; observedAt: number }
+  receipt?: { key: AgentPromptInputKey; status: 'terminal-confirmed' | 'native-admitted' | 'launch-carried' | 'not-applied' | 'unknown'; observedAt: number }
 }
+/** New authored input which has not yet acquired its resumed Run binding. */
+export type AgentMuxContinuityInputRequest = {
+  submissionId: string
+  prompt: string
+  agentMuxNote?: string
+  authorHuman?: boolean
+  sourceChannel?: AgentMessageChannel
+  sourceDevice?: AgentOperationDevice
+}
+
+/** The original lifecycle owner, never a fabricated terminal or Native acceptance ACK. */
+export type AgentMuxContinuityLaunchInput = {
+  input: AgentMuxContinuityInputRequest
+  prompt: string
+  message: AgentPromptMessageContent
+  digest: string
+  delivery: 'launch' | 'post-launch'
+  lifecycleOperationId: string
+  launchPlan?: { program: string; argsDigest: string }
+  state: 'prepared' | 'launch-carried' | 'unknown' | 'not-applied' | 'terminal-confirmed'
+  key?: Extract<AgentPromptInputKey, { kind: 'prompt' }>
+  receipt?: { kind: 'runtime-launch'; operationId: string; run: AgentMuxRunRef; observedAt: number }
+}
+
 export type AgentMuxContinuityOperation = {
   operationId: string
   agentSessionId: string
@@ -112,7 +139,28 @@ export type AgentMuxContinuityOperation = {
   /** New inputs, independent of old drafts and unknown earlier input; actual delivery has its own owner. */
   recoveryInputs?: { reminder: string; continuation: string }
   previousInput?: AgentMuxContinuityPreviousInput
+  launchInput?: AgentMuxContinuityLaunchInput
   recoveryDelivery?: AgentMuxContinuityInputDelivery
+}
+
+export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxContinuityLaunchInput {
+  const input = value as AgentMuxContinuityLaunchInput
+  if (!input || typeof input !== 'object' || !input.input || typeof input.input.submissionId !== 'string' || !input.input.submissionId ||
+      typeof input.input.prompt !== 'string' || input.input.agentMuxNote !== undefined && typeof input.input.agentMuxNote !== 'string' ||
+      input.input.authorHuman !== undefined && typeof input.input.authorHuman !== 'boolean' ||
+      typeof input.prompt !== 'string' || !input.prompt.trim() || typeof input.digest !== 'string' || !input.digest ||
+      typeof input.lifecycleOperationId !== 'string' || !input.lifecycleOperationId || !input.message ||
+      !['launch', 'post-launch'].includes(input.delivery) || !['prepared', 'launch-carried', 'unknown', 'not-applied', 'terminal-confirmed'].includes(input.state) ||
+      input.launchPlan && (typeof input.launchPlan.program !== 'string' || typeof input.launchPlan.argsDigest !== 'string') ||
+      input.state === 'launch-carried' && (input.delivery !== 'launch' || !input.key || !input.receipt) ||
+      input.state === 'terminal-confirmed' && (input.delivery !== 'post-launch' || !input.key) ||
+      input.receipt && (input.receipt.kind !== 'runtime-launch' || input.receipt.operationId !== input.lifecycleOperationId ||
+        input.receipt.run?.runId !== input.key?.expectedRun.runId || !Number.isSafeInteger(input.receipt.observedAt) || input.receipt.observedAt < 0)) throw new TypeError('Invalid original continuity launch input.')
+  if (input.key) {
+    const key = validateAgentPromptInputKey(input.key)
+    if (key.kind !== 'prompt' || key.submissionId !== input.input.submissionId) throw new TypeError('Conflicting continuity launch input key.')
+  }
+  return structuredClone(input)
 }
 
 export function normalizeAgentContinuityOperation(value: unknown): AgentMuxContinuityOperation {
@@ -126,6 +174,10 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     !op.evidence || typeof op.evidence.kind !== 'string' || op.newRun && typeof op.newRun.runId !== 'string' ||
     op.nativeTarget && (op.nativeTarget.kind !== 'provider' || typeof op.nativeTarget.providerId !== 'string' || typeof op.nativeTarget.sessionId !== 'string') ||
     op.recoveryInputs && (typeof op.recoveryInputs.reminder !== 'string' || typeof op.recoveryInputs.continuation !== 'string')) throw new TypeError('Invalid continuity operation.')
+  if (op.launchInput) {
+    const launched = normalizeAgentContinuityLaunchInput(op.launchInput)
+    if (launched.key && (launched.key.agentSessionId !== op.agentSessionId || launched.key.expectedRun.runId !== op.newRun?.runId)) throw new TypeError('Continuity launch input changed its exact Run.')
+  }
   const delivery = op.recoveryDelivery
   if (delivery && (!delivery.context || delivery.context.agentSessionId !== op.agentSessionId || delivery.context.newRun?.runId !== op.newRun?.runId ||
     delivery.context.previousRun?.runId !== op.previousRun.runId || delivery.context.interruptedWorking !== true ||
@@ -169,6 +221,7 @@ export type AgentMuxAgentContinuityInput = {
   expectedRun: AgentMuxRunRef
   operationId: string
   trigger?: AgentMuxContinuityTrigger
+  input?: AgentMuxContinuityInputRequest
   policy?: Partial<AgentMuxContinuityPolicy>
   /** A saved Mote timing overrides ordinary automatic admission only. */
   timingOverride?: 'startup' | 'on-open'

@@ -7,11 +7,13 @@ export function pendingSteerInput(entry: {
   archived?: true
   inputReceipt?: Pick<AgentInputSubmissionReceipt, 'status' | 'control'>
   inputIntakeStarted?: true
+  resumeInputReceipt?: { state: string }
   promptCondition?: AgentPromptCondition | null
 }): boolean {
   if (!entry.archived) return true
   if (entry.inputReceipt) return entry.inputReceipt.status !== 'admitted' && entry.inputReceipt.status !== 'terminal-confirmed' && entry.inputReceipt.status !== 'not-applied' &&
     entry.inputReceipt.control.state !== 'stopped-before-dispatch'
+  if (entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state)) return false
   if (entry.inputIntakeStarted) return true
   return entry.promptCondition !== null
 }
@@ -26,7 +28,7 @@ export function confirmedSteerDelivery(timeline: AgentTimelineSnapshot | undefin
 /** Reconcile legacy exact queue records from their captured timeline contract.
  * Controlled input keeps its typed receipt owner, including across lost replies or restart. */
 export function reconcileDeliveredSteers<State extends {
-  agentSteerQueues: Record<string, Array<{ operationId: string; archived?: true; directInputBinding?: AgentPromptInputBinding; goalDispatch?: { goalId: string; operationId: string }; goalPmo?: { creationOperationId?: string } }>>
+  agentSteerQueues: Record<string, Array<{ operationId: string; archived?: true; directInputBinding?: AgentPromptInputBinding; resumeInputIntent?: unknown; goalDispatch?: { goalId: string; operationId: string }; goalPmo?: { creationOperationId?: string } }>>
   timelines: Record<string, AgentTimelineSnapshot>
   sessions: SessionSnapshot[]
 }>(state: State, sessionId: string): State {
@@ -42,7 +44,7 @@ export function reconcileDeliveredSteers<State extends {
   // arrival can precede the terminal ACK and cannot replace that outcome.
   // Original input confirmation does not confirm the first Goal source write. Keep its
   // exact existing queue reference until the caller reconciles that owner without input.
-  const pending = queue.filter((entry) => entry.archived || entry.directInputBinding !== undefined || entry.goalDispatch !== undefined || entry.goalPmo?.creationOperationId !== undefined || !delivered.has(`prompt:${entry.operationId}`))
+  const pending = queue.filter((entry) => entry.archived || entry.directInputBinding !== undefined || entry.resumeInputIntent !== undefined || entry.goalDispatch !== undefined || entry.goalPmo?.creationOperationId !== undefined || !delivered.has(`prompt:${entry.operationId}`))
   if (pending.length === queue.length) return state
   const agentSteerQueues = { ...state.agentSteerQueues }
   if (pending.length) agentSteerQueues[sessionId] = pending

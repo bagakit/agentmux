@@ -299,7 +299,7 @@ export class AgentPromptSubmissionCoordinator {
     assertSession?: (session: AgentMuxAgentSession) => void,
     transportQualification?: AgentPromptTransportQualification,
     inputKey?: AgentPromptInputKey,
-    control?: { authority?: AgentPromptInputAuthority; authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }
+    control?: { authority?: AgentPromptInputAuthority; authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null>; onlyIfUnclaimed?: boolean }
   ): Promise<AgentPromptMessageContent | undefined> {
     const condition = 'kind' in binding ? undefined : binding
     const manual = condition === undefined
@@ -336,6 +336,8 @@ export class AgentPromptSubmissionCoordinator {
           // The exact original claim remains authoritative after a later input
           // moves the latest projection. Never reinterpret Native as PTY bytes.
           const original = await this.deps.store.readPromptAdmission(current.agentSessionId, binding.expectedRun, submissionId)
+          if (control?.onlyIfUnclaimed && original) throw new AgentMuxError(
+            'The original deferred input already has a claim. Inspect its exact receipt; this owner will not replay it.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
           const originalAdmission = original?.admission
           if (originalAdmission && (originalAdmission.transport === 'native' || current.promptCompletionAdmission?.submissionId !== submissionId)) {
             const intent = originalAdmission.intent

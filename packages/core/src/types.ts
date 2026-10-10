@@ -1212,6 +1212,8 @@ export type AgentMuxAgentSession = {
 
 /** Original Session-owner record; legacy missing identity/source remains missing. */
 export type AgentPromptSubmissionRecord = {
+  /** Original Runtime launch carrier; never a PTY or Provider acceptance ACK. */
+  launch?: import('./agent-session-continuity.js').AgentMuxContinuityLaunchInput
   agentSessionId: string
   run: AgentMuxRunRef
   admission?: NonNullable<AgentMuxAgentSession['promptCompletionAdmission']>

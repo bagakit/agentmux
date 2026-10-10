@@ -253,9 +253,10 @@ export function AgentSessionComposer({
           id: entry.operationId,
           text: entry.text,
           ...(entry.archived ? { archived: true as const } : {}),
-          inputControlled: Boolean(entry.directInputBinding),
-          confirmed: (entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed') || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
+          inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
+          confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || (entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed') || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, session?.kind === 'agent' ? session.control : undefined, entry.operationId)),
           ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
+          ...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),
           ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
@@ -263,7 +264,7 @@ export function AgentSessionComposer({
           immediateSend: session?.kind === 'agent' && agentSteerExecution(entry, session.capabilities) === 'immediate',
           preparing: !entry.archived && entry.operationId === sendingId && sendingPhase !== 'submitting',
           sending: !entry.archived && entry.operationId === sendingId && sendingPhase === 'submitting',
-          unconfirmed: entry.inputReceipt ? entry.inputReceipt.status === 'unknown'
+          unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.status === 'unknown'
             : Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
           ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
