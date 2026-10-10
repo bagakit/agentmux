@@ -1,5 +1,5 @@
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import { useWorkbenchWindowRevision, workbenchDocuments } from '../lib/workbench-window-registry'
+import { useWorkbenchWindowRevision, workbenchDocuments, workbenchDocumentVisible } from '../lib/workbench-window-registry'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusGoalLinks } from '../lib/focus-goal-links'
@@ -62,7 +62,7 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
     clearTimeout(intent.current); keepOpen()
     const trigger = anchor.current
     // Only the transient peek needs an available visible invoker; Agent actions stay independent.
-    if (!enabled || !trigger?.isConnected || trigger.closest('[inert]') || document.visibilityState === 'hidden') return false
+    if (!enabled || !trigger?.isConnected || trigger.closest('[inert]') || !workbenchDocumentVisible(document)) return false
     return agentInformationPreview.show({ token, id, context, identity, goalLinks, anchor: trigger, openWorkface, enterReading, keepOpen,
       restoreFocus() {
         if (!trigger.isConnected || trigger.closest('[inert]')) return

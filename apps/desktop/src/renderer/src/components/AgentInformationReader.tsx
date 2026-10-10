@@ -1,5 +1,5 @@
 import { WorkbenchDocumentContext } from '../lib/workbench-document'
-import { observeWorkbenchDocumentReturn, workbenchDocumentIdentity } from '../lib/workbench-window-registry'
+import { observeWorkbenchDocumentReturn, workbenchDocumentIdentity, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -157,8 +157,8 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   const reflowAnchor = useRef<ReturnType<typeof captureReadingAnchor>>(null)
   const heldSelection = useRef<Range | null>(null), laterSelection = useRef(false)
   const [tab, setTab] = useState<AgentInformationTab | null>(null)
-  const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
-  useLayoutEffect(() => { setVisible(document.visibilityState !== 'hidden') }, [document])
+  const visible = useWorkbenchDocumentVisibility(document)
+  useEffect(() => { if (!visible) agentInformationPreview.dismiss(request.token) }, [visible, request.token])
   const transferredFocus = useRef<HTMLElement | null>(null)
   const transferredSelection = useRef<{ start: Node; startOffset: number; end: Node; endOffset: number } | null>(null)
   useLayoutEffect(() => {
@@ -292,7 +292,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   }, [tab !== null, document])
   useLayoutEffect(() => {
     const surface = panel.current
-    if (!surface) return
+    if (!surface || !visible) return
     let current = true
     const update = async () => {
       const { x, y } = await computePosition(request.anchor, surface, {
@@ -314,7 +314,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     }
     const stop = autoUpdate(request.anchor, surface, () => { void update() })
     return () => { current = false; stop(); cancelDeparture() }
-  }, [request.token, request.pinned, document])
+  }, [request.token, request.pinned, document, visible])
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.defaultPrevented || wasWindowOverlayDismissed(event)) return
@@ -326,16 +326,14 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
       if (tab) showReading()
       else close(true)
     }
-    const hide = () => { setVisible(document.visibilityState !== 'hidden'); if (document.visibilityState === 'hidden') agentInformationPreview.dismiss(request.token) }
     const outside = (event: Event) => { if (!panel.current?.contains(event.target as Node)) agentInformationPreview.dismiss(request.token) }
     document.addEventListener('keydown', escape)
-    document.addEventListener('visibilitychange', hide)
     document.addEventListener('pointerdown', outside, true)
     window.addEventListener('scroll', outside, true)
     const resize = () => agentInformationPreview.dismiss(request.token)
     window.addEventListener('resize', resize)
     return () => {
-      document.removeEventListener('keydown', escape); document.removeEventListener('visibilitychange', hide)
+      document.removeEventListener('keydown', escape)
       document.removeEventListener('pointerdown', outside, true); window.removeEventListener('scroll', outside, true); window.removeEventListener('resize', resize)
     }
   }, [request, tab, document])
