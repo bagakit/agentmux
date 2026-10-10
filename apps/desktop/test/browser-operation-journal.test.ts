@@ -334,7 +334,8 @@ describe('BrowserOperationJournal', () => {
 
   it('caller-supplied operation identity survives lookup and persistence independently of storage identities', async () => {
     const store = new MemoryStore()
-    const journal = new BrowserOperationJournal(store, { id: () => 'minted-here' })
+    let minted = 0
+    const journal = new BrowserOperationJournal(store, { id: () => `minted-here-${++minted}` })
     const base = {
       browserId: 'browser-1',
       operator: { id: 'agent-1', name: 'Agent' },
@@ -344,10 +345,10 @@ describe('BrowserOperationJournal', () => {
     // 给了就用它：查询用的 key 与记录用的 key 必须是同一个决定。
     expect((await journal.start({ ...base, id: 'op:from-caller' })).id).toBe('op:from-caller')
     // 没给才铸。
-    expect((await journal.start(base)).id).toBe('minted-here')
+    expect((await journal.start(base)).id).toBe('minted-here-1')
     // 空白等于没给——`'  '` trim 成空串，落回铸造点。协议层的 `id()` 也会先把它拒掉（一处判据，
     // 两道门都对同一件事说同一句话），这里钉的是这一层自己不会把空白当成一个合法 identity。
-    expect((await journal.start({ ...base, id: '   ' })).id).toBe('minted-here')
+    expect((await journal.start({ ...base, id: '   ' })).id).toBe('minted-here-2')
 
     expect(await journal.get('op:from-caller')).toMatchObject({ id: 'op:from-caller' })
     expect(store.document!.operations.map(operation => operation.id)).toContain('op:from-caller')
