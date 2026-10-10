@@ -1,6 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { tabSwitchObservation } from '../src/renderer/src/lib/tab-switch-observation'
+import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
@@ -13,6 +14,7 @@ import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-re
 
 type FixtureTerminal = HeadlessTerminal & {
   refresh: ReturnType<typeof vi.fn>
+  open: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
   written: string[]
   completed: string[]
@@ -48,7 +50,7 @@ vi.mock('@xterm/xterm', async () => {
       this.written.push(text)
       super.write(data, () => { this.completed.push(text); callback?.() })
     }
-    open(root: HTMLElement) { this.element = document.createElement('div'); root.append(this.element) }
+    open = vi.fn((root: HTMLElement) => { this.element ??= root.ownerDocument.createElement('div'); root.append(this.element) })
     focus() {}
     onUserInput() { return { dispose() {} } }
     onRender() { return { dispose() {} } }
@@ -111,6 +113,7 @@ vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({
     endReplay() {}
     setInteractiveResize() {}
     setVisible() {}
+    synchronizeCellMetrics() {}
     observeViewport() {}
     acceptOwnerSize() {}
     async startLiveSynchronization() {}
@@ -132,6 +135,7 @@ const linkOrigin = { workspaceId: 'workspace', tabGroupId: 'group', tabId: 'tab'
 const reference = { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' }
 const switchTarget = { ...reference, presentationId: 'space' }
 let root: Root | null = null
+let rootContainer: HTMLDivElement
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -144,9 +148,9 @@ beforeEach(() => {
     resizeRevision: 0, gap: null,
     replay: [{ runId: session.control.run.runId, data: 'before ', dataBytes: new TextEncoder().encode('before '), startByte: 0, endByte: 7 }] })
   fixture.detach.mockResolvedValue(undefined)
-  const container = document.createElement('div')
-  document.body.append(container)
-  root = createRoot(container)
+  rootContainer = document.createElement('div')
+  document.body.append(rootContainer)
+  root = createRoot(rootContainer)
 })
 afterEach(async () => {
   await act(async () => root?.unmount())
@@ -271,4 +275,27 @@ it('reports a visible terminal awaiting attachment as unready, then observes the
   expect(current).toMatchObject({ runId: 'run-retained', visible: true, liveReady: true, acceptsInput: true, replaying: false, pendingItems: 0, pendingBytes: 0 })
   expect(current.readySinceAt).toBeGreaterThanOrEqual(current.visibleSinceAt!)
   expect(fixture.attach).toHaveBeenCalledOnce(); expect(fixture.detach).not.toHaveBeenCalled()
+})
+
+it('moves only the retained Terminal view to its actual document and keeps the original attachment and parser', async () => {
+  let currentDocument=document
+  const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>
+  await act(async()=>root!.render(tree()))
+  await act(async()=>vi.waitFor(()=>expect(fixture.terminals[0]?.completed).toContain('before ')))
+  const original=fixture.terminals[0]!, originalElement=(original as unknown as {element:HTMLElement}).element, originalGpu=fixture.webgl[0]!
+  expect(fixture.webgl).toHaveLength(1)
+  const frame=document.createElement('iframe');document.body.append(frame)
+  const child=frame.contentDocument!
+  child.body.append(child.adoptNode(rootContainer));currentDocument=child
+  await act(async()=>root!.render(tree()))
+  expect(fixture.terminals).toHaveLength(1);expect(fixture.terminals[0]).toBe(original);expect(original.open).toHaveBeenCalledTimes(2)
+  expect(originalGpu.disposed).toHaveBeenCalledOnce();expect(fixture.webgl).toHaveLength(2);expect(terminalResourceOwnerCounts().terminalAddons).toBe(4)
+  expect((original as unknown as {element:HTMLElement}).element).toBe(originalElement);expect(originalElement.ownerDocument).toBe(child)
+  await hiddenOutput('continued',7)
+  expect(original.buffer.active.getLine(0)?.translateToString(true)).toBe('before continued')
+  expect(original.dispose).not.toHaveBeenCalled();expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0)
+  expect(fixture.detach).not.toHaveBeenCalled();expect(fixture.unsubscribe).not.toHaveBeenCalled()
+  // The headless fixture proves the product consumer's attachment lifecycle. The real
+  // native-window gate separately verifies public xterm reparenting and GPU rendering.
+  await act(async()=>root!.unmount());root=null;frame.remove()
 })
