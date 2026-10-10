@@ -7,7 +7,11 @@ import { parseConversationChangesPage, type ConversationChangesPage, type Conver
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'scope'>
-export type PublicationPayload = {
+export type PermissionPublicationPayload = {
+  kind: 'permission'; disclosure: 'shared' | 'redacted'; title: string; context?: string; status: 'pending' | 'response-sent' | 'unconfirmed' | 'unavailable'
+  options: Array<{ label: string; actionRef: string }>
+}
+export type PublicationPayload = PermissionPublicationPayload | {
   kind: 'speech'
   text: string
   phase?: 'progress' | 'final'
@@ -33,7 +37,7 @@ export function publicDelivery(operation: PublicationOperation): ConnectionDeliv
   const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, ...delivery } = operation
   return parseConnectionDelivery(delivery)
 }
-type Decision = { recordId: string; revision: string; payload?: PublicationPayload; reason?: 'not-assistant-speech' | 'no-public-text' }
+type Decision = { recordId: string; revision: string; payload?: Extract<PublicationPayload, { kind: 'speech' }>; reason?: 'not-assistant-speech' | 'no-public-text' }
 export type PublicationPageOptions = {
   fragmentBytes?: number
   /** Only the original Core resource reader supplies these verified text parts for this one accepted page. */
@@ -48,7 +52,7 @@ const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>)
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
 /** Exact UTF-8 text fragments. The adapter declares its supported payload budget before admission. */
-function fragments(payload: PublicationPayload, byteLimit: number): PublicationPayload[] {
+function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byteLimit: number): PublicationPayload[] {
   if (!Number.isSafeInteger(byteLimit) || byteLimit < 4 || byteLimit > 128 * 1024)
     throw new AgentMuxError('The adapter must declare a bounded publication text budget.', 'INVALID_PUBLICATION_REQUEST')
   const texts: string[] = []
@@ -200,21 +204,43 @@ export class PublicationStore {
         .run(encode(page.checkpoint), ...scopeKey(boundary), source)
     })
   }
+  /** Original request projection uses this same outbox, not a fabricated history record or source cut. */
+  commitPermission(boundary: PublicationBoundary, projectionId: string, reference: ConnectionDelivery['reference'], payload: PermissionPublicationPayload): void {
+    this.transaction(() => {
+      const revision = digest(payload), prior = this.latestProjection(projectionId)
+      if (prior?.sourceRevision === revision && prior.state !== 'cancelled') return
+      const predecessor = this.appliedPredecessor(prior ?? undefined)
+      if (prior?.state === 'pending' || prior?.state === 'not-applied') this.write({ ...prior, state: 'superseded' })
+      const operationId = 'publication-' + digest([projectionId, prior?.operationId ?? null, revision])
+      const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision,
+        bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
+        reference, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
+        payload, effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending', ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
+      this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+        .run(operationId, projectionId, revision, 0, boundary.bindingId, boundary.revision, encode(operation), 'pending')
+    })
+  }
+  latestProjection(projectionId: string): PublicationOperation | null {
+    return this.read(this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? ORDER BY ordinal DESC LIMIT 1').get(projectionId))
+  }
+  confirmedMapping(projectionId: string): PublicationMapping | undefined {
+    return this.read(this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(projectionId))?.mapping
+  }
   private appliedPredecessor(value: PublicationOperation | undefined): PublicationOperation | null {
     let original = value ?? null
     while (original && ['pending', 'cancelled', 'superseded', 'not-applied'].includes(original.state))
       original = original.predecessorOperationId ? this.inspect(original.predecessorOperationId) : null
     return original
   }
-  next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>): PublicationOperation | null {
-    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') ORDER BY ordinal LIMIT 1").get(...scopeKey(boundary)))
+  next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): PublicationOperation | null {
+    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + ' ORDER BY ordinal LIMIT 1' ).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])) )
   }
   /** Save the exact effect identity before any adapter call. Unknown work blocks this audience alone. */
-  claimNext(boundary: PublicationBoundary, authorized: () => boolean, adapter: PublicationPreparer): PublicationOperation | null {
+  claimNext(boundary: PublicationBoundary, authorized: () => boolean, adapter: PublicationPreparer, projectionId?: string): PublicationOperation | null {
     return this.transaction(() => {
       if (!authorized()) return null
-      const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') ORDER BY ordinal LIMIT 1")
-        .get(...scopeKey(boundary)))
+      const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + ' ORDER BY ordinal LIMIT 1' )
+        .get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])))
       if (!first || first.state !== 'pending') return null
       if ((first.publicationScope ?? 'future-native-user-facing') !== boundary.scope.publication)
         throw new AgentMuxError('The original publication retains another sharing scope. Inspect its Binding revision without replacing the operation.', 'PUBLICATION_SCOPE_CONFLICT')

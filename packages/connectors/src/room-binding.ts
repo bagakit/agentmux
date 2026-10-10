@@ -90,7 +90,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   findGrant(input: { connectionId: string; externalConversationId: string; actor: ConnectionGrant['actor'] }): ConnectionGrant | null {
     return this.safe(() => { const row = this.database.prepare("SELECT h.grant_id FROM room_grant_head h JOIN room_binding_head b ON b.binding_id=h.binding_id JOIN room_grant_revision r ON r.grant_id=h.grant_id AND r.revision=h.revision WHERE h.connection_id=? AND h.room_id=? AND h.actor_json=? AND b.connection_id=h.connection_id AND b.room_id=h.room_id AND b.revision=json_extract(r.snapshot_json,'$.bindingRevision')").get(input.connectionId, input.externalConversationId, JSON.stringify(parseConnectionActor(input.actor))); return row ? this.readGrant(String(row.grant_id)) : null })
   }
-  private grants(binding: RoomBinding | null): ConnectionGrant[] {
+  grants(bindingId: string, revision: number): ConnectionGrant[] { return this.bindingGrants(this.readExact(bindingId, revision)).filter(grant => grant.bindingRevision === revision) }
+  private bindingGrants(binding: RoomBinding | null): ConnectionGrant[] {
     if (!binding) return []
     return this.safe(() => this.database.prepare('SELECT grant_id FROM room_grant_head WHERE binding_id=?').all(binding.bindingId).map(row => this.readGrant(String(row.grant_id))!).filter(grant => grant.bindingRevision === binding.revision))
   }
@@ -103,7 +104,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return this.safe(() => {
       const operation = input.operationId ? this.saved(input.operationId)?.operation ?? null : null
       const binding = input.bindingId ? input.revision === undefined ? this.readCurrent(input.bindingId) : this.readExact(input.bindingId, input.revision) : operation?.state === 'applied' ? operation.binding : null
-      return { binding, current: binding ? this.readCurrent(binding.bindingId) : null, operation, grants: this.grants(binding) }
+      return { binding, current: binding ? this.readCurrent(binding.bindingId) : null, operation, grants: this.bindingGrants(binding) }
     })
   }
   private writeBinding(binding: RoomBinding): void {

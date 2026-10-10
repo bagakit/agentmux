@@ -1,6 +1,8 @@
+import { isDeepStrictEqual } from 'node:util'
+import { PermissionActions } from './permission-actions.js'
 import { randomUUID } from 'node:crypto'
-import { AgentMuxError, parseAgentExternalMessageAuthor, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
-import { CONNECTION_INGRESS_AUTHORITY_CODES, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
+import { AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
+import { CONNECTION_INGRESS_AUTHORITY_CODES, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 
 /** Returned only by a Host-registered adapter after verifying the original transport proof. */
@@ -26,7 +28,7 @@ export interface IngressAuthenticator {
   /** Read the exact parent after persistence/ACK, outside original Core input admission. */
   qualifyReply?(config: ConnectionConfig, event: Readonly<VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal): Promise<'reply' | 'message' | 'unknown'>
 }
-export type DurableIngressCore = Pick<AgentMuxClient, 'readAgentSessions' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'>
+export type DurableIngressCore = Pick<AgentMuxClient, 'readAgentSessions' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation'>>
 export type DurableIngressOptions = {
   connections: ConnectionHost
   bindings: RoomBindingReadPort
@@ -52,10 +54,12 @@ function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
 
 /** Durable transport admission only. The original Core queue owns all Agent input and delivery facts. */
 export class DurableIngressHost implements ConnectionIngressReadPort {
+  readonly permissions: PermissionActions
   private readonly database
   private readonly authenticators: Map<string, IngressAuthenticator>
   private readonly pending = new Map<string, Promise<ConnectionIngressInspection>>()
   constructor(private readonly options: DurableIngressOptions) {
+    this.permissions = new PermissionActions(options)
     this.database = options.connections.database
     this.authenticators = new Map(options.authenticators.map(port => [port.adapterId, port]))
     if (this.authenticators.size !== options.authenticators.length) fail('INGRESS_AUTHENTICATOR_CONFLICT')
@@ -93,11 +97,10 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   private nextSequence(): number {
     return Number(this.database.prepare('SELECT max(sequence) AS sequence FROM (SELECT max(sequence) AS sequence FROM connection_ingress_message UNION ALL SELECT max(intake_sequence) AS sequence FROM connection_ingress_event WHERE record_json IS NOT NULL)').get()!.sequence ?? 0) + 1
   }
-  private write(record: ConnectionIngressMessage): ConnectionIngressMessage {
+  private write<T extends ConnectionIngressRecord>(record: T): T {
     const value = parseConnectionIngressRecord(record)
-    if (value.kind === 'action') fail('INVALID_CONNECTION_INGRESS')
-    this.database.prepare('UPDATE connection_ingress_message SET record_json=? WHERE ingress_id=?').run(JSON.stringify(value), value.ingressId)
-    return value
+    this.database.prepare(value.kind === 'action' ? 'UPDATE connection_ingress_event SET record_json=? WHERE ingress_id=? AND record_json IS NOT NULL' : 'UPDATE connection_ingress_message SET record_json=? WHERE ingress_id=?').run(JSON.stringify(value), value.ingressId)
+    return value as T
   }
   private assertService(): void {
     try { this.options.connections.assertServiceEnabled() }
@@ -127,7 +130,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       }
       if (event.kind === 'action') {
         const ingress = parseConnectionIngressRecord({ ...event, ingressId: `ingress:${randomUUID()}`, connectionId: input.connectionId,
-          application: current.config.application, state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' })
+          application: current.config.application, ...(this.permissions.supports(event) ? { state: 'received' } : { state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' }) })
         this.database.prepare('INSERT INTO connection_ingress_event (domain,app_id,event_id,ingress_id,event_json,raw_payload,record_json,connection_id,intake_sequence) VALUES (?,?,?,?,?,?,?,?,?)')
           .run(domain, appId, event.eventId, ingress.ingressId, encoded, input.raw, JSON.stringify(ingress), input.connectionId, this.nextSequence())
         return { ingress, duplicate: null }
@@ -151,7 +154,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   private binding(record: ConnectionIngressMessage): RoomBinding | null {
     return this.options.bindings.listActive({ connectionId: record.connectionId }).find(binding => equal(binding.application, record.application) && binding.externalConversationId === record.externalConversationId) ?? null
   }
-  private authorize(record: ConnectionIngressMessage, expected?: ConnectionIngressRecord['input'], allowPendingReply = false) {
+  private authorize(record: ConnectionIngressMessage, expected?: ConnectionIngressMessage['input'], allowPendingReply = false) {
     this.assertService()
     const connection = this.options.connections.readConfiguration(record.connectionId), binding = this.binding(record)
     if (!connection?.config.enabled || !equal(connection.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
@@ -219,6 +222,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     const intake = this.read(ingressId)
     if (!intake) fail('UNKNOWN_CONNECTION_INGRESS')
     if (intake.state !== 'received') return await this.inspect({ ingressId })
+    if (intake.kind === 'action') return await this.dispatchAction(intake)
     let record: ConnectionIngressMessage = intake
     let original: ReturnType<DurableIngressHost['authorize']>
     try {
@@ -232,7 +236,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     catch (error) {
       if (error instanceof AgentMuxError && ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED'].includes(error.code)) return await this.inspect({ ingressId })
       if (!(error instanceof AgentMuxError) || error.code === 'INGRESS_STORAGE_UNCONFIRMED') throw error
-      this.transaction(() => { const current = this.read(ingressId)!; if (current.state === 'received') this.write({ ...current, state: 'refused', code: error.code }) })
+      this.transaction(() => { const current = this.read(ingressId)!; if (current.kind !== 'action' && current.state === 'received') this.write({ ...current, state: 'refused', code: error.code }) })
       return await this.inspect({ ingressId })
     }
     const client = this.options.core(original.binding.executionHostId)
@@ -242,6 +246,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     const expectedRun = { ...exact[0]!.run }
     const claimed = this.transaction(() => {
       const current = this.read(ingressId)!
+      if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
       const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: `ingress-operation-${randomUUID()}`, messageId: `ingress-message-${randomUUID()}`, author: original.author }
       this.authorize(current, frozen)
@@ -256,9 +261,46 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     } catch { /* A Core call may have saved or dispatched input. Only inspect this original operation. */ }
     return await this.inspect({ ingressId })
   }
+  private async dispatchAction(original: ConnectionIngressAction): Promise<ConnectionIngressInspection> {
+    let claimed: ReturnType<PermissionActions['claim']> | undefined
+    this.transaction(() => {
+      const record = this.read(original.ingressId)
+      if (!record || record.kind !== 'action' || record.state !== 'received') return
+      try { this.assertService(); claimed = this.permissions.claim(record); this.write(claimed.record) }
+      catch (error) {
+        // A service or storage observation gap cannot consume this already acknowledged original event.
+        if (error instanceof AgentMuxError && ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED', 'INGRESS_STORAGE_UNCONFIRMED'].includes(error.code)) return
+        if (!(error instanceof AgentMuxError) || !CONNECTION_INGRESS_AUTHORITY_CODES.includes(error.code as never)) throw error
+        this.write({ ...record, state: 'refused', code: error.code as ConnectionIngressAuthorityCode })
+      }
+    })
+    if (claimed?.own) {
+      const input = claimed.input, record = claimed.record
+      const client = this.options.core(record.input!.hostId)
+      if (client?.respondAgentInteraction) {
+        try { await client.respondAgentInteraction(input, { externalAction: { identity: record.input!.author,
+          assertCurrent: async intent => {
+            const authority = await this.authority({ operationId: input.operationId })
+            if (authority.authority !== 'current' || agentInteractionIntentDigest(intent) !== record.input!.intentDigest || !isDeepStrictEqual(intent.externalAction, record.input!.author)) fail('INGRESS_AUTHORITY_REVISED')
+          } } }) } catch { /* A Core response may be saved or written. Only inspect this exact operation. */ }
+      }
+    }
+    return await this.inspect({ ingressId: original.ingressId })
+  }
   async inspect(value: { ingressId: string }): Promise<ConnectionIngressInspection> {
     const input = parseIngressParams('connection.ingress.inspect', value), ingress = this.read(input.ingressId)
     if (!ingress?.input) return { ingress, inputReceipt: null, observation: 'not-started' }
+    if (ingress.kind === 'action') {
+      try {
+        const client = this.options.core(ingress.input.hostId)
+        if (!client?.inspectAgentInteractionOperation) return { ingress, inputReceipt: null, interactionReceipt: null, observation: 'unavailable' }
+        const receipt = await client.inspectAgentInteractionOperation({ agentSessionId: ingress.input.agentSessionId, operationId: ingress.input.operationId })
+        if (receipt && (agentInteractionIntentDigest({ ...receipt, expectedRun: receipt.run }) !== ingress.input.intentDigest || !isDeepStrictEqual(receipt.externalAction, ingress.input.author))) throw new Error('Foreign original interaction receipt.')
+        const interactionReceipt = receipt ? { operationId: receipt.operationId, agentSessionId: receipt.agentSessionId, run: receipt.run, delivery: receipt.delivery, nativeAdoption: receipt.nativeAdoption } : null
+        return parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt: null, interactionReceipt, observation: 'observed' }, input)
+      } catch { return { ingress, inputReceipt: null, interactionReceipt: null, observation: 'unavailable' } }
+    }
+
     try {
       const client = this.options.core(ingress.input.hostId)
       if (!client) return { ingress, inputReceipt: null, observation: 'unavailable' }
@@ -272,10 +314,11 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     let ingress: ConnectionIngressRecord | null = null
     try {
       return this.safe(() => {
-        const row = this.database.prepare("SELECT ingress_id FROM connection_ingress_message WHERE json_extract(record_json,'$.input.operationId')=?").get(input.operationId)
+        const row = this.database.prepare(`SELECT ingress_id FROM (${intakeRows}) WHERE json_extract(record_json,'$.input.operationId')=? ORDER BY sequence LIMIT 1`).get(input.operationId)
         ingress = row ? this.read(String(row.ingress_id)) : null
         if (!ingress?.input || ingress.state !== 'claimed') return { ingress: null, authority: 'refused', code: 'INGRESS_CLAIM_UNAVAILABLE' }
-        this.authorize(ingress, ingress.input)
+        if (ingress.kind === 'action') { this.assertService(); this.permissions.authorize(ingress); this.permissions.originalInput(ingress) }
+        else this.authorize(ingress, ingress.input)
         return { ingress, authority: 'current' }
       })
     } catch (error) {
@@ -287,7 +330,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   /** Explicitly rejoin a positively saved original Core wait; unknown effects are read only. */
   async rejoin(ingressId: string): Promise<ConnectionIngressInspection> {
     const original = await this.inspect({ ingressId })
-    if (original.ingress?.input && original.inputReceipt?.control.state === 'enabled') {
+    if (original.ingress?.kind !== 'action' && original.ingress?.input && original.inputReceipt?.control.state === 'enabled') {
       const client = this.options.core(original.ingress.input.hostId)
       if (!client) fail('INGRESS_CORE_UNAVAILABLE')
       await client.rejoinAgentInputWaiting({ ref: original.inputReceipt.ref }, this.context(original.ingress))
@@ -308,9 +351,9 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   received(connectionId: string, afterIngressId?: string, limit = 25): { ingressIds: string[]; nextAfterIngressId: string | null } {
     return this.safe(() => {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
-      const after = afterIngressId ? this.database.prepare('SELECT sequence FROM connection_ingress_message WHERE connection_id=? AND ingress_id=?').get(connectionId, afterIngressId) : undefined
+      const after = afterIngressId ? this.database.prepare(`SELECT sequence FROM (${intakeRows}) WHERE connection_id=? AND ingress_id=?`).get(connectionId, afterIngressId) : undefined
       if (afterIngressId && !after) fail('INGRESS_CURSOR_MISMATCH')
-      const rows = this.database.prepare("SELECT ingress_id FROM connection_ingress_message WHERE connection_id=? AND json_extract(record_json,'$.state')='received' AND sequence>? ORDER BY sequence LIMIT ?")
+      const rows = this.database.prepare(`SELECT ingress_id FROM (${intakeRows}) WHERE connection_id=? AND json_extract(record_json,'$.state')='received' AND sequence>? ORDER BY sequence LIMIT ?`)
         .all(connectionId, Number(after?.sequence ?? 0), limit + 1)
       const ingressIds = rows.slice(0, limit).map(row => String(row.ingress_id))
       return { ingressIds, nextAfterIngressId: rows.length > ingressIds.length ? ingressIds.at(-1)! : null }
