@@ -44,9 +44,10 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   expect(delivery).toContain('platform note and joins the continuation prompt')
   expect(delivery).toContain('Selected nonempty content is sent in one new input')
   expect(delivery).toContain('If neither part has content, no input is sent')
-  expect(delivery).toContain('same original input key and Provider acceptance record')
+  expect(delivery).toContain('same original input key and actual transport or delivery receipt')
+  expect(delivery).toContain('native launch argument receipt confirms Runtime carriage only; Provider consumption requires separate evidence')
   expect(delivery).toContain('ordinary User role and open one turn')
-  expect(delivery).toContain('Provider acceptance does not mean the model completed the task')
+  expect(delivery).toContain('delivery does not mean the model completed the task')
   const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
     const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
     useAppStore.setState({ config: saved }); return saved
