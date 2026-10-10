@@ -1,3 +1,4 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import type { RegionGeometry } from '@agentmux/layout'
 import type { WorkbenchTab } from '../lib/workbench-tabs'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
@@ -158,6 +159,8 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
   /** The parent may suspend this preview while its own menu or editor is open. */
   enabled?: boolean
 }) {
+  const document = useWorkbenchDocument()
+  const window = document.defaultView!
   const TabEntry = interactive ? 'button' : 'span'
 
   const popoverId = useId()
@@ -171,7 +174,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
   const inspected = tabs.find((tab, index) => entryKey(tab, index) === inspectedKey) ?? active
   const [aspectRatio, setAspectRatio] = useState(16 / 10)
   const label = `${tabs.length} ${tabs.length === 1 ? 'Tab' : 'Tabs'}. Hover or focus a Tab to inspect its Regions and recent activity.`
-  const overlayHost = getWindowOverlayHost()
+  const overlayHost = getWindowOverlayHost(document)
   const inspectorInPortal = enabled && inspectorOpen && overlayHost !== null
 
   const inspectTab = (key: string) => {
@@ -189,7 +192,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
     }
     document.addEventListener('keydown', dismiss, true)
     return () => document.removeEventListener('keydown', dismiss, true)
-  }, [inspectorInPortal])
+  }, [inspectorInPortal, document])
 
   useIsomorphicLayoutEffect(() => {
     if (!inspectorInPortal) {
@@ -230,7 +233,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
       window.removeEventListener('resize', updatePosition)
       window.removeEventListener('scroll', updatePosition, true)
     }
-  }, [inspected, inspectorInPortal, aspectRatio])
+  }, [inspected, inspectorInPortal, aspectRatio, document])
 
   const inspectorClassName = `workbench-topology__inspector${inspectorInPortal ? ' workbench-topology__inspector--portal' : ''}`
   const inspector = (

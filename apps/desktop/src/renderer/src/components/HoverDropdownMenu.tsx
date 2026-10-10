@@ -3,14 +3,15 @@ import {
   createContext, forwardRef, useContext, useEffect, useRef, useState,
   type ComponentPropsWithoutRef, type PointerEvent
 } from 'react'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 // Radix owns selection, dismissal, keyboard navigation and portals. This adapter adds mouse
 // disclosure and routes portals to the window overlay host or explicit container.
 export { Group, Separator, Label, RadioGroup, ItemIndicator } from '@radix-ui/react-dropdown-menu'
 
 export function Portal({ container, ...props }: ComponentPropsWithoutRef<typeof Menu.Portal>) {
-  return <Menu.Portal container={resolveOverlayContainer(container)} {...props} />
+  return <DocumentOverlayPortal component={Menu.Portal} container={container} {...props} />
 }
 const OPEN_EVENT = 'agentmux:hover-menu-open'
 const Context = createContext<{
@@ -46,7 +47,7 @@ function useItemPointerHandlers({ disabled, onPointerMove, onPointerLeave, onPoi
       event.preventDefault()
       // The same leave reaches Content already cancelled for Radix focus. A direct exit
       // therefore asks the original disclosure owner to close; crossing rows/gaps does not.
-      if (!(event.relatedTarget instanceof Node && menu.content.current?.contains(event.relatedTarget))) {
+      if (!(event.relatedTarget && (event.relatedTarget as Node).nodeType && menu.content.current?.contains(event.relatedTarget as Node))) {
         menu.leave(event)
       }
     },
@@ -76,6 +77,8 @@ export const CheckboxItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
 )
 
 export function Root({ open: controlled, onOpenChange, children }: ComponentPropsWithoutRef<typeof Menu.Root>) {
+  const document = useWorkbenchDocument()
+  const ownerWindow = document.defaultView!
   const [local, setLocal] = useState(false)
   const open = controlled ?? local
   const openRef = useRef(open)
@@ -91,7 +94,7 @@ export function Root({ open: controlled, onOpenChange, children }: ComponentProp
   function change(next: boolean) {
     cancelClose()
     if (openRef.current === next) return
-    if (next) window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: identity.current }))
+    if (next) ownerWindow.dispatchEvent(new ownerWindow.CustomEvent(OPEN_EVENT, { detail: identity.current }))
     openRef.current = next
     setLocal(next)
     notify.current?.(next)
@@ -102,13 +105,13 @@ export function Root({ open: controlled, onOpenChange, children }: ComponentProp
     const closeOther = (event: Event) => {
       if ((event as CustomEvent).detail !== identity.current) changeRef.current(false)
     }
-    window.addEventListener(OPEN_EVENT, closeOther)
+    ownerWindow.addEventListener(OPEN_EVENT, closeOther)
     return () => {
       cancelClose()
-      window.removeEventListener(OPEN_EVENT, closeOther)
+      ownerWindow.removeEventListener(OPEN_EVENT, closeOther)
       if (openRef.current) notify.current?.(false)
     }
-  }, [])
+  }, [ownerWindow])
   function enter(event: PointerEvent) {
     if (event.pointerType !== 'mouse' || event.buttons !== 0) return
     cancelClose()
