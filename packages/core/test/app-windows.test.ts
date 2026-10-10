@@ -174,6 +174,17 @@ describe('original desktop document facts', () => {
       expect(() => parseDesktopFocusSuccessReceipt(receipt)).toThrow('confirmation is inconsistent')
     }
   })
+  it('requires a transferred caret to match an explicitly observed main document too', () => {
+    const receipt = focusedWindow()
+    receipt.result.presentation.state = 'main-visible'
+    const input = receipt.result.input as { before: { scope: string }; after: { scope: string } }
+    input.before.scope = 'main'; input.after.scope = 'main'
+    expect(parseDesktopFocusSuccessReceipt(receipt)).toEqual(receipt)
+    for (const key of ['windowId', 'documentGeneration'] as const) {
+      const forged = structuredClone(receipt); forged.result.input.after[key] = 'another-native-owner'
+      expect(() => parseDesktopFocusSuccessReceipt(forged)).toThrow('confirmation is inconsistent')
+    }
+  })
   it('does not certify preserved input after the native document identity changes', () => {
     const receipt = focusedWindow('preserve')
     expect(parseDesktopFocusSuccessReceipt(receipt)).toEqual(receipt)

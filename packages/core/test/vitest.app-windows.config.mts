@@ -15,7 +15,7 @@ const changes = {
   exactForward: [service, 'this.ports.forwardControl!<AppWindowMethod>(method, input, context)', 'this.ports.forwardControl!<AppWindowMethod>(method, {} as never, context)'],
   pairedDocument: [focus, '(required && !hasWindow)', 'false'],
   preserveDocument: [focus, "['scope', 'ownerKind', 'tabId', 'regionId', 'sessionId', 'windowId', 'documentGeneration'].some", "['scope', 'ownerKind', 'tabId', 'regionId', 'sessionId', 'windowId'].some"],
-  transferDocument: [focus, "(result.presentation.state === 'window' && (observedInput.after.scope", '(false && (observedInput.after.scope']
+  transferDocument: [focus, 'result.presentation.windowId !== undefined &&', 'false &&']
 } as const
 const sha = (s: string) => createHash('sha256').update(s).digest('hex')
 export default defineConfig({ plugins: [{ name: 'original-window-contract-mutants', enforce: 'pre', transform(source, id) {
