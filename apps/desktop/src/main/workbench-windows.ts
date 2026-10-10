@@ -48,6 +48,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   private rendererAvailable = false
   private storageWritable = true
   private issue: string | null = null
+  private focusIssue: WorkbenchWindowDocument | null = null
   private quitting = false
   private disposed = false
   private readonly windows = new Map<string, ManagedWindow>()
@@ -80,7 +81,8 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
       if (mainFrame && !inPlace) this.departRenderer()
     })
     main.webContents.on('render-process-gone', () => this.departRenderer())
-    for (const event of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore', 'resize', 'move'] as const) (main.on as (event: string, listener: () => void) => BrowserWindow)(event, () => this.changed())
+    main.on('focus', () => { this.confirmFocus({ windowId: this.mainId, documentGeneration: this.mainGeneration }, main); this.changed() })
+    for (const event of ['blur', 'show', 'hide', 'minimize', 'restore', 'resize', 'move'] as const) (main.on as (event: string, listener: () => void) => BrowserWindow)(event, () => this.changed())
   }
 
   setNativeOwner(owner: WorkbenchNativeWindowOwner): () => void {
@@ -206,7 +208,8 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
       if (record.native === window && this.windows.get(record.windowId) === record && !this.mayClose.has(window.id)) this.departChild(record, window, generation)
       this.mayClose.delete(window.id)
     })
-    for (const event of ['focus', 'blur', 'show', 'hide', 'minimize', 'restore'] as const) (window.on as (event: string, listener: () => void) => BrowserWindow)(event, () => this.changed())
+    window.on('focus', () => { this.confirmFocus({ windowId: record.windowId, documentGeneration: generation }, window); this.changed() })
+    for (const event of ['blur', 'show', 'hide', 'minimize', 'restore'] as const) (window.on as (event: string, listener: () => void) => BrowserWindow)(event, () => this.changed())
     let geometrySave: ReturnType<typeof setTimeout> | undefined
     const resized = () => {
       if (window.isDestroyed()) return
@@ -282,7 +285,8 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     const native = this.windowForDocument(scope)
     this.focusNative(native)
     const confirmed = native.isFocused()
-    if (!confirmed) this.warn('Native workface focus has not been confirmed. Original content and input remain; focus its recorded window directly.')
+    if (!confirmed) this.warn('Native workface focus has not been confirmed. Original content and input remain; focus its recorded window directly.', scope)
+    else if (this.confirmFocus(scope, native)) this.changed()
     return confirmed
   }
 
@@ -516,11 +520,19 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     try { await this.store.save({ mainWindowId: this.mainId, windows: [...this.windows.values()].filter(record => record.durable && record.windowId !== excludeWindowId).map(({ windowId, target, geometry }) => ({ windowId, target, geometry })) }); return true }
     catch (error) { this.warn(`Window arrangement persistence is unconfirmed. Original work remains. ${String(error)}`); return false }
   }
-  private warn(issue: string): void { this.issue = issue; this.changed() }
+  private confirmFocus(scope: WorkbenchWindowDocument, native: BrowserWindow): boolean {
+    if (!this.focusIssue || this.focusIssue.windowId !== scope.windowId || this.focusIssue.documentGeneration !== scope.documentGeneration || native.isDestroyed() || !native.isFocused()) return false
+    const current = native === this.main ? scope.windowId === this.mainId && scope.documentGeneration === this.mainGeneration
+      : this.windows.get(scope.windowId)?.native === native && this.windows.get(scope.windowId)?.generation === scope.documentGeneration
+    if (!current) return false
+    this.focusIssue = null; this.issue = null
+    return true
+  }
+  private warn(issue: string, focus?: WorkbenchWindowDocument): void { this.issue = issue; this.focusIssue = focus ? { ...focus } : null; this.changed() }
   private changed(): void {
     if (!this.disposed && this.rendererAvailable && !this.main.isDestroyed() && !this.main.webContents.isDestroyed()) {
       try { this.main.webContents.send(WORKBENCH_WINDOW_CHANGED, { windows: this.descriptors(), issue: this.issue }) }
-      catch { this.issue = 'The original interface document changed before the window observation arrived. Original workfaces and Agents remain.' }
+      catch { this.focusIssue = null; this.issue = 'The original interface document changed before the window observation arrived. Original workfaces and Agents remain.' }
     }
   }
   private assertSender(sender: WebContents, frame: WebFrameMain | null): void {
