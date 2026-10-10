@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 36e8941b97d6746e986422f9aeefacdff84604d8..492feeeb944f648ef56f4193a79fcbe26359bce2 100644
+index 36e8941b97..5501d74f40 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -113,27 +113,38 @@ var usePopperScope = (0, import_react_popper.createPopperScope)();
@@ -56,8 +56,31 @@ index 36e8941b97d6746e986422f9aeefacdff84604d8..492feeeb944f648ef56f4193a79fcbe2
    React.useEffect(() => {
      if (!open) {
        return;
+@@ -274,7 +285,7 @@ var MenuContentImpl = React.forwardRef(
+     const handleTypeaheadSearch = (key) => {
+       const search = searchRef.current + key;
+       const items = getItems().filter((item) => !item.disabled);
+-      const currentItem = document.activeElement;
++      const currentItem = items[0]?.ref.current?.ownerDocument.activeElement;
+       const currentMatch = items.find((item) => item.ref.current === currentItem)?.textValue;
+       const values = items.map((item) => item.textValue);
+       const nextMatch = getNextMatch(values, search, currentMatch);
+@@ -859,11 +870,11 @@ function getCheckedState(checked) {
+   return isIndeterminate(checked) ? "indeterminate" : checked ? "checked" : "unchecked";
+ }
+ function focusFirst(candidates) {
+-  const PREVIOUSLY_FOCUSED_ELEMENT = document.activeElement;
++  const PREVIOUSLY_FOCUSED_ELEMENT = candidates[0]?.ownerDocument.activeElement;
+   for (const candidate of candidates) {
+     if (candidate === PREVIOUSLY_FOCUSED_ELEMENT) return;
+     candidate.focus();
+-    if (document.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
++    if (candidate.ownerDocument.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
+   }
+ }
+ function wrapArray(array, startIndex) {
 diff --git a/dist/index.mjs b/dist/index.mjs
-index c3cbde4ff184b07ddaf6b952c9cba720e3192fb4..acfb19fa4cd3f08e13df47ed95903155268c7ba5 100644
+index c3cbde4ff1..d052b14337 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -46,27 +46,38 @@ var usePopperScope = createPopperScope();
@@ -114,3 +137,26 @@ index c3cbde4ff184b07ddaf6b952c9cba720e3192fb4..acfb19fa4cd3f08e13df47ed95903155
    React.useEffect(() => {
      if (!open) {
        return;
+@@ -207,7 +218,7 @@ var MenuContentImpl = React.forwardRef(
+     const handleTypeaheadSearch = (key) => {
+       const search = searchRef.current + key;
+       const items = getItems().filter((item) => !item.disabled);
+-      const currentItem = document.activeElement;
++      const currentItem = items[0]?.ref.current?.ownerDocument.activeElement;
+       const currentMatch = items.find((item) => item.ref.current === currentItem)?.textValue;
+       const values = items.map((item) => item.textValue);
+       const nextMatch = getNextMatch(values, search, currentMatch);
+@@ -792,11 +803,11 @@ function getCheckedState(checked) {
+   return isIndeterminate(checked) ? "indeterminate" : checked ? "checked" : "unchecked";
+ }
+ function focusFirst(candidates) {
+-  const PREVIOUSLY_FOCUSED_ELEMENT = document.activeElement;
++  const PREVIOUSLY_FOCUSED_ELEMENT = candidates[0]?.ownerDocument.activeElement;
+   for (const candidate of candidates) {
+     if (candidate === PREVIOUSLY_FOCUSED_ELEMENT) return;
+     candidate.focus();
+-    if (document.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
++    if (candidate.ownerDocument.activeElement !== PREVIOUSLY_FOCUSED_ELEMENT) return;
+   }
+ }
+ function wrapArray(array, startIndex) {

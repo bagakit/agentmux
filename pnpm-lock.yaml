@@ -8,8 +8,10 @@ overrides:
   '@ctxmux/sdk@0.0.0': file:packages/core/vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz
 
 patchedDependencies:
-  '@radix-ui/react-menu@2.1.20': 750fd2f9629013b52d6edc3e7c5e24c5422e631fd8c08fc4fb243662bd80c903
-  '@xterm/xterm@6.1.0-beta.303': 86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6
+  '@radix-ui/react-menu@2.1.20': b38917d70564a14d4b518a3a2f1253c8743abeb4d382065963e71534e3f6f9f3
+  '@radix-ui/react-roving-focus@1.1.15': 1bb741197a55de7696737b96f40411ebd6c32d428c47a586eb41200a2d936667
+  '@xterm/xterm@6.1.0-beta.303': 9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754
+  monaco-editor@0.56.0: a4545a28114bc2073290a846e1a838baf6536b2803e163a42caf15241c206c7d
   node-diff3@3.2.1: 921b08abe21722b700dcb6036f7a33eebf583f414dbb286e8a02541ff17a0d48
 
 importers:
@@ -63,7 +65,7 @@ importers:
         version: 1.8.0
       '@monaco-editor/react':
         specifier: ^4.7.0
-        version: 4.7.0(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 4.7.0(monaco-editor@0.56.0(patch_hash=a4545a28114bc2073290a846e1a838baf6536b2803e163a42caf15241c206c7d))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@noble/hashes':
         specifier: 2.4.0
         version: 2.4.0
@@ -81,7 +83,7 @@ importers:
         version: 2.1.20(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-roving-focus':
         specifier: 1.1.15
-        version: 1.1.15(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 1.1.15(patch_hash=1bb741197a55de7696737b96f40411ebd6c32d428c47a586eb41200a2d936667)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@tanstack/react-virtual':
         specifier: 3.14.13
         version: 3.14.13(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -102,25 +104,25 @@ importers:
         version: 3.31.0
       '@xterm/addon-fit':
         specifier: 0.12.0-beta.300
-        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
+        version: 0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))
       '@xterm/addon-search':
         specifier: 0.17.0-beta.300
-        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
+        version: 0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.300
-        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))
       '@xterm/addon-web-links':
         specifier: 0.13.0-beta.300
-        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
+        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.299
-        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
+        version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))
       '@xterm/headless':
         specifier: ^5.5.0
         version: 5.5.0
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+        version: 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
       '@xyflow/react':
         specifier: 12.12.0
         version: 12.12.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -141,7 +143,7 @@ importers:
         version: 12.1.0
       monaco-editor:
         specifier: ^0.56.0
-        version: 0.56.0
+        version: 0.56.0(patch_hash=a4545a28114bc2073290a846e1a838baf6536b2803e163a42caf15241c206c7d)
       papaparse:
         specifier: 5.5.3
         version: 5.5.3
@@ -311,7 +313,7 @@ importers:
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+        version: 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
       lucide-react:
         specifier: ^0.468.0
         version: 0.468.0(react@19.2.8)
@@ -378,10 +380,10 @@ importers:
         version: 3.31.3
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.300
-        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))
+        version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))
       '@xterm/xterm':
         specifier: 6.1.0-beta.303
-        version: 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+        version: 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
       entities:
         specifier: 7.0.1
         version: 7.0.1
@@ -5358,10 +5360,10 @@ snapshots:
     dependencies:
       state-local: 1.0.7
 
-  '@monaco-editor/react@4.7.0(monaco-editor@0.56.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@monaco-editor/react@4.7.0(monaco-editor@0.56.0(patch_hash=a4545a28114bc2073290a846e1a838baf6536b2803e163a42caf15241c206c7d))(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@monaco-editor/loader': 1.7.0
-      monaco-editor: 0.56.0
+      monaco-editor: 0.56.0(patch_hash=a4545a28114bc2073290a846e1a838baf6536b2803e163a42caf15241c206c7d)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
@@ -5517,7 +5519,7 @@ snapshots:
     dependencies:
       '@radix-ui/primitive': 1.1.5
       '@radix-ui/react-context': 1.2.0(@types/react@19.2.18)(react@19.2.8)
-      '@radix-ui/react-menu': 2.1.20(patch_hash=750fd2f9629013b52d6edc3e7c5e24c5422e631fd8c08fc4fb243662bd80c903)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-menu': 2.1.20(patch_hash=b38917d70564a14d4b518a3a2f1253c8743abeb4d382065963e71534e3f6f9f3)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-primitive': 2.1.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-use-controllable-state': 1.2.3(@types/react@19.2.18)(react@19.2.8)
       react: 19.2.8
@@ -5628,7 +5630,7 @@ snapshots:
       '@radix-ui/react-compose-refs': 1.1.3(@types/react@19.2.18)(react@19.2.8)
       '@radix-ui/react-context': 1.2.0(@types/react@19.2.18)(react@19.2.8)
       '@radix-ui/react-id': 1.1.2(@types/react@19.2.18)(react@19.2.8)
-      '@radix-ui/react-menu': 2.1.20(patch_hash=750fd2f9629013b52d6edc3e7c5e24c5422e631fd8c08fc4fb243662bd80c903)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-menu': 2.1.20(patch_hash=b38917d70564a14d4b518a3a2f1253c8743abeb4d382065963e71534e3f6f9f3)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-primitive': 2.1.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-use-controllable-state': 1.2.3(@types/react@19.2.18)(react@19.2.8)
       react: 19.2.8
@@ -5715,7 +5717,7 @@ snapshots:
     optionalDependencies:
       '@types/react': 19.2.18
 
-  '@radix-ui/react-menu@2.1.20(patch_hash=750fd2f9629013b52d6edc3e7c5e24c5422e631fd8c08fc4fb243662bd80c903)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@radix-ui/react-menu@2.1.20(patch_hash=b38917d70564a14d4b518a3a2f1253c8743abeb4d382065963e71534e3f6f9f3)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@radix-ui/primitive': 1.1.5
       '@radix-ui/react-collection': 1.1.12(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -5730,7 +5732,7 @@ snapshots:
       '@radix-ui/react-portal': 1.1.13(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-presence': 1.1.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-primitive': 2.1.7(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@radix-ui/react-roving-focus': 1.1.15(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-roving-focus': 1.1.15(patch_hash=1bb741197a55de7696737b96f40411ebd6c32d428c47a586eb41200a2d936667)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-slot': 1.3.0(@types/react@19.2.18)(react@19.2.8)
       '@radix-ui/react-use-callback-ref': 1.1.2(@types/react@19.2.18)(react@19.2.8)
       aria-hidden: 1.2.6
@@ -5915,7 +5917,7 @@ snapshots:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
 
-  '@radix-ui/react-roving-focus@1.1.15(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@radix-ui/react-roving-focus@1.1.15(patch_hash=1bb741197a55de7696737b96f40411ebd6c32d428c47a586eb41200a2d936667)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@radix-ui/primitive': 1.1.5
       '@radix-ui/react-collection': 1.1.12(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -6661,29 +6663,29 @@ snapshots:
 
   '@xmldom/xmldom@0.9.12': {}
 
-  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
+  '@xterm/addon-fit@0.12.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
 
-  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
+  '@xterm/addon-search@0.17.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
 
-  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
+  '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
 
-  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
+  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
 
-  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6))':
+  '@xterm/addon-webgl@0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754))':
     dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)
+      '@xterm/xterm': 6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)
 
   '@xterm/headless@5.5.0': {}
 
-  '@xterm/xterm@6.1.0-beta.303(patch_hash=86343e9131f01bf65f22f0eecefb6f1e5326cccfd213c0f53d387894416701d6)': {}
+  '@xterm/xterm@6.1.0-beta.303(patch_hash=9e4d696ee1abd8f9d753b3af34b7b3254d574543c16f0cf7a82fbb421d456754)': {}
 
   '@xyflow/react@12.12.0(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
@@ -8004,7 +8006,7 @@ snapshots:
     dependencies:
       minipass: 7.1.3
 
-  monaco-editor@0.56.0:
+  monaco-editor@0.56.0(patch_hash=a4545a28114bc2073290a846e1a838baf6536b2803e163a42caf15241c206c7d):
     dependencies:
       dompurify: 3.4.8
       marked: 14.0.0
