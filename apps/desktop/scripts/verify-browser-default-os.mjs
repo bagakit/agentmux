@@ -188,7 +188,8 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
         const current = await observation(), matching = regions(current).filter(region => region.kind === 'browser' && region.url === url && !region.loading)
         return matching.length >= minimum && { current, matching }
       }, 'Actual new original Browser for ' + url)
-      const targets = await rpc.call('browser.targets', {}), catalog = (await rpc.call('space.ls', { target: {} })).catalog
+      const targets = await rpc.call('browser.targets', {}), catalog = (await rpc.call('space.ls', { target: {}, presentation: true })).catalog
+      receipt.lastSurveyPageObservation = { url, browsers: value.matching, targets, catalog }
       const pageReads = []
       for (const region of value.matching) {
         assert.equal(region.workspaceId, '__scratch__')
