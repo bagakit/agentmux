@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
-import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -93,8 +93,9 @@ async function browserBundle(name, wrongRoot = false) {
   else {
     assert(!failure, name + ': actual product browser bundle must pass: ' + (failure?.message ?? ''))
     const metadata = Object.keys(result.metafile.inputs).map(path => resolve(repository, path))
-    assert(metadata.includes(owner) && metadata.includes(join(repository, 'packages/core/dist/sharing.js')), name + ': actual product and public pure Core entry must be consumed')
-    assert(!metadata.includes(join(repository, 'packages/core/dist/index.js')) && nodeImports.length === 0, name + ': Native Core root must not enter the browser graph')
+    const [sharingEntry, coreEntry] = await Promise.all(['sharing.js', 'index.js'].map(file => realpath(join(repository, 'packages/core/dist', file))))
+    assert(metadata.includes(owner) && metadata.includes(sharingEntry), name + ': actual product and public pure Core entry must be consumed')
+    assert(!metadata.includes(coreEntry) && nodeImports.length === 0, name + ': Native Core root must not enter the browser graph')
     assert(result.outputFiles.length === 1 && result.outputFiles[0].contents.length > 0 && Object.values(result.metafile.outputs).some(file => file.exports.includes('openSystemUrlInSurvey')), name + ': nonempty actual browser consumer export')
   }
   for (const [path, sha] of inputs) assert(hash(await readFile(path)) === sha, name + ': a loaded input changed')
