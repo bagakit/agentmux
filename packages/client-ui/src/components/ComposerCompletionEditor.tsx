@@ -48,13 +48,14 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
   const queryText = queryKind ? range!.query : ''
   const open = Boolean(queryKind && (suggestions.length || completionFeedback))
   useLayoutEffect(() => {
-    const anchor = shell.current, floating = panel.current
+    const anchor = shell.current?.closest<HTMLElement>('.composer') ?? shell.current, floating = panel.current
     if (!open || !anchor || !floating) return
     let current = true
     const update = async () => {
       const result = await computePosition(anchor, floating, { strategy: 'fixed', placement: 'top-start',
         middleware: [offset(6), flip({ padding: 8 }), shift({ padding: 8 }), size({ padding: 8, apply({ availableHeight, availableWidth, rects }) {
-          Object.assign(floating.style, { maxHeight: `${Math.max(0, availableHeight)}px`, maxWidth: `${Math.max(0, availableWidth)}px`, width: `${Math.min(Math.max(rects.reference.width, 260), Math.max(0, availableWidth))}px` })
+          floating.style.setProperty('--composer-completion-available-height', `${Math.max(0, availableHeight)}px`)
+          Object.assign(floating.style, { maxWidth: `${Math.max(0, availableWidth)}px`, width: `${Math.min(560, rects.reference.width, Math.max(0, availableWidth))}px` })
         } })] })
       if (current) Object.assign(floating.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
     }
@@ -82,18 +83,42 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
     if (shortcut === 'message-tool.dismiss-suggestions') {
       event.preventDefault(); setDismissed(queryKey); focusEditor(); return true
     }
-    if (shortcut !== 'message-tool.next' && shortcut !== 'message-tool.previous' && shortcut !== 'message-tool.send') return false
+    const horizontalKey = event.key === 'ArrowLeft' || event.key === 'ArrowRight'
+    if (shortcut !== 'message-tool.next' && shortcut !== 'message-tool.previous' && shortcut !== 'message-tool.send' && !horizontalKey) return false
     const buttons = [...(panel.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
     if (!buttons.length) return false
     const current = buttons.indexOf(panel.current?.ownerDocument.activeElement as HTMLButtonElement)
+    const horizontal = current >= 0 && horizontalKey
+    if (horizontalKey && !horizontal) return false
     if (shortcut === 'message-tool.send') {
       if (current < 0) return false
       event.preventDefault(); buttons[current]!.click(); return true
     }
     event.preventDefault()
-    const next = current < 0 ? (shortcut === 'message-tool.next' ? 0 : buttons.length - 1)
-      : (current + (shortcut === 'message-tool.next' ? 1 : -1) + buttons.length) % buttons.length
-    buttons[next]!.focus(); return true
+    const forward = horizontal ? event.key === 'ArrowRight' : shortcut === 'message-tool.next'
+    let next = current < 0 ? (forward ? 0 : buttons.length - 1)
+      : (current + (forward ? 1 : -1) + buttons.length) % buttons.length
+    if (current >= 0 && !horizontal) {
+      // Follow rendered rows across groups; CSS alone owns the column count.
+      const rects = buttons.map(button => button.getBoundingClientRect()), origin = rects[current]!
+      const rows = rects.map((rect, index) => ({ rect, index })).filter(({ rect }) =>
+        forward ? rect.top > origin.top + 1 : rect.top < origin.top - 1)
+      if (rows.length) {
+        const row = forward ? Math.min(...rows.map(({ rect }) => rect.top)) : Math.max(...rows.map(({ rect }) => rect.top))
+        const column = origin.left + origin.width / 2
+        next = rows.filter(({ rect }) => Math.abs(rect.top - row) < 1)
+          .sort((a, b) => Math.abs(a.rect.left + a.rect.width / 2 - column) - Math.abs(b.rect.left + b.rect.width / 2 - column))[0]!.index
+      } else if (origin.height > 0) next = current
+    }
+    buttons[next]!.focus({ preventScroll: true })
+    const list = panel.current?.querySelector<HTMLElement>('.composer__suggestions')
+    if (list) {
+      const bounds = list.getBoundingClientRect(), target = buttons[next]!.getBoundingClientRect()
+      const heading = buttons[next]!.closest('.composer__suggestion-group')?.querySelector('h4')?.getBoundingClientRect().height ?? 0
+      if (target.top < bounds.top + heading) list.scrollTop += target.top - bounds.top - heading
+      else if (target.bottom > bounds.bottom) list.scrollTop += target.bottom - bounds.bottom
+    }
+    return true
   }
   const groups = new Map<string, ComposerSuggestion[]>()
   for (const item of suggestions) {
@@ -117,10 +142,11 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
     {open ? createPortal(<div ref={panel} className="composer-completion-popover" style={{ position: 'fixed', visibility: 'hidden' }}>
     {suggestions.length ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${range!.kind}`} onKeyDown={suggestionKeyDown}>
       {[...groups].map(([group, items]) => {
-        const options = items.map((item, index) => <button type="button" role="option" aria-selected="false" key={item.id ?? `${group}:${index}:${item.text}`}
+        const options = items.map((item, index) => <button type="button" role="option" aria-selected="false" key={item.id ?? `${group}:${index}:${item.text}`} title={`${item.label ?? item.text}\n${item.description}`}
           onClick={() => choose(item)}>{item.icon ? <span className="composer__suggestion-icon">{item.icon}</span> : null}
           <span className="composer__suggestion-label">{item.label ?? item.text}</span><small>{item.description}</small></button>)
-        return group && groups.size > 1 ? <div className="composer__suggestion-group" role="group" aria-label={group} key={group}><h4>{group}</h4>{options}</div> : options
+        const label = group || ({ command: 'Commands', skill: 'Skills', reference: 'Agents & files', keyword: 'Prompts' }[range!.kind])
+        return <div className="composer__suggestion-group" role="group" aria-label={label} key={group}>{groups.size > 1 ? <h4>{label}<span>{items.length}</span></h4> : null}{options}</div>
       })}
     </div> : null}
     {completionFeedback ? <div className="composer__suggestion-feedback" role="status">{completionFeedback}</div> : null}
