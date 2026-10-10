@@ -61,7 +61,9 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   const memberKey = (idType: string, userId: string) => JSON.stringify([binding?.bindingId, binding?.revision, idType, userId])
   selectedMember.current = memberKey(actorType, actorId)
   const activeAudience = useRef(''); activeAudience.current = JSON.stringify([binding?.bindingId, binding?.revision])
-  const actorGrant = actors && binding && actors.bindingId === binding.bindingId && actors.revision === binding.revision ? actors.grants.find(grant => grant.actor.idType === actorType && grant.actor.userId === actorId) : undefined
+  const currentGrants = actors && binding && actors.bindingId === binding.bindingId && actors.revision === binding.revision
+    ? actors.grants.filter(grant => grant.actor.application.domain === binding.application.domain && grant.actor.application.appId === binding.application.appId) : []
+  const actorGrant = currentGrants.find(grant => grant.actor.idType === actorType && grant.actor.userId === actorId)
   const creatingGroup = mode === 'create' && !binding
   const bindingIntent = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
   const bindingPending = !!bindingIntent
@@ -101,13 +103,12 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   function acceptGrant(grant: ConnectionGrant, source: RoomBinding) {
     if (activeAudience.current !== JSON.stringify([source.bindingId, source.revision])) return
     setActors(previous => {
-      if (previous && (previous.bindingId !== source.bindingId || previous.revision !== source.revision)) return previous
-      const grants = previous?.grants ?? [], old = grants.find(value => value.grantId === grant.grantId)
+      const grants = previous?.bindingId === source.bindingId && previous.revision === source.revision ? previous.grants : [], old = grants.find(value => value.grantId === grant.grantId)
       return old && old.revision > grant.revision ? previous : { bindingId: source.bindingId, revision: source.revision, grants: [...grants.filter(value => value.grantId !== grant.grantId), grant] }
     })
   }
   function selectActor(idType: string, userId: string) {
-    const grant = actors?.grants.find(value => value.actor.idType === idType && value.actor.userId === userId && value.state === 'active')
+    const grant = currentGrants.find(value => value.actor.idType === idType && value.actor.userId === userId && value.state === 'active')
     setActorType(idType); setActorId(userId); setActorInput(grant?.capabilities.includes('input') ?? false); setActorAnswer(grant?.capabilities.includes('answer') ?? false); setActorPermission(grant?.capabilities.includes('permission') ?? false); setAccessOpen(true)
   }
   async function memberWork(key: string, action: () => Promise<void>) {
