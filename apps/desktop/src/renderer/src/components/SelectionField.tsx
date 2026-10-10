@@ -1,3 +1,4 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -17,15 +18,17 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
   id?: string | undefined; label: string; value: string; options: readonly SelectionOption[]
   onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null; triggerLabel?: string | undefined; searchable?: boolean
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const descriptionId = useId(), trigger = useRef<HTMLButtonElement>(null)
   const [query, setQuery] = useState(''), [open, setOpen] = useState(false), [searchSession, setSearchSession] = useState(false)
   const search = useRef<HTMLInputElement>(null), menu = useRef<HTMLDivElement>(null)
   const canSearch = searchable !== false && (open ? searchSession : searchable ?? options.length > 8)
   useEffect(() => {
     if (!open || !canSearch) return
-    const frame = requestAnimationFrame(() => search.current?.focus({ preventScroll: true }))
-    return () => cancelAnimationFrame(frame)
-  }, [open, canSearch])
+    const ownerWindow = ownerDocument.defaultView!
+    const frame = ownerWindow.requestAnimationFrame(() => search.current?.focus({ preventScroll: true }))
+    return () => ownerWindow.cancelAnimationFrame(frame)
+  }, [open, canSearch, ownerDocument])
   const needle = query.trim().toLocaleLowerCase()
   const visibleOptions = canSearch && needle ? options.filter(option => `${option.label} ${option.description ?? ''}`.toLocaleLowerCase().includes(needle)) : options
   const focusOption = (last = false) => {
