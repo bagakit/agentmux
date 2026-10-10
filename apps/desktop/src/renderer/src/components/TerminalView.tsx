@@ -944,15 +944,20 @@ export function TerminalView({
     let renderReady: { dispose(): void } | null = null
     const preserveResizeReading = (resize: () => void): void => {
       clearLinkPreview()
-      const selected = terminal.getSelectionPosition()
+      const selected = terminal.getSelectionSnapshot()
       const cols = terminal.cols
+      const minimumLength = selected?.minimumEnd ? (selected.minimumEnd.y - selected.anchor.y) * cols + selected.minimumEnd.x - selected.anchor.x : 0
       const rows = terminal.rows
       const buffer = terminal.buffer.active
+      const cursorY = buffer.cursorY
       const reading = rememberTerminalViewport(buffer.viewportY, buffer.baseY)
-      const markLine = (line: number) => buffer.type === 'normal'
-        ? terminal.registerMarker(line - buffer.baseY - buffer.cursorY) : undefined
-      const readingMarker = reading.kind === 'line' ? markLine(reading.line) : undefined
-      // Reflow can delete a continuation row and its marker. Anchor its original
+      const markers: IMarker[] = []
+      const markLine = (line: number): IMarker | undefined => {
+        const marker = buffer.type === 'normal' ? terminal.registerMarker(line - buffer.baseY - buffer.cursorY) : undefined
+        if (marker) markers.push(marker)
+        return marker
+      }
+      // Reflow can delete a continuation row and its marker. Anchor each original
       // cell offset at the retained wrapped group's first row instead.
       const wrappedRowCells = (line: number, width: number): number => {
         const next = buffer.getLine(line + 1)
@@ -960,38 +965,111 @@ export function TerminalView({
         const widePadding = next?.isWrapped && last?.getCode() === 0 && last.getWidth() === 1 && next.getCell(0)?.getWidth() === 2
         return widePadding ? width - 1 : width
       }
-      let readingStart = reading.kind === 'line' ? reading.line : 0
-      let readingOffset = 0
-      while (readingStart > 0 && buffer.getLine(readingStart)?.isWrapped) {
-        readingOffset += wrappedRowCells(readingStart - 1, cols)
-        readingStart -= 1
+      const meaningfulRowCells = (line: number, width: number): number => {
+        const row = buffer.getLine(line)
+        for (let x = width - 1; x >= 0; x -= 1) {
+          const cell = row?.getCell(x)
+          if (cell && cell.getCode() !== 0) return x + cell.getWidth()
+        }
+        return 0
       }
-      const reflowMarker = reading.kind === 'line' && readingStart !== reading.line ? markLine(readingStart) : readingMarker
-      const selectionStart = selected ? markLine(selected.start.y) : undefined
-      const selectionEnd = selected ? markLine(selected.end.y) : undefined
+      const captureCell = (x: number, y: number) => {
+        const marker = markLine(y)
+        let first = y
+        let offset = Math.min(x, wrappedRowCells(y, cols))
+        while (first > 0 && buffer.getLine(first)?.isWrapped) {
+          offset += wrappedRowCells(first - 1, cols)
+          first -= 1
+        }
+        const cursorLine = buffer.baseY + buffer.cursorY
+        let last = y
+        while (buffer.getLine(last + 1)?.isWrapped) last += 1
+        const cursorGroup = terminal.options.reflowCursorLine !== true && first <= cursorLine && last >= cursorLine
+        let tailOffset = meaningfulRowCells(last, cols) - Math.min(x, wrappedRowCells(y, cols))
+        for (let line = y; line < last; line += 1) tailOffset += wrappedRowCells(line, cols)
+        // A following hard row survives prefix trimming of this wrapped group. Only
+        // cell distances are retained, including written spaces and wide-cell widths.
+        const nextMarker = last + 1 < buffer.length ? markLine(last + 1) : undefined
+        return { x, y, marker, offset, cursorGroup, tailOffset, nextMarker, groupMarker: first === y ? marker : markLine(first) }
+      }
+      const resolveCell = (anchor: ReturnType<typeof captureCell>): { x: number; y: number } | null => {
+        // Alternate rows do not reflow. During this synchronous resize, the public
+        // cursor delta records any top trim rather than treating absent markers as loss.
+        if (buffer.type === 'alternate') {
+          const y = anchor.y + buffer.cursorY - cursorY
+          return y >= 0 && y < buffer.length ? { x: Math.min(anchor.x, Math.max(terminal.cols, buffer.getLine(y)?.length ?? 0)), y } : null
+        }
+        if (terminal.cols === cols || anchor.cursorGroup) {
+          const y = anchor.marker?.line ?? anchor.y
+          const row = buffer.getLine(y)
+          // A non-reflowing cursor row may have discarded cells when narrowed.
+          // Missing source cells are not coordinates to submit to native restore.
+          return anchor.marker?.isDisposed || !row || anchor.x > row.length ? null : { x: anchor.x, y }
+        }
+        if (!anchor.groupMarker || anchor.groupMarker.isDisposed) {
+          if (!anchor.nextMarker || anchor.nextMarker.isDisposed) return null
+          let y = anchor.nextMarker.line - 1
+          if (y < 0 || !buffer.getLine(y)) return null
+          let offset = anchor.tailOffset
+          let cells = meaningfulRowCells(y, terminal.cols)
+          while (offset > cells && buffer.getLine(y)?.isWrapped && y > 0) {
+            offset -= cells
+            y -= 1
+            cells = wrappedRowCells(y, terminal.cols)
+          }
+          return offset <= cells ? { x: Math.min(cells - offset, terminal.cols), y } : null
+        }
+        let y = anchor.groupMarker.line
+        let offset = anchor.offset
+        while (offset > 0 && buffer.getLine(y + 1)?.isWrapped) {
+          const cells = wrappedRowCells(y, terminal.cols)
+          if (offset < cells) break
+          offset -= cells
+          y += 1
+        }
+        return { x: Math.min(offset, terminal.cols), y }
+      }
+      const readingAnchor = reading.kind === 'line' ? captureCell(0, reading.line) : undefined
+      // Native column selection keeps physical columns, even outside a narrower
+      // grid. Only row provenance moves; the original mode and direction survive.
+      const selectionCell = (point: { x: number; y: number }) => captureCell(selected?.mode === 'column' ? 0 : point.x, point.y)
+      const selectionAnchor = selected ? selectionCell(selected.anchor) : undefined
+      const selectionActive = selected?.active ? selectionCell(selected.active) : undefined
+      const minimumReflows = buffer.type === 'normal' && !selectionAnchor?.cursorGroup
+      const selectionMinimum = selected?.minimumEnd && minimumReflows ? selectionCell(selected.minimumEnd) : undefined
       try {
         resize()
-        // Public markers follow retained lines when a full buffer trims its oldest rows.
-        if (selected && terminal.cols === cols && terminal.buffer.active === buffer && !selectionEnd?.isDisposed) {
-          const startY = selectionStart ? Math.max(0, selectionStart.line) : selected.start.y
-          const startX = selectionStart?.isDisposed ? 0 : selected.start.x
-          const endY = selectionEnd?.line ?? selected.end.y
-          const length = (endY - startY) * cols + selected.end.x - startX
-          if (length > 0) terminal.select(startX, startY, length)
+        if (selected && selectionAnchor && terminal.buffer.active === buffer) {
+          // Normal ranges retain their surviving suffix and direction. Native column
+          // trimming clips only its raw start; an evicted raw end remains cleared.
+          const resolveSelection = (cell: ReturnType<typeof captureCell>, originalX = cell.x) => {
+            const point = resolveCell(cell)
+            if (point) return selected.mode === 'column' ? { ...point, x: originalX } : point
+            return cell.marker?.isDisposed && (selected.mode !== 'column' || cell === selectionAnchor) ? { x: 0, y: 0 } : null
+          }
+          const anchor = resolveSelection(selectionAnchor, selected.anchor.x)
+          const active = selectionActive ? resolveSelection(selectionActive, selected.active!.x) : undefined
+          let minimumEnd = selectionMinimum ? resolveSelection(selectionMinimum) : undefined
+          if (!minimumReflows && selected.minimumEnd && anchor) {
+            // An alternate or retained cursor group does not reflow. Re-encode
+            // the original native minimum length instead of moving a fictitious row.
+            const end = anchor.x + minimumLength
+            minimumEnd = end <= terminal.cols ? { x: end, y: anchor.y } : {
+              x: end % terminal.cols || terminal.cols, y: anchor.y + Math.ceil(end / terminal.cols) - 1
+            }
+          }
+          if (anchor && active !== null && minimumEnd !== null) {
+            terminal.restoreSelection({ ...selected,
+              anchor,
+              ...(active ? { active } : {}),
+              ...(minimumEnd ? { minimumEnd } : {}) })
+          }
         }
         if ((terminal.cols !== cols || terminal.rows !== rows) &&
           terminal.buffer.active === buffer && buffer.type === 'normal') {
-          let line = readingMarker && !readingMarker.isDisposed ? readingMarker.line : reading.kind === 'line' ? reading.line : buffer.viewportY
-          if (terminal.cols !== cols && reflowMarker && !reflowMarker.isDisposed) {
-            line = reflowMarker.line
-            while (readingOffset > 0 && buffer.getLine(line + 1)?.isWrapped) {
-              const cells = wrappedRowCells(line, terminal.cols)
-              if (readingOffset < cells) break
-              readingOffset -= cells
-              line += 1
-            }
-          }
-          const anchored = reading.kind === 'line' ? { kind: 'line' as const, line: Math.max(0, line) } : reading
+          const anchored = reading.kind === 'line' && readingAnchor
+            ? { kind: 'line' as const, line: Math.max(0, resolveCell(readingAnchor)?.y ?? (readingAnchor.marker?.isDisposed ? 0 : reading.line)) }
+            : reading
           const target = restoreTerminalViewport(anchored, buffer.baseY)
           // Confirm the absolute viewport even when resize already moved the buffer to its base.
           // A zero-delta relative scroll leaves xterm's cached DOM position at the old row.
@@ -1003,10 +1081,7 @@ export function TerminalView({
           releaseViewportMemoryMarker(terminal)
         }
       } finally {
-        readingMarker?.dispose()
-        if (reflowMarker !== readingMarker) reflowMarker?.dispose()
-        selectionStart?.dispose()
-        selectionEnd?.dispose()
+        for (const marker of markers) marker.dispose()
       }
     }
     let nextViewportFrame = 0
