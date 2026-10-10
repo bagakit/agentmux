@@ -90,6 +90,10 @@ it('discovers the one generic Connector from Mods, Overview and search and opens
     const choices = dom.container.querySelectorAll('nav [data-settings-target="chat-connections"]')
     expect(choices, query).toHaveLength(1)
     expect(choices[0]!.textContent).toContain('Agent Conversation Connector')
+    expect(currentPane().hidden).toBe(true)
+    const result = dom.container.querySelector<HTMLButtonElement>('[aria-label="Settings search results"] [data-settings-search-section="chat-connections"]')
+    expect(result, query).not.toBeNull()
+    await act(async () => result!.click())
     expect(currentPane().hidden).toBe(false)
   }
   expect(network).toEqual([])
