@@ -42,7 +42,7 @@ export function ConnectionProfilePanel({ record }: { record: ConnectionRecord })
     try {
       const result = advance ? await api.connections.call('connection.profile.advance', { operationId: id }) : (await api.connections.call('connection.profile.inspect', { operationId: id })).operation
       if (token === lifetime.current && sequence === order.current.get(id)) { if (result) accept(result); if (selection.current === id && message === feedback.current) setIssue(result ? 'The original update is shown. Unconfirmed platform effects are not sent again.' : 'No recorded update was found. Its result remains unconfirmed.') }
-    } catch (error) { if (token === lifetime.current && sequence === order.current.get(id) && selection.current === id) setIssue(presentError(error)) }
+    } catch (error) { if (token === lifetime.current && sequence === order.current.get(id) && selection.current === id && message === feedback.current) setIssue(presentError(error)) }
     finally { if (advance) { writing.current.delete(id); setPending([...writing.current]) } }
   }
   const operation = operations.find(item => item.operationId === selected)
