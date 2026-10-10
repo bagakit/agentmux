@@ -37,11 +37,11 @@ describe('PMO teams topic launcher', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true')
   })
 
-  it('uses the same dragon identity and a persistent expanded state without decorative particles', async () => {
+  it('uses the shared static Mote identity and a persistent expanded state without decorative particles', async () => {
     window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: true }))
     await act(async () => root.render(createElement(PmoTeamsTopicEntry, { placement: 'compact' })))
-    const avatar = container.querySelector('.pmo-teams-topic-compact-launcher__button img') as HTMLImageElement
-    expect(avatar.getAttribute('src')).toContain('pmo-teams-topic-avatar')
+    const avatar = container.querySelector('.pmo-teams-topic-compact-launcher__button svg[data-mote-icon-source=automatic]')!
+    expect(avatar).not.toBeNull(); expect(avatar.getAttribute('data-semantic-icon')).toBe('object.mote')
     expect(container.querySelector('button[aria-expanded="true"]')).toBeTruthy()
     expect(container.querySelectorAll('.pmo-teams-topic-compact-launcher__firework')).toHaveLength(0)
     expect(container.querySelectorAll('[data-particle]')).toHaveLength(0)

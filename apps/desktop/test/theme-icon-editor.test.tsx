@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -75,4 +76,14 @@ it('handles empty drawing search and preserves the semantic ID on a focusable na
   await act(async () => button.click())
   expect(draft.icons['action.close']).toEqual({ kind: 'glyph', glyph: 'circle-play' })
   expect(host.querySelector('[aria-label="Selected semantic icon"] code')?.textContent).toBe('action.close')
+})
+it('discovers independent Mote and spark meanings in Settings and keeps an explicit old drawing while editing the badge', async () => {
+  expect(host.querySelector('[aria-label="Edit object.mote"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="Edit avatar.badge-spark"]')).not.toBeNull()
+  await click('Edit object.mote'); await click('Choose a drawing'); await fill('Find icon drawing', 'mote-mark'); await click('Use mote-mark')
+  expect(draft.icons).toEqual({ 'object.mote': { kind: 'glyph', glyph: 'mote-mark' } })
+  await click('Edit avatar.badge-spark'); await click('Choose a drawing'); await fill('Find icon drawing', 'circle-play'); await click('Use circle-play')
+  expect(draft.icons).toEqual({ 'object.mote': { kind: 'glyph', glyph: 'mote-mark' }, 'avatar.badge-spark': { kind: 'glyph', glyph: 'circle-play' } })
+  await click('Restore default drawing')
+  expect(draft.icons).toEqual({ 'object.mote': { kind: 'glyph', glyph: 'mote-mark' } })
 })

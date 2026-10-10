@@ -75,14 +75,14 @@ describe('Mote vector identity', () => {
     expect(new Set(paths).size).toBe(1)
   })
 
-  it('keeps the primary PNG avatar and the custom Mote mark in the real tree and creation menu', async () => {
+  it('shares the Mote identity in the primary, ordinary tree and creation menu', async () => {
     vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([{ id: 'launcher:custom-mote', title: 'Research Mote', summary: '', directoryPath: _hygiene_fixturePath("topics/topic--launcher--custom-mote"), topicPath: _hygiene_fixturePath("topics/topic--launcher--custom-mote/topic.md"), collaborators: [], soul: { path: _hygiene_fixturePath("topics/topic--launcher--custom-mote/SOUL.md"), content: '# Research Mote', version: 'v1' } }])
     const config = await api.config.get()
     useAppStore.setState({ config: { ...config, workspaces: [workspace] }, layouts: {}, tabs: {}, collapsedProjectGroups: {}, pinnedItems: {}, scratchTopicSnapshots: {}, workspaceFileRevisions: {} })
     await act(async () => root.render(<><SpaceTopicsTree workspace={workspace} icons={{}} onChangeIcon={() => {}} /><SpaceCreateMenu onOpenFolder={async () => {}} /></>))
-    const primary = container.querySelector<HTMLImageElement>('[aria-label="Open Mote"] img')
+    const primary = container.querySelector('[aria-label="Open Mote"] svg[data-semantic-icon="object.mote"]')
     expect(primary).not.toBeNull()
-    expect(primary?.getAttribute('src')).toContain('pmo-teams-topic-avatar.png')
+    expect(primary?.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.mote'))
     const tree = container.querySelector('[aria-label="Open Mote · Research Mote"] svg')
     expect(tree).not.toBeNull()
     const contour = semanticIconHref('object.mote')
@@ -102,7 +102,7 @@ describe('Mote vector identity', () => {
     expect(node.querySelector('[data-agent-provider="codex"]')).not.toBeNull()
     const badge = node.querySelector('[data-avatar-badge="spark"]')
     expect(badge).not.toBeNull()
-    expect(badge?.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.mote'))
+    expect(badge?.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('avatar.badge-spark'))
     expect(badge?.querySelector('svg')?.getAttribute('width')).toBe('6')
   })
 

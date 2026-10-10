@@ -15,7 +15,7 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 
 it('discovers the exact shared semantic catalog through the actual Main owner, public RPC and compiled CLI without changing configuration', async () => {
-  const originalTheme = { ...themeValue(structuredClone(GRAPHITE_THEME)), icons: { 'file.locked': { kind: 'glyph' as const, glyph: 'file-lock' as const }, 'object.agent': { kind: 'paths' as const, paths: [{ d: 'M4 4H20V20H4Z' }] } } }
+  const originalTheme = { ...themeValue(structuredClone(GRAPHITE_THEME)), icons: { 'object.mote': { kind: 'glyph' as const, glyph: 'mote-mark' as const }, 'avatar.badge-spark': { kind: 'paths' as const, paths: [{ d: 'M3 3H21V21H3Z' }] }, 'file.locked': { kind: 'glyph' as const, glyph: 'file-lock' as const }, 'object.agent': { kind: 'paths' as const, paths: [{ d: 'M4 4H20V20H4Z' }] } } }
   const f = await configOwnerFixture({ appearance: { terminalTheme: 'graphite', customThemes: { 'custom.retained-original': originalTheme } } }), bytes = await f.bytes(), catalog = getSemanticIconCatalog()
   expect(catalog.groups.length).toBeGreaterThan(0); expect(catalog.icons.length).toBeGreaterThan(0); expect(catalog.glyphs.length).toBeGreaterThan(0)
   const seen: AgentMuxControlRequest[] = []
@@ -31,10 +31,10 @@ it('discovers the exact shared semantic catalog through the actual Main owner, p
   expect(discovered).toMatchObject({ resource: 'themes', iconCatalog: catalog, issues: [] })
   if (discovered.resource !== 'themes') throw new Error('Expected a theme catalog response.')
   expect(discovered.iconCatalog).toEqual(catalog)
-  const expected = { 'action.fork-conversation': 'git-fork', 'object.relationships': 'topology-nodes', 'object.collaboration': 'message-history', 'action.move-to-draft': 'draft-return', 'navigation.space': 'layers', 'navigation.focus': 'focus', 'navigation.goals': 'target', 'navigation.recall': 'book-open', 'object.agent-controlled-browser': 'browser-agent', 'conversation.history-window': 'clock-3', 'action.configure-reconnect': 'clock-3', 'action.upgrade-host': 'arrow-up', 'action.arrange-graph': 'graph-arrange', 'git.pull': 'download', 'git.push': 'upload', 'git.discard-changes': 'trash-2', 'action.collect-sources': 'notebook-text' }
+  const expected = { 'object.mote': 'mote-identity', 'avatar.badge-spark': 'badge-token', 'action.fork-conversation': 'git-fork', 'object.relationships': 'topology-nodes', 'object.collaboration': 'message-history', 'action.move-to-draft': 'draft-return', 'navigation.space': 'layers', 'navigation.focus': 'focus', 'navigation.goals': 'target', 'navigation.recall': 'book-open', 'object.agent-controlled-browser': 'browser-agent', 'conversation.history-window': 'clock-3', 'action.configure-reconnect': 'clock-3', 'action.upgrade-host': 'arrow-up', 'action.arrange-graph': 'graph-arrange', 'git.pull': 'download', 'git.push': 'upload', 'git.discard-changes': 'trash-2', 'action.collect-sources': 'notebook-text' }
   for (const [id, defaultGlyph] of Object.entries(expected)) expect(discovered.iconCatalog.icons.find(icon => icon.id === id), `public semantic discovery: ${id}`).toMatchObject({ id, defaultGlyph, label: expect.any(String), description: expect.any(String) })
   expect(discovered.iconCatalog.icons.find(icon => icon.id === 'conversation.tool-result')).toMatchObject({ id: 'conversation.tool-result', defaultGlyph: 'tool-return', label: 'Tool result' })
-  expect(discovered.iconCatalog.glyphs).toContain('tool-return')
+  expect(discovered.iconCatalog.glyphs).toEqual(expect.arrayContaining(['tool-return', 'mote-mark', 'mote-identity', 'badge-token']))
 
   const cli = await runCompiledObjectCli(['settings', 'themes', 'ls'], objectCliEnvironment(directory))
   expect(cli.code, cli.stderr).toBe(0)

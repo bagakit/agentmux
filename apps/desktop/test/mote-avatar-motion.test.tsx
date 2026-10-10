@@ -15,13 +15,15 @@ import { ConversationMessageAvatar } from '../src/renderer/src/components/Conver
 import { defaultAgent } from './fixtures/mote-workface'
 import { useAppStore } from '../src/renderer/src/store'
 import * as expressionAuthority from '../src/renderer/src/lib/mote-expression'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 let root: Root, container: HTMLDivElement, sheet: HTMLStyleElement, reduced = false, commits = 0
 let intersections: Map<Element, (visible: boolean) => void>, changes: Set<() => void>, frames: Map<number, FrameRequestCallback>
 const baseline = useAppStore.getState()
 const require = createRequire(import.meta.url)
 const cssSources = [
   ...['tokens', 'chrome'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css')),
-  ...['conversation-avatar', 'conversation-input-details'].map(name => resolve(import.meta.dirname, '../../../packages/client-ui/src/styles/' + name + '.css')),
+  ...['conversation-avatar', 'conversation-input-details', 'mote-identity'].map(name => resolve(import.meta.dirname, '../../../packages/client-ui/src/styles/' + name + '.css')),
   ...['mote-workface', 'space-object-appearance'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css'))
 ]
 beforeEach(() => {
@@ -46,14 +48,14 @@ async function mount(node: React.ReactNode) { await act(async () => root.render(
 function face() { const node = container.querySelector<HTMLElement>('[data-mote-expression]'); expect(node).not.toBeNull(); return node! }
 function move(x: number, y = 196) { document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: x, clientY: y })); const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(10)) }
 const image = { kind: 'image' as const, fileName: 'c'.repeat(64) + '.png' }
-it('all static image, dragon, seed, manual and face consumers join one native owner without Session selectors or synchronized object phases', async () => {
+it('all explicit image, automatic, manual and face consumers join one native owner without Session selectors or synchronized object phases', async () => {
   const expression = vi.spyOn(expressionAuthority, 'moteExpression')
   const choices = [image, null, null, 'book', DEFAULT_MOTE_FACE] as const
   await mount(<>{choices.map((choice, index) => <div key={index} data-static-asset={index}><SpaceObjectIcon kind="mote" name="Original identity" manualIcon={choice} avatarWorkspaceId="scratch" avatarTopicId={index === 1 ? PMO_TEAMS_TOPIC_ID : 'custom'} avatarObjectKey={'original-object-' + index} /></div>)}</>)
   const identities = [...container.querySelectorAll<HTMLElement>('[data-mote-expression]')]
   expect(identities).toHaveLength(choices.length); expect(intersections.size).toBe(choices.length); expect(changes.size).toBe(1)
   for (const identity of identities) { expect(identity.dataset.moteExpression).toBe('identity'); expect(identity.dataset.moteMotion).toBe('on') }
-  expect(container.querySelectorAll('img')).toHaveLength(2)
+  expect(container.querySelectorAll('img')).toHaveLength(1)
   const phases = identities.map(node => parseFloat(node.style.getPropertyValue('--mote-ambient-delay')))
   expect(Math.max(...phases) - Math.min(...phases)).toBeGreaterThan(500)
   const count = commits; expression.mockClear()
@@ -63,11 +65,14 @@ it('all static image, dragon, seed, manual and face consumers join one native ow
   await mount(<SpaceObjectIcon kind="mote" name="Renamed identity" manualIcon={image} avatarWorkspaceId="scratch" avatarTopicId="custom" avatarObjectKey="original-object-0" />)
   expect(face().style.getPropertyValue('--mote-ambient-delay')).toBe(phase)
 })
-it('ambient glyphs and images use native short gestures with a much longer unchanged rest', async () => {
+it('selected glyphs retain native short gestures while automatic identities stay still', async () => {
   await mount(<><SpaceObjectIcon kind="mote" name="Seed" manualIcon={null} /><SpaceObjectIcon kind="mote" name="Manual" manualIcon="book" /><SpaceObjectIcon kind="mote" name="Image" manualIcon={null} avatarTopicId={PMO_TEAMS_TOPIC_ID} /><SpaceObjectIcon kind="topic" name="Topic" manualIcon="book" /></>)
   const paints = [...container.querySelectorAll('[data-mote-expression] svg, [data-mote-expression] img')]
   expect(paints).toHaveLength(3)
-  for (const paint of paints) expect(getComputedStyle(paint).animation).toBe('mote-presence 14s ease-in-out infinite')
+  for (const paint of paints) {
+    if (paint.getAttribute('data-mote-icon-source') === 'automatic') expect(getComputedStyle(paint).animation).not.toContain('mote-presence')
+    else expect(getComputedStyle(paint).animation).toBe('mote-presence 14s ease-in-out infinite')
+  }
   expect(getComputedStyle(container.querySelector('[data-space-icon-kind="topic"] svg')!).animation).not.toContain('mote-presence')
   const rules = [...sheet.sheet!.cssRules] as CSSKeyframesRule[]
   const keyframes = rules.find(rule => rule.name === 'mote-presence')!
@@ -83,7 +88,7 @@ it('ambient glyphs and images use native short gestures with a much longer uncha
 it('neutral waiting and unknown blink while keeping brows and mouth, sleep keeps closed eyes and error/stopped retain pointer without ambient', async () => {
   for (const [state, expected] of [['waiting', 'waiting'], ['running', 'unknown'], ['error', 'error'], ['exited', 'stopped']] as const) {
     await mount(null)
-    await act(async () => useAppStore.setState({ sessions: [{ ...defaultAgent, status: { state, source: 'run-process', observedAt: 20 } }] }))
+    await act(async () => useAppStore.setState({ sessions: [{ ...defaultAgent, processState: state === 'exited' ? 'exited' : 'running', status: { state, source: 'run-process', observedAt: _historyFixtureEpoch(0, 0, 20) } }] }))
     await mount(<SpaceObjectIcon kind="mote" name="Same identity" manualIcon={DEFAULT_MOTE_FACE} moteSessionId={defaultAgent.id} moteHostId="local" />)
     const identity = face(), allowed = expected === 'waiting' || expected === 'unknown'
     expect(identity.dataset.moteExpression).toBe(expected); expect(identity.dataset.moteMotion).toBe(allowed ? 'on' : 'off')
