@@ -17,3 +17,21 @@
 .mote-connection-dialog__requests { color: var(--text-2); font-size: var(--fs-body); }
 .mote-connection-dialog__requests code { overflow-wrap: anywhere; white-space: normal; }
 @media (pointer: coarse) { .mote-connection__row { min-height: 44px; } }
+.mote-bot-setup { display: grid; gap: var(--sp-3); min-width: 0; }
+.mote-bot-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.mote-bot-actions button { white-space: normal; }
+.mote-bot-avatar { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); }
+.mote-bot-request-heading { display: grid; gap: var(--sp-1); overflow-wrap: anywhere; }
+.mote-bot-confirmation { display: grid; justify-items: start; gap: var(--sp-3); min-width: 0; }
+.mote-bot-confirmation .connector-enrollment__code { display: grid; place-items: center; padding: var(--sp-2); background: #fff; max-width: 100%; box-sizing: border-box; }
+.mote-bot-confirmation svg { display: block; max-width: 100%; height: auto; }
+.mote-bot-confirmation > p { margin: 0; overflow-wrap: anywhere; }
+.mote-bot-stages { display: grid; gap: var(--sp-2); margin: 0; }
+.mote-bot-stages > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: var(--sp-3); }
+.mote-bot-stages dt { color: var(--text-2); }
+.mote-bot-stages dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.mote-bot-history, .mote-bot-existing { color: var(--text-2); }
+.mote-bot-history[open] { display: grid; gap: var(--sp-2); }
+.mote-bot-history button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+.mote-bot-existing[open] { display: grid; gap: var(--sp-3); }
+@media (max-width: 380px) { .mote-bot-stages > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } }

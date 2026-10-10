@@ -12,6 +12,7 @@ import { api } from '../lib/api'
 import { clearMoteConnectionSaveIntent, retainMoteConnectionSaveIntent, useAppStore } from '../store'
 import { moteConnectionChoice, moteConnectionTarget } from '../lib/mote-connection-default'
 import { SelectionField } from './SelectionField'
+import { MoteBotSetup } from './MoteBotSetup'
 import { SettingsNavigation } from './SettingsNavigation'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import '../styles/mote-connection-identity.css'
@@ -54,19 +55,20 @@ export function MoteConnectionIdentity({ scope, active }: { scope: MoteWorkfaceS
       <BotIcon size={14} /><span>Chat bot</span><strong>{choice?.record?.config.label ?? (ref ? 'Saved bot' : snapshot?.saved.status === 'ready' ? 'Choose a bot' : snapshot || issue ? 'Not confirmed' : 'View bots')}</strong><ForwardIcon size={12} />
     </button>
     {issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue ? <p role="status" className="mote-details__hint">{issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue}</p> : null}
-    {editing ? <MoteConnectionDialog key={identity} target={target} moteName={scope.topic.title} onClose={() => setEditing(false)}
+    {editing ? <MoteConnectionDialog key={identity} target={target} topicId={scope.topic.id} moteName={scope.topic.title} onClose={() => setEditing(false)}
       onRead={accept} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
   </section>
 }
 
-function MoteConnectionDialog({ target, moteName, onClose, onRead, returnFocus }: {
-  target: MotePreferencesTarget | null; moteName: string; onClose(): void; onRead(value: Snapshot): void; returnFocus(): HTMLElement | null
+function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, returnFocus }: {
+  target: MotePreferencesTarget | null; topicId: string; moteName: string; onClose(): void; onRead(value: Snapshot): void; returnFocus(): HTMLElement | null
 }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [selection, setSelection] = useState(''), fieldId = useId()
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
   const [attempt, setAttempt] = useState<{ input: MoteConnectionPreferencesSaveParams; receipt: MoteConnectionPreferencesSaveResult | null } | null>(null)
   const intents = useAppStore(state => state.moteConnectionSaveIntents)
   const retained = Object.values(intents).filter(item => target && sameMotePreferencesTarget(item.input.target, target))
+  const [choosing, setChoosing] = useState(false)
   const [reviewed, setReviewed] = useState(false), [newChoice, setNewChoice] = useState(false)
   const edited = useRef(false), alive = useRef<object | null>(null), flight = useRef(false), readEpoch = useRef(0), content = useRef<HTMLDivElement>(null)
   const settings = useContext(SettingsNavigation)
@@ -134,12 +136,13 @@ function MoteConnectionDialog({ target, moteName, onClose, onRead, returnFocus }
           <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close bot choice"><CloseIcon size={16} /></button></Dialog.Close>
         </header>
         <div className="mote-connection-dialog__body">
-          {snapshot ? <><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
+          <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} onChoose={() => setChoosing(true)} onCurrent={() => void refresh()} />
+          {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}
             options={[{ value: '', label: 'No default bot' }, ...snapshot.connections.map(item => ({ value: choiceKey(item.config), label: item.config.label,
               disabled: !item.config.enabled, description: item.config.application.domain + ' · ' + item.config.application.appId }))]} />
             {current ? <p className="mote-details__hint">Saved bot: {current.application.domain} · {current.application.appId}</p> : null}
-            {currentChoice?.issue ? <p role="status" className="mote-details__hint">{currentChoice.issue}</p> : null}</> : null}
+            {currentChoice?.issue ? <p role="status" className="mote-details__hint">{currentChoice.issue}</p> : null}</details> : null}
           {loading ? <p role="status" className="mote-details__hint">Reading saved bots…</p> : null}
           {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
           {pending ? <p className="mote-details__hint">The previous save is still unconfirmed. Reading the current choice does not confirm that save.</p> : null}
@@ -152,9 +155,9 @@ function MoteConnectionDialog({ target, moteName, onClose, onRead, returnFocus }
             {retained.map(({ input, phase }) => <p key={input.operationId}><code>{input.operationId}</code><br />{input.values.connection?.application.appId ?? 'Remove default bot'} · {phase === 'not-dispatched' ? 'Not sent' : 'Result unconfirmed'}</p>)}
           </details> : null}
         </div>
-        <footer className="mote-connection-dialog__footer"><Dialog.Close asChild><button type="button" className="small-button">Cancel</button></Dialog.Close>
+        {choosing || pending || attempt ? <footer className="mote-connection-dialog__footer"><Dialog.Close asChild><button type="button" className="small-button">Cancel</button></Dialog.Close>
           <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>
-        </footer>
+        </footer> : null}
       </Dialog.Content>
     </div>
   </Dialog.Portal></Dialog.Root>
