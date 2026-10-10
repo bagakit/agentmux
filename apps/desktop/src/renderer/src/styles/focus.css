@@ -193,16 +193,7 @@
 .focus-context-hover__prose .md-block-code { margin: 0; padding: 6px; font-size: var(--fs-meta); }
 .focus-context-hover__prose .md-link--readonly { color: inherit; cursor: text; text-decoration: underline; text-decoration-color: var(--text-3); }
 .focus-context-hover__prose .md-list { padding-left: 18px; }
-.focus-context-hover__inputs { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
-.focus-context-hover__inputs h4 { margin: 0; color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .focus-context-hover__coverage { color: var(--text-3); font-size: var(--fs-micro); }
-.focus-context-hover__inputs > ol { display: flex; flex-direction: column; margin: 4px 0 0; padding: 0; list-style: none; }
-.focus-context-hover__inputs > ol > li { min-width: 0; padding: 7px 0; }
-.focus-context-hover__inputs > ol > li + li { border-top: 1px solid var(--line); }
-.focus-context-hover__input-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 2px 8px; margin-bottom: 3px; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-context-hover__input-meta strong { min-width: 0; color: var(--text-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.focus-context-hover__input-meta time { font-variant-numeric: tabular-nums; }
-.focus-context-hover__inputs .focus-context-hover__notice { margin-top: 6px; color: var(--text-3); font-size: var(--fs-micro); }
 @keyframes focus-context-hover-enter { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .focus-context-hover { animation: none; } }
 .focus-project-lanes__empty { margin: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
