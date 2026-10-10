@@ -85,7 +85,7 @@ async function settledHistory(): Promise<void> {
 }
 
 describe('shared native presentation preserves the existing reading owner', () => {
-  it('a real public native user trace keeps its raw record and canonical disclosure identity when opened and refreshed', async () => {
+  it('a real public native user trace keeps its raw record and canonical disclosure identity when its source refreshes', async () => {
     const f = await fixture(); const pages: AgentSessionHistoryPage[] = []; const pending: Promise<AgentSessionHistoryPage>[] = []
     const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => {
       expect(control).toEqual(f.control); const read = f.page(); pending.push(read); const result = await read; pages.push(result); return result
@@ -103,12 +103,15 @@ describe('shared native presentation preserves the existing reading owner', () =
     console.log('SHARED_READING_USER_TRACE_IDENTITY', JSON.stringify({ rawId: f.rawId, traceId: trace.dataset.traceId, expanded: trace.getAttribute('aria-expanded') }))
     expect(trace.getAttribute('aria-expanded')).toBe('true')
     expect(parseTraceDisclosureKey(trace.dataset.traceId!)).toEqual([projectSessionUserMessages({ agentSessionId: f.control.agentSessionId, historyPage: pages[0]! })[0]!.id, JSON.stringify(['tool-result', 'opaque:call:0', 0])])
-    const latest = host.querySelector<HTMLButtonElement>('[aria-label="Return to latest messages"]')!
-    await act(async () => latest.click())
-    expect(history).toHaveBeenCalledTimes(2)
+    expect(host.querySelector('[data-message-tool-control="jump-to-latest"]'), 'an opened current window is already current').toBeNull()
+    await f.writeInput('Native tail refreshed')
+    const refreshed = await f.page(); pages.push(refreshed)
+    await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} nativeHistoryPage={refreshed} />))
+    expect(history).toHaveBeenCalledTimes(1)
     await act(async () => { await Promise.all(pending) })
     await settledHistory()
-    expect(host.querySelector<HTMLButtonElement>('button.conversation-tool-trace__row')!.getAttribute('aria-expanded')).toBe('true')
+    expect(host.querySelector<HTMLButtonElement>('button.conversation-tool-trace__row')).toBe(trace)
+    expect(trace.getAttribute('aria-expanded')).toBe('true'); expect(host.textContent).toContain('Native tail refreshed')
     expect(pages.map(page => page.items.map(item => item.id))).toEqual([[f.rawId], [f.rawId]])
   })
 
@@ -129,6 +132,9 @@ describe('shared native presentation preserves the existing reading owner', () =
       clientHeight: { configurable: true, get: () => clientHeight },
       scrollTop: { configurable: true, get: () => top, set: value => { top = Math.max(0, Math.min(Number(value), height - clientHeight)) } }
     })
+    feed.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, bottom: clientHeight, left: 0, right: 800, width: 800, height: clientHeight, toJSON() {} })
+    const tail = feed.querySelector<HTMLElement>('[data-conversation-reading-tail]')!
+    tail.getBoundingClientRect = () => ({ x: 0, y: height - top, top: height - top, bottom: height - top, left: 0, right: 800, width: 800, height: 0, toJSON() {} })
     await act(async () => feed.dispatchEvent(new Event('scroll')))
     height = 1200
     await render(messages)
