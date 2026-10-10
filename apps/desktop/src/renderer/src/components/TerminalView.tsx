@@ -942,7 +942,7 @@ export function TerminalView({
     // this decoder never participates in the byte cursor, overlap, or terminal writes.
     const kittyOutputDecoder = new TextDecoder()
     let renderReady: { dispose(): void } | null = null
-    const preserveRowResizeReading = (resize: () => void): void => {
+    const preserveResizeReading = (resize: () => void): void => {
       clearLinkPreview()
       const selected = terminal.getSelectionPosition()
       const cols = terminal.cols
@@ -952,6 +952,21 @@ export function TerminalView({
       const markLine = (line: number) => buffer.type === 'normal'
         ? terminal.registerMarker(line - buffer.baseY - buffer.cursorY) : undefined
       const readingMarker = reading.kind === 'line' ? markLine(reading.line) : undefined
+      // Reflow can delete a continuation row and its marker. Anchor its original
+      // cell offset at the retained wrapped group's first row instead.
+      const wrappedRowCells = (line: number, width: number): number => {
+        const next = buffer.getLine(line + 1)
+        const last = buffer.getLine(line)?.getCell(width - 1)
+        const widePadding = next?.isWrapped && last?.getCode() === 0 && last.getWidth() === 1 && next.getCell(0)?.getWidth() === 2
+        return widePadding ? width - 1 : width
+      }
+      let readingStart = reading.kind === 'line' ? reading.line : 0
+      let readingOffset = 0
+      while (readingStart > 0 && buffer.getLine(readingStart)?.isWrapped) {
+        readingOffset += wrappedRowCells(readingStart - 1, cols)
+        readingStart -= 1
+      }
+      const reflowMarker = reading.kind === 'line' && readingStart !== reading.line ? markLine(readingStart) : readingMarker
       const selectionStart = selected ? markLine(selected.start.y) : undefined
       const selectionEnd = selected ? markLine(selected.end.y) : undefined
       try {
@@ -964,18 +979,32 @@ export function TerminalView({
           const length = (endY - startY) * cols + selected.end.x - startX
           if (length > 0) terminal.select(startX, startY, length)
         }
-        if (terminal.cols === cols && terminal.rows !== rows &&
+        if ((terminal.cols !== cols || terminal.rows !== rows) &&
           terminal.buffer.active === buffer && buffer.type === 'normal') {
-          const anchored = readingMarker ? { kind: 'line' as const, line: Math.max(0, readingMarker.line) } : reading
+          let line = readingMarker && !readingMarker.isDisposed ? readingMarker.line : reading.kind === 'line' ? reading.line : buffer.viewportY
+          if (terminal.cols !== cols && reflowMarker && !reflowMarker.isDisposed) {
+            line = reflowMarker.line
+            while (readingOffset > 0 && buffer.getLine(line + 1)?.isWrapped) {
+              const cells = wrappedRowCells(line, terminal.cols)
+              if (readingOffset < cells) break
+              readingOffset -= cells
+              line += 1
+            }
+          }
+          const anchored = reading.kind === 'line' ? { kind: 'line' as const, line: Math.max(0, line) } : reading
           const target = restoreTerminalViewport(anchored, buffer.baseY)
           // Confirm the absolute viewport even when resize already moved the buffer to its base.
           // A zero-delta relative scroll leaves xterm's cached DOM position at the old row.
           if (target.kind === 'latest') terminal.scrollToLine(buffer.baseY)
           else terminal.scrollToLine(target.line)
           viewportMemoryRef.current = anchored
+          // A physical row marker from before this fit no longer identifies the
+          // same reading cell after reflow, even when the marker is still alive.
+          releaseViewportMemoryMarker(terminal)
         }
       } finally {
         readingMarker?.dispose()
+        if (reflowMarker !== readingMarker) reflowMarker?.dispose()
         selectionStart?.dispose()
         selectionEnd?.dispose()
       }
@@ -984,8 +1013,8 @@ export function TerminalView({
     const viewportFrames = new Map<number, { window: Window; id: number }>()
     const viewport = new TerminalViewportSynchronizer({
       proposeGrid: () => fit.proposeDimensions() ?? null,
-      fit: () => preserveRowResizeReading(() => fit.fit()),
-      applyOwnerGrid: ({ cols, rows }) => preserveRowResizeReading(() => terminal.resize(cols, rows)),
+      fit: () => preserveResizeReading(() => fit.fit()),
+      applyOwnerGrid: ({ cols, rows }) => preserveResizeReading(() => terminal.resize(cols, rows)),
       readGrid: () => ({ cols: terminal.cols, rows: terminal.rows }),
       resize: async ({ cols, rows }) => {
         // 进程已死时不向 PTY 发 resize（effect 不再随 processState 重挂，
