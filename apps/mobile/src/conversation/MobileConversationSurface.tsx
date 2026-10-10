@@ -7,7 +7,7 @@ import { questionReplyKey } from '@agentmux/client-ui/conversation-question-repl
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
-import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionRequestTarget } from '@agentmux/core/agent-interaction-state'
+import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionOperationReceiptMatches } from '@agentmux/core/agent-interaction-state'
 import { currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -534,9 +534,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }
   function adoptResponseReceipt(attempt: ResponseAttempt, receipt: AgentMuxInteractionOperationReceipt) {
     const input = attempt.original!.input
-    if (receipt.agentSessionId !== input.agentSessionId || receipt.operationId !== input.operationId || receipt.run.runId !== input.expectedRun.runId ||
-        JSON.stringify(agentInteractionRequestTarget(receipt.expectedRequest)) !== JSON.stringify(agentInteractionRequestTarget(input.expectedRequest)) ||
-        JSON.stringify(receipt.response) !== JSON.stringify(input.response)) throw new Error('原答复回执身份未匹配；原请求与操作保留。')
+    if (!agentInteractionOperationReceiptMatches(input, receipt)) throw new Error('原答复回执身份未匹配；原请求与操作保留。')
     attempt.phase = receipt.delivery === 'unknown' || receipt.delivery === 'saved' ? 'unknown' : 'confirmed'
     attempt.message = receipt.nativeCompleted ? '原请求已确认完成；答复回执仍可查询。'
       : receipt.delivery === 'saved' ? '答复已保存；是否送达尚未确认。'
@@ -583,8 +581,14 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const capturedSpeech = useMemo(() => reading.timeline?.items.filter(item => item.agentSessionId === agentSessionId &&
     (item.kind === 'user_message' || item.kind === 'assistant_message')) ?? [], [agentSessionId, reading.timeline])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
+  const readHistoryResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
+    if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，原资源引用和草稿保留。')
+    return client.sessionHistoryResource(agentSessionId, input)
+  }, [client, agentSessionId])
   const readingProps = {
+    active: visible,
     ...(session ? { workspaceRoot: session.workspacePath, executionHostId: session.hostId } : {}),
+    ...(client && agentSessionId ? { readHistoryResource } : {}),
     ...(openWorkspaceFile ? { openWorkspaceFile } : {}), ...(readPastedImage ? { readPastedImage } : {}),
     ...(openHttpLink ? { openHttpLink } : {}),
     onSelectAnnotation: ({ messageId, quote }: Parameters<NonNullable<ConversationMessageProps['onSelectAnnotation']>>[0]) =>
@@ -751,7 +755,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             if (!insertion.current) throw new Error('原编辑器已关闭，正文和草稿保留。')
             insertion.current.replace(entry.text)
           }}
-          reading={{ ...readingProps, ...(client && agentSessionId ? { readHistoryResource: (input: Parameters<AgentMuxHostedClient['sessionHistoryResource']>[1]) => client.sessionHistoryResource(agentSessionId, input) } : {}) }}
+          reading={readingProps}
           {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
           onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
           onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })} {...(readPastedImage ? { readPastedImage } : {})}
