@@ -9,7 +9,7 @@ import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicPhysicalPath } fr
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { createFocusProjectionSelector } from './focus-context'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
-import { moteExpression } from './mote-expression'
+import { moteExpressionPresentation } from './mote-expression'
 import type { RendererAgentTimelineSnapshot } from './session-state'
 import { originalTopicAddress } from '../../../shared/space-addresses'
 import { resolveMoteDefaultConversation, moteDefaultCatalog } from './mote-default-conversation'
@@ -61,8 +61,9 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
     const choice = state.spaceObjectIcons[key]
     const matching = target && scratch && topic ? state.sessions.filter(value => value.kind === 'agent' && value.hostId === scratch.hostId && (value.workspacePath === scratchTopicPhysicalPath(scratch, topic) || value.workspacePath === JSON.parse(target.key)[1])) : []
     const original = matching.length === 1 ? matching[0] : undefined
-    const expression = moteExpression(original, 'static', original ? state.timelines[original.id]?.liveTool : undefined)
-    const motion = space.kind === 'mote' ? { expression, activities: matching.map(session => ({ agentSessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id, runId: session.control.run.runId, expression: moteExpression(session, 'static', state.timelines[session.id]?.liveTool) })) } : {}
+    const { expression } = moteExpressionPresentation(original, 'static', original ? state.timelines[original.id]?.liveTool : undefined)
+    const motion = space.kind === 'mote' ? { expression, activities: matching.map(session => ({ agentSessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id, hostId: session.hostId,
+      runId: session.control.run.runId, ...moteExpressionPresentation(session, 'static', state.timelines[session.id]?.liveTool) })) } : {}
     if (typeof choice === 'string') return { spaceId: space.spaceId, glyph: choice, ...motion }
     if (choice?.kind === 'face') return { spaceId: space.spaceId, parts: { ...choice }, ...motion }
     const imageChoice = choice?.kind === 'series' ? choice.image : choice?.kind === 'image' ? choice : null

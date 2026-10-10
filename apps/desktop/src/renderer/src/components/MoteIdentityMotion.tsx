@@ -1,7 +1,8 @@
-import { useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
-import { moteExpression } from '../lib/mote-expression'
+import { useShallow } from 'zustand/react/shallow'
+import { moteExpression, moteExpressionPresentation } from '../lib/mote-expression'
 import { observeMoteMotion } from '../lib/mote-face-motion'
 import type { MoteExpression } from './MoteFace'
 
@@ -20,12 +21,24 @@ export function MoteIdentityMotion(props: Props) {
     : <SessionMotion {...props} />
 }
 function SessionMotion({ moteSessionId, moteHostId, moteAvailability = 'static', visible, motionKey, className, children }: Props) {
-  const expression = useAppStore(state => {
+  const { session, tool } = useAppStore(useShallow(state => {
     const candidate = moteSessionId ? sessionPresentationById(state.sessions).get(moteSessionId) : undefined
     const session = candidate?.kind === 'agent' && candidate.hostId === moteHostId ? candidate : undefined
-    return moteExpression(session, moteSessionId && !session ? 'restoring' : moteAvailability,
-      moteSessionId ? state.timelines[moteSessionId]?.liveTool : undefined)
-  })
+    return { session, tool: session && moteSessionId ? state.timelines[moteSessionId]?.liveTool : undefined }
+  }))
+  const [clock, wake] = useState(0)
+  const { expression, activeForMs } = moteExpressionPresentation(session, moteSessionId && !session ? 'restoring' : moteAvailability, tool)
+  useEffect(() => {
+    if (!session) return
+    const refresh = () => wake(value => value + 1)
+    document.addEventListener('visibilitychange', refresh)
+    return () => document.removeEventListener('visibilitychange', refresh)
+  }, [session])
+  useEffect(() => {
+    if (visible === false || document.hidden || activeForMs <= 0) return
+    const timer = setTimeout(() => wake(value => value + 1), activeForMs)
+    return () => clearTimeout(timer)
+  }, [session, tool, activeForMs, visible, clock])
   return <MotionSurface expression={expression} visible={visible} motionKey={motionKey} className={className}>{children}</MotionSurface>
 }
 function MotionSurface({ expression, visible = true, motionKey, className, children }: { expression: MoteExpression; visible?: boolean | undefined; motionKey?: string | undefined; className?: string | undefined; children(expression: MoteExpression): ReactNode }) {
