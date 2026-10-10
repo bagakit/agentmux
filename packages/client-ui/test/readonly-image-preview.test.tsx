@@ -132,8 +132,8 @@ it('a hidden secondary document cannot borrow primary visibility or late source 
 })
 it('retained nodes rebind their actual realm when the existing platform document changes', async () => {
   const owner = secondary(); await visibility(owner, 'hidden')
-  function Probe() { const work = useVisibleWork<HTMLSpanElement>(); return <span ref={work.ref} data-work={work.visible}>Retained content</span> }
-  const { host, root } = await render(<Probe />); await reveal(); const node = host.firstElementChild!; expect(node.getAttribute('data-work')).toBe('true')
+  function Probe() { const work = useVisibleWork<HTMLSpanElement>(); return <span ref={work.ref} data-work={work.visible} data-ref-current={Boolean(work.ref.current)}>Retained content</span> }
+  const { host, root } = await render(<Probe />); await reveal(); const node = host.firstElementChild!; expect(node.getAttribute('data-work')).toBe('true'); expect(node.getAttribute('data-ref-current')).toBe('true')
   const old = observations.find(item => item.target === node)!
   owner.body.append(owner.adoptNode(host))
   await act(async () => root.render(<ClientUiProvider platform={platform(owner)}><Probe /></ClientUiProvider>)); await reveal(owner)
@@ -142,9 +142,9 @@ it('retained nodes rebind their actual realm when the existing platform document
   await visibility(owner, 'visible'); expect(node.getAttribute('data-work')).toBe('true')
 })
 it('standalone visible-work consumers retain their own document without requiring a platform', async () => {
-  function Probe() { const work = useVisibleWork<HTMLSpanElement>(); return <span ref={work.ref} data-work={work.visible}>Plain content</span> }
+  function Probe() { const work = useVisibleWork<HTMLSpanElement>(); return <span ref={work.ref} data-work={work.visible} data-ref-current={Boolean(work.ref.current)}>Plain content</span> }
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); mounts.push({ host, root })
-  await act(async () => root.render(<Probe />)); await reveal(); expect(host.firstElementChild?.getAttribute('data-work')).toBe('true')
+  await act(async () => root.render(<Probe />)); await reveal(); expect(host.firstElementChild?.getAttribute('data-work')).toBe('true'); expect(host.firstElementChild?.getAttribute('data-ref-current')).toBe('true')
 })
 
 it('a secondary viewport fallback uses its own window bounds without a primary observer', async () => {
