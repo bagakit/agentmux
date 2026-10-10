@@ -182,6 +182,44 @@ describe('original workface native presentation owner', () => {
     expect(snapshot(f).windows.some(window => window.windowId === identity.windowId)).toBe(false)
     expect(snapshot(f).issue).toBeNull()
   })
+  it('retains another original window focus cause when an unrelated window returns', async () => {
+    const f = await fixture(), first = await opened(f)
+    const other = await f.owner.call('app.window.open', { operationId: 'another-original-window', target: { ...target, tabId: 'other-tab' } }, context)
+    const identity = { windowId: other.recordedOperation!.windowId!, documentGeneration: other.recordedOperation!.documentGeneration! }, native = f.children[1]!
+    native.focused = false; native.focus = () => {}
+    expect(f.owner.focusDocument(identity)).toBe(false)
+    const issue = snapshot(f).issue
+    expect(issue).not.toBeNull()
+    expect((await f.owner.call('app.window.return', { operationId: 'return-unrelated-original-window', ...first }, context)).recordedOperation?.state).toBe('confirmed')
+    expect(snapshot(f).issue).toBe(issue)
+  })
+  it.each(['main', 'child'])('retires the exact %s document focus cause when its original Renderer document retires', async kind => {
+    const f = await fixture()
+    const descriptor = (await f.owner.call('app.window.ls', {}, context)).windows[0]!
+    const original = kind === 'child' ? await opened(f) : { windowId: descriptor.windowId, documentGeneration: descriptor.documentGeneration! }
+    const native = kind === 'child' ? f.children[0]! : f.main
+    native.focused = false; native.focus = () => {}
+    expect(f.owner.focusDocument(original)).toBe(false)
+    expect(snapshot(f).issue).not.toBeNull()
+    f.main.webContents.emit('did-start-navigation', {}, _historyFixtureFileUrl("app/index.html"), false, true)
+    const current = await f.owner.rendererReady({ sender: f.main.webContents, senderFrame: f.main.webContents.mainFrame } as never)
+    if (kind === 'child') await vi.waitFor(() => expect(f.children).toHaveLength(2))
+    else { expect(current.windowId).toBe(original.windowId); expect(current.documentGeneration).not.toBe(original.documentGeneration) }
+    expect(() => f.owner.focusDocument(original)).toThrow('current')
+    expect(snapshot(f).issue).toBeNull()
+  })
+  it('retains an unrelated receipt warning when the original Main document retires', async () => {
+    const f = await fixture(), descriptor = (await f.owner.call('app.window.ls', {}, context)).windows[0]!
+    f.main.focused = false; f.main.focus = () => {}
+    expect(f.owner.focusDocument({ windowId: descriptor.windowId, documentGeneration: descriptor.documentGeneration! })).toBe(false)
+    f.store.journalFailure = 'pending'
+    await f.owner.call('app.window.open', { operationId: 'unpersisted-window-before-main-reload', target }, context)
+    const issue = snapshot(f).issue
+    expect(issue).toContain('persistence is unconfirmed')
+    f.main.webContents.emit('did-start-navigation', {}, _historyFixtureFileUrl("app/index.html"), false, true)
+    await f.owner.rendererReady({ sender: f.main.webContents, senderFrame: f.main.webContents.mainFrame } as never)
+    expect(snapshot(f).issue).toBe(issue)
+  })
   it('ignores a retired native focus event and stale document when the current focus is unknown', async () => {
     const f = await fixture(), original = await opened(f), retired = f.children[0]!
     retired.webContents.emit('render-process-gone')
