@@ -655,14 +655,22 @@ it('selects the exact child lease before rehosting the same native page and scop
 
 it('keeps the original reachable viewport when the selected native child refuses admission', async () => {
   const f = await fixture(), original = f.register('A')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, original.leaseId)
+  f.request()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
   await f.manager.activatePresentation(f.app as never, f.frame as never, original.leaseId, { kind: 'select' })
+  const confirmed = { leaseId: original.leaseId, captureId: capture.captureId }, control = f.events()
+  expect(f.coverage().at(-1)).toEqual(confirmed)
+  const failure = new Error('Native child admission unavailable')
   const child = { webContents: new native.Contents(), isDestroyed: () => false, isFocused: () => true, contentView: {
-    addChildView: () => { throw new Error('Native child admission unavailable') }, removeChildView: vi.fn()
+    addChildView: () => { throw failure }, removeChildView: vi.fn()
   } }
   const identity = { windowId: 'child', documentGeneration: 'original-document' }
   f.manager.setPresentationWindowOwner(scope => scope?.windowId === identity.windowId ? child as never : f.window as never)
   const borrowed = f.manager.registerPresentation(f.app as never, f.frame as never, { browserId: 'browser', occurrence: occurrence('B'), geometry: { visible: true, bounds: { x: 5000, y: 4000, width: 200, height: 100 } }, window: identity })
-  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, borrowed.leaseId, { kind: 'select' })).rejects.toThrow('Native child admission unavailable')
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, borrowed.leaseId, { kind: 'select' })).rejects.toBe(failure)
+  expect(f.coverage().at(-1)).toEqual(confirmed)
+  expect(f.events()).toEqual(control)
   expect(f.manager.windowForView(f.source as never)).toBe(f.window)
   expect(f.views).toContain(f.source); expect(f.source.getBounds()).toEqual(geometry.bounds)
   expect(f.source.getVisible()).toBe(true); expect(f.source.webContents.dead).toBe(false)
