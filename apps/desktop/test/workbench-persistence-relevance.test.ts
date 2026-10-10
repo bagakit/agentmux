@@ -1,6 +1,10 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { AppConfig, BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 
@@ -32,10 +36,16 @@ let backing: Map<string, string>
 let writes: Array<{ name: string; value: string; at: number }>
 let localStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 let dispose: (() => void) | undefined
+let spatial: AgentMuxSpatialStateStore
+let spatialRoot: string
+let spatialCommit: MockInstance
+let spatialRead: MockInstance
 
 beforeEach(async () => {
   vi.resetModules()
   vi.useFakeTimers()
+  spatialRoot = await mkdtemp(join(tmpdir(), 'workbench-persistence-'))
+  spatial = new AgentMuxSpatialStateStore(join(spatialRoot, 'spatial.json'))
   backing = new Map()
   writes = []
   localStorage = {
@@ -49,18 +59,30 @@ beforeEach(async () => {
   store = (await import('../src/renderer/src/store.js')).useAppStore
   api = (await import('../src/renderer/src/lib/api.js')).api
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+  // Positions belong to the real Core owner. Local storage retains UI preferences
+  // and drafts; it intentionally stops duplicating the workface after Core ACK.
+  spatialRead = vi.spyOn(api.spatial, 'read').mockImplementation(() => spatial.readForLayout())
+  spatialCommit = vi.spyOn(api.spatial, 'commit').mockImplementation(input => spatial.commit(input))
+  vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => spatial.retainDisplayLabels(values))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => spatial.subscribe(listener))
 })
 
-afterEach(() => {
-  dispose?.()
-  dispose = undefined
-  vi.clearAllTimers()
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
-  vi.useRealTimers()
+afterEach(async () => {
+  try {
+    if (store.getState().config) await (await import('../src/renderer/src/store.js')).prepareRendererUpdate('quit')
+  }
+  finally {
+    dispose?.()
+    dispose = undefined
+    vi.clearAllTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+    await rm(spatialRoot, { recursive: true, force: true })
+  }
 })
 
 async function initialize(): Promise<void> {
@@ -85,6 +107,13 @@ function saved() {
   return JSON.parse(raw!) as { state: ReturnType<NonNullable<ReturnType<typeof store.persist.getOptions>['partialize']>>; version: number }
 }
 
+async function savedWorkbench() {
+  await (await import('../src/renderer/src/store.js')).prepareRendererUpdate()
+  const saved = await spatial.readForLayout()
+  expect(saved).not.toBeNull()
+  return (await import('../src/renderer/src/lib/desktop-spatial-state.js')).desktopWorkbenchFromSpatial(saved!.graph)
+}
+
 describe('actual Store persistence relevance', () => {
   it('consumes semantic events and external transient updates without projecting or encoding unrelated Tabs', async () => {
     await initialize()
@@ -95,10 +124,13 @@ describe('actual Store persistence relevance', () => {
     store.setState({ tabs, layouts: { [workspaceId]: createWorkspaceLayout('fixture-group', Object.keys(tabs)) } })
     store.getState().setViewMode(sessionId, 'activity')
     vi.advanceTimersByTime(400)
-    expect(Object.keys(saved().state.restoredWorkbench.tabs)).toHaveLength(64)
+    expect(Object.keys((await savedWorkbench()).tabs)).toHaveLength(64)
+    expect(saved().state).not.toHaveProperty('restoredWorkbench')
     expect(saved().state.viewModes).toEqual({ [sessionId]: 'activity' })
     const before = backing.get(storageName)
     projection.mockClear()
+    spatialCommit.mockClear()
+    spatialRead.mockClear()
     const stringify = vi.spyOn(JSON, 'stringify')
     const read = vi.mocked(localStorage.getItem)
     read.mockClear()
@@ -106,7 +138,14 @@ describe('actual Store persistence relevance', () => {
     for (let index = 0; index < 200; index += 1) store.setState({ startupProgress: { step: 'runtime' } })
     expect(store.getState().sessions[0]?.status.observedAt).toBe(201)
     expect(projection).not.toHaveBeenCalled()
-    expect(stringify).not.toHaveBeenCalled()
+    expect(spatialCommit).not.toHaveBeenCalled()
+    expect(spatialRead).not.toHaveBeenCalled()
+    // The Run service owner keys the exact changed Session once per event.
+    // No Tab, layout or persisted state is encoded, and unrelated transient
+    // updates add no work. Keep this bounded independently of the 64 Tabs.
+    expect(stringify.mock.calls).toEqual(Array.from({ length: 200 }, () => [[
+      session.hostId, session.control.hostId, sessionId, runId
+    ]]))
     expect(read).not.toHaveBeenCalled()
     expect(backing.get(storageName)).toBe(before)
   })
@@ -120,8 +159,9 @@ describe('actual Store persistence relevance', () => {
     expect(store.getState().viewModes).toEqual({})
     store.getState().setViewMode(sessionId, 'activity')
     store.getState().setViewMode(readerId, 'terminal')
-    const original = store.getState(), modes = { [sessionId]: 'activity', [readerId]: 'terminal' }
     vi.advanceTimersByTime(400)
+    await savedWorkbench()
+    const original = store.getState(), modes = { [sessionId]: 'activity', [readerId]: 'terminal' }
     expect(saved().state.viewModes).toEqual(modes)
     expect(saved().state).not.toHaveProperty('sessions')
     expect(saved().state).not.toHaveProperty('editorRegionModes')
@@ -197,24 +237,27 @@ describe('actual Store persistence relevance', () => {
     }
     expect(writes.map(({ at }) => at - start)).toEqual([400])
     expect(saved().state.toolsOpen).toBe(false)
-    expect(saved().state.restoredWorkbench.tabs[tab.id]?.regions['browser-region']).toEqual({
-      regionId: 'browser-region', kind: 'browser', workspaceId, browserId: browser.id, url: next.url, title: next.title
+    expect((await savedWorkbench()).tabs[tab.id]?.regions['browser-region']).toEqual({
+      regionId: 'browser-region', kind: 'browser', workspaceId, browserId: browser.id, profileId: browser.profileId, url: next.url, title: next.title
     })
     expect(store.getState().tabs[tab.id]?.regions['browser-region']).toMatchObject({ loading: false, driving: true })
   })
 
-  it('admits a real run-removal topology change through the semantic event path', async () => {
+  it('admits real run removal without treating Runtime retirement as deletion of the durable workface', async () => {
     await initialize()
     const tab = agentTab()
     store.setState({ tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('agent-group', [tab.id]) } })
     vi.advanceTimersByTime(400)
-    expect(Object.keys(saved().state.restoredWorkbench.tabs)).toEqual([tab.id])
+    expect(Object.keys((await savedWorkbench()).tabs)).toEqual([tab.id])
     store.getState().applyEvent({ type: 'core', hostId: 'local', event: {
       type: 'run-removed', agentSessionId: sessionId, run: { runId }, evidence: { source: 'run-process', observedAt: 2, run: { runId } }
     } })
     vi.advanceTimersByTime(400)
     expect(store.getState().sessions).toEqual([])
-    expect(saved().state.restoredWorkbench.tabs).toEqual({})
+    expect(store.getState().tabs).toEqual({})
+    // A Run event withdraws its live projection. Deleting the Core-owned entity
+    // requires an explicit view close, rather than absence from a Runtime list.
+    expect((await savedWorkbench()).tabs[tab.id]?.regions[`${tab.id}-region`]).toMatchObject({ sessionId })
   })
 
   it('never queues startup defaults and explicitly saves the restored shell after opening the fence', async () => {
@@ -230,7 +273,7 @@ describe('actual Store persistence relevance', () => {
     vi.advanceTimersByTime(400)
     expect(writes).toHaveLength(1)
     expect(saved().state.agentComposerDrafts).toEqual({ [sessionId]: 'Saved user draft' })
-    expect(Object.keys(saved().state.restoredWorkbench.tabs)).toEqual([tab.id])
+    expect(Object.keys((await savedWorkbench()).tabs)).toEqual([tab.id])
   })
 
   it('keeps the fence closed after failed hydration and preserves the unread durable record', async () => {
