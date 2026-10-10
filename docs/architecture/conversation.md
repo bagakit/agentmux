@@ -65,7 +65,7 @@ captured 输入沿既有 `AgentSessionUserMessage` 交共同 Message，captured 
 
 [`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 使用 [`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 通过 Hosted SDK 读取原 Host 的 Timeline／native page 并观察相关来源；原生消息／过程消费共同 `ConversationView` 与 `NativeProcessObservation`，captured 输入／回复消费共同 Message 及 Captured adapter；本端尚未呈现 captured 工具／lifecycle 过程。captured 正文同样常显，并保原作者、来源及失败／未确认状态；没有额外的总来源折叠。连接、草稿和未确认操作归本端既有 owner，原生读取失败不自动撤销普通输入。
 
-Mobile 自己持有单页阅读状态，没有使用 Desktop 的连续窗口 Hook。当前 `readingProps` 向共同消息传入所选 Session 的准确执行 Host，但未向主 `ConversationView` 注入 `readHistoryResource`；同组件却为 `MobileMailbox` 单独注入资源 reader。因此主对话的原生 image／deferred-text part 会落入 Message 的引用分支，无法据此宣称两端资源能力已一致。这说明接线范围，不删减[共同阅读要求](../design/behavior/conversation-mode.md#共同阅读组件与完整原生内容)。
+Mobile 自己持有单页阅读状态，没有使用 Desktop 的连续窗口 Hook。`MobileConversationSurface` 向主 `ConversationView` 与 `MobileMailbox` 注入原 `sessionHistoryResource`，并传递准确执行 Host 与可见性。已接受 native page 在原阅读投影保留其 client／Session／Host 归属；切换连接后仍展示的旧页继续沿原 reader，Mailbox 不把旧页交给新 Host。原生 image／deferred-text part 交共同 Message 的准确资源读取、完整重组与身份校验；隐藏时释放相应展示读取，切换 Session 后不采用旧资源结果。资源失败保原引用、正文、草稿及普通输入，不另建资源 Store。这条接线不代替[共同阅读要求](../design/behavior/conversation-mode.md#共同阅读组件与完整原生内容)的各项验收。
 
 两端样式来自共同 [`client-ui/styles`](../../packages/client-ui/src/styles/index.css)：Desktop 在 [`styles/index.css`](../../apps/desktop/src/renderer/src/styles/index.css) 分项导入，Mobile 在 [`main.tsx`](../../apps/mobile/src/main.tsx) 导入整包，再由 [`conversation.css`](../../apps/mobile/src/conversation/conversation.css) 覆盖触控尺寸、气泡和容器。其中对共享 `.log-turn` 的气泡、padding、字号和消息间距的直接覆写，与[共享样式 owner](../design/presentation/shared-rules.md#样式表的组织)要求存在差异；不能把共享组件的 import 当作两端布局和视觉已经统一的证明。触控和外层容器适配与共同消息本身的样式职责须分别核对。
 
@@ -75,7 +75,7 @@ Mobile 自己持有单页阅读状态，没有使用 Desktop 的连续窗口 Hoo
 | --- | --- |
 | 普通消息、Queue／steer | [`AgentSessionComposer`](../../apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx) 回到原 store.send／enqueueAgentSteer；Mobile 回到 Hosted Core 输入。草稿与已入队不代替投递回执。 |
 | 当前同步问题／权限请求 | [`AgentInteractionCard`](../../packages/client-ui/src/components/AgentInteractionCard.tsx) 回原 interaction response owner；历史卡片不产生当前 pending 资格。 |
-| 原生异步问题答复 | [`projectConversationQuestions`](../../packages/core/src/conversation-questions.ts) → 共同 question card → `replySessionQuestion`；原 native answer、submitted receipt 与本端未知意图分别持有。 |
+| 原生异步问题答复 | [`projectConversationQuestions`](../../packages/core/src/conversation-questions.ts) → 共同 question card → Provider 声明的原 Terminal 路径；当前 `replySessionQuestion` 明确拒绝自动回复。单题草稿／Copy／导航不派发输入，原 native answer 与本端未知意图分别持有。 |
 | reaction 快捷回复 | [`useConversationReactions`](../../apps/desktop/src/renderer/src/lib/conversation-reactions.tsx) 沿原输入队列发送带回复引用的新人工消息。 |
 | Mailbox 阅读／定位 | [`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 及 [`mailboxMessages`](../../apps/desktop/src/renderer/src/lib/session-mailbox-messages.ts) 消费原输入投影与准确记录引用，保留原 row／read-marker；详情复用 Message。 |
 | Activity／Terminal 切换 | [`AgentComposerTools`](../../apps/desktop/src/renderer/src/components/AgentComposerTools.tsx) → store.setViewMode；`SessionPane` 保留已打开 Terminal，用可见性切换表面，不向 CLI 注入模式按键。 |
