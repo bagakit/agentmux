@@ -1,5 +1,6 @@
 import { gunzipSync } from 'node:zlib'
 import { afterEach, expect, it, vi } from 'vitest'
+import { parseConnectionEnrollmentDiagnostic } from '@agentmux/core/connections'
 import { createFeishuEnrollment } from '../src/adapters/feishu/enrollment.js'
 import type { EnrollmentAdapterInput, EnrollmentBeginReceipt, EnrollmentPollReceipt } from '../src/connection-enrollment-adapter.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -24,6 +25,12 @@ function challenge(receipt: EnrollmentBeginReceipt | EnrollmentPollReceipt) {
   expect(receipt.kind).toBe('pending')
   if (receipt.kind !== 'pending') throw new Error('Original challenge was not confirmed')
   return receipt
+}
+function unconfirmed(value: EnrollmentBeginReceipt | EnrollmentPollReceipt) {
+  expect(value.kind).toBe('unknown')
+  if (value.kind !== 'unknown') throw new Error('Expected an unconfirmed original effect')
+  expect(value).toEqual({ kind: 'unknown', ...(value.diagnostic ? { diagnostic: parseConnectionEnrollmentDiagnostic(value.diagnostic) } : {}) })
+  return value
 }
 async function started(next: unknown = { error: 'authorization_pending' }, status = 400) {
   const network = remote({ body: initial }, { body: next, status })
@@ -96,12 +103,12 @@ it.each([
   const result = await f.adapter.poll(f.poll)
   expect(result.kind).toBe(kind)
   expect(f.network.calls).toHaveLength(2)
-  if (kind === 'unknown') expect(result).toEqual({ kind: 'unknown' })
+  if (kind === 'unknown') expect(unconfirmed(result).diagnostic).toMatchObject({ stage: 'response' })
 })
 
 it('keeps brand mismatch unknown without a second HTTP request or replacing the frozen domain', async () => {
   const f = await started({ client_id: 'cli_remote', client_secret: 'private-original-secret', user_info: { tenant_brand: 'lark' } }, 200)
-  expect(await f.adapter.poll(f.poll)).toEqual({ kind: 'unknown' })
+  expect(await f.adapter.poll(f.poll)).toEqual({ kind: 'unknown', diagnostic: { stage: 'response', code: 'invalid-response', httpStatus: 200 } })
   expect(f.network.calls).toHaveLength(2)
   expect(new Set(f.network.calls.map(call => new URL(call.url).hostname))).toEqual(new Set(['accounts.feishu.cn']))
 })
@@ -121,7 +128,7 @@ it.each([
   { expires_in: '600' }, { expires_in: null }, { expires_in: [] }, { expires_in: -1 }, { expires_in: 600, expire_in: 601 }
 ])('does not publish a malformed or wrong-issuer challenge: %j', async override => {
   const network = remote({ body: { ...initial, ...override } })
-  expect(await createFeishuEnrollment().begin(input)).toEqual({ kind: 'unknown' })
+  unconfirmed(await createFeishuEnrollment().begin(input))
   expect(network.calls).toHaveLength(1)
 })
 
@@ -171,14 +178,81 @@ it('forwards cancellation, keeps unknown HTTP delivery unknown and retains a lat
   deliver(Response.json({ client_id: 'cli_original_application', client_secret: 'private-original-secret' }))
   expect(await original).toEqual({ kind: 'authorized', application: { domain: input.domain, appId: 'cli_original_application' }, secret: 'private-original-secret' })
   expect(fetch).toHaveBeenCalledTimes(1)
-  expect(await f.adapter.poll(f.poll, controller.signal)).toEqual({ kind: 'unknown' })
+  expect(await f.adapter.poll(f.poll, controller.signal)).toEqual({ kind: 'unknown', diagnostic: { stage: 'request', code: 'cancelled' } })
   expect(fetch).toHaveBeenCalledTimes(1)
   vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('device-code secret and raw private diagnostic') }))
-  expect(await f.adapter.poll(f.poll)).toEqual({ kind: 'unknown' })
+  expect(await f.adapter.poll(f.poll)).toEqual({ kind: 'unknown', diagnostic: { stage: 'request', code: 'transport-unconfirmed' } })
 })
 
 it.each([302, 429, 500])('does not follow redirects, retry or confirm error-status credentials: %s', async status => {
   const f = await started({ client_id: 'cli_original_application', client_secret: 'private-original-secret' }, status)
-  expect(await f.adapter.poll(f.poll)).toEqual({ kind: 'unknown' })
+  expect(await f.adapter.poll(f.poll)).toEqual({ kind: 'unknown', diagnostic: { stage: 'response', code: 'http-status', httpStatus: status } })
   expect(f.network.calls).toHaveLength(2)
+})
+
+it.each(['open.feishu.cn', 'open.larksuite.com'] as const)('preserves the official CLI public-code challenge on the original issuer: %s', async domain => {
+  const { verification_uri_complete, ...uriOnly } = initial
+  const publicCode = 'PUBLIC & next=群/one'
+  const network = remote({ body: { ...uriOnly, verification_uri: `https://${domain}/page/cli`, user_code: publicCode } })
+  const pending = challenge(await createFeishuEnrollment().begin({ ...input, domain }))
+  const url = new URL(pending.verificationUrl)
+  expect(url.origin + url.pathname).toBe(`https://${domain}/page/cli`)
+  expect(url.searchParams.get('user_code')).toBe(publicCode)
+  expect(url.searchParams.get('source')).toBe('node-sdk/agentmux')
+  expect(url.searchParams.get('createOnly')).toBe('true')
+  expect(pending.userCode).toBe(publicCode)
+  expect(JSON.parse(pending.privateState)).toMatchObject({ operationId: input.operationId, connectionId: input.connectionId, domain, deviceCode: initial.device_code })
+  expect(network.calls).toHaveLength(1)
+})
+
+it('can construct the exact official page without a server URI but requires a public code', async () => {
+  const { verification_uri_complete, verification_uri, ...codeOnly } = initial
+  const network = remote({ body: codeOnly }, { body: { ...codeOnly, user_code: undefined } })
+  expect(new URL(challenge(await createFeishuEnrollment().begin(input)).verificationUrl).hostname).toBe(input.domain)
+  expect(await createFeishuEnrollment().begin(input)).toEqual({ kind: 'unknown', diagnostic: { stage: 'challenge', code: 'missing-verification' } })
+  expect(network.calls).toHaveLength(2)
+})
+
+it.each([
+  { verification_uri_complete: null }, { verification_uri_complete: '' },
+  { verification_uri_complete: 'https://attacker.invalid/confirm' },
+  { verification_uri_complete: `https://open.feishu.cn/page/cli?device_code=${initial.device_code}` },
+  { verification_uri: 'https://open.larksuite.com/page/cli' },
+  { verification_uri: 'https://attacker.invalid/confirm' }, { verification_uri: 'http://open.feishu.cn/page/cli' },
+  { verification_uri: `https://open.feishu.cn/page/cli?public=${initial.device_code}` },
+  { user_code: initial.device_code }, { user_code: '' }, { user_code: ['PUBLIC'] }
+])('does not use missing complete to hide unsafe supplied confirmation material: %j', async override => {
+  const { verification_uri_complete, ...uriOnly } = initial
+  const network = remote({ body: { ...uriOnly, ...override } })
+  expect(unconfirmed(await createFeishuEnrollment().begin(input)).diagnostic?.stage).toBe('challenge')
+  expect(network.calls).toHaveLength(1)
+})
+
+it.each([
+  [{ body: { error: 'invalid_request', error_description: 'private-diagnostic' }, status: 400 }, { stage: 'response', code: 'platform-error', httpStatus: 400 }],
+  [{ body: {}, status: 403 }, { stage: 'response', code: 'http-status', httpStatus: 403 }],
+  [{ body: [], status: 200 }, { stage: 'response', code: 'invalid-response', httpStatus: 200 }],
+  [{ body: { error: null }, status: 200 }, { stage: 'response', code: 'invalid-response', httpStatus: 200 }],
+  [{ body: { error: false }, status: 200 }, { stage: 'response', code: 'invalid-response', httpStatus: 200 }],
+  [{ body: { error: { message: 'private-diagnostic' } }, status: 200 }, { stage: 'response', code: 'invalid-response', httpStatus: 200 }],
+  [{ body: initial, status: 503 }, { stage: 'response', code: 'http-status', httpStatus: 503 }]
+] as const)('reports finite observed response facts without exposing platform text: %j', async (response, diagnostic) => {
+  const network = remote(response)
+  const value = await createFeishuEnrollment().begin(input)
+  expect(value).toEqual({ kind: 'unknown', diagnostic })
+  expect(JSON.stringify(value)).not.toContain('private-diagnostic')
+  expect(JSON.stringify(value)).not.toContain(initial.device_code)
+  expect(network.calls).toHaveLength(1)
+})
+
+it('separates no response, invalid JSON and local cancellation without granting a new request', async () => {
+  const fetch = vi.fn(async () => { throw new TypeError('private-transport-detail') })
+  vi.stubGlobal('fetch', fetch)
+  expect(await createFeishuEnrollment().begin(input)).toEqual({ kind: 'unknown', diagnostic: { stage: 'request', code: 'transport-unconfirmed' } })
+  vi.stubGlobal('fetch', vi.fn(async () => new Response('private-not-json', { status: 200 })))
+  expect(await createFeishuEnrollment().begin(input)).toEqual({ kind: 'unknown', diagnostic: { stage: 'response', code: 'invalid-json', httpStatus: 200 } })
+  const controller = new AbortController(); controller.abort()
+  const unused = vi.fn(); vi.stubGlobal('fetch', unused)
+  expect(await createFeishuEnrollment().begin(input, controller.signal)).toEqual({ kind: 'unknown', diagnostic: { stage: 'request', code: 'cancelled' } })
+  expect(unused).not.toHaveBeenCalled()
 })
