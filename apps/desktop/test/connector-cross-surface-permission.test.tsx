@@ -1,0 +1,115 @@
+// @vitest-environment happy-dom
+import { act } from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+vi.mock('react-resizable-panels', async () => { const { createRequire } = await import('node:module'); return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js') })
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
+vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
+import { connectorJourneyFixture } from './fixtures/connector-journey'
+import { permissionActionsFixture } from '../../../packages/connectors/test/fixtures/permission-actions.js'
+import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { AttentionRequestPanel } from '../src/renderer/src/components/AttentionRequestPanel.js'
+import { RuntimeController } from '../src/main/runtime-controller.js'
+import { useAppStore } from '../src/renderer/src/store'
+import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
+import { api } from '../src/renderer/src/lib/api'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
+
+async function disclosure(label: string) {
+  const summary = [...document.querySelectorAll('summary')].find(node => node.textContent === label)!
+  expect(summary, label).toBeDefined()
+  if (!(summary.parentElement as HTMLDetailsElement).open) await act(async () => summary.click())
+}
+async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }) }
+async function toggle(label: string) {
+  const input = [...document.querySelectorAll('label')].find(node => node.textContent?.trim() === label)?.querySelector('input')!
+  expect(input, label).not.toBeNull(); await act(async () => input.click())
+}
+
+describe('the original member access owner', () => {
+  const f = connectorJourneyFixture({ platform: async request => {
+    if (request.url?.endsWith('/members')) return { code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_original', name: 'Ada' }], has_more: false } }
+    if (request.url?.endsWith('/chats') || request.url?.endsWith('chats/search')) return { code: 0, data: { items: [{ chat_id: 'oc_original', name: 'Design team', chat_status: 'normal' }], has_more: false } }
+    return { code: 0, data: { name: 'Design team', chat_status: 'normal', chat_mode: 'group' } }
+  } })
+  async function open() {
+    await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'oc_original')
+    await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
+    await f.button('Connect group'); await ready('Sharing on'); await disclosure('Manage member access')
+    await f.fill('Member access ID type', 'open_id'); await f.fill('Member access ID', 'ou_original')
+  }
+  it('starts remote permission off, explicitly shares decision context for one member and revokes only that capability through trusted IPC/public CLI', async () => {
+    await open()
+    const permission = [...document.querySelectorAll('label')].find(node => node.textContent === 'Allow permission decisions')!.querySelector('input')!
+    expect(permission.checked).toBe(false)
+    await ready('original permission request and tool details with this group')
+    await toggle('Send requests'); await toggle('Allow permission decisions'); await f.button('Approve this member')
+    await ready('Permission decisions')
+    const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
+    const read = await f.cli(['binding', 'inspect', '--binding', binding.bindingId])
+    expect(read.grants[0]).toMatchObject({ actor: { idType: 'open_id', userId: 'ou_original' }, capabilities: ['input', 'permission'], revision: 1 })
+    expect(f.calls.filter(value => value.method === 'connection.grant')).toHaveLength(1)
+    await f.button('Revoke permission decisions')
+    await vi.waitFor(async () => expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants[0]).toMatchObject({ capabilities: ['input'], state: 'active', revision: 2 }))
+    expect(f.calls.filter(value => value.method === 'connection.grant')).toHaveLength(2)
+    expect(f.platformCalls.some(call => call.method === 'POST')).toBe(false)
+    expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中'); await f.original.unchanged()
+  }, 25_000)
+
+  it('retains the original grant intent after a lost IPC receipt and only inspects it', async () => {
+    await open(); await toggle('Allow permission decisions')
+    const forward = f.forward
+    vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => { const result = await forward(method, input); if (method === 'connection.grant') throw new Error('Controlled lost member grant receipt'); return result })
+    await f.button('Approve this member'); await ready('not confirmed')
+    const intents = Object.values(useAppStore.getState().connectorRoomIntents)
+    expect(intents).toHaveLength(1)
+    const original = intents[0]!
+    expect(original.method).toBe('connection.grant')
+    await f.button('Check status'); await ready('Permission decisions')
+    expect(f.calls.filter(value => value.method === 'connection.grant')).toHaveLength(1)
+    expect(f.calls.some(value => value.method === 'connection.binding.inspect' && (value.input as { operationId?: string }).operationId === original.input.operationId)).toBe(true)
+    expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
+  }, 25_000)
+})
+
+describe('the original Desktop card and Hosted execution owner', () => {
+  const dom = composerDOM(), cleanup: Array<() => void | Promise<void>> = []
+  afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+  async function open() {
+    const f = await permissionActionsFixture(); cleanup.push(() => f.close())
+    await f.grant(); const original = await f.open()
+    const session = { ...composerSession('original-agent'), pendingInteraction: original.request, agentSessionUpdatedAt: _historyFixtureEpoch(0, 0, 0) }
+    useAppStore.setState({ sessions: [session], agentComposerDrafts: { 'original-agent': 'Retain this exact draft 中' } })
+    cleanup.push(f.hosted.onEvent(event => { act(() => useAppStore.setState(reduceRuntimeEvent(useAppStore.getState(), { type: 'core', hostId: 'local', event }))) }))
+    const runtime = Object.create(RuntimeController.prototype) as RuntimeController
+    Object.assign(runtime, { hostReconfigurationReservations: new Map(), hostLifecycleOperations: new Map(), configuredClient: () => f.hosted })
+    vi.spyOn(api.sessions, 'respondInteraction').mockImplementation((control, response, intent) => runtime.respondInteraction(control, response, intent))
+    vi.spyOn(api.sessions, 'inspectInteraction').mockImplementation((control, operationId) => runtime.inspectInteraction(control, operationId))
+    const submit = vi.spyOn(useAppStore.getState(), 'respondInteraction')
+    await dom.render(<AttentionRequestPanel sessionId="original-agent" onClose={() => {}} />)
+    await vi.waitFor(() => expect(f.buttons().length).toBeGreaterThan(0), { timeout: 8_000 })
+    return { ...f, originalRequest: original, submit }
+  }
+  it('an original Desktop decision reaches the real Hook and updates its exact SDK card without pretending Native completion', async () => {
+    const f = await open(), label = f.originalRequest.request.kind === 'permission' ? f.originalRequest.request.options.find(option => option.id === 'reject-once')!.label : ''
+    const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label)!
+    expect(button).toBeDefined(); await act(async () => { button.click(); await f.submit.mock.results[0]!.value })
+    await expect(f.originalRequest.callback).resolves.toMatchObject({ hookSpecificOutput: { decision: { behavior: 'deny' } } })
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Native adoption') })
+    await vi.waitFor(() => expect(f.effects.some(value => value.method === 'PATCH')).toBe(true))
+    expect(f.buttons()).toEqual([])
+    expect(f.effects.filter(value => value.method === 'POST')).toHaveLength(1)
+    expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Retain this exact draft 中')
+  }, 25_000)
+  it('an authenticated group decision updates the mounted original Desktop request through its existing event reducer', async () => {
+    const f = await open(), button = f.buttons().find(value => /deny|reject/i.test(value.text.content))!
+    await act(async () => { await f.sdk.receive(f.action(button.value.actionRef)); await f.originalRequest.callback })
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Native adoption') })
+    expect(dom.container.querySelector('pre')?.textContent).toContain('original command')
+    expect([...dom.container.querySelectorAll('button')].some(node => /deny|reject/i.test(node.textContent ?? '') && !(node as HTMLButtonElement).disabled)).toBe(false)
+    expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Retain this exact draft 中')
+    expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
+  }, 25_000)
+})
