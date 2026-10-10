@@ -159,7 +159,7 @@ export async function reviewPrivate(ctx) {
   ctx.receipt.privateWebsite = { beforeRelease: values, cacheResponses: network, cacheRequests: [...ctx.receipt.privateCacheRequests] }
 
   ctx.setPhase('private-release-close-and-late-incarnation')
-  await ctx.rpc.call('space.focus', { target: { kind: 'region', regionId: retained.regionId } })
+  await ctx.rpc.call('space.focus', { target: { kind: 'space', regionId: retained.regionId } })
   await contents(ctx, firstUrl, '(globalThis.__privateRetiredSession=contents.session,true)')
   await ctx.probe.cdp.evaluate(`window.agentmux.browser.release(${quote(first.region.browserId)})`)
   await ctx.probe.cdp.evaluate(`window.agentmux.browser.restore(${quote(first.region.browserId)},{workspaceId:${quote(workspaceId)},profileId:null,mode:'private'})`)
@@ -220,7 +220,7 @@ export async function reviewPrivate(ctx) {
   assert.deepEqual(after.graph.tabLayouts, before.graph.tabLayouts, 'Cold restart must preserve the original mixed Region topology')
   assert.deepEqual(after.graph.layouts, before.graph.layouts, 'Cold restart must preserve the original Tab Group topology')
   assert.deepEqual(after.graph.resources['region:' + retained.regionId], privateSurface, 'The original private Region stays empty in the actual Core descriptor')
-  await ctx.rpc.call('space.focus', { target: { kind: 'region', regionId: retained.regionId } })
+  await ctx.rpc.call('space.focus', { target: { kind: 'space', regionId: retained.regionId } })
   await ctx.waitFor('actual private restart notice', () => next.cdp.evaluate(`${ctx.selectors(`[data-workbench-region-id="${retained.regionId}"] .browser-private-notice,[data-workbench-region-id="${retained.regionId}"] .browser-empty`)}.some(e=>e.textContent.includes('Temporary data has ended'))`))
   if (ctx.privateVisual) {
     await ctx.resize(next, 1440, 900); await privateFrame(restarted, 'private-restarted-normal')
