@@ -29,15 +29,17 @@ function captureTargetScript(key: string, editable: boolean): string {
 }
 
 /** Native menus dispatch to their original contents, never the application's current responder. */
-export function installTextEditContextMenu(contents: WebContents, window: BrowserWindow, owner: MenuOwner): () => void {
+export function installTextEditContextMenu(contents: WebContents, host: BrowserWindow | (() => BrowserWindow), owner: MenuOwner): () => void {
   let disposed = false
   let pending: (() => void) | undefined
-  const live = () => !disposed && !contents.isDestroyed() && !window.isDestroyed() && window.isVisible() && !window.isMinimized() && owner.isCurrent()
-  const focused = () => live() && window.isFocused() && webContents.getFocusedWebContents() === contents
+  const ownerWindow = () => typeof host === 'function' ? host() : host
+  const live = (window: BrowserWindow) => !disposed && ownerWindow() === window && !contents.isDestroyed() && !window.isDestroyed() && window.isVisible() && !window.isMinimized() && owner.isCurrent()
+  const focused = (window: BrowserWindow) => live(window) && window.isFocused() && webContents.getFocusedWebContents() === contents
 
   const open = async (_event: Electron.Event, params: ContextMenuParams): Promise<void> => {
     pending?.()
-    if (!focused() || !window.isFocused()) return
+    const window = ownerWindow()
+    if (!focused(window) || !window.isFocused()) return
     const frame = params.frame
     if (!frame || frame.isDestroyed() || frame.detached || webContents.fromFrame(frame) !== contents) return
     const actions: Array<{ action: EditAction; label: string; enabled: boolean }> = params.isEditable
@@ -53,7 +55,7 @@ export function installTextEditContextMenu(contents: WebContents, window: Browse
     const key = `__agentmuxTextEdit_${randomUUID().replaceAll('-', '')}`
     let ended = false, chosen = false, menu: Menu | undefined
     const cleanup: Array<() => void> = []
-    const current = () => focused() && contents.focusedFrame === frame && ancestors.every((original, index) =>
+    const current = () => focused(window) && contents.focusedFrame === frame && ancestors.every((original, index) =>
       !original.frame.isDestroyed() && !original.frame.detached && original.frame.frameToken === original.token && original.frame.parent === (ancestors[index + 1]?.frame ?? null))
     const finish = () => {
       if (ended) return
@@ -88,7 +90,7 @@ export function installTextEditContextMenu(contents: WebContents, window: Browse
       } finally { clearTimeout(timer) }
     }
     const notice = () => {
-      if (!focused() || frame.isDestroyed() || frame.detached) return
+      if (!focused(window) || frame.isDestroyed() || frame.detached) return
       const origin = owner.origin?.() ?? { x: 0, y: 0 }
       try {
         Menu.buildFromTemplate([{ label: 'Text target changed or unavailable. Open its menu again.', enabled: false }]).popup({

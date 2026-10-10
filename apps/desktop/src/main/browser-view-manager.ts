@@ -1,3 +1,4 @@
+import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
 import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from './browser-screenshot-source.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
@@ -157,6 +158,8 @@ type PresentationLease = {
   id: string
   entry: BrowserEntry
   document: PresentationDocument
+  window: BrowserWindow
+  windowDocument: WorkbenchWindowDocument | undefined
   occurrence: BrowserPresentationOccurrence
   geometry: BrowserPresentationGeometry
 }
@@ -269,7 +272,7 @@ export function normalizeBrowserUrl(value: string): string {
 
 export class BrowserViewManager {
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
-  onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility) => void) | undefined
+  onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility, window?: BrowserWindow) => void) | undefined
   private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
   /** Facts from real embedded page owners; external tabs never enter this registry. */
@@ -288,6 +291,32 @@ export class BrowserViewManager {
     })
   }
   private readonly entries = new Map<string, BrowserEntry>()
+  private readonly viewWindows = new WeakMap<WebContentsView, BrowserWindow>()
+  private presentationWindow: ((document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location']) => BrowserWindow) | undefined
+  setPresentationWindowOwner(resolve: (document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location']) => BrowserWindow): void { this.presentationWindow = resolve }
+  windowForView(view: WebContentsView): BrowserWindow { return this.viewWindows.get(view) ?? this.window }
+  private placeView(view: WebContentsView, window: BrowserWindow, index = 1): void {
+    const previous = this.viewWindows.get(view)
+    if (previous && previous !== window && !previous.isDestroyed()) previous.contentView.removeChildView(view)
+    try { window.contentView.addChildView(view, index); this.viewWindows.set(view, window) }
+    catch (error) { if (previous && previous !== window && !previous.isDestroyed()) { previous.contentView.addChildView(view, 1); this.viewWindows.set(view, previous) } throw error }
+  }
+  private detachView(view: WebContentsView): void {
+    const host = this.windowForView(view)
+    if (!host.isDestroyed()) host.contentView.removeChildView(view)
+    this.viewWindows.delete(view)
+  }
+  /** Exact presentation resources return before destroying a borrowed shell. */
+  async returnWindow(window: BrowserWindow): Promise<void> {
+    for (const entry of this.entries.values()) {
+      for (const id of [...entry.presentationLeaseIds]) { const lease = this.presentationLeases.get(id); if (lease?.window === window) this.removePresentationLease(lease) }
+      if (this.windowForView(entry.view) === window) { this.placeView(entry.view, this.window); entry.view.setVisible(false); entry.visible = false }
+      const candidate = entry.pendingSwitch?.view
+      if (candidate && this.windowForView(candidate) === window) this.placeView(candidate, this.window)
+    }
+    this.notifyNativeVisibility(window)
+    if (window !== this.window) this.notifyNativeVisibility(this.window)
+  }
   private readonly faviconUrls = new WeakMap<WebContentsView, { documentUrl: string; navigationId: string | undefined; urls: string[] }>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private readonly webAuthnSessions = new Map<Session, () => void>()
@@ -347,7 +376,7 @@ export class BrowserViewManager {
   }
 
   registerPresentation(sender: WebContents, frame: WebFrameMain | null, input: {
-    browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry
+    browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry; window?: WorkbenchWindowDocument
   }): BrowserPresentationLease {
     const document = this.requirePresentationDocument(sender, frame)
     const entry = this.require(input.browserId)
@@ -358,6 +387,7 @@ export class BrowserViewManager {
         occurrence.location[key as keyof typeof occurrence.location].trim())) {
       throw new Error('Browser presentation requires an exact occurrence')
     }
+    const nativeWindow = this.presentationWindow?.(input.window, occurrence.location) ?? this.window
     const geometry = this.presentationGeometry(input.geometry)
     for (const id of entry.presentationLeaseIds) {
       const existing = this.presentationLeases.get(id)!
@@ -366,10 +396,14 @@ export class BrowserViewManager {
       }
     }
     const id = randomUUID()
-    this.presentationLeases.set(id, { id, entry, document,
+    this.presentationLeases.set(id, { id, entry, document, window: nativeWindow, windowDocument: input.window,
       occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location } }, geometry })
     entry.presentationLeaseIds.add(id)
     return { leaseId: id }
+  }
+
+  presentationWindowForLease(sender: WebContents, frame: WebFrameMain | null, leaseId: string): BrowserWindow {
+    return this.requirePresentationLease(sender, frame, leaseId).window
   }
 
   updatePresentation(sender: WebContents, frame: WebFrameMain | null,
@@ -384,7 +418,7 @@ export class BrowserViewManager {
   }
 
   removePresentation(sender: WebContents, frame: WebFrameMain | null, leaseId: string): void {
-    const lease = this.requirePresentationLease(sender, frame, leaseId)
+    const lease = this.requirePresentationLease(sender, frame, leaseId, false)
     this.removePresentationLease(lease)
   }
 
@@ -415,7 +449,7 @@ export class BrowserViewManager {
       capture.preparingSource = true
       try {
         capture.source.setBounds(lease.entry.bounds)
-        this.window.contentView.addChildView(capture.source, 0)
+        this.placeView(capture.source, lease.window, 0)
         capture.source.setVisible(true)
       } catch (error) {
         try { this.finishPresentationCapturePreparation(capture) }
@@ -483,7 +517,7 @@ export class BrowserViewManager {
         throw new Error('Browser first press requires a known mouse button and click count')
       }
       if (!lease.geometry.visible || !entry.bounds) return unconfirmed('hidden', 'The original Browser viewport or this presentation is hidden.')
-      if (!this.window.isFocused()) return unconfirmed('window-not-focused', 'Focus this window before taking control of the Browser.')
+      if (!lease.window.isFocused()) return unconfirmed('window-not-focused', 'Focus this window before taking control of the Browser.')
       if (entry.navigationId !== activation.navigationId || entry.view.webContents.isLoadingMainFrame()) {
         return unconfirmed('navigation-changed', 'The displayed Browser navigation changed. Wait for its current frame and try again.')
       }
@@ -559,8 +593,10 @@ export class BrowserViewManager {
 
   private selectPresentation(lease: PresentationLease, claimFocus = true): void {
     if (!lease.geometry.visible) return
-    this.setBounds(lease.entry.id, lease.geometry.bounds)
+    const previousLeaseId = lease.entry.inputLeaseId
     lease.entry.inputLeaseId = lease.id
+    try { this.setBounds(lease.entry.id, lease.geometry.bounds) }
+    catch (error) { lease.entry.inputLeaseId = previousLeaseId; throw error }
     if (claimFocus) lease.entry.view.webContents.focus()
     this.sendPresentation({ type: 'input-owner-changed', browserId: lease.entry.id, leaseId: lease.id })
   }
@@ -576,7 +612,7 @@ export class BrowserViewManager {
     if (entry.bounds !== press.sourceBounds || entry.inputLeaseId !== press.sourceInputLeaseId ||
       press.lease.geometry !== press.geometry || entry.viewport !== press.viewport ||
       press.source.webContents.getZoomFactor() !== press.zoom) return fail('geometry-changed', 'The captured Browser viewport or presentation geometry changed.')
-    if (!this.window.isFocused()) return fail('window-not-focused', 'This Browser window is no longer focused.')
+    if (!press.lease.window.isFocused()) return fail('window-not-focused', 'This Browser window is no longer focused.')
     return null
   }
 
@@ -644,12 +680,13 @@ export class BrowserViewManager {
     }
   }
 
-  private requirePresentationLease(sender: WebContents, frame: WebFrameMain | null, id: string): PresentationLease {
+  private requirePresentationLease(sender: WebContents, frame: WebFrameMain | null, id: string, validateWindow = true): PresentationLease {
     const document = this.requirePresentationDocument(sender, frame)
     const lease = this.presentationLeases.get(id)
     if (!lease || lease.document !== document || this.entries.get(lease.entry.id) !== lease.entry) {
       throw new Error('Unknown Browser presentation lease')
     }
+    if (validateWindow && this.presentationWindow && this.presentationWindow(lease.windowDocument, lease.occurrence.location) !== lease.window) throw new Error('The exact native Browser presentation document has changed. The original page remains.')
     return lease
   }
 
@@ -697,7 +734,7 @@ export class BrowserViewManager {
 
   private finishPresentationCapturePreparation(capture: PresentationCapture): void {
     if (!capture.preparingSource) return
-    if (!this.owns(capture.entry, capture.source) || capture.source.webContents.isDestroyed() || this.window.isDestroyed()) {
+    if (!this.owns(capture.entry, capture.source) || capture.source.webContents.isDestroyed() || this.windowForView(capture.source).isDestroyed()) {
       capture.preparingSource = false
       return
     }
@@ -710,8 +747,8 @@ export class BrowserViewManager {
     }
     // A failed hide must leave the passive source below the Renderer. Profile
     // replacement/release may already have detached the old source.
-    if (canRestorePlacement && this.window.contentView.children.includes(capture.source)) {
-      try { this.window.contentView.addChildView(capture.source, 1) } catch (error) { errors.push(error) }
+    if (canRestorePlacement && this.windowForView(capture.source).contentView.children.includes(capture.source)) {
+      try { this.placeView(capture.source, this.windowForView(capture.source), 1) } catch (error) { errors.push(error) }
     }
     if (errors.length) throw new AggregateError(errors, 'Browser preview preparation cleanup failed')
     capture.preparingSource = false
@@ -739,23 +776,23 @@ export class BrowserViewManager {
   }
 
   /** Native Chrome considers only physically visible Browser frames, never Session/Run projections. */
-  visibleNativeBounds(): BrowserBounds[] {
+  visibleNativeBounds(window?: BrowserWindow): BrowserBounds[] {
     return [...this.entries.values()].flatMap(entry =>
-      entry.visible && entry.bounds && !entry.view.webContents.isDestroyed() ? [{ ...entry.bounds }] : [])
+      entry.visible && entry.bounds && (!window || this.windowForView(entry.view) === window) && !entry.view.webContents.isDestroyed() ? [{ ...entry.bounds }] : [])
   }
 
-  nativeBrowserVisibility(): import('../shared/native-overlay.js').NativeBrowserVisibility {
-    return { revision: this.nativeVisibilityRevision, bounds: this.visibleNativeBounds() }
+  nativeBrowserVisibility(window?: BrowserWindow): import('../shared/native-overlay.js').NativeBrowserVisibility {
+    return { revision: this.nativeVisibilityRevision, bounds: this.visibleNativeBounds(window) }
   }
-  private notifyNativeVisibility(): void {
+  private notifyNativeVisibility(window?: BrowserWindow): void {
     this.nativeVisibilityRevision++
-    this.onNativeVisibilityChange?.(this.nativeBrowserVisibility())
+    this.onNativeVisibilityChange?.(this.nativeBrowserVisibility(window), window)
   }
 
   /** O(1) lookup of the current physically attached owner; no second native Browser registry. */
-  nativeOwner(browserId: string): NativeBrowserOwner | undefined {
+  nativeOwner(browserId: string, window?: BrowserWindow): NativeBrowserOwner | undefined {
     const entry = this.entries.get(browserId)
-    if (!entry || !entry.visible || !entry.bounds || !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || !entry.view.getVisible()) return
+    if (!entry || window && this.windowForView(entry.view) !== window || !entry.visible || !entry.bounds || !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || !entry.view.getVisible()) return
     return { browserId, bounds: entry.view.getBounds(), view: entry.view }
   }
 
@@ -836,10 +873,10 @@ export class BrowserViewManager {
     }
     this.clearFavicon(entry)
     this.entries.delete(id)
-    this.notifyNativeVisibility()
+    this.notifyNativeVisibility(this.windowForView(entry.view))
     this.releasedEntries.set(id, released)
     if (!this.window.isDestroyed()) {
-      try { this.window.contentView.removeChildView(entry.view) } catch { /* already detached */ }
+      try { this.detachView(entry.view) } catch { /* already detached */ }
     }
     if (!contents.isDestroyed()) contents.close()
   }
@@ -920,7 +957,7 @@ export class BrowserViewManager {
     try {
       childRegistrationAttempted = true
       // BrowserWindow's original Renderer is child 0. Browsers sit above it and below native Chrome.
-      this.window.contentView.addChildView(view, 1)
+      this.placeView(view, this.window)
       view.setVisible(false)
       this.attach(entry, view)
       this.emit(entry)
@@ -938,11 +975,11 @@ export class BrowserViewManager {
       return this.snapshot(entry)
     } catch (error) {
       this.entries.delete(id)
-      this.notifyNativeVisibility()
+      this.notifyNativeVisibility(this.windowForView(view))
       const cleanupErrors: unknown[] = []
       if (childRegistrationAttempted && !this.window.isDestroyed()) {
         try {
-          this.window.contentView.removeChildView(view)
+          this.detachView(view)
         } catch (cleanupError) {
           cleanupErrors.push(cleanupError)
         }
@@ -1037,7 +1074,7 @@ export class BrowserViewManager {
     let committed = false
     try {
       entry.pendingSwitch = pending
-      this.window.contentView.addChildView(candidate, 1)
+      this.placeView(candidate, this.windowForView(authoritativeView))
       pending.attached = true
       this.attach(entry, candidate)
       await Promise.race([candidate.webContents.loadURL(url), cancellation])
@@ -1057,7 +1094,7 @@ export class BrowserViewManager {
       this.applyViewport(entry, candidate)
       if (entry.bounds) candidate.setBounds(entry.bounds)
       candidate.setVisible(entry.visible)
-      this.window.contentView.removeChildView(authoritativeView)
+      this.detachView(authoritativeView)
 
       this.releaseUploadFiles(entry)
       void this.releaseDemonstrationCapture(entry)
@@ -2454,7 +2491,7 @@ export class BrowserViewManager {
       entry.visible = false
       void entry.feedback?.clear()
       entry.view.setVisible(false)
-      if (wasVisible) this.notifyNativeVisibility()
+      if (wasVisible) this.notifyNativeVisibility(this.windowForView(entry.view))
       return
     }
     // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
@@ -2471,10 +2508,14 @@ export class BrowserViewManager {
     entry.visible = true
     entry.view.setBounds(entry.bounds)
     if (sizeChanged && entry.viewport !== 'responsive') this.applyViewport(entry)
-    if (becomingVisible) this.window.contentView.addChildView(entry.view, 1)
+    const selectedLease = entry.inputLeaseId ? this.presentationLeases.get(entry.inputLeaseId) : null
+    const nativeWindow = selectedLease?.window ?? this.windowForView(entry.view)
+    const previousWindow = this.windowForView(entry.view), hostChanged = previousWindow !== nativeWindow
+    if (becomingVisible || hostChanged) this.placeView(entry.view, nativeWindow)
     entry.view.setVisible(true)
     if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
-    if (becomingVisible || boundsChanged) this.notifyNativeVisibility()
+    if (hostChanged) this.notifyNativeVisibility(previousWindow)
+    if (becomingVisible || boundsChanged || hostChanged) this.notifyNativeVisibility(nativeWindow)
   }
 
   /**
@@ -2504,7 +2545,7 @@ export class BrowserViewManager {
     if (this.entries.get(id)?.storage === storage) this.entries.delete(id)
     // destroyOwner can remove the map entry before native close throws. Keep using the captured
     // exact view to finish that consumer, independently of any later incarnation with this id.
-    try { if (entry && !entry.view.webContents.isDestroyed() && !this.window.isDestroyed()) this.window.contentView.removeChildView(entry.view) } catch (error) { failures.push(error) }
+    try { if (entry && !entry.view.webContents.isDestroyed() && !this.window.isDestroyed()) this.detachView(entry.view) } catch (error) { failures.push(error) }
     try { if (entry && !entry.view.webContents.isDestroyed()) entry.view.webContents.close() } catch (error) { failures.push(error) }
     if (this.releasedEntries.get(id)?.storage === storage) this.releasedEntries.delete(id)
     try { if (notify) this.send({ type: 'closed', id }) } catch (error) { failures.push(error) }
@@ -2582,9 +2623,9 @@ export class BrowserViewManager {
     }
     this.clearFavicon(entry)
     this.entries.delete(id)
-    this.notifyNativeVisibility()
+    this.notifyNativeVisibility(this.windowForView(entry.view))
     if (!this.window.isDestroyed()) {
-      try { this.window.contentView.removeChildView(entry.view) } catch { /* already detached */ }
+      try { this.detachView(entry.view) } catch { /* already detached */ }
     }
     if (!entry.view.webContents.isDestroyed()) entry.view.webContents.close()
     return true
@@ -2626,7 +2667,7 @@ export class BrowserViewManager {
       const storage = entry.storage
       contents.on('did-create-window', child => this.trackPrivatePopup(entry.id, storage, child))
     }
-    installTextEditContextMenu(contents, this.window, {
+    installTextEditContextMenu(contents, () => this.windowForView(view), {
       isCurrent: () => this.nativeOwner(entry.id)?.view === view,
       origin: () => view.getBounds()
     })
@@ -2801,9 +2842,9 @@ export class BrowserViewManager {
       }
       if (this.entries.get(entry.id) !== entry || entry.view !== view) return
       this.entries.delete(entry.id)
-      this.notifyNativeVisibility()
+      this.notifyNativeVisibility(this.windowForView(view))
       if (!this.window.isDestroyed()) {
-        try { this.window.contentView.removeChildView(view) } catch (error) {
+        try { this.detachView(view) } catch (error) {
           released.detachedView = view
           cleanupErrors.push(error)
         }
@@ -2852,12 +2893,13 @@ export class BrowserViewManager {
     const profileId = entry.storage.profileId
     const navigationId = entry.navigationId
     const ownsRequest = (): boolean => this.owns(entry, view) && entry.storage.profileId === profileId && entry.navigationId === navigationId
+    const currentWindow = () => this.windowForView(view)
     const currentBounds = (): BrowserBounds | null => this.nativeOwner(entry.id)?.bounds ?? null
     return {
-      window: this.window,
+      get window() { return currentWindow() },
       get bounds() { return currentBounds() },
       isCurrent: () => ownsRequest() && !contents.isDestroyed() &&
-        !this.window.isDestroyed(),
+        !currentWindow().isDestroyed(),
       report: message => {
         // Hidden original pages keep their notice. Visibility never changes the request's owner.
         if (!ownsRequest()) return
@@ -2915,7 +2957,7 @@ export class BrowserViewManager {
     const errors: unknown[] = []
     if (pending.attached) {
       try {
-        if (!this.window.isDestroyed()) this.window.contentView.removeChildView(pending.view)
+        if (!this.window.isDestroyed()) this.detachView(pending.view)
         pending.attached = false
       } catch (error) { errors.push(error) }
     }
@@ -2935,7 +2977,7 @@ export class BrowserViewManager {
     }
     if (released.detachedView) {
       try {
-        if (!this.window.isDestroyed()) this.window.contentView.removeChildView(released.detachedView)
+        if (!this.window.isDestroyed()) this.detachView(released.detachedView)
         delete released.detachedView
       } catch (error) { errors.push(error) }
     }
