@@ -27,10 +27,24 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
   { find: 'react-dom', replacement: resolve(root, 'apps/desktop/node_modules/react-dom') }] },
  ssr: { noExternal: ['@agentmux/client-ui'], resolve: { conditions: ['browser', 'import', 'default'] } },
  cacheDir: resolve(root, '.cache/conversation-latest-auto-owning'),
- plugins: [{ name: 'actual-unified-input', enforce: 'pre', transform(code, id) {
+ plugins: [{ name: 'actual-unified-input', enforce: 'pre', transform(source, id) {
   const file = id.split('?')[0]!; if (!file.startsWith(root + '/apps/desktop/src/') && !file.startsWith(root + '/packages/') && file !== resolve(root, 'apps/desktop/test/conversation-latest-auto.integration.test.tsx')) return
+  let code = source
+  const mutation = process.env.AGENTMUX_LATEST_CONTROL_MUTATION
+  if (mutation && file === resolve(root, 'apps/desktop/src/renderer/src/components/ActivityView.tsx')) {
+   const replacements: Record<string, [string, string]> = {
+    'transient-visibility': ['const needsReturnToLatest = showJump || readingWindow.historical', 'const needsReturnToLatest = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.newerOutside'],
+    'loaded-return-refresh': ['if (readingWindow.historical || readingWindow.newerOutside || readingWindow.held) {', 'if (conversationReading?.opened || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held) {'],
+    'disable-automatic-latest': ['readingWindow.showLatestAutomatically()', 'void 0 /* Source mutation: no automatic current catch-up */']
+   }
+   const replacement = replacements[mutation]
+   if (!replacement || source.split(replacement[0]).length !== 2) throw Error('Unknown or non-unique latest-control mutation: ' + mutation)
+   code = source.replace(...replacement)
+  }
   const log = process.env.AGENTMUX_UNIFIED_LOADED
-  if (log) appendFileSync(log, JSON.stringify({ path: relative(root, file), bytes: Buffer.byteLength(code), sha256: createHash('sha256').update(code).digest('hex') }) + '\n')
+  if (log) appendFileSync(log, JSON.stringify({ path: relative(root, file), bytes: Buffer.byteLength(code), sha256: createHash('sha256').update(code).digest('hex'),
+   originalSHA256: createHash('sha256').update(source).digest('hex'), ...(code !== source ? { mutation } : {}) }) + '\n')
+  return code === source ? undefined : { code, map: null }
  }}],
  test: { include: ['apps/desktop/test/conversation-latest-auto.integration.test.tsx'], passWithNoTests: false, fileParallelism: false, testTimeout: 15000,
   globalSetup: [], setupFiles: [], server: { deps: { inline: ['@agentmux/client-ui'] } } }

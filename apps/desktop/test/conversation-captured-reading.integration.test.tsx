@@ -23,6 +23,7 @@ let host: HTMLDivElement, root: Root, directory: string, transcript: string, pro
 let client: AgentMuxClient, stored: AgentMuxStoredAgentSession, originalStore: Buffer, expectedTranscript: Buffer
 let requests: { cursor?: string; limit?: number }[], pending: Promise<AgentSessionHistoryPage>[]
 let controls: ReturnType<typeof vi.spyOn>[], nativeVisible: boolean, capturedItems: AgentTimelineItem[], viewportWidth: number
+let observation: Parameters<typeof api.sessions.observeHistory>[1] | null
 function record(id: string, text?: string) {
   return provider === 'claude'
     ? { uuid: id, type: 'assistant', sessionId: native, message: { role: 'assistant', content: text
@@ -48,7 +49,7 @@ function nativeIds() {
   return [...host.querySelectorAll<HTMLElement>('.conversation-native-thread > [data-native-record-id], .conversation-native-thread > [data-native-record-ids]')]
     .flatMap(row => row.dataset.nativeRecordIds ? JSON.parse(row.dataset.nativeRecordIds) as string[] : [row.dataset.nativeRecordId!])
 }
-function latest() { const action = host.querySelector<HTMLButtonElement>('[aria-label="Return to latest messages"]'); expect(action).not.toBeNull(); return action! }
+function latest() { const action = host.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]'); expect(action).not.toBeNull(); return action! }
 async function flush() {
   for (let n = 0; n < 4; n++) await act(async () => { await Promise.allSettled([...pending]); await new Promise(resolve => setTimeout(resolve, 10)) })
 }
@@ -80,7 +81,7 @@ async function fixture(shape: Provider, width = 500) {
     expect(reference).toMatchObject({ hostId: 'local', agentSessionId: sid }); requests.push(options ?? {})
     const read = client.sessionHistoryPage(reference.agentSessionId, options); pending.push(read); return read
   })
-  vi.spyOn(api.sessions, 'observeHistory').mockResolvedValue({ source: { providerId: provider, nativeSessionId: native }, dispose() {} })
+  vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async (_reference, listener) => { observation = listener; return { source: { providerId: provider, nativeSessionId: native }, dispose() {} } })
   useAppStore.setState({ sessions: [], timelines: {}, agentComposerDrafts: { [sid]: draft } })
   await render(); expect(nativeIds()).toHaveLength(300); expect(nativeIds().at(-1)).toBe('record-449')
   const feed = viewport(); Object.defineProperties(feed, { clientHeight: { configurable: true, value: 600 }, scrollHeight: { configurable: true, value: 2200 } })
@@ -92,7 +93,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   Element.prototype.scrollIntoView = vi.fn()
-  requests = []; pending = []; controls = []; nativeVisible = false; viewportWidth = 500
+  requests = []; pending = []; controls = []; nativeVisible = false; viewportWidth = 500; observation = null
   capturedItems = [captured('captured-original', 'Captured content remains readable.\n\n' + 'Original captured paragraph. '.repeat(80))]
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -142,21 +143,27 @@ it.each([{ provider: 'claude', width: 360 }, { provider: 'claude', width: 1100 }
   expect(nativeIds()).toHaveLength(450); expect(nativeIds().at(-1)).toBe('record-449')
   expect(host.querySelector('[data-native-record-id="record-449"]')).toBe(row)
   await appendFile(transcript, JSON.stringify(record('current-appended', 'Latest original native answer.')) + '\n'); expectedTranscript = await readFile(transcript)
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: provider, nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  for (let attempt = 0; attempt < 20 && nativeIds().at(-1) !== 'current-appended'; attempt++) await flush()
+  expect(nativeIds().at(-1), 'the original observed source is adopted before the scroll action').toBe('current-appended')
+  const beforeReturn = requests.length
   await act(async () => latest().click()); await flush()
-  expect(nativeIds().at(-1), 'Explicit latest reads the original current source').toBe('current-appended')
+  expect(requests, 'return to the already updated current source only scrolls').toHaveLength(beforeReturn)
+  expect(nativeIds().at(-1), 'source observation adopts the original current tail before navigation').toBe('current-appended')
   expect(host.textContent).toContain('Latest original native answer.'); expect(host.textContent).toContain('New captured observation.')
 })
 
-it('keeps a selected original native record on Current and adds no paging demand while hidden', async () => {
+it('keeps a selected native record during current append and adds no paging demand while hidden', async () => {
   await fixture('claude'); await wheel(true)
   const selected = host.querySelector('.conversation-native-thread [data-native-record-ids]')!
   const head = selected.querySelector<HTMLElement>('.wf-head')!; expect(head).not.toBeNull()
   const range = document.createRange(); range.selectNodeContents(head); window.getSelection()!.addRange(range)
   await appendFile(transcript, JSON.stringify(record('current-appended', 'Latest original native answer.')) + '\n'); expectedTranscript = await readFile(transcript)
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: provider, nativeSessionId: native }, kind: 'invalidated' })); await flush()
   const before = nativeIds(); await act(async () => latest().click()); await flush()
-  expect(nativeIds()).toEqual(before); expect(selected.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  window.getSelection()!.removeAllRanges(); await act(async () => latest().click()); await flush()
-  expect(nativeIds().at(-1)).toBe('current-appended')
+  expect(nativeIds().slice(0, before.length)).toEqual(before)
+  expect(selected.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  expect(nativeIds().at(-1)).toBe('current-appended'); window.getSelection()!.removeAllRanges()
   await render(false); const count = requests.length
   await wheel(false); await wheel(true); expect(requests).toHaveLength(count)
 })
