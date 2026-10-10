@@ -134,6 +134,28 @@ describe('original workface native presentation owner', () => {
     expect(f.owner.presentationWindow(identity, occurrence)).toBe(f.children[0])
     expect(() => f.owner.windowForDocument({ ...identity, documentGeneration: 'older' })).toThrow('current')
   })
+  it.each([
+    { name: 'whole Tab in another Group', owned: target, requested: { ...target, groupId: 'other-group' } },
+    { name: 'same Region in another Group', owned: { ...target, kind: 'region' as const, regionId: 'original-region' }, requested: { ...target, kind: 'region' as const, regionId: 'original-region', groupId: 'other-group' } },
+    { name: 'parent Tab in another display Workspace', owned: { ...target, kind: 'region' as const, regionId: 'original-region' }, requested: { ...target, displayWorkspaceId: 'other-display' } }
+  ])('locates the already borrowed original entity across occurrences: $name', async ({ owned, requested }) => {
+    const f = await fixture()
+    const first = await f.owner.call('app.window.open', { operationId: 'first-original-occurrence', target: owned }, context)
+    expect(first.recordedOperation?.state).toBe('confirmed')
+    const requests = f.main.webContents.send.mock.calls.filter(([channel]) => channel === WORKBENCH_WINDOW_REQUEST).length
+    const second = await f.owner.call('app.window.open', { operationId: 'same-entity-other-occurrence', target: requested }, context)
+    expect(second.recordedOperation).toMatchObject({ state: 'rejected', input: { operationId: 'same-entity-other-occurrence', target: requested }, windowId: first.recordedOperation!.windowId, documentGeneration: first.recordedOperation!.documentGeneration })
+    expect(f.children).toHaveLength(1)
+    expect(f.main.webContents.send.mock.calls.filter(([channel]) => channel === WORKBENCH_WINDOW_REQUEST)).toHaveLength(requests)
+  })
+  it('keeps distinct original Regions independently movable across display occurrences', async () => {
+    const f = await fixture()
+    for (const [regionId, groupId] of [['first-region', 'group'], ['second-region', 'other-group']]) {
+      const page = await f.owner.call('app.window.open', { operationId: regionId!, target: { ...target, kind: 'region', regionId: regionId!, groupId: groupId! } }, context)
+      expect(page.recordedOperation?.state).toBe('confirmed')
+    }
+    expect(f.children).toHaveLength(2)
+  })
   it.each(['navigation', 'crash'])('revokes a departed child document before any projection can reuse it: %s', async kind => {
     const f = await fixture(), identity = await opened(f)
     if (kind === 'navigation') { f.children[0]!.webContents.emit('did-finish-load'); f.children[0]!.webContents.emit('did-start-navigation', {}, new URL("?replacement", _historyFixtureFileUrl("app/workbench-window.html")).href, false, true) }
