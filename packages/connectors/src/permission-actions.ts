@@ -38,7 +38,8 @@ export class PermissionActions implements PublicationPermissionsPort {
   }
   observe(binding: RoomBinding, wake: () => void): () => void {
     const core = this.options.core(binding.executionHostId)
-    return core?.onEvent?.(event => { if (event.type === 'agent-session' && event.session.agentSessionId === binding.agentSessionId) wake() }) ?? (() => {})
+    if (!core?.onEvent) return failure('INGRESS_CORE_UNAVAILABLE')
+    return core.onEvent(event => { if (event.type === 'agent-session' && event.session.agentSessionId === binding.agentSessionId) wake() })
   }
   private grants(binding: RoomBinding): ConnectionGrant[] {
     return (this.options.bindings.grants?.(binding.bindingId, binding.revision) ?? [])
@@ -53,7 +54,7 @@ export class PermissionActions implements PublicationPermissionsPort {
   project(binding: RoomBinding, store: PublicationStore): string[] {
     this.initialize()
     const core = this.options.core(binding.executionHostId)
-    if (!core?.agentSession) return []
+    if (!core?.agentSession) return failure('INGRESS_CORE_UNAVAILABLE')
     const session = core.agentSession(binding.agentSessionId), pending = session.pendingInteraction
     const requests = pending ? [pending.request, ...(pending.additionalRequests ?? [])] : []
     const grants = this.grants(binding)

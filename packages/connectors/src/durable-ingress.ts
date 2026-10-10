@@ -263,10 +263,18 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   }
   private async dispatchAction(original: ConnectionIngressAction): Promise<ConnectionIngressInspection> {
     let claimed: ReturnType<PermissionActions['claim']> | undefined
+    let client: DurableIngressCore | undefined
     this.transaction(() => {
       const record = this.read(original.ingressId)
       if (!record || record.kind !== 'action' || record.state !== 'received') return
-      try { this.assertService(); claimed = this.permissions.claim(record); this.write(claimed.record) }
+      try {
+        this.assertService()
+        const target = this.permissions.authorize(record)
+        client = this.options.core(target.binding.executionHostId)
+        // No Core call has started; retain received until this exact consumer is available.
+        if (!client?.respondAgentInteraction) return
+        claimed = this.permissions.claim(record); this.write(claimed.record)
+      }
       catch (error) {
         // A service or storage observation gap cannot consume this already acknowledged original event.
         if (error instanceof AgentMuxError && ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED', 'INGRESS_STORAGE_UNCONFIRMED'].includes(error.code)) return
@@ -276,7 +284,6 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     })
     if (claimed?.own) {
       const input = claimed.input, record = claimed.record
-      const client = this.options.core(record.input!.hostId)
       if (client?.respondAgentInteraction) {
         try { await client.respondAgentInteraction(input, { externalAction: { identity: record.input!.author,
           assertCurrent: async intent => {
