@@ -256,3 +256,7 @@
 .connector-enrollment__previous:focus-visible, .connector-enrollment__history > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 
 .connector-enrollment .connector-diagnostics > .small-button { margin-top: var(--sp-4); }
+@container (width < 480px) {
+  .connector-enrollment__action > button,
+  .connector-enrollment__text-action { min-height: 36px; }
+}
