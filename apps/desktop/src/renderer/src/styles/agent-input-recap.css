@@ -11,7 +11,7 @@
 .agent-input-recall .focus-context-hover__input-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 2px 8px; margin-bottom: 2px; color: var(--text-3); font-size: 10px; line-height: 12px; }
 .agent-input-recall .focus-context-hover__input-meta strong { min-width: 0; color: var(--text-2); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-input-recall .focus-context-hover__input-meta time { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.agent-input-recall p.agent-input-recall__excerpt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: 28px; overflow: hidden; color: var(--text-2); font-size: 11px; line-height: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-input-recall p.agent-input-recall__excerpt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; max-height: 28px; overflow: hidden; color: var(--text-2); font-size: 11px; line-height: 14px; white-space: normal; overflow-wrap: anywhere; }
 .agent-input-recall__thumbnail { display: flex; align-items: center; justify-content: center; flex: 0 0 34px; width: 34px; height: 34px; overflow: hidden; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-1); color: var(--text-3); font-size: 9px; }
 .agent-input-recall__thumbnail > span { width: 100%; min-width: 0; max-height: 100%; overflow: hidden; }
 .agent-input-recall__thumbnail .md-conversation-image__thumb { display: block; width: 34px; height: 34px; max-height: 34px; object-fit: cover; border: 0; border-radius: 0; margin: 0; }
