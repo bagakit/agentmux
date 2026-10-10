@@ -15,13 +15,34 @@
 .semantic-icon-motion > .semantic-icon,
 .semantic-icon > use,
 [data-semantic-icon-sprite] symbol { animation-play-state: inherit; }
-[data-semantic-icon-part="writing-pen"] {
-  transform-box: view-box;
-  transform-origin: 10px 18px;
-  animation: var(--icon-writing-animation, none) 2.4s ease-in-out infinite;
+.semantic-icon { --icon-work-part-animation: none; }
+.semantic-icon > foreignObject[data-semantic-icon-work] {
+  overflow: visible;
   animation-play-state: inherit;
 }
-.semantic-icon-motion[data-icon-animation="work"] { --icon-writing-animation: semantic-icon-work-pen; }
+.semantic-icon-work-model {
+  position: relative;
+  width: 24px;
+  height: 24px;
+}
+.semantic-icon-work-model,
+.semantic-icon-work-model > div,
+.semantic-icon-work-model > div > svg { animation-play-state: inherit; }
+.semantic-icon-work-model > div {
+  position: absolute;
+  inset: 0;
+  width: 24px;
+  height: 24px;
+}
+.semantic-icon-work-model > div > svg { display: block; overflow: visible; }
+.semantic-icon-work-body { --icon-work-pen-display: none; }
+[data-semantic-icon-part="writing-pen"] { display: var(--icon-work-pen-display, inline); }
+.semantic-icon-work-pen {
+  transform-box: view-box;
+  transform-origin: 10px 18px;
+  animation: var(--icon-work-part-animation, none) 2.4s ease-in-out infinite;
+  animation-play-state: inherit;
+}
 .semantic-icon-motion[data-icon-animation="stream"] { --icon-stream-animation: semantic-icon-stream-caret; }
 .semantic-icon-motion[data-icon-animation="execute"] { --icon-execute-animation: semantic-icon-execute-arrow; }
 .semantic-icon-motion[data-icon-animation="orbit"] { --icon-orbit-animation: semantic-icon-orbit-arc; }
