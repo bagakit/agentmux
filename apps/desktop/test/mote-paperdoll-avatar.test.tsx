@@ -45,7 +45,7 @@ function quiet(before: ReturnType<typeof useAppStore.getState>) {
 it('real primary and custom editor saves one bounded face in the original owner and actual Footer/rail/Space consume it', async () => {
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
   await app.mount(); const before = useAppStore.getState()
-  expect(app.entry().querySelector('img')?.getAttribute('src')).toContain('pmo-teams-topic-avatar')
+  expect(app.entry().querySelector('[data-mote-icon-source=automatic][data-semantic-icon="object.mote"]')).not.toBeNull()
   await edit(); await moteClick(button('Eyes · spark')); await moteClick(button('Color · peach'))
   expect(document.querySelector('.mote-face-editor__preview [data-mote-face-eyes="spark"]')).not.toBeNull()
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
@@ -66,7 +66,7 @@ it('real primary and custom editor saves one bounded face in the original owner 
   expect(directory).toHaveLength(1); expect(directory[0]!.querySelector('[data-mote-face-shape="square"]')).not.toBeNull()
   quiet(before)
 })
-it('Cancel and Escape discard actual component drafts, restoring automatic returns the primary to its original dragon', async () => {
+it('Cancel and Escape discard actual component drafts, restoring automatic returns the primary to its shared identity', async () => {
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
   await app.mount(); const before = useAppStore.getState(); await edit()
   await moteClick(button('Mouth · grin')); await moteClick(button('Cancel'))
@@ -77,7 +77,7 @@ it('Cancel and Escape discard actual component drafts, restoring automatic retur
   await edit(); await moteClick(button('Save avatar'))
   expect(app.entry().querySelector('.mote-face')).not.toBeNull()
   await edit(); await moteClick(button('Restore automatic')); await moteClick(button('Save avatar'))
-  expect(app.entry().querySelector('img')?.getAttribute('src')).toContain('pmo-teams-topic-avatar')
+  expect(app.entry().querySelector('[data-mote-icon-source=automatic][data-semantic-icon="object.mote"]')).not.toBeNull()
   expect(app.entry().querySelector('.mote-face')).toBeNull(); quiet(before)
 })
 it('the actual face editor paints one checked outline per nonempty group without moving marker slots or publishing its draft', async () => {

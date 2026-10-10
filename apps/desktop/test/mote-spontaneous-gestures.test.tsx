@@ -75,7 +75,7 @@ it('uses original authoritative expressions and clears an old gesture immediatel
     ['working','thinking',['ponder','double-blink']], ['waiting','waiting',['blink','attentive']],
     ['running','unknown',['blink']], ['starting','starting',['wake']], ['error','error',[]], ['exited','stopped',[]]
   ] as const) {
-    await act(async () => useAppStore.setState({ sessions: [{ ...defaultAgent, status: { state, source: 'native-hook', observedAt: Date.now() } }] }))
+    await act(async () => useAppStore.setState({ sessions: [{ ...defaultAgent, processState: state === 'exited' ? 'exited' : 'running', status: { state, source: 'native-hook', observedAt: Date.now() } }] }))
     expect(node().dataset.moteGesture).toBeUndefined(); expect(node().dataset.moteExpression).toBe(expected)
     const seen = gestures(12000)
     expect(seen.length > 0).toBe(allowed.length > 0); expect(seen.every(value => (allowed as readonly string[]).includes(value))).toBe(true)

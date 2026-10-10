@@ -59,7 +59,7 @@ it('original image colors reach the real Footer, both floating forms, Space iden
   await useAppStore.getState().setSpaceObjectIcon(custom.key, image)
   await app.mount(<ConversationMessageAvatar speaker={{ role: 'agent', id: 'custom-agent' }} name="Analyst" mote={{ workspaceId: scratchWorkspace.id, topicId: customMoteId, objectKey: custom.key, name: 'Analyst', icon: image }} />)
   const before = useAppStore.getState()
-  const dragon = originalImages(app.entry()); expect(dragon).toHaveLength(1); expect(dragon[0]!.src).toContain('pmo-teams-topic-avatar')
+  expect(app.entry().querySelector('[data-mote-icon-source=automatic][data-semantic-icon="object.mote"]')).not.toBeNull(); expect(app.entry().querySelector('img')).toBeNull()
   const customRow = app.panel().querySelector<HTMLElement>(`[data-mote-topic-id="${customMoteId}"]`)!
   expect(customRow).not.toBeNull(); expect(customRow.getAttribute('aria-pressed')).toBe('false'); expect(originalImages(customRow)).toHaveLength(1)
   await moteClick(customRow); expect(originalImages(app.entry())[0]!.src).toContain('ORIGINAL')

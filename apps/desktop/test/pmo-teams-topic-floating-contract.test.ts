@@ -19,8 +19,7 @@ it('keeps one native anchored surface and one product footer caller for all Mote
   expect(entry).toContain('aria-expanded={visible}')
   expect(entry).toContain('<SpaceObjectIcon kind="mote"')
   const identity = readFileSync(join(renderer, 'components/SpaceObjectIcon.tsx'), 'utf8')
-  expect(identity).toContain("import defaultMoteAvatar from '../assets/pmo-teams-topic-avatar.png'")
-  expect(identity).toContain('src={defaultMoteAvatar}')
+  expect(identity).toContain('<MoteIcon size={14} data-mote-icon-source="automatic" />')
   expect(panel).toContain('popover="auto"')
   expect(panel).toContain("placement: 'top-start'")
   expect(panel).toContain('topicId={target.topicId}')
@@ -40,7 +39,7 @@ it('keeps one native anchored surface and one product footer caller for all Mote
   expect(callers.map(file => relative(renderer, file)).sort()).toEqual(['components/SurfaceNavigation.tsx'])
 })
 
-it('uses the shipped AgentMux dragon asset for the PMO teams topic launcher', () => {
+it('retains the original project image asset independently from the automatic Mote identity', () => {
   const launcherAsset = readFileSync(join(renderer, 'assets/pmo-teams-topic-avatar.png'))
   const projectAsset = readFileSync(new URL('../resources/icon.png', import.meta.url))
   expect(launcherAsset.equals(projectAsset)).toBe(true)
