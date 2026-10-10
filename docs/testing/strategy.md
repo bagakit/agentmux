@@ -124,6 +124,8 @@ pnpm check           # typecheck + fast + native + all builds
 
 Fast 与 Native 分开是为了让失败归因清晰，不允许用 Mock 代替 Native proof。Native fixture 使用独立 runtime/state 与真实 packaged `ctxmuxd`、真实 PTY；具体隔离方法以 harness 为准。产品进程级路径策略由 runtime-paths.ts 持有，不能把某一版 fixture 的 synthetic uid 方案写成「产品不支持 override」。清理只针对已证明归属的测试资源。
 
+真实 Desktop Main 夹具还须在加载生产模块前设置并核对 Electron 的 `home`、`appData`、`userData` 与 `sessionData`；仅覆盖 `HOME` 或读取 `os.homedir()` 不能证明这些路径已隔离。独立启动入口先设置路径，再动态加载 Main，避免模块顶层提前固化用户目录。启动后复核实际 Store、scratch、Notes、Mote 和 connector owner 的目录；继承的 Agent 身份、Hook、端点及队列上下文须清除或由夹具明确替换。隔离缺口保留原回执和副作用未知，不以修正后的新夹具通过证明旧运行未触达用户数据。
+
 ## 资源与故障证据
 
 本节的代表数值和故障结果是历史观测，适用范围由对应 receipt 的源码、产物、Runtime、机器和场景身份决定；它们不证明当前候选已通过，也不替代本轮热路径的相关消费者成本检查。当前预算与 harness 是执行来源。
