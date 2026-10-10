@@ -101,13 +101,18 @@ async function historyTab() { await click('[data-space-tool="git"]'); await tab(
 it('joins actual file IO, fixed real Git history, source-control switching, collapse and display preference without losing original workface', async () => {
   await dom.render(<><WorkspaceSidebar /><TopBreadcrumb /><SurfaceToolDock workspace={workspace} /></>)
   await settle(() => !!dom.container.querySelector('[data-tree-path="notes.md"]') && !!dom.container.querySelector('.workspace-zone-entry') &&
-    /^\d+ changed files?$/.test(dom.container.querySelector('.workspace-changes-summary > span')?.textContent ?? ''))
+    /^\d+ changed files?$/.test(dom.container.querySelector('.workspace-changes-summary strong')?.textContent ?? ''))
   expect(element('.workspace-tool-context--explorer strong').textContent).toBe(workspace.name)
   expect(dom.container.querySelectorAll('.explorer-header')).toHaveLength(0)
   expect(element('.workspace-zones-panel').closest('[hidden]')).toBeNull()
   expect(dom.container.querySelector('.workspace-zones-panel [role="tablist"]')).toBeNull()
   expect(dom.container.querySelectorAll('.workspace-zone-entry')).toHaveLength(1)
   expect(element('.workspace-zone-entry[aria-pressed="true"]').textContent).toContain('main')
+  expect(element('.workspace-zone-entry[aria-pressed="true"] .workspace-zone-entry__name').textContent).toBe(workspace.name)
+  expect(element('.workspace-zone-entry[aria-pressed="true"] .workspace-zone-entry__kind').textContent).toBe('Folder')
+  expect(element('.workspace-changes-summary').closest('.workspace-zones-panel')).not.toBeNull()
+  expect(element('.workspace-changes-summary').dataset.workspaceId).toBe(workspace.id)
+  expect(element('.workspace-changes-summary small').textContent).toBe('Current folder · main')
   const label = element('[data-tree-path="notes.md"] .tree-row__label')
   await act(async () => label.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
   const input = element('.tree-inline-input') as HTMLInputElement
@@ -151,7 +156,7 @@ it('joins actual file IO, fixed real Git history, source-control switching, coll
   await act(async () => useAppStore.setState({ config: { ...config, copyPathsAsAbsolute: true } }))
   expect(element('select[aria-label="History reference"]').title).toBe(directory)
   await click('[data-space-tool="files-branches"]')
-  await settle(() => /^\d+ changed files?$/.test(dom.container.querySelector('.workspace-changes-summary > span')?.textContent ?? ''))
+  await settle(() => /^\d+ changed files?$/.test(dom.container.querySelector('.workspace-changes-summary strong')?.textContent ?? ''))
   expect(element('.workspace-tool-context--explorer > span').title).toBe(directory)
   expect(element('.breadcrumbs strong').title).toBe(directory)
   expect(history).toHaveBeenCalledTimes(3)
