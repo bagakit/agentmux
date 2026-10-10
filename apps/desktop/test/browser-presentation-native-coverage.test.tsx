@@ -44,6 +44,11 @@ let frameStateDescriptor: PropertyDescriptor | undefined
 let listeners: Set<(event: BrowserPresentationEvent) => void>
 let playback: WeakMap<HTMLMediaElement, Playback>
 let pendingPlay: { presentationId: string; promise: Promise<void> } | null
+let srcObjectDescriptor: PropertyDescriptor | undefined
+let requestFrameDescriptor: PropertyDescriptor | undefined, cancelFrameDescriptor: PropertyDescriptor | undefined
+let sinks: WeakMap<HTMLMediaElement, MediaProvider | null>
+let frameCallbacks: Map<number, { node: HTMLVideoElement; callback: VideoFrameRequestCallback }>
+let drawFrame: ReturnType<typeof vi.fn>, nextFrame: number
 
 function state(video: HTMLMediaElement): Playback {
   let value = playback.get(video)
@@ -85,8 +90,12 @@ async function mount() {
 async function frame(id: string) {
   await act(async () => {
     const node = video(id)
+    if (node.srcObject !== stream) return
     Object.assign(state(node), { readyState: 2, width: 640, height: 320 })
     node.dispatchEvent(new Event('loadeddata'))
+    for (const [handle, pending] of frameCallbacks) if (pending.node === node) {
+      frameCallbacks.delete(handle); pending.callback(0, {} as VideoFrameCallbackMetadata)
+    }
   })
 }
 function controlCounts() {
@@ -100,6 +109,7 @@ function controlCounts() {
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.clearAllMocks(); playback = new WeakMap(); pendingPlay = null; listeners = new Set()
+  sinks = new WeakMap(); frameCallbacks = new Map(); nextFrame = 0; drawFrame = vi.fn()
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   vi.spyOn(document, 'readyState', 'get').mockReturnValue('complete')
   bridge.registerPresentation.mockReset().mockImplementation(async request => ({ leaseId: `lease-${request.occurrence.presentationId}` }))
@@ -120,6 +130,20 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia: display } })
   frameStateDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement, 'HAVE_CURRENT_DATA')
   Object.defineProperty(HTMLMediaElement, 'HAVE_CURRENT_DATA', { configurable: true, value: 2 })
+  srcObjectDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'srcObject')
+  Object.defineProperty(HTMLMediaElement.prototype, 'srcObject', { configurable: true,
+    get(this: HTMLMediaElement) { return sinks.get(this) ?? null },
+    set(this: HTMLMediaElement, value: MediaProvider | null) {
+      sinks.set(this, value)
+      Object.assign(state(this), { readyState: 0, width: 0, height: 0 })
+    } })
+  requestFrameDescriptor = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'requestVideoFrameCallback')
+  cancelFrameDescriptor = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'cancelVideoFrameCallback')
+  Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', { configurable: true, value(this: HTMLVideoElement, callback: VideoFrameRequestCallback) {
+    const handle = ++nextFrame; frameCallbacks.set(handle, { node: this, callback }); return handle
+  } })
+  Object.defineProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback', { configurable: true, value(handle: number) { frameCallbacks.delete(handle) } })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: drawFrame } as unknown as CanvasRenderingContext2D)
   vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function (this: HTMLMediaElement) {
     state(this).paused = false
     const current = pendingPlay
@@ -139,6 +163,14 @@ afterEach(async () => {
   else delete (navigator as unknown as Record<string, unknown>).mediaDevices
   if (frameStateDescriptor) Object.defineProperty(HTMLMediaElement, 'HAVE_CURRENT_DATA', frameStateDescriptor)
   else delete (HTMLMediaElement as unknown as Record<string, unknown>).HAVE_CURRENT_DATA
+  for (const [prototype, key, descriptor] of [
+    [HTMLMediaElement.prototype, 'srcObject', srcObjectDescriptor],
+    [HTMLVideoElement.prototype, 'requestVideoFrameCallback', requestFrameDescriptor],
+    [HTMLVideoElement.prototype, 'cancelVideoFrameCallback', cancelFrameDescriptor]
+  ] as const) {
+    if (descriptor) Object.defineProperty(prototype, key, descriptor)
+    else delete (prototype as unknown as Record<string, unknown>)[key]
+  }
   vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
@@ -155,22 +187,29 @@ it('keeps desired selection, its receipt and input-owner facts separate from phy
   expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
 })
 
-it('pauses only the exactly covered lease and resumes its same video, last frame, stream and live track without control work', async () => {
+it('releases only the covered receiver and resumes its same video, retained frame, stream and live track without control work', async () => {
   await mount(); await frame('stage-a'); await frame('stage-b')
   const a = video('stage-a'), b = video('stage-b'), originalStage = stage('stage-a')
   const originalPage = originalStage.querySelector('[data-original-page]'), counts = controlCounts()
   expect(a.srcObject).toBe(stream); expect(b.srcObject).toBe(stream)
   await emit(coverage('lease-stage-a'))
   expect(a.paused).toBe(true); expect(b.paused).toBe(false)
-  expect(a.readyState).toBe(2); expect(a.videoWidth).toBe(640); expect(a.videoHeight).toBe(320)
-  expect(a.srcObject).toBe(stream); expect(track.readyState).toBe('live'); expect(stopTrack).not.toHaveBeenCalled()
+  expect(a.srcObject).toBeNull(); expect(track.readyState).toBe('live'); expect(stopTrack).not.toHaveBeenCalled()
+  const canvas = originalStage.querySelector('canvas')!
+  expect([canvas.width, canvas.height, canvas.hidden]).toEqual([640, 320, false])
+  expect(drawFrame).toHaveBeenCalledExactlyOnceWith(a, 0, 0)
   expect(controlCounts()).toEqual(counts)
+  await emit(coverage('lease-stage-a'))
+  expect(drawFrame).toHaveBeenCalledTimes(1)
   await emit(uncover())
   expect(video('stage-a')).toBe(a); expect(video('stage-b')).toBe(b)
   expect(stage('stage-a')).toBe(originalStage); expect(originalStage.querySelector('[data-original-page]')).toBe(originalPage)
   expect(a.srcObject).toBe(stream); expect(b.srcObject).toBe(stream)
   expect(stream.getTracks()).toEqual([track]); expect(track.readyState).toBe('live')
   expect(a.paused).toBe(false); expect(b.paused).toBe(false)
+  expect(canvas.hidden).toBe(false)
+  await frame('stage-a')
+  expect(canvas.hidden).toBe(true)
   expect(controlCounts()).toEqual(counts); expect(stopTrack).not.toHaveBeenCalled()
   expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
 })
@@ -201,9 +240,11 @@ it('retains coverage published before the ready acknowledgement and does not lea
   await frame('stage-a'); await frame('stage-b')
   const a = video('stage-a'), counts = controlCounts()
   expect(a.paused).toBe(true); expect(video('stage-b').paused).toBe(false)
+  expect(a.srcObject).toBeNull(); expect(drawFrame).not.toHaveBeenCalled()
   expect(surface('stage-a').textContent).not.toContain('Starting preview playback')
   await emit(uncover())
   expect(video('stage-a')).toBe(a); expect(a.srcObject).toBe(stream); expect(a.paused).toBe(false)
+  await frame('stage-a')
   expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
   expect(controlCounts()).toEqual(counts)
 })
@@ -221,8 +262,119 @@ it('clears an interrupted starting phase when Main covers a pending play, and ig
   expect(a.paused).toBe(true); expect(video('stage-b').paused).toBe(false)
   await emit(uncover())
   expect(video('stage-a')).toBe(a); expect(a.paused).toBe(false); expect(a.srcObject).toBe(stream)
+  await frame('stage-a')
   expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
   expect(controlCounts()).toEqual(counts)
+})
+
+it('keeps the retained image until one new frame and cancels an obsolete reattachment callback', async () => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  await emit(coverage('lease-stage-a')); await emit(uncover())
+  const a = video('stage-a'), canvas = stage('stage-a').querySelector('canvas')!
+  await act(async () => {
+    Object.assign(state(a), { readyState: 2, width: 640, height: 320 })
+    a.dispatchEvent(new Event('loadeddata'))
+    a.dispatchEvent(new Event('playing'))
+  })
+  expect(frameCallbacks.size).toBe(1)
+  expect(canvas.hidden).toBe(false)
+  expect(surface('stage-a').textContent).toContain('Waiting for the first preview frame')
+  const old = [...frameCallbacks.values()][0]!
+  await emit(coverage('lease-stage-a'))
+  expect(frameCallbacks.size).toBe(0)
+  await act(async () => old.callback(0, {} as VideoFrameCallbackMetadata))
+  expect(a.srcObject).toBeNull(); expect(canvas.hidden).toBe(false)
+  await emit(uncover()); await frame('stage-a')
+  expect(canvas.hidden).toBe(true)
+  expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
+})
+
+it('accepts a single new frame delivered before the same reattachment play request resolves', async () => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  await emit(coverage('lease-stage-a'))
+  const playing = deferred<void>()
+  pendingPlay = { presentationId: 'stage-a', promise: playing.promise }
+  await emit(uncover())
+  const canvas = stage('stage-a').querySelector('canvas')!
+  expect(frameCallbacks.size).toBe(1)
+  await frame('stage-a')
+  expect(frameCallbacks.size).toBe(0); expect(canvas.hidden).toBe(false)
+  await act(async () => playing.resolve())
+  expect(canvas.hidden).toBe(true)
+  expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
+})
+
+it.each(['missing-context', 'draw-failure'] as const)('keeps the original preview and local retry when retaining a frame has %s', async failure => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  if (failure === 'missing-context') vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValueOnce(null)
+  else drawFrame.mockImplementationOnce(() => { throw new Error('Frame retention failed') })
+  const counts = controlCounts()
+  await emit(coverage('lease-stage-a'))
+  expect(video('stage-a').srcObject).toBe(stream); expect(video('stage-a').paused).toBe(false)
+  expect(video('stage-b').srcObject).toBe(stream); expect(video('stage-b').paused).toBe(false)
+  expect(surface('stage-a').textContent).toContain('Page preview needs attention')
+  const retry = surface('stage-a').querySelector<HTMLButtonElement>('button')!
+  expect(retry.disabled).toBe(false)
+  expect(track.readyState).toBe('live'); expect(stopTrack).not.toHaveBeenCalled()
+  expect(controlCounts()).toEqual(counts)
+  await act(async () => retry.click())
+  expect(video('stage-a').srcObject).toBeNull()
+  expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
+  await emit(uncover()); await frame('stage-a')
+  expect(video('stage-a').srcObject).toBe(stream)
+  expect(surface('stage-a').querySelector('[role="status"]')).toBeNull()
+  expect(controlCounts()).toEqual(counts)
+})
+
+it('does not clear an actual playback failure when Native coverage succeeds', async () => {
+  vi.mocked(HTMLMediaElement.prototype.play).mockRejectedValueOnce(new Error('Playback denied'))
+  await mount(); await frame('stage-a')
+  expect(surface('stage-a').textContent).toContain('Playback denied')
+  await emit(coverage('lease-stage-a'))
+  expect(video('stage-a').srcObject).toBeNull()
+  expect(surface('stage-a').textContent).toContain('Playback denied')
+  expect(surface('stage-a').querySelector<HTMLButtonElement>('button')!.disabled).toBe(false)
+})
+
+it('releases a revoked source bitmap and never lends its image to the next capture', async () => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  await emit(coverage('lease-stage-a'))
+  const oldCanvas = stage('stage-a').querySelector('canvas')!, oldVideo = video('stage-a')
+  await emit({ type: 'capture-revoked', browserId, captureId, reason: 'source-replaced' })
+  expect([oldCanvas.width, oldCanvas.height, oldCanvas.hidden]).toEqual([0, 0, true])
+  expect(oldVideo.srcObject).toBeNull()
+  expect(stage('stage-a').querySelector('canvas')).toBeNull()
+  expect(surface('stage-a').textContent).toContain('Live preview source changed')
+  const nextStream = new MediaStream()
+  Object.defineProperty(nextStream, 'getTracks', { value: () => [track] })
+  trackState = 'live'
+  display.mockResolvedValueOnce(nextStream)
+  bridge.armPresentationCapture.mockResolvedValueOnce({ captureId: 'next-capture', browserId })
+  await emit(uncover())
+  await act(async () => surface('stage-a').querySelector<HTMLButtonElement>('button')!.click())
+  expect(video('stage-a').srcObject).toBe(nextStream)
+  const nextCanvas = stage('stage-a').querySelector('canvas')!
+  expect(nextCanvas).not.toBe(oldCanvas)
+  expect(nextCanvas.hidden).toBe(true)
+  expect(drawFrame).toHaveBeenCalledTimes(1)
+})
+
+it('releases the local bitmap, attached receiver and pending frame callback when the workface ends', async () => {
+  await mount(); await frame('stage-a'); await frame('stage-b')
+  await emit(coverage('lease-stage-a')); await emit(uncover())
+  const a = video('stage-a'), b = video('stage-b'), canvas = stage('stage-a').querySelector('canvas')!
+  await act(async () => {
+    Object.assign(state(a), { readyState: 2, width: 640, height: 320 })
+    a.dispatchEvent(new Event('loadeddata'))
+  })
+  const old = [...frameCallbacks.values()][0]!
+  expect(old).toBeDefined()
+  await act(async () => root.render(null))
+  expect(frameCallbacks.size).toBe(0)
+  expect(a.srcObject).toBeNull(); expect(b.srcObject).toBeNull()
+  expect([canvas.width, canvas.height, canvas.hidden]).toEqual([0, 0, true])
+  await act(async () => old.callback(0, {} as VideoFrameCallbackMetadata))
+  expect(canvas.hidden).toBe(true)
 })
 
 it.each(['track-ended', 'source-released'] as const)('reports %s while covered and keeps the original page available for explicit recovery', async reason => {
