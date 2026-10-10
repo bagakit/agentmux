@@ -15,6 +15,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 import { NoteLinksPanel } from './NoteLinksPanel'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
+import { NoteFileIdentity } from './NoteFileIdentity'
 
 /** Only an in-flight explicit reveal observes its original editor and ancestor visibility. */
 function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () => void {
@@ -140,14 +141,16 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>{history?.(presentation.active)}</div>
   const attribution = document.noteWriteAttribution?.status === 'unconfirmed' ? document.noteWriteAttribution
     : document.noteProvenance?.status === 'unconfirmed' ? document.noteProvenance : null
+  const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active && !canvasOpen} />
   return <div className="note-file-view">
     {attribution ? <div className="note-knowledge-notice" role="status">{document.noteWriteAttribution?.status === 'unconfirmed' ? 'From the last confirmed save: ' : ''}Block authorship is unconfirmed: {attribution.reason} Your Note remains readable and editable. {onCheckOriginal ? <button className="small-button" onClick={onCheckOriginal}>Check original file</button> : null}</div> : null}
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
     {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!}
       {...(read.note.title === undefined ? {} : { sourceTitle: read.note.title })} {...(dirty === undefined ? {} : { sourceDirty: dirty })} {...(onCheckOriginal ? { onCheckOriginal } : {})} /> : null}
-    {!registered ? <header className="notebook-page-heading"><h1>{read.note.title ?? 'Untitled note'}</h1><p className="note-scope">Original file · {document.path}</p></header> : null}
+    {!registered ? <header className="notebook-page-heading"><h1>{identityIcon} {read.note.title ?? 'Untitled note'}</h1><p className="note-scope">Original file · {document.path}</p></header> : null}
     {resource && catalog?.pages[read.note.noteId] && !sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <p className="note-knowledge-notice" role="status">This file has a different recorded Note location. Editing stays available; recover its Notebook history or inspect the original resource.</p> : null}
     {registered ? <div className="note-view-toolbar" aria-label="Note view selection">
+      {identityIcon}
       <SurfaceModeSwitch value={canvasOpen ? 'graph' : 'note'} onChange={view => setCanvasOpen(view === 'graph')} active={presentation.active} ariaLabel="Note presentation"
         options={[{ value: 'note', label: 'Note', ariaLabel: 'Note view' }, { value: 'graph', label: 'Graph', ariaLabel: 'Graph view' }]} />
       {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
