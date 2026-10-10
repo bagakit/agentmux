@@ -121,6 +121,10 @@ describe('the original member access owner', () => {
         expect((await forward('connection.grant', { ...original, operationId: 'member-reassigned-current-group', expectedBindingRevision: 2, expectedRevision: 1 })).state).toBe('applied')
       }
       await f.menu('Shared group details'); await disclosure('People in this group'); await f.button('Choose')
+      const earlier = document.querySelector('[aria-label="Member access status"]')!
+      expect(earlier).not.toBeNull(); expect(earlier.querySelector('strong')?.textContent).toBe('Member access not confirmed')
+      const originalScope = [...earlier.querySelectorAll('span')].find(node => node.textContent === 'Original group connection · revision 1')
+      expect(originalScope, 'The old request identifies its own group revision before opening details').toBeDefined(); expect(originalScope!.closest('details')).toBeNull()
       if (action === 'approve') {
         await toggle('Allow permission decisions'); await f.button('Approve this member')
         await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.grant'), 'A wait for revision one cannot take a new revision two action').toHaveLength(2))
