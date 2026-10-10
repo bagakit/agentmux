@@ -111,8 +111,16 @@ it('cancels selection when the intent reverses before geometry confirmation', as
   expect(bridge.activatePresentation).not.toHaveBeenCalled()
 })
 it('does not select a late geometry receipt after unmount', async () => {
-  await render(false); const pending = deferred<void>(); bridge.updatePresentation.mockReturnValueOnce(pending.promise)
-  await render(true); await act(async () => root.render(null)); await act(async () => pending.resolve(undefined))
+  const initialGeometry = deferred<void>()
+  bridge.updatePresentation.mockImplementationOnce(async () => initialGeometry.resolve(undefined))
+  await render(false); await act(async () => initialGeometry.promise)
+  expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
+  expect(bridge.updatePresentation.mock.calls).toEqual([['lease-focus', { visible: true, bounds: { x: 10, y: 40, width: 640, height: 320 } }]])
+  const pending = deferred<void>(), geometryAdmitted = deferred<void>()
+  bridge.updatePresentation.mockImplementationOnce(() => { geometryAdmitted.resolve(undefined); return pending.promise })
+  await render(true); await act(async () => geometryAdmitted.promise)
+  expect(bridge.activatePresentation).not.toHaveBeenCalled()
+  await act(async () => root.render(null)); await act(async () => pending.resolve(undefined))
   expect(bridge.activatePresentation).not.toHaveBeenCalled(); expect(bridge.removePresentation).toHaveBeenCalledWith('lease-focus')
 })
 it('does not transfer a queued owner after the new intent reverses', async () => {
@@ -146,8 +154,10 @@ it('does not reclaim a later human input owner on ordinary geometry changes', as
 })
 
 it('keeps a later Main owner event authoritative over an earlier pending receipt', async () => {
-  const pending = deferred<{ outcome: 'selected' }>(); bridge.activatePresentation.mockReturnValueOnce(pending.promise)
-  await render(true)
+  const pending = deferred<{ outcome: 'selected' }>(), selectionAdmitted = deferred<void>()
+  bridge.activatePresentation.mockImplementationOnce(() => { selectionAdmitted.resolve(undefined); return pending.promise })
+  await render(true); await act(async () => selectionAdmitted.promise)
+  expect(bridge.activatePresentation.mock.calls).toEqual([['lease-focus', { kind: 'select', focus: 'preserve' }]])
   await act(async () => events({ type: 'input-owner-changed', browserId: 'browser', leaseId: 'human-mote-lease' }))
   await act(async () => pending.resolve({ outcome: 'selected' }))
   await render(false); await render(true)
@@ -179,7 +189,10 @@ it('cancels an older queued Focus intent when a later foreign first-press become
 })
 
 it('restores the currently selected visible lease when Main releases a foreign owner without recapturing', async () => {
-  await render(true)
+  const selectionAdmitted = deferred<void>()
+  bridge.activatePresentation.mockImplementationOnce(async () => { selectionAdmitted.resolve(undefined); return { outcome: 'selected' } })
+  await render(true); await act(async () => selectionAdmitted.promise)
+  expect(bridge.activatePresentation.mock.calls).toEqual([['lease-focus', { kind: 'select', focus: 'preserve' }]])
   await act(async () => events({ type: 'input-owner-changed', browserId: 'browser', leaseId: 'human-mote-lease' }))
   await act(async () => events({ type: 'input-owner-changed', browserId: 'browser', leaseId: null }))
   expect(bridge.activatePresentation.mock.calls).toEqual([
