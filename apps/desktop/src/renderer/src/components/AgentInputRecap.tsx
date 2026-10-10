@@ -67,11 +67,12 @@ export function AgentInputRecap({ request, enabled, available }: { request: Prev
   }, [inspected])
   function scheduleClose() {
     clearTimeout(openTimer.current); clearTimeout(closeTimer.current)
+    if (request.pinned) return
     closeTimer.current = setTimeout(() => {
       if (!original.current?.contains(original.current.ownerDocument.activeElement)) setInspected(null)
     }, 180)
   }
-  useEffect(() => { if (!enabled) cancelTimers(); if (!available) setInspected(null); return cancelTimers }, [enabled, available])
+  useEffect(() => { if (!enabled || request.pinned) cancelTimers(); if (!available) setInspected(null); return cancelTimers }, [enabled, available, request.pinned])
   const snapshot = frozen ?? (enabled ? current : held.current ?? current)
   const ordered = snapshot.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
   // Missing times retain the public source order; they cannot establish a cross-source chronology.
@@ -104,7 +105,7 @@ export function AgentInputRecap({ request, enabled, available }: { request: Prev
     })}</ol> : <p className="focus-context-hover__coverage">{snapshot.loading ? enabled ? 'Loading recent messages…' : 'Reading paused' : notice ? 'Recorded inputs unavailable' : 'No inputs in the current reading window'}</p>}
     {notice ? <p className="focus-context-hover__notice">{notice} · Open the Agent to read History.</p> : null}
     {inspected ? <div ref={original} id={request.id + '-input'} className="agent-input-recall__inspection" onPointerEnter={cancelTimers} onPointerLeave={scheduleClose}
-      onBlur={event => { if (event.relatedTarget && !event.currentTarget.closest('.agent-information-reader')?.contains(event.relatedTarget as Node)) closeInput(false) }}>
+      onBlur={event => { if (!request.pinned && event.relatedTarget && !event.currentTarget.closest('.agent-information-reader')?.contains(event.relatedTarget as Node)) closeInput(false) }}>
       <OriginalInput inspected={inspected} request={request} active={enabled} onClose={() => closeInput()} />
     </div> : null}
   </section>
