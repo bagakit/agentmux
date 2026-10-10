@@ -299,3 +299,40 @@ it('moves only the retained Terminal view to its actual document and keeps the o
   // native-window gate separately verifies public xterm reparenting and GPU rendering.
   await act(async()=>root!.unmount());root=null;frame.remove()
 })
+
+it.each(['reading', 'latest', 'later wheel', 'later pointer', 'later key', 'later touch'])('keeps actual terminal reading intent across its document move, reflow and later input: %s', async mode => {
+  let currentDocument=document
+  const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>
+  await act(async()=>root!.render(tree()))
+  await act(async()=>vi.waitFor(()=>expect(fixture.terminals[0]?.completed).toContain('before ')))
+  const terminal=fixture.terminals[0]!, originalElement=(terminal as unknown as {element:HTMLElement}).element
+  const history=Array.from({length:300},(_,index)=>`ROW_${String(index).padStart(3,'0')} ${'x'.repeat(110)}\r\n`).join('')
+  await hiddenOutput(history,7)
+  if(mode==='latest')terminal.scrollToBottom();else terminal.scrollToLine(60)
+  const originalLine=terminal.buffer.active.viewportY, marker=mode==='latest'?undefined:terminal.registerMarker(originalLine-terminal.buffer.active.baseY-terminal.buffer.active.cursorY)
+  expect(mode==='latest'||terminal.buffer.active.baseY-originalLine>20).toBe(true)
+  const frameElement=document.createElement('iframe');document.body.append(frameElement)
+  const child=frameElement.contentDocument!, queued=new Map<number,FrameRequestCallback>();let frameId=0
+  const schedule=vi.spyOn(child.defaultView!,'requestAnimationFrame').mockImplementation(callback=>{const id=++frameId;queued.set(id,callback);return id})
+  const cancel=vi.spyOn(child.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)})
+  try{
+    child.body.append(child.adoptNode(rootContainer));currentDocument=child
+    await act(async()=>root!.render(tree()))
+    expect(terminal.buffer.active.viewportY).toBe(originalLine)
+    expect(terminalResourceOwnerCounts()).toEqual({terminalViews:1,terminalAddons:4,terminalListeners:11})
+    if(mode.startsWith('later ')){
+      terminal.scrollToLine(75)
+      const event=mode==='later wheel'?'wheel':mode==='later pointer'?'pointerdown':mode==='later key'?'keydown':'touchstart'
+      originalElement.dispatchEvent(new child.defaultView!.Event(event,{bubbles:true}))
+    }else{
+      // Use the same retained public parser to reflow actual wrapped rows, then
+      // deliver ordered live bytes before the delayed document restore runs.
+      terminal.resize(160,20)
+      await hiddenOutput('continued original output\r\n'.repeat(mode==='latest'?700:1),7+history.length)
+    }
+    await act(async()=>{const pending=[...queued.values()];queued.clear();for(const callback of pending)callback(0)})
+    expect(terminal.buffer.active.viewportY).toBe(mode==='latest'?terminal.buffer.active.baseY:mode.startsWith('later ')?75:Math.max(0,marker!.line))
+    expect(fixture.terminals).toEqual([terminal]);expect(originalElement.ownerDocument).toBe(child)
+    expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(fixture.unsubscribe).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled()
+  }finally{marker?.dispose();await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+})
