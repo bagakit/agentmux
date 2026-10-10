@@ -4,7 +4,7 @@ import type { MoteAvatarSeriesCreateResult } from '@agentmux/core/mote-avatar-se
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const AddIcon = semanticIconComponent('action.add-item')
 const FolderIcon = semanticIconComponent('action.open-folder')
@@ -65,7 +65,7 @@ export function MoteAvatarSeriesCreateDialog({ disabled, rootPath, onUse }: {
   return <Dialog.Root open={open} onOpenChange={changeOpen}>
     <Dialog.Trigger asChild><button type="button" className="small-button mote-series__add" disabled={disabled}
       aria-label="Add avatar series" title="Add your own series"><AddIcon size={15} /></button></Dialog.Trigger>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content asChild onEscapeKeyDown={event => event.stopPropagation()}>
         <form className="dialog-surface mote-series-create" data-series-create-id={seriesId} data-series-created={created?.seriesId}
@@ -98,6 +98,6 @@ export function MoteAvatarSeriesCreateDialog({ disabled, rootPath, onUse }: {
             : <button type="submit" className="primary-button" disabled={disabled || busy === 'create' || !title.trim() || !seriesId}>{busy === 'create' ? 'Creating…' : 'Create starter series'}</button>}</footer>
         </form>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

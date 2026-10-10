@@ -14,7 +14,7 @@ import { MoteAvatarCrop } from './MoteAvatarCrop'
 import { MoteFaceEditor } from './MoteFaceEditor'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { keepMoteAvatarSaveDraft, moteAvatarSaveRequestHash, readMoteAvatarSaveDraft, retireMoteAvatarSaveDraft } from '../lib/mote-avatar-save-draft'
 
 type SeriesSaveAttempt = { request: MoteAvatarSave; state: 'unsent' | 'unknown' | 'refused' | 'saved'; issue: string }
@@ -261,7 +261,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         : editingSeries && seriesStorageIssue ? 'Request unconfirmed'
           : error && errorStep === 'save' ? 'Retry saving' : supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'
   return <Dialog.Root open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="space-icon-picker__overlay dialog-scrim" />
       <Dialog.Content ref={content} data-series-draft-ready={Boolean(seriesDraft)} data-avatar-baseline-ready={Boolean(avatarBaseline)} data-avatar-save-state={busy && seriesAttempt ? 'saving' : seriesAttempt?.state} data-avatar-operation={seriesAttempt?.request.operationId} className={`space-icon-picker dialog-surface${editingSeries ? ' space-icon-picker--series' : ''}${supportsImages ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}
@@ -329,6 +329,6 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           </button>
         </footer>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

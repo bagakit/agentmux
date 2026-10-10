@@ -1,7 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useRef, type ReactNode } from 'react'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 
@@ -38,7 +38,7 @@ export function ConfirmationDialog({
   const openedContent = useRef<Element | null>(null)
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && !busy && onCancel()}>
-      <Dialog.Portal container={resolveOverlayContainer()}>
+      <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
         <Dialog.Content className="confirmation-dialog dialog-surface" aria-busy={busy}
           onOpenAutoFocus={(event) => { event.preventDefault(); previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -72,7 +72,7 @@ export function ConfirmationDialog({
             </button>
           </footer>
         </Dialog.Content>
-      </Dialog.Portal>
+      </DocumentOverlayPortal>
     </Dialog.Root>
   )
 }

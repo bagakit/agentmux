@@ -14,7 +14,7 @@ import { filterLauncherResumeRows, launcherCandidateIdentity, launcherCandidateK
 import { agentProviderLabel } from './AgentProviderIcon'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentAvatar } from './AgentAvatar'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { SettingsNavigation } from './SettingsNavigation'
 import { launcherCatalogWarnings, launcherDiscoveryKey, launcherNativeDiscovery, launcherNativeSourceKey, mergeLauncherNativeCatalog } from '../lib/launcher-native-discovery'
 import { launcherPreviewKey, useLauncherResumePreviews } from '../hooks/useLauncherResumePreviews'
@@ -333,7 +333,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
         <ThemeActionResumeSessionIcon size={13} aria-hidden="true" /><span>Resume</span><ThemeNavigationDownIcon size={11} aria-hidden="true" />
       </button>
     </Dialog.Trigger>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="dialog-scrim launcher-resume__scrim" />
       <Dialog.Content className="dialog-surface launcher-resume" aria-busy={busyId !== null}
         onOpenAutoFocus={event => { event.preventDefault(); searchRef.current?.focus() }}>
@@ -462,6 +462,6 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             {busyId ? 'Restoring…' : selectedSession?.status.continuityConflict === 'session-run-changed' ? 'Open current Session' : selected && !selected.workspace && selectedHostConfigured ? 'Open project & resume' : 'Resume Session'}
           </button></footer>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

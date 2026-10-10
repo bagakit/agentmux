@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import type { WorkspaceDirectoryEntry, WorkspaceRecord } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
@@ -46,7 +46,7 @@ export function LauncherFileReferences({ workspace, hostLabel, onSelect, onClose
     return () => { current = false }
   }, [workspace.id, directory, resourceKey, revision])
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface launcher-file-references">
         <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">Reference a project file</Dialog.Title>
@@ -68,6 +68,6 @@ export function LauncherFileReferences({ workspace, hostLabel, onSelect, onClose
           {issue ? <div className="composer-feedback" role="alert"><span>{issue}</span><button type="button" onClick={() => setRevision(value => value + 1)}>Retry</button></div> : null}
         </div>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

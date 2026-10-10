@@ -14,7 +14,7 @@ import { moteConnectionChoice, moteConnectionTarget } from '../lib/mote-connecti
 import { SelectionField } from './SelectionField'
 import { MoteBotSetup } from './MoteBotSetup'
 import { SettingsNavigation } from './SettingsNavigation'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import '../styles/mote-connection-identity.css'
 
 const BotIcon = semanticIconComponent('object.conversation')
@@ -127,7 +127,7 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
   const current = snapshot?.saved.values?.connection
   const currentChoice = current && snapshot && !snapshot.connectionIssue ? moteConnectionChoice(current, snapshot.connections) : null
   const savedBotIssue = current ? snapshot?.connectionIssue ?? currentChoice?.issue : null
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
+  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <div className="window-overlay-host__entry" data-overlay-layer="dialog"><Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
         onCloseAutoFocus={event => { event.preventDefault(); const active = document.activeElement, node = returnFocus();
@@ -161,5 +161,5 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
         </footer> : null}
       </Dialog.Content>
     </div>
-  </Dialog.Portal></Dialog.Root>
+  </DocumentOverlayPortal></Dialog.Root>
 }

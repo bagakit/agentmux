@@ -6,7 +6,7 @@ import { useMoteWorkfaceScope, type MoteWorkfaceScope } from '../lib/mote-workfa
 import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { MoteDetailsPanel } from './MoteDetailsPanel'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeObjectContactIcon = semanticIconComponent('object.contact')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -57,7 +57,7 @@ export function MoteProfilePopover({ workspaceId, topicId, reference, active, on
   }}>
     {children(<Dialog.Trigger asChild><button ref={setAnchor} type="button" className="pane-action mote-profile-trigger" aria-label="Show Mote profile"
       aria-pressed={open && active} title="Mote profile"><ThemeObjectContactIcon size={14} /></button></Dialog.Trigger>)}
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Content ref={attach} className="mote-profile-popover" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
         <Dialog.Title hidden>Mote profile</Dialog.Title>
@@ -68,6 +68,6 @@ export function MoteProfilePopover({ workspaceId, topicId, reference, active, on
           onOpenPath={materials.open} />
           : <p role="status" className="mote-details__hint">The original Mote profile is being read. Your conversation stays available.</p>}
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

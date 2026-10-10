@@ -15,7 +15,7 @@ import { scratchTopicIdentityPath } from '../../../shared/scratch-topics'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/space-addresses'
 import { AgentAvatar } from './AgentAvatar'
 import { SelectionField } from './SelectionField'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
@@ -141,7 +141,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
   const location = mode === 'mote' && scratch ? motes.find(topic => topic.id === moteId) : undefined
   const executionPath = mode === 'mote' ? scratch && location ? scratchTopicIdentityPath(scratch, location) : undefined : state.config?.workspaces.find(workspace => workspace.id === workspaceId)?.path
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
+    <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface goal-agent-picker" aria-busy={busy} onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; openedContent.current = event.target instanceof Element ? event.target : null; search.current?.focus() }} onCloseAutoFocus={event => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement; if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active))) original.focus({ preventScroll: true }) }} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <header className="confirmation-dialog__heading"><Dialog.Title className="confirmation-dialog__title">{labels[role]}</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close Agent picker" disabled={busy}><ThemeActionCloseIcon size={15} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">{demand.title}<br />{role === 'assignees' ? 'Choose who advances this Goal. Their related history is retained.' : role === 'related' ? 'Keep the conversations involved in this Goal. Responsibilities are edited separately.' : 'Choose one assignee for the next Loop. This selection does not start it.'}</Dialog.Description>
@@ -181,6 +181,6 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
           {issue ? <p className="goals-service" role="status">{issue}</p> : null}
           <footer><span>{role === 'supervisor' ? selected.length ? 'One Supervisor selected' : 'Supervisor cleared' : `${selected.length} selected`}</span><button type="button" className="goals-button" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="goals-button goals-button--primary" disabled={busy}>{busy ? 'Working…' : 'Save relationships'}</button></footer>
         </form>
-      </Dialog.Content></Dialog.Portal>
+      </Dialog.Content></DocumentOverlayPortal>
   </Dialog.Root>
 }

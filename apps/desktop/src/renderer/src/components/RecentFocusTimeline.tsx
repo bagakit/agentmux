@@ -28,7 +28,7 @@ import { observeAgentSession } from '../lib/agent-observation'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
 import * as Dialog from '@radix-ui/react-dialog'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { createFocusTimelineOrder, extendFocusTimelineOrder, focusTimelineOrderCandidates, focusTimelineTrackKey, groupFocusTimeline, observeFocusInputTracks, orderFocusTimelineProjects, resolveFocusInputTrack, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
 import { FocusMessagePreview } from './FocusMessagePreview'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
@@ -534,7 +534,7 @@ function FocusTimelineLegend({ active, reading, sources, serviceNotice, latestIn
   const incomplete = reading.trimmed || latestIncomplete
   return <Dialog.Root open={active && open} onOpenChange={next => { if (next && active) dormantClose.current = false; setOpen(next) }}>
     <Dialog.Trigger asChild><button ref={trigger} data-focus-window-control type="button" className="recent-focus__coverage-button" aria-label="Timeline meaning and coverage" title={serviceNotice ?? (incomplete ? "Some history is outside this bounded window. Current activity is shown independently." : "Working, focused visits, running processes and history coverage")}><ThemeActionHelpIcon size={12} /><span>{serviceNotice ? "Updates paused" : incomplete ? "Partial history" : read ? `${read} read` : "History"}</span></button></Dialog.Trigger>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="dialog-surface recent-focus__legend-dialog" onEscapeKeyDown={event => { event.preventDefault(); setOpen(false) }} onPointerDownCapture={event => event.stopPropagation()} onCloseAutoFocus={event => { if (dormantClose.current || readingNext.current) { event.preventDefault(); readingNext.current = false } }}>
         <header><Dialog.Title>Timeline meaning and coverage</Dialog.Title><Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close timeline meaning and coverage"><ThemeActionCloseIcon size={14} /></button></Dialog.Close></header>
@@ -558,7 +558,7 @@ function FocusTimelineLegend({ active, reading, sources, serviceNotice, latestIn
         </section>
         <footer><button type="button" className="small-button" onClick={() => { readingNext.current = true; setOpen(false); if (trigger.current) onRead(trigger.current) }}>Open conversation records</button></footer>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }
 
@@ -566,7 +566,7 @@ function FocusHistoryObservation({ segment, anchor, time, onClose }: { segment: 
   const displayPath = usePathDisplay()
   const identity = segment.identity
   const dateClock = time.detailed
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
+  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
     <Dialog.Content className="confirmation-dialog dialog-surface recent-focus__observation" onCloseAutoFocus={event => { event.preventDefault(); if (anchor.isConnected && document.activeElement === document.body) anchor.focus() }}>
       <Dialog.Title className="confirmation-dialog__title">{identity?.name ?? segment.sessionId}</Dialog.Title>
@@ -577,13 +577,13 @@ function FocusHistoryObservation({ segment, anchor, time, onClose }: { segment: 
       <p>Focus visits are retained here. Message and execution history coverage may be incomplete.</p>
       <footer><Dialog.Close asChild><button type="button" className="small-button">Close</button></Dialog.Close></footer>
     </Dialog.Content>
-  </Dialog.Portal></Dialog.Root>
+  </DocumentOverlayPortal></Dialog.Root>
 }
 function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
   segment: FocusWorkInterval; track: FocusTimelineTrack; anchor: HTMLElement; time: FocusTimeFormatters; onClose(): void
 }) {
   const endings = { 'state-change': 'Another semantic state was observed', 'run-ended': 'Run ended or was interrupted', 'observation-gap': 'Observation became unavailable', unknown: 'No subsequent observation recorded', current: 'Still working in the current confirmed Run' }
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
+  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
     <Dialog.Content className="confirmation-dialog dialog-surface recent-focus__observation" onCloseAutoFocus={event => {
       event.preventDefault()
@@ -598,7 +598,7 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
       <p>State observations do not measure CPU execution or prove task success. Older history or missing transitions may remain unknown.</p>
       <footer><Dialog.Close asChild><button type="button" className="small-button">Close</button></Dialog.Close></footer>
     </Dialog.Content>
-  </Dialog.Portal></Dialog.Root>
+  </DocumentOverlayPortal></Dialog.Root>
 }
 
 export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, currentContext = null, contexts, lanes, hierarchy, onSelect, onReveal, historyWindowRequest, catalogue: sharedCatalogue, visible = true }: {

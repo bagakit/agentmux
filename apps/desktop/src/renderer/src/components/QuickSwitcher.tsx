@@ -13,7 +13,7 @@ import { tabGroupForTab } from '../lib/workbench-tabs'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { AgentAvatar } from './AgentAvatar'
 import { StatusDot } from './StatusDot'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { QuickOpenFiles } from './QuickOpenFiles'
 import { desktopElementVisible } from '../lib/desktop-presentation'
@@ -99,7 +99,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
 
   return (
     <Dialog.Root open={open} onOpenChange={(next) => !next && onClose()}>
-      <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="quick-switch__overlay dialog-scrim" />
         <Dialog.Content
           ref={contentRef}
@@ -181,7 +181,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
             <span><kbd aria-label="Enter"><ThemeKeyEnterIcon size={11} /></kbd> to open · <kbd>Esc</kbd> to dismiss</span>
           </div>
         </Dialog.Content>
-      </Dialog.Portal>
+      </DocumentOverlayPortal>
     </Dialog.Root>
   )
 }

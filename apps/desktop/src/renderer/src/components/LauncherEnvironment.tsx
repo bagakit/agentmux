@@ -5,7 +5,7 @@ import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/d
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import type { HostCheckState } from '../store'
 import { hostCheckLabel } from '../lib/host-check'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { LauncherExecutionPicker } from './LauncherExecutionPicker'
 
 const ThemeObjectHostIcon = semanticIconComponent('object.host')
@@ -59,7 +59,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
       <Dialog.Trigger asChild><button type="button" className="launcher-environment__host" ref={trigger} disabled={!active} aria-label="Runtime environment" title={`${kind} · ${label}`}>
         <Icon size={14} /><span>{label}</span><ThemeNavigationDownIcon size={12} />
       </button></Dialog.Trigger>
-      {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      {active ? <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Content ref={setPanel} className="launcher-environment__panel" inert={!open} style={{ visibility: 'hidden' }}
           onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
           <header><div className="launcher-environment__identity"><Icon size={18} /><div><Dialog.Title>Choose where to start</Dialog.Title><Dialog.Description>Current target · {label} · {kind}</Dialog.Description></div></div>
@@ -75,7 +75,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
             <div><dt>Execution</dt><dd>{host ? 'Configured host shell' : 'Host not configured'}</dd></div>
           </dl></details>
         </Dialog.Content>
-      </Dialog.Portal> : null}
+      </DocumentOverlayPortal> : null}
     </Dialog.Root>
   </header>
 }

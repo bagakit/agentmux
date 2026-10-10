@@ -5,7 +5,7 @@ import { useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -28,7 +28,7 @@ export function HostFolderDialog({ hostId, label, onClose }: { hostId: string; l
     finally { setBusy(false) }
   }
   return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface project-group-dialog" aria-busy={busy}
         onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
@@ -42,6 +42,6 @@ export function HostFolderDialog({ hostId, label, onClose }: { hostId: string; l
             <button type="submit" className="small-button confirmation-dialog__confirm--neutral" disabled={busy || !path.trim()}>{busy ? 'Opening…' : 'Open Folder'}</button></footer>
         </form>
       </Dialog.Content>
-    </Dialog.Portal>
+    </DocumentOverlayPortal>
   </Dialog.Root>
 }

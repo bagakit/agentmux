@@ -34,7 +34,7 @@ import { SelectorPresence, SelectorRow } from './SelectorList'
 import { BranchContextMenu } from './BranchContextMenu'
 import { BranchComparisonPanel } from './BranchComparisonPanel'
 import { ConfirmationDialog } from './ConfirmationDialog'
-import { resolveOverlayContainer } from './WindowOverlayHost'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionPinIcon = semanticIconComponent('action.pin')
@@ -593,7 +593,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
           }
         }}
       >
-        <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+        <DocumentOverlayPortal component={Dialog.Portal}>
           <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
           <Dialog.Content
             className="branch-create-dialog dialog-surface"
@@ -637,7 +637,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
               </footer>
             </form>
           </Dialog.Content>
-        </Dialog.Portal>
+        </DocumentOverlayPortal>
       </Dialog.Root>
       {/* Fan one prompt across N fresh branches. Lives beside "create worktree" because it is the same
           act repeated — the branch names and paths are main's to derive, never chosen here. */}
@@ -649,7 +649,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
           if (!open) setActionError(null)
         }}
       >
-        <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+        <DocumentOverlayPortal component={Dialog.Portal}>
           <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
           <Dialog.Content
             className="branch-create-dialog dialog-surface"
@@ -702,7 +702,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
               </footer>
             </form>
           </Dialog.Content>
-        </Dialog.Portal>
+        </DocumentOverlayPortal>
       </Dialog.Root>
       {/*
         单条 worktree 移除的确认。两个阶段共用这一个对话框，文案由 worktreeRemovalPrompt 按阶段算，
