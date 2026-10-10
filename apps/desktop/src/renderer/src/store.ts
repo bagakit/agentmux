@@ -2,6 +2,11 @@ import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from 
 import { parseConversationLandmarkWrite, type ConversationLandmarkWrite } from '@agentmux/core/conversation'
 import { restoredMoteBotRequests, type MoteBotRequest } from './lib/mote-bot-request'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
+import { noteHistoryRevision } from '@agentmux/core/note-history'
+import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
+import type { NoteFileAttempt, NoteFileInput, NoteWrittenReceipt, NoteHistorySelection } from '../../shared/note-file-editing'
+import { afterNoteComposition, mergeLiveNote, setNoteComposition } from './lib/note-live-merge'
+import { confirmNoteHistoryTarget, noteHistoryReadParams, type NoteHistoryRead, type NoteHistoryTarget } from './lib/note-history-target'
 import { restoredConnectorRoomIntents, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './lib/connector-service-intent'
 import type { ConnectorServiceObservation } from './lib/connector-service-observation'
@@ -248,6 +253,7 @@ import {
   reduceDocumentReloaded,
   reduceDocumentSaving,
   reduceDocumentWriteError,
+  preserveNoteInputConflict,
   reduceDocumentWritten,
   reduceFileDelete,
   reduceFileOpened,
@@ -1288,11 +1294,17 @@ type AppState = {
   renamePath(path: string, nextPath: string, workspaceId?: string): Promise<void>
   deletePath(path: string, workspaceId?: string): Promise<void>
   updateDocument(tabId: string, content: string, regionId?: string): void
+  updateNoteDocument(tabId: string, content: string, editorBeforeContent: string, regionId?: string): void
+  adoptNoteCurrentDocument(tabId: string, regionId: string): Promise<void>
+  retryNoteInput(tabId: string, regionId: string): Promise<void>
+  retainNoteEditorDraft(tabId: string, regionId: string, displayed: string, incoming: string, resource: { hostId: string; path: string }, action: 'retain' | 'keep-displayed'): void
   saveDocument(tabId: string, regionId?: string): Promise<void>
   overwriteDocument(tabId: string, regionId?: string): Promise<void>
-  useRetainedDocumentDraft(tabId: string, regionId?: string): void
+  useRetainedDocumentDraft(tabId: string, regionId?: string, selected?: FileDocument): void
   reloadDocument(tabId: string, regionId?: string): Promise<void>
   refreshDocument(workspaceId: string, path: string): Promise<void>
+  inspectNoteHistory(tabId: string, regionId: string, noteId: string): Promise<NoteHistoryRead>
+  applyNoteHistory(tabId: string, regionId: string, selection: NoteHistorySelection): Promise<void>
   launchBoardAgent(
     workspaceId: string,
     executorId: string,
@@ -1834,6 +1846,260 @@ function pruneEditorRegionState(tabs: Readonly<Record<string, WorkbenchTab>>): v
   })
 }
 
+const noteInputTails = new Map<string, Promise<void>>()
+/** Local Steps can arrive while a remote snapshot is still being mapped into this editor. */
+async function drainNoteInput(workspaceId: string, path: string): Promise<void> {
+  const key = documentKey(workspaceId, path), existing = noteInputTails.get(key)
+  if (existing) return existing
+  const expected = useAppStore.getState().documents[key]?.noteEditing?.input?.resource
+  const lifetime = documentLifetime(key), resource = watchNoteResource(workspaceId, expected ? { hostId: expected.hostId, path: expected.workspacePath } : undefined)
+  const operation = (async () => {
+    await afterNoteComposition(key)
+    while (documentLifetime(key) === lifetime && resource.current()) {
+      const before = useAppStore.getState(), document = before.documents[key], input = document?.noteEditing?.input
+      if (!document || !input || input.phase !== 'mapping') return
+      let failed = { baseContent: input.baseContent, observedContent: input.observedContent, proposedContent: input.proposedContent }
+      let merged = await mergeLiveNote(failed.baseContent, failed.observedContent, failed.proposedContent)
+      for (const delta of input.queued ?? []) {
+        if (merged.status !== 'merged' || useAppStore.getState().documents[key]?.noteEditing?.input !== input) break
+        failed = { ...delta, observedContent: merged.content }
+        merged = await mergeLiveNote(failed.baseContent, failed.observedContent, failed.proposedContent)
+      }
+      if (documentLifetime(key) !== lifetime || !resource.current()) return
+      if (useAppStore.getState().documents[key]?.noteEditing?.input !== input) continue
+      useAppStore.setState(state => {
+        const current = state.documents[key]
+        if (current?.noteEditing?.input !== input) return state
+        const issues = { ...state.documentIssues }, content = merged.status === 'merged' ? merged.content : current.content
+        if (merged.status === 'merged') {
+          if (issues[key]?.kind === 'changed' && issues[key].noteMerge) delete issues[key]
+        } else issues[key] = { kind: 'changed', observed: { path, content: failed.observedContent, revision: current.revision },
+          noteMerge: { baseContent: failed.baseContent, proposedContent: failed.proposedContent,
+            ...(failed.proposedContent !== current.content ? { earlierInput: true as const } : {}),
+            ...(noteHistoryRevision(failed.observedContent) !== current.revision ? { observedIsDraft: true as const } : {}), reason: merged.status === 'unavailable' ? merged.message : 'This input overlaps a newer draft. Both versions and your original input are retained.' } }
+        const drafts = [...state.retainedDocumentDrafts[key] ?? []]
+        if (merged.status !== 'merged') for (const raw of [input.observedContent, input.proposedContent, ...input.queued?.map(delta => delta.proposedContent) ?? [], failed.observedContent]) {
+          if (raw !== content && !drafts.some(draft => draft.content === raw)) drafts.push({ path, content: raw, revision: current.revision })
+        }
+        return { ...(merged.status !== 'merged' ? { retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: drafts } } : {}),
+          documents: { ...state.documents, [key]: { ...current, content, noteEditing: { ...current.noteEditing,
+          input: merged.status === 'merged' ? undefined : { ...input, phase: 'conflict' as const } } } },
+          dirtyDocuments: { ...state.dirtyDocuments, [key]: content !== current.noteEditing.baseline?.content },
+          documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 }, documentIssues: issues }
+      })
+    }
+  })()
+  noteInputTails.set(key, operation)
+  try { await operation } finally { resource.release(); if (noteInputTails.get(key) === operation) noteInputTails.delete(key) }
+}
+
+function updateNoteInput(tabId: string, content: string, editorBeforeContent: string, regionId?: string): void {
+  const state = useAppStore.getState(), surface = fileSurface(state.tabs[tabId], regionId)
+  if (!surface) return
+  const key = documentKey(surface.workspaceId, surface.path), document = state.documents[key]
+  if (!document || content === document.content) return
+  const pending = document.noteEditing?.input, workspace = state.config?.workspaces.find(item => item.id === surface.workspaceId)
+  if (!pending && editorBeforeContent === document.content) { useAppStore.setState(current => reduceDocumentContent(current, tabId, content, regionId)); return }
+  if (!workspace) { useAppStore.setState(current => reduceDocumentContent(current, tabId, content, regionId)); return }
+  let input: NoteFileInput
+  if (!pending) {
+    input = { baseContent: editorBeforeContent, observedContent: document.content, proposedContent: content, phase: 'mapping',
+      resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: surface.path } }
+  } else {
+    const queued = pending.queued ?? [], tail = queued.at(-1)
+    if (tail) {
+      const next = tail.proposedContent === editorBeforeContent
+        ? [...queued.slice(0, -1), { ...tail, proposedContent: content }]
+        : [...queued, { baseContent: editorBeforeContent, proposedContent: content }]
+      input = { ...pending, phase: 'mapping', queued: next }
+    } else if (pending.proposedContent === editorBeforeContent) {
+      input = { ...pending, proposedContent: content, phase: 'mapping' }
+    } else {
+      input = { ...pending, phase: 'mapping', queued: [{ baseContent: editorBeforeContent, proposedContent: content }] }
+    }
+  }
+  useAppStore.setState(current => {
+    const next = reduceDocumentContent(current, tabId, content, regionId)
+    return { ...next, documents: { ...next.documents, [key]: { ...next.documents[key]!, noteEditing: { ...next.documents[key]!.noteEditing, input } } } }
+  })
+  void drainNoteInput(surface.workspaceId, surface.path)
+}
+
+async function readNoteHistoryTarget(tabId: string, regionId: string, noteId: string): Promise<NoteHistoryRead> {
+  const state = useAppStore.getState(), tab = state.tabs[tabId], surface = tab?.regions[regionId]
+  if (surface?.kind !== 'file') throw Error('The original Note file occurrence is unavailable.')
+  const key = documentKey(surface.workspaceId, surface.path), lifetime = documentLifetime(key)
+  const params = noteHistoryReadParams(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? [], tabId, regionId)
+  let changed = false
+  const current = () => {
+    try { const latest = useAppStore.getState(); return JSON.stringify(noteHistoryReadParams(latest, scratchTopicsForConfig(latest.config, latest.scratchTopicSnapshots) ?? [], tabId, regionId)) === JSON.stringify(params) }
+    catch { return false }
+  }
+  const release = useAppStore.subscribe((next, previous) => {
+    if (next.tabs[tabId] === previous.tabs[tabId] && next.config?.workspaces === previous.config?.workspaces &&
+      next.spaceZoneBindings === previous.spaceZoneBindings && next.scratchTopicSnapshots === previous.scratchTopicSnapshots && next.topicCategories === previous.topicCategories) return
+    if (!current()) changed = true
+  })
+  try {
+    const observed = await api.files.readPublic(params)
+    if (changed || documentLifetime(key) !== lifetime || !current()) throw Error('The original Note resource changed during its history read. The selection and draft are retained.')
+    return confirmNoteHistoryTarget(params, noteId, observed, surface.path)
+  } finally { release() }
+}
+
+function noteAttemptResourceCurrent(workspaceId: string, path: string, attempt: NoteFileAttempt): boolean {
+  const current = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+  return attempt.resource.workspaceId === workspaceId && attempt.resource.path === path && current?.hostId === attempt.resource.hostId && current.path === attempt.resource.workspacePath
+}
+/** Observe the exact original resource for one in-flight Note operation, including away-and-back changes. */
+function watchNoteResource(workspaceId: string, original: { hostId: string; path: string } | undefined) {
+  let changed = !original
+  const current = () => {
+    const resource = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+    return !changed && Boolean(original && resource?.hostId === original.hostId && resource.path === original.path)
+  }
+  const release = useAppStore.subscribe((state, previous) => {
+    if (state.config?.workspaces === previous.config?.workspaces) return
+    const resource = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+    if (!original || resource?.hostId !== original.hostId || resource.path !== original.path) changed = true
+  })
+  return { current, release }
+}
+function noteWrittenMetadata(result: Extract<import('../../shared/contracts').WorkspaceFileWriteResult, { status: 'written' }>): NoteWrittenReceipt {
+  const { content: _content, ...receipt } = result
+  return receipt
+}
+/** Advance the original document only after mapping canonical bytes against the latest local draft. */
+async function settleNoteWritten(workspaceId: string, path: string, lifetime: number, attempt: NoteFileAttempt,
+  result: Extract<import('../../shared/contracts').WorkspaceFileWriteResult, { status: 'written' }>, resourceCurrent = () => true): Promise<void> {
+  const key = documentKey(workspaceId, path), receipt = noteWrittenMetadata(result)
+  await drainNoteInput(workspaceId, path)
+  const original = () => documentLifetime(key) === lifetime && useAppStore.getState().documents[key]?.noteEditing?.attempt?.operationId === attempt.operationId
+  const owns = () => original() && resourceCurrent() && noteAttemptResourceCurrent(workspaceId, path, attempt)
+  if (!original()) return
+  useAppStore.setState(state => ({ documents: { ...state.documents, [key]: { ...state.documents[key]!, noteEditing: {
+    ...state.documents[key]!.noteEditing, receipt, attempt: { ...attempt, phase: 'written', written: receipt, ...(result.content !== undefined && noteHistoryRevision(result.content) === result.revision ? { canonical: result.content } : {}) } } } },
+    savingDocuments: { ...state.savingDocuments, [key]: false } }))
+  if (useAppStore.getState().documents[key]?.noteEditing?.input?.phase === 'conflict' || result.content === undefined) return
+  const canonical = result.content
+  const canonicalHeader = readNoteMarkdownHeader(canonical)
+  if (noteHistoryRevision(canonical) !== result.revision || attempt.noteId !== null && (canonicalHeader.status !== 'valid' || canonicalHeader.noteId !== attempt.noteId)) return
+  await afterNoteComposition(key)
+  while (owns()) {
+    const before = useAppStore.getState(), document = before.documents[key]!, generation = before.documentGenerations[key] ?? 0
+    const merged = attempt.retainDraft ? { status: 'conflict' as const } : document.content === attempt.content ? { status: 'merged' as const, content: canonical }
+      : await mergeLiveNote(attempt.content, canonical, document.content)
+    if (!owns()) return
+    if ((useAppStore.getState().documentGenerations[key] ?? 0) !== generation) continue
+    let accepted = false
+    useAppStore.setState(state => {
+      if ((state.documentGenerations[key] ?? 0) !== generation || state.documents[key]?.noteEditing?.attempt?.operationId !== attempt.operationId) return state
+      accepted = true
+      const current = state.documents[key]!, issue = state.documentIssues[key], issues = { ...state.documentIssues }
+      const observed = { path, content: canonical, revision: result.revision, ...(result.noteProvenance ? { noteProvenance: result.noteProvenance } : {}) }
+      if (merged.status !== 'merged') issues[key] = { kind: 'changed', observed,
+        noteMerge: { baseContent: attempt.content, proposedContent: current.content, reason: merged.status === 'unavailable' ? merged.message : 'The saved content overlaps this later draft or changes a block identity.' } }
+      else if (issue?.kind !== 'changed' || issue.observed.revision === result.revision) delete issues[key]
+      const content = merged.status === 'merged' ? merged.content : current.content
+      const { noteProvenance: _oldProvenance, noteWriteAttribution: _oldAttribution, ...kept } = current
+      return { documents: { ...state.documents, [key]: { ...kept, content, revision: result.revision,
+        ...(result.noteProvenance ? { noteProvenance: result.noteProvenance } : {}), ...(result.noteAttribution ? { noteWriteAttribution: result.noteAttribution } : {}),
+        noteEditing: { baseline: { content: canonical, revision: result.revision }, receipt } } },
+        dirtyDocuments: { ...state.dirtyDocuments, [key]: content !== canonical },
+        documentGenerations: { ...state.documentGenerations, [key]: generation + 1 }, documentIssues: issues,
+        savingDocuments: { ...state.savingDocuments, [key]: false } }
+    })
+    if (accepted) return
+  }
+}
+
+/** Watch/read and save receipts share this original document reconciliation boundary. */
+async function reconcileNoteRead(workspaceId: string, path: string, lifetime: number, requestId: number,
+  result: import('../../shared/contracts').WorkspaceFileReadResult, resourceCurrent = () => true): Promise<boolean> {
+  if (!path.endsWith(NOTE_FILE_EXTENSION)) return false
+  const key = documentKey(workspaceId, path)
+  const owns = () => resourceCurrent() && documentLifetime(key) === lifetime && fileReadRequestIds.get(key) === requestId && Boolean(useAppStore.getState().documents[key])
+  await afterNoteComposition(key)
+  await drainNoteInput(workspaceId, path)
+  if (!owns()) return true
+  const pending = useAppStore.getState().documents[key]!.noteEditing?.attempt
+  if (pending) {
+    if (!noteAttemptResourceCurrent(workspaceId, path, pending)) return true
+    if (pending.phase === 'written' && pending.written && pending.canonical !== undefined) {
+      await settleNoteWritten(workspaceId, path, lifetime, pending, { ...pending.written, content: pending.canonical }, resourceCurrent)
+      if (owns() && !useAppStore.getState().documents[key]?.noteEditing?.attempt && result.status === 'read' && result.document.revision !== pending.written.revision) return reconcileNoteRead(workspaceId, path, lifetime, requestId, result, resourceCurrent)
+      return true
+    }
+    if (pending.phase === 'written' && pending.written && result.status === 'read' && result.document.path === path && result.document.revision === pending.written.revision) {
+      await settleNoteWritten(workspaceId, path, lifetime, pending, { ...pending.written, content: result.document.content, ...(result.document.noteProvenance ? { noteProvenance: result.document.noteProvenance } : {}) }, resourceCurrent)
+      return true
+    }
+    const eventId = pending.written?.noteHistory?.eventId ?? (pending.enhanced || pending.action ? pending.operationId : undefined)
+    if (pending.target && eventId) {
+      try {
+        const response = await api.files.historyPublic({ ...pending.target, eventId, includeContent: true })
+        if (!owns() || useAppStore.getState().documents[key]?.noteEditing?.attempt?.operationId !== pending.operationId) return true
+        if (response.result.status === 'read') {
+          const event = response.result.entries.find(entry => entry.eventId === eventId)
+          if (event?.status === 'committed' && event.operation === (pending.action?.kind ?? 'edit') && event.content !== undefined && (!pending.written || pending.written.revision === event.revision)) {
+            await settleNoteWritten(workspaceId, path, lifetime, pending, { status: 'written', revision: event.revision, content: event.content,
+              noteHistory: { status: 'committed', eventId: event.eventId, batchId: event.batchId, replayed: true },
+              ...(event.provenance ? { noteProvenance: { ...event.provenance, status: 'recorded' } } : {}) }, resourceCurrent)
+            if (owns() && !useAppStore.getState().documents[key]?.noteEditing?.attempt && result.status === 'read' && result.document.revision !== event.revision) return reconcileNoteRead(workspaceId, path, lifetime, requestId, result, resourceCurrent)
+            return true
+          }
+          if (event?.status === 'not-applied' && pending.phase !== 'written') {
+            useAppStore.setState(state => ({ documents: { ...state.documents, [key]: { ...state.documents[key]!, noteEditing: { ...state.documents[key]!.noteEditing, attempt: undefined } } },
+              documentIssues: { ...state.documentIssues, [key]: preserveNoteInputConflict(state.documents[key], state.documentIssues[key], { kind: 'write-error', code: 'NOTE_OPERATION_NOT_APPLIED', message: 'The original Note operation was confirmed not applied. Your draft is retained; inspect the current file before a new save.' }) } }))
+            return true
+          }
+        }
+      } catch { /* Keep the original operation and current readable document when its history is unavailable. */ }
+    }
+    // Sending requests can still be running. Current bytes never certify that original operation.
+    if (result.status === 'error') useAppStore.setState(state => ({ documentIssues: { ...state.documentIssues, [key]: preserveNoteInputConflict(state.documents[key], state.documentIssues[key], { kind: 'write-unknown',
+      code: result.code, message: result.message, checkMessage: result.message, attempted: { content: pending.content, expectedRevision: pending.expectedRevision, generation: pending.generation,
+        resource: { hostId: pending.resource.hostId, path: pending.resource.workspacePath } } }) } }))
+    return true
+  }
+  const unresolved = useAppStore.getState().documents[key]!.noteEditing?.input
+  if (unresolved?.phase === 'conflict') {
+    // A same-revision read cannot settle conflicting unsaved drafts. Keep a later actual
+    // saved observation too, without replacing the original three-way comparison.
+    if (result.status === 'read' && result.document.path === path && result.document.revision !== useAppStore.getState().documents[key]!.revision) useAppStore.setState(state => {
+      const retained = state.retainedDocumentDrafts[key] ?? []
+      if (retained.some(document => document.revision === result.document.revision && document.content === result.document.content)) return state
+      return { retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: [...retained, result.document] } }
+    })
+    return true
+  }
+  if (result.status !== 'read' || result.document.path !== path) return false
+  while (owns()) {
+    const before = useAppStore.getState(), document = before.documents[key]!, generation = before.documentGenerations[key] ?? 0
+    const baseline = document.noteEditing?.baseline
+    if (!before.dirtyDocuments[key] || !baseline || baseline.revision !== document.revision || result.document.revision === document.revision) return false
+    const merged = await mergeLiveNote(baseline.content, result.document.content, document.content)
+    if (!owns()) return true
+    if ((useAppStore.getState().documentGenerations[key] ?? 0) !== generation) continue
+    let applied = false
+    useAppStore.setState(state => {
+      if ((state.documentGenerations[key] ?? 0) !== generation || state.documents[key] !== document) return state
+      applied = true
+      if (merged.status !== 'merged') return { documentIssues: { ...state.documentIssues, [key]: { kind: 'changed', observed: result.document,
+        noteMerge: { baseContent: baseline.content, proposedContent: document.content, reason: merged.status === 'unavailable' ? merged.message : 'The current file overlaps this local draft or changes a block identity.' } } },
+        documentObservationGenerations: { ...state.documentObservationGenerations, [key]: (state.documentObservationGenerations[key] ?? 0) + 1 } }
+      const issues = { ...state.documentIssues }; delete issues[key]
+      return { documents: { ...state.documents, [key]: { ...document, ...result.document, content: merged.content,
+        noteEditing: { ...document.noteEditing, baseline: { content: result.document.content, revision: result.document.revision } } } },
+        dirtyDocuments: { ...state.dirtyDocuments, [key]: merged.content !== result.document.content },
+        documentGenerations: { ...state.documentGenerations, [key]: generation + 1 },
+        documentObservationGenerations: { ...state.documentObservationGenerations, [key]: (state.documentObservationGenerations[key] ?? 0) + 1 }, documentIssues: issues }
+    })
+    if (applied) return true
+  }
+  return true
+}
+
 async function refreshFileDocument(
   workspaceId: string,
   path: string,
@@ -1845,6 +2111,7 @@ async function refreshFileDocument(
   fileReadRequestIds.set(key, requestId)
   const beforeReadIssue = useAppStore.getState().documentIssues[key]
   const checkedWrite = beforeReadIssue?.kind === 'write-unknown' ? beforeReadIssue : undefined
+  const noteResource = path.endsWith(NOTE_FILE_EXTENSION) ? watchNoteResource(workspaceId, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)) : null
   fileReadInFlightCounts.set(key, (fileReadInFlightCounts.get(key) ?? 0) + 1)
   // Observe only this pending check. A resource changing away and back cannot authorize its result.
   let resourceChanged = false
@@ -1885,9 +2152,13 @@ async function refreshFileDocument(
       }
     }
     if (documentLifetime(key) !== expectedLifetime || fileReadRequestIds.get(key) !== requestId) return
+    if (noteResource && !noteResource.current()) return
+    if (result.status === 'read' && result.document.path !== path) result = { status: 'error', code: 'WORKSPACE_FILE_READ_TARGET_CHANGED', message: 'The read returned another file path. The original document and draft are retained.' }
+    if (await reconcileNoteRead(workspaceId, path, expectedLifetime, requestId, result, noteResource?.current)) return
     useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result, checkedWrite))
   } finally {
     stopObservingResource()
+    noteResource?.release()
     const remaining = (fileReadInFlightCounts.get(key) ?? 1) - 1
     if (remaining === 0) fileReadInFlightCounts.delete(key)
     else fileReadInFlightCounts.set(key, remaining)
@@ -2009,6 +2280,7 @@ async function enqueueFileSave(
   const previous = fileSaveTails.get(key) ?? Promise.resolve()
   const mutation = workspaceFileMutationTails.get(initialSurface.workspaceId) ?? Promise.resolve()
   const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => {
+    await drainNoteInput(initialSurface.workspaceId, initialSurface.path)
     const state = useAppStore.getState()
     const tab = state.tabs[tabId]
     const surface = fileSurface(tab, regionId)
@@ -2026,6 +2298,8 @@ async function enqueueFileSave(
     const document = state.documents[currentKey]
     const savedResource = state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)
     const issue = state.documentIssues[currentKey]
+    if (document?.noteEditing?.input?.phase === 'conflict' && !overwrite) return
+    if (document?.noteEditing?.attempt) { await refreshFileDocument(surface.workspaceId, surface.path, queuedLifetime); return }
     if (issue?.kind === 'write-unknown') return
     if (!document) return
     const hasOverwriteConflict = overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted')
@@ -2037,18 +2311,39 @@ async function enqueueFileSave(
         'WORKSPACE_FILE_RESOURCE_UNCONFIRMED', 'The original workspace is unavailable. Restore it before saving this draft.'))
       return
     }
+    const resourceWatch = surface.path.endsWith(NOTE_FILE_EXTENSION) ? watchNoteResource(surface.workspaceId, savedResource) : null
+    try {
     const generation = state.documentGenerations[currentKey] ?? 0
     const observationGeneration = state.documentObservationGenerations[currentKey] ?? 0
     const savedLifetime = documentLifetime(currentKey)
     let expectedRevision: string | null = document.revision
     if (overwrite) expectedRevision = issue?.kind === 'changed' ? issue.observed.revision : null
+    const header = surface.path.endsWith(NOTE_FILE_EXTENSION) ? readNoteMarkdownHeader(document.content) : undefined
+    let noteAttempt: NoteFileAttempt | undefined
+    if (surface.path.endsWith(NOTE_FILE_EXTENSION)) {
+      const baseline = overwrite && issue?.kind === 'changed' ? { content: issue.observed.content, revision: issue.observed.revision }
+        : document.noteEditing?.baseline ?? (noteHistoryRevision(document.content) === document.revision ? { content: document.content, revision: document.revision } : undefined)
+      const baseContent = baseline?.revision === expectedRevision && noteHistoryRevision(baseline.content) === expectedRevision ? baseline.content : undefined
+      const enhanced = baseContent !== undefined && readNoteDocument(baseContent).status === 'valid' && readNoteDocument(document.content).status === 'valid'
+      noteAttempt = { operationId: crypto.randomUUID(), noteId: header?.status === 'valid' ? header.noteId : null, content: document.content, expectedRevision, generation,
+        resource: { hostId: savedResource.hostId, workspaceId: savedResource.id, workspacePath: savedResource.path, path: surface.path }, phase: 'sending',
+        ...(baseContent === undefined ? {} : { baseContent }), ...(enhanced ? { enhanced: true } : {}) }
+      const originalRegion = surface.regionId
+      try { if (noteAttempt.noteId !== null) noteAttempt.target = (await readNoteHistoryTarget(tabId, originalRegion, noteAttempt.noteId)).target }
+      catch { /* History discovery is independent; an unavailable observation cannot remove ordinary Files saving. */ }
+      if (documentLifetime(currentKey) !== savedLifetime || !resourceWatch?.current() || !noteAttemptResourceCurrent(surface.workspaceId, surface.path, noteAttempt)) return
+      const captured = noteAttempt
+      useAppStore.setState(current => ({ documents: { ...current.documents, [currentKey]: { ...current.documents[currentKey]!,
+        noteEditing: { ...current.documents[currentKey]!.noteEditing, attempt: captured } } } }))
+    }
     useAppStore.setState((current) => reduceDocumentSaving(current, surface.workspaceId, surface.path, true))
     let result
     try {
       result = await api.files.write(surface.workspaceId, {
         path: surface.path,
         content: document.content,
-        expectedRevision
+        expectedRevision,
+        ...(noteAttempt?.enhanced ? { baseContent: noteAttempt.baseContent!, operationId: noteAttempt.operationId } : {})
       })
     } catch (error) {
       result = {
@@ -2061,6 +2356,14 @@ async function enqueueFileSave(
     }
     if (documentLifetime(currentKey) !== savedLifetime || !useAppStore.getState().documents[currentKey]) return
     if (result.status === 'written') {
+      if (noteAttempt) {
+        const canonical = result.content !== undefined ? result.content
+          : !result.contentUnavailable && noteHistoryRevision(document.content) === result.revision ? document.content : undefined
+        await settleNoteWritten(surface.workspaceId, surface.path, savedLifetime, noteAttempt, { ...result, ...(canonical === undefined ? {} : { content: canonical }) }, resourceWatch?.current)
+        void useAppStore.getState().invalidateScratchTopicPaths(surface.workspaceId, [surface.path])
+        await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
+        return
+      }
       const receiptState = useAppStore.getState()
       const needsReconciliation =
         (fileReadInFlightCounts.get(currentKey) ?? 0) > 0 ||
@@ -2095,17 +2398,22 @@ async function enqueueFileSave(
     }
     if (result.status === 'unknown') {
       useAppStore.setState(current => ({ savingDocuments: { ...current.savingDocuments, [currentKey]: false },
-        documentIssues: { ...current.documentIssues, [currentKey]: { kind: 'write-unknown', code: result.code, message: result.message,
+        ...(noteAttempt ? { documents: { ...current.documents, [currentKey]: { ...current.documents[currentKey]!,
+          noteEditing: { ...current.documents[currentKey]!.noteEditing, attempt: { ...noteAttempt, phase: 'unknown' as const } } } } } : {}),
+        documentIssues: { ...current.documentIssues, [currentKey]: preserveNoteInputConflict(current.documents[currentKey], current.documentIssues[currentKey], { kind: 'write-unknown', code: result.code, message: result.message,
           attempted: { content: document.content, expectedRevision, generation,
-            resource: { hostId: savedResource.hostId, path: savedResource.path } } } } }))
+            resource: { hostId: savedResource.hostId, path: savedResource.path } } }) } }))
       return
     }
+    if (noteAttempt) useAppStore.setState(current => ({ documents: { ...current.documents, [currentKey]: { ...current.documents[currentKey]!,
+      noteEditing: { ...current.documents[currentKey]!.noteEditing, attempt: undefined } } } }))
     if (result.status === 'error') {
       useAppStore.setState((current) => reduceDocumentWriteError(current, surface.workspaceId, surface.path, result.code, result.message))
       return
     }
     useAppStore.setState((current) => reduceDocumentSaving(current, surface.workspaceId, surface.path, false))
     await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
+    } finally { resourceWatch?.release() }
   })
   const tail = operation.then(() => {}, () => {})
   fileSaveTails.set(key, tail)
@@ -2114,6 +2422,64 @@ async function enqueueFileSave(
   } finally {
     if (fileSaveTails.get(key) === tail) fileSaveTails.delete(key)
   }
+}
+
+/** Historical actions join the same file/save and Workspace mutation tails as ordinary editing. */
+async function enqueueNoteHistoryAction(tabId: string, regionId: string, selection: NoteHistorySelection): Promise<void> {
+  const selected = structuredClone(selection), initial = fileSurface(useAppStore.getState().tabs[tabId], regionId)
+  if (!initial) throw Error('The original Note file occurrence is unavailable.')
+  const key = documentKey(initial.workspaceId, initial.path), lifetime = documentLifetime(key)
+  const previous = fileSaveTails.get(key) ?? Promise.resolve(), mutation = workspaceFileMutationTails.get(initial.workspaceId) ?? Promise.resolve()
+  const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => {
+    await drainNoteInput(initial.workspaceId, initial.path)
+    const state = useAppStore.getState(), surface = fileSurface(state.tabs[tabId], regionId)
+    if (!surface || documentKey(surface.workspaceId, surface.path) !== key || documentLifetime(key) !== lifetime) throw Error('The original history target changed. No action was sent.')
+    if (state.documents[key]?.noteEditing?.attempt) throw Error('The original Note request still needs reconciliation. Its operation and draft are retained; check that same request first.')
+    const observed = await readNoteHistoryTarget(tabId, regionId, selected.target.noteId)
+    if (JSON.stringify(observed.target) !== JSON.stringify(selected.target) || documentLifetime(key) !== lifetime) throw Error('The original history resource changed. Read that same Note before choosing another action.')
+    const current = useAppStore.getState(), document = current.documents[key]
+    if (!document || current.documents[key]?.noteEditing?.attempt) throw Error('The original Note document is unavailable or has an unresolved request.')
+    const resourceWatch = watchNoteResource(initial.workspaceId, { hostId: observed.target.expectedResource.hostId, path: observed.target.expectedResource.workspacePath })
+    try {
+    const generation = current.documentGenerations[key] ?? 0, operationId = crypto.randomUUID()
+    const params = { ...observed.target, operationId, expectedRevision: observed.document.revision }
+    const action: NonNullable<NoteFileAttempt['action']> = 'eventId' in selected
+      ? { kind: 'restore', params: { ...params, eventId: selected.eventId } }
+      : { kind: 'undo', params: { ...params, batchId: selected.batchId, batchLastEventId: selected.batchLastEventId } }
+    const baseline = document.noteEditing?.baseline
+    const knownDraftBase = baseline?.revision === document.revision && noteHistoryRevision(baseline.content) === document.revision
+    const attempt: NoteFileAttempt = { operationId, noteId: selected.target.noteId, generation,
+      content: current.dirtyDocuments[key] && knownDraftBase ? baseline.content : document.content,
+      baseContent: observed.document.content, expectedRevision: observed.document.revision, action, target: observed.target, phase: 'sending',
+      ...(current.dirtyDocuments[key] && !knownDraftBase ? { retainDraft: true } : {}),
+      resource: { hostId: observed.target.expectedResource.hostId, workspaceId: observed.target.expectedResource.workspaceId,
+        workspacePath: observed.target.expectedResource.workspacePath, path: observed.target.expectedResource.path } }
+    useAppStore.setState(value => ({ documents: { ...value.documents, [key]: { ...value.documents[key]!, noteEditing: { ...value.documents[key]!.noteEditing, attempt } } },
+      ...(value.dirtyDocuments[key] ? { retainedDocumentDrafts: { ...value.retainedDocumentDrafts, [key]: [...value.retainedDocumentDrafts[key] ?? [], value.documents[key]!] } } : {}),
+      savingDocuments: { ...value.savingDocuments, [key]: true } }))
+    let response: import('@agentmux/core/files').FileRestoreResult | import('@agentmux/core/files').FileUndoResult
+    try { response = action.kind === 'restore' ? await api.files.restorePublic(action.params) : await api.files.undoPublic(action.params) }
+    catch (error) { response = { resource: null, result: { status: 'unknown', code: 'NOTE_HISTORY_ACTION_UNCONFIRMED', message: presentError(error) } } }
+    if (documentLifetime(key) !== lifetime || !useAppStore.getState().documents[key]) return
+    const result = response.result
+    if (result.status === 'written') {
+      await settleNoteWritten(initial.workspaceId, initial.path, lifetime, attempt, result, resourceWatch.current)
+      void useAppStore.getState().invalidateScratchTopicPaths(initial.workspaceId, [initial.path])
+      await refreshFileDocument(initial.workspaceId, initial.path, lifetime)
+      return
+    }
+    useAppStore.setState(value => ({ documents: { ...value.documents, [key]: { ...value.documents[key]!, noteEditing: { ...value.documents[key]!.noteEditing,
+      attempt: result.status === 'unknown' ? { ...attempt, phase: 'unknown' as const } : undefined } } }, savingDocuments: { ...value.savingDocuments, [key]: false },
+      documentIssues: { ...value.documentIssues, [key]: preserveNoteInputConflict(value.documents[key], value.documentIssues[key], result.status === 'unknown'
+        ? { kind: 'write-unknown', code: result.code, message: result.message, attempted: { content: attempt.content, expectedRevision: attempt.expectedRevision, generation,
+          resource: { hostId: attempt.resource.hostId, path: attempt.resource.workspacePath } } }
+        : { kind: 'write-error', code: result.status === 'error' ? result.code : 'NOTE_HISTORY_CONFLICT', message: result.status === 'error' ? result.message : 'The historical action conflicted with the current Note. Its original versions and local draft are retained.' }) } }))
+    if (result.status === 'conflict') await refreshFileDocument(initial.workspaceId, initial.path, lifetime)
+    throw Error(result.status === 'error' || result.status === 'unknown' ? result.message : 'The historical action conflicted. The current file and draft are retained.')
+    } finally { resourceWatch.release() }
+  })
+  const tail = operation.then(() => {}, () => {}); fileSaveTails.set(key, tail)
+  try { await operation } finally { if (fileSaveTails.get(key) === tail) fileSaveTails.delete(key) }
 }
 
 type BufferedSessionEvent = {
@@ -3118,7 +3484,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,
     recallZoneSelection: persistedSurveyZoneSelection(presentation.recallZoneSelection),
     surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
-    documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion)),
+    documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input)),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
   }
@@ -8498,8 +8864,64 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
   },
+  async adoptNoteCurrentDocument(tabId, regionId) {
+    const state = get(), surface = fileSurface(state.tabs[tabId], regionId)
+    if (!surface) return
+    const key = documentKey(surface.workspaceId, surface.path), lifetime = documentLifetime(key), original = state.documents[key]
+    if (!original?.noteEditing?.attempt) return
+    const noteId = original.noteEditing.attempt.noteId
+    const resource = watchNoteResource(surface.workspaceId, { hostId: original.noteEditing.attempt.resource.hostId, path: original.noteEditing.attempt.resource.workspacePath })
+    try {
+      await afterNoteComposition(key)
+      const observed = await api.files.read(surface.workspaceId, surface.path)
+      await afterNoteComposition(key)
+      if (!resource.current() || documentLifetime(key) !== lifetime) throw Error('The original Note resource changed. Its request and draft are retained.')
+      const header = observed.status === 'read' ? readNoteMarkdownHeader(observed.document.content) : undefined
+      if (observed.status !== 'read' || observed.document.path !== surface.path || noteId !== null && (header?.status !== 'valid' || header.noteId !== noteId) || noteHistoryRevision(observed.document.content) !== observed.document.revision) throw Error('The current original Note could not be confirmed. Its request and draft are retained.')
+      set(current => {
+        const document = current.documents[key]
+        if (document?.noteEditing?.attempt?.operationId !== original.noteEditing!.attempt!.operationId) return current
+        const next = reduceDocumentReloaded(current, surface.workspaceId, surface.path, observed.document)
+        return { ...next, retainedDocumentDrafts: { ...next.retainedDocumentDrafts, [key]: [...current.retainedDocumentDrafts[key] ?? [], document] },
+          savingDocuments: { ...current.savingDocuments, [key]: false } }
+      })
+    } finally { resource.release() }
+  },
+  retainNoteEditorDraft(tabId, regionId, displayed, incoming, expected, action) {
+    set(state => {
+      const surface = fileSurface(state.tabs[tabId], regionId)
+      if (!surface) return state
+      const key = documentKey(surface.workspaceId, surface.path), document = state.documents[key]
+      const resource = state.config?.workspaces.find(item => item.id === surface.workspaceId)
+      if (!document || document.content !== incoming || displayed === incoming || resource?.hostId !== expected.hostId || resource.path !== expected.path) return state
+      const shown = readNoteMarkdownHeader(displayed), target = readNoteMarkdownHeader(incoming)
+      if (shown.status !== 'valid' || target.status !== 'valid' || shown.noteId !== target.noteId) return state
+      const drafts = state.retainedDocumentDrafts[key] ?? []
+      const candidate: FileDocument = action === 'retain' ? { path: surface.path, content: displayed, revision: document.revision } : document
+      const retained = drafts.some(draft => draft.content === candidate.content && draft.noteEditing?.attempt?.operationId === candidate.noteEditing?.attempt?.operationId && draft.noteEditing?.input === candidate.noteEditing?.input) ? drafts : [...drafts, candidate]
+      const next = action === 'retain' ? state : reduceDocumentContent(state, tabId, displayed, regionId)
+      return { ...next, ...(action === 'keep-displayed' && document.noteEditing?.input ? { documents: { ...next.documents, [key]: { ...next.documents[key]!, noteEditing: { ...next.documents[key]!.noteEditing, input: undefined } } } } : {}),
+        retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: retained } }
+    })
+  },
+  async retryNoteInput(tabId, regionId) {
+    const surface = fileSurface(get().tabs[tabId], regionId)
+    if (!surface) return
+    const key = documentKey(surface.workspaceId, surface.path), input = get().documents[key]?.noteEditing?.input
+    if (!input) return
+    set(state => ({ documents: { ...state.documents, [key]: { ...state.documents[key]!, noteEditing: { ...state.documents[key]!.noteEditing, input: { ...input, phase: 'mapping' as const } } } } }))
+    await drainNoteInput(surface.workspaceId, surface.path)
+  },
+  updateNoteDocument: updateNoteInput,
   updateDocument(tabId, content, regionId) {
-    set((state) => reduceDocumentContent(state, tabId, content, regionId))
+    set(state => {
+      const next = reduceDocumentContent(state, tabId, content, regionId), surface = fileSurface(state.tabs[tabId], regionId)
+      if (!surface) return next
+      const key = documentKey(surface.workspaceId, surface.path), previous = state.documents[key]
+      if (!previous?.noteEditing?.input || previous.content === content) return next
+      return { ...next, documents: { ...next.documents, [key]: { ...next.documents[key]!, noteEditing: { ...next.documents[key]!.noteEditing, input: undefined } } },
+        retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: [...state.retainedDocumentDrafts[key] ?? [], previous] } }
+    })
   },
   async saveDocument(tabId, regionId) {
     await enqueueFileSave(tabId, false, regionId)
@@ -8507,7 +8929,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async overwriteDocument(tabId, regionId) {
     await enqueueFileSave(tabId, true, regionId)
   },
-  useRetainedDocumentDraft(tabId, regionId) {
+  useRetainedDocumentDraft(tabId, regionId, requested) {
     // Read both buffers at the user's click, so a later edit is kept rather than overwritten.
     set(state => {
       const surface = fileSurface(state.tabs[tabId], regionId)
@@ -8515,8 +8937,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const key = documentKey(surface.workspaceId, surface.path)
       const document = state.documents[key], drafts = state.retainedDocumentDrafts[key]
       if (!document || !drafts?.length) return state
-      const [selected, ...remaining] = drafts
+      const index = requested ? drafts.indexOf(requested) : 0
+      if (index < 0) return state
+      const selected = drafts[index]!
+      // The chosen body becomes current, while its original request remains a retained fact.
+      const hasOriginalRequest = selected.noteEditing?.attempt || selected.noteEditing?.input
+      const remaining = hasOriginalRequest ? drafts : drafts.filter((_draft, position) => position !== index)
       return { documents: { ...state.documents, [key]: { ...document, content: selected!.content,
+        ...(document.noteEditing ? { noteEditing: { ...document.noteEditing, input: undefined } } : {}),
         ...(selected!.noteConversion ? { noteConversion: selected!.noteConversion } : {}) } },
         retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: [...remaining, document] },
         dirtyDocuments: { ...state.dirtyDocuments, [key]: true },
@@ -8528,7 +8956,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!surface) return
     const key = documentKey(surface.workspaceId, surface.path)
     const issue = get().documentIssues[key]
-    if (issue?.kind === 'write-unknown') {
+    if (issue?.kind === 'changed' && get().documents[key]?.noteEditing?.input?.phase === 'conflict') {
+      const lifetime = documentLifetime(key)
+      await afterNoteComposition(key)
+      if (documentLifetime(key) !== lifetime || get().documentIssues[key] !== issue) return
+      set(state => {
+        const document = state.documents[key]!, baseline = document.noteEditing?.baseline, issues = { ...state.documentIssues }
+        delete issues[key]
+        return { documents: { ...state.documents, [key]: { ...document, content: issue.observed.content,
+          noteEditing: { ...document.noteEditing, input: undefined } } },
+          dirtyDocuments: { ...state.dirtyDocuments, [key]: baseline?.content !== issue.observed.content },
+          retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: [...state.retainedDocumentDrafts[key] ?? [], document] },
+          documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 }, documentIssues: issues }
+      })
+      await refreshFileDocument(surface.workspaceId, surface.path, lifetime)
+      return
+    }
+    if (issue?.kind === 'write-unknown' || get().documents[key]?.noteEditing?.attempt) {
       if (get().savingDocuments[key]) return
       const checkedLifetime = documentLifetime(key)
       set(state => reduceDocumentSaving(state, surface.workspaceId, surface.path, true))
@@ -8548,7 +8992,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     if (issue?.kind === 'changed') {
-      set((state) => reduceDocumentReloaded(state, surface.workspaceId, surface.path, issue.observed))
+      set(state => {
+        const next = reduceDocumentReloaded(state, surface.workspaceId, surface.path, issue.observed)
+        if (!issue.noteMerge?.observedIsDraft) return next
+        const previous = state.documents[key]!, baseline = previous.noteEditing?.baseline
+        return { ...next, documents: { ...next.documents, [key]: { ...next.documents[key]!,
+          ...(baseline ? { noteEditing: { baseline, ...(previous.noteEditing?.receipt ? { receipt: previous.noteEditing.receipt } : {}) } } : {}) } },
+          dirtyDocuments: { ...next.dirtyDocuments, [key]: true } }
+      })
       return
     }
     if (issue?.kind === 'deleted') {
@@ -8562,6 +9013,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async refreshDocument(workspaceId, path) {
     await refreshFileDocument(workspaceId, path)
   },
+  inspectNoteHistory: readNoteHistoryTarget,
+  applyNoteHistory: enqueueNoteHistoryAction,
   async launchBoardAgent(workspaceId, executorId, prompt, topicId) {
     await get().selectWorkspace(workspaceId)
     set({ mainSurface: 'board' })
@@ -10997,6 +11450,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const local = (persisted ?? {}) as Partial<PersistedAppState>
     if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
+    state.documents = Object.fromEntries(Object.entries(state.documents).map(([key, document]) => [key, document.noteEditing?.attempt?.phase === 'sending'
+      ? { ...document, noteEditing: { ...document.noteEditing, attempt: { ...document.noteEditing.attempt, phase: 'unknown' as const } } } : document]))
     state.noticeReadReceipts = normalizeNotificationReadReceipts(state.noticeReadReceipts)
     // Old Chromium reads never overwrite acknowledged names or clear tombstones.
     if (current.nameAuthorityRevision > 0) {

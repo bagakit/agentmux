@@ -575,6 +575,9 @@ const mockApi: AgentMuxDesktopApi = {
   files: {
     readPublic: async () => ({ resource: null, result: { status: 'unknown', code: 'FILE_RESOURCE_UNCONFIRMED', message: 'Original file discovery requires the connected desktop Host. The original reference is retained.' } }),
     createPublic: async () => ({ resource: null, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: 'File creation requires the connected desktop Host. The original draft and target are retained.' } }),
+    historyPublic: async () => ({ resource: null, result: { status: 'unknown', code: 'FILE_HISTORY_UNCONFIRMED', message: 'Original Note history requires the connected desktop Host. The original file and history selection are retained.' } }),
+    restorePublic: async params => ({ resource: null, result: { status: 'unknown', code: 'FILE_RESTORE_UNCONFIRMED', message: 'Original Note restoration requires the connected desktop Host. Keep this same operation and selection.', noteHistory: { status: 'unconfirmed', eventId: params.operationId, reason: 'The original Host is unavailable; this operation has not been replayed.' } } }),
+    undoPublic: async params => ({ resource: null, result: { status: 'unknown', code: 'FILE_UNDO_UNCONFIRMED', message: 'Original Note undo requires the connected desktop Host. Keep this same operation and batch selection.', noteHistory: { status: 'unconfirmed', eventId: params.operationId, reason: 'The original Host is unavailable; this operation has not been replayed.' } } }),
     list: async () => { throw new Error('Project file discovery requires the connected desktop Host. Recent files remain available.') },
     readDirectory: async (_workspaceId, path) =>
       [...mockFiles.entries()]

@@ -621,6 +621,8 @@ export type FileDocument = {
   noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot
   /** Local last-save observation; never part of the filesystem body or public read DTO. */
   noteWriteAttribution?: import('@agentmux/core').NoteWriteAttribution | undefined
+  /** Durable client recovery facts on this original File session, outside Markdown. */
+  noteEditing?: import('./note-file-editing').NoteFileEditing
 }
 
 export type WorkspaceFileReadResult =
@@ -1666,6 +1668,9 @@ export type AgentMuxDesktopApi = {
   files: {
     readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
     createPublic(params: AgentMuxRpcParams<'file.create'>): Promise<AgentMuxRpcResult<'file.create'>>
+    historyPublic(params: AgentMuxRpcParams<'file.history'>): Promise<AgentMuxRpcResult<'file.history'>>
+    restorePublic(params: AgentMuxRpcParams<'file.restore'>): Promise<AgentMuxRpcResult<'file.restore'>>
+    undoPublic(params: AgentMuxRpcParams<'file.undo'>): Promise<AgentMuxRpcResult<'file.undo'>>
     list(workspaceId: string, path?: string, limit?: number): Promise<import('@agentmux/core').FileNameListing>
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>

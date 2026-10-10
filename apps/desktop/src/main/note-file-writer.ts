@@ -1,4 +1,4 @@
-import { replacesEditedBlock } from './note-merge-identity.js'
+import { replacesEditedBlock } from '@agentmux/client-ui/note/note-merge-identity'
 import type { FileWriteContext } from '@agentmux/core'
 import { NOTE_FILE_EXTENSION, NOTE_BLOCK_TYPES, readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
 import { attributeNoteBlocks } from '@agentmux/client-ui/note/note-provenance'

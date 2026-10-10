@@ -182,6 +182,9 @@ export function EditorPane({
     )
   }
 
+  const pendingNote = document.noteEditing?.attempt, noteReceipt = document.noteEditing?.receipt
+  const historyIssue = noteReceipt?.noteHistory?.status === 'unconfirmed' ? noteReceipt.noteHistory : null
+  const titleIssue = noteReceipt?.noteTitleProjection?.status === 'unconfirmed' ? noteReceipt.noteTitleProjection : null
   return (
     <section
       className={`editor-pane ${onTogglePreview || extraActions ? 'editor-pane--format' : ''}`}
@@ -212,15 +215,24 @@ export function EditorPane({
       </header>
       <div className="editor-file-notices">
         {!previewHasNoteAttribution && document.noteProvenance?.status === 'unconfirmed' && document.noteWriteAttribution?.status !== 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship is unconfirmed: {document.noteProvenance.reason} Your Note remains readable and editable. <button className="small-button" onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original file</button></div> : null}
-        {!previewHasNoteAttribution && document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">The Note was saved. Block authorship is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
+        {!previewHasNoteAttribution && document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship from the last confirmed save is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
         {formatResult?.message ? <div className="editor-file-notice" role={formatResult.status === 'failed' ? 'alert' : 'status'}>{formatResult.message}</div> : null}
         <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
-        {issue ? (
+        {pendingNote ? <div className="editor-file-notice" role="status"><span>{pendingNote.phase === 'written'
+          ? pendingNote.canonical !== undefined && document.noteEditing?.input?.phase === 'conflict' ? 'The saved result is confirmed. Resolve the retained input before applying it to this draft.' : 'The Note was saved. Its canonical content still needs confirmation; your draft and original request are retained.'
+          : pendingNote.phase === 'sending' ? 'Saving the original Note. Your later input stays in this draft.'
+          : issue?.kind === 'write-unknown' ? issue.message : 'The original Note request is unconfirmed. Its operation and draft are retained; it will not be repeated automatically.'}</span>
+          <button className="small-button" disabled={saving} onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original request</button>
+          {pendingNote.phase !== 'sending' ? <button className="small-button" disabled={saving} onClick={() => void useAppStore.getState().adoptNoteCurrentDocument(tabId, surface.regionId).catch(reportError)}>Use current file; keep draft</button> : null}
+        </div> : null}
+        {!pendingNote && historyIssue ? <div className="editor-file-notice" role="status">History from the last confirmed save is unconfirmed: {'reason' in historyIssue ? historyIssue.reason : 'The original event is not committed.'} Check its version history before another history action.</div> : null}
+        {titleIssue ? <div className="editor-file-notice" role="status">Page-list title from the last confirmed save is unconfirmed: {titleIssue.message}</div> : null}
+        {issue && !(issue.kind === 'write-unknown' && pendingNote) ? (
           <div className={`editor-file-notice editor-file-notice--${issue.kind}`} role="alert">
             <ThemeStatusWarningIcon size={13} />
             <span>
               {issue.kind === 'changed'
-                ? 'File changed on disk. Your draft is preserved.'
+                ? issue.noteMerge?.observedIsDraft ? 'Newer changes overlap this input. Both drafts are preserved.' : 'File changed on disk. Your draft is preserved.'
                 : issue.kind === 'deleted'
                   ? 'File was deleted on disk. Reload accepts the deletion; Overwrite recreates it.'
                   : issue.kind === 'read-error'
@@ -228,6 +240,7 @@ export function EditorPane({
                     : issue.kind === 'write-unknown' ? `Save outcome is not confirmed. Your draft is preserved. Check the saved file before saving again.${issue.checkMessage ? ' Check unavailable: ' + issue.checkMessage : ''}`
                       : issue.kind === 'write-error' ? `Save failed (${issue.message}). Your draft is still unsaved.`
                       : 'The file is binary. The existing text buffer is preserved.'}
+              {issue.kind === 'changed' && issue.operationIssue ? ` ${issue.operationIssue.message}` : ''}
             </span>
           </div>
         ) : null}

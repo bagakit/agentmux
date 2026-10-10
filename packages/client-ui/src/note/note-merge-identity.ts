@@ -1,5 +1,5 @@
-import type { NoteDocument } from '../shared/note-document.js'
-import { noteBlockContentFingerprint } from '@agentmux/client-ui/note/note-provenance'
+import type { NoteDocument } from './note-document.js'
+import { noteBlockContentFingerprint } from './note-provenance.js'
 
 /** A text merge must not transplant an edit to a deleted or replaced stable block. */
 export function replacesEditedBlock(base: NoteDocument, current: NoteDocument, proposed: NoteDocument): boolean {
@@ -20,4 +20,3 @@ export function replacesEditedBlock(base: NoteDocument, current: NoteDocument, p
   }
   return false
 }
-

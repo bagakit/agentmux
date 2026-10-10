@@ -29,7 +29,12 @@ const ThemeObjectBookmarkIcon = semanticIconComponent('object.bookmark')
 const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 
 
-export function NotebookPageDetails({ page }: { page: NotebookPage }) {
+export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, onCheckOriginal }: {
+  page: NotebookPage
+  sourceTitle?: string
+  sourceDirty?: boolean
+  onCheckOriginal?: () => void
+}) {
   const visible = useWorkbenchPresentationActive()
   const [menuOpen, setMenuOpen] = useState(false)
   useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
@@ -38,7 +43,8 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const config = useAppStore(state => state.config), snapshots = useAppStore(state => state.scratchTopicSnapshots)
   const topicNames = useMemo(() => new Map(spatialSources(config, scratchTopicsForWorkspace(snapshots,
     config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []).spaces.map(space => [space.spaceId, space.name])), [config, snapshots])
-  const operation = useNotebookOperation(), [title, setTitle] = useState(page.title), [editing, setEditing] = useState(false)
+  const originalTitle = sourceTitle ?? page.title
+  const operation = useNotebookOperation(), [title, setTitle] = useState(originalTitle), [editing, setEditing] = useState(false)
   const [panel, setPanel] = useState<'move' | 'sources' | 'history' | 'followers' | null>(null)
   const optionsTrigger = useRef<HTMLButtonElement>(null), followersTrigger = useRef<HTMLButtonElement>(null)
   const followOperation = useNotebookOperation()
@@ -60,11 +66,11 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const [sourceIssue, setSourceIssue] = useState<string | null>(null)
   const cancelTitle = useRef(false)
   const sourceCreation = useRef<{ sourceId: string; prepared: SurveyBrowserPreparation | null } | null>(null)
-  useEffect(() => { if (!editing && !operation.busy && !operation.issue) setTitle(page.title) }, [page.title, editing, operation.busy, operation.issue])
+  useEffect(() => { if (!editing && !operation.busy && !operation.issue) setTitle(originalTitle) }, [originalTitle, editing, operation.busy, operation.issue])
   const allPages = Object.values(library?.pages ?? {}), excluded = notebookDescendants(allPages, page.noteId)
   async function rename() {
-    const value = title.trim(); if (!value) { setTitle(page.title); return }
-    if (value === page.title) return
+    const value = title.trim(); if (!value) { setTitle(originalTitle); return }
+    if (value === originalTitle) return
     await operation.run({ kind: 'rename-page', noteId: page.noteId, title: value })
   }
   async function move() {
@@ -116,7 +122,7 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
           <Menu.Separator className="tab-context-menu__separator" />
           <Menu.Group aria-label="Page information">
             <Menu.Item className="tab-context-menu__item" aria-label="Page sources" onSelect={() => openPanel('sources')}><ThemeObjectLinkIcon size={14} /><span>Sources{page.sources.length ? ` · ${page.sources.length}` : ''}</span></Menu.Item>
-            <Menu.Item className="tab-context-menu__item" aria-label="Page history" onSelect={() => openPanel('history')}><ThemeObjectHistoryIcon size={14} /><span>History</span></Menu.Item>
+            <Menu.Item className="tab-context-menu__item" aria-label="Page activity" onSelect={() => openPanel('history')}><ThemeObjectHistoryIcon size={14} /><span>Page activity</span></Menu.Item>
           </Menu.Group>
           <Menu.Separator className="tab-context-menu__separator" />
           <Menu.Group aria-label="Page lifecycle">
@@ -130,7 +136,12 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
     </div></div>
     <TextInput className="notebook-page-title" aria-label="Page title" title={title} value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
       onFocus={() => setEditing(true)} onChange={event => setTitle(event.target.value)} onBlur={() => { setEditing(false); if (cancelTitle.current) { cancelTitle.current = false; return } void rename() }}
-      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') { cancelTitle.current = true; setTitle(page.title); event.currentTarget.blur() } }} />
+      onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') { cancelTitle.current = true; setTitle(originalTitle); event.currentTarget.blur() } }} />
+    {sourceTitle !== undefined && sourceTitle !== page.title ? <div className="notebook-change-issue" role="status">
+      {sourceDirty ? <>Draft title differs from the page list. Page list title: {page.title}. This draft is not saved yet.</>
+        : <>Saved file title differs from the page list. Page list title: {page.title}.</>}
+      {onCheckOriginal ? <button type="button" className="note-text-button" onClick={onCheckOriginal}>Check original</button> : null}
+    </div> : null}
     {archiveRoot ? <div className="notebook-archive-status" role="status"><ThemeActionArchiveIcon size={13} /><span>{archiveRoot.noteId === page.noteId ? 'Archived' : `Archived with ${archiveRoot.title}`}</span>
       <button type="button" className="note-text-button" title={archiveRoot.title} disabled={operation.busy || Boolean(operation.issue)} onClick={() => void operation.run({ kind: 'restore', noteId: archiveRoot.noteId })}><ThemeActionRestoreIcon size={13} />{restoreLabel}</button>
     </div> : null}
@@ -165,7 +176,7 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
         <ThemeObjectLinkIcon size={14} /><span><strong>{source.title || source.url}</strong><small>{source.url}</small><small>{new Date(source.recordedAt).toLocaleString()}{source.operator ? ` · ${source.operator.kind} · ${source.operator.id}` : ''}</small></span><ThemeActionOpenExternalIcon size={13} /></button>) : <p>No webpage was attached to this note.</p>}
       {sourceIssue ? <p role="status">{sourceIssue} Retry the same source above.</p> : null}
     </section> : null}
-    {panel === 'history' ? <section className="notebook-page-panel notebook-history" aria-label="Note history">{panelHeading('Page history')}{events.map(event => <div className="notebook-history-event" key={event.eventId}>
+    {panel === 'history' ? <section className="notebook-page-panel notebook-history" aria-label="Page activity">{panelHeading('Page activity')}{events.map(event => <div className="notebook-history-event" key={event.eventId}>
       <span className="notebook-history-dot" /><div><strong>{labels[event.action]}</strong><small>{new Date(event.at).toLocaleString()} · {event.actor.kind} · {event.actor.id}</small>
         {event.before && (event.before.notebookId !== event.after.notebookId || event.before.parentNoteId !== event.after.parentNoteId) ? <p>{event.before.notebookName ?? library?.notebooks[event.before.notebookId]?.name ?? event.before.notebookId} / {event.before.parentNoteId ? library?.pages[event.before.parentNoteId]?.title ?? event.before.parentNoteId : 'Root'} → {event.after.notebookName ?? library?.notebooks[event.after.notebookId]?.name ?? event.after.notebookId} / {event.after.parentNoteId ? library?.pages[event.after.parentNoteId]?.title ?? event.after.parentNoteId : 'Root'}</p> : null}
         {event.before && event.before.title !== event.after.title ? <p>{event.before.title} → {event.after.title}</p> : null}

@@ -5,11 +5,12 @@ import { useNotebookLibrary, sameNoteResource } from './notebook-library'
 import { documentKey } from './workbench-tabs'
 import { useAppStore } from '../store'
 
-/** A display name from the existing catalog, never a lookup or a target binding. */
+/** Prefer the already parsed original source; the exact catalog is only a display fallback. */
 export function useNoteSourceTitle(enabled = true) {
   const catalog = useNotebookLibrary(state => enabled ? state.state : null)
   const workspaces = useAppStore(state => enabled ? state.config?.workspaces : undefined)
   return useCallback((source: Pick<NoteSource, 'location' | 'note'>): string | undefined => {
+    if (source.note.title !== undefined) return source.note.title
     const page = catalog?.pages[source.note.noteId]
     const workspace = workspaces?.find(item => item.id === source.location.workspaceId)
     return page && workspace && sameNoteResource(page.resource, { hostId: workspace.hostId, workspaceId: workspace.id,

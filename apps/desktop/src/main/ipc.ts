@@ -38,6 +38,7 @@ import { GitPublicControl } from './git-public-control.js'
 import { NoteTitleFileWriter } from './note-title-file-writer.js'
 import { createNotebookObservationServices } from './notebook-observation-requests.js'
 import { FileReadOwner } from './file-read-owner.js'
+import { parseFileHistoryParams, parseFileHistoryResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult } from '@agentmux/core/files'
 import { MoteConnectionPreferences } from './mote-connection-preferences.js'
 import { registerMotePreferencesIpc } from './mote-preferences-ipc.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
@@ -839,6 +840,21 @@ export async function registerIpc(args: {
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     requireTrustedSender('files:readPublic', event)
     return await publicFiles.read(input)
+  })
+  handleWithEvent('files:historyPublic', async (event, input: import('@agentmux/core').FileHistoryParams) => {
+    requireTrustedSender('files:historyPublic', event)
+    const params = parseFileHistoryParams(input)
+    return parseFileHistoryResult(await publicFiles.history(params), params)
+  })
+  handleWithEvent('files:restorePublic', async (event, input: import('@agentmux/core').FileRestoreParams) => {
+    requireTrustedSender('files:restorePublic', event)
+    const params = parseFileRestoreParams(input)
+    return parseFileRestoreResult(await publicFiles.restore(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
+  })
+  handleWithEvent('files:undoPublic', async (event, input: import('@agentmux/core').FileUndoParams) => {
+    requireTrustedSender('files:undoPublic', event)
+    const params = parseFileUndoParams(input)
+    return parseFileUndoResult(await publicFiles.undo(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
   handle('files:read', async (workspaceId: string, path: string) => await noteFileWriter.read(workspace(config, workspaceId), path))
   handle('files:readPreview', async (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>

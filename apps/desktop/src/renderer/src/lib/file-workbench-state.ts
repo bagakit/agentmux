@@ -40,7 +40,7 @@ export type FileWorkbenchState = {
 }
 
 export type FileDocumentIssue =
-  | { kind: 'changed'; observed: FileDocument }
+  | { kind: 'changed'; observed: FileDocument; noteMerge?: { baseContent: string; proposedContent: string; reason: string; observedIsDraft?: true; earlierInput?: true }; operationIssue?: { kind: 'write-unknown' | 'write-error' | 'read-error'; code: string; message: string } }
   | { kind: 'binary'; revision: string; byteLength: number }
   | { kind: 'deleted' }
   | { kind: 'read-error'; code: string; message: string }
@@ -361,9 +361,11 @@ export function reduceDocumentContent(
   const key = documentKey(surface.workspaceId, surface.path)
   const current = state.documents[key]
   if (!current) return state
+  const noteEditing = surface.path.endsWith('.note.md') && !state.dirtyDocuments[key]
+    ? { ...current.noteEditing, baseline: { content: current.content, revision: current.revision } } : current.noteEditing
   return {
     ...state,
-    documents: { ...state.documents, [key]: { ...current, content } },
+    documents: { ...state.documents, [key]: { ...current, content, ...(noteEditing ? { noteEditing } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: true },
     documentGenerations: {
       ...state.documentGenerations,
@@ -433,6 +435,9 @@ export function reduceDocumentRead(
   if (unknown?.kind === 'write-unknown') {
     // A read begun before the missing receipt cannot settle that write.
     if (unknown !== checkedWrite) return state
+    if (current.noteEditing?.attempt) return { ...state, documentObservationGenerations,
+      documentIssues: { ...state.documentIssues, [key]: { ...unknown,
+        checkMessage: result.status === 'error' ? result.message : 'The current file was observed. This original Note operation still needs its durable history receipt; matching bytes do not prove it committed.' } } }
     if (result.status === 'read' && result.document.content === unknown.attempted.content) {
       return reduceDocumentWritten({ ...state, documentObservationGenerations }, workspaceId, path,
         unknown.attempted.generation, result.document.revision, unknown.attempted.expectedRevision, 0, undefined, undefined, result.document.noteProvenance)
@@ -508,7 +513,8 @@ export function reduceDocumentRead(
   return {
     ...state,
     documentObservationGenerations,
-    documents: { ...state.documents, [key]: { ...result.document, ...(current.noteConversion ? { noteConversion: current.noteConversion } : {}) } },
+    documents: { ...state.documents, [key]: { ...result.document, ...(current.noteConversion ? { noteConversion: current.noteConversion } : {}),
+      ...(current.noteEditing?.receipt ? { noteEditing: { receipt: current.noteEditing.receipt } } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 },
     documentIssues: withoutIssue(state.documentIssues, key)
@@ -520,6 +526,8 @@ export function reduceDocumentReloaded(state: FileWorkbenchState, workspaceId: s
   if (!state.documents[key]) return state
   return {
     ...state,
+    ...(state.dirtyDocuments[key] ? { retainedDocumentDrafts: { ...state.retainedDocumentDrafts,
+      [key]: [...state.retainedDocumentDrafts?.[key] ?? [], state.documents[key]!] } } : {}),
     documents: { ...state.documents, [key]: { ...document, ...(state.documents[key]?.noteConversion ? { noteConversion: state.documents[key]!.noteConversion } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 },
@@ -543,8 +551,15 @@ export function reduceDocumentWriteError(state: FileWorkbenchState, workspaceId:
   return {
     ...state,
     savingDocuments: { ...state.savingDocuments, [key]: false },
-    documentIssues: { ...state.documentIssues, [key]: { kind: 'write-error', code, message } }
+    documentIssues: { ...state.documentIssues, [key]: preserveNoteInputConflict(state.documents[key], state.documentIssues[key], { kind: 'write-error', code, message }) }
   }
+}
+
+/** A failed/unknown transport cannot hide an independently unresolved three-way editor conflict. */
+export function preserveNoteInputConflict(document: FileDocument | undefined, current: FileDocumentIssue | undefined, next: FileDocumentIssue): FileDocumentIssue {
+  return document?.noteEditing?.input?.phase === 'conflict' && current?.kind === 'changed' &&
+    (next.kind === 'write-unknown' || next.kind === 'write-error' || next.kind === 'read-error')
+    ? { ...current, operationIssue: { kind: next.kind, code: next.code, message: next.message } } : next
 }
 
 export function reconcileWorkbenchFileProjection(

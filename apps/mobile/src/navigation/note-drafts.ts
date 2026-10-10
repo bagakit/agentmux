@@ -1,9 +1,10 @@
 import type { FileWriteReceipt } from '@agentmux/core/files'
-import { acknowledgeNoteWrite, type NoteEditState } from '@agentmux/client-ui/note/note-edit-state'
+import { acknowledgeNoteWrite, acknowledgeNoteCanonicalRead, type NoteEditState } from '@agentmux/client-ui/note/note-edit-state'
 import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { convertLegacyNoteDraft } from '@agentmux/client-ui/note/note-legacy-draft'
 import type { NotesResourceChange } from '@agentmux/core/notebook-store'
 import type { FileReadResource } from '@agentmux/core/files'
+import { parseNoteTitleProjection } from '@agentmux/core/note-title'
 
 const observers = new Map<string, Set<(raw: string, durable?: boolean) => void>>()
 const latest = new Map<string, string>()
@@ -14,10 +15,36 @@ function parse(raw: string): NoteEditState {
   const value = JSON.parse(raw) as NoteEditState
   const note = readNoteDocument(value.draft)
   const revision = (value: unknown) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/.test(value)
+  const history = (candidate: unknown) => {
+    if (candidate === undefined) return true
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return false
+    const value = candidate as Record<string, unknown>
+    const id = (value: unknown) => typeof value === 'string' && value.length > 0 && !/[\0\r\n]/u.test(value)
+    return Object.keys(value).every(key => ['status', 'eventId', 'batchId', 'reason', 'replayed'].includes(key)) &&
+      ['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(value.status as string) &&
+      (value.status === 'unconfirmed' ? (value.eventId === undefined || id(value.eventId)) && (value.batchId === undefined || id(value.batchId)) &&
+        (value.reason === undefined || typeof value.reason === 'string' && value.reason.length > 0) && (id(value.eventId) || typeof value.reason === 'string' && value.reason.length > 0)
+        : id(value.eventId) && id(value.batchId) && value.reason === undefined) &&
+      (value.replayed === undefined || value.replayed === true && value.status === 'committed')
+  }
+  const written = (receipt: NoteEditState['receipt']) => {
+    if (!receipt || receipt.status !== 'written' || !revision(receipt.revision) || !history(receipt.noteHistory) ||
+      receipt.contentUnavailable !== undefined && (typeof receipt.contentUnavailable !== 'string' || !receipt.contentUnavailable.length)) return false
+    if (receipt.noteAttribution && (receipt.noteAttribution.status !== 'recorded' && receipt.noteAttribution.status !== 'unconfirmed' ||
+      receipt.noteAttribution.status === 'unconfirmed' && (typeof receipt.noteAttribution.reason !== 'string' || !receipt.noteAttribution.reason.length))) return false
+    if (receipt.noteTitleProjection) { try { if (parseNoteTitleProjection(receipt.noteTitleProjection).noteId !== value.noteId) return false } catch { return false } }
+    return true
+  }
   if (note.status !== 'valid' || note.note.noteId !== value.noteId || !revision(value.expectedRevision)
+    || value.input !== undefined && (![value.input.baseContent, value.input.observedContent, value.input.proposedContent].every(body => { const parsed = typeof body === 'string' ? readNoteDocument(body) : null; return parsed?.status === 'valid' && parsed.note.noteId === value.noteId }) || value.input.issue !== undefined && typeof value.input.issue !== 'string')
+    || value.receipt !== undefined && !written(value.receipt)
     || value.alternates !== undefined && (!Array.isArray(value.alternates) || value.alternates.some(item => typeof item.draft !== 'string' || !revision(item.expectedRevision)))
-    || value.unconfirmed !== undefined && (!Array.isArray(value.unconfirmed) || value.unconfirmed.some(item => typeof item.content !== 'string' || !revision(item.expectedRevision)))
-    || value.attempt && (typeof value.attempt.content !== 'string' || !revision(value.attempt.expectedRevision) || !['sending', 'unknown'].includes(value.attempt.phase))) throw new Error('原设备草稿无法完整读取')
+    || value.unconfirmed !== undefined && (!Array.isArray(value.unconfirmed) || value.unconfirmed.some(item => typeof item.content !== 'string' || !revision(item.expectedRevision) || !history(item.noteHistory) || item.written !== undefined && !written(item.written)))
+    || value.attempt && (typeof value.attempt.content !== 'string' || !revision(value.attempt.expectedRevision) || !['sending', 'unknown', 'written'].includes(value.attempt.phase) || !history(value.attempt.noteHistory) ||
+      value.attempt.phase === 'written' && (!written(value.attempt.written) || value.attempt.written!.revision !== value.expectedRevision) ||
+      value.attempt.phase !== 'written' && (value.attempt.written !== undefined || value.attempt.canonicalContent !== undefined) ||
+      value.attempt.canonicalContent !== undefined && (typeof value.attempt.canonicalContent !== 'string' || !written(value.attempt.written) || !revision(value.expectedRevision)))) throw new Error('原设备草稿无法完整读取')
+  if (value.attempt?.canonicalContent !== undefined && acknowledgeNoteCanonicalRead(value, { content: value.attempt.canonicalContent, revision: value.expectedRevision }) === value) throw new Error('原保存正文无法准确核对')
   return value
 }
 /** Device-owned draft and unresolved save intent, never a filesystem truth or write queue. */
@@ -29,7 +56,7 @@ export function noteDrafts(identity: readonly string[]) {
   const callbacks = new Set<(value: NoteEditState) => void>()
   const current = (raw: string): NoteEditState => {
     const value = parse(raw)
-    return value.attempt && !pending.get(key) ? { ...value, attempt: { ...value.attempt, phase: 'unknown' } } : value
+    return value.attempt && value.attempt.phase !== 'written' && !pending.get(key) ? { ...value, attempt: { ...value.attempt, phase: 'unknown' } } : value
   }
   try {
     observed = localStorage.getItem(key)
@@ -74,7 +101,7 @@ export function noteDrafts(identity: readonly string[]) {
       if (converted.status === 'converted' && !match.origin.conversion) throw new Error('原格式转换回执尚未确认；旧设备草稿保留，未自动改写')
       const retained = parse(JSON.stringify({ ...legacy, draft: converted.content }))
       const originalDraft = { draft: legacy.draft, expectedRevision: legacy.expectedRevision }
-      let next: NoteEditState = { ...retained, ...(retained.attempt ? { attempt: { ...retained.attempt, phase: 'unknown' } } : {}),
+      let next: NoteEditState = { ...retained, ...(retained.attempt ? { attempt: { ...retained.attempt, phase: retained.attempt.phase === 'written' ? 'written' : 'unknown' } } : {}),
         ...(converted.status === 'converted' ? { alternates: [...retained.alternates ?? [], originalDraft] } : {}) }
       if (!next.attempt && match.origin.conversion && next.expectedRevision === match.origin.conversion.sourceRevision && bodyRevision === match.origin.conversion.targetRevision) next.expectedRevision = bodyRevision
       const currentRaw = localStorage.getItem(key)
@@ -85,7 +112,8 @@ export function noteDrafts(identity: readonly string[]) {
           if (draft.draft !== current.draft && !alternates.some(other => other.draft === draft.draft && other.expectedRevision === draft.expectedRevision)) alternates.push(draft)
         }
         for (const attempt of [...next.unconfirmed ?? [], ...next.attempt ? [next.attempt] : []]) {
-          if (!unconfirmed.some(other => other.content === attempt.content && other.expectedRevision === attempt.expectedRevision)) unconfirmed.push({ content: attempt.content, expectedRevision: attempt.expectedRevision })
+          if (!unconfirmed.some(other => other.content === attempt.content && other.expectedRevision === attempt.expectedRevision)) unconfirmed.push({ content: attempt.content, expectedRevision: attempt.expectedRevision,
+            ...(attempt.noteHistory ? { noteHistory: attempt.noteHistory } : {}), ...(attempt.written ? { written: attempt.written } : {}) })
         }
         next = { ...current, alternates, unconfirmed }
       }
@@ -109,10 +137,10 @@ export function noteDrafts(identity: readonly string[]) {
         const value = raw === null ? undefined : parse(raw)
         if (value?.attempt?.content === content && value.attempt.expectedRevision === expectedRevision) {
           const next = result.status === 'written' ? acknowledgeNoteWrite(value, content, expectedRevision, result)
-            : { ...value, attempt: result.status === 'unknown' ? { ...value.attempt, phase: 'unknown' as const } : undefined }
+            : { ...value, attempt: result.status === 'unknown' ? { ...value.attempt, phase: 'unknown' as const, ...(result.noteHistory ? { noteHistory: result.noteHistory } : {}) } : undefined }
           const written = JSON.stringify(next)
           if (durable) { try { localStorage.setItem(key, written); observed = written; latest.set(key, written) } catch { durable = false } }
-          for (const observer of observers.get(key) ?? []) observer(durable ? written : JSON.stringify({ ...value, attempt: { ...value.attempt, phase: 'unknown' } }), durable)
+          for (const observer of observers.get(key) ?? []) observer(written, durable)
         }
         return result
       }
