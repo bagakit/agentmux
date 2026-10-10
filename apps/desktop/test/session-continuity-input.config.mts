@@ -4,6 +4,26 @@ import owning from '../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../..')
 const inputOwner = 'packages/core/src/agent-session-continuity-input.ts'
 const mutations: Record<string, { file?: string; before: string; after: string }> = {
+  'launch-store-carrier': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'if (resumeInputIntent) {', after: 'if (false) {' },
+  'launch-live-receipt': { file: 'apps/desktop/src/renderer/src/store.ts', before: '...projectResumeInputReceipts({ ...state, ...next }, core.session.agentSessionId),', after: '' },
+  'launch-concurrent-records': { file: 'packages/core/src/agent-session-store.ts', before: 'continuityOperations: { ...next.continuityOperations, ...previous.continuityOperations,', after: 'continuityOperations: { ...next.continuityOperations,' },
+  'launch-pending-freeze': { file: 'packages/core/src/client.ts', before: 'if (saved && receipt.launchInput && !isDeepStrictEqual(saved.input, receipt.launchInput.input))', after: 'if (false)' },
+  'launch-early-freeze': { file: 'packages/core/src/client.ts', before: 'if (!prior && input.input && current) receipt.launchInput = prepareContinuityLaunchInput', after: 'if (false) receipt.launchInput = prepareContinuityLaunchInput' },
+  'postlaunch-original-claim': { file: 'packages/core/src/prompt-submission.ts', before: 'if (control?.onlyIfUnclaimed && original)', after: 'if (false)' },
+  'postlaunch-known-unknown': { file: 'packages/core/src/client.ts', before: 'if (record) return this.postLaunchPromptConfirmed(record, text, message)', after: 'if (false) return this.postLaunchPromptConfirmed(record, text, message)' },
+  'postlaunch-same-op': { file: 'packages/core/src/client.ts', before: "if (prior.launchInput?.delivery === 'post-launch' && prior.launchInput.state !== 'terminal-confirmed')", after: 'if (false)' },
+  'postlaunch-lost-start': { file: 'packages/core/src/client.ts', before: "if (carried?.delivery === 'post-launch' && prepared.continuity) return await this.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)", after: '' },
+  'launch-reconcile-history': { file: 'packages/core/src/client.ts', before: "if (carried?.delivery === 'launch' && carried.state === 'launch-carried')", after: 'if (false)' },
+  'launch-mailbox-carrier': { file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', before: '...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),', after: '' },
+  'launch-history-key': { file: 'packages/core/src/client.ts', before: 'continuity?.launchInput?.input.submissionId ?? lifecycleOperationId', after: 'lifecycleOperationId' },
+  'launch-rpc-inspect': { file: 'packages/core/src/rpc-native-codec.ts', before: 'original.terminalPromptSubmission?.submissionId ?? original.launch?.input.submissionId', after: 'original.terminalPromptSubmission?.submissionId' },
+  'launch-carrier': { file: 'packages/core/src/client.ts', before: '...(receipt.launchInput ? { prompt: receipt.launchInput.input.prompt,', after: '...(false ? { prompt: receipt.launchInput!.input.prompt,' },
+  'launch-atomic-receipt': { file: 'packages/core/src/client.ts', before: '        bindContinuityLaunchInput(next.continuity, next.run)', after: '        void next.continuity' },
+  'launch-unknown-restart': { file: 'packages/core/src/client.ts', before: "if (prior?.kind === 'starting' || prior?.reason === 'operation-unconfirmed') {", after: 'if (false) {' },
+  'launch-frozen-source': { file: 'packages/core/src/client.ts', before: 'if (prior && (!prior.launchInput || !isDeepStrictEqual(prior.launchInput.input, input.input)))', after: 'if (false)' },
+  'launch-record': { file: 'packages/core/src/agent-session-store.ts', before: "if (launch?.delivery === 'launch' && launch.state === 'launch-carried' && launch.key) originals.push({", after: 'if (false) originals.push({' },
+  'launch-reconcile-args': { file: 'packages/core/src/client.ts', before: 'if (launched && (!launched.launchPlan || launched.launchPlan.program !== run.program ||', after: 'if (false && (!launched!.launchPlan || launched!.launchPlan.program !== run.program ||' },
+  'launch-post-original-key': { file: 'packages/core/src/client.ts', before: 'originalSubmissionId ?? `launch-prompt:${lifecycleOperationId}`', after: '`launch-prompt:${lifecycleOperationId}`' },
   'selected-body': { before: 'continuation: part(inputs.continuation)', after: "continuation: part('Changed continuation body')" },
   'optional-native-gate': { before: 'const evidence = provider.readPromptExecutionEvidence',
     after: "if (!provider.readPromptExecutionEvidence || !provider.verifyPromptExecutionTransport) throw new AgentMuxError('Required optional probes', 'CONTINUITY_INPUT_UNCONFIRMED')\n      const evidence = provider.readPromptExecutionEvidence" },
@@ -43,5 +63,5 @@ export default defineConfig({ ...owning, root,
     return { code: code.replace(mutation.before, mutation.after), map: null }
   } }] : [],
   test: { ...owning.test, exclude: defaultExclude,
-    include: ['packages/core/test/session-continuity-input.test.ts', 'apps/desktop/test/session-continuity-notices.test.tsx', 'apps/desktop/test/session-continuity-live-projection.test.ts'], passWithNoTests: false, maxWorkers: 1 }
+    include: ['apps/desktop/test/session-continuity-launch-mailbox.test.tsx', 'apps/desktop/test/session-continuity-launch-consumer.test.ts', 'packages/core/test/session-continuity-launch-input.test.ts', 'packages/core/test/session-continuity-input.test.ts', 'apps/desktop/test/session-continuity-notices.test.tsx', 'apps/desktop/test/session-continuity-live-projection.test.ts'], passWithNoTests: false, maxWorkers: 1 }
 })

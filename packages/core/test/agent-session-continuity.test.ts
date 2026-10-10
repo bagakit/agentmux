@@ -543,8 +543,8 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
     const harness = await continuityHarness(); await working(harness)
     const kernel = (harness.client as any).kernel, start = kernel.start
     let started: CtxmuxAdapterRun | undefined
-    kernel.start = async (input: { operationKey: string }) => {
-      started = { ...await start(input), lifecycleOperationId: input.operationKey }
+    kernel.start = async (input: { operationKey: string; program: string; args: string[] }) => {
+      started = { ...await start(input), program: input.program, args: input.args, lifecycleOperationId: input.operationKey }
       throw new Error('start ACK lost')
     }
     kernel.list = async () => started ? [started] : []

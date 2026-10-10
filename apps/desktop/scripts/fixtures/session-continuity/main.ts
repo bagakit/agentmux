@@ -13,7 +13,7 @@ process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state'
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const executor = (mode: string) => ({ label: 'Private native continuity fixture', providerId: 'codex', command: path.join(privateRoot, 'fake-codex'),
   env: { AGENTMUX_FAKE_READY_MODE: mode, AGENTMUX_FAKE_NATIVE_RECORD: '1',
-    AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original continuity task: retain decision sentinel continuity-body-7f41 and the independent unsent draft.',
+    AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_LAUNCH_INPUT: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original continuity task: retain decision sentinel continuity-body-7f41 and the independent unsent draft.',
     CODEX_HOME: path.join(privateRoot, 'codex'), AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: path.join(privateRoot, 'codex', 'sessions') }, injectAgentMuxGuide: false })
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private continuity proof' }],
   executors: { healthy: executor('before'), working: executor('working-until-resume'), idle: executor('before') },
@@ -128,7 +128,9 @@ app.whenReady().then(async () => {
       assert.deepEqual(delivery.reminder.receiptRef, delivery.key)
       assert.deepEqual(delivery.continuation.receiptRef, delivery.key)
       assert.deepEqual(delivery.receipt.key, delivery.key)
-      assert.ok(['terminal-confirmed', 'native-admitted'].includes(delivery.receipt.status))
+      assert.equal(delivery.receipt.status, 'launch-carried')
+      assert.equal(result.recoveryInput.launchInput.state, 'launch-carried')
+      assert.deepEqual(result.recoveryInput.launchInput.key, delivery.key)
       result.rendererRecoveryInput = await wait('actual Renderer consumes the settled original input receipt', async () => {
         const value = await state(), session = value.sessions.find((one: any) => one.id === ids.working.sessionId)
         const projected = session?.continuityOperations?.[result.recoveryInput.operationId]?.recoveryDelivery
@@ -147,15 +149,22 @@ app.whenReady().then(async () => {
         if (session?.processState !== 'running' || session.control.run.runId === ids.idle.run.runId) return false
         const replay = await client().readRunReplay(session.control.run)
         const output = Buffer.concat(replay.replay.map((chunk: any) => Buffer.from(chunk.dataBytes))).toString('utf8')
-        return output.includes('codex-submit:Fresh explicit input resumes the retained idle conversation:accepted') ? { session, output } : false
+        const witness = JSON.parse(output.match(/codex-launch-input:([^\r\n]+)/u)?.[1] ?? 'null')
+        return witness?.prompt === 'Fresh explicit input resumes the retained idle conversation' ? { session, output, witness } : false
       }, 30000)
-      assert.equal(result.manualExecution.output.split('codex-submit:Fresh explicit input resumes the retained idle conversation:accepted').length - 1, 1, 'The native CLI accepts the original fresh prompt exactly once')
-      const submits = result.calls.filter((call: any) => call.operation === 'submit-prompt' && call.args[0].agentSessionId === ids.idle.sessionId)
-      assert.ok(submits.length > 0)
-      assert.equal(new Set(submits.map((call: any) => call.args[2])).size, 1, 'All input observations retain the original submission identity')
-      result.manualInputReceipt = await runtime.inspectInput(result.manualExecution.session.control, { kind: 'prompt', agentSessionId: ids.idle.sessionId,
-        expectedRun: result.manualExecution.session.control.run, submissionId: submits[0].args[2] })
-      assert.ok(result.manualInputReceipt && ['admitted', 'terminal-confirmed'].includes(result.manualInputReceipt.status), 'The exact fresh input key has a real Core receipt')
+      assert.equal(result.manualExecution.output.split('codex-launch-input:').length - 1, 1, 'The native process consumes the original fresh launch prompt exactly once')
+      assert.equal(result.manualExecution.output.includes('codex-submit:'), false, 'Launch-carried input must never be sent again through PTY')
+      assert.equal(result.manualExecution.output.includes('codex-dropped-pre-ready-payload'), false)
+      assert.equal(result.calls.filter((call: any) => call.operation === 'submit-prompt' && call.args[0].agentSessionId === ids.idle.sessionId).length, 0)
+      const inputRecovery: any = Object.values((await store.load()).find(one => one.agentSessionId === ids.idle.sessionId)?.continuityOperations ?? {}).find((one: any) => one.trigger === 'input' && one.launchInput)
+      result.manualInputReceipt = inputRecovery?.launchInput
+      assert.equal(result.manualInputReceipt.state, 'launch-carried')
+      assert.equal(result.manualInputReceipt.input.prompt, result.manualExecution.witness.prompt)
+      assert.deepEqual(result.manualInputReceipt.key.expectedRun, result.manualExecution.session.control.run)
+      const projected = (await state()).queues[ids.idle.sessionId]?.find((one: any) => one.operationId === result.manualInputReceipt.input.submissionId)
+      assert.equal(projected?.resumeInputReceipt?.state, 'launch-carried', 'The actual queue consumes the truthful carrier receipt')
+      assert.equal(projected.archived, true)
+      assert.equal(projected.inputReceipt, undefined, 'No synthetic terminal input journal ACK is used')
       result.afterManualInput = await state()
       assert.equal(result.afterManualInput.drafts[ids.idle.sessionId], result.initial.drafts[ids.idle.sessionId], 'Explicit new input cannot overwrite the independently retained draft')
       const manual = result.calls.filter((call: any) => call.operation === 'recover' && call.args[0].agentSessionId === ids.idle.sessionId)
@@ -184,6 +193,11 @@ app.whenReady().then(async () => {
     await fs.writeFile(path.join(evidence, phase + '-workface.png'), (await win.capturePage()).toPNG())
     if (phase === 'restore') {
       const originalStore = await store.load()
+      result.launchReceiptPresentation = await win.webContents.executeJavaScript('window.continuityShowLaunchReceipt()')
+      await fs.writeFile(path.join(evidence, 'launch-input-receipt.png'), (await win.capturePage()).toPNG())
+      await win.webContents.executeJavaScript('window.continuityHideLaunchReceipt()')
+      await win.webContents.executeJavaScript('window.continuityFlush()')
+      result.finalSpatial = await spatial.readForLayout()
       result.noticePresentation = await win.webContents.executeJavaScript('window.continuityShowNotice()')
       assert.equal(result.noticePresentation.draft, result.initial.drafts[ids.working.sessionId])
       await fs.writeFile(path.join(evidence, 'recovery-input-notice.png'), (await win.capturePage()).toPNG())
