@@ -195,6 +195,7 @@ import {
 } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { normalizeBrowserBounds } from '../src/shared/browser-bounds.js'
+import { BROWSER_EVENT_CHANNEL, BROWSER_PRESENTATION_EVENT_CHANNEL, type BrowserEvent, type BrowserPresentationEvent } from '../src/shared/contracts.js'
 
 const profiles: BrowserProfileResolver = {
   defaultProfileId: () => 'default',
@@ -243,10 +244,14 @@ function appLinkHost(remembered: Record<string, 'allow' | 'deny'> = {}) {
 
 function fakeWindow() {
   const children: InstanceType<typeof fakeElectron.FakeWebContentsView>[] = []
-  const sent: unknown[] = []
+  const sent: BrowserEvent[] = []
+  const presentationEvents: BrowserPresentationEvent[] = []
+  const messages: Array<{ channel: string; value: unknown }> = []
   return {
     children,
     sent,
+    presentationEvents,
+    messages,
     window: {
       contentView: {
         addChildView(view: InstanceType<typeof fakeElectron.FakeWebContentsView>) {
@@ -264,7 +269,11 @@ function fakeWindow() {
       isDestroyed: () => false,
       webContents: {
         isDestroyed: () => false,
-        send(_channel: string, value: unknown) { sent.push(value) }
+        send(channel: string, value: unknown) {
+          messages.push({ channel, value })
+          if (channel === BROWSER_EVENT_CHANNEL) sent.push(value as BrowserEvent)
+          if (channel === BROWSER_PRESENTATION_EVENT_CHANNEL) presentationEvents.push(value as BrowserPresentationEvent)
+        }
       }
     }
   }
@@ -326,10 +335,22 @@ describe('BrowserViewManager', () => {
     const opened = original.webContents.listeners.get('did-create-window')![0]!
     opened(first); opened(second)
     if (failure === 'parent-close') vi.spyOn(original.webContents, 'close').mockImplementationOnce(() => { throw new Error('Parent close failed') })
-    if (failure === 'closed-receipt') vi.spyOn(f.window.webContents, 'send').mockImplementationOnce(() => { throw new Error('Receipt failed') })
+    const closedReceiptFault = vi.fn()
+    if (failure === 'closed-receipt') {
+      const send = f.window.webContents.send
+      vi.spyOn(f.window.webContents, 'send').mockImplementation((channel, value) => {
+        const event = value as BrowserEvent
+        if (channel === BROWSER_EVENT_CHANNEL && event.type === 'closed' && event.id === 'private-failure' && !closedReceiptFault.mock.calls.length) {
+          closedReceiptFault(channel, value)
+          throw new Error('Receipt failed')
+        }
+        send(channel, value)
+      })
+    }
     if (failure === 'first-popup') first.destroy.mockImplementationOnce(() => { throw new Error('Popup close failed') })
     if (failure === 'storage') storage.clearStorageData.mockRejectedValueOnce(new Error('Storage clear failed'))
     await expect(manager.close('private-failure')).rejects.toThrow('cleanup failures')
+    if (failure === 'closed-receipt') expect(closedReceiptFault).toHaveBeenCalledExactlyOnceWith(BROWSER_EVENT_CHANNEL, { type: 'closed', id: 'private-failure' })
     expect(original.webContents.isDestroyed()).toBe(true)
     expect(first.destroy).toHaveBeenCalledTimes(1)
     expect(second.destroy).toHaveBeenCalledTimes(1)
@@ -567,7 +588,10 @@ describe('BrowserViewManager', () => {
     const originalState = useAppStore.getState()
     const fixture = fakeWindow(), manager = browserManager(fixture.window)
     const send = fixture.window.webContents.send
-    fixture.window.webContents.send = (channel, event) => { send(channel, event); useAppStore.getState().applyBrowserEvent(event as import('../src/shared/contracts.js').BrowserEvent) }
+    fixture.window.webContents.send = (channel, event) => {
+      send(channel, event)
+      if (channel === BROWSER_EVENT_CHANNEL) useAppStore.getState().applyBrowserEvent(event as BrowserEvent)
+    }
     const current = await manager.create('cleanup-store', 'https://original.example/path', 'workspace-a', 'work')
     const view = fixture.children[0]!
     let tab = createWorkbenchTab('cleanup-store-tab', { ...current, kind: 'browser', browserId: current.id, regionId: 'cleanup-store-region', workspaceId: 'workspace-a' })
@@ -653,7 +677,7 @@ describe('BrowserViewManager', () => {
     const sent = fixture.window.webContents.send
     fixture.window.webContents.send = (channel, value) => {
       sent(channel, value)
-      useAppStore.getState().applyBrowserEvent(value as import('../src/shared/contracts.js').BrowserEvent)
+      if (channel === BROWSER_EVENT_CHANNEL) useAppStore.getState().applyBrowserEvent(value as BrowserEvent)
     }
     const manager = browserManager(fixture.window)
     try {
@@ -1099,6 +1123,7 @@ describe('BrowserViewManager', () => {
     manager.setViewport('browser-release', 'mobile')
     manager.setBounds('browser-release', { x: 2, y: 3, width: 400, height: 500 })
     fixture.sent.length = 0
+    const messagesBeforeRelease = fixture.messages.length
 
     await manager.release('browser-release')
 
@@ -1107,6 +1132,9 @@ describe('BrowserViewManager', () => {
     expect(manager.usesProfile('default')).toBe(true)
     // A budget release is not a user close: no closed event may remove the Region projection.
     expect(fixture.sent).toEqual([])
+    const coverage = { type: 'native-coverage-changed', browserId: created.id, coverage: null }
+    expect(fixture.messages.slice(messagesBeforeRelease)).toContainEqual({ channel: BROWSER_PRESENTATION_EVENT_CHANNEL, value: coverage })
+    expect(fixture.presentationEvents.at(-1)).toEqual(coverage)
     await expect(manager.restore('browser-release', {
       profileId: created.profileId,
       viewport: 'mobile'
@@ -1493,7 +1521,7 @@ describe('BrowserViewManager', () => {
     const send = fixture.window.webContents.send
     fixture.window.webContents.send = (channel, event) => {
       send(channel, event)
-      useAppStore.getState().applyBrowserEvent(event as import('../src/shared/contracts.js').BrowserEvent)
+      if (channel === BROWSER_EVENT_CHANNEL) useAppStore.getState().applyBrowserEvent(event as BrowserEvent)
     }
     try {
       await manager.create('browser-destroyed', 'https://initial.example/')
