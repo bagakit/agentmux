@@ -102,6 +102,10 @@ async function fixture(focused = true) {
     { browserId: 'browser', occurrence: occurrence(id), geometry: value })
   const events = (): BrowserPresentationEvent[] => app.send.mock.calls
     .filter(([channel]) => channel === 'agentmux:browser-presentation-event').map(([, value]) => value)
+    .filter(value => value.type !== 'native-coverage-changed')
+  const coverage = () => app.send.mock.calls
+    .filter(([channel, value]) => channel === 'agentmux:browser-presentation-event' && value.type === 'native-coverage-changed')
+    .map(([, value]) => value.coverage)
   const request = (change = {}) => {
     const result: unknown[] = []
     expect(app.session.display).not.toBeNull()
@@ -110,8 +114,132 @@ async function fixture(focused = true) {
     expect(result).toHaveLength(1)
     return result[0]
   }
-  return { manager, app, frame, source, views, register, events, request, browser, addChildView, window }
+  return { manager, app, frame, source, views, register, events, coverage, request, browser, addChildView, window }
 }
+
+it('confirms native coverage only after the exact source capture is acknowledged', async () => {
+  const f = await fixture(), lease = f.register('A')
+  await f.manager.activatePresentation(f.app as never, f.frame as never, lease.leaseId, { kind: 'select', focus: 'preserve' })
+  expect(f.coverage().at(-1)).toBeNull()
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+  f.manager.setBounds('browser', geometry.bounds)
+  expect(f.coverage().at(-1)).toBeNull()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  expect(f.coverage().at(-1)).toEqual({ leaseId: lease.leaseId, captureId: capture.captureId })
+  expect(f.events()).toEqual([{ type: 'input-owner-changed', browserId: 'browser', leaseId: lease.leaseId }])
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+})
+
+it('withdraws physical coverage on direct hide or move while retaining the logical input owner', async () => {
+  const f = await fixture(), lease = f.register('A')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  f.request()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, lease.leaseId, { kind: 'select', focus: 'preserve' })
+  const confirmed = { leaseId: lease.leaseId, captureId: capture.captureId }
+  expect(f.coverage().at(-1)).toEqual(confirmed)
+  const control = f.events()
+  f.manager.setBounds('browser', null)
+  expect(f.coverage().at(-1)).toBeNull()
+  expect(f.source.getVisible()).toBe(false)
+  f.manager.setBounds('browser', geometry.bounds)
+  expect(f.coverage().at(-1)).toEqual(confirmed)
+  const moved = { ...geometry.bounds, x: 600 }
+  f.manager.setBounds('browser', moved)
+  expect(f.coverage().at(-1)).toBeNull()
+  expect(f.manager.nativeOwner('browser')?.bounds).toEqual(moved)
+  expect(f.events()).toEqual(control)
+  expect(f.source.webContents.focus).not.toHaveBeenCalled()
+})
+
+it('keeps coverage unknown after a detached source or failed native hide without changing input', async () => {
+  const f = await fixture(), lease = f.register('A')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  f.request()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, lease.leaseId, { kind: 'select', focus: 'preserve' })
+  expect(f.coverage().at(-1)).toEqual({ leaseId: lease.leaseId, captureId: capture.captureId })
+  f.views.splice(f.views.indexOf(f.source), 1)
+  f.manager.setBounds('browser', geometry.bounds)
+  expect(f.coverage().at(-1)).toBeNull()
+  f.views.push(f.source)
+  f.manager.setBounds('browser', geometry.bounds)
+  expect(f.coverage().at(-1)).not.toBeNull()
+  const control = f.events()
+  const hide = vi.spyOn(f.source, 'setVisible').mockImplementationOnce(() => { throw new Error('Native hide unavailable') })
+  expect(() => f.manager.setBounds('browser', null)).toThrow('Native hide unavailable')
+  expect(f.coverage().at(-1)).toBeNull()
+  expect(f.events()).toEqual(control)
+  hide.mockRestore()
+})
+
+it('retires coverage with the original capture and confirms a fresh source generation independently', async () => {
+  const f = await fixture(), lease = f.register('A')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  f.request()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, lease.leaseId, { kind: 'select', focus: 'preserve' })
+  expect(f.coverage().at(-1)).toEqual({ leaseId: lease.leaseId, captureId: capture.captureId })
+  await f.manager.switchProfile('browser', 'another')
+  expect(f.coverage().at(-1)).toBeNull()
+  const source = f.views[0]!
+  expect(source).not.toBe(f.source)
+  const next = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  expect(next.captureId).not.toBe(capture.captureId)
+  expect(f.request()).toEqual({ video: source.webContents.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, next.captureId, { outcome: 'ready', trackIds: ['new-video'] })
+  expect(f.coverage().at(-1)).toEqual({ leaseId: lease.leaseId, captureId: next.captureId })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, next.captureId, { outcome: 'stopped', trackIds: ['new-video'] })
+  expect(f.coverage().at(-1)).toBeNull()
+})
+
+it('reconciles coverage after selection rolls back without replacing the original failure', async () => {
+  const f = await fixture(), a = f.register('A'), b = f.register('B', { visible: true, bounds: { ...geometry.bounds, x: 600 } })
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, a.leaseId)
+  f.request()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, a.leaseId, { kind: 'select', focus: 'preserve' })
+  const control = f.events(), failure = new Error('Native visibility observer failed')
+  f.manager.onNativeVisibilityChange = () => { throw failure }
+  await expect(f.manager.activatePresentation(f.app as never, f.frame as never, b.leaseId, { kind: 'select', focus: 'preserve' })).rejects.toBe(failure)
+  expect(f.coverage().at(-1)).toBeNull()
+  expect(f.source.getBounds().x).toBe(600)
+  expect(f.events()).toEqual(control)
+  f.manager.onNativeVisibilityChange = undefined
+})
+
+it('does not confirm a capture whose native preparation placement failed', async () => {
+  const f = await fixture(), lease = f.register('A')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  f.request()
+  await f.manager.activatePresentation(f.app as never, f.frame as never, lease.leaseId, { kind: 'select', focus: 'preserve' })
+  const failure = new Error('Native preparation placement failed')
+  f.addChildView.mockImplementationOnce(() => { throw failure })
+  expect(() => f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId,
+    { outcome: 'ready', trackIds: ['video'] })).toThrow(AggregateError)
+  expect(f.coverage().at(-1)).toBeNull()
+  expect(f.source.webContents.dead).toBe(false)
+})
+
+it('keeps a stale native window document from confirming coverage without hiding the original page', async () => {
+  const f = await fixture(), host = f.manager.windowForView(f.source)
+  let current = true
+  f.manager.setPresentationWindowOwner(() => { if (!current) throw new Error('Original host document changed'); return host })
+  const lease = f.register('A'), capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  f.request()
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['video'] })
+  await f.manager.activatePresentation(f.app as never, f.frame as never, lease.leaseId, { kind: 'select', focus: 'preserve' })
+  expect(f.coverage().at(-1)).not.toBeNull()
+  current = false
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  try {
+    expect(() => f.manager.setBounds('browser', geometry.bounds)).not.toThrow()
+    expect(f.coverage().at(-1)).toBeNull()
+    expect(f.manager.nativeOwner('browser')?.view).toBe(f.source)
+    expect(warn).toHaveBeenCalledOnce()
+  } finally { warn.mockRestore() }
+})
 
 it('prepares a never-selected passive source below the Renderer and hides it after acquisition', async () => {
   const f = await fixture(), lease = f.register('A')
