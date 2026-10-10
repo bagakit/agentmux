@@ -113,7 +113,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     AGENTMUX_RUNTIME_DIRECTORY: scope.directory, AGENTMUX_STATE_DIRECTORY: join(scope.directory, 'state'),
     AGENTMUX_AGENT_SESSION_STORE: join(userData, 'agent-sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(scope.directory, 'state/messages.ndjson') }
   const cli = async args => {
-    const result = await command(process.execPath, [join(core, 'bin/amux'), '--endpoint', 'unix:' + join(scope.directory, 'control.sock'), ...args], { env: cleanEnvironment })
+    const result = await command(join(core, 'bin/amux'), ['--endpoint', 'unix:' + join(scope.directory, 'control.sock'), ...args], { env: cleanEnvironment })
     const value = JSON.parse(result.stdout); assert.equal(value.ok, true, result.stderr); return value.result
   }
   try {
