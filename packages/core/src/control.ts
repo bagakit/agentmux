@@ -19,6 +19,7 @@ import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
 export * from './browser-task-control.js'
+import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
 import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
 export * from './metrics.js'
 export { createInputPerformanceRecorder, readInputObservation } from './performance-diagnostics.js'
@@ -245,7 +246,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
-export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' })
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client' }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
@@ -745,6 +746,7 @@ export type AgentMuxControlResult =
   | ToolkitResult
   | { operation: 'metrics.get'; observation: MetricsObservation }
   | { operation: 'metrics.watch' }
+  | { operation: 'metrics.profile.capture'; capture: RendererV8ProfileResult }
   | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
   | { operation: 'inspect.mote-context'; observation: AgentMuxMoteContextObservation }
@@ -1005,6 +1007,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'toolkit.watch': 'short',
   'metrics.get': 'short',
   'metrics.watch': 'short',
+  'metrics.profile.capture': 'long',
   'inspect.client': 'short',
   'inspect.mote-context': 'short',
   'inspect.tab': 'short',

@@ -171,6 +171,14 @@ capture uses one private bounded file, one active write and one replaceable pend
 (each <=96KiB); droppedWrites counts superseded writes in this owner lifetime. pending/confirmed/unconfirmed describe this writer's
 ACK, observed-on-disk only proves this read. Diagnostic and cleanup issues never replace the
 primary failure; they retain actual operation, code and known write phase or null. This reads Toolkit-owned evidence, not arbitrary Run bytes or Runtime authority.
+system metrics profile capture explicitly collects one exact Renderer main-target V8 profile
+for 1000-5000ms. Supply original window-id, web-contents-id, generation, pid and creation-time.
+The same RPC returns the original bounded profile (8 MiB maximum), actual interval and separate
+stop/detach facts. --output FILE saves a new local cpuprofile without replacing files or symlinks.
+Function names, URLs and local paths may be present: no automatic watch/Toolkit capture, upload
+or error-log export. Busy DevTools/debuggers preserve their original owner and refuse only this
+profile. A lost reply is unknown and is never automatically recaptured; no retained handles,
+restart history, worker/native/compositor CPU coverage or optimization claim.
 system metrics get returns the first bounded frame and releases its own reader; a
 pending Renderer has not failed. Watch frames may update different sources: use the
 app source observation time and process intervalMs to identify actual CPU intervals.
