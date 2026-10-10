@@ -1,3 +1,4 @@
+import { WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_RESPONSE, WORKBENCH_WINDOW_CHANGED } from '../shared/workbench-windows'
 import { createPreloadNotebookObservation } from './notebook-observation'
 import { readInputObservation } from '@agentmux/core/control'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
@@ -336,6 +337,21 @@ const api: AgentMuxPreloadApi = {
   },
   ui: {
     initialTheme,
+    workbenchWindows: {
+      ready: () => ipcRenderer.invoke('ui:workbenchWindowsReady'),
+      call: (method, input) => ipcRenderer.invoke('ui:workbenchWindowsCall', method, input),
+      onRequest(listener) {
+        const wrapped = (_event: Electron.IpcRendererEvent, request: import('../shared/workbench-windows').WorkbenchWindowRequest) => listener(request)
+        ipcRenderer.on(WORKBENCH_WINDOW_REQUEST, wrapped)
+        return () => ipcRenderer.off(WORKBENCH_WINDOW_REQUEST, wrapped)
+      },
+      respond: response => ipcRenderer.send(WORKBENCH_WINDOW_RESPONSE, response),
+      onChanged(listener) {
+        const wrapped = (_event: Electron.IpcRendererEvent, snapshot: import('../shared/workbench-windows').WorkbenchWindowSnapshot) => listener(snapshot)
+        ipcRenderer.on(WORKBENCH_WINDOW_CHANGED, wrapped)
+        return () => ipcRenderer.off(WORKBENCH_WINDOW_CHANGED, wrapped)
+      }
+    },
     onNativeBrowserInput(listener, document) {
       const wrapped = (_event: Electron.IpcRendererEvent, input: import('../shared/native-overlay').NativeBrowserInput): void => {
         if (sameNativeOverlayDocument(input.document, document)) listener(input)

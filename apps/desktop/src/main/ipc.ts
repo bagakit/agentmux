@@ -1,5 +1,8 @@
 import { ConversationLandmarkStore } from '@agentmux/core'
 import { registerMoteConnectionIpc } from './mote-connection-ipc.js'
+import { NativeOverlayWindows } from './native-overlay-windows.js'
+import type { WorkbenchWindows } from './workbench-windows.js'
+import { WORKBENCH_WINDOW_RESPONSE } from '../shared/workbench-windows.js'
 import { MoteConnectionOperations } from './mote-connection-operations.js'
 import { MoteConnectionSourceOwner } from './mote-connection-source.js'
 import { goalRoleInputNote } from './goal-role-input.js'
@@ -171,8 +174,6 @@ import { createAgentNotifier } from './agent-notifier.js'
 import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
-import { NativeOverlaySurfaces } from './native-overlay-surfaces.js'
-import { installNativeOverlayFocus } from './native-overlay-focus.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-journal.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
@@ -248,6 +249,7 @@ export async function openExternalFromRenderer(
 
 export async function registerIpc(args: {
   window: BrowserWindow
+  workbenchWindows: WorkbenchWindows
   configStore: ConfigStore
   initialConfig: AppConfig
   runtime: RuntimeController
@@ -419,15 +421,13 @@ export async function registerIpc(args: {
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads)
-  const warnNativeChrome = (warning: string): void => {
-    if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_OVERLAY_WARNING_CHANNEL, warning)
-  }
-  const nativeChrome = new NativeOverlaySurfaces(args.window, browsers, warnNativeChrome,
-    input => { if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_INPUT_CHANNEL, input) })
-  const disposeNativeOverlayFocus = installNativeOverlayFocus(args.window, nativeChrome)
-  browsers.onNativeVisibilityChange = visibility => {
-    if (!args.window.webContents.isDestroyed()) args.window.webContents.send(NATIVE_BROWSER_VISIBILITY_CHANNEL, visibility)
-  }
+  browsers.setPresentationWindowOwner((document, occurrence) => args.workbenchWindows.presentationWindow(document, occurrence))
+  const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
+  const releaseNativeWindowOwner = args.workbenchWindows.setNativeOwner({ beforeClosing: async window => {
+    await browsers.returnWindow(window)
+    nativeChrome.releaseWindow(window)
+  } })
+  browsers.onNativeVisibilityChange = (_visibility, window) => nativeChrome.visibilityChanged(window)
   browsers.onNativeInput = (owner, input) => nativeChrome.forwardBrowserInput(owner, input)
   const currentMetricsWindow = (): import('@agentmux/core/control').MetricsWindow | null => {
     if (args.window.isDestroyed() || args.window.webContents.isDestroyed() || args.window.webContents.isLoadingMainFrame()) return null
@@ -545,7 +545,16 @@ export async function registerIpc(args: {
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
-    return projectBrowserControlResult(await controlBridge.execute(request, signal))
+    const result = projectBrowserControlResult(await controlBridge.execute(request, signal))
+    if (request.operation === 'focus' && request.inputPolicy === 'target' && result.operation === 'focus' && result.presentation.state === 'window' && result.presentation.windowId && result.presentation.documentGeneration) {
+      try {
+        if (!args.workbenchWindows.focusDocument({ windowId: result.presentation.windowId, documentGeneration: result.presentation.documentGeneration })) {
+          result.partial = true; result.input.outcome = 'unconfirmed'
+          result.issues.push({ step: 'input', code: 'NATIVE_WINDOW_FOCUS_UNCONFIRMED', message: 'Native focus has not been confirmed for the recorded workface window.', recovery: 'Keep using the original content; focus its recorded native window directly.' })
+        }
+      } catch (error) { result.partial = true; result.input.outcome = 'unconfirmed'; result.issues.push({ step: 'input', code: 'NATIVE_WINDOW_CHANGED', message: String(error), recovery: 'Inspect the original workface window before another explicit focus.' }) }
+    }
+    return result
   }
   const executeControl = (request: AgentMuxControlRequest, context?: AgentMuxNameContext, signal?: AbortSignal): Promise<AgentMuxControlResult> =>
     nameChangeRequests.run({ context: context ?? unknownNameContext(request.operation), operationId: request.requestId },
@@ -587,6 +596,17 @@ export async function registerIpc(args: {
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, args.window.webContents))
+
+  const acceptWorkbenchWindow = (event: Electron.IpcMainEvent, response: import('../shared/workbench-windows.js').WorkbenchWindowResponse) => args.workbenchWindows.accept(event, response)
+  ipcMain.on(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow)
+  handleWithEvent('ui:workbenchWindowsReady', event => {
+    requireTrustedSender('ui:workbenchWindowsReady', event)
+    return args.workbenchWindows.rendererReady(event)
+  })
+  handleWithEvent('ui:workbenchWindowsCall', (event, method: import('@agentmux/core/control').AppWindowMethod, input: unknown) => {
+    requireTrustedSender('ui:workbenchWindowsCall', event)
+    return callUserRpc(method, input as never)
+  })
 
   registerDeviceManagementIpc({ handleWithEvent, assertTrusted: requireTrustedSender })
 
@@ -1343,13 +1363,13 @@ export async function registerIpc(args: {
     requireTrustedSender('ui:captureScreenshot', event)
     return await captureComposerScreenshot(app.getPath('home'))
   })
-  handleWithEvent('ui:nativeBrowserVisibility', event => {
+  handleWithEvent('ui:nativeBrowserVisibility', (event, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
     requireTrustedSender('ui:nativeBrowserVisibility', event)
-    return browsers.nativeBrowserVisibility()
+    return nativeChrome.visibility(scope)
   })
-  handleWithEvent('ui:publishNativeOverlays', async (event, regions: NativeOverlayRegion[]) => {
+  handleWithEvent('ui:publishNativeOverlays', async (event, regions: NativeOverlayRegion[], scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
     requireTrustedSender('ui:publishNativeOverlays', event)
-    return await nativeChrome.update(regions)
+    return await nativeChrome.update(regions, scope)
   })
   handleWithEvent('ui:listAgentSkills', async (event, sessionId: string) => {
     requireTrustedSender('ui:listAgentSkills', event)
@@ -1997,7 +2017,7 @@ export async function registerIpc(args: {
     await browsers.setAnnotationMarkers(id, navigationId, markers)
   })
   handleWithEvent('browser:registerPresentation', (event, input: {
-    browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry
+    browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry; window?: import('../shared/workbench-windows.js').WorkbenchWindowDocument
   }) => {
     requireTrustedSender('browser:registerPresentation', event)
     return browsers.registerPresentation(event.sender, event.senderFrame, input)
@@ -2005,12 +2025,10 @@ export async function registerIpc(args: {
   handleWithEvent('browser:updatePresentation', (event, leaseId: string, geometry: BrowserPresentationGeometry) => {
     requireTrustedSender('browser:updatePresentation', event)
     browsers.updatePresentation(event.sender, event.senderFrame, leaseId, geometry)
-    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
   })
   handleWithEvent('browser:removePresentation', (event, leaseId: string) => {
     requireTrustedSender('browser:removePresentation', event)
     browsers.removePresentation(event.sender, event.senderFrame, leaseId)
-    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
   })
   handleWithEvent('browser:armPresentationCapture', (event, leaseId: string) => {
     requireTrustedSender('browser:armPresentationCapture', event)
@@ -2024,13 +2042,18 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:activatePresentation', event)
     const receipt = await browsers.activatePresentation(event.sender, event.senderFrame, leaseId, activation)
     if (receipt.outcome === 'selected' || receipt.outcome === 'input-dispatched') {
-      void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
+      try { await nativeChrome.refresh(browsers.presentationWindowForLease(event.sender, event.senderFrame, leaseId)) }
+      catch {
+        // Activation has already acted. An observation failure must not turn
+        // that original receipt into a rejection or authorize replaying input.
+        try { args.window.webContents.send(NATIVE_OVERLAY_WARNING_CHANNEL, { message: 'The original Browser activation receipt is retained. Floating control refresh is unconfirmed; keep using the original Browser and reopen its floating control.' }) }
+        catch { console.warn('Native floating control refresh observation ended after the original Browser activation.') }
+      }
     }
     return receipt
   })
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => {
     browsers.setBounds(id, bounds)
-    void nativeChrome.refresh().catch(() => warnNativeChrome('Native floating content could not follow the Browser frame. The Browser remains available; close and reopen the floating panel.'))
   })
   handle('browser:release', async (id: string) => await browsers.release(id))
   handle('browser:restore', async (
@@ -2062,6 +2085,7 @@ export async function registerIpc(args: {
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   const control = new AgentMuxControlServer({
+    windows: args.workbenchWindows,
     connections: connectorServices.connections,
     moteConnections,
     deliveryAttempts,
@@ -2143,6 +2167,7 @@ export async function registerIpc(args: {
       { owner: 'metrics-listener', dispose: () => { args.window.webContents.off('destroyed', closeMetrics) } },
       { owner: 'metrics', dispose: () => metrics.dispose() },
       { owner: 'theme-bootstrap', dispose: disposeThemeBootstrap },
+      { owner: 'workbench-window-listener', dispose: () => { ipcMain.removeListener(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow) } },
       { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
       { owner: 'progress-input', dispose: () => disposeProgressInput() },
       { owner: 'progress-changes', dispose: () => disposeProgressChanges() },
@@ -2157,8 +2182,9 @@ export async function registerIpc(args: {
       { owner: 'resource-observation', dispose: () => releaseResourceObservation() },
       { owner: 'notifier', dispose: () => notifier.dispose() },
       { owner: 'browser-native-input', dispose: () => { browsers.onNativeInput = undefined } },
-      { owner: 'native-chrome', dispose: () => { disposeNativeOverlayFocus(); nativeChrome.dispose() } },
+      { owner: 'native-chrome', dispose: () => nativeChrome.dispose() },
       { owner: 'external-browsers', dispose: () => externalBrowsers.dispose() },
+      { owner: 'workbench-native-window-port', dispose: releaseNativeWindowOwner },
       { owner: 'browsers', dispose: () => browsers.dispose() },
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },

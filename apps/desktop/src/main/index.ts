@@ -1,3 +1,5 @@
+import { WorkbenchWindows } from './workbench-windows.js'
+import { WorkbenchWindowStore } from './workbench-window-store.js'
 import { openDemandStore } from '@agentmux/demand'
 import { readLoadedPackageIdentity } from './client-observation.js'
 import { randomUUID } from 'node:crypto'
@@ -38,7 +40,7 @@ import { reportQuitDisposalFailure } from './quit-disposal-failure.js'
 import { SpatialLinkIngress } from './spatial-link-ingress.js'
 import { WebUrlIngress, receiveDesktopUrl, receiveDesktopUrlArguments } from './web-url-ingress.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
-import { windowOpenOutcome, windowSecurityWebPreferences } from './window-security.js'
+import { windowSecurityWebPreferences } from './window-security.js'
 import { deliverContinuousProgress } from './continuous-progress-delivery.js'
 import { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
@@ -115,6 +117,7 @@ function startPrimaryInstance(): void {
   let rendererUpdates: RendererUpdates | null = null
   let allowingQuit = false
   let workbenchWindow: BrowserWindow | null = null
+  let workbenchWindows: WorkbenchWindows | null = null
   let recoverInterface: (() => Promise<void>) | null = null
   // Every window entry point shares this read, including a second launch during startup.
   const environmentReady = hydrateProcessEnvironmentFromLoginShell().then((result) => {
@@ -130,6 +133,7 @@ function startPrimaryInstance(): void {
       ownerDisposal = runOwnerDisposals([
         { owner: 'continuous-progress', dispose: () => progressLoops.stop() },
         { owner: 'renderer-updates', dispose: () => rendererUpdates?.dispose() },
+        { owner: 'workbench-windows', dispose: () => workbenchWindows?.dispose() },
         { owner: 'desktop-ipc', dispose: () => disposeRegisteredIpc?.() },
         { owner: 'runtime', dispose: () => runtime.dispose() }
       ], 'Desktop owner disposal failed')
@@ -187,6 +191,8 @@ function startPrimaryInstance(): void {
       webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
     })
     workbenchWindow = window
+    const windows = new WorkbenchWindows(window, new WorkbenchWindowStore(join(app.getPath('userData'), 'workbench-windows.json')), liveVisibleAreas)
+    workbenchWindows = windows
     recoverInterface = registerRendererCrashRecovery(window, dialog, () => app.quit(), () => ownerDisposal !== null)
     installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })
     window.once('closed', () => { if (workbenchWindow === window) { spatialLinks.unavailable(); webLinks.unavailable(); workbenchWindow = null; recoverInterface = null } })
@@ -194,11 +200,8 @@ function startPrimaryInstance(): void {
     // A window persisted while maximized reopens maximized on top of its restored normal bounds, so
     // unmaximize returns to the size the user actually chose rather than the default.
     if (persistedGeometry?.maximized) window.maximize()
-    // 回调体刻意只有这一句转发：判定与「交给系统浏览器」这个副作用都在 windowOpenOutcome 里，受行为
-    // 测试直接质询。此前这里是三句（取判定 / if 里 openExternal / return action），那个形状实测有两个
-    // 变异能在 17/17 全绿下存活——详见 window-security.ts 里 windowOpenOutcome 的注释。
-    window.webContents.setWindowOpenHandler(({ url }) =>
-      windowOpenOutcome(url, (target) => { void shell.openExternal(target) }))
+    window.webContents.setWindowOpenHandler(details => windows.windowOpen(details, target => { void shell.openExternal(target) }))
+    window.webContents.on('did-create-window', (child, details) => windows.createdWindow(child, details))
     // 顶帧的导航闸。preload 把特权桥 `agentmux` 无条件挂到 window（src/preload/index.ts:238），且每次
     // 导航后 preload 会重新执行；应用的 CSP 只是自家 index.html 里的 <meta>，不跟着导航走。所以只要顶帧
     // 被导航到应用之外的文档（Chromium 默认把「往顶帧拖入一个文件」变成一次 file:/// 导航），那个文档就
@@ -260,7 +263,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, configStore, initialConfig, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
+    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
       loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
@@ -509,6 +512,7 @@ function startPrimaryInstance(): void {
       try { await prepareWindowWorkbenchForQuit(window) }
       catch (error) { reportWorkbenchQuitFailure(window, error); return }
     }
+    await workbenchWindows?.prepareQuit()
     try { await disposeOwners() }
     catch (error) {
       reportQuitDisposalFailure(error, {

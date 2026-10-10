@@ -1776,6 +1776,13 @@ export type AgentMuxDesktopApi = {
     /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */
     requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
+    workbenchWindows: {
+      ready(): Promise<import('./workbench-windows').WorkbenchWindowDocument | null>
+      call<M extends import('@agentmux/core/control').AppWindowMethod>(method: M, input: import('@agentmux/core/control').AppWindowParamsMap[M]): Promise<import('@agentmux/core/control').AppWindowResultMap[M]>
+      onRequest(listener: (request: import('./workbench-windows').WorkbenchWindowRequest) => void): () => void
+      respond(response: import('./workbench-windows').WorkbenchWindowResponse): void
+      onChanged(listener: (snapshot: import('./workbench-windows').WorkbenchWindowSnapshot) => void): () => void
+    }
     /** Best-effort observation of this Workbench's original startup error; no lifecycle effect. */
     recordStartupFailure(input: import('./workbench-startup-failure').WorkbenchRendererStartupFailure): Promise<boolean>
     inspectDefaultBrowser(): Promise<import('@agentmux/core').BrowserDefaultInspection>
@@ -2029,6 +2036,7 @@ export type AgentMuxDesktopApi = {
     setAnnotationMarkers(id: string, navigationId: string, markers: BrowserAnnotationMarker[]): Promise<void>
     setBounds(id: string, bounds: BrowserBounds | null): Promise<void>
     registerPresentation(input: {
+      window?: import('./workbench-windows').WorkbenchWindowDocument
       browserId: string
       occurrence: BrowserPresentationOccurrence
       geometry: BrowserPresentationGeometry
