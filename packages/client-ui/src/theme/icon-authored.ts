@@ -19,6 +19,27 @@ type AuthoredIconDefinition = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "goal-consensus": {
+    shapes: [["path",{"d":"M6 5H4a1.5 1.5 0 0 0-1.5 1.5V12L5 10.5h1M18 9h1.5a2 2 0 0 1 2 2v6L19 15h-1"}],["path",{"d":"M9 4h4l3 3v11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"}],["path",{"d":"M13 4v3h3M10 15h3"}],["path",{"d":"M10 11h3","pathLength":"1","data-semantic-icon-part":"agreement-line"}]],
+    design: {
+      rest: "两侧相向对话围绕一份折角约定页，表达共同讨论的方向；不是完成勾或普通靶心",
+      motion: {"kind": "once", "animation": "feedback", "description": "仅约定页内一条线短描一次，两侧对话与纸框固定", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航、旧确认和结果验收不触发。"}
+    }
+  },
+  "survey-explore": {
+    shapes: [["path",{"d":"M10 20H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4M3 8h18"}],["circle",{"cx":"15.5","cy":"14.5","r":"4"}],["path",{"d":"m18.5 17.5 3 3"}],["path",{"d":"m14 13.2 2 2","data-semantic-icon-part":"survey-reflection"}]],
+    design: {
+      rest: "开放浏览框与留白探查镜，表达浏览中主动查阅；不混同指南针、书册或纯浏览器",
+      motion: {"kind": "once", "animation": "feedback", "description": "仅镜内短反光线轻扫并归位，浏览框、镜圈与镜柄固定", "trigger": "当前原 Survey 成果 written 且 notebookRegistered 后反馈一次；打开记录面、未知登记、导航和旧成果静止。"}
+    }
+  },
+  "note-page": {
+    shapes: [["path",{"d":"M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z"}],["path",{"d":"M14 3v6h6M8 17h6"}],["path",{"d":"M8 13h8","pathLength":"1","data-semantic-icon-part":"note-content"}]],
+    design: {
+      rest: "单份折角页与两条错长内容线；区别于 Notebook 书册集合和关系图",
+      motion: {"kind": "once", "animation": "feedback", "description": "仅正文上方一条线短描一次，纸框、折角与另一条线固定", "trigger": "本次准确资源与正文 revision 获得 written 回执后反馈；旧回执、目录、焦点与点击保存不触发。"}
+    }
+  },
   "work-writing": {
     shapes: [["path",{"d":"M4 6h8 M4 12h5"}],["path",{"d":"M9 20l1-4 9-9 3 3-9 9-4 1Z","data-semantic-icon-part":"writing-pen"}]],
     design: {
