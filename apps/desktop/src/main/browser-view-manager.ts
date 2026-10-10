@@ -2504,14 +2504,17 @@ export class BrowserViewManager {
     const boundsChanged = !entry.bounds || entry.bounds.x !== normalized.x || entry.bounds.y !== normalized.y ||
       entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
     const sizeChanged = !entry.bounds || entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
+    const selectedLease = entry.inputLeaseId ? this.presentationLeases.get(entry.inputLeaseId) : null
+    const nativeWindow = selectedLease?.window ?? this.windowForView(entry.view)
+    const previousWindow = this.windowForView(entry.view), hostChanged = previousWindow !== nativeWindow
+    // Admission can fail. Keep the original reachable geometry until its same
+    // native page has actually entered the selected host; placeView restores
+    // the original host if attachment fails.
+    if (becomingVisible || hostChanged) this.placeView(entry.view, nativeWindow)
     entry.bounds = normalized
     entry.visible = true
     entry.view.setBounds(entry.bounds)
     if (sizeChanged && entry.viewport !== 'responsive') this.applyViewport(entry)
-    const selectedLease = entry.inputLeaseId ? this.presentationLeases.get(entry.inputLeaseId) : null
-    const nativeWindow = selectedLease?.window ?? this.windowForView(entry.view)
-    const previousWindow = this.windowForView(entry.view), hostChanged = previousWindow !== nativeWindow
-    if (becomingVisible || hostChanged) this.placeView(entry.view, nativeWindow)
     entry.view.setVisible(true)
     if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
     if (hostChanged) this.notifyNativeVisibility(previousWindow)
