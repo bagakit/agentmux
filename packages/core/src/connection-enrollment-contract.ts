@@ -4,6 +4,12 @@ export type ConnectionEnrollmentReason = 'adapter-unavailable' | 'secure-storage
 /** Local implementation availability, never remote account eligibility or granted scopes. */
 export type ConnectionEnrollmentCapability = { adapterId: string; domain: string; label: string; availability: 'available' | 'unavailable' | 'unknown'; reason?: 'adapter-unavailable' | 'secure-storage-unavailable' }
 export type ConnectionEnrollmentChallenge = { verificationUrl: string; userCode?: string; expiresAt: number | null; nextPollAt: number }
+/** Observed failure stage only; never evidence that registration was not applied or may be replayed. */
+export type ConnectionEnrollmentDiagnostic =
+  | { stage: 'request'; code: 'transport-unconfirmed' | 'cancelled' }
+  | { stage: 'response'; code: 'http-status' | 'platform-error' | 'invalid-json' | 'invalid-response'; httpStatus?: number }
+  | { stage: 'challenge'; code: 'missing-verification' | 'unsafe-verification' | 'invalid-challenge' }
+  | { stage: 'secure-storage'; code: 'challenge-unconfirmed' | 'credential-unconfirmed' }
 export type ConnectionEnrollmentBeginInput = { operationId: string; connectionId: string; adapterId: string; domain: string; label: string; preset?: { name: string; description?: string } }
 export type ConnectionEnrollmentOperation = ConnectionEnrollmentBeginInput & {
   revision: number
@@ -15,6 +21,7 @@ export type ConnectionEnrollmentOperation = ConnectionEnrollmentBeginInput & {
   /** The immutable original configuration receipt, separate from current connection health. */
   configured: ConnectionOperation | null
   reason?: ConnectionEnrollmentReason
+  diagnostic?: ConnectionEnrollmentDiagnostic
 }
 export type ConnectionEnrollmentOperationInput = { operationId: string }
 export type ConnectionEnrollmentListInput = { cursor?: string; limit?: number }
