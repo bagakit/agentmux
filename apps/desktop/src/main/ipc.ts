@@ -266,6 +266,7 @@ export async function registerIpc(args: {
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
+  const contents = args.window.webContents
   const spatialState = new AgentMuxSpatialStateStore()
   const nameAudit = new NameChangeAudit(spatialState)
   args.scratchTopics.setNameAudit(nameAudit)
@@ -325,12 +326,12 @@ export async function registerIpc(args: {
         const palette = terminalPaletteForAppearance(saved.appearance, nativeTheme.shouldUseDarkColors)
         args.runtime.setTerminalViewColors({ foreground: palette.foreground, background: palette.background })
       }
-      if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
+      if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONFIG_CHANGED_CHANNEL, saved)
     }
   })
   const fileObservations = new FileObservationRegistry()
   const notesStorage = new AgentMuxNotesStorage(undefined, undefined, { beforeSourceCleanup: async changes => { await notesStorageOwner.confirmResources(await notesStorage.inspect()); for (const change of changes) await fileObservations.unobserve(change.from.workspaceId + '\0' + change.from.path) } })
-  const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notesStorage:changed', snapshot) }, notesStorage)
+  const notesStorageOwner = new NotesStorageOwner(configOwner, spatialState, snapshot => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notesStorage:changed', snapshot) }, notesStorage)
   const notesStorageReady = notesStorageOwner.initialize().catch(error => process.stderr.write('Notes directory recovery remains available: ' + String(error) + '\n'))
   const hostUpgrades = new SettingsHostsUpgradeOwner(new RemoteCoreUpgradeManager({
     stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades')
@@ -392,7 +393,7 @@ export async function registerIpc(args: {
   const browserResults = new BrowserResultArtifactStore(join(app.getPath('userData'), 'browser-results'))
   const browserUploads = new BrowserUploads(join(app.getPath('userData'), 'browser-uploads'), files, id => workspace(config, id))
   const externalBridge = new ExternalBrowserBridge(join(app.getPath('userData'), 'browser-external-targets.json'), () => {
-    if (!args.window.webContents.isDestroyed()) args.window.webContents.send('browser:targetsChanged')
+    if (!contents.isDestroyed()) contents.send('browser:targetsChanged')
   }, (browserId, navigationId) => {
     void browserUploads.releaseDocument(browserId, navigationId).catch(error => console.warn('Selected-file snapshots could not be released after the original document ended:', error))
   })
@@ -430,22 +431,22 @@ export async function registerIpc(args: {
   browsers.onNativeVisibilityChange = (_visibility, window) => nativeChrome.visibilityChanged(window)
   browsers.onNativeInput = (owner, input) => nativeChrome.forwardBrowserInput(owner, input)
   const currentMetricsWindow = (): import('@agentmux/core/control').MetricsWindow | null => {
-    if (args.window.isDestroyed() || args.window.webContents.isDestroyed() || args.window.webContents.isLoadingMainFrame()) return null
-    const generation = args.runtime.rendererGeneration(args.window.webContents)
-    return generation === null ? null : { windowId: args.window.id, webContentsId: args.window.webContents.id, generation }
+    if (args.window.isDestroyed() || contents.isDestroyed() || contents.isLoadingMainFrame()) return null
+    const generation = args.runtime.rendererGeneration(contents)
+    return generation === null ? null : { windowId: args.window.id, webContentsId: contents.id, generation }
   }
   const inputSender = (event: IpcMainInvokeEvent): import('@agentmux/core/control').InputPerformanceSender => {
     let window: import('@agentmux/core/control').MetricsWindow | null = null
-    try { if (event.sender === args.window.webContents) window = currentMetricsWindow() } catch { /* Optional observation cannot gate input. */ }
+    try { if (event.sender === contents) window = currentMetricsWindow() } catch { /* Optional observation cannot gate input. */ }
     return { webContentsId: event.sender.id, window }
   }
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
     observeDiagnostics: signal => args.runtime.performanceDiagnostics(signal),
     rendererWindow: currentMetricsWindow,
-    observeRenderer: signal => observeRendererResources(controlBridge, currentMetricsWindow, signal, () => args.window.webContents.isDestroyed() ? null : args.window.webContents.getOSProcessId()),
+    observeRenderer: signal => observeRendererResources(controlBridge, currentMetricsWindow, signal, () => contents.isDestroyed() ? null : contents.getOSProcessId()),
     processOwners: () => ({
-      rendererPids: [...args.window.webContents.mainFrame.framesInSubtree
+      rendererPids: [...contents.mainFrame.framesInSubtree
         .filter((frame) => !frame.detached && frame.osProcessId > 0)
         .map((frame) => frame.osProcessId), ...nativeChrome.resourceProcessIds()],
       browserPids: browsers.resourceProcessIds()
@@ -462,7 +463,7 @@ export async function registerIpc(args: {
       // Main focuses the window; WHERE to go inside it is the renderer's call, so the id is forwarded
       // rather than resolved here — View and Region truth belongs to the renderer.
       if (args.window.isDestroyed()) return
-      args.window.webContents.send(AGENT_ATTENTION_ACTIVATE_CHANNEL, sessionId)
+      contents.send(AGENT_ATTENTION_ACTIVATE_CHANNEL, sessionId)
     }
   })
 
@@ -470,15 +471,15 @@ export async function registerIpc(args: {
   const channels: string[] = []
   let acceptingControl = true
   const controlBridge = new DesktopControlIpcBridge({
-    isAvailable: () => acceptingControl && !args.window.isDestroyed() && !args.window.webContents.isDestroyed(),
-    sendRequest: (request) => args.window.webContents.send(CONTROL_REQUEST_CHANNEL, request),
-    sendCancellation: (cancellation) => args.window.webContents.send(CONTROL_CANCEL_CHANNEL, cancellation)
+    isAvailable: () => acceptingControl && !args.window.isDestroyed() && !contents.isDestroyed(),
+    sendRequest: (request) => contents.send(CONTROL_REQUEST_CHANNEL, request),
+    sendCancellation: (cancellation) => contents.send(CONTROL_CANCEL_CHANNEL, cancellation)
   })
-  args.window.webContents.on('render-process-gone', releaseRendererResources)
-  args.window.webContents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
+  contents.on('render-process-gone', releaseRendererResources)
+  contents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
   const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow })
   const closeMetrics = () => metrics.dispose()
-  args.window.webContents.once('destroyed', closeMetrics)
+  contents.once('destroyed', closeMetrics)
   const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {
     const result = await controlBridge.execute({ operation: 'continuous-progress.observeInput', requestId: randomUUID(), control }, signal)
     if (result.operation !== 'continuous-progress.observeInput' || result.control.kind !== 'agent' ||
@@ -489,14 +490,14 @@ export async function registerIpc(args: {
     return result.occupied
   })
   const disposeProgressChanges = args.progressLoops.subscribe((loop) => {
-    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) {
-      args.window.webContents.send(loop.calendar ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)
+    if (!args.window.isDestroyed() && !contents.isDestroyed()) {
+      contents.send(loop.calendar ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)
     }
   })
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
     // 发送者判据走 senderTrust（被行为测试直接质询）；这个频道的处置是**静默返回**而非抛，所以那半件
     // 留在这里。requestId 的形状检查不是发送者关切，也留在 shell——不塞进纯判据里。
-    if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, args.window.webContents).trusted) return
+    if (!senderTrust(CONTROL_RESPONSE_CHANNEL, event.sender, contents).trusted) return
     if (!response || typeof response.requestId !== 'string') return
     controlBridge.accept(response)
   }
@@ -520,15 +521,15 @@ export async function registerIpc(args: {
     }
 
     if (request.operation === 'inspect.mote-context') return await inspectMoteContext(request, {
-      renderer: () => args.window.webContents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
-      generation: () => args.runtime.rendererGeneration(args.window.webContents),
+      renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
+      generation: () => args.runtime.rendererGeneration(contents),
       execute: input => controlBridge.execute(input)
     })
     if (request.operation === 'inspect.client') return await inspectDesktopClient(request, {
       pid: process.pid, package: args.loadedPackage ?? null,
-      renderer: () => args.window.webContents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
-      generation: () => args.runtime.rendererGeneration(args.window.webContents),
-      storage: () => observeWorkbenchStorageAuthority(args.window.webContents.session, {
+      renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
+      generation: () => args.runtime.rendererGeneration(contents),
+      storage: () => observeWorkbenchStorageAuthority(contents.session, {
         userData: app.getPath('userData'), sessionData: app.getPath('sessionData')
       }),
       runtimes: () => args.runtime.connectedRuntimeIdentities(), execute: (input) => controlBridge.execute(input)
@@ -566,7 +567,7 @@ export async function registerIpc(args: {
   ): void => {
     channels.push(channel)
     ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
-      context: desktopNameContext(channel, event.sender, args.window.webContents, args.window.id), operationId: randomUUID()
+      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: randomUUID()
     }, () => listener(...values)))
   }
   /**
@@ -586,7 +587,7 @@ export async function registerIpc(args: {
   ): void => {
     channels.push(channel)
     ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
-      context: desktopNameContext(channel, event.sender, args.window.webContents, args.window.id), operationId: randomUUID()
+      context: desktopNameContext(channel, event.sender, contents, args.window.id), operationId: randomUUID()
     }, () => listener(event, ...values)))
   }
   /**
@@ -595,7 +596,7 @@ export async function registerIpc(args: {
    * 也没有可插早退的语句位。每个会抛的特权 handler 第一句都调它。控制响应频道不走这里（它要静默返回）。
    */
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
-    assertSenderTrusted(senderTrust(channel, event.sender, args.window.webContents))
+    assertSenderTrusted(senderTrust(channel, event.sender, contents))
 
   const acceptWorkbenchWindow = (event: Electron.IpcMainEvent, response: import('../shared/workbench-windows.js').WorkbenchWindowResponse) => args.workbenchWindows.accept(event, response)
   ipcMain.on(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow)
@@ -882,52 +883,52 @@ export async function registerIpc(args: {
   )
   handleWithEvent('files:readPreviewResource', async (event, request: import('../shared/workspace-file-preview').WorkspacePreviewResourceRequest) => {
     requireTrustedSender('files:readPreviewResource', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File preview resources require the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('File preview resources require the original application frame.')
     return await previewResources.read(request)
   })
   handleWithEvent('files:cancelPreviewResource', async (event, id: string) => {
     requireTrustedSender('files:cancelPreviewResource', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File preview resources require the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('File preview resources require the original application frame.')
     previewResources.cancel(id)
   })
   handleWithEvent('files:openHtmlPreview', async (event, workspaceId: string, path: string, content: string) => {
     requireTrustedSender('files:openHtmlPreview', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('HTML preview requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('HTML preview requires the original application frame.')
     return await htmlPreviews.open(workspace(config, workspaceId), path, content)
   })
   handleWithEvent('files:releaseHtmlPreview', async (event, id: string) => {
     requireTrustedSender('files:releaseHtmlPreview', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('HTML preview requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('HTML preview requires the original application frame.')
     htmlPreviews.release(id)
   })
   handleWithEvent('files:renderDiagram', async (event, request: import('../shared/file-diagram').FileDiagramRequest) => {
     requireTrustedSender('files:renderDiagram', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
     return await diagramPreviews.render(request)
   })
   handleWithEvent('files:cancelDiagram', async (event, id: string) => {
     requireTrustedSender('files:cancelDiagram', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
     diagramPreviews.cancel(id)
   })
   handleWithEvent('files:build', async (event, workspaceId: string, request: import('../shared/file-build').FileBuildRequest) => {
     requireTrustedSender('files:build', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     return await builds.start(workspace(config, workspaceId), request)
   })
   handleWithEvent('files:inspectBuild', async (event, id: string) => {
     requireTrustedSender('files:inspectBuild', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     return builds.inspect(id)
   })
   handleWithEvent('files:cancelBuild', async (event, id: string) => {
     requireTrustedSender('files:cancelBuild', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     return await builds.cancel(id)
   })
   handleWithEvent('files:releaseBuild', async (event, id: string) => {
     requireTrustedSender('files:releaseBuild', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    if (event.senderFrame !== contents.mainFrame) throw new Error('File build requires the original application frame.')
     await builds.release(id)
   })
   handle('files:readBookmark', async (workspaceId: string, path: string) => {
@@ -942,14 +943,14 @@ export async function registerIpc(args: {
   })
   handleWithEvent('files:write', async (event, workspaceId: string, input: WorkspaceFileWriteInput) =>
     notesStorageOwner.write(workspace(config, workspaceId), input, actual => noteFileWriter.write(actual, input,
-      Object.is(event.sender, args.window.webContents) ? { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } } : undefined))
+      Object.is(event.sender, contents) ? { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } } : undefined))
   )
   handle('files:observe', async (workspaceId: string, path: string) => {
     const key = `${workspaceId}\0${path}`
     await fileObservations.observe(key, async () => (
       await files.observe(workspace(config, workspaceId), path, () => {
-        if (args.window.webContents.isDestroyed()) return
-        args.window.webContents.send(WORKSPACE_FILE_INVALIDATED_CHANNEL, { workspaceId, path })
+        if (contents.isDestroyed()) return
+        contents.send(WORKSPACE_FILE_INVALIDATED_CHANNEL, { workspaceId, path })
       })
     ))
   })
@@ -1056,24 +1057,24 @@ export async function registerIpc(args: {
       goalVersions.set(goal.id, version)
     }
     for (const id of goalVersions.keys()) if (!retained.has(id)) { changed.push(id); goalVersions.delete(id) }
-    if (changed.length && !args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', changed)
+    if (changed.length && !args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', changed)
   })
   goalAttention = new GoalDelegationAttentionOwner(demands, args.runtime, goalDelegations, goalIds => {
-    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds)
+    if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds)
   })
   void goalAttention.start()
   goalStartResponsibility = new GoalStartResponsibilityOwner(demands, args.runtime, goalIds => {
-    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds)
+    if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds)
   })
   void goalStartResponsibility.start()
   goalResponsibility = new GoalResponsibilityOwner(demands, args.runtime,
     (goalId, context) => goalDelegations.call('goal.delegations', { goalId }, context, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } }), goalIds => {
-      if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds)
+      if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds)
     })
   void goalResponsibility.start()
   goalPatrol = new GoalPatrolOwner(demands, args.runtime,
     (goalId, context) => goalDelegations.call('goal.delegations', { goalId }, context, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } }),
-    goalIds => { if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('demands:changed', goalIds) })
+    goalIds => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('demands:changed', goalIds) })
   void goalPatrol.start()
   handleWithEvent('demands:delegation', async (event, method: 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue', input: GoalDelegationParamsMap['goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue']) => {
     requireTrustedSender('demands:delegation', event)
@@ -1144,7 +1145,7 @@ export async function registerIpc(args: {
       creationOrigin: { requesterAsSupervisor }, ...(participation ? { participation } : {}) })
   })
   handleWithEvent('demands:reconcilePmoCreation', async (event, intent: GoalPmoIntent, hostId: string, agentSessionId: string, createOperationId: string) => {
-    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    assertManualPromptSenderTrusted(event.sender, contents)
     await pmoGoal(intent)
     if (intent.creationOperationId === undefined || createOperationId !== await goalPmoOperation(intent, 'create')) throw new AgentMuxError('The original PMO creation operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
     const created = await args.runtime.agentCreation(hostId, agentSessionId)
@@ -1153,7 +1154,7 @@ export async function registerIpc(args: {
     return confirmedPmoSource(intent, created, createOperationId)
   })
   handleWithEvent('demands:reconcilePmoInput', async (event, intent: GoalPmoIntent, session: AgentSessionControl, operationId: string) => {
-    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    assertManualPromptSenderTrusted(event.sender, contents)
     await pmoGoal(intent)
     if (intent.creationOperationId === undefined || operationId !== await goalPmoOperation(intent, 'discussion')) throw new AgentMuxError('The original PMO discussion operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
     const timeline = await args.runtime.sessionTimeline(session)
@@ -1185,14 +1186,14 @@ export async function registerIpc(args: {
   handle('demands:readActivities', async (id: string) => await demands.readActivities(id))
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   const disposeToolkitIpc = registerToolkitIpc(toolkit, (channel, handler) => handleWithEvent(channel, (event, ...values) => {
-    assertToolkitSenderTrusted(event.sender, event.senderFrame, args.window.webContents, args.window.webContents.mainFrame)
+    assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
     return handler(event, ...values)
   }))
 
   handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
   handleWithEvent('notesStorage:change', async (event, input: import('@agentmux/core/notebook-store').NotesStorageChange) => { requireTrustedSender('notesStorage:change', event); return notesStorageOwner.change(input) })
   const disposeNotebook = notebookStore.subscribe(observation => {
-    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notebook:changed', observation)
+    if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('notebook:changed', observation)
   })
   const notebookActor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
   handleWithEvent('notebook:resolve', async (event, input: import('../shared/notebook-observation').NotebookResolveRequest) => {
@@ -1275,7 +1276,7 @@ export async function registerIpc(args: {
     return topicKnowledge.call(method, params)
   })
   const disposeSpatial = spatialState.subscribe(state => {
-    if(!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('spatial:changed',state)
+    if(!args.window.isDestroyed() && !contents.isDestroyed()) contents.send('spatial:changed',state)
   })
   handleWithEvent('spatial:read',async event=>{requireTrustedSender('spatial:read',event);return spatialState.readForLayout()})
   handleWithEvent('spatial:commit',async (event,input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit)=>{requireTrustedSender('spatial:commit',event);return spatialState.commit(input)})
@@ -1293,7 +1294,7 @@ export async function registerIpc(args: {
     const known = current && (tab || zone || regions.length > 0 || sessions.length > 0 ||
       (input.target.kind === 'agent-session' && displayLabel(current.graph, input.target)))
     if (!known) throw new Error('The original name target is unobserved. Keep the name and restore its original workface before retrying.')
-    const context = desktopNameContext('spatial:renameLabel', event.sender, args.window.webContents, args.window.id)
+    const context = desktopNameContext('spatial:renameLabel', event.sender, contents, args.window.id)
     const onlyRegion = regions.length === 1 ? regions[0] : undefined
     const regionTab = onlyRegion && current!.graph.tabs.find(tab => tab.tabId === onlyRegion.tabId)
     const onlySession = sessions.length === 1 ? sessions[0] : undefined
@@ -1321,15 +1322,15 @@ export async function registerIpc(args: {
   })
   handleWithEvent('ui:requestStorageFlush', async (event) => {
     requireTrustedSender('ui:requestStorageFlush', event)
-    requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(args.window.webContents.session, {
+    requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(contents.session, {
       userData: app.getPath('userData'), sessionData: app.getPath('sessionData')
     }))
     // Electron returns void: this requests flush without claiming a disk acknowledgement.
-    args.window.webContents.session.flushStorageData()
+    contents.session.flushStorageData()
   })
   handleWithEvent('ui:recordStartupFailure', (event, input: unknown) => {
     requireTrustedSender('ui:recordStartupFailure', event)
-    if (event.senderFrame !== args.window.webContents.mainFrame) return false
+    if (event.senderFrame !== contents.mainFrame) return false
     return args.onRendererStartupFailure?.(input) ?? false
   })
   handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
@@ -1345,8 +1346,8 @@ export async function registerIpc(args: {
   handleWithEvent('ui:openDefaultBrowserSettings', event => { requireTrustedSender('ui:openDefaultBrowserSettings', event); return openDefaultBrowserSettings() })
   handleWithEvent('ui:spatialLinksReady', event => {
     requireTrustedSender('ui:spatialLinksReady', event)
-    args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => args.window.webContents.send('ui:spatialLinkIssue', message))
-    args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => args.window.webContents.send('ui:spatialLinkIssue', message))
+    args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => contents.send('ui:spatialLinkIssue', message))
+    args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
   handle('ui:readClipboardText' , () => clipboard.readText())
   handle('ui:writeClipboardText', (text: string) => {
@@ -1357,7 +1358,7 @@ export async function registerIpc(args: {
     clipboard.writeImage(nativeImageFromBrowserPng(image, (png) => nativeImage.createFromBuffer(png)))
   })
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
-    await openExternalFromRenderer(event, args.window.webContents, rawUrl)
+    await openExternalFromRenderer(event, contents, rawUrl)
   })
   handleWithEvent('ui:captureScreenshot', async (event) => {
     requireTrustedSender('ui:captureScreenshot', event)
@@ -1457,9 +1458,9 @@ export async function registerIpc(args: {
   handle('sessions:nativeHistoryResource', async (input: import('../shared/contracts.js').NativeAgentHistoryResourceInput) => args.runtime.nativeAgentHistoryResource(input, config))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput, goalPmo?: GoalPmoIntent) => sessionAgentLaunchResult(input, async () => {
     try {
-      if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
       if (goalPmo) {
-        assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+        assertManualPromptSenderTrusted(event.sender, contents)
         await pmoGoal(goalPmo)
         if (goalPmo.creationOperationId !== undefined && input.createOperationId !== await goalPmoOperation(goalPmo, 'create')) throw new AgentMuxError('The original PMO creation operation changed.', 'CONTROL_REQUEST_CONFLICT')
       }
@@ -1659,22 +1660,22 @@ export async function registerIpc(args: {
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
     if ('admissionIntent' in condition) {
-      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      assertManualPromptSenderTrusted(event.sender, contents)
       if (goalContinuation || goalPmo || goalDispatch) throw new AgentMuxError('The original Goal input cannot become a new manual message.', 'CONTROL_REQUEST_CONFLICT')
       pauseUserProgress(session, 'Paused for your message.')
       return await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, authorHuman, agentMuxNote, sourceChannel)
     }
     if (goalPmo) {
-      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      assertManualPromptSenderTrusted(event.sender, contents)
       await pmoGoal(goalPmo)
       if (goalPmo.creationOperationId !== undefined && operationId !== await goalPmoOperation(goalPmo, 'discussion')) throw new AgentMuxError('The original PMO discussion operation changed.', 'CONTROL_REQUEST_CONFLICT')
     }
-    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if (authorHuman === true) {
-      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      assertManualPromptSenderTrusted(event.sender, contents)
       effectiveAuthorHuman = true
     }
-    if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     if (goalPmo || goalDispatch || goalContinuation) {
       const goalId = goalPmo?.goalId ?? goalDispatch?.goalId ?? goalContinuation!.goalId
       const original = await args.runtime.inspectGoalAttention({ hostId: session.hostId, supervisorAgentSessionId: session.agentSessionId,
@@ -1684,7 +1685,7 @@ export async function registerIpc(args: {
     }
     const submitOriginal = async () => {
       if (goalContinuation) {
-        assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+        assertManualPromptSenderTrusted(event.sender, contents)
         if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
         await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
           async (isCurrent, signal) => { await args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel) })
@@ -1694,7 +1695,7 @@ export async function registerIpc(args: {
       }
     }
     if (goalDispatch) {
-      assertManualPromptSenderTrusted(event.sender, args.window.webContents); assertGoalDispatchReference(goalDispatch)
+      assertManualPromptSenderTrusted(event.sender, contents); assertGoalDispatchReference(goalDispatch)
       if (goalPmo) throw new AgentMuxError('A PMO discussion cannot impersonate an explicit Goal Start.', 'CONTROL_REQUEST_CONFLICT')
       await goalDispatchInputs.submit(goalDispatch, session, operationId, prompt, submitOriginal, goalContinuation)
     } else await submitOriginal()
@@ -1706,7 +1707,7 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
     input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
-    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.replyQuestion(session, input, config)
   })
   handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => sessionInputWriteResult(async () => {
@@ -1715,15 +1716,15 @@ export async function registerIpc(args: {
     return receipt
   }))
   handleWithEvent('sessions:inspectInput', async (event, session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) => sessionInputOperationResult(async () => {
-    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.inspectInput(session, key)
   }))
   handleWithEvent('sessions:stopInputWaiting', async (event, session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) => sessionInputOperationResult(async () => {
-    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.stopInputWaiting(session, ref, cancelOperationId)
   }))
   handleWithEvent('sessions:rejoinInputWaiting', async (event, session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef) => sessionInputOperationResult(async () => {
-    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.rejoinInputWaiting(session, ref)
   }))
   handle('sessions:respondInteraction', async (
@@ -1743,7 +1744,7 @@ export async function registerIpc(args: {
   handle('sessions:reopen', async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
     sessionReopenResult(() => args.runtime.reopenRetiredSession(reference, expectedRetiredAt, operationId, config)))
   handleWithEvent('sessions:resume', async (event, session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) => {
-    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.resumeSession(session, prompt, operationId, config, agentMuxNote)
   })
   handle('sessions:interrupt', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you interrupted the Agent.'); await args.runtime.interrupt(session) })
@@ -2046,7 +2047,7 @@ export async function registerIpc(args: {
       catch {
         // Activation has already acted. An observation failure must not turn
         // that original receipt into a rejection or authorize replaying input.
-        try { args.window.webContents.send(NATIVE_OVERLAY_WARNING_CHANNEL, { message: 'The original Browser activation receipt is retained. Floating control refresh is unconfirmed; keep using the original Browser and reopen its floating control.' }) }
+        try { contents.send(NATIVE_OVERLAY_WARNING_CHANNEL, { message: 'The original Browser activation receipt is retained. Floating control refresh is unconfirmed; keep using the original Browser and reopen its floating control.' }) }
         catch { console.warn('Native floating control refresh observation ended after the original Browser activation.') }
       }
     }
@@ -2065,7 +2066,7 @@ export async function registerIpc(args: {
     return await browsers.restore(id, { ...input, workspaceId: verifiedWorkspaceId })
   })
   handle('browser:close', (id: string) => browsers.close(id))
-  const detach = args.runtime.attach(args.window.webContents)
+  const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
   const connectorServices = await createDesktopConnections({ directory: join(homedir(), '.agentmux', 'connectors'), encryption: safeStorage,
     publication: createPublicationConversationPort(() => args.runtime.rpcClients()),
@@ -2164,7 +2165,7 @@ export async function registerIpc(args: {
       { owner: 'toolkit', dispose: () => toolkit.dispose() },
       { owner: 'spatial-links', dispose: () => args.spatialLinks?.unavailable() },
       { owner: 'web-links', dispose: () => args.webLinks?.unavailable() },
-      { owner: 'metrics-listener', dispose: () => { args.window.webContents.off('destroyed', closeMetrics) } },
+      { owner: 'metrics-listener', dispose: () => { contents.off('destroyed', closeMetrics) } },
       { owner: 'metrics', dispose: () => metrics.dispose() },
       { owner: 'theme-bootstrap', dispose: disposeThemeBootstrap },
       { owner: 'workbench-window-listener', dispose: () => { ipcMain.removeListener(WORKBENCH_WINDOW_RESPONSE, acceptWorkbenchWindow) } },
@@ -2193,8 +2194,8 @@ export async function registerIpc(args: {
       { owner: 'file-builds', dispose: () => builds.dispose() },
       { owner: 'diagram-previews', dispose: () => diagramPreviews.dispose() },
       { owner: 'html-preview-listeners', dispose: () => {
-        args.window.webContents.off('render-process-gone', releaseRendererResources)
-        args.window.webContents.off('did-start-navigation', releaseNavigatedHtmlPreviews)
+        contents.off('render-process-gone', releaseRendererResources)
+        contents.off('did-start-navigation', releaseNavigatedHtmlPreviews)
       } },
       { owner: 'preview-resources', dispose: () => previewResources.dispose() },
       { owner: 'workspace-files', dispose: () => files.dispose() },
