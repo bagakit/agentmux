@@ -1,3 +1,4 @@
+import { ConversationLandmarkStore } from '@agentmux/core'
 import { MoteConnectionOperations } from './mote-connection-operations.js'
 import { MoteConnectionSourceOwner } from './mote-connection-source.js'
 import { goalRoleInputNote } from './goal-role-input.js'
@@ -798,6 +799,15 @@ export async function registerIpc(args: {
   handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
     await files.listFiles(workspace(config, workspaceId), path, limit)
   )
+  const conversationLandmarks = new ConversationLandmarkStore()
+  handleWithEvent('conversationLandmarks:list', (event, input: import('@agentmux/core/conversation').ConversationLandmarkQuery) => sessionObservationResult(async () => {
+    requireTrustedSender('conversationLandmarks:list', event)
+    return conversationLandmarks.list(input)
+  }))
+  handleWithEvent('conversationLandmarks:apply', (event, input: import('@agentmux/core/conversation').ConversationLandmarkWrite) => sessionObservationResult(async () => {
+    requireTrustedSender('conversationLandmarks:apply', event)
+    return conversationLandmarks.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') })
+  }))
   const titleWorkspace = (resource: import('@agentmux/core').NoteResource) => {
     const current = config.workspaces.find(item => item.id === resource.workspaceId)
     return current?.hostId === resource.hostId && current.path === resource.workspacePath ? { ...current } : undefined
@@ -2048,6 +2058,7 @@ export async function registerIpc(args: {
     moteAvatars,
 
     schedules: args.progressLoops,
+    conversationLandmarks,
     notebookStore,
     notebookObservation: notebookObservation.owner,
     goalDelegations,
