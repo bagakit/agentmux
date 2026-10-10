@@ -2,6 +2,8 @@ import type { ConversationItemRef } from './conversation.js'
 import type { ConnectionApplication } from './connections-contract.js'
 import type { RoomBindingCallContext } from './room-binding-contract.js'
 
+export type ConnectionDeliveryReference = ConversationItemRef | { hostId: string; agentSessionId: string; source: { kind: 'interaction'; runId: string; requestId: string; requestDigest: string } }
+
 export type ConnectionDeliveryState = 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'cancelled' | 'superseded'
 export type ConnectionDeliveryReceiptReason = 'effect-unconfirmed' | 'platform-rejected' | 'adapter-unavailable' | 'platform-unavailable' | 'rate-limited' | 'thread-unavailable' | 'unsupported-format'
 export type ConnectionDeliveryReason = ConnectionDeliveryReceiptReason | 'original-speech-withdrawn'
@@ -17,7 +19,7 @@ export type ConnectionDelivery = {
   sourceRevision: string
   bindingId: string
   bindingRevision: number
-  reference: ConversationItemRef
+  reference: ConnectionDeliveryReference
   target: { connectionId: string; application: ConnectionApplication; externalConversationId: string }
   effect: 'upsert' | 'withdraw'
   fragment: { ordinal: number; count: number }

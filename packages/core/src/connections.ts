@@ -19,3 +19,6 @@ export * from './connection-profile-codec.js'
 
 export type * from './connection-service-contract.js'
 export * from './connection-service-codec.js'
+
+export { parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, agentInteractionRequestDigest } from './external-author.js'
+export type { AgentExternalInteractionAuthor } from './external-author.js'
