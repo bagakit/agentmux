@@ -164,9 +164,10 @@ export class NativeOverlaySurfaces {
 
   // Native document blur precedes the sibling WebContents focus event. The containing
   // window owns departure; a current attached projection owns the original menu route.
+  // Paint readiness gates forwarded input, not membership in that same native window.
   hasProjectionInFocusedWindow(): boolean {
     return !this.disposed && !this.window.isDestroyed() && this.window.isFocused() &&
-      [...this.projections.values()].some(projection => this.current(projection) && projection.interactive && projection.view.getVisible() &&
+      [...this.projections.values()].some(projection => this.current(projection) && projection.view.getVisible() &&
         this.window.contentView.children.includes(projection.view))
   }
 
