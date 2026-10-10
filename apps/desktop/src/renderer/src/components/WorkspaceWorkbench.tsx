@@ -1,6 +1,6 @@
 import { useWorkbenchWindowRevision, workbenchWindowPlacement, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { openWorkbenchWindow } from '../lib/workbench-windows'
-import { useWorkbenchWindowDocument, useWorkbenchDocument } from '../lib/workbench-document'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -54,7 +54,7 @@ import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
 import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
-import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
+import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, workbenchBrowserWindowTarget, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -583,6 +583,7 @@ function SurfaceContent({
   const browserReleased = useBrowserSurfaceReleased(surface.regionId)
   const browserPresentation = useWorkbenchBrowserPresentation()
   const browserTargets = useContext(WorkbenchBrowserTargetsContext)
+  const independentDocument = useWorkbenchDocument() !== document
   if (isSessionSurface(surface)) {
     return (
       <SessionPane
@@ -626,13 +627,16 @@ function SurfaceContent({
     )
   }
   if (surface.kind === 'browser') {
+    const windowTarget = independentDocument ? workbenchBrowserWindowTarget(browserTargets, browserPresentation, surface.regionId) : undefined
+    const presentedTargets = windowTarget ? browserTargets.map(target => target === windowTarget
+      ? { ...target, active: browserPresentation.active, visible: nativeSurfacesVisible } : target) : browserTargets
     return (
       <BrowserPane key={surface.browserId}
         tab={surface}
         onRegionSplit={onBrowserRegionSplit}
         regionSplitSurface={browserPresentation.surface ?? (browserPresentation.survey ? 'survey' : undefined)}
         onRegionClose={onBrowserRegionClose}
-        presentations={browserTargets.flatMap(target => target.reference?.tabId === tabId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)
+        presentations={presentedTargets.flatMap(target => target.reference?.tabId === tabId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)
           ? [{ occurrence: { presentationId: workbenchBrowserStageHostId(target, surface.regionId), location: { ...target.reference, regionId: surface.regionId } },
             stageHostId: workbenchBrowserStageHostId(target, surface.regionId), visible: target.visible !== false,
             active: target.active, yieldToFocusRing: focusForPresentation(target).nativeViewYieldsToRing, target }] : [])}
@@ -641,7 +645,7 @@ function SurfaceContent({
         visible={nativeSurfacesVisible}
         released={browserReleased}
         yieldToFocusRing={focus.nativeViewYieldsToRing}
-        presentationTargetId={primaryPresentationHostId ?? browserPresentation.tabHostId}
+        presentationTargetId={windowTarget?.hostId ?? primaryPresentationHostId ?? browserPresentation.tabHostId}
         controlPanelOpen={browserPresentation.survey ? browserPresentation.controlsOpen : undefined}
         onControlConfirmation={browserPresentation.onBrowserControlConfirmation}
       />
@@ -733,12 +737,12 @@ function WorkbenchRegionSlot({ regionId }: { regionId: string }) {
 }
 function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
   useWorkbenchWindowRevision()
-  const parentWindow = useWorkbenchWindowDocument()
+  const independentDocument = useWorkbenchDocument() !== document
   const parent = useWorkbenchBrowserPresentation()
   const target = confirmedRegionTarget(regionTarget, props.tab.id, props.node.regionId)
   const homeId = `${parent.tabHostId}:region:${props.node.regionId}`
   const detached = parent.reference && workbenchWindowPlacement({ kind: 'region', displayWorkspaceId: parent.reference.displayWorkspaceId, groupId: parent.reference.groupId, tabId: props.tab.id, regionId: props.node.regionId })
-  const visible = Boolean(detached || parentWindow) || (target ? target.visible !== false : props.surfaceVisible)
+  const visible = Boolean(detached) || independentDocument || (target ? target.visible !== false : props.surfaceVisible)
   return <StableWorkbenchView kind="region" nativeRegionId={props.node.regionId} homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
       visible={visible}
       retainedRegionId={target?.retainedRegionId ?? parent.retainedRegionId}
@@ -747,7 +751,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
       onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
       projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference}
       homeNotice={target && props.surfaceVisible ? <div role="status" className="workbench-restore-notice">This Region is shown in the selected presentation. Close that presentation to return it here.</div> : undefined}>
-      <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={detached || parentWindow ? visible : target ? visible : props.nativeSurfacesVisible}
+      <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={detached || independentDocument ? visible : target ? visible : props.nativeSurfacesVisible}
         headerPortalTargetId={target?.surface === 'focus' ? null : target?.headerPortalTargetId ?? props.headerPortalTargetId} />
     </StableWorkbenchView>
 }

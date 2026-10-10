@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
-import { WorkbenchDocumentContext } from '../lib/workbench-document'
+import { WorkbenchDocumentContext, useWorkbenchDocument } from '../lib/workbench-document'
 import { registerWorkbenchHost, workbenchDocumentIdentity, useWorkbenchDocumentVisibility, type WorkbenchWindowPlacement } from '../lib/workbench-window-registry'
 import type { AppWindowTarget } from '@agentmux/core/control'
 import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
@@ -148,6 +148,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   homeNotice?: ReactNode
   children: ReactNode
 }) {
+  const parentDocument = useWorkbenchDocument()
   const [host] = useState(() => {
     const element = document.createElement('div')
     element.className = kind === 'region' ? 'retained-workbench-region' : 'retained-workbench-view'
@@ -200,7 +201,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       // View is being reparented. It need not wait in inert parking for body lookup.
       const siblingHome = kind === 'region' && targetId === null
         ? Array.from(parking.current?.parentElement?.children ?? []).find(element => element.id === destinationId) : undefined
-      const destination = windowPlacement?.destination ?? siblingHome ?? host.ownerDocument.getElementById(destinationId) ?? document.getElementById(destinationId)
+      const destination = windowPlacement?.destination ?? siblingHome ?? host.ownerDocument.getElementById(destinationId) ?? parentDocument.getElementById(destinationId) ?? document.getElementById(destinationId)
       if (!destination) return false
       if (host.parentElement !== destination) {
         // Reparenting an existing DOM host collapses Chromium's live Range.

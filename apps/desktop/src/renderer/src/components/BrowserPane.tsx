@@ -59,7 +59,8 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserWorkbenchSurface, WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
-import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation, workbenchBrowserWindowTarget, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { spatialCatalog, zoneContext } from '../lib/space-agent-control'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -262,12 +263,15 @@ function BrowserPaneContent({
   const saveBrowserBookmark = useAppStore((state) => state.saveBrowserBookmark)
   const openFile = useAppStore((state) => state.openFile)
   const primaryPresentation = useWorkbenchBrowserPresentation()
+  const independentDocument = useWorkbenchDocument() !== document
+  const windowTarget = independentDocument ? workbenchBrowserWindowTarget(presentations.map(presentation => presentation.target), primaryPresentation, tab.regionId) : undefined
+  const windowPresentation = presentations.find(presentation => presentation.target === windowTarget && presentation.visible && presentation.active)
   const sourcePresentations = useRef({ primary: primaryPresentation, targets: presentations })
   sourcePresentations.current = { primary: primaryPresentation, targets: presentations }
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   // Selection comes from the owning surface, never the first rendered occurrence.
-  const selectedPresentationId = useAppStore(state => selectedBrowserPresentationId(presentations, state))
+  const selectedPresentationId = useAppStore(state => windowPresentation?.occurrence.presentationId ?? selectedBrowserPresentationId(presentations, state))
   const media = useBrowserPresentationCapture(tab.browserId)
   const stageRef = useRef<HTMLDivElement>(null)
   // 焦点结论用 ref 承接，边界同步那条 effect 从 ref 读它而不订阅它（#545）：直接把 prop 放进那条
