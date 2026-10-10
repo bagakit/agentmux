@@ -188,6 +188,14 @@ export async function reviewPrivate(ctx) {
   assert.equal(input.outcome, 'private'); assert.deepEqual(input.entries, [])
   ctx.receipt.privateLifecycle = { releaseRetainedSameSession: true, popupInheritedAndClosed: true, closedCookies: [], newIncarnationDistinct: true, lateRetiredWriteIsolated: true, input }
 
+  if (ctx.privateCrash) {
+    ctx.setPhase('prepare-committed-normal-login-baseline')
+    const baseline = await contents(ctx, normalUrl, `(async()=>{if(!contents.session.isPersistent())throw new Error('The committed login baseline requires the exact ordinary persistent Session');
+      await contents.session.cookies.flushStore();return {webContentsId:contents.id,persistent:contents.session.isPersistent(),storagePath:contents.session.storagePath,cookieValues:(await contents.session.cookies.get({url:${quote(base)},name:'private-fixture'})).map(cookie=>cookie.value),cookieStoreFlush:'completed'};})()`)
+    assert.equal(baseline.persistent, true); assert.equal(baseline.storagePath, observations[0].storagePath); assert.deepEqual(baseline.cookieValues, [values[0]])
+    ctx.receipt.privateCrashBaseline = { ...baseline, boundary: 'Setup acknowledgement for an established normal login only. Private Sessions and the actual abrupt-exit path are unchanged; newly written cookies are not claimed immediately crash-durable.' }
+  }
+
   ctx.setPhase('private-real-persistence-and-exit')
   const before = await saved(ctx, [normal.region.browserId, retained.browserId]), bytes = await ctx.probe.cdp.evaluate("localStorage.getItem('agentmux-workbench-v1')")
   for (const secret of [firstUrl, retainedUrl, newUrl, 'private-address-input-never-persisted']) assert.ok(!bytes.includes(secret), 'Actual persisted Workbench must omit the private address and input')
