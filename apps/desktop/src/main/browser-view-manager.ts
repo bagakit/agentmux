@@ -311,6 +311,7 @@ export class BrowserViewManager {
     for (const entry of this.entries.values()) {
       for (const id of [...entry.presentationLeaseIds]) { const lease = this.presentationLeases.get(id); if (lease?.window === window) this.removePresentationLease(lease) }
       if (this.windowForView(entry.view) === window) { this.placeView(entry.view, this.window); entry.view.setVisible(false); entry.visible = false }
+      this.publishNativeCoverage(entry)
       const candidate = entry.pendingSwitch?.view
       if (candidate && this.windowForView(candidate) === window) this.placeView(candidate, this.window)
     }
@@ -475,7 +476,8 @@ export class BrowserViewManager {
       if (capture.entry.captureId === capture.id) capture.entry.captureId = null
       if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
       this.presentationCaptures.delete(capture.id)
-      this.finishPresentationCapturePreparation(capture)
+      try { this.finishPresentationCapturePreparation(capture) }
+      finally { this.publishNativeCoverage(capture.entry) }
       return
     }
     if (!['ready', 'stopped'].includes(ack.outcome) || !Array.isArray(ack.trackIds) ||
@@ -494,7 +496,8 @@ export class BrowserViewManager {
       this.presentationCaptures.delete(capture.id)
     }
     if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
-    this.finishPresentationCapturePreparation(capture)
+    try { this.finishPresentationCapturePreparation(capture) }
+    finally { this.publishNativeCoverage(capture.entry) }
   }
 
   async activatePresentation(sender: WebContents, frame: WebFrameMain | null,
@@ -596,7 +599,7 @@ export class BrowserViewManager {
     const previousLeaseId = lease.entry.inputLeaseId
     lease.entry.inputLeaseId = lease.id
     try { this.setBounds(lease.entry.id, lease.geometry.bounds) }
-    catch (error) { lease.entry.inputLeaseId = previousLeaseId; throw error }
+    catch (error) { lease.entry.inputLeaseId = previousLeaseId; this.publishNativeCoverage(lease.entry); throw error }
     if (claimFocus) lease.entry.view.webContents.focus()
     this.sendPresentation({ type: 'input-owner-changed', browserId: lease.entry.id, leaseId: lease.id })
   }
@@ -720,12 +723,14 @@ export class BrowserViewManager {
     lease.entry.presentationLeaseIds.delete(lease.id)
     if (lease.entry.inputLeaseId === lease.id) this.clearPresentationInput(lease.entry)
     if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
+    this.publishNativeCoverage(lease.entry)
   }
 
   private revokePresentationCapture(entry: BrowserEntry, reason: BrowserPresentationRevocationReason): void {
     const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
-    if (!capture || capture.revoked) return
+    if (!capture || capture.revoked) { this.publishNativeCoverage(entry); return }
     capture.revoked = true
+    this.publishNativeCoverage(entry)
     try { this.finishPresentationCapturePreparation(capture) }
     catch (error) { console.warn('Browser preview preparation cleanup failed:', error) }
     if (this.pendingPresentationCapture === capture) this.pendingPresentationCapture = null
@@ -773,6 +778,31 @@ export class BrowserViewManager {
     if (!this.window.isDestroyed() && !this.window.webContents.isDestroyed()) {
       this.window.webContents.send(BROWSER_PRESENTATION_EVENT_CHANNEL, event)
     }
+  }
+
+  /** A rendering fact derived from the existing owners, never a selection or restore intent. */
+  private publishNativeCoverage(entry: BrowserEntry): void {
+    let coverage: Extract<BrowserPresentationEvent, { type: 'native-coverage-changed' }>['coverage'] = null
+    try {
+      const lease = entry.inputLeaseId ? this.presentationLeases.get(entry.inputLeaseId) : undefined
+      const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
+      if (lease?.entry === entry && lease.geometry.visible && capture?.document === lease.document &&
+        !capture.preparingSource && capture.granted && capture.trackIds?.length && this.isPresentationCaptureCurrent(capture) &&
+        capture.source === entry.view && !lease.window.isDestroyed() &&
+        (!this.presentationWindow || this.presentationWindow(lease.windowDocument, lease.occurrence.location) === lease.window) &&
+        this.windowForView(entry.view) === lease.window && lease.window.contentView.children.includes(entry.view)) {
+        const actual = this.nativeOwner(entry.id, lease.window)?.bounds, expected = lease.geometry.bounds
+        if (actual && actual.x === expected.x && actual.y === expected.y &&
+          actual.width === expected.width && actual.height === expected.height) {
+          coverage = { leaseId: lease.id, captureId: capture.id }
+        }
+      }
+    } catch (error) {
+      // An observation failure cannot turn a healthy original page into a failed operation.
+      console.warn('Browser native coverage observation failed:', error)
+    }
+    try { this.sendPresentation({ type: 'native-coverage-changed', browserId: entry.id, coverage }) }
+    catch (error) { console.warn('Browser native coverage update failed:', error) }
   }
 
   /** Native Chrome considers only physically visible Browser frames, never Session/Run projections. */
@@ -2486,39 +2516,41 @@ export class BrowserViewManager {
   setBounds(id: string, bounds: BrowserBounds | null): void {
     const entry = this.entries.get(id)
     if (!entry) return
-    if (bounds === null) {
-      const wasVisible = entry.visible
-      entry.visible = false
-      void entry.feedback?.clear()
-      entry.view.setVisible(false)
-      if (wasVisible) this.notifyNativeVisibility(this.windowForView(entry.view))
-      return
-    }
-    // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
-    // 隐藏：矩形到了 main 还不可用，意味着上游算错了或有人绕过 renderer 直接发 IPC，隐藏会把 bug 埋掉。
-    const normalized = normalizeBrowserBounds(bounds)
-    if (!normalized) {
-      throw new Error('Browser bounds must be finite with a positive size')
-    }
-    const becomingVisible = !entry.visible
-    const boundsChanged = !entry.bounds || entry.bounds.x !== normalized.x || entry.bounds.y !== normalized.y ||
-      entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
-    const sizeChanged = !entry.bounds || entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
-    const selectedLease = entry.inputLeaseId ? this.presentationLeases.get(entry.inputLeaseId) : null
-    const nativeWindow = selectedLease?.window ?? this.windowForView(entry.view)
-    const previousWindow = this.windowForView(entry.view), hostChanged = previousWindow !== nativeWindow
-    // Admission can fail. Keep the original reachable geometry until its same
-    // native page has actually entered the selected host; placeView restores
-    // the original host if attachment fails.
-    if (becomingVisible || hostChanged) this.placeView(entry.view, nativeWindow)
-    entry.bounds = normalized
-    entry.visible = true
-    entry.view.setBounds(entry.bounds)
-    if (sizeChanged && entry.viewport !== 'responsive') this.applyViewport(entry)
-    entry.view.setVisible(true)
-    if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
-    if (hostChanged) this.notifyNativeVisibility(previousWindow)
-    if (becomingVisible || boundsChanged || hostChanged) this.notifyNativeVisibility(nativeWindow)
+    try {
+      if (bounds === null) {
+        const wasVisible = entry.visible
+        entry.visible = false
+        void entry.feedback?.clear()
+        entry.view.setVisible(false)
+        if (wasVisible) this.notifyNativeVisibility(this.windowForView(entry.view))
+        return
+      }
+      // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
+      // 隐藏：矩形到了 main 还不可用，意味着上游算错了或有人绕过 renderer 直接发 IPC，隐藏会把 bug 埋掉。
+      const normalized = normalizeBrowserBounds(bounds)
+      if (!normalized) {
+        throw new Error('Browser bounds must be finite with a positive size')
+      }
+      const becomingVisible = !entry.visible
+      const boundsChanged = !entry.bounds || entry.bounds.x !== normalized.x || entry.bounds.y !== normalized.y ||
+        entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
+      const sizeChanged = !entry.bounds || entry.bounds.width !== normalized.width || entry.bounds.height !== normalized.height
+      const selectedLease = entry.inputLeaseId ? this.presentationLeases.get(entry.inputLeaseId) : null
+      const nativeWindow = selectedLease?.window ?? this.windowForView(entry.view)
+      const previousWindow = this.windowForView(entry.view), hostChanged = previousWindow !== nativeWindow
+      // Admission can fail. Keep the original reachable geometry until its same
+      // native page has actually entered the selected host; placeView restores
+      // the original host if attachment fails.
+      if (becomingVisible || hostChanged) this.placeView(entry.view, nativeWindow)
+      entry.bounds = normalized
+      entry.visible = true
+      entry.view.setBounds(entry.bounds)
+      if (sizeChanged && entry.viewport !== 'responsive') this.applyViewport(entry)
+      entry.view.setVisible(true)
+      if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
+      if (hostChanged) this.notifyNativeVisibility(previousWindow)
+      if (becomingVisible || boundsChanged || hostChanged) this.notifyNativeVisibility(nativeWindow)
+    } finally { this.publishNativeCoverage(entry) }
   }
 
   /**
