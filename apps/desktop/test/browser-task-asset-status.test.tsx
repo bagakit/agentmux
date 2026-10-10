@@ -124,7 +124,8 @@ it('projects actual Main waiting next to the completed Journal action before ope
     expect(status.getAttribute('data-task-version')).toBe('1')
     const trigger = status.querySelector('button')!
     expect(trigger.getAttribute('aria-label')).toContain('Review profile · Waiting for human checkpoint · v1 · Check the profile · Next step 3')
-    expect(trigger.querySelector('.lucide-user-round')).not.toBeNull()
+    expect(status.querySelector('[data-icon-animation]')).toBeNull()
+    expect(trigger.querySelector('[data-semantic-icon="object.user"]')).not.toBeNull()
     expect(view.host.querySelector('.browser-trace-rail')).toBeNull()
     const menu = await openStatus(view.host)
     const review = menu.querySelector<HTMLElement>('[aria-label="Review and continue task v1"]')!
@@ -186,6 +187,8 @@ it('keeps a single completed action distinct from the actual ready cursor', asyn
   try {
     expect(view.host.querySelector('.browser-operation-status')?.getAttribute('data-phase')).toBe('waiting')
     expect(view.host.querySelector('button')?.getAttribute('aria-label')).toContain('Task ready to continue · v1 · Next step 2')
+    expect(view.host.querySelectorAll('[data-semantic-icon="status.waiting"]')).toHaveLength(1)
+    expect(view.host.querySelector('[data-icon-animation]')).toBeNull()
     expect(fixture.operation.phase).toBe('completed')
   } finally { await view.close() }
 })

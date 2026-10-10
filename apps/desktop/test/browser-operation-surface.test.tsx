@@ -223,3 +223,55 @@ describe('Browser RSI labels', () => {
     expect(formatClock(Number.NaN)).toBe('—')
   })
 })
+
+
+describe('Browser protocol wait motion in the original surfaces', () => {
+  it('animates only the exact current Agent wait and stops across original phase and control changes', async () => {
+    const host = document.createElement('div'), root = createRoot(host), stop = vi.fn(), take = vi.fn()
+    const waiting: BrowserActivityState = { operation: { ...operation, phase: 'waiting' }, control: 'agent' }
+    const original = structuredClone(waiting)
+    document.body.append(host)
+    const render = (value: BrowserActivityState) => act(async () => root.render(createElement(BrowserOperationStatus, {
+      activity: value, onStop: stop, onTakeControl: take
+    })))
+    try {
+      await render(waiting)
+      expect(host.querySelectorAll('[data-icon-animation="wait"] [data-semantic-icon="status.waiting"]')).toHaveLength(1)
+      expect(host.querySelector('button')!.getAttribute('aria-label')).toContain('Navigator · Waiting for page')
+      const transitions: BrowserActivityState[] = [
+        { operation: { ...operation, phase: 'running' }, control: 'agent' },
+        { ...waiting, control: 'human' },
+        { operation: { ...operation, phase: 'completed' }, control: 'agent' },
+        { operation: { ...operation, phase: 'indeterminate' }, control: 'agent' },
+        { operation: null, control: 'agent' }
+      ]
+      expect(transitions).toHaveLength(5)
+      for (const next of transitions) {
+        await render(next)
+        expect(host.querySelector('[data-icon-animation="wait"]')).toBeNull()
+      }
+      await render(waiting)
+      expect(host.querySelectorAll('[data-icon-animation="wait"]')).toHaveLength(1)
+      expect(waiting).toEqual(original)
+      expect(stop).not.toHaveBeenCalled()
+      expect(take).not.toHaveBeenCalled()
+    } finally { await act(async () => root.unmount()); host.remove() }
+  })
+
+  it('keeps recorded waits complete and still while retaining the original history selection', async () => {
+    const host = document.createElement('div'), root = createRoot(host), select = vi.fn()
+    const recorded = { ...operation, phase: 'waiting' as const }
+    document.body.append(host)
+    try {
+      await act(async () => root.render(createElement(BrowserOperationHistory, {
+        operations: [recorded], selectedOperationId: recorded.id, onSelect: select, onRetry: vi.fn()
+      })))
+      expect(host.querySelectorAll('[data-semantic-icon="status.waiting"]')).toHaveLength(1)
+      expect(host.querySelector('[data-icon-animation]')).toBeNull()
+      const item = host.querySelector<HTMLButtonElement>('.browser-rsi-history__item')!
+      expect(item.getAttribute('aria-pressed')).toBe('true')
+      await act(async () => item.click())
+      expect(select).toHaveBeenCalledExactlyOnceWith(recorded)
+    } finally { await act(async () => root.unmount()); host.remove() }
+  })
+})
