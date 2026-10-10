@@ -1,6 +1,7 @@
 import { ClientUiProvider, type ClientUiPlatform, type ConversationSenderDetails } from '@agentmux/client-ui'
-import { lazy, Suspense, type ReactNode } from 'react'
+import { lazy, Suspense, useMemo, type ReactNode } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
@@ -31,8 +32,8 @@ export function bindDesktopComposerFocus(target: HTMLElement, focus: () => boole
     }
     attempt()
     if (useAppStore.getState().regionCaretFocus?.nonce !== intent.nonce) return
-    observer = new MutationObserver(attempt)
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
+    observer = new (target.ownerDocument.defaultView?.MutationObserver ?? MutationObserver)(attempt)
+    observer.observe(target.ownerDocument.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
   }
   const unsubscribe = useAppStore.subscribe((state, previous) => {
     if (state.regionCaretFocus !== previous.regionCaretFocus) update()
@@ -65,6 +66,11 @@ const desktopPlatform: ClientUiPlatform = {
 }
 
 /** Electron IO, the Desktop identity surface and its workface focus policy stay in this client. */
-export function DesktopClientUiProvider({ children }: { children: ReactNode }) {
-  return <ClientUiProvider platform={desktopPlatform}>{children}</ClientUiProvider>
+export function DesktopClientUiProvider({ children, document: presentationDocument }: { children: ReactNode; document?: Document }) {
+  const contextDocument = useWorkbenchDocument()
+  const ownerDocument = presentationDocument ?? contextDocument
+  const platform = useMemo<ClientUiPlatform>(() => ({ ...desktopPlatform, ownerDocument,
+    overlayContainer: () => resolveOverlayContainer(undefined, ownerDocument)
+  }), [ownerDocument])
+  return <ClientUiProvider platform={platform}>{children}</ClientUiProvider>
 }

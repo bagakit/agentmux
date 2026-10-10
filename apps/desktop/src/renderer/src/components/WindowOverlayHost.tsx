@@ -1,4 +1,5 @@
-import { type ReactNode, useLayoutEffect, useState } from 'react'
+import { type ComponentType, type ReactNode } from 'react'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { createPortal } from 'react-dom'
 
 export const OVERLAY_LAYER_BANDS = {
@@ -22,8 +23,9 @@ const interactiveOverlay = '[role="dialog"], [role="alertdialog"], [role="menu"]
 const interactionHosts = new WeakMap<HTMLElement, HTMLElement>()
 
 function captureNativeInvoker(host: HTMLElement): void {
+  const document = host.ownerDocument
   const active = document.activeElement
-  const popover = active instanceof HTMLElement ? active.closest<HTMLElement>('[popover]') : null
+  const popover = active?.nodeType === 1 ? active.closest<HTMLElement>('[popover]') : null
   if (popover && popover !== host && !host.contains(popover) && popover.matches(':popover-open')) {
     // DOM ancestry is the native auto-popover's light-dismiss ownership. A
     // higher manual layer alone does not preserve that ancestor on pointerup.
@@ -38,12 +40,13 @@ function captureNativeInvoker(host: HTMLElement): void {
 
 /** Promote only new interactive surfaces; persistent window chrome stays painted. */
 function bindWindowOverlayTopLayer(host: HTMLElement): void {
+  const document = host.ownerDocument
   host.setAttribute('popover', 'manual')
   const active = new Set<Element>()
   const chromeEntry = (node: Element) => { const chrome = node.closest('[data-overlay-layer="window-chrome"]'); return chrome && host.contains(chrome) }
   const eligible = (node: Element) => { const closed = node.closest('[data-state="closed"]')
     return node.matches(interactiveOverlay) && (!closed || !host.contains(closed)) && !chromeEntry(node) }
-  const observer = new MutationObserver(records => {
+  const observer = new (document.defaultView?.MutationObserver ?? MutationObserver)(records => {
     let opened = false
     const admit = (node: Element) => {
       if (eligible(node) && !active.has(node)) { active.add(node); opened = true }
@@ -51,9 +54,11 @@ function bindWindowOverlayTopLayer(host: HTMLElement): void {
     for (const record of records) {
       if (record.type === 'attributes') admit(record.target as Element)
       else for (const node of record.addedNodes) {
-        if (!(node instanceof Element) || chromeEntry(node)) continue
-        admit(node)
-        for (const child of node.querySelectorAll(interactiveOverlay)) admit(child)
+        if (node.nodeType !== 1) continue
+        const element = node as Element
+        if (chromeEntry(element)) continue
+        admit(element)
+        for (const child of element.querySelectorAll(interactiveOverlay)) admit(child)
       }
     }
     for (const node of active) if (!host.contains(node) || !eligible(node)) active.delete(node)
@@ -83,7 +88,7 @@ function bindWindowOverlayTopLayer(host: HTMLElement): void {
  * This eliminates the race condition where child overlay portals resolve their
  * container during render before <WindowOverlayHost /> commits to the DOM.
  */
-function ensureWindowOverlayHost(): HTMLElement | null {
+function ensureWindowOverlayHost(document: Document = globalThis.document): HTMLElement | null {
   if (typeof document === 'undefined') return null
   // The host is a single window identity. Descendant selectors traverse retained
   // terminal content before reaching this body child on every Portal render.
@@ -100,8 +105,8 @@ function ensureWindowOverlayHost(): HTMLElement | null {
   return host
 }
 
-function ensureInteractionHost(): HTMLElement | null {
-  const root = ensureWindowOverlayHost()
+function ensureInteractionHost(document: Document = globalThis.document): HTMLElement | null {
+  const root = ensureWindowOverlayHost(document)
   if (!root) return null
   let host = interactionHosts.get(root)
   if (!host?.isConnected) {
@@ -117,9 +122,9 @@ function ensureInteractionHost(): HTMLElement | null {
   return host
 }
 
-export function getWindowOverlayHost(): HTMLElement | null {
+export function getWindowOverlayHost(document: Document = globalThis.document): HTMLElement | null {
   if (typeof document === 'undefined') return null
-  return ensureInteractionHost()
+  return ensureInteractionHost(document)
 }
 
 /**
@@ -128,10 +133,11 @@ export function getWindowOverlayHost(): HTMLElement | null {
  * never receive undefined or silently fall back to document.body.
  */
 export function resolveOverlayContainer(
-  container?: HTMLElement | Element | DocumentFragment | null
+  container?: HTMLElement | Element | DocumentFragment | null,
+  document: Document = globalThis.document
 ): HTMLElement | Element | DocumentFragment {
   if (container) return container
-  const host = ensureInteractionHost()
+  const host = ensureInteractionHost(document)
   if (!host) {
     if (typeof document !== 'undefined') {
       throw new Error(
@@ -144,11 +150,7 @@ export function resolveOverlayContainer(
 }
 
 export function useWindowOverlayHost(): HTMLElement | null {
-  const [host, setHost] = useState<HTMLElement | null>(() => ensureInteractionHost())
-  useLayoutEffect(() => {
-    setHost(ensureInteractionHost())
-  }, [])
-  return host
+  return ensureInteractionHost(useWorkbenchDocument())
 }
 
 /**
@@ -156,8 +158,9 @@ export function useWindowOverlayHost(): HTMLElement | null {
  * Idempotently adopts the synchronously created host element in document.body outside #root.
  */
 export function WindowOverlayHost({ children }: { children?: ReactNode } = {}) {
+  const document = useWorkbenchDocument()
   if (typeof document === 'undefined') return null
-  const host = ensureWindowOverlayHost()
+  const host = ensureWindowOverlayHost(document)
   if (!host) return null
   return createPortal(children ?? null, host)
 }
@@ -173,8 +176,9 @@ export function WindowOverlayPortal({
   layer = OVERLAY_LAYER_BANDS.popover,
   container
 }: WindowOverlayPortalProps) {
+  const document = useWorkbenchDocument()
   const host = useWindowOverlayHost()
-  const target = container ?? (layer === OVERLAY_LAYER_BANDS.windowChrome ? ensureWindowOverlayHost() : host)
+  const target = container ?? (layer === OVERLAY_LAYER_BANDS.windowChrome ? ensureWindowOverlayHost(document) : host)
   if (!target) return null
   return createPortal(
     <div
@@ -185,4 +189,15 @@ export function WindowOverlayPortal({
     </div>,
     target
   )
+}
+
+/** Keep the maintained Portal's behavior while targeting this original workface's document. */
+export function DocumentOverlayPortal({ component: Portal, container, ...props }: {
+  component: ComponentType<{ children?: ReactNode; container?: Element | DocumentFragment | null | undefined; forceMount?: true }>
+  children?: ReactNode
+  container?: Element | DocumentFragment | null | undefined
+  forceMount?: true
+}) {
+  const document = useWorkbenchDocument()
+  return <Portal {...props} container={resolveOverlayContainer(container, document)} />
 }

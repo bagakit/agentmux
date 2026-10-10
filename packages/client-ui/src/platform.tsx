@@ -9,6 +9,9 @@ export type MarkdownDiagramInput = { code: string; language: 'mermaid' | 'dot' |
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */
 export type ClientUiPlatform = {
+  /** Current presentation document; moving a retained editor does not replace its state. */
+  ownerDocument?: Document
+
   /** A failed copy must call reportError and return false; success alone returns true. */
   copyText(text: string, reportError: (error: unknown) => void): Promise<boolean>
   overlayContainer(): HTMLElement | Element | DocumentFragment
