@@ -104,7 +104,8 @@ it('active false and a hidden image viewport reject late bytes while retaining a
   const view = (active: boolean) => <ConversationImage active={active} interactive={false} text={pasted} path={pasted} readImage={read} />
   const { host, draw } = await render(view(false)); await reveal(); expect(read).not.toHaveBeenCalled()
   await draw(view(true)); await reveal(); expect(read).toHaveBeenCalledTimes(1)
-  await reveal(document, false); await act(async () => finish({ dataUrl: 'data:image/png;base64,late' })); expect(host.querySelector('img')).toBeNull()
+  await draw(view(false)); await act(async () => finish({ dataUrl: 'data:image/png;base64,late' })); expect(host.querySelector('img')).toBeNull()
+  await draw(view(true)); expect(read).toHaveBeenCalledTimes(1)
   await reveal(); expect(read).toHaveBeenCalledTimes(2); const image = host.querySelector('img')!; expect(image.getAttribute('src')).toBe(dataUrl)
   await draw(view(false)); await draw(view(true)); await reveal(); expect(read).toHaveBeenCalledTimes(2); expect(host.querySelector('img')).toBe(image)
 })
