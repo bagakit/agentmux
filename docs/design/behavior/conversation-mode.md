@@ -246,7 +246,7 @@ Activity、Workflow、服务窗、权限卡与 Composer 沿[共同组件合同](
 
 ## 同步原请求与耐久答复回执
 
-桌面对话、公共客户端与连接器回答同一个 Core 待答请求。作答意图保留原 typed 请求的内容与 evidence、准确 Session／Run 和稳定 operationId；显示文案与焦点不授予响应资格。同一 operationId 不能换答案或目标，多个入口竞争由原请求 owner 只接受一个有效意图。问题完成、新题到达或 Run 更换后，原操作回执仍可按原身份读取，不把当前 pending 列表当作操作历史。
+桌面对话、公共客户端与连接器在原 Provider 具备准确回复通道时，回答同一个 Core 待答请求；可回答资格与原终端出口沿[Provider 与人机交互合同](agent-capabilities-and-messaging.md#provider-与人机交互的分层收敛)，请求可读或意图已保存不代表通道存在。作答意图保留原 typed 请求的内容与 evidence、准确 Session／Run 和稳定 operationId；显示文案与焦点不授予响应资格。同一 operationId 不能换答案或目标，多个入口竞争由原请求 owner 只接受一个有效意图。问题完成、新题到达或 Run 更换后，原操作回执仍可按原身份读取，不把当前 pending 列表当作操作历史。
 
 保存、派发未知、PTY 字节接受、Hook 原连接写入、ACP adapter 确认、原生采用和准确原请求完成分别报告；没有原生采用协议事实时保持未知。丢回执先查原操作，查询不发送输入，也不因返回空值证明其他操作未发生。用户明确重试同一操作与同一答案时，沿原 recoverable Input join；可能首次施效时仍由原 Provider 目标资格核对原请求与当前 Run，已经施效时消费原去重回执。不能自动重放未知动作、换 ID 绕过原意图或把旧卡答复应用于新题；Hook 回调未知不改投另一连接。
 
