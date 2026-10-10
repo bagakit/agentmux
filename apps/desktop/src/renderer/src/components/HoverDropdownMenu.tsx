@@ -7,7 +7,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 
 // Radix owns selection, dismissal, keyboard navigation and portals. This adapter adds mouse
 // disclosure and routes portals to the window overlay host or explicit container.
-export { Separator, Label, RadioGroup, ItemIndicator } from '@radix-ui/react-dropdown-menu'
+export { Group, Separator, Label, RadioGroup, ItemIndicator } from '@radix-ui/react-dropdown-menu'
 
 export function Portal({ container, ...props }: ComponentPropsWithoutRef<typeof Menu.Portal>) {
   return <Menu.Portal container={resolveOverlayContainer(container)} {...props} />

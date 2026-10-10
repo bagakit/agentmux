@@ -177,6 +177,13 @@
 .connector-enabled input { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--green); }
 .connector-optional .settings-group-note { margin-top: var(--sp-3); }
 .connector-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.connector-service-control { display: grid; gap: var(--sp-4); }
+.connector-service-control__heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
+.connector-service-control__heading h3 { margin: 0; }
+.connector-service-control__heading > span { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-service-requests { min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
+.connector-service-requests summary { cursor: pointer; }
+.connector-service-requests > .settings-group-note { margin-top: var(--sp-3); }
 .connector-connection-state { display: grid; gap: var(--sp-2); }
 .connector-connection-state > span { color: var(--text-3); font-size: var(--fs-meta); }
 .connector-next-step { display: flex; align-items: flex-start; gap: var(--sp-4); padding-block: var(--sp-5); border-top: 1px solid var(--line-soft); }
