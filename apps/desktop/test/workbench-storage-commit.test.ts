@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
 const storageName = 'agentmux-workbench-v1'
 const sessionId = 'storage-commit-agent'
@@ -49,7 +50,7 @@ beforeEach(async () => {
   store = (await import('../src/renderer/src/store')).useAppStore
   api = (await import('../src/renderer/src/lib/api')).api
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [agent()], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => {
@@ -57,6 +58,7 @@ beforeEach(async () => {
     return () => { runtimeEvent = undefined }
   })
   vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => agent(control.run.runId))
   vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => {
     trace.push({ kind: 'commit', at: Date.now() })
@@ -74,6 +76,9 @@ afterEach(() => {
 })
 
 async function initialize(): Promise<void> {
+  // Supply the original execution before Core bootstrap; later membership reads
+  // deliberately follow durable publication rather than blocking initialize.
+  store.setState({ sessions: (await api.sessions.snapshot()).sessions })
   const tab = createWorkbenchTab('commit-tab', {
     regionId: 'commit-region', kind: 'agent', phase: 'attached', workspaceId, sessionId
   })
@@ -87,6 +92,22 @@ async function initialize(): Promise<void> {
   expect(backing.has(storageName)).toBe(true)
   trace.length = 0
   vi.mocked(api.ui.requestStorageFlush).mockClear()
+}
+
+async function recoverCanonical(): Promise<Extract<SessionSnapshot, { kind: 'agent' }>> {
+  vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [agent('old-run', 'exited')], timelines: {}, recoveryCandidates: [] })
+  await initialize()
+  const canonical = agent('canonical-run')
+  vi.spyOn(api.sessions, 'recover').mockImplementation(async () => {
+    vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [canonical], timelines: {}, recoveryCandidates: [] })
+    return { kind: 'resumed', session: canonical }
+  })
+  const recovered = await store.getState().recoverSession(sessionId, 'private-explicit-recovery')
+  expect(recovered?.control).toEqual(canonical.control)
+  await vi.advanceTimersByTimeAsync(400)
+  vi.mocked(api.ui.requestStorageFlush).mockClear()
+  vi.mocked(api.sessions.submitPrompt).mockClear()
+  return canonical
 }
 
 function saved() {
@@ -200,6 +221,7 @@ describe('actual workbench writes request native storage commit', () => {
     await initialize()
     store.persist.clearStorage()
     expect(backing.has(storageName)).toBe(false)
+    await vi.advanceTimersByTimeAsync(0)
     expect(trace.map(item => item.kind)).toEqual(['remove', 'commit'])
     store.persist.clearStorage()
     await vi.advanceTimersByTimeAsync(800)
@@ -232,49 +254,72 @@ describe('actual workbench writes request native storage commit', () => {
     expect(api.ui.requestStorageFlush).not.toHaveBeenCalled()
   })
 
-  it('keeps typed first execution awaiting its foreground request after the background commit request', async () => {
-    vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [agent('old-run', 'exited')], timelines: {}, recoveryCandidates: [] })
-    await initialize()
-    vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'resumed', session: agent('canonical-run') })
-    let resolve!: () => void
-    const gate = new Promise<void>(done => { resolve = done })
-    const submit = vi.mocked(api.sessions.submitPrompt)
-    const flush = vi.mocked(api.ui.requestStorageFlush)
-    flush.mockImplementationOnce(async () => {
-      expect(saved().state.agentSteerQueues[sessionId]).toEqual([
-        expect.objectContaining({ runId: 'canonical-run', status: 'restoring' })
+  it('submits typed input on its original canonical binding while every native flush is pending', async () => {
+    const canonical = await recoverCanonical()
+    let release!: () => void, settled = false
+    const pending = new Promise<void>(done => { release = () => { settled = true; done() } })
+    const flush = vi.mocked(api.ui.requestStorageFlush).mockReturnValue(pending)
+    try {
+      expect(store.getState().send(sessionId, 'Bound typed execution')).toBe(true)
+      const operationId = store.getState().agentSteerQueues[sessionId]![0]!.operationId
+      await vi.waitFor(() => expect(api.sessions.submitPrompt).toHaveBeenCalledOnce())
+      expect(settled).toBe(false)
+      expect(flush).toHaveBeenCalled()
+      expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
+        [canonical.control, 'Bound typed execution', operationId]
       ])
-      expect(submit).not.toHaveBeenCalled()
-    }).mockReturnValueOnce(gate)
-    expect(store.getState().send(sessionId, 'First typed execution')).toBe(true)
-    const operationId = store.getState().agentSteerQueues[sessionId]![0]!.operationId
-    const drain = store.getState().flushAgentSteerQueue(sessionId)
-    await vi.waitFor(() => expect(flush).toHaveBeenCalledTimes(2))
-    expect(submit).not.toHaveBeenCalled()
-    expect(store.getState().agentSteerQueues[sessionId]).toEqual([
-      expect.objectContaining({ operationId, runId: 'canonical-run', status: 'restoring' })
-    ])
-    resolve()
-    await drain
-    expect(submit.mock.calls.map(call => [call[0].run.runId, call[1], call[2]])).toEqual([
-      ['canonical-run', 'First typed execution', operationId]
-    ])
-    expect(store.getState().agentSteerQueues[sessionId]).toBeUndefined()
+      await store.getState().flushAgentSteerQueue(sessionId)
+      expect(store.getState().agentSteerQueues[sessionId]).toBeUndefined()
+      expect(store.getState().sessions[0]?.control).toEqual(canonical.control)
+      expect(api.sessions.submitPrompt).toHaveBeenCalledOnce()
+    } finally { release(); await vi.advanceTimersByTimeAsync(0) }
   })
 
-  it('retains a typed binding when its foreground request fails even though the background commit request succeeded', async () => {
-    vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [agent('old-run', 'exited')], timelines: {}, recoveryCandidates: [] })
-    await initialize()
-    vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'resumed', session: agent('canonical-run') })
-    vi.mocked(api.ui.requestStorageFlush).mockResolvedValueOnce(undefined)
-      .mockRejectedValueOnce(new Error('Private foreground commit rejection'))
-    expect(store.getState().send(sessionId, 'Keep exact binding')).toBe(true)
+  it('submits typed input on its original canonical binding once and shows the failed native save service window', async () => {
+    const canonical = await recoverCanonical()
+    vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('Private bound-input save rejection'))
+    expect(store.getState().send(sessionId, 'Keep exact bound input')).toBe(true)
     const operationId = store.getState().agentSteerQueues[sessionId]![0]!.operationId
     await store.getState().flushAgentSteerQueue(sessionId)
-    expect(store.getState().agentSteerQueues[sessionId]).toEqual([
-      expect.objectContaining({ operationId, runId: 'canonical-run', status: 'restoring', error: 'Private foreground commit rejection' })
+    await vi.waitFor(() => expect(store.getState().workbenchSaveWarning).toBe('Private bound-input save rejection'))
+    expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
+      [canonical.control, 'Keep exact bound input', operationId]
     ])
-    expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
-    expect(api.ui.requestStorageFlush).toHaveBeenCalledTimes(2)
+    expect(store.getState().agentSteerQueues[sessionId]).toBeUndefined()
+    expect(store.getState().sessions[0]?.control).toEqual(canonical.control)
+    const [{ createElement, act }, { createRoot }, { GlobalSystemNotices }] = await Promise.all([
+      import('react'), import('react-dom/client'), import('../src/renderer/src/components/GlobalSystemNotices')
+    ])
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createRoot(host)
+    try {
+      await act(async () => root.render(createElement(GlobalSystemNotices)))
+      expect([...host.querySelectorAll('[role="status"]')].some(node => node.textContent?.includes('Private bound-input save rejection'))).toBe(true)
+      expect(host.textContent).toContain('Retry saving')
+    } finally { await act(async () => root.unmount()); host.remove() }
+    await store.getState().flushAgentSteerQueue(sessionId)
+    expect(api.sessions.submitPrompt).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an unbound recovered queue input behind its original save fence', async () => {
+    const canonical = await recoverCanonical()
+    const operationId = 'private-unbound-intent'
+    store.setState({ agentSteerQueues: { [sessionId]: [{ operationId, text: 'Original unbound queue input',
+      promptCondition: null, status: 'queued' }] } })
+    let release!: () => void
+    const pending = new Promise<void>(done => { release = done })
+    vi.mocked(api.ui.requestStorageFlush).mockReturnValue(pending)
+    const delivery = store.getState().sendQueuedAgentSteer(sessionId, operationId)
+    try {
+      await vi.waitFor(() => expect(api.ui.requestStorageFlush).toHaveBeenCalled())
+      expect(api.sessions.submitPrompt).not.toHaveBeenCalled()
+      expect(store.getState().agentSteerQueues[sessionId]).toEqual([
+        expect.objectContaining({ operationId, text: 'Original unbound queue input', runId: canonical.control.run.runId, status: 'restoring' })
+      ])
+    } finally { release() }
+    await expect(delivery).resolves.toBe('submitted')
+    expect(vi.mocked(api.sessions.submitPrompt).mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
+      [canonical.control, 'Original unbound queue input', operationId]
+    ])
   })
 })
