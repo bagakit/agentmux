@@ -84,14 +84,20 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   const questionAnswers = kind === 'user-message' ? codexQuestionAnswers(Array.isArray(payload.content)
     ? payload.content.map(part => object(part).type === 'input_text' ? { ...object(part), type: 'text' } : part)
     : payload.content) : undefined
-  const timestamp = Date.parse(String(record.timestamp)), id = typeof payload.id === 'string' && payload.id ? payload.id : `codex-record:${start}`
+  const timestamp = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN
+  const id = typeof payload.id === 'string' && payload.id ? payload.id : `codex-record:${start}`
+  const directTurnId = typeof payload.turn_id === 'string' && payload.turn_id.length > 0 ? payload.turn_id : undefined
+  const metadata = record.type === 'response_item' && type === 'message' ? object(payload.internal_chat_message_metadata_passthrough) : {}
+  const messageTurnId = typeof metadata.turn_id === 'string' && metadata.turn_id.length > 0 ? metadata.turn_id : undefined
+  // Conflicting native facts cannot assign this original record to either turn.
+  const turnId = directTurnId && messageTurnId && directTurnId !== messageTurnId ? undefined : directTurnId ?? messageTurnId
   return { id, kind, contentParts: parts,
     ...metrics(record, payload, nativeSessionId),
     ...(kind === 'assistant-message' && payload.phase === 'final_answer' ? { messagePhase: 'final' as const }
       : kind === 'assistant-message' && payload.phase === 'commentary' ? { messagePhase: 'progress' as const } : {}),
     ...(questionAnswers === undefined ? {} : { questionAnswers }),
-    ...(typeof payload.turn_id === 'string' && payload.turn_id.length > 0 ? { turnId: payload.turn_id } : {}),
-    ...(Number.isFinite(timestamp) ? { timestamp } : {}),
+    ...(turnId === undefined ? {} : { turnId }),
+    ...(Number.isSafeInteger(timestamp) && timestamp >= 0 ? { startedAt: timestamp } : {}),
     ...(title ? { title } : kind === 'activity' ? { title: String(type ?? record.type) } : {}) }
 }
 
