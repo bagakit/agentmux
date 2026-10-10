@@ -1,3 +1,4 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -148,7 +149,7 @@ function moveClusterFocus(event: React.KeyboardEvent<HTMLDivElement>): void {
   if (event.key === 'Home') target = buttons[0]
   else if (event.key === 'End') target = buttons[buttons.length - 1]
   else {
-    const current = buttons.find((button) => button === document.activeElement)
+    const current = buttons.find((button) => button === event.currentTarget.ownerDocument.activeElement)
     const from = current ? destinationOf(current) : null
     // Nothing focused yet (or focus sits on something outside the cluster): an arrow key should still
     // give the keyboard an entry point rather than doing nothing.
@@ -255,9 +256,10 @@ export function OpenDestinationPopover({
   onSelect(destination: OpenDestination): void
   onDismiss(requestId: number): void
 }) {
+  const document = useWorkbenchDocument()
   const containerRef = useRef<HTMLDivElement>(null)
   const requestId = request?.id ?? null
-  const overlayHost = getWindowOverlayHost()
+  const overlayHost = getWindowOverlayHost(document)
   const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
   const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
 
@@ -288,7 +290,7 @@ export function OpenDestinationPopover({
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('pointerdown', onPointerDown, true)
     }
-  }, [requestId, onDismiss])
+  }, [requestId, onDismiss, document])
 
   if (!request || !overlayHost) return null
 
