@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "../src/components/AgentMarkdown.tsx",
+    "../src/components/ConversationImage.tsx",
+    "../src/components/ConversationResourceImage.tsx",
+    "../src/lib/use-visible-work.ts",
+    "../src/lib/conversation-image-references.ts",
+    "../src/platform.tsx",
+    "readonly-image-preview.test.tsx",
+    "../src/assets.d.ts"
+  ]
+}
