@@ -116,10 +116,12 @@ export async function reviewPrivate(ctx) {
   // The ordinary UI creates the initial saved Workspace/Launcher. Every Browser creation below
   // then crosses the actual public server, Renderer createControlBrowser and Main manager.
   await ctx.click(ctx.probe.cdp, ctx.selectors(`.project-rail-row[data-workspace-id="${ctx.workspaceId}"]`))
-  const catalog = await ctx.rpc.call('space.ls', { target: {} })
-  const sourceTab = catalog.catalog.tabs.find(tab => tab.workspaceId === ctx.workspaceId && catalog.catalog.regions.some(region => region.tabId === tab.tabId && region.kind === 'launcher'))
-  assert.ok(sourceTab, 'The real saved Workspace must expose its original Launcher')
-  const launcher = catalog.catalog.regions.find(region => region.tabId === sourceTab.tabId && region.kind === 'launcher')
+  const launcher = await ctx.waitFor('the original Workspace Launcher acknowledged by Core', async () => {
+    const catalog = await ctx.rpc.call('space.ls', { target: {} })
+    ctx.receipt.privateWorkspaceCatalog = catalog
+    const sourceTab = catalog.catalog.tabs.find(tab => tab.workspaceId === ctx.workspaceId && catalog.catalog.regions.some(region => region.tabId === tab.tabId && region.kind === 'launcher'))
+    return sourceTab ? catalog.catalog.regions.find(region => region.tabId === sourceTab.tabId && region.kind === 'launcher') : null
+  })
   const base = new URL(ctx.pageUrl).origin, normalUrl = base + '/normal-owner', firstUrl = base + '/private-owner-first', retainedUrl = base + '/private-owner-retained'
   const normal = await ctx.rpc.call('browser.open', { url: normalUrl, destination: { kind: 'launcher', regionId: launcher.regionId } })
   const first = await ctx.rpc.call('browser.open', { url: firstUrl, mode: 'private', destination: { kind: 'split', region: { kind: 'region', regionId: normal.region.regionId }, direction: 'right' } })
