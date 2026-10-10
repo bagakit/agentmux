@@ -83,7 +83,7 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
       setSnapshot(value); onRead(value)
       if (!edited.current) setSelection(value.saved.values?.connection ? choiceKey(value.saved.values.connection) : '')
       if (!flight.current) setReviewed(value.saved.status === 'ready')
-      setIssue(value.saved.issue ?? value.connectionIssue ?? '')
+      setIssue(value.saved.issue ?? (value.saved.values?.connection ? '' : value.connectionIssue) ?? '')
     } catch (error) { if (alive.current === token && readEpoch.current === epoch) setIssue(presentError(error)) }
     finally { if (alive.current === token && readEpoch.current === epoch) setLoading(false) }
   }
@@ -126,6 +126,7 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
   const pending = !!attempt && (!attempt.receipt || attempt.receipt.status === 'unconfirmed') || !newChoice && retained.some(item => item.phase === 'may-have-dispatched')
   const current = snapshot?.saved.values?.connection
   const currentChoice = current && snapshot && !snapshot.connectionIssue ? moteConnectionChoice(current, snapshot.connections) : null
+  const savedBotIssue = current ? snapshot?.connectionIssue ?? currentChoice?.issue : null
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
     <div className="window-overlay-host__entry" data-overlay-layer="dialog"><Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
@@ -136,13 +137,13 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
           <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close bot choice"><CloseIcon size={16} /></button></Dialog.Close>
         </header>
         <div className="mote-connection-dialog__body">
-          <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} onChoose={() => setChoosing(true)} onCurrent={() => void refresh()} />
+          {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={() => setChoosing(true)}>Review saved bot</button></section> : null}
+          <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={() => setChoosing(true)} onCurrent={() => void refresh()} />
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}
             options={[{ value: '', label: 'No default bot' }, ...snapshot.connections.map(item => ({ value: choiceKey(item.config), label: item.config.label,
               disabled: !item.config.enabled, description: item.config.application.domain + ' · ' + item.config.application.appId }))]} />
-            {current ? <p className="mote-details__hint">Saved bot: {current.application.domain} · {current.application.appId}</p> : null}
-            {currentChoice?.issue ? <p role="status" className="mote-details__hint">{currentChoice.issue}</p> : null}</details> : null}
+            {current ? <p className="mote-details__hint">Saved bot: {current.application.domain} · {current.application.appId}</p> : null}</details> : null}
           {loading ? <p role="status" className="mote-details__hint">Reading saved bots…</p> : null}
           {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
           {pending ? <p className="mote-details__hint">The previous save is still unconfirmed. Reading the current choice does not confirm that save.</p> : null}

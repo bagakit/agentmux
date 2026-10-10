@@ -18,6 +18,11 @@
 .mote-connection-dialog__requests code { overflow-wrap: anywhere; white-space: normal; }
 @media (pointer: coarse) { .mote-connection__row { min-height: 44px; } }
 .mote-bot-setup { display: grid; gap: var(--sp-3); min-width: 0; }
+.mote-bot-saved-issue { display: grid; gap: var(--sp-2); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); color: var(--text-2); overflow-wrap: anywhere; }
+.mote-bot-saved-issue strong { color: var(--text); font-weight: 500; }
+.mote-bot-saved-issue p { margin: 0; }
+.mote-bot-saved-issue code { white-space: normal; }
+.mote-bot-saved-issue button { justify-self: start; }
 .mote-bot-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .mote-bot-actions button { white-space: normal; }
 .mote-bot-avatar { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); }

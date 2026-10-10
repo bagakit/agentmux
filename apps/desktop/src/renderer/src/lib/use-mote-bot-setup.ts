@@ -89,7 +89,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       const result = request.action === 'create'
         ? parseMoteConnectionResult('space.mote.connection.create', await api.moteConnections.call('space.mote.connection.create', request.input), request.input)
         : parseMoteConnectionResult('space.mote.connection.sync', await api.moteConnections.call('space.mote.connection.sync', request.input), request.input)
-      if (token === lifetime.current && order === occurrences.current.get(id)) { accept(result); if (selection.current === id) setIssue('The original result is shown below. Any unfinished step stays with this setup.') }
+      if (token === lifetime.current && order === occurrences.current.get(id)) { accept(result); if (selection.current === id) setIssue('The original result is available. Any unfinished step stays with this setup.') }
     } catch (error) {
       if (!dispatched) {
         try { await retainMoteBotRequest({ ...request, phase: 'not-dispatched' }) } catch { /* The local request remains visible; its persistence failure is reported below. */ }
@@ -119,7 +119,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       const operation = advance ? await api.moteConnections.call('space.mote.connection.advance', { operationId: id }) : (await api.moteConnections.call('space.mote.connection.inspect', { operationId: id })).operation
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         if (operation) accept(operation)
-        if (selection.current === id) setIssue(operation ? 'The latest saved result is shown below. Unconfirmed steps are still kept with this setup.' : 'No recorded result was found. Keep the original request; this does not confirm that nothing happened.')
+        if (selection.current === id) setIssue(operation ? 'The latest saved result is available. Any unfinished step stays with this setup.' : 'No recorded result was found. Keep the original request; this does not confirm that nothing happened.')
       }
     } catch (error) { if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) setIssue(presentError(error)) }
     finally { if (advance) pending(id, false) }
