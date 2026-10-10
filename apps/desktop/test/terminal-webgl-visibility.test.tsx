@@ -7,6 +7,7 @@ import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Terminal as HeadlessTerminal } from '@xterm/headless'
+import type { IBufferRange, ISelectionSnapshot } from '@xterm/xterm'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
@@ -18,6 +19,7 @@ type FixtureTerminal = HeadlessTerminal & {
   dispose: ReturnType<typeof vi.fn>
   written: string[]
   completed: string[]
+  restoreSelection: ReturnType<typeof vi.fn>
 }
 type FixtureWebgl = {
   disposed: ReturnType<typeof vi.fn>
@@ -32,7 +34,10 @@ const fixture = vi.hoisted(() => ({
   detach: vi.fn(),
   unsubscribe: vi.fn(),
   resize: vi.fn(),
+  write: vi.fn(),
   realViewport: false,
+  selection: undefined as IBufferRange | undefined,
+  snapshot: undefined as ISelectionSnapshot | undefined,
   grid: { cols: 80, rows: 24 }
 }))
 
@@ -59,7 +64,8 @@ vi.mock('@xterm/xterm', async () => {
     onRender() { return { dispose() {} } }
     onSelectionChange() { return { dispose() {} } }
     getSelection() { return '' }
-    getSelectionPosition() { return undefined }
+    getSelectionSnapshot() { return fixture.snapshot ?? (fixture.selection ? { anchor: fixture.selection.start, active: fixture.selection.end, mode: 'normal' as const, selectAll: false } : undefined) }
+    restoreSelection = vi.fn()
     hasSelection() { return false }
     registerLinkProvider() { return { dispose() {} } }
     attachCustomKeyEventHandler() {}
@@ -98,6 +104,7 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
   attach: fixture.attach,
   detach: fixture.detach,
   resize: fixture.resize,
+  write: fixture.write,
   onEvent: (receive: (event: RuntimeEvent) => void) => {
     fixture.receive = receive
     return fixture.unsubscribe
@@ -153,6 +160,9 @@ beforeEach(() => {
   fixture.webgl.length = 0
   fixture.receive = null
   fixture.realViewport = false
+  fixture.write.mockResolvedValue(undefined)
+  fixture.selection = undefined
+  fixture.snapshot = undefined
   fixture.grid = { cols: 80, rows: 24 }
   vi.clearAllMocks()
   fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
@@ -419,3 +429,268 @@ it.each(['combined grid', 'column reflow', 'column continuation', 'narrow contin
     schedule.mockRestore(); cancel.mockRestore(); frameElement.remove()
   }
 })
+
+
+// This is the public range-adapter boundary, with actual parser/reflow/markers.
+// Browser SelectionService/content preservation is qualified separately in the
+// ordinary Electron App with trusted pointer selection, never simulated here.
+it.each(['combined short', 'hard newline', 'wrapped continuation', 'wide continuation', 'cursor continuation', 'same columns', 'trailing newline', 'reverse', 'word minimum', 'wrapped minimum', 'column'])('maps the public retained selection range through actual document reflow: %s', async mode => {
+  fixture.realViewport = true
+  const wrapped = mode === 'wrapped continuation' || mode === 'wide continuation' || mode === 'cursor continuation' || mode === 'wrapped minimum'
+  fixture.grid = { cols: wrapped ? 80 : 136, rows: 61 }
+  let currentDocument = document
+  const tree = () => <WorkbenchDocumentContext.Provider value={{ document: currentDocument, window: null }}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>
+  await act(async () => root!.render(tree()))
+  await act(async () => vi.waitFor(() => {
+    expect(fixture.terminals[0]?.completed).toContain('before ')
+    expect(fixture.terminals[0]?.cols).toBe(fixture.grid.cols)
+    expect(fixture.terminals[0]?.rows).toBe(fixture.grid.rows)
+    expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)
+  }))
+  const terminal = fixture.terminals[0]!
+  const history = mode === 'cursor continuation'
+    ? 'short original line\r\n'.repeat(100) + 'A'.repeat(80) + 'B'.repeat(40)
+    : mode === 'wide continuation'
+    ? 'short original line\r\n'.repeat(100) + 'w'.repeat(79) + '界' + 'tail'.repeat(25) + '\r\n' + 'following original line\r\n'.repeat(200)
+    : Array.from({ length: 300 }, (_, index) => `HISTORY_${String(index).padStart(4, '0')} ${wrapped ? 'x'.repeat(110) : ''}\r\n`).join('')
+  await hiddenOutput(history, 7)
+  terminal.scrollToLine(mode === 'wide continuation' ? 101 : 113)
+  fixture.selection = mode === 'cursor continuation'
+    ? { start: { x: 2, y: 101 }, end: { x: 20, y: 101 } }
+    : mode === 'wide continuation'
+    ? { start: { x: 0, y: 101 }, end: { x: 2, y: 101 } }
+    : mode === 'wrapped continuation'
+      ? { start: { x: 2, y: 113 }, end: { x: 20, y: 113 } }
+      : { start: { x: 1, y: 115 }, end: { x: 14, y: mode === 'hard newline' ? 116 : 115 } }
+  if (mode === 'wrapped minimum') fixture.snapshot = { anchor: { x: 76, y: 112 }, active: { x: 2, y: 112 }, minimumEnd: { x: 6, y: 113 }, mode: 'word', selectAll: false }
+  if (mode === 'trailing newline') fixture.snapshot = { anchor: { x: 1, y: 115 }, active: { x: 0, y: 116 }, mode: 'normal', selectAll: false }
+  if (mode === 'reverse') fixture.snapshot = { anchor: { x: 14, y: 116 }, active: { x: 1, y: 115 }, mode: 'normal', selectAll: false }
+  if (mode === 'word minimum') fixture.snapshot = { anchor: { x: 1, y: 115 }, active: { x: 1, y: 116 }, minimumEnd: { x: 14, y: 115 }, mode: 'word', selectAll: false }
+  if (mode === 'column') fixture.snapshot = { anchor: { x: 14, y: 116 }, active: { x: 1, y: 115 }, mode: 'column', selectAll: false }
+  const frameElement = document.createElement('iframe'); document.body.append(frameElement)
+  const child = frameElement.contentDocument!, queued = new Map<number, FrameRequestCallback>(); let frameId = 0
+  const schedule = vi.spyOn(child.defaultView!, 'requestAnimationFrame').mockImplementation(callback => { const id = ++frameId; queued.set(id, callback); return id })
+  const cancel = vi.spyOn(child.defaultView!, 'cancelAnimationFrame').mockImplementation(id => { queued.delete(id) })
+  const flushFrame = async () => { await act(async () => { const callbacks = [...queued.values()]; queued.clear(); for (const callback of callbacks) callback(0) }) }
+  try {
+    child.body.append(child.adoptNode(rootContainer)); currentDocument = child
+    await act(async () => root!.render(tree()))
+    fixture.grid = { cols: mode === 'wide continuation' ? 40 : mode === 'wrapped continuation' || mode === 'cursor continuation' || mode === 'wrapped minimum' ? 160 : mode === 'same columns' ? 136 : 157, rows: 54 }
+    await flushFrame(); await flushFrame()
+    expect({ cols: terminal.cols, rows: terminal.rows }).toEqual(fixture.grid)
+    const expected = mode === 'cursor continuation' ? [{ x: 2, y: 101 }, { x: 20, y: 101 }] : mode === 'wide continuation' ? [{ x: 0, y: 102 }, { x: 2, y: 102 }] : mode === 'wrapped continuation' ? [{ x: 82, y: 56 }, { x: 100, y: 56 }] : [{ x: 1, y: 115 }, { x: 14, y: mode === 'hard newline' ? 116 : 115 }]
+    expect(terminal.restoreSelection).toHaveBeenLastCalledWith((mode === 'wrapped minimum' ? { anchor: { x: 76, y: 56 }, active: { x: 2, y: 56 }, minimumEnd: { x: 86, y: 56 }, mode: 'word', selectAll: false } : fixture.snapshot) ?? { anchor: expected[0], active: expected[1], mode: 'normal', selectAll: false })
+    expect(fixture.terminals).toEqual([terminal]); expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+    expect(fixture.detach).not.toHaveBeenCalled(); expect(terminal.dispose).not.toHaveBeenCalled()
+  } finally {
+    await act(async () => root!.unmount()); root = null
+    schedule.mockRestore(); cancel.mockRestore(); frameElement.remove()
+  }
+})
+
+it.each(['whole tail', 'wide partial tail', 'blank tail'])('restores retained native endpoints after wrapped prefix trimming: %s', async mode => {
+ fixture.realViewport=true; fixture.grid={cols:80,rows:61}; let currentDocument=document;
+ const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>;
+ await act(async()=>root!.render(tree()));
+ await act(async()=>vi.waitFor(()=>{expect(fixture.terminals[0]?.completed).toContain('before ');expect(fixture.terminals[0]?.cols).toBe(80);expect(fixture.terminals[0]?.rows).toBe(61);expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)}));
+ const terminal=fixture.terminals[0]!;
+ await hiddenOutput('\r\u001b[2K'+'A'.repeat(1200)+'SELECTED'+(mode === 'whole tail' ? 'A'.repeat(392) : mode === 'blank tail' ? 'A'.repeat(342) : 'A'.repeat(376) + '界 ')+'\r\n'+'short\r\n'.repeat(5040),7);
+ const y=15;
+ fixture.selection={start:{x:0,y},end:mode === 'blank tail' ? {x:70,y:19} : {x:8,y}};
+ expect(terminal.buffer.active.getLine(y)?.translateToString(true,0,8)).toBe('SELECTED');
+ const frameElement=document.createElement('iframe');document.body.append(frameElement);
+ const child=frameElement.contentDocument!,queued=new Map<number,FrameRequestCallback>();let frameId=0;
+ const schedule=vi.spyOn(child.defaultView!,'requestAnimationFrame').mockImplementation(callback=>{const id=++frameId;queued.set(id,callback);return id});
+ const cancel=vi.spyOn(child.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ const flushFrame=async()=>{await act(async()=>{const callbacks=[...queued.values()];queued.clear();for(const callback of callbacks)callback(0)})};
+ try{
+  child.body.append(child.adoptNode(rootContainer));currentDocument=child;await act(async()=>root!.render(tree()));fixture.grid={cols:40,rows:54};await flushFrame();await flushFrame();
+  expect({cols:terminal.cols,rows:terminal.rows}).toEqual(fixture.grid);
+  const retainedRow = mode === 'blank tail' ? 4 : 3;
+  expect(terminal.buffer.active.getLine(retainedRow)?.translateToString(true,0,8),'selected original cells still retained').toBe('SELECTED');
+  const calls=terminal.restoreSelection.mock.calls;expect(calls.length,'retained range must be restored').toBeGreaterThan(0);
+  const snapshot=calls.at(-1)![0] as ISelectionSnapshot;
+  expect(snapshot).toEqual({anchor:{x:0,y:retainedRow},active:mode === 'blank tail' ? {x:40,y:12} : {x:8,y:retainedRow},mode:'normal',selectAll:false});
+  expect(terminal.buffer.active.getLine(snapshot.anchor.y)?.translateToString(true,snapshot.anchor.x,snapshot.anchor.x + 8),'selected retained content').toBe('SELECTED');
+  expect(fixture.terminals).toEqual([terminal]);expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled();
+ }finally{await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+});
+
+
+it.each(['forward', 'reverse', 'column'])('clips only the discarded end of a native partial selection and keeps direction: %s', async direction => {
+  const reverse = direction === 'reverse'
+  const mode = direction === 'column' ? 'column' : 'normal'
+  fixture.realViewport = true
+  fixture.grid = { cols: 80, rows: 61 }
+  let currentDocument = document
+  const tree = () => <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>
+  await act(async () => root!.render(tree()))
+  await act(async () => vi.waitFor(() => expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)))
+  const terminal = fixture.terminals[0]!
+  await hiddenOutput('\r\u001b[2K' + Array.from({length: 5100}, (_, index) => `ROW${String(index).padStart(4,'0')}\r\n`).join(''), 7)
+  fixture.snapshot = { anchor: reverse ? {x:5,y:10} : {x:direction === 'column' ? 5 : 0,y:0}, active: reverse ? {x:0,y:0} : {x:direction === 'column' ? 10 : 5,y:10}, mode, selectAll:false }
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const child = frame.contentDocument!, queued = new Map<number, FrameRequestCallback>(); let nextFrame = 0
+  const schedule = vi.spyOn(child.defaultView!, 'requestAnimationFrame').mockImplementation(callback => { queued.set(++nextFrame, callback); return nextFrame })
+  const cancel = vi.spyOn(child.defaultView!, 'cancelAnimationFrame').mockImplementation(id => { queued.delete(id) })
+  child.body.append(child.adoptNode(rootContainer)); currentDocument = child
+  await act(async () => root!.render(tree()))
+  fixture.grid = { cols:80, rows:54 }
+  for (let i = 0; i < 2; i += 1) await act(async () => { const callbacks = [...queued.values()]; queued.clear(); callbacks.forEach(callback => callback(0)) })
+  expect({cols:terminal.cols,rows:terminal.rows}).toEqual(fixture.grid)
+  expect(terminal.restoreSelection).toHaveBeenLastCalledWith({anchor:reverse ? {x:5,y:3} : {x:0,y:0},active:reverse ? {x:0,y:0} : {x:direction === 'column' ? 10 : 5,y:3},mode,selectAll:false})
+  expect(fixture.terminals).toEqual([terminal]); expect(fixture.detach).not.toHaveBeenCalled()
+  await act(async () => root!.unmount()); root = null
+  schedule.mockRestore(); cancel.mockRestore(); frame.remove()
+})
+
+it.each(['retained rows', 'top trimmed'])('restores native alternate selection from actual synchronous cursor movement: %s',async mode=>{
+ fixture.realViewport=true;fixture.grid={cols:80,rows:61};let currentDocument=document;
+ const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>;
+ await act(async()=>root!.render(tree()));await act(async()=>vi.waitFor(()=>{expect(fixture.terminals[0]?.cols).toBe(80);expect(fixture.terminals[0]?.rows).toBe(61);expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)}));
+ const terminal=fixture.terminals[0]!;
+ await hiddenOutput('\u001b[?1049h'+Array.from({length:20},(_,i)=>'ALT_'+String(i).padStart(4,'0')+'\r\n').join('')+(mode === 'top trimmed' ? '\u001b[61;1H' : ''),7);
+ expect(terminal.buffer.active.type).toBe('alternate');expect(terminal.buffer.active.getLine(10)?.translateToString(true)).toBe('ALT_0010');expect(terminal.buffer.active.getLine(11)?.translateToString(true)).toBe('ALT_0011');
+ fixture.selection={start:{x:1,y:10},end:{x:8,y:11}};
+ const frameElement=document.createElement('iframe');document.body.append(frameElement);const child=frameElement.contentDocument!,queued=new Map<number,FrameRequestCallback>();let id=0;
+ const schedule=vi.spyOn(child.defaultView!,'requestAnimationFrame').mockImplementation(fn=>{queued.set(++id,fn);return id});const cancel=vi.spyOn(child.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ const flush=async()=>act(async()=>{const all=[...queued.values()];queued.clear();for(const fn of all)fn(0)});
+ try{
+ child.body.append(child.adoptNode(rootContainer));currentDocument=child;await act(async()=>root!.render(tree()));fixture.grid={cols:100,rows:54};await flush();await flush();
+ expect({cols:terminal.cols,rows:terminal.rows}).toEqual(fixture.grid);expect(terminal.buffer.active.type).toBe('alternate');
+ const first = mode === 'top trimmed' ? 3 : 10;
+ expect(terminal.buffer.active.getLine(first)?.translateToString(true)).toBe('ALT_0010');expect(terminal.buffer.active.getLine(first+1)?.translateToString(true)).toBe('ALT_0011');
+ expect(terminal.restoreSelection,'retained native alt-buffer range is restored').toHaveBeenLastCalledWith({anchor:{x:1,y:first},active:{x:8,y:first+1},mode:'normal',selectAll:false});
+ expect(fixture.terminals).toEqual([terminal]);expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled();
+ }finally{await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+});
+
+it('does not invent a row before a fully evicted wrapped group and keeps healthy input', async () => {
+ fixture.realViewport=true; fixture.grid={cols:80,rows:61}; let currentDocument=document;
+ const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>;
+ await act(async()=>root!.render(tree()));
+ await act(async()=>vi.waitFor(()=>{expect(fixture.terminals[0]?.completed).toContain('before ');expect(fixture.terminals[0]?.cols).toBe(80);expect(fixture.terminals[0]?.rows).toBe(61);expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)}));
+ const terminal=fixture.terminals[0]!;
+ await hiddenOutput('\r\u001b[2K'+'A'.repeat(160)+'\r\n'+'short\r\n'.repeat(5053),7);
+ terminal.scrollToLine(1);
+ fixture.snapshot={anchor:{x:79,y:1},active:{x:80,y:1},mode:'normal',selectAll:false};
+ expect(terminal.buffer.active.getLine(1)?.translateToString(true)).toBe('A'.repeat(80));
+ const frameElement=document.createElement('iframe');document.body.append(frameElement);
+ const child=frameElement.contentDocument!,queued=new Map<number,FrameRequestCallback>();let frameId=0;
+ const schedule=vi.spyOn(child.defaultView!,'requestAnimationFrame').mockImplementation(callback=>{const id=++frameId;queued.set(id,callback);return id});
+ const cancel=vi.spyOn(child.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ const flushFrame=async()=>{await act(async()=>{const callbacks=[...queued.values()];queued.clear();for(const callback of callbacks)callback(0)})};
+ try{
+  child.body.append(child.adoptNode(rootContainer));currentDocument=child;await act(async()=>root!.render(tree()));fixture.grid={cols:40,rows:54};await flushFrame();await flushFrame();
+  expect({cols:terminal.cols,rows:terminal.rows}).toEqual(fixture.grid);
+  expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('short');
+  expect(terminal.buffer.active.viewportY,'evicted original reading resumes at first retained row').toBe(0);
+  const snapshot=terminal.restoreSelection.mock.calls.at(-1)![0] as ISelectionSnapshot;
+  expect(snapshot).toEqual({anchor:{x:0,y:0},active:{x:0,y:0},mode:'normal',selectAll:false});
+  expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({liveReady:true,acceptsInput:true});
+  terminal.input('HEALTHY_AFTER_TRIM',true);
+  expect(fixture.write).toHaveBeenCalledWith(session.control,'HEALTHY_AFTER_TRIM','terminal-protocol',expect.anything());
+  expect(fixture.terminals).toEqual([terminal]);expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled();
+ }finally{await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+});
+
+
+it('keeps native alternate physical cells and minimum length through narrowing and return',async()=>{
+ fixture.realViewport=true;fixture.grid={cols:80,rows:61};let currentDocument=document;
+ const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>;
+ await act(async()=>root!.render(tree()));await act(async()=>vi.waitFor(()=>{expect(fixture.terminals[0]?.cols).toBe(80);expect(fixture.terminals[0]?.rows).toBe(61);expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)}));
+ const terminal=fixture.terminals[0]!;
+ await hiddenOutput('\u001b[?1049h\r'+Array.from({length:78},(_,index)=>String.fromCharCode(65+index%26)).join(''),7);
+ expect(terminal.buffer.active.getLine(0)?.translateToString(true,60,65)).toBe('IJKLM');
+ fixture.snapshot={anchor:{x:60,y:0},minimumEnd:{x:65,y:0},mode:'normal',selectAll:false};
+ const frameElement=document.createElement('iframe');document.body.append(frameElement);const child=frameElement.contentDocument!,queued=new Map<number,FrameRequestCallback>();let id=0;
+ const schedule=vi.spyOn(child.defaultView!,'requestAnimationFrame').mockImplementation(fn=>{queued.set(++id,fn);return id});const cancel=vi.spyOn(child.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ const flush=async()=>act(async()=>{const all=[...queued.values()];queued.clear();for(const fn of all)fn(0)});
+ try{
+ child.body.append(rootContainer);currentDocument=child;await act(async()=>root!.render(tree()));fixture.grid={cols:40,rows:54};await flush();await flush();
+ expect({cols:terminal.cols,rows:terminal.rows}).toEqual(fixture.grid);expect(terminal.buffer.active.type).toBe('alternate');
+ expect(terminal.buffer.active.getLine(0)?.length).toBe(80);
+ const narrowed: ISelectionSnapshot={anchor:{x:60,y:0},minimumEnd:{x:25,y:1},mode:'normal',selectAll:false};
+ expect(terminal.restoreSelection.mock.calls.length,'the retained native selection is restored').toBeGreaterThan(0);
+ const sent=terminal.restoreSelection.mock.calls.at(-1)![0] as ISelectionSnapshot;
+ expect(sent.anchor).toEqual({x:60,y:0}); expect(sent.mode).toBe('normal');
+ expect((sent.minimumEnd!.y-sent.anchor.y)*40+sent.minimumEnd!.x-sent.anchor.x).toBe(5);
+ // The actual native getter encodes its unchanged five-cell minimum in the
+ // narrower grid. That encoding is metadata, not a new physical content row.
+ fixture.snapshot=narrowed;
+ const mainSchedule=vi.spyOn(document.defaultView!,'requestAnimationFrame').mockImplementation(fn=>{queued.set(++id,fn);return id});
+ const mainCancel=vi.spyOn(document.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ try{
+ document.body.append(rootContainer);currentDocument=document;
+ await act(async()=>root!.render(tree()));fixture.grid={cols:80,rows:61};await flush();await flush();
+ const returned=terminal.restoreSelection.mock.calls.at(-1)![0] as ISelectionSnapshot;
+ expect(returned.anchor).toEqual({x:60,y:0}); expect(returned.mode).toBe('normal');
+ expect((returned.minimumEnd!.y-returned.anchor.y)*80+returned.minimumEnd!.x-returned.anchor.x).toBe(5);
+ expect(terminal.buffer.active.getLine(0)?.translateToString(true,60,65)).toBe('IJKLM');
+ }finally{mainSchedule.mockRestore();mainCancel.mockRestore()}
+ expect(fixture.terminals).toEqual([terminal]);expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled();
+ }finally{await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+});
+
+
+it('keeps the native cursor-group word minimum length through narrowing and return',async()=>{
+ fixture.realViewport=true;fixture.grid={cols:80,rows:61};let currentDocument=document;
+ const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>;
+ await act(async()=>root!.render(tree()));await act(async()=>vi.waitFor(()=>{expect(fixture.terminals[0]?.cols).toBe(80);expect(fixture.terminals[0]?.rows).toBe(61);expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)}));
+ const terminal=fixture.terminals[0]!;
+ await hiddenOutput('\r\u001b[2K'+'short original line\r\n'.repeat(100)+'A'.repeat(37)+' WORD5 '+'A'.repeat(36)+'B'.repeat(40),7);
+ expect(terminal.buffer.active.getLine(100)?.translateToString(true,38,43)).toBe('WORD5');
+ fixture.snapshot={anchor:{x:38,y:100},minimumEnd:{x:43,y:100},mode:'word',selectAll:false};
+ const frameElement=document.createElement('iframe');document.body.append(frameElement);const child=frameElement.contentDocument!,queued=new Map<number,FrameRequestCallback>();let id=0;
+ const schedule=vi.spyOn(child.defaultView!,'requestAnimationFrame').mockImplementation(fn=>{queued.set(++id,fn);return id});const cancel=vi.spyOn(child.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ const flush=async()=>act(async()=>{const all=[...queued.values()];queued.clear();for(const fn of all)fn(0)});
+ try{
+ child.body.append(rootContainer);currentDocument=child;await act(async()=>root!.render(tree()));fixture.grid={cols:40,rows:54};await flush();await flush();
+ expect({cols:terminal.cols,rows:terminal.rows}).toEqual(fixture.grid);expect(terminal.buffer.active.type).toBe('normal');
+ expect(terminal.buffer.active.getLine(100)?.translateToString(true,38,40)).toBe('WO');
+ expect(terminal.restoreSelection.mock.calls.length,'the retained native selection is restored').toBeGreaterThan(0);
+ const sent=terminal.restoreSelection.mock.calls.at(-1)![0] as ISelectionSnapshot;
+ expect(sent.anchor).toEqual({x:38,y:100}); expect(sent.mode).toBe('word');
+ expect((sent.minimumEnd!.y-sent.anchor.y)*40+sent.minimumEnd!.x-sent.anchor.x).toBe(5);
+ const narrowed: ISelectionSnapshot={anchor:{x:38,y:100},minimumEnd:{x:3,y:101},mode:'word',selectAll:false};
+ // The actual native getter encodes its unchanged five-cell minimum in the
+ // narrower grid. That encoding is metadata, not a new physical content row.
+ fixture.snapshot=narrowed;
+ const mainSchedule=vi.spyOn(document.defaultView!,'requestAnimationFrame').mockImplementation(fn=>{queued.set(++id,fn);return id});
+ const mainCancel=vi.spyOn(document.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ try{
+ document.body.append(rootContainer);currentDocument=document;
+ await act(async()=>root!.render(tree()));fixture.grid={cols:80,rows:61};await flush();await flush();
+ const returned=terminal.restoreSelection.mock.calls.at(-1)![0] as ISelectionSnapshot;
+ expect(returned.anchor).toEqual({x:38,y:100}); expect(returned.mode).toBe('word');
+ expect((returned.minimumEnd!.y-returned.anchor.y)*80+returned.minimumEnd!.x-returned.anchor.x).toBe(5);
+ // Native shrinking already discarded the tail; never manufacture WORD5 back.
+ expect(terminal.buffer.active.getLine(100)?.translateToString(true,38,43)).toBe('WO');
+ }finally{mainSchedule.mockRestore();mainCancel.mockRestore()}
+ expect(fixture.terminals).toEqual([terminal]);expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled();
+ }finally{await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+});
+
+
+it('does not submit discarded cursor-group cells as a restored range or stop healthy input',async()=>{
+ fixture.realViewport=true;fixture.grid={cols:80,rows:61};let currentDocument=document;
+ const tree=()=> <WorkbenchDocumentContext.Provider value={{document:currentDocument,window:null}}><TerminalView session={session} themeId="graphite" interactiveResize={false} visible autoFocus={false} linkOrigin={linkOrigin}/></WorkbenchDocumentContext.Provider>;
+ await act(async()=>root!.render(tree()));await act(async()=>vi.waitFor(()=>{expect(fixture.terminals[0]?.cols).toBe(80);expect(fixture.terminals[0]?.rows).toBe(61);expect(rendererPerformance.snapshot().terminals[0]?.liveReady).toBe(true)}));
+ const terminal=fixture.terminals[0]!;
+ await hiddenOutput('\r\u001b[2K'+'short original line\r\n'.repeat(100)+'A'.repeat(37)+' WORD5 '+'A'.repeat(36)+'B'.repeat(40),7);
+ expect(terminal.buffer.active.getLine(100)?.translateToString(true,60,65)).toBe('AAAAA');
+ fixture.snapshot={anchor:{x:60,y:100},active:{x:65,y:100},mode:'normal',selectAll:false};
+ const frameElement=document.createElement('iframe');document.body.append(frameElement);const child=frameElement.contentDocument!,queued=new Map<number,FrameRequestCallback>();let id=0;
+ const schedule=vi.spyOn(child.defaultView!,'requestAnimationFrame').mockImplementation(fn=>{queued.set(++id,fn);return id});const cancel=vi.spyOn(child.defaultView!,'cancelAnimationFrame').mockImplementation(id=>{queued.delete(id)});
+ const flush=async()=>act(async()=>{const all=[...queued.values()];queued.clear();for(const fn of all)fn(0)});
+ try{
+ child.body.append(rootContainer);currentDocument=child;await act(async()=>root!.render(tree()));terminal.restoreSelection.mockClear();fixture.grid={cols:40,rows:54};await flush();await flush();
+ expect({cols:terminal.cols,rows:terminal.rows}).toEqual(fixture.grid);expect(terminal.buffer.active.type).toBe('normal');
+ expect(terminal.buffer.active.getLine(100)?.length).toBe(40);
+ expect(terminal.buffer.active.getLine(100)?.getCell(60)).toBeUndefined();
+ expect(terminal.restoreSelection).not.toHaveBeenCalled();
+ terminal.input('HEALTHY_AFTER_CELL_TRIM',true);
+ expect(fixture.write).toHaveBeenCalledWith(session.control,'HEALTHY_AFTER_CELL_TRIM','terminal-protocol',expect.anything());
+ expect(fixture.terminals).toEqual([terminal]);expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled();
+ }finally{await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
+});
