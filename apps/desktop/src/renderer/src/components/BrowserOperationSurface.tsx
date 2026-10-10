@@ -339,7 +339,7 @@ function replayOutcomeLabel(kind: Exclude<BrowserScriptRunReport['outcome']['kin
 function PhaseGlyph({ phase, current = false }: { phase: BrowserOperationPhase; current?: boolean }) {
   if (phase === 'running') return <SemanticIcon name="status.browser-running" animation={current ? 'execute' : 'none'} size={13} />
   if (phase === 'preparing') return <ThemeStatusLoadingIcon animation={current ? 'spin' : 'none'} size={13} aria-hidden="true" />
-  if (phase === 'waiting') return <ThemeStatusWaitingIcon size={13} aria-hidden="true" />
+  if (phase === 'waiting') return <ThemeStatusWaitingIcon animation={current ? 'wait' : 'none'} size={13} aria-hidden="true" />
   if (phase === 'human') return <ThemeObjectUserIcon size={13} aria-hidden="true" />
   if (phase === 'completed') return <ThemeStatusCompletedIcon size={13} aria-hidden="true" />
   if (phase === 'failed') return <ThemeStatusFailedIcon size={13} aria-hidden="true" />
