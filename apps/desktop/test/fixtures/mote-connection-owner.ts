@@ -247,6 +247,11 @@ export async function moteConnectionOwner(
   const server = new AgentMuxControlServer({
     socketPath: join(root, 'owner.sock'),
     files: publicFiles,
+    moteAvatars: avatars,
+    execute: request => {
+      if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') return preferences.execute(request)
+      throw new Error('Only original Mote preference requests are routed by this fixture')
+    },
     moteConnections: parent,
     connections: connections.connections,
     coreClients: () => {
