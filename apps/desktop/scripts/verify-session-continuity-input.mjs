@@ -18,6 +18,7 @@ const mutations = [
   ['postlaunch-known-unknown', 'only inspects an existing unknown deferred input'],
   ['postlaunch-same-op', 'rejoins a committed unclaimed deferred packet'],
   ['postlaunch-lost-start', 'continues the original post-launch-only input after a lost Start ACK'],
+  ['postlaunch-not-applied', 'projects only the original exact deferred refusal as not-applied'],
   ['launch-reconcile-history', 'reconciles an applied Start with lost ACK'],
   ['launch-mailbox-carrier', 'carrier through the real mailbox consumer'],
   ['launch-history-key', 'reads the original launch key through the real public RPC input.inspect wire'],

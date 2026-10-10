@@ -289,6 +289,28 @@ it('only inspects an existing unknown deferred input and never enters its submis
   } finally { await h.close() }
 })
 
+it('projects only the original exact deferred refusal as not-applied without submitting again', async () => {
+  const h = await fixture({ postLaunch: true })
+  try {
+    h.core.kernel.input = vi.fn(async () => { throw new AgentMuxError('Original payload rejected before any bytes', 'CTXMUX_INPUT_NOT_APPLIED', 'not_applied',
+      { disposition: 'not_applied', confirmedInputBytes: 0 }) })
+    await h.client.ensureAgentContinuity(h.request)
+    const packet = h.op()!.launchInput!, record = await h.client.inspectAgentPromptSubmission(packet.key!)
+    expect(record?.admission).toMatchObject({ acknowledged: false, notApplied: true, inputKey: packet.key,
+      intent: { prompt: packet.prompt, message: packet.message } })
+    const submit = vi.spyOn(h.core.promptSubmission, 'submitInputPlan')
+    await h.client.ensureAgentContinuity(h.request)
+    expect(h.op()!.launchInput).toMatchObject({ state: 'not-applied', key: packet.key, input: fresh })
+    expect(submit).not.toHaveBeenCalled(); expect(h.core.kernel.input).toHaveBeenCalledTimes(1)
+    expect((await h.store.readMetadata('recipient'))!.continuityOperations!['original-resume']!.launchInput?.state).toBe('not-applied')
+    const inspect = vi.spyOn(h.client, 'inspectAgentPromptSubmission').mockRejectedValue(new Error('Later observation unavailable'))
+    await h.client.ensureAgentContinuity(h.request)
+    expect(h.op()!.launchInput?.state).toBe('not-applied'); expect(inspect).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled(); expect(h.core.kernel.input).toHaveBeenCalledTimes(1)
+    expect(h.core.kernel.stop).not.toHaveBeenCalled()
+  } finally { await h.close() }
+})
+
 it('does not replay a deferred claim when a second FileStore owner holds a stale unclaimed observation', async () => {
   const h = await fixture({ postLaunch: true, lostStart: true }); let other: AgentMuxClient | undefined
   const firstRead = Promise.withResolvers<void>(), secondRead = Promise.withResolvers<void>(), releaseFirst = Promise.withResolvers<void>(), releaseSecond = Promise.withResolvers<void>()
