@@ -115,10 +115,35 @@ export async function reviewPrivate(ctx) {
   // The actual GUI-created Tab is already acknowledged by Core. Public new-tab placement
   // uses that original identity, then crosses Renderer createControlBrowser and Main.
   const base = new URL(ctx.pageUrl).origin, normalUrl = base + '/normal-owner', firstUrl = base + '/private-owner-first', retainedUrl = base + '/private-owner-retained'
+  const values = ['normal-persistent-login', 'private-first-login', 'private-retained-login']
   const normalDestination = { kind: 'new-tab', after: { kind: 'tab', tabId: guiRegion.tabId } }
   const normal = await ctx.rpc.call('browser.open', { url: normalUrl, destination: normalDestination })
   const workspaceId = normal.region.workspaceId
   assert.equal(workspaceId, guiRegion.workspaceId, 'Public placement must preserve the original GUI Tab workspace')
+  let establishedNormal = null
+  if (ctx.privateCrash) {
+    ctx.setPhase('prepare-established-normal-profile')
+    await actualPage(ctx, normalUrl); expectEmpty(await page(ctx, normalUrl, pageRead))
+    const website = await page(ctx, normalUrl, pageSeed(values[0])), session = await storage(ctx, normalUrl)
+    expectSeeded(website, values[0]); assert.equal(session.persistent, true)
+    const cacheResponse = await page(ctx, normalUrl, "fetch('/private-cache').then(r=>r.text())")
+    assert.equal(await page(ctx, normalUrl, "fetch('/private-cache').then(r=>r.text())"), cacheResponse)
+    const workface = await saved(ctx, [guiTarget.id, normal.region.browserId])
+    establishedNormal = ctx.receipt.privateCrashBaseline = { setupFirst: ctx.receipt.first, session, website, cacheResponse,
+      boundary: 'A separate ordinary-exit setup establishes existing normal website data and HTTP cache. The crash pair starts only after a real reopened process confirms every value; no private data or flush API is used to prepare that baseline.' }
+    establishedNormal.setupExit = await ctx.normalQuit(ctx.probe)
+    ctx.probe = await ctx.launch('first'); ctx.retainSecond(ctx.probe)
+    ctx.setPhase('confirm-established-normal-profile')
+    await actualPage(ctx, normalUrl)
+    establishedNormal.establishedWebsite = await page(ctx, normalUrl, pageRead)
+    expectSeeded(establishedNormal.establishedWebsite, values[0])
+    assert.equal(await page(ctx, normalUrl, "fetch('/private-cache').then(r=>r.text())"), cacheResponse)
+    const restoredSession = await storage(ctx, normalUrl), restored = await saved(ctx, [guiTarget.id, normal.region.browserId])
+    assert.equal(restoredSession.persistent, true); assert.equal(restoredSession.storagePath, session.storagePath)
+    for (const key of ['tabs', 'regions', 'tabLayouts', 'layouts']) assert.deepEqual(restored.graph[key], workface.graph[key])
+    establishedNormal.establishedFirst = ctx.receipt.first; establishedNormal.restoredSession = restoredSession
+    ctx.setPhase('private-public-entrypoints')
+  }
   const first = await ctx.rpc.call('browser.open', { url: firstUrl, mode: 'private', destination: { kind: 'split', region: { kind: 'region', regionId: normal.region.regionId }, direction: 'right' } })
   const cliOpened = await cli(ctx, ['browser', 'open', '--url', retainedUrl, '--tab', normal.region.tabId, '--new-tab', '--private'])
   const retained = cliOpened.result.region
@@ -145,13 +170,16 @@ export async function reviewPrivate(ctx) {
   ctx.receipt.privatePublic.privateProgram = script
 
   ctx.setPhase('private-website-storage-and-cache')
-  for (const url of [normalUrl, firstUrl, retainedUrl]) expectEmpty(await page(ctx, url, pageRead))
-  const values = ['normal-persistent-login', 'private-first-login', 'private-retained-login']
-  for (const [index,url] of [normalUrl, firstUrl, retainedUrl].entries()) expectSeeded(await page(ctx, url, pageSeed(values[index])), values[index])
+  for (const [index,url] of [normalUrl, firstUrl, retainedUrl].entries()) {
+    const actual = await page(ctx, url, pageRead)
+    if (establishedNormal && index === 0) expectSeeded(actual, values[0]); else expectEmpty(actual)
+  }
+  for (const [index,url] of [normalUrl, firstUrl, retainedUrl].entries()) expectSeeded(await page(ctx, url, establishedNormal && index === 0 ? pageRead : pageSeed(values[index])), values[index])
   const network = []
   for (const url of [normalUrl, firstUrl, retainedUrl]) {
     const firstResponse = await page(ctx, url, "fetch('/private-cache').then(r=>r.text())")
     assert.equal(await page(ctx, url, "fetch('/private-cache').then(r=>r.text())"), firstResponse, 'Actual per-session HTTP cache must serve the repeated resource')
+    if (establishedNormal && url === normalUrl) assert.equal(firstResponse, establishedNormal.cacheResponse)
     network.push(firstResponse)
   }
   assert.equal(new Set(network).size, 3, 'Private sessions must not share the ordinary or each other HTTP cache')
@@ -187,14 +215,6 @@ export async function reviewPrivate(ctx) {
   const input = await ctx.probe.cdp.evaluate(`window.agentmux.browser.recordInputHistory({kind:'browser',browserId:${quote(retained.browserId)},profileId:null},'private-address-input-never-persisted')`)
   assert.equal(input.outcome, 'private'); assert.deepEqual(input.entries, [])
   ctx.receipt.privateLifecycle = { releaseRetainedSameSession: true, popupInheritedAndClosed: true, closedCookies: [], newIncarnationDistinct: true, lateRetiredWriteIsolated: true, input }
-
-  if (ctx.privateCrash) {
-    ctx.setPhase('prepare-committed-normal-login-baseline')
-    const baseline = await contents(ctx, normalUrl, `(async()=>{if(!contents.session.isPersistent())throw new Error('The committed login baseline requires the exact ordinary persistent Session');
-      await contents.session.cookies.flushStore();return {webContentsId:contents.id,persistent:contents.session.isPersistent(),storagePath:contents.session.storagePath,cookieValues:(await contents.session.cookies.get({url:${quote(base)},name:'private-fixture'})).map(cookie=>cookie.value),cookieStoreFlush:'completed'};})()`)
-    assert.equal(baseline.persistent, true); assert.equal(baseline.storagePath, observations[0].storagePath); assert.deepEqual(baseline.cookieValues, [values[0]])
-    ctx.receipt.privateCrashBaseline = { ...baseline, boundary: 'Setup acknowledgement for an established normal login only. Private Sessions and the actual abrupt-exit path are unchanged; newly written cookies are not claimed immediately crash-durable.' }
-  }
 
   ctx.setPhase('private-real-persistence-and-exit')
   const before = await saved(ctx, [normal.region.browserId, retained.browserId]), bytes = await ctx.probe.cdp.evaluate("localStorage.getItem('agentmux-workbench-v1')")
