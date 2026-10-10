@@ -64,7 +64,7 @@ it('keeps permission off for chat/answer grants and never exposes original tool 
   const f = await fixture(); await f.grant(['input', 'answer'])
   const original = await f.open()
   f.services.publication!.refresh()
-  await vi.waitFor(async () => { const lane = Reflect.get(f.services.publication!, 'lanes').get(f.binding.bindingId); await lane?.work; expect(lane?.work, 'The original publication cycle has settled before checking absence').toBeUndefined() })
+  await vi.waitFor(async () => { const lane = Reflect.get(f.services.publication!, 'lanes').get(f.binding.bindingId); expect(lane, 'The exact original Binding lane is present').toBeDefined(); await lane!.work; expect(lane!.work, 'The original publication cycle has settled before checking absence').toBeUndefined() })
   expect(f.effects).toEqual([])
   const ack = vi.fn()
   await expect(f.services.ingress!.receive({ connectionId: 'feishu-connection', raw: JSON.stringify(f.action('forged-reference')), transportProof: { authenticated: true } }, ack)).rejects.toMatchObject({ code: 'INGRESS_AUTHENTICATION_FAILED' })
@@ -303,7 +303,7 @@ it('the public SDK refuses a contradictory safe claim projection without changin
 it('an adapter without an explicit permission declaration retains original local and speech capabilities', async () => {
   const f = await fixture(); f.disablePermissionSupport(); await f.grant(); const original = await f.open()
   f.services.publication!.refresh()
-  await vi.waitFor(async () => { const lane = Reflect.get(f.services.publication!, 'lanes').get(f.binding.bindingId); await lane?.work; expect(lane?.work, 'The original publication cycle has settled before checking absence').toBeUndefined() })
+  await vi.waitFor(async () => { const lane = Reflect.get(f.services.publication!, 'lanes').get(f.binding.bindingId); expect(lane, 'The exact original Binding lane is present').toBeDefined(); await lane!.work; expect(lane!.work, 'The original publication cycle has settled before checking absence').toBeUndefined() })
   expect(f.effects).toEqual([])
   expect((await f.cli(['connection', 'delivery', 'ls', '--connection', 'feishu-connection', '--binding', f.binding.bindingId, '--binding-revision', '1'])).deliveries).toEqual([])
   const result = await f.hosted.respondAgentInteraction({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, operationId: 'local-on-unsupported-adapter', expectedRequest: original.request,
