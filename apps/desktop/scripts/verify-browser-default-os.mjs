@@ -107,7 +107,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
   const receipt = { schema: 'agentmux.browser-default-os-proof.v1', status: 'running', app, packageIdentity,
     boundary: 'Exact non-installed production App; read-only OS handlers; explicit-app HTTP(S) routing is not proof of a changed default. Private user data, Scratch, Notes, Core and Runtime. No product replacement or automatic OS setter.', cases: [], images: [] }
   const writeReceipt = async () => { const file = join(evidence, 'receipt.tmp'); await writeFile(file, JSON.stringify(receipt, null, 2) + '\n'); await rename(file, join(evidence, 'receipt.json')) }
-  let page, main, rpc, server, failure, terminalControl
+  let page, main, rpc, server, failure, terminalControl, originalMainPid
   const cleanEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key)))
   const environment = { ...cleanEnvironment, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_DISABLE_CRASH_REPORTER: '1',
     AGENTMUX_RUNTIME_DIRECTORY: scope.directory, AGENTMUX_STATE_DIRECTORY: join(scope.directory, 'state'),
@@ -157,6 +157,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     const initialProcess = await command('/bin/ps', ['-p', String(initial.main.pid), '-o', 'uid=,lstart=,command='], { env: { ...cleanEnvironment, LC_ALL: 'C' } })
     assert.ok(initialProcess.stdout.includes(executable) && initialProcess.stdout.includes('--browser-default-proof=' + scope.directory), 'Actual original Main process must belong to this invocation')
     receipt.mainProcess = initialProcess.stdout.trim()
+    originalMainPid = initial.main.pid
     const devtools = (await readFile(join(userData, 'DevToolsActivePort'), 'utf8')).trim().split('\n'), port = Number(devtools[0])
     assert.ok(Number.isInteger(port) && port > 0 && port < 65536 && devtools[1].startsWith('/devtools/browser/'), 'Original browser endpoint must be observed')
     const rootTarget = async () => {
@@ -356,7 +357,7 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
   } catch (error) {
     failure = error; receipt.status = 'failed'; receipt.failure = { name: error.name, message: error.message, stack: error.stack }
   } finally {
-    const cleanup = []
+    const cleanup = [], cleanupObservations = []
     if (terminalControl) {
       try {
         await page.evaluate('window.agentmux.sessions.stop(' + JSON.stringify(terminalControl) + ')')
@@ -371,10 +372,29 @@ export async function verifyDefaultBrowserOs({ repository, appPath, output }) {
     try { await rpc?.dispose() } catch (error) { cleanup.push(error.message) }
     try { page?.close(); main?.close() } catch (error) { cleanup.push(error.message) }
     if (server) await new Promise(done => server.close(done))
-    try { await stopProbeProcesses(-1, scope.directory); receipt.cleanupProcesses = await listProbeProcesses(-1, scope.directory) } catch (error) { cleanup.push(error.message) }
+    let selectedPids
+    try {
+      selectedPids = [...new Set([...(await listProbeProcesses(-1, scope.directory)), ...(originalMainPid ? [originalMainPid] : [])])]
+      receipt.cleanupProcessSelection = { pids: selectedPids, originalMainPid: originalMainPid ?? null }
+    } catch (error) { cleanup.push('Private process selection is unconfirmed: ' + error.message) }
+    try { await stopProbeProcesses(-1, scope.directory) } catch (error) { cleanupObservations.push({ step: 'stop-private-processes', message: error.message }) }
     try { receipt.cleanupRuntime = await scope.cleanup() } catch (error) { cleanup.push(error.message) }
+    if (selectedPids) {
+      try {
+        receipt.cleanupProcessAbsence = await eventually(async () => {
+          const remaining = await listProbeProcesses(-1, scope.directory)
+          const selected = selectedPids.map(pid => {
+            try { process.kill(pid, 0); return { pid, state: 'present' } }
+            catch (error) { return { pid, state: error.code === 'ESRCH' ? 'absent' : 'unknown', ...(error.code === 'ESRCH' ? {} : { code: error.code ?? null, message: error.message }) } }
+          })
+          receipt.cleanupProcessAbsence = { remaining, selected }
+          return remaining.length === 0 && selected.every(item => item.state === 'absent') && receipt.cleanupProcessAbsence
+        }, 'Private scope inventory and every selected process exit')
+        receipt.cleanupProcesses = receipt.cleanupProcessAbsence.remaining
+      } catch (error) { cleanup.push(error.message) }
+    }
     try { receipt.handlersAfter = await systemHandlers(); if (receipt.handlersBefore) assert.deepEqual(receipt.handlersAfter.map(item => item.handler), receipt.handlersBefore.map(item => item.handler)) } catch (error) { cleanup.push(error.message) }
-    receipt.cleanup = { errors: cleanup, retained: cleanup.length > 0, privateDirectory: scope.directory }
+    receipt.cleanup = { errors: cleanup, observations: cleanupObservations, retained: cleanup.length > 0, privateDirectory: scope.directory }
     if (!cleanup.length) await rm(scope.directory, { recursive: true })
     if (cleanup.length) { receipt.status = 'failed'; failure ??= new Error('Private proof cleanup or original handlers are unconfirmed') }
     await writeReceipt()
