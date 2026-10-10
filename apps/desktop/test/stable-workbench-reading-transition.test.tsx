@@ -78,3 +78,62 @@ it.each(['none', 'keydown', 'pointerdown', 'beforeinput', 'other-control', 'sele
     expect(selection.toString()).toBe(intent === 'selection' ? 'igin' : '')
   } finally { move?.mockRestore(); await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() }
 })
+
+it.each(['update', 'move'] as const)('keeps a scroll-only reader without restoring a global selection during %s', async change => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createClientUiRoot(container)
+  const tree = (targetId: string | null, revision: number) => createElement(Fragment, null,
+    createElement('div', { id: 'scroll-home' }), createElement('div', { id: 'scroll-next' }),
+    createElement(StableWorkbenchView, { homeId: 'scroll-home', targetId, active: true, visible: true, retainedRegionId: null },
+      createElement('div', { 'data-workbench-reading-scroll': true }, createElement('p', null, `Reading revision ${revision}`))))
+  let read: ReturnType<typeof vi.spyOn> | undefined
+  try {
+    document.getSelection()!.removeAllRanges()
+    await act(async () => root.render(tree(null, 0)))
+    const reader = container.querySelector<HTMLElement>('[data-workbench-reading-scroll]')!
+    reader.scrollTop = 120
+    read = vi.spyOn(document, 'getSelection')
+    await act(async () => root.render(tree(change === 'move' ? 'scroll-next' : null, 1)))
+    expect(container.querySelector('[data-workbench-reading-scroll]')).toBe(reader)
+    expect(reader.scrollTop).toBe(120)
+    expect(reader.textContent).toBe('Reading revision 1')
+    // The outgoing snapshot still captures current reading. Moving also
+    // captures at placement and at the resulting host-identity commit.
+    // None of those snapshots needs to restore an absent range.
+    expect(read).toHaveBeenCalledTimes(change === 'move' ? 3 : 1)
+  } finally { read?.mockRestore(); await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() }
+})
+
+it.each([false, true])('repairs an original input with no local range while respecting a foreign selection: %s', async foreignSelection => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createClientUiRoot(container)
+  const tree = (targetId: string | null) => createElement(Fragment, null,
+    createElement('p', { id: 'foreign-reading' }, 'Other reading remains selected'),
+    createElement('div', { id: 'input-home' }), createElement('div', { id: 'input-next' }),
+    createElement(StableWorkbenchView, { homeId: 'input-home', targetId, active: true, visible: true, retainedRegionId: null },
+      createElement('div', { 'data-workbench-reading-scroll': true }, createElement('input', { defaultValue: 'Original unsent input' }))))
+  let move: ReturnType<typeof vi.spyOn> | undefined
+  try {
+    await act(async () => root.render(tree(null)))
+    const input = container.querySelector('input')!, reader = input.parentElement!
+    const selection = document.getSelection()!
+    selection.removeAllRanges(); input.focus(); reader.scrollTop = 120
+    const next = container.querySelector<HTMLElement>('#input-next')!, originalMove = next.moveBefore.bind(next)
+    move = vi.spyOn(next, 'moveBefore').mockImplementation((node, before) => {
+      originalMove(node, before); input.blur()
+      if (foreignSelection) {
+        const range = document.createRange(), text = container.querySelector('#foreign-reading')!.firstChild!
+        range.setStart(text, 0); range.setEnd(text, 5)
+        selection.removeAllRanges(); selection.addRange(range)
+      }
+    })
+    await act(async () => root.render(tree('input-next')))
+    expect(next.querySelector('input')).toBe(input)
+    expect(input.value).toBe('Original unsent input')
+    expect(reader.scrollTop).toBe(120)
+    expect(document.activeElement).toBe(foreignSelection ? document.body : input)
+    expect(selection.toString()).toBe(foreignSelection ? 'Other' : '')
+  } finally { move?.mockRestore(); await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() }
+})
