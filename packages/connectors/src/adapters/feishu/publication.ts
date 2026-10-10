@@ -101,7 +101,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     }
     if (operation.payload.kind === 'permission') {
       const payload = operation.payload
-      const status = { pending: 'Choose one original permission option.', 'response-sent': 'Decision returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original decision is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
+      const status = { pending: 'Choose one original permission option.', 'response-sent': 'Response returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original response is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
       const card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: payload.title } }, elements: [
         ...(payload.context === undefined ? [] : [{ tag: 'div', text: { tag: 'plain_text', content: payload.context } }]),
         { tag: 'div', text: { tag: 'plain_text', content: status } },
