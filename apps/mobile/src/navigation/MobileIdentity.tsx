@@ -9,7 +9,6 @@ import { observeMoteMotion } from '@agentmux/client-ui/mote-face-motion'
 import '@agentmux/client-ui/styles/mote-identity.css'
 import { SPACE_ICON_CATALOG } from '@agentmux/client-ui/space-icon-catalog'
 import { MoteIcon as MoteMark } from '@agentmux/client-ui/components/MoteIcon'
-import defaultAvatar from './mote-avatar.png'
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileObjectIdentity = { name: string; project: string; context?: AgentMuxSpaceAddress;
@@ -101,7 +100,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
     data-mote-expression={expression} data-mote-motion="off" style={{ width: size, height: size, '--mote-ambient-delay': `-${Array.from(spaceId ?? '').reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 0) % 14000}ms` } as import('react').CSSProperties} title={issue || selected?.issue || identity.name}>
     {identity.mote ? <span className="space-object-icon">{face ? <MoteFace face={face} expression={expression} />
       : selected?.image ? image && image.spaceId === spaceId && image.revision === selected.image.revision ? <img className="space-object-icon__avatar" src={image.dataUrl} alt="" /> : <MoteMark size={size - 8} />
-      : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : selected?.preset === 'primary-mote' ? <img className="space-object-icon__avatar" src={defaultAvatar} alt="" /> : <MoteMark size={size - 8} />}</span>
+      : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : <MoteMark size={size - 8} data-mote-icon-source="automatic" />}</span>
       : <span>{Array.from(identity.project || identity.name).slice(0, 1).join('').toLocaleUpperCase()}</span>}
     {(issue || selected?.issue) && <span className="mobile-avatar-issue" aria-label={issue || selected?.issue}><ThemeStatusWarningIcon size={10} /></span>}
   </span>

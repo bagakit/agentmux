@@ -4,12 +4,10 @@ import { memo, useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { isMoteFace, type MoteAvatarImage, type MoteAvatarRef } from '../../../shared/mote-avatars'
-import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { projectMonogram } from '../lib/project-monogram'
-import defaultMoteAvatar from '../assets/pmo-teams-topic-avatar.png'
 import { MoteIcon } from './MoteIcon'
 import { ProjectIcon } from './ProjectIcon'
 import { MoteFace, type MoteExpression } from './MoteFace'
@@ -111,6 +109,6 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
   const monogram = kind === 'topic' && !topicGlyph ? projectMonogram(name) : ''
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="automatic"
     {...(monogram ? { 'data-monogram': '' } : {})} title={kind === 'mote' ? 'Mote' : kind === 'category' ? 'Category' : 'Topic'} aria-hidden="true">
-    {kind === 'mote' ? avatarTopicId === PMO_TEAMS_TOPIC_ID ? <span className="mote-image-follow"><img className="space-object-icon__avatar" src={defaultMoteAvatar} alt="" draggable={false} /></span> : <MoteIcon size={14} /> : monogram ? <span>{monogram}</span> : <FallbackIcon size={14} />}
+    {kind === 'mote' ? <MoteIcon size={14} data-mote-icon-source="automatic" /> : monogram ? <span>{monogram}</span> : <FallbackIcon size={14} />}
   </span>
 }
