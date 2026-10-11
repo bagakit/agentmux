@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, useEffect } from 'react'
@@ -18,7 +19,7 @@ const fixture = vi.hoisted(() => ({
     timelines: {}, agentNames: {}, viewModes: {} as Record<string, 'activity' | 'terminal'>, regionCaretFocus: null,
     tabs: {}, layouts: {}, demandPmoTabIds: {}, demands: {}, scratchTopicSnapshots: {},
     spaceZoneBindings: {}, spatialRequests: {}, localHome: '', noticeReadReceipts: {},
-    acquireNativeSurfaceOverlay: vi.fn(), releaseNativeSurfaceOverlay: vi.fn(),
+
     clearRegionCaretFocus: vi.fn(), focusRegion: vi.fn(), appendAgentComposerDraft: vi.fn(), refreshSession: vi.fn(),
     recoverSession: vi.fn(), respondInteraction: vi.fn(), openFile: vi.fn(), reportError: vi.fn(), openHttpLink: vi.fn() }
 }))
@@ -39,9 +40,9 @@ vi.mock('../src/renderer/src/components/ActivityView', () => ({ ActivityView: ()
 
 const control: AgentSessionControl = {kind:'agent',hostId:'local',agentSessionId:'agent-history',run:{runId:'run-history'}}
 const session: Extract<SessionSnapshot, { kind: 'agent' }> = {
-  id: control.agentSessionId, hostId:'local',workspacePath:_hygiene_fixturePath("synthetic"),label:'Reader',createdAt:1,updatedAt:1,
-  processState:'running',status:{state:'running',source:'run-process',observedAt:1},latestOutputBytes:0,
-  kind:'agent',providerId:'codex',executorId:'codex',agentSessionUpdatedAt:1,control,
+  id: control.agentSessionId, hostId:'local',workspacePath:_hygiene_fixturePath("synthetic"),label:'Reader',createdAt:_tailFixtureEpoch(0, 0, 1),updatedAt:_tailFixtureEpoch(0, 0, 1),
+  processState:'running',status:{state:'running',source:'run-process',observedAt:_tailFixtureEpoch(0, 0, 1)},latestOutputBytes:0,
+  kind:'agent',providerId:'codex',executorId:'codex',agentSessionUpdatedAt:_tailFixtureEpoch(0, 0, 1),control,
   capabilities:{terminal:true,timeline:'complete-events',permission:'observe',providerResume:true,replyCorrelation:'none'}
 }
 function page(id: string, nextCursor: string | null, overrides: Partial<AgentSessionHistoryPage> = {}): AgentSessionHistoryPage {
@@ -118,8 +119,8 @@ it('keeps a visible restore action interactive in Activity while covered and hea
 })
 
 const retiredSource: AgentSessionHistoryDescriptor = {
-  agentSessionId: session.id, hostId: 'local', state: 'retired', retiredAt: 10,
-  history: { providerId: 'codex', executorId: 'saved-executor', workspacePath: _hygiene_fixturePath("synthetic"), createdAt: 1,
+  agentSessionId: session.id, hostId: 'local', state: 'retired', retiredAt: _tailFixtureEpoch(0, 0, 10),
+  history: { providerId: 'codex', executorId: 'saved-executor', workspacePath: _hygiene_fixturePath("synthetic"), createdAt: _tailFixtureEpoch(0, 0, 1),
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-main' } }
 }
 
@@ -182,7 +183,7 @@ it('opens native history in the actual SessionPane while keeping the original Te
 })
 
 it('keeps the native history entry reachable when the Agent Run is unavailable', async () => {
-  fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: 1 } }]
+  fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) } }]
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
   expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith({ hostId: control.hostId, agentSessionId: control.agentSessionId }, { limit: 6 })
@@ -204,10 +205,10 @@ it('keeps the native history entry reachable when the Agent Run is unavailable',
 })
 
 it('keeps a missing Run readable with a direct restore action when the independent history read fails', async () => {
-  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'disconnected', source: 'run-process', observedAt: 1, detail: 'Idle time is unknown.' } }]
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'disconnected', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1), detail: 'Idle time is unknown.' } }]
   fixture.state.recoveryCandidates = [{ agentSessionId: session.id, hostId: 'local', workspacePath: session.workspacePath,
     providerId: 'codex', executorId: 'codex', capabilities: session.capabilities,
-    label: 'Pending', createdAt: 1, updatedAt: 1, run: control.run }]
+    label: 'Pending', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), run: control.run }]
   fixture.historyPage.mockRejectedValue(new Error('Native reader unavailable'))
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect(container.textContent).toContain('Ready to restore')
@@ -293,7 +294,7 @@ it('hides the real retained recap while History covers it and reuses its observa
     expect(container.querySelector('[aria-label="Session recap"]')).toBeNull()
     fixture.state.timelines = { [control.agentSessionId]: { agentSessionId: control.agentSessionId, revision: 1,
       items: [{ id: 'covered', agentSessionId: control.agentSessionId, kind: 'assistant_message', status: 'complete',
-        source: 'native-hook', title: 'Reply', createdAt: 1, updatedAt: 1, content: 'Covered captured excerpt' }] } }
+        source: 'native-hook', title: 'Reply', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), content: 'Covered captured excerpt' }] } }
     await act(async () => renderPane())
     expect(format).not.toHaveBeenCalled()
     expect(container.textContent).not.toContain('Covered captured excerpt')
@@ -329,7 +330,7 @@ it('does not read or show recap on a parked pending SessionPane', async () => {
 })
 
 it('keeps unconfirmed recovery facts and the original retry owner visible outside diagnostics', async () => {
-  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'error', source: 'run-process', observedAt: 1,
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'error', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1),
     continuity: 'unavailable' } }]
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   const stage = container.querySelector('.full-page-loading__stage')!
@@ -345,7 +346,7 @@ it('keeps unconfirmed recovery facts and the original retry owner visible outsid
 })
 
 it('keeps a retained exited Session on one state with one original Resume action', async () => {
-  fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: 1 } }]
+  fixture.state.sessions = [{ ...session, processState: 'exited', status: { state: 'exited', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) } }]
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   expect([...container.querySelectorAll('h1')].map(node => node.textContent)).toEqual(['Ready to restore'])
   expect(container.querySelector('.terminal-recovery')).toBeNull()
@@ -357,7 +358,7 @@ it('keeps a retained exited Session on one state with one original Resume action
 })
 
 it('re-reads a changed canonical Run from the pending history notice without resuming again', async () => {
-  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'error', source: 'run-process', observedAt: 1,
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { state: 'error', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1),
     continuity: 'conflict', continuityConflict: 'session-run-changed' } }]
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
   await act(async () => button('Re-read this Agent').click())
@@ -397,8 +398,8 @@ it('uses the shared message owner for ordered native parts, exact copy and host 
     { kind: 'resource' as const, resourceType: 'audio' as const, reference: _hygiene_fixturePath("synthetic/audio.wav") }
   ]
   fixture.historyPage.mockResolvedValue(page('unused', null, { items: [
-    { id: 'native-user', kind: 'user-message', contentParts: parts, completedAt: 500 },
-    { id: 'native-assistant', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'known zero clock' }], startedAt: 0 },
+    { id: 'native-user', kind: 'user-message', contentParts: parts, completedAt: _tailFixtureEpoch(0, 0, 500) },
+    { id: 'native-assistant', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'known zero clock' }], startedAt: _tailFixtureEpoch(0, 0, 0) },
     { id: 'native-activity', kind: 'activity', title: 'Tool observation', contentParts: [{ kind: 'text', text: 'native tool facts' }] }
   ] }))
   const openWorkspaceFile = vi.fn(), openHttpLink = vi.fn()
@@ -413,7 +414,7 @@ it('uses the shared message owner for ordered native parts, exact copy and host 
   expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-speaker-role'))).toEqual(['human', 'agent', null])
   expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(['You', 'Reader', 'Tool observation'])
   expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-status'))).toEqual([null, null, null])
-  expect(rows.map(row => row.querySelector('.log-turn__time')?.textContent ?? null)).toEqual([null, new Date(0).toTimeString().slice(0, 8), null])
+  expect(rows.map(row => row.querySelector('.log-turn__time')?.textContent ?? null)).toEqual([null, new Date(_tailFixtureEpoch(0, 0, 0)).toTimeString().slice(0, 8), null])
   const body = rows[0]!.querySelector('.log-turn__body')!
   expect(Array.from(body.children, node => node.matches('.log-turn__resource')
     ? ['resource', node.querySelector('span')?.textContent, node.querySelector('code')?.textContent]

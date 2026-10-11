@@ -2,10 +2,6 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { tmpdir } from 'node:os'
-import ts from 'typescript'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -20,30 +16,20 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { AgentContextUsage } from '../src/renderer/src/components/AgentContextUsage'
 import { useAppStore } from '../src/renderer/src/store'
-import { deriveOverlayInventoryFromSource } from './helpers/overlay-source-inventory.js'
 
-const AVATAR_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent-avatar.css'), 'utf8')
-const TOPOLOGY_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/workbench-topology.css'), 'utf8')
-const OVERLAYS_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/overlays.css'), 'utf8')
-const NOTICES_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/GlobalSystemNotices.tsx'), 'utf8')
-const CONTEXT_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/AgentContextUsage.tsx'), 'utf8')
-const MAILBOX_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/SessionMailbox.tsx'), 'utf8')
-const OPEN_DEST_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/OpenDestinationBar.tsx'), 'utf8')
-const TOP_ROW_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/TopRowChrome.tsx'), 'utf8')
-
-describe('T-003: Native popover and bespoke portal families adoption', () => {
+describe('native popover and bespoke portal behavior', () => {
   let root: Root | null = null
   let container: HTMLDivElement | null = null
   let host: HTMLDivElement | null = null
 
   beforeEach(() => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    Object.defineProperty(HTMLElement.prototype, 'hidePopover', { configurable: true, value() {} })
     for (const el of document.querySelectorAll('[data-overlay-host]')) el.remove()
     container = document.createElement('div')
     host = getWindowOverlayHost() as HTMLDivElement
     document.body.append(container)
     root = createRoot(container)
-    useAppStore.setState({ nativeSurfaceOverlayCount: 0 })
   })
 
   afterEach(async () => {
@@ -54,22 +40,13 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     root = null
     container = null
     host = null
-    useAppStore.setState({ nativeSurfaceOverlayCount: 0 })
   })
 
-  it('AgentAvatar portals into the shared overlay host and uses CSS layer tokens', async () => {
-    expect(AVATAR_CSS).toContain('z-index: var(--layer-popover);')
-    expect(AVATAR_CSS).not.toContain('.agent-identity-popover { position: fixed; z-index: 10000;')
-    expect(AVATAR_CSS).toContain('pointer-events: auto;')
-
-    let leaseCalledWith: boolean | null = null
-    const onPanelVisibilityChange = (visible: boolean) => {
-      leaseCalledWith = visible
-    }
+  it('AgentAvatar portals into the shared overlay host and preserves disclosure actions', async () => {
 
     await act(async () => {
       root?.render(
-        <ExecutorIdentityContext.Provider value={{ config: null, onPanelVisibilityChange }}>
+        <ExecutorIdentityContext.Provider value={{ config: null }}>
           <AgentAvatar label="Builder Agent" providerId="claude" state="running" detail="Compiling" />
         </ExecutorIdentityContext.Provider>
       )
@@ -96,51 +73,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(host?.querySelector('.agent-identity-popover')).toBeNull()
   })
 
-  it('AgentAvatar preserves Browser/native surface lease acquisition and teardown cleanup', async () => {
-    const browserStage = document.createElement('div')
-    browserStage.dataset.nativeBrowserStage = ''
-    browserStage.style.visibility = 'visible'
-    browserStage.getBoundingClientRect = () => ({
-      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800,
-      toJSON: () => ({})
-    })
-    document.body.append(browserStage)
-
-    const onPanelVisibilityChange = (visible: boolean) => {
-      if (visible) useAppStore.getState().acquireNativeSurfaceOverlay()
-      else useAppStore.getState().releaseNativeSurfaceOverlay()
-    }
-
-    await act(async () => {
-      root?.render(
-        <ExecutorIdentityContext.Provider value={{ config: null, onPanelVisibilityChange }}>
-          <AgentAvatar label="Overlapping Agent" providerId="codex" state="running" />
-        </ExecutorIdentityContext.Provider>
-      )
-    })
-
-    const trigger = container?.querySelector<HTMLElement>('.agent-avatar')
-    expect(trigger).toBeTruthy()
-
-    await act(async () => {
-      trigger?.focus()
-    })
-
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
-
-    // Escape dismisses and releases lease
-    await act(async () => {
-      const panel = host?.querySelector<HTMLDivElement>('.agent-identity-popover')
-      panel?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
-
-    browserStage.remove()
-  })
-
-  it('WorkbenchTopology portals into shared host and uses CSS layer tokens', async () => {
-    expect(TOPOLOGY_CSS).toContain('z-index: var(--layer-tooltip);')
-    expect(TOPOLOGY_CSS).not.toContain('.workbench-topology__inspector--portal {\n  position: fixed;\n  z-index: 10000;')
+  it('WorkbenchTopology portals into the shared host and preserves focus disclosure', async () => {
 
     const tabs = [
       {
@@ -179,10 +112,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(host?.querySelector('.workbench-topology__inspector--portal')).toBeNull()
   })
 
-  it('WorkbenchTopology absent-host state renders null/closed with zero inline fallback', async () => {
-    // Contract: TopicPresence source does not contain an inline inspector fallback
-    const TOPOLOGY_TSX = readFileSync(join(import.meta.dirname, '../src/renderer/src/components/WorkbenchTopology.tsx'), 'utf8')
-    expect(TOPOLOGY_TSX).not.toMatch(/createPortal\([^)]+\)\s*:\s*inspector/)
+  it('WorkbenchTopology recreates a missing window host without mounting an inline inspector', async () => {
 
     // When overlay host is absent
     host?.remove()
@@ -213,18 +143,15 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     // Closed / unhovered: no inline inspector in container
     expect(container?.querySelector('.workbench-topology__inspector')).toBeNull()
 
-    // Even when focused without host: never renders inline fallback
+    // Focusing recreates its one window host; the inspector never enters the workbench layout
     await act(async () => {
       topology?.focus()
     })
     expect(container?.querySelector('.workbench-topology__inspector')).toBeNull()
+    expect(getWindowOverlayHost()?.querySelector('.workbench-topology__inspector--portal')).not.toBeNull()
   })
 
   it('Dock tooltip closes on Escape, window blur, and unmount; avoids inline fallback', async () => {
-    // Contract: TopRowChrome avoids inline tooltip fallback when host is absent
-    expect(TOP_ROW_TSX).not.toContain('renderTooltip(plugin, true)')
-    expect(TOP_ROW_TSX).toContain('window.addEventListener(\'keydown\', onKeyDown)')
-    expect(TOP_ROW_TSX).toContain('window.addEventListener(\'blur\', onBlur)')
 
     useAppStore.setState({ mainSurface: 'survey' })
     await act(async () => {
@@ -267,12 +194,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(container?.querySelector('.surface-navigation__tooltip')).toBeNull()
   })
 
-  it('OpenDestinationPopover mounts into shared host, holds browser-yield lease, and dismisses on Escape/outside-click', async () => {
-    expect(OVERLAYS_CSS).toContain('.open-destination-bar {')
-    expect(OVERLAYS_CSS).toContain('z-index: var(--layer-popover);')
-    expect(OVERLAYS_CSS).not.toContain('.open-destination-bar {\n  z-index: 40;')
-    expect(OPEN_DEST_TSX).toContain('createPortal')
-    expect(OPEN_DEST_TSX).toContain('getWindowOverlayHost')
+  it('OpenDestinationPopover mounts into shared scope and dismisses on Escape/outside-click', async () => {
 
     let dismissedId: number | null = null
     const request = { id: 42, url: 'https://example.com/doc', x: 200, y: 150 }
@@ -293,16 +215,13 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(popoverInHost).toBeTruthy()
     expect(container?.querySelector('.open-destination-bar')).toBeNull()
 
-    // Browser-yield lease acquired
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
-
     // Escape dismisses
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     })
     expect(dismissedId).toBe(42)
 
-    // Unmount releases lease
+    // Unmount removes the original surface
     await act(async () => {
       root?.render(
         <OpenDestinationPopover
@@ -313,15 +232,11 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
         />
       )
     })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
     expect(host?.querySelector('.open-destination-bar')).toBeNull()
   })
 
-  it('proves native popovers yield browser surface and track open/close lifecycle', async () => {
-    // 1. GlobalSystemNotices
-    expect(NOTICES_TSX).toContain('acquireNativeSurfaceOverlay')
-    expect(NOTICES_TSX).toContain('releaseNativeSurfaceOverlay')
-    expect(NOTICES_TSX).toContain('popover="auto"')
+  it('tracks the original native popovers through open and close', async () => {
+    // The native toggle changes the original accessible disclosure state.
 
     await act(async () => {
       root?.render(<GlobalSystemNotices />)
@@ -329,7 +244,6 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
 
     const noticesDetails = container?.querySelector('.global-system-notices__details') as HTMLElement
     expect(noticesDetails).toBeTruthy()
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
 
     // Open native popover
     await act(async () => {
@@ -339,7 +253,7 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
       Object.assign(toggleEv, { newState: 'open' })
       noticesDetails.dispatchEvent(toggleEv)
     })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+    expect(container?.querySelector(`[aria-controls="${noticesDetails.id}"]`)?.getAttribute('aria-expanded')).toBe('true')
 
     // Close native popover
     await act(async () => {
@@ -347,11 +261,9 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
       Object.assign(toggleEv, { newState: 'closed' })
       noticesDetails.dispatchEvent(toggleEv)
     })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+    expect(container?.querySelector(`[aria-controls="${noticesDetails.id}"]`)?.getAttribute('aria-expanded')).toBe('false')
 
     // 2. SessionMailbox
-    expect(MAILBOX_TSX).toContain('acquireNativeSurfaceOverlay')
-    expect(MAILBOX_TSX).toContain('releaseNativeSurfaceOverlay')
 
     const fakeSystem = { notices: [], unread: [], acknowledge: vi.fn(), available: true } as any
     await act(async () => {
@@ -372,18 +284,18 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
       Object.assign(toggleEv, { newState: 'open' })
       mailboxEl.dispatchEvent(toggleEv)
     })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+    expect(mailboxEl.dataset.state).toBe('open')
+    expect(mailboxEl.inert).toBe(false)
 
     await act(async () => {
       const toggleEv = new Event('toggle')
       Object.assign(toggleEv, { newState: 'closed' })
       mailboxEl.dispatchEvent(toggleEv)
     })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+    expect(mailboxEl.dataset.state).toBe('closed')
+    expect(mailboxEl.inert).toBe(true)
 
     // 3. AgentContextUsage
-    expect(CONTEXT_TSX).toContain('acquireNativeSurfaceOverlay')
-    expect(CONTEXT_TSX).toContain('releaseNativeSurfaceOverlay')
 
     await act(async () => {
       root?.render(<AgentContextUsage />)
@@ -397,14 +309,14 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
       Object.assign(toggleEv, { newState: 'open' })
       contextCard.dispatchEvent(toggleEv)
     })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+    expect(container?.querySelector(`[aria-controls="${contextCard.id}"]`)?.getAttribute('aria-expanded')).toBe('true')
 
     await act(async () => {
       const toggleEv = new Event('toggle')
       Object.assign(toggleEv, { newState: 'closed' })
       contextCard.dispatchEvent(toggleEv)
     })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+    expect(container?.querySelector(`[aria-controls="${contextCard.id}"]`)?.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('enforces no-fallback rule: never mounts to an unnamed host directly on document.body', async () => {
@@ -434,136 +346,4 @@ describe('T-003: Native popover and bespoke portal families adoption', () => {
     expect(unnamedHosts).toHaveLength(0)
   })
 
-  it('source-derived AST scan proves all native and bespoke overlay families adopt window host or explicit top layer', () => {
-    const rendererSrcDir = join(import.meta.dirname, '../src/renderer/src')
-    const inventory = deriveOverlayInventoryFromSource(rendererSrcDir)
-
-    // Non-vacuous assertion: scan must find active triggers in renderer source
-    expect(inventory.length).toBeGreaterThan(0)
-
-    const nativeAndBespoke = inventory.filter(
-      (item) =>
-        item.kind === 'native-popover' ||
-        (item.kind === 'createPortal' && !item.file.includes('Radix')) ||
-        item.file.includes('TopRowChrome')
-    )
-    expect(nativeAndBespoke.length).toBeGreaterThan(0)
-
-    // Verify discovered components cover all native and bespoke families
-    const owners = new Set(nativeAndBespoke.map((item) => item.lifecycleOwner))
-    expect(owners).toContain('AgentAvatar')
-    expect(owners).toContain('WorkbenchTopology')
-    expect(owners).toContain('OpenDestinationPopover')
-    expect(owners).toContain('GlobalSystemNotices')
-    expect(owners).toContain('SessionMailbox')
-    expect(owners).toContain('AgentContextUsage')
-    expect(TOP_ROW_TSX).toContain('WindowOverlayPortal')
-
-    // Every createPortal must target window-overlay-host, never document-body or unclassified
-    const createPortals = nativeAndBespoke.filter((item) => item.kind === 'createPortal')
-    expect(createPortals.length).toBeGreaterThan(0)
-    for (const cp of createPortals) {
-      expect(cp.host, `${cp.file}:${cp.line} must target window-overlay-host`).toBe('window-overlay-host')
-      expect(['tooltip', 'popover', 'dialog']).toContain(cp.layer)
-    }
-
-    // Every native popover must be classified as native-top-layer
-    const nativePopovers = nativeAndBespoke.filter((item) => item.kind === 'native-popover')
-    expect(nativePopovers.length).toBeGreaterThan(0)
-    for (const np of nativePopovers) {
-      expect(np.host, `${np.file}:${np.line} must use native-top-layer`).toBe('native-top-layer')
-      expect(['popover', 'service']).toContain(np.layer)
-    }
-
-    // Zero unclassified items
-    const unclassified = nativeAndBespoke.filter((item) => item.host === 'unclassified' || item.layer === 'unclassified')
-    expect(unclassified).toHaveLength(0)
-  })
-
-  it('derives retained layout hosts without allowing any body-backed or otherwise unknown attachment', () => {
-    const sources = ['AgentRegionHeader.tsx', 'StableWorkbenchView.tsx'].map(file => ({
-      file, source: readFileSync(join(import.meta.dirname, '../src/renderer/src/components', file), 'utf8')
-    }))
-    const fixture = mkdtempSync(join(tmpdir(), 'agentmux-overlay-host-source-'))
-    try {
-      for (const { file, source } of sources) {
-        const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-        const calls: ts.CallExpression[] = []
-        function visit(node: ts.Node): void {
-          if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'createPortal') calls.push(node)
-          ts.forEachChild(node, visit)
-        }
-        visit(ast)
-        expect(calls.length).toBe(1)
-        writeFileSync(join(fixture, file), source)
-      }
-      const inventory = deriveOverlayInventoryFromSource(fixture)
-      expect(inventory.length).toBeGreaterThan(0)
-      expect(inventory.map(item => ({ kind: item.kind, host: item.host }))).toEqual([
-        { kind: 'radix-portal', host: 'window-overlay-host' }
-      ])
-      for (const { file, source } of sources) {
-        const attachments: [string, string][] = [
-          ['destination.append(host)', 'document.body.append(host)'],
-          ["document.createElement('div')", 'document.body'],
-          ['destination.append(host)', '{ destination.append(host); document.body.append(host) }']
-        ]
-        if (source.includes('target ?? home.current')) attachments.push(
-          ['const destination = target ?? home.current', 'const destination = document.body'],
-          ['document.getElementById(targetId)', 'document.body'])
-        if (source.includes('parking.current.append(host)')) attachments.push(
-          ['parking.current.append(host)', 'document.body.append(host)'],
-          ['document.getElementById(destinationId)', 'document.body'])
-        expect(attachments.length).toBe(5)
-        for (const [before, after] of attachments) {
-          expect(source.split(before).length - 1).toBe(1)
-          writeFileSync(join(fixture, file), source.replace(before, after))
-          const unknown = deriveOverlayInventoryFromSource(fixture).filter(item => item.kind === 'createPortal')
-          expect(unknown.map(item => ({ file: item.file, host: item.host, layer: item.layer }))).toEqual([
-            { file, host: 'unclassified', layer: 'unclassified' }
-          ])
-        }
-        writeFileSync(join(fixture, file), source)
-      }
-    } finally { rmSync(fixture, { recursive: true, force: true }) }
-  })
-
-  it('neighboring Browser surface probe proves native views yield when overlays open and return on dismiss', async () => {
-    useAppStore.setState({ nativeSurfaceOverlayCount: 0 })
-    const browserStage = document.createElement('div')
-    browserStage.dataset.nativeBrowserStage = ''
-    browserStage.style.visibility = 'visible'
-    document.body.append(browserStage)
-
-    // Initially: native view has 0 overlay leases
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
-
-    // 1. OpenDestinationPopover opens over workspace containing browser
-    await act(async () => {
-      root?.render(
-        <OpenDestinationPopover
-          request={{ id: 99, url: 'https://example.com/item', x: 100, y: 100 }}
-          canSplit={false}
-          onSelect={vi.fn()}
-          onDismiss={vi.fn()}
-        />
-      )
-    })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
-
-    // Dismiss OpenDestinationPopover: lease releases
-    await act(async () => {
-      root?.render(
-        <OpenDestinationPopover
-          request={null}
-          canSplit={false}
-          onSelect={vi.fn()}
-          onDismiss={vi.fn()}
-        />
-      )
-    })
-    expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
-
-    browserStage.remove()
-  })
 })

@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
@@ -35,7 +36,7 @@ const fixture = vi.hoisted(() => ({
   releaseWrite: null as (() => void) | null,
   menuHistoryBoundary: null as string | null,
   reveal: null as (() => void) | null,
-  state: {noticeReadReceipts:{},acquireNativeSurfaceOverlay:vi.fn(),releaseNativeSurfaceOverlay:vi.fn(),sessions: [] as SessionSnapshot[],config:{appearance:{terminalTheme:'graphite'},executors:{},workspaces:[]},pendingAgentLaunches:{},recoveryCandidates:[],timelines:{},agentNames:{},viewModes:{},regionCaretFocus:null,clearRegionCaretFocus:vi.fn(),focusRegion:vi.fn(),appendAgentComposerDraft:vi.fn(),refreshSession:vi.fn(),recoverSession:vi.fn(),respondInteraction:vi.fn(),openFile:vi.fn(),reportError:vi.fn(),openHttpLink:vi.fn()}
+  state: {noticeReadReceipts:{},sessions: [] as SessionSnapshot[],config:{appearance:{terminalTheme:'graphite'},executors:{},workspaces:[]},pendingAgentLaunches:{},recoveryCandidates:[],timelines:{},agentNames:{},viewModes:{},regionCaretFocus:null,clearRegionCaretFocus:vi.fn(),focusRegion:vi.fn(),appendAgentComposerDraft:vi.fn(),refreshSession:vi.fn(),recoverSession:vi.fn(),respondInteraction:vi.fn(),openFile:vi.fn(),reportError:vi.fn(),openHttpLink:vi.fn()}
 }))
 
 vi.mock('@xterm/xterm', async () => {
@@ -138,8 +139,8 @@ vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
 }))
 
 const session: SessionSnapshot = {
-  id:'agent-history-retained',hostId:'local',workspacePath:_hygiene_fixturePath("synthetic"),label:'Retained',createdAt:1,updatedAt:1,agentSessionUpdatedAt:1,
-  processState:'running',status:{state:'running',source:'run-process',observedAt:1},latestOutputBytes:0,
+  id:'agent-history-retained',hostId:'local',workspacePath:_hygiene_fixturePath("synthetic"),label:'Retained',createdAt:_tailFixtureEpoch(0, 0, 1),updatedAt:_tailFixtureEpoch(0, 0, 1),agentSessionUpdatedAt:_tailFixtureEpoch(0, 0, 1),
+  processState:'running',status:{state:'running',source:'run-process',observedAt:_tailFixtureEpoch(0, 0, 1)},latestOutputBytes:0,
   kind:'agent',providerId:'codex',executorId:'codex',
   capabilities:{terminal:true,timeline:'complete-events',permission:'observe',providerResume:true,replyCorrelation:'none'},
   control:{kind:'agent',hostId:'local',agentSessionId:'agent-history-retained',run:{runId:'run-history-retained'}}
@@ -198,7 +199,7 @@ it.each(['normal', 'alternate', 'Runtime gap', 'retained read failure', 'line bo
       const later = new TextEncoder().encode('Later live output')
       const startByte = dataBytes.length + 10, endByte = startByte + later.length
       await act(async () => fixture.receive!({ type: 'core', hostId: 'local', event: { type: 'terminal-output', run: session.control.run,
-        data: 'Later live output', dataBytes: later, evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
+        data: 'Later live output', dataBytes: later, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
           outputByteRange: { startByte, endByte } } } }))
       await act(async () => await vi.waitFor(() => expect(fixture.replay).toHaveBeenCalledExactlyOnceWith('retained-attachment', dataBytes.length)))
       await act(async () => await vi.waitFor(() => expect(document.body.textContent).toContain('Retained history could not be read')))

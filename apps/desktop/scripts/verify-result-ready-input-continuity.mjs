@@ -41,8 +41,8 @@ const mutations = [
       return replaceOne(source, '      <OpenDestinationPopover\n', '      {session.status.state === \'done\' ? resultReview : null}\n      <OpenDestinationPopover\n')
     } },
   { label: 'automatic-focus-takeover', file: 'components/SessionResultReview.tsx', expected: /never steals terminal focus/,
-    change: source => replaceOne(source, '  const acquireNativeSurfaceOverlay = useAppStore',
-      '  useEffect(() => { if (ready && !dismissed) trigger.current?.focus() }, [ready, dismissed])\n  const acquireNativeSurfaceOverlay = useAppStore') },
+    change: source => replaceOne(source, '  useEffect(() => { setExpanded(false); setDismissed(false) }, [sessionId])',
+      '  useEffect(() => { if (ready && !dismissed) trigger.current?.focus() }, [ready, dismissed])\n  useEffect(() => { setExpanded(false); setDismissed(false) }, [sessionId])') },
   { label: 'actual-keyboard-write', file: 'components/TerminalView.tsx', expected: /Trusted keyboard input reaches production sessions.write/,
     change: source => replaceOne(source, 'if (!readOnlyRef.current) void api.sessions.write(session.control, data, source).catch(reportError)',
       'void 0 // private block mutation: cut the actual native keyboard write callback') },

@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
@@ -106,7 +107,7 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
 vi.mock('../src/renderer/src/store', () => {
   const state = {
     config: null, regionCaretFocus: null,
-    noticeReadReceipts: {}, acquireNativeSurfaceOverlay: vi.fn(), releaseNativeSurfaceOverlay: vi.fn(),
+    noticeReadReceipts: {},
     clearRegionCaretFocus: vi.fn(), recoverSession: vi.fn(),
     openHttpLink: vi.fn(), openFile: vi.fn(), reportError: vi.fn()
   }
@@ -136,8 +137,8 @@ vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
 
 const session: SessionSnapshot = {
   id: 'session-retained', hostId: 'local', workspacePath: _hygiene_fixturePath("fixture"), label: 'Retained',
-  createdAt: 1, updatedAt: 1, processState: 'running',
-  status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+  createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), processState: 'running',
+  status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
   kind: 'terminal', providerId: null,
   control: { kind: 'terminal', hostId: 'local', runId: 'run-retained', run: { runId: 'run-retained' } }
 }
@@ -215,7 +216,7 @@ function liveOutput(data: string): RuntimeEvent {
   const dataBytes = new TextEncoder().encode(data)
   const startByte = new TextEncoder().encode(retained).byteLength
   return { type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run, dataBytes, data,
-    evidence: { source: 'terminal-output', observedAt: 2, run,
+    evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run,
       outputByteRange: { startByte, endByte: startByte + dataBytes.byteLength } } } }
 }
 

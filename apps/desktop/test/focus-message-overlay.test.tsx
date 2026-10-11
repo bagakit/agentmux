@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
@@ -59,8 +60,8 @@ async function fixture() {
   const unsafe = (['write', 'paste', 'stop', 'interrupt', 'resume', 'recover'] as const).map(name => vi.spyOn(api.sessions, name))
   const sessions: SessionSnapshot[] = [A, B].map(id => ({
     id, kind: 'agent', providerId: 'generic', executorId: 'generic', hostId: 'local', workspacePath: _hygiene_fixturePath("overlay-fixture"), label: id,
-    createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running', latestOutputBytes: 0,
-    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1), processState: 'running', latestOutputBytes: 0,
+    status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) },
     capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `${id}-original-run` } }
   }))
@@ -157,11 +158,10 @@ it('explicit sender navigation preserves its actual Store target and does not re
   expect(container!.querySelector('[data-observed-context]')!.getAttribute('data-observed-context')).toBe(B)
   expect(useAppStore.getState().sessions.map(session => [session.id, session.control.run.runId])).toEqual(h.subjects)
 })
-it('anchor resize repositions the same selected body and unrelated bytes do not read another sender or acquire a manual lease', async () => {
+it('anchor resize repositions the same selected body and unrelated bytes do not read another sender or disturb the original sender', async () => {
   const h = await fixture(), node = await h.open(), { body, range } = selectBody(node)
   const reads = h.history.mock.calls.map(call => call[0].agentSessionId)
   expect(reads).toEqual([A]); const origin = useAppStore.getState().agentFocus
-  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
   await act(async () => { window.dispatchEvent(new Event('resize')); useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === B ? { ...session, latestOutputBytes: 64 } : session) })) }); await settle()
   expect(preview()).toBe(node); expect(node.querySelector('[data-input-preview-id]')).toBe(body)
   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Keep')
@@ -186,5 +186,5 @@ it('the existing native overlay collector observes real open Portal surfaces and
   await act(async () => box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))); await settle()
   expect(regions.map(item => item.id)).toEqual([parentID])
   await act(async () => button(node, 'Close message').click()); await settle()
-  expect(regions).toEqual([]); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  expect(regions).toEqual([])
 })

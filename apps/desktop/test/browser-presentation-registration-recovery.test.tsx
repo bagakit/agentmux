@@ -12,7 +12,7 @@ const bridge = vi.hoisted(() => ({
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: bridge, ui: bridge } }))
 vi.mock('../src/renderer/src/store', async () => {
   const { create } = await import('zustand')
-  return { useAppStore: create(() => ({ noticeReadReceipts: {}, acquireNativeSurfaceOverlay() {}, releaseNativeSurfaceOverlay() {} })) }
+  return { useAppStore: create(() => ({ noticeReadReceipts: {},  })) }
 })
 // Consume the actual persistent disclosure; a null mock would hide the source failure.
 import { BrowserPresentationStage, useBrowserPresentationCapture } from '../src/renderer/src/components/BrowserPresentationStage'

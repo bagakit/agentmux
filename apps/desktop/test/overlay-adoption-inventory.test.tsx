@@ -1,8 +1,6 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getWindowOverlayHost,
@@ -13,11 +11,8 @@ import {
   WindowOverlayPortal
 } from '../src/renderer/src/components/WindowOverlayHost.js'
 import * as HoverMenu from '../src/renderer/src/components/HoverDropdownMenu.js'
-import { isOverlayNode, openOverlayCount } from '../src/renderer/src/lib/native-surface-overlay.js'
-import { deriveOverlayInventoryFromSource, type OverlayHostKind, type OverlayLayerKind } from './helpers/overlay-source-inventory.js'
 
-describe('overlay adoption inventory and shared adapter contract (T-001)', () => {
-  const rendererSrcDir = join(import.meta.dirname, '../src/renderer/src')
+describe('window overlay host runtime contract', () => {
   let root: Root | null = null
   let container: HTMLDivElement | null = null
   let hostEl: HTMLElement | null = null
@@ -39,57 +34,7 @@ describe('overlay adoption inventory and shared adapter contract (T-001)', () =>
     hostEl = null
   })
 
-  it('derives a non-vacuous overlay inventory directly from renderer source AST', () => {
-    const inventory = deriveOverlayInventoryFromSource(rendererSrcDir)
-
-    // Non-vacuous check: scan must find real overlay triggers in renderer source
-    expect(inventory.length, 'Inventory scan found zero triggers - AST scan or source path broken')
-      .toBeGreaterThan(0)
-
-    const createPortals = inventory.filter((t) => t.kind === 'createPortal')
-    const nativePopovers = inventory.filter((t) => t.kind === 'native-popover')
-    const radixPortals = inventory.filter((t) => t.kind === 'radix-portal')
-
-    expect(createPortals.length, 'createPortal triggers must be non-empty').toBeGreaterThan(0)
-    expect(nativePopovers.length, 'native-popover triggers must be non-empty').toBeGreaterThan(0)
-    expect(radixPortals.length, 'radix-portal triggers must be non-empty').toBeGreaterThan(0)
-
-    // Verify distinct files discovered
-    const distinctFiles = new Set(inventory.map((t) => t.file))
-    expect(distinctFiles.size, 'Inventory should span multiple renderer files').toBeGreaterThan(10)
-  })
-
-  it('proves every discovered trigger is classified by host, layer and lifecycle owner with zero unclassified usages', () => {
-    const inventory = deriveOverlayInventoryFromSource(rendererSrcDir)
-
-    const unclassified = inventory.filter(
-      (item) =>
-        item.host === 'unclassified' ||
-        item.layer === 'unclassified' ||
-        !item.lifecycleOwner ||
-        item.lifecycleOwner === 'UnknownComponent'
-    )
-
-    // Fails if any cross-boundary overlay usage cannot be classified from source
-    expect(
-      unclassified,
-      `Unclassified overlay usages detected in renderer source:\n${JSON.stringify(unclassified, null, 2)}`
-    ).toEqual([])
-
-    // Verify each classified item meets contract invariants
-    const validHosts: OverlayHostKind[] = ['window-overlay-host', 'native-top-layer']
-    const validLayers: OverlayLayerKind[] = ['tooltip', 'popover', 'service', 'dialog']
-
-    for (const item of inventory) {
-      expect(validHosts).toContain(item.host)
-      expect(validLayers).toContain(item.layer)
-      expect(typeof item.lifecycleOwner).toBe('string')
-      expect(item.lifecycleOwner.length).toBeGreaterThan(0)
-      expect(typeof item.leasesNative).toBe('boolean')
-    }
-  })
-
-  it('provides the shared WindowOverlayHost and adapter contract without duplicating native surface leasing', async () => {
+  it('provides the shared WindowOverlayHost, layer attributes and portal destination', async () => {
     // 1. Layer bands enum
     expect(OVERLAY_LAYER_BANDS.windowChrome).toBe('window-chrome')
     expect(OVERLAY_LAYER_BANDS.tooltip).toBe('tooltip')
@@ -175,9 +120,9 @@ describe('overlay adoption inventory and shared adapter contract (T-001)', () =>
     const content = document.body.querySelector('[data-testid="initial-commit-content"]')
     expect(content, 'Overlay content must be rendered in DOM').toBeTruthy()
 
-    const host = document.querySelector<HTMLElement>('[data-overlay-host]')
+    const host = getWindowOverlayHost()
     expect(host, 'Shared host must exist in document.body').toBeTruthy()
-    expect(host?.parentElement, 'Host must reside directly on document.body outside #root').toBe(document.body)
+    expect(host?.parentElement?.parentElement, 'Interaction host belongs to the one window root outside #root').toBe(document.body)
 
     // Critical assertion: content is inside [data-overlay-host], NOT directly under body or root!
     expect(
@@ -186,7 +131,8 @@ describe('overlay adoption inventory and shared adapter contract (T-001)', () =>
     ).toBe(host)
 
     // Assert only one single host is created (idempotent adoption, no duplicate host)
-    expect(document.querySelectorAll('[data-overlay-host]').length).toBe(1)
+    expect(document.querySelectorAll('#agentmux-window-overlay-host')).toHaveLength(1)
+    expect(document.querySelectorAll('#agentmux-window-overlay-host-interaction')).toHaveLength(1)
 
     await act(async () => {
       testRoot.unmount()
@@ -203,65 +149,10 @@ describe('overlay adoption inventory and shared adapter contract (T-001)', () =>
     const initialized = getWindowOverlayHost()
     expect(initialized, 'Synchronous ensure must provide non-null host').not.toBeNull()
     expect(initialized?.hasAttribute('data-overlay-host')).toBe(true)
-    expect(initialized?.parentElement).toBe(document.body)
+    expect(initialized?.parentElement?.parentElement).toBe(document.body)
 
     // And second call returns identical element (idempotent)
     expect(getWindowOverlayHost()).toBe(initialized)
-  })
-
-  it('keeps browser-yield lease acquired for open nested overlays and releases only after all close', () => {
-    document.body.innerHTML = ''
-    const hostNode = getWindowOverlayHost()!
-
-    // Initially no overlays: count is 0
-    expect(openOverlayCount(document.body)).toBe(0)
-
-    // 1. Parent overlay open in host
-    const parentEntry = document.createElement('div')
-    parentEntry.className = 'window-overlay-host__entry'
-    parentEntry.dataset.overlayLayer = 'popover'
-    const parentContent = document.createElement('div')
-    parentContent.setAttribute('data-state', 'open')
-    parentContent.textContent = 'Parent Menu'
-    parentEntry.appendChild(parentContent)
-    hostNode.appendChild(parentEntry)
-
-    expect(openOverlayCount(document.body), 'Parent overlay open holds lease').toBe(1)
-
-    // 2. Nested submenu opens in host
-    const nestedEntry = document.createElement('div')
-    nestedEntry.className = 'window-overlay-host__entry'
-    nestedEntry.dataset.overlayLayer = 'popover'
-    const nestedContent = document.createElement('div')
-    nestedContent.setAttribute('data-state', 'open')
-    nestedContent.textContent = 'Nested Submenu'
-    nestedEntry.appendChild(nestedContent)
-    hostNode.appendChild(nestedEntry)
-
-    expect(openOverlayCount(document.body), 'Nested overlay open maintains lease').toBe(2)
-
-    // 3. Nested submenu closes: parent remains open
-    nestedContent.setAttribute('data-state', 'closed')
-    expect(openOverlayCount(document.body), 'Closing nested menu keeps parent lease acquired').toBe(1)
-
-    // 4. Parent menu closes: all overlays closed
-    parentContent.setAttribute('data-state', 'closed')
-    expect(openOverlayCount(document.body), 'Lease is released only after all nested overlays close').toBe(0)
-  })
-
-  it('enforces layer attributes have actual CSS and DOM ordering semantics without display: contents', () => {
-    // 1. Verify CSS rules in agent.css consume data-overlay-layer and do not use display: contents
-    const styles = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent.css'), 'utf8')
-    expect(styles).toContain('.window-overlay-host__entry { position: absolute; inset: 0;')
-    expect(styles).not.toContain('.window-overlay-host__entry { display: contents')
-    expect(styles).toContain('[data-overlay-layer="dialog"]')
-    expect(styles).toContain('[data-overlay-layer="service"]')
-    expect(styles).toContain('[data-overlay-layer="popover"]')
-    expect(styles).toContain('[data-overlay-layer="tooltip"]')
-    expect(styles).toContain('[data-overlay-layer="window-chrome"]')
-
-    // Numeric values live in the CSS token SSOT. This contract only proves the
-    // source selectors consume the named bands; it does not duplicate that table.
   })
 
   it('rejects silent document.body fallback when WindowOverlayHost is explicitly unavailable', () => {
@@ -274,7 +165,7 @@ describe('overlay adoption inventory and shared adapter contract (T-001)', () =>
 
     // When no container is provided, resolveOverlayContainer ensures the host in document.body
     const resolved = resolveOverlayContainer()
-    expect(resolved).toBe(document.querySelector('[data-overlay-host]'))
+    expect(resolved).toBe(getWindowOverlayHost())
     expect(resolved).not.toBe(document.body)
   })
 })

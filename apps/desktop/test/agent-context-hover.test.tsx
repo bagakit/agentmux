@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { AgentContextUsage } from '../src/renderer/src/components/AgentContextUsage'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore } from '../src/renderer/src/store'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let host: HTMLDivElement, root: Root
 const usage = { inputTokens: 230, outputTokens: 20, totalTokens: 250, observedAt: fixtureEpoch(1), context: { usedTokens: 250, capacityTokens: 1000 } }
@@ -25,14 +24,14 @@ async function pointer(node: HTMLElement, type: string, pointerType = 'mouse', b
   await act(async () => node.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType, buttons })))
 }
 function props(node: HTMLElement) { const key = Object.keys(node).find(key => key.startsWith('__reactProps$'))!; return (node as unknown as Record<string, Record<string, (event: unknown) => void>>)[key]! }
-beforeEach(() => { vi.useFakeTimers(); host = document.createElement('div'); document.body.append(host); root = createRoot(host); useAppStore.setState({ nativeSurfaceOverlayCount: 0 }) })
+beforeEach(() => { vi.useFakeTimers(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks(); vi.useRealTimers(); window.getSelection()?.removeAllRanges() })
 
 it('opens a passive native hover reader from the exact chip without changing input focus', async () => {
   await render(); const { show } = native(), input = document.createElement('textarea'); host.append(input); input.value = 'Keep this draft'; input.focus()
   await pointer(chip(), 'pointerover')
   expect(show).toHaveBeenCalledOnce(); expect(isOpen()).toBe(true); expect(document.activeElement).toBe(input); expect(input.value).toBe('Keep this draft')
-  expect(chip().getAttribute('aria-expanded')).toBe('true'); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  expect(chip().getAttribute('aria-expanded')).toBe('true')
   expect(card().textContent).toContain('25% used'); expect(card().textContent).toContain('75% remaining'); expect(card().textContent).toContain('750 remaining')
   expect([...card().querySelectorAll('dd')].map(node => node.textContent)).toEqual(['230', '20', '250'])
   expect(card().textContent).toContain('Latest report · scope unrecorded')
@@ -43,7 +42,7 @@ it('allows crossing the gap into the reader and closes only a departed preview',
   await act(async () => vi.advanceTimersByTime(100)); await pointer(card(), 'pointerover'); await act(async () => vi.advanceTimersByTime(200))
   expect(isOpen()).toBe(true); expect(hide).not.toHaveBeenCalled()
   await pointer(card(), 'pointerout'); await act(async () => vi.advanceTimersByTime(180))
-  expect(isOpen()).toBe(false); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  expect(isOpen()).toBe(false)
 })
 
 it('promotes a hover click to explicit reading and leaves the next native toggle available', async () => {
@@ -111,7 +110,7 @@ it('closes on the first frame of another Session or Run and rejects the old hove
 
 it('releases the overlay and cannot open from an unmounted retained handler', async () => {
   await render(); const { show } = native(); await pointer(chip(), 'pointerover'); const old = props(chip()).onPointerEnter!
-  await render(null); await act(async () => old({ pointerType: 'mouse', buttons: 0 })); expect(show).toHaveBeenCalledTimes(1); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  await render(null); await act(async () => old({ pointerType: 'mouse', buttons: 0 })); expect(show).toHaveBeenCalledTimes(1)
 })
 
 it('gives each chip and panel its own anchor in a multi-Agent workface', async () => {
@@ -140,6 +139,6 @@ it('uses the shared scope-separated usage body in the actual Composer reader wit
   expect(card().querySelector('.agent-usage-details')).toBe(body); expect(window.getSelection()!.toString()).toBe('Context window')
   expect(card().textContent).toContain('92% remaining'); expect(card().textContent).toContain('236 remaining')
   await render(<AgentContextUsage source="sample/run" visible={false} usage={sample} />)
-  expect(isOpen()).toBe(false); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  expect(isOpen()).toBe(false)
   for (const port of ports) expect(port).not.toHaveBeenCalled()
 })

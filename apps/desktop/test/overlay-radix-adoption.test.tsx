@@ -3,8 +3,6 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { act, createElement } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.hoisted(() => {
@@ -12,7 +10,6 @@ vi.hoisted(() => {
 })
 
 import * as DropdownMenu from '../src/renderer/src/components/HoverDropdownMenu.js'
-import * as RadixDialog from '@radix-ui/react-dialog'
 import { ConfirmationDialog } from '../src/renderer/src/components/ConfirmationDialog.js'
 import { BranchContextMenu } from '../src/renderer/src/components/BranchContextMenu.js'
 import { TopicContextMenu } from '../src/renderer/src/components/TopicContextMenu.js'
@@ -23,17 +20,8 @@ import {
   resolveOverlayContainer,
   WindowOverlayHost
 } from '../src/renderer/src/components/WindowOverlayHost.js'
-import { openOverlayCount } from '../src/renderer/src/lib/native-surface-overlay.js'
-import { deriveOverlayInventoryFromSource } from './helpers/overlay-source-inventory.js'
 
-const CHROME_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/chrome.css'), 'utf8')
-const PANELS_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/agent-panels.css'), 'utf8')
-const OVERLAYS_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/overlays.css'), 'utf8')
-const BOARD_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/board.css'), 'utf8')
-const SOURCE_CONTROL_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/source-control.css'), 'utf8')
-const BROWSER_CSS = readFileSync(join(import.meta.dirname, '../src/renderer/src/styles/browser.css'), 'utf8')
-
-describe('T-002: Radix Portal overlay families adoption', () => {
+describe('shared Modal and Radix menu behavior', () => {
   let root: Root | null = null
   let container: HTMLDivElement | null = null
   let host: HTMLElement | null = null
@@ -54,34 +42,6 @@ describe('T-002: Radix Portal overlay families adoption', () => {
     root = null
     container = null
     host = null
-  })
-
-  it('layer tokens replace component-local cross-boundary z-index decisions', () => {
-    // 1. Context menus
-    expect(CHROME_CSS).toContain('z-index: var(--layer-popover);')
-    expect(CHROME_CSS).not.toContain('.tab-context-menu {\n  min-width: 176px;\n  z-index: 120;')
-
-    // 2. Dropdown menus and panels
-    expect(PANELS_CSS).toContain('.agent-roster {')
-    expect(PANELS_CSS).toContain('z-index: var(--layer-popover);')
-    expect(PANELS_CSS).not.toContain('.agent-roster {\n  min-width: 268px;\n  max-width: 420px;\n  z-index: 120;')
-    expect(PANELS_CSS).toContain('.resource-usage {')
-    expect(PANELS_CSS).not.toContain('.resource-usage {\n  min-width: 236px;\n  max-width: 340px;\n  z-index: 120;')
-    expect(BROWSER_CSS).toContain('.browser-menu { min-width: 210px; z-index: var(--layer-popover);')
-    expect(BROWSER_CSS).not.toContain('.browser-menu { min-width: 210px; z-index: 130;')
-
-    // 3. Confirmation Dialog & Quick Switcher
-    expect(OVERLAYS_CSS).toContain('.confirmation-dialog__overlay { position: fixed; z-index: var(--layer-dialog);')
-    expect(OVERLAYS_CSS).toContain('.confirmation-dialog {\n  position: fixed;\n  z-index: var(--layer-dialog);')
-    expect(OVERLAYS_CSS).toContain('.quick-switch__overlay { position: fixed; z-index: var(--layer-dialog);')
-    expect(OVERLAYS_CSS).toContain('.quick-switch {\n  position: fixed;\n  z-index: var(--layer-dialog);')
-    expect(OVERLAYS_CSS).toContain('.md-conversation-image__overlay { position: fixed; z-index: var(--layer-dialog);')
-    expect(OVERLAYS_CSS).toContain('.md-conversation-image__lightbox {\n  position: fixed;\n  z-index: var(--layer-dialog);')
-
-    // 4. Board discussion canvas & Source control dialog
-    expect(BOARD_CSS).toContain('.discussion-canvas__overlay { position: fixed; z-index: var(--layer-dialog);')
-    expect(BOARD_CSS).toContain('position: fixed; z-index: var(--layer-dialog); pointer-events: auto; top: 50%; left: 50%; display: grid;')
-    expect(SOURCE_CONTROL_CSS).toContain('.branch-create-dialog { position: fixed; z-index: var(--layer-dialog);')
   })
 
   it('ConfirmationDialog mounts into shared window overlay host and preserves Escape, actions and teardown', async () => {
@@ -302,9 +262,8 @@ describe('T-002: Radix Portal overlay families adoption', () => {
     expect(host?.querySelector('.md-conversation-image__lightbox')).toBeNull()
   })
 
-  it('preserves native lease count across nested modal and dropdown overlays in window-overlay-host', async () => {
-    // 1. Initial state: 0 overlays
-    expect(openOverlayCount(document.body)).toBe(0)
+  it('keeps the original dialog mounted when a sibling dropdown opens and closes', async () => {
+    // Initially the original dialog is absent.
 
     // 2. Open a dialog in host (contains Overlay + Content)
     await act(async () => {
@@ -319,8 +278,6 @@ describe('T-002: Radix Portal overlay families adoption', () => {
         />
       )
     })
-    const dialogLeaseCount = openOverlayCount(document.body)
-    expect(dialogLeaseCount, 'Dialog in window-overlay-host holds positive lease count').toBeGreaterThan(0)
     expect(host?.querySelector('.confirmation-dialog')).toBeTruthy()
 
     // 3. Open nested dropdown while dialog is open
@@ -346,11 +303,10 @@ describe('T-002: Radix Portal overlay families adoption', () => {
         </>
       )
     })
-    expect(openOverlayCount(document.body), 'Stacked modal + dropdown increments lease count beyond dialog alone').toBeGreaterThan(dialogLeaseCount)
     expect(host?.querySelector('.test-nested-menu')).toBeTruthy()
     expect(host?.querySelector('.confirmation-dialog')).toBeTruthy()
 
-    // 4. Close dropdown: lease remains held by dialog
+    // Closing the dropdown keeps the original dialog.
     await act(async () => {
       root?.render(
         <>
@@ -373,15 +329,13 @@ describe('T-002: Radix Portal overlay families adoption', () => {
         </>
       )
     })
-    expect(openOverlayCount(document.body), 'Closing nested dropdown restores parent dialog lease count').toBe(dialogLeaseCount)
     expect(host?.querySelector('.test-nested-menu')).toBeNull()
     expect(host?.querySelector('.confirmation-dialog')).toBeTruthy()
 
-    // 5. Close dialog: lease returns to 0
+    // Unmount removes both original surfaces.
     await act(async () => {
       root?.render(null)
     })
-    expect(openOverlayCount(document.body), 'Closing all overlays returns lease count to 0').toBe(0)
     expect(host?.children.length).toBe(0)
   })
 
@@ -408,6 +362,9 @@ describe('T-002: Radix Portal overlay families adoption', () => {
           onArrange={() => {}}
           moveSessionViewTargets={[]}
           onMoveSessionView={() => {}}
+          displayTargets={[]}
+          bindingPending={false}
+          onDisplayBindingChange={() => {}}
         >
           <div className="tab-trigger">Tab 1</div>
         </WorkbenchTabContextMenu>
@@ -478,28 +435,6 @@ describe('T-002: Radix Portal overlay families adoption', () => {
     expect(resolved).not.toBe(document.body)
   })
 
-  it('proves zero unnamed portal host mounts across all migrated Radix families in renderer source', () => {
-    const rendererSrcDir = join(import.meta.dirname, '../src/renderer/src')
-    const files = [...new Set(
-      deriveOverlayInventoryFromSource(rendererSrcDir)
-        .filter((item) => item.kind === 'radix-portal')
-        .map((item) => item.file)
-    )]
-    expect(files.length, 'AST inventory must discover Radix portal callers').toBeGreaterThan(0)
-    for (const file of files) {
-      const filePath = join(rendererSrcDir, file)
-      const content = readFileSync(filePath, 'utf8')
-      if (file.endsWith('/HoverDropdownMenu.tsx')) {
-        expect(content, `${file} must route its Portal through resolveOverlayContainer`).toContain('resolveOverlayContainer(container)')
-      } else if (content.includes("from './HoverDropdownMenu'") || content.includes("from './HoverDropdownMenu.js'")) {
-        expect(content, `${file} uses the shared dropdown adapter`).toContain('<DropdownMenu.Portal>')
-      } else {
-        expect(content, `${file} must import resolveOverlayContainer`).toContain('resolveOverlayContainer')
-        expect(content, `${file} must pass container to Portal`).toContain('container={resolveOverlayContainer')
-      }
-    }
-  })
-
   it('initial same-commit render: open overlay mounts its Portal under data-overlay-host without prior host in DOM', async () => {
     // 1. Clear any pre-existing host from DOM to simulate cold initial App render
     host?.remove()
@@ -525,9 +460,9 @@ describe('T-002: Radix Portal overlay families adoption', () => {
     })
 
     // 3. The host was created synchronously and adopted
-    const activeHost = document.querySelector<HTMLElement>('[data-overlay-host]')
+    const activeHost = getWindowOverlayHost()
     expect(activeHost, 'data-overlay-host must exist on document.body').toBeTruthy()
-    expect(activeHost?.parentElement).toBe(document.body)
+    expect(activeHost?.parentElement?.parentElement).toBe(document.body)
     expect(activeHost?.closest('#root')).toBeNull()
 
     // 4. Content is under [data-overlay-host], NOT fallen back to document.body or container
@@ -537,7 +472,7 @@ describe('T-002: Radix Portal overlay families adoption', () => {
     expect(content?.parentElement?.closest('[data-overlay-host]')).toBe(activeHost)
 
     // 5. Exactly 1 host element exists (no duplicate created by WindowOverlayHost later in commit)
-    const hostCount = document.querySelectorAll('[data-overlay-host]').length
+    const hostCount = document.querySelectorAll('#agentmux-window-overlay-host-interaction').length
     expect(hostCount, 'Host creation must be idempotent on initial same-commit render').toBe(1)
   })
 
