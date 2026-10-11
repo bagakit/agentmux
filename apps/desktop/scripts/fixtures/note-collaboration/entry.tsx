@@ -16,7 +16,8 @@ window.addEventListener('unhandledrejection', event => (window as any).__noteErr
 
 async function invoke(method: string, ...args: unknown[]) { const response = await fetch('/__note/invoke', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ method, args }) }); const result = await response.json(); if (!response.ok) throw Object.assign(Error(result.error.message), { code: result.error.code }); return result.value }
 const original = await invoke('bootstrap'), invalidations = new Set<(event: any) => void>(), spatial = new Set<(value: any) => void>()
-const stopTheme = mountThemeRuntime(window, original.config.appearance)
+const appearance = new URLSearchParams(location.search).get('appearance')
+const stopTheme = mountThemeRuntime(window, { ...original.config.appearance, ...(appearance === 'light' || appearance === 'dark' ? { appAppearance: appearance } : {}) })
 const events = new EventSource('/__note/events')
 events.onmessage = event => { const value = JSON.parse(event.data); if (value.channel === 'file') for (const listener of invalidations) listener(value.value) }
 api.config.get = () => invoke('config.get')
@@ -32,6 +33,11 @@ for (const method of ['read', 'write', 'list', 'observe', 'unobserve'] as const)
 for (const [method, rpc] of [['readPublic', 'file.read'], ['createPublic', 'file.create'], ['historyPublic', 'file.history'], ['restorePublic', 'file.restore'], ['undoPublic', 'file.undo']] as const) api.files[method] = input => invoke('rpc', rpc, input)
 api.files.onInvalidated = listener => { invalidations.add(listener); return () => { invalidations.delete(listener) } }
 api.ui.requestStorageFlush = () => invoke('storage.flush', localStorage.getItem('agentmux-workbench-v1'))
+// Explicit private-fixture recovery reads the exact previously flushed renderer state.
+if (new URLSearchParams(location.search).get('resume') === '1') {
+  const persisted = (await invoke('facts')).workbench
+  if (persisted) localStorage.setItem('agentmux-workbench-v1', persisted)
+}
 const ready = await useAppStore.getState().initialize(), key = documentKey(original.workspace.id, original.path)
 if (!useAppStore.getState().documents[key]) await useAppStore.getState().reloadDocument(original.tabId, original.regionId)
 const tab = useAppStore.getState().tabs[original.tabId], surface = tab?.regions[original.regionId]
@@ -42,5 +48,5 @@ Object.assign(window, { noteCollaboration: { original, async flush() { await pre
   async save() { await useAppStore.getState().saveDocument(original.tabId, original.regionId) },
   async check() { await useAppStore.getState().reloadDocument(original.tabId, original.regionId) }, dispose() { ready(); events.close(); stopTheme() } } })
 createRoot(document.getElementById('root')!).render(<StrictMode><DesktopClientUiProvider><WindowOverlayHost /><WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, tabHostId: 'fixture-primary', reference }}>
-  <main style={{ width: 1000, height: '100vh', margin: 'auto', background: 'var(--bg)' }} data-workbench-region-id={surface.regionId}><FileSurfaceView tabId={original.tabId} surface={surface} /></main>
+  <main style={{ width: '100%', maxWidth: 1000, height: '100vh', margin: 'auto', background: 'var(--bg)' }} data-workbench-region-id={surface.regionId}><FileSurfaceView tabId={original.tabId} surface={surface} /></main>
 </WorkbenchPresentationContext.Provider></DesktopClientUiProvider></StrictMode>)

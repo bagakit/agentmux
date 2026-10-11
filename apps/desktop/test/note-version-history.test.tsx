@@ -26,13 +26,13 @@ const records = (noteId = 'original'): NoteHistoryRecord[] => [2, 1].map(sequenc
 function history(params: FileHistoryParams, rows = records(params.noteId), window = false): FileHistoryResult {
   const available = rows.filter(row => params.eventId ? row.eventId === params.eventId : params.before === undefined || row.sequence < params.before)
   const selected = window && !params.eventId ? available.slice(0, 1) : available
-  return { resource: params.expectedResource, result: noteHistorySnapshot({ noteId: params.noteId, resource, includeContent: params.includeContent }, selected, selected.length < available.length) }
+  return { resource: params.expectedResource, result: noteHistorySnapshot({ noteId: params.noteId, resource, ...(params.includeContent === undefined ? {} : { includeContent: params.includeContent }) }, selected, selected.length < available.length) }
 }
 const pairs: monaco.editor.IDiffEditorModel[] = []
 let baseline: number
 beforeEach(async () => {
   baseline = monaco.editor.getModels().length; pairs.length = 0
-  vi.spyOn(monaco.editor, 'createDiffEditor').mockImplementation((host => ({
+  vi.spyOn(monaco.editor, 'createDiffEditor').mockImplementation(((host: HTMLElement) => ({
     createViewModel(pair: monaco.editor.IDiffEditorModel) { pairs.push(pair); return { model: pair, dispose() {} } },
     setModel(view: { model: monaco.editor.IDiffEditorModel } | null) { host.textContent = view ? view.model.original.getValue() + '\n' + view.model.modified.getValue() : '' },
     updateOptions() {}, dispose() {}
@@ -47,7 +47,7 @@ beforeEach(async () => {
 })
 afterEach(() => { expect(monaco.editor.getModels()).toHaveLength(baseline) })
 async function mount(active = true, noteId = 'original') { await dom.render(<NoteVersionHistory tabId={tabId} regionId={regionId} noteId={noteId} active={active} />) }
-async function expand(selector = '.note-version-history', open = true) {
+async function expand(selector = '.note-version-history__activity', open = true) {
   const details = dom.container.querySelector<HTMLDetailsElement>(selector)!
   await act(async () => { details.open = open; details.dispatchEvent(new Event('toggle')) })
 }
@@ -55,14 +55,23 @@ async function click(text: string) {
   const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)
   expect(button, text).toBeDefined(); await act(async () => button!.click())
 }
-async function opened() { await mount(); await expand(); await vi.waitFor(() => expect(dom.container.querySelector('.note-version-history__activity')).not.toBeNull()); await expand('.note-version-history__activity') }
+async function opened() { await mount(); await vi.waitFor(() => expect(dom.container.querySelector('.note-version-history__activity')).not.toBeNull()); await expand() }
 
-it('reads only after explicit expansion in an active view and shows real actor identity without hidden polling', async () => {
+it('reads only when the parent activates Saved versions and keeps full trusted IDs behind activity details without polling', async () => {
   await mount(false)
   expect(api.files.historyPublic).not.toHaveBeenCalled(); expect(useAppStore.getState().inspectNoteHistory).not.toHaveBeenCalled()
-  await expand(); expect(api.files.historyPublic).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('.note-version-history')).toBeNull()
   await mount(true); await vi.waitFor(() => expect(api.files.historyPublic).toHaveBeenCalledTimes(1))
+  expect(dom.container.querySelector('section[aria-label="Saved versions"]')).not.toBeNull()
+  expect(dom.container.querySelector('.note-version-history > summary')).toBeNull()
   expect(dom.container.textContent).toContain('Agent · Research agent'); expect(dom.container.textContent).toContain('original-agent-session')
+  const activity = dom.container.querySelector('.note-version-history__activity')!, identity = activity.querySelector<HTMLDetailsElement>('.note-version-history__identity')!
+  expect(activity.querySelector('summary')!.textContent).not.toContain('original-agent-session')
+  expect(identity.open).toBe(false)
+  await expand()
+  await expand('.note-version-history__identity')
+  expect(identity.textContent).toContain('original-batch'); expect(identity.textContent).toContain('original-event-2'); expect(identity.textContent).toContain('agent · original-agent-session')
+  expect(api.files.historyPublic).toHaveBeenCalledWith({ ...target(), limit: 50 })
   expect(pairs).toHaveLength(0)
   await mount(false)
   await act(async () => useAppStore.setState({ agentNames: { unrelated: 'Other agent' } }))
@@ -100,7 +109,7 @@ it('rejects a late history window from the previous Note identity', async () => 
   let release!: (value: FileHistoryResult) => void
   const late = new Promise<FileHistoryResult>(resolve => { release = resolve })
   vi.mocked(api.files.historyPublic).mockImplementation(params => params.noteId === 'original' ? late : Promise.resolve(history(params)))
-  await mount(); await expand(); await vi.waitFor(() => expect(api.files.historyPublic).toHaveBeenCalledTimes(1))
+  await mount(); await vi.waitFor(() => expect(api.files.historyPublic).toHaveBeenCalledTimes(1))
   await mount(true, 'second'); await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Preview version second-event-2"]')).not.toBeNull())
   await act(async () => { release(history(target())); await late })
   expect(dom.container.querySelector('[aria-label="Preview version second-event-2"]')).not.toBeNull()
@@ -119,9 +128,54 @@ it('keeps the newest explicit version selection when an earlier body read return
   await mount(false); expect(monaco.editor.getModels()).toHaveLength(baseline)
 })
 
+it('discards an old history read after the parent hides and reactivates the same Note', async () => {
+  let release!: (value: FileHistoryResult) => void
+  const late = new Promise<FileHistoryResult>(resolve => { release = resolve })
+  vi.mocked(api.files.historyPublic).mockImplementationOnce(() => late)
+  await mount(); await vi.waitFor(() => expect(api.files.historyPublic).toHaveBeenCalledTimes(1))
+  await mount(false)
+  expect(dom.container.querySelector('.note-version-history')).toBeNull()
+  await mount(); await vi.waitFor(() => expect(dom.container.querySelector('.note-version-history__activity')).not.toBeNull())
+  await act(async () => { release(history(target(), [])); await late })
+  expect(dom.container.querySelector('[aria-label="Preview version original-event-2"]')).not.toBeNull()
+  expect(dom.container.textContent).not.toContain('No saved versions')
+  expect(api.files.historyPublic).toHaveBeenCalledTimes(2)
+})
+
+it('discards a hidden version body without creating diff models or changing the current draft', async () => {
+  let release!: (value: FileHistoryResult) => void
+  const late = new Promise<FileHistoryResult>(resolve => { release = resolve })
+  vi.mocked(api.files.historyPublic).mockImplementation(params => params.eventId ? late : Promise.resolve(history(params)))
+  await opened(); const documents = useAppStore.getState().documents
+  await dom.click('[aria-label="Preview version original-event-2"]')
+  await mount(false)
+  await act(async () => { release(history({ ...target(), eventId: 'original-event-2', includeContent: true })); await late })
+  expect(dom.container.querySelector('[aria-label="Version preview"]')).toBeNull()
+  expect(pairs).toHaveLength(0); expect(monaco.editor.getModels()).toHaveLength(baseline)
+  expect(useAppStore.getState().documents).toBe(documents)
+  await mount(); await vi.waitFor(() => expect(dom.container.querySelector('.note-version-history__activity')).not.toBeNull())
+  expect(dom.container.querySelector('[aria-label="Version preview"]')).toBeNull()
+  expect(useAppStore.getState().applyNoteHistory).not.toHaveBeenCalled()
+})
+
+it('retains the loaded window and exact original selection when history is partly unconfirmed', async () => {
+  vi.mocked(api.files.historyPublic).mockImplementation(async params => {
+    const value = history(params)
+    return { ...value, result: { ...value.result, status: 'unconfirmed', reason: 'Older activity metadata is unavailable' } } as FileHistoryResult
+  })
+  await opened()
+  expect(dom.container.textContent).toContain('History is partly unconfirmed. Older activity metadata is unavailable')
+  expect(dom.container.textContent).not.toContain('No saved versions')
+  await dom.click('[aria-label="Preview version original-event-2"]')
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Older activity metadata is unavailable'))
+  expect(pairs).toHaveLength(0)
+  await click('Undo this activity…'); await click('Undo selected activity')
+  expect(useAppStore.getState().applyNoteHistory).toHaveBeenCalledWith(tabId, regionId, { target: target(), batchId: 'original-batch', batchLastEventId: 'original-event-2' })
+})
+
 it('keeps unavailable history explicit and never presents it as an empty saved timeline', async () => {
   vi.mocked(api.files.historyPublic).mockResolvedValue({ resource: target().expectedResource, result: { status: 'unknown', code: 'FILE_HISTORY_UNCONFIRMED', message: 'Original history unavailable' } })
-  await mount(); await expand(); await vi.waitFor(() => expect(dom.container.textContent).toContain('Original history unavailable'))
+  await mount(); await vi.waitFor(() => expect(dom.container.textContent).toContain('Original history unavailable'))
   expect(dom.container.textContent).not.toContain('No saved versions')
   expect(useAppStore.getState().applyNoteHistory).not.toHaveBeenCalled()
 })

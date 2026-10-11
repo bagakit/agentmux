@@ -32,6 +32,8 @@ export function editorPaneStoreState(): Record<string, unknown> {
     documentIssues: {},
     savingDocuments: {},
     documentRevealTargets: {},
+    documentGenerations: {},
+    refreshDocument: vi.fn(),
     regionCaretFocus: null,
     // These platform-wiring fixtures choose an explicit size; inherited App tokens have owning DOM tests.
     config: { workspaces: [] as unknown[], appearance: { terminalTheme: 'graphite', editorFontSize: 12 } },

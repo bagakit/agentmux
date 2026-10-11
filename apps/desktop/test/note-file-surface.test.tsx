@@ -4,6 +4,7 @@ import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-
 import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
+import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 import { act } from 'react'
 import type { Editor } from '@tiptap/core'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -47,6 +48,7 @@ const source = newNoteDocument('Original finding', 'source-note', 'source-block'
 const reference = { schema: NOTE_SCHEMA, noteId: 'referring-note', content: { type: 'doc', content: [{ type: 'blockReference', attrs: { blockId: 'referring-block', referenceId: 'referring-reference', target: { noteId: 'source-note', blockId: 'source-block' }, mode: 'reference' } }] } }
 const sourceKey = documentKey('workspace', sourceRegion.path), referenceKey = documentKey('workspace', referring.path)
 beforeEach(() => {
+  vi.stubGlobal('Worker', NoteSnapshotTestWorker)
   useNotebookLibrary.setState({ state: null, issue: null })
   useAppStore.setState({ config: composerConfig, activeWorkspaceId: 'workspace', mainSurface: 'survey', sessions: [composerSession()], tabs: { [mixed.id]: mixed, [referringTab.id]: referringTab },
     layouts: { workspace: createWorkspaceLayout('original-group', [mixed.id, referringTab.id]) },
@@ -56,13 +58,13 @@ beforeEach(() => {
     regionCaretFocus: null, retainedSpatialFocus: null, error: null, lastError: null, lastActiveFileByWorkspace: {} })
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined); vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'read').mockRejectedValue(new Error('These canonical documents are already read'))
-  vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'saved-revision' })
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, params) => ({ status: 'written', revision: fileUploadRevision(new TextEncoder().encode(params.content)), content: params.content }))
   vi.spyOn(api.files, 'readDirectory').mockRejectedValue(new Error('Render must not discover directories'))
 })
 
 it('uses the original File navigation for an inline exact block while preserving the dirty Survey source and existing mixed Tab', async () => {
   const inline = newNoteDocument('Keep my draft ', reference.noteId, 'referring-block')
-  inline.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'inline-original', text: 'An old page title', target: { noteId: source.noteId, blockId: 'source-block' } } })
+  inline.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'inline-original', text: 'An old page title', target: { noteId: source.noteId, blockId: 'source-block' } }, content: [{ type: 'text', text: '[[An old page title]]' }] })
   useAppStore.setState(state => ({ documents: { ...state.documents, [referenceKey]: { ...state.documents[referenceKey]!, content: serializeNoteDocument(inline) } } }))
   const book = emptyNotebookState(), resource = composerConfig.workspaces.find(workspace => workspace.id === 'workspace')!
   const page: NotebookPage = { noteId: source.noteId, title: 'Renamed original', notebookId: 'quick-notes', parentNoteId: null, resource: { hostId: resource.hostId, workspaceId: resource.id, workspacePath: resource.path, path: sourceRegion.path }, workface: { zoneId, workspaceId: 'workspace' }, sources: [], topics: [], createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1) }
@@ -164,8 +166,11 @@ it('uses the original conflict actions and preserves the rich draft rather than 
   await mount(); await act(async () => editor().commands.insertContentAt(1, 'Unsaved '))
   const raw = useAppStore.getState().documents[sourceKey]!.content
   await act(async () => useAppStore.setState({ documentIssues: { [sourceKey]: { kind: 'changed', observed: { path: sourceRegion.path, content: serializeNoteDocument(source), revision: 'external' } } } }))
-  expect(dom.container.textContent).toContain('Your draft is preserved')
-  expect([...dom.container.querySelectorAll('button')].map(button => button.textContent?.trim())).toContain('Overwrite')
+  expect(dom.container.querySelector('.note-recovery-summary')?.textContent).toContain('Changes need review')
+  expect(dom.container.querySelector('[aria-label="Open versions and recovery"]')).not.toBeNull()
+  await click('Review changes')
+  expect(dom.container.querySelector('[role="dialog"]')?.textContent).toContain('Your draft is preserved')
+  expect([...dom.container.querySelectorAll('button')].map(button => button.textContent?.trim())).toContain('Overwrite with this draft')
   await act(async () => editor().view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true })))
   expect(api.files.write).not.toHaveBeenCalled(); expect(useAppStore.getState().documents[sourceKey]!.content).toBe(raw)
 })
@@ -181,13 +186,21 @@ it('renders per-block Agent authors and a non-blocking unconfirmed save notice w
   const current = readNoteDocument(useAppStore.getState().documents[sourceKey]!.content)
   if (current.status !== 'valid') throw Error('Draft must remain valid')
   const canonical = serializeNoteDocument(attributeNoteBlocks(authored, current.note, undefined, _liveTailFixtureEpoch(0, 0, 200)))
-  vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'written', revision: 'canonical-revision', content: canonical, noteAttribution: { status: 'unconfirmed', reason: 'Original actor is unknown' } })
+  vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path: sourceRegion.path, content: canonical, revision: fileUploadRevision(new TextEncoder().encode(canonical)) } })
+  vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'written', revision: fileUploadRevision(new TextEncoder().encode(canonical)), content: canonical, noteAttribution: { status: 'unconfirmed', reason: 'Original actor is unknown' } })
   await click('Save')
   expect(useAppStore.getState().documents[sourceKey]?.content).toBe(canonical)
-  expect(dom.container.textContent).toContain('Block authorship is unconfirmed')
+  expect(dom.container.querySelector('.note-recovery-summary')?.textContent).toContain('Authorship unconfirmed')
+  await dom.click('.note-recovery-summary button')
+  expect(dom.container.querySelector('[role="dialog"]')?.textContent).toContain('Block authorship from the last confirmed save is unconfirmed')
+  await dom.click('[aria-label="Close versions and recovery"]')
   expect(editor()).toBe(originalEditor)
   await act(async () => originalEditor.commands.insertContentAt(1, 'Another '))
-  vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'written', revision: 'next-revision', noteAttribution: { status: 'recorded' } })
+  vi.mocked(api.files.write).mockImplementationOnce(async (_workspace, params) => {
+    const revision = fileUploadRevision(new TextEncoder().encode(params.content))
+    vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document: { path: params.path, content: params.content, revision } })
+    return { status: 'written', revision, content: params.content, noteAttribution: { status: 'recorded' } }
+  })
   await click('Save')
   expect(api.files.write).toHaveBeenCalledTimes(2)
   expect(dom.container.textContent).not.toContain('Block authorship is unconfirmed')
@@ -334,7 +347,8 @@ it('uses the original catalog name for the file header and reference, updates af
     await mount(referring, referringTab.id); const originalEditor = editor(), before = useAppStore.getState().documents
     const sourceButton = () => dom.container.querySelector<HTMLButtonElement>('.note-reference__source button')!
     expect(sourceButton().textContent).toBe('N2.1'); expect(sourceButton().title).toContain(sourceRegion.path)
-    catalog = await store.apply({ operationId: 'rename-readable-name', expectedRevision: catalog.revision, change: { kind: 'rename-page', noteId: source.noteId, title: 'N2.1 renamed' } }, { kind: 'user', id: 'original-person' })
+    // This reader consumes the renamed catalog; original Host title writes have separate owner tests.
+    catalog = { ...catalog, revision: catalog.revision + 1, pages: { ...catalog.pages, [source.noteId]: { ...catalog.pages[source.noteId]!, title: 'N2.1 renamed' } } }
     await act(async () => useNotebookLibrary.setState({ state: catalog }))
     expect(sourceButton().textContent).toBe('N2.1 renamed'); expect(editor()).toBe(originalEditor)
     await mount()
@@ -571,8 +585,8 @@ it.each(['different-note', 'whole-page', 'external-block', 'graph-view'] as cons
   installNoteCanvasGeometry()
   const note = newNoteDocument('Original first block ', source.noteId, 'source-block')
   note.content.content![0]!.content!.push(
-    { type: 'noteLink', attrs: { referenceId: 'local-tail', text: 'Exact original tail', target: { noteId: note.noteId, blockId: 'tail-block' } } },
-    { type: 'noteLink', attrs: { referenceId: 'local-page', text: 'Whole original page', target: { noteId: note.noteId } } },
+    { type: 'noteLink', attrs: { referenceId: 'local-tail', text: 'Exact original tail', target: { noteId: note.noteId, blockId: 'tail-block' } }, content: [{ type: 'text', text: '[[Exact original tail]]' }] },
+    { type: 'noteLink', attrs: { referenceId: 'local-page', text: 'Whole original page', target: { noteId: note.noteId } }, content: [{ type: 'text', text: '[[Whole original page]]' }] },
   )
   note.content.content!.push({ type: 'paragraph', attrs: { blockId: 'tail-block' }, content: [{ type: 'text', text: 'Original late target' }] })
   const saved = { path: sourceRegion.path, revision: 'source-revision', content: serializeNoteDocument(note) }
