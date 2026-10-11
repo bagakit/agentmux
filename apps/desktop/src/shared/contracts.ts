@@ -5,6 +5,7 @@ import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { ToolkitDesktopApi } from './toolkit.js'
+import type { BrowserViewport } from './browser-viewport.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
 export type { LaunchOptionSelection } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
@@ -1353,14 +1354,8 @@ export type BrowserProfileImportSourceSummary = {
   profileLabel: string
 }
 
-export const BROWSER_VIEWPORT_PRESETS = {
-  responsive: null,
-  mobile: { width: 390, height: 844 },
-  tablet: { width: 768, height: 1024 },
-  desktop: { width: 1280, height: 800 }
-} as const
-
-export type BrowserViewport = keyof typeof BROWSER_VIEWPORT_PRESETS
+export { BROWSER_VIEWPORT_PRESETS } from './browser-viewport'
+export type { BrowserViewport, BrowserViewportPreset, BrowserViewportSize } from './browser-viewport'
 
 export const BROWSER_PNG_MAX_BASE64_CHARS = 24 * 1024 * 1024
 export const BROWSER_PNG_MAX_BYTES = 18 * 1024 * 1024
@@ -1954,7 +1949,7 @@ export type AgentMuxDesktopApi = {
     /** Forget only the answer displayed on this row; a newer answer is a conflict. */
     forgetAppLinkScheme(scheme: string, expected: AppLinkSchemeChoice): Promise<void>
     /** Ensure this Browser identity: existing owners keep their actual URL/Profile; absent owners open url. */
-    create(id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode): Promise<BrowserSnapshot>
+    create(id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport): Promise<BrowserSnapshot>
     navigate(id: string, url: string): Promise<BrowserSnapshot>
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>
