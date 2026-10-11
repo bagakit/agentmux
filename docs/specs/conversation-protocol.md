@@ -121,7 +121,7 @@ The original `agent.history` and `agent.context` expose typed question and answe
 
 The original Desktop Mailbox consumes Core input projection and `conversationItemRef` for the same Host, Session and native or captured record. Its mapper retains the original object and existing row/read-marker keys; known Agent authors and delivery status come from Core rather than another timeline interpretation. Typed native question answers retain their opaque IDs and original input-record reference. Missing original question pages do not manufacture a question target or acquire another reader. An unknown Host or incomplete source leaves the record readable without inventing a complete reference.
 
-Inbox, original user Outbox, System notices and the original A2A journal retain [their existing owners and reading behavior](../design/behavior/conversation-mode.md#统一对话阅读与简明操作). Saved or dispatched input receipts, recorded native input and local read markers remain independent facts. The original `message.pending.*` and `agent.history` paths continue to expose the same queue and history; connector publication Outbox is a separate owner and is not inserted into user Pending.
+Inbox, original user Outbox, System notices and the original A2A journal retain [their existing owners and reading behavior](../design/behavior/conversation-input.md#统一对话阅读与简明操作). Saved or dispatched input receipts, recorded native input and local read markers remain independent facts. The original `message.pending.*` and `agent.history` paths continue to expose the same queue and history; connector publication Outbox is a separate owner and is not inserted into user Pending.
 
 ## External input attribution and admission
 
