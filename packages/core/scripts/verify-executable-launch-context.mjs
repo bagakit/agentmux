@@ -108,19 +108,23 @@ if (process.argv[2] === '--worker') {
       const failed = report.testResults.flatMap(file => file.assertionResults).filter(test => test.status === 'failed')
       assert(failed.length > 0 && failed.some(test => test.fullName.includes(spec.test)), 'The targeted consumer must fail')
       const failures = failed.flatMap(test => test.failureMessages).join('\n')
-      if (name === 'resume-plan') {
+      if (['create-plan', 'resume-plan', 'unknown-create-block', 'unknown-resume-block'].includes(name)) {
         // Vitest JSON serializes a resolves assertion as Error and truncates its cause;
         // the default reporter retains the full original operation failure below it.
-        assert.match(failures, /promise rejected.*configured.*instead of resolving/i)
-        assert.match(red.text, /Caused by: AgentMuxError:.*Configured executable "context-runner" was not found/)
+        assert.match(failures, /promise rejected.*instead of resolving/is)
+        assert.match(red.text, /AssertionError: promise rejected/)
         assert.match(red.text, /code: 'AGENT_NOT_FOUND'/)
+        if (name === 'create-plan' || name === 'resume-plan') {
+          const command = name === 'create-plan' ? 'pre-plan-command' : 'context-runner'
+          assert(red.text.includes(`Configured executable "${command}" was not found`))
+        } else assert.match(red.text, /Caused by: AgentMuxError: Could not verify the Claude executable on this host: EIO: Original executable observation failed/)
       } else if (name === 'provider-refusal-bypass' || name === 'unknown-command-binding') {
         // Vitest JSON labels a rejected-promise assertion as Error. Its default
         // report must show the actual unauthorized Agent Session it returned.
         assert.match(failures, /promise resolved.*instead of rejecting/)
         assert.match(red.text, /AssertionError: promise resolved/)
         assert.match(red.text, /"kind": "agent"/)
-      } else assert.match(failures, /AssertionError|Configured executable.*pre-plan-command|Could not verify/)
+      } else assert.match(failures, /AssertionError/)
       assert.doesNotMatch(red.text, /Session persistence unavailable|Failed to resolve entry|Failed to load|No space left|Private Native readiness unavailable|Test timed out/)
       mutations.push({ name, loaded: loaded[0], failures: failed.map(test => ({ fullName: test.fullName, failureMessages: test.failureMessages })) })
       assert.deepEqual(await bind(), before)
