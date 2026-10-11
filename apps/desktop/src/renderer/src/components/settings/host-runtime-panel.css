@@ -22,5 +22,14 @@
 .host-runtime__details dt { color: var(--text-3); }
 .host-runtime__details dd { margin: 0; min-width: 0; color: var(--text); overflow-wrap: anywhere; user-select: text; }
 .host-runtime__details code { font-size: 10px; }
-.host-runtime__capabilities { color: var(--text-3); line-height: 1.6; }
+.host-runtime__capabilities { display: grid; gap: 8px; margin-top: 16px; color: var(--text-3); line-height: 1.6; }
+.host-runtime__capabilities > header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
+.host-runtime__capabilities > header > strong { color: var(--text-2); font-weight: 550; }
+.host-runtime__capabilities > header > span { font-size: 10px; }
+.host-runtime__capabilities ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; padding: 0; margin: 0; list-style: none; }
+.host-runtime__capabilities li { min-width: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-block: 7px; border-bottom: 1px solid var(--line-soft); }
+.host-runtime__capabilities li > span { color: var(--text-2); }
+.host-runtime__capabilities li > strong { flex-shrink: 0; font-size: 10px; font-weight: 500; }
+.host-runtime__capabilities[data-diagnostic-evidence="current"] [data-declaration="confirmed"] { color: var(--text); }
 @container (max-width: 340px) { .host-runtime__resources { gap: 8px; } .host-runtime__resources strong { font-size: 17px; } .host-runtime__details dl > div { grid-template-columns: 1fr; gap: 3px; } }
+@container (max-width: 460px) { .host-runtime__capabilities ul { grid-template-columns: minmax(0, 1fr); } }

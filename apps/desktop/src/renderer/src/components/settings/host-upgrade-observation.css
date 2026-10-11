@@ -1,0 +1,5 @@
+.host-upgrade__observation { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-4); margin: 0; }
+.host-upgrade__observation > div { min-width: 0; display: grid; gap: var(--sp-1); }
+.host-upgrade__observation dt { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.host-upgrade__observation dd { min-width: 0; margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+@container (max-width: 360px) { .host-upgrade__observation { grid-template-columns: minmax(0, 1fr); } }

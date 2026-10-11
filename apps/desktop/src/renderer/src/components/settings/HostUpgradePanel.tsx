@@ -5,6 +5,7 @@ import type { SshHostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
+import './host-upgrade-observation.css'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
@@ -12,7 +13,10 @@ const ThemeStatusInfoIcon = semanticIconComponent('status.info')
 const UpgradeHostIcon = semanticIconComponent('action.upgrade-host')
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
-
+const STAGE_LABELS: Record<RemoteCoreUpgradeReceipt['stage'], string> = {
+  preparing: 'Preparing the candidate', staged: 'Candidate staged', stopping: 'Stopping the original Core',
+  starting: 'Starting the updated Core', verifying: 'Verifying the original Runtime', completed: 'Verification completed'
+}
 
 type State = {
   input?: SshHostConfig
@@ -142,6 +146,10 @@ export function HostUpgradePanel({ host, committed, active }: {
       <span className="host-upgrade__title">{busy ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : receipt?.status === 'completed' ? <ThemeStatusCompletedIcon size={14} /> : check && !check.eligible || uncertain ? <ThemeStatusInfoIcon size={14} /> : <UpgradeHostIcon size={14} />}<strong role="status">{status}</strong></span>
     </div>
     <p className="field-hint host-upgrade__description">{description}</p>
+    {receipt ? <dl className="host-upgrade__observation" aria-label="Original update receipt">
+      <div><dt>Last reported stage</dt><dd data-upgrade-stage={receipt.stage}>{STAGE_LABELS[receipt.stage]}</dd></div>
+      <div><dt>Receipt updated</dt><dd><time dateTime={new Date(receipt.updatedAt).toISOString()}>{new Date(receipt.updatedAt).toLocaleString()}</time></dd></div>
+    </dl> : null}
     {runtimeBlocked ? <p className="host-upgrade__next-step">Copy the diagnostics for whoever maintains this host to arrange a supported runtime update. Recheck availability after that update is installed.</p> : null}
     <div className="host-upgrade__actions">
       {runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><ThemeActionCopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
