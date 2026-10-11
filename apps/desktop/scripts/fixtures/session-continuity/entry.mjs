@@ -39,6 +39,7 @@ api.sessions.recover = async (...args) => {
 }
 api.sessions.resolve = control => request('resolve', control)
 api.sessions.refresh = control => request('refresh', control)
+api.sessions.stop = control => request('stop', control)
 const spatialEvent = event => event.kind === 'native-proof-spatial-state'
 api.sessions.onEvent = createRendererSessionEvents(listener => window.nativeBoundary.onEvent(event => { if (!spatialEvent(event)) listener(event) }))
 api.spatial.read = () => request('spatial-read')
@@ -132,4 +133,18 @@ window.continuityShowLaunchReceipt = async () => {
   if (!row.textContent.includes('Runtime 已确认') || !row.textContent.includes('CLI 是否采用')) throw new Error('The actual carrier distinction is absent from the mailbox')
   window.continuityHideLaunchReceipt = () => { mailbox.hidePopover(); useAppStore.setState({ layouts }) }
   return { operationId: entry.operationId, inputKey: entry.resumeInputReceipt.key, text: row.textContent }
+}
+
+// Capability scenario uses production Store actions and the mounted native Terminal.
+window.capabilityRecheck = () => useAppStore.getState().refreshSession(setup.ids.working.sessionId)
+window.capabilityRecheckHealthy = () => useAppStore.getState().refreshSession(setup.ids.healthy.sessionId)
+window.capabilityRequestOriginalRestore = async () => {
+  await useAppStore.getState().recoverSession(setup.ids.working.sessionId)
+  return window.continuityRecoveryReceipts.at(-1)?.result
+}
+window.capabilityRetireOriginal = () => useAppStore.getState().stopSession(setup.ids.idle.sessionId)
+window.capabilityFocusHealthy = () => {
+  const terminal = window.terminals.find(one => one.element?.isConnected && one.element.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === 'continuity-healthy')
+  if (!terminal) throw new Error('The mounted original healthy Terminal is unavailable')
+  terminal.focus()
 }

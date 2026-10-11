@@ -6,8 +6,11 @@ import { constants as fsConstants } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
+import * as core from '../../../packages/core/dist/index.js'
+import { AgentMuxControlServer } from '../../../packages/core/dist/public-rpc-server.js'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = core
+const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
 const desktop = path.resolve(import.meta.dirname, '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/session-continuity')
@@ -18,7 +21,7 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-continuity-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
-const receipt = { schema: 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
+const receipt = { schema: capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
   limitations: ['Actual private Electron Main and Renderer restart exercise production App/Store and RuntimeController/Core, with a nonempty original spatial workface before hydration.',
     'The native CLI is a repository protocol fixture. It validates the exact resume identity against retained native session metadata and appends to the original conversation record; this is not upstream Provider certification.',
     'Only private Runs are deliberately ended between Electron generations; no user profile, user Agent or user configuration is accessed.',
@@ -26,6 +29,7 @@ const receipt = { schema: 'agentmux.session-continuity.v1', passed: false, priva
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory()
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const sourceFiles = [new URL(import.meta.url).pathname, bootstrap, path.join(desktop, 'scripts/probe-process.mjs'),
+  ...(capability ? [path.join(desktop, 'scripts/verify-session-capability-recovery-product.mjs')] : []),
   path.join(desktop, 'test/helpers/local-runtime-connector.ts'), path.join(desktop, 'test/helpers/client-ui-render.tsx'),
   path.join(root, 'packages/client-ui/package.json'),
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
@@ -52,10 +56,11 @@ const compiledManifest = async () => {
     return [path.relative(privateRoot, file), { bytes: bytes.length, sha256: hash(bytes) }]
   })))
 }
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
 let client, processesLaunched = false
 await fs.mkdir(evidence, { recursive: true })
 try {
+  process.env.CODEX_HOME = path.join(privateRoot, 'codex')
   receipt.inputs = await hashes()
   await fs.mkdir(path.join(privateRoot, 'workspace'), { recursive: true })
   await fs.mkdir(path.join(privateRoot, 'node_modules/@agentmux'), { recursive: true })
@@ -126,6 +131,10 @@ try {
     assert.equal(exit.timedOut, false, `${phase} watchdog fired`)
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
+    if (capability) {
+      const image = path.join(evidence, phase + '-workface.png')
+      entry.image = { path: image, sha256: hash(await fs.readFile(image)) }
+    }
     process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
     process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
     process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
@@ -136,6 +145,20 @@ try {
     const healthy = runs.find(run => run.runId === ids.healthy.run.runId)
     assert.equal(healthy?.state, 'running', 'The original healthy Run must survive every Electron generation')
     const identity = { runId: healthy.runId, pid: healthy.pid }
+    if (capability) {
+      if (phase === 'seed') receipt.originalHealthy = identity
+      else assert.deepEqual(identity, receipt.originalHealthy, 'The healthy original Run and PID survive real Electron restart')
+      assert.equal(native.capability.originalRecheck.zeroLifecycleOrInput, true)
+      assert.equal(native.capability.originalOutput.zeroLifecycleInputOrResize, true)
+      assert.equal(native.capability.originalOutput.runId, ids.working.run.runId)
+      assert.equal(native.capability.observationFailure.healthyInputPreserved, true)
+      assert.equal(native.capability.retirement.noResurrection, true)
+      assert.equal(native.capability.rawInput.length, 2)
+      assert.ok(native.capability.rawInput.every(one => one.runId === identity.runId && one.pid === identity.pid && one.consumedOnce))
+      receipt.survivingHealthy = identity
+      await client.dispose(); client = null
+      continue
+    }
     if (phase === 'seed') {
       receipt.originalHealthy = identity
       const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
@@ -204,6 +227,16 @@ try {
 
   }
   assert.equal(new Set(receipt.phases.map(phase => phase.native.pid)).size, 3)
+  if (capability) {
+    const cliFixture = path.join(fixture, 'capability-public-cli.mjs')
+    const cliSourceSha256 = hash(await fs.readFile(cliFixture))
+    assert.equal(cliSourceSha256, receipt.inputs[path.relative(root, cliFixture)], 'Public CLI fixture changed before loading')
+    const { verifyCapabilityPublicCli } = await import(pathToFileURL(cliFixture).href + '?source=' + cliSourceSha256)
+    client ??= await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
+    receipt.publicCli = await verifyCapabilityPublicCli({ client, core, ControlServer: AgentMuxControlServer,
+      privateRoot, coreSnapshot, ids: JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8')) })
+    receipt.publicCli.sourceSha256 = cliSourceSha256
+  }
   receipt.inputsAfter = await hashes()
   assert.deepEqual(await compiledManifest(), receipt.compiled, 'Actual compiled restart proof changed across generations')
   assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'Source changed during native verification')
