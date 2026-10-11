@@ -195,7 +195,7 @@ export function ConversationMessage({
     ? described?.providerId ?? (!agentReference.declared && agentReference.speaker.id === conversationSessionId ? providerId : undefined)
     : providerId
   const displayName = recordedSpeaker?.role === 'unknown'
-    ? recordedIdentity ? 'Author unknown' : 'You'
+    ? recordedIdentity ? conversationEvent?.role === 'observation' ? '作者未记录' : 'Author unknown' : 'You'
     : speaker?.role === 'external' ? externalSpeakerLabel(speaker)
     : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
@@ -336,7 +336,7 @@ export function ConversationMessage({
             </span> : null
   const metadata = hasMetadata || sources && !detailsOnlyMetadata ? <div className="log-turn__meta">
         {sources?.submissions ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} /> : null}
-        {!detailsOnlyMetadata ? <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply} unconfirmed={sources?.unconfirmed ?? false} /> : null}
+        {!detailsOnlyMetadata ? <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply} /> : null}
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
@@ -415,7 +415,7 @@ export function ConversationMessage({
           declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : null}{messageDetails}</ConversationInputDetails> : null}
       </div>
       {!detailsOnlyMetadata ? metadata : null}
-      {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} unconfirmed={sources.unconfirmed} /></div> : null}
+      {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>

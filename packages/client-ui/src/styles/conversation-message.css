@@ -405,7 +405,6 @@
 
 .conversation-source-labels { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px 6px; max-width: 100%; color: var(--text-3); font-size: var(--fs-micro); font-weight: normal; line-height: 1.4; vertical-align: middle; }
 .conversation-source-labels > span { min-width: 0; overflow-wrap: anywhere; border: 1px solid var(--line-soft); border-radius: 4px; padding-inline: 4px; }
-.conversation-source-labels > .conversation-source-labels__unknown { border-color: transparent; }
 .conversation-tool-trace__row > .conversation-source-labels { flex-shrink: 1; }
 
 .log-turn[data-trace-only='true'] > .log-turn__meta { display: none; }
