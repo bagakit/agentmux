@@ -1,0 +1,26 @@
+.host-runtime { min-width: 0; display: grid; gap: 12px; padding-block: 18px; border-top: 1px solid var(--line-soft); }
+.host-runtime__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.host-runtime__header > div { display: grid; gap: 4px; min-width: 0; }
+.host-runtime__header strong { font-size: 13px; font-weight: 600; }
+.host-runtime__header > div > span, .host-runtime__sample { color: var(--text-3); font-size: 11px; line-height: 1.5; }
+.host-runtime__header button { flex-shrink: 0; }
+.host-runtime__resources { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.host-runtime__resources > div { display: grid; align-content: start; gap: 5px; min-width: 0; }
+.host-runtime__resources span, .host-runtime__resources small { color: var(--text-3); font-size: 11px; line-height: 1.45; }
+.host-runtime__resources strong { color: var(--text); font-size: 20px; line-height: 1.3; font-weight: 550; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.host-runtime__resources small { font-size: 10px; }
+.host-runtime__sample { margin: 0; }
+.host-runtime__environment { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; font-size: 11px; line-height: 1.5; }
+.host-runtime__environment > span { color: var(--text-3); }
+.host-runtime__environment > strong { color: var(--text); font-weight: 500; }
+.host-runtime__issue { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: var(--text-3); font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
+.host-runtime__issue > svg { flex-shrink: 0; margin-top: 2px; }
+.host-runtime__details { min-width: 0; font-size: 11px; }
+.host-runtime__details summary { width: fit-content; cursor: pointer; color: var(--text-3); line-height: 1.6; }
+.host-runtime__details dl { display: grid; gap: 8px; margin: 12px 0; }
+.host-runtime__details dl > div { display: grid; grid-template-columns: minmax(105px, 0.8fr) minmax(0, 1.8fr); gap: 12px; }
+.host-runtime__details dt { color: var(--text-3); }
+.host-runtime__details dd { margin: 0; min-width: 0; color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.host-runtime__details code { font-size: 10px; }
+.host-runtime__capabilities { color: var(--text-3); line-height: 1.6; }
+@container (max-width: 340px) { .host-runtime__resources { gap: 8px; } .host-runtime__resources strong { font-size: 17px; } .host-runtime__details dl > div { grid-template-columns: 1fr; gap: 3px; } }

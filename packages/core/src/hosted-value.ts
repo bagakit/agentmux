@@ -1,3 +1,4 @@
+import { parseRuntimeIdentity } from './runtime-observation-codec.js'
 import { hostedCarrierPerformance } from './performance-diagnostics.js'
 import { AgentMuxError } from './errors.js'
 import { base64 } from '@scure/base'
@@ -168,11 +169,7 @@ export function parseHostedRuntimeOwnerIdentity(value: unknown): import('./hoste
   if (p.protocolVersion !== 2 || p.availability !== 'connected' && p.availability !== 'unverified') throw new AgentMuxError(
     'Runtime owner identity is malformed.', 'CONTROL_PROTOCOL_ERROR')
   if (p.ctxmux === null) return p as unknown as import('./hosted-client-contract.js').AgentMuxRuntimeOwnerIdentity
-  const native = wireRecord(p.ctxmux, ['hostId', 'instanceId', 'processId', 'buildIdentity', 'protocolVersion', 'ownership'])
-  wireString(native.hostId); wireString(native.instanceId); wireString(native.buildIdentity); wireCount(native.protocolVersion)
-  if (native.processId !== null) wireCount(native.processId)
-  if (native.ownership !== undefined && native.ownership !== 'owned' && native.ownership !== 'unverified') throw new AgentMuxError(
-    'Native Runtime ownership is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  parseRuntimeIdentity(p.ctxmux)
   return p as unknown as import('./hosted-client-contract.js').AgentMuxRuntimeOwnerIdentity
 }
 export function parseHostedTransferChunk(value: unknown): AgentMuxHostedTransferChunk {

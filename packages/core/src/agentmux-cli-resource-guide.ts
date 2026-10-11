@@ -48,6 +48,14 @@ Executor refresh takes exact Executor and Host IDs and only checks availability.
 means a regular executable was found; missing means no usable executable; check-failed
 retains cause.code/message. It does not launch, stop, resume, save configuration or imply
 Agent health. Use settings hosts test --input <file|-> for an unsaved connection draft.
+Use settings hosts inspect --host <id> for one exact route's passive Runtime observation.
+It returns the original configuration snapshot (null without a Host configuration owner),
+separate semantic owner, Native identity, diagnostics and retained Run/attachment/output
+facts. Source failures remain explicit; an unavailable source is not an empty inventory
+or proof of a dead Agent. readAt is this service's read completion; resources.observedAt
+remains the original producer sample time. Native build/protocol and bundled artifact
+are not the serving Core version. Observation never starts Native, resumes a Session,
+attaches a reader or grants source trust. Cancel ends only this read; keep original work.
 settings executors ls lists global saved templates. To choose a remote Executor, use
 settings executors discover --host <id>; routeHostId and runtimeId identify the executing
 Host and descriptors contain its own registered commands and current checks. Unknown

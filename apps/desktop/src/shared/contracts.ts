@@ -1628,6 +1628,7 @@ export type AgentMuxDesktopApi = {
     onChange(listener: (config: AppConfig) => void): () => void
   }
   hosts: {
+    inspect(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostRuntimeObservation>
     check(host: HostConfig): Promise<HostCheckResult>
     creationTrust(host: HostConfig): Promise<HostCreationTrustSnapshot>
     trustCreationSource(host: HostConfig, expected: HostCreationTrustSnapshot): Promise<HostCreationTrustSnapshot>
@@ -2064,7 +2065,10 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts'> & {
+  hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect'> & {
+    inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>
+  }
   browser: Omit<AgentMuxDesktopApi['browser'], 'runScript'> & {
     runScript(...args: Parameters<AgentMuxDesktopApi['browser']['runScript']>): Promise<import('./browser-run-result').BrowserRunResult>
   }

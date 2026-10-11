@@ -3304,7 +3304,8 @@ export class AgentMuxClient {
     return { processId: process.pid, observedAt: Date.now(), input: this.inputPerformance.snapshot(), carrier: hostedCarrierPerformance.snapshot() }
   }
 
-  async runtimeDiagnostics(): Promise<AgentMuxRuntimeDiagnostics> {
+  async runtimeDiagnostics(options?: { signal?: AbortSignal }): Promise<AgentMuxRuntimeDiagnostics> {
+    options?.signal?.throwIfAborted()
     this.requireConnected()
     const identity = this.kernel.identity()
     return {
@@ -3343,9 +3344,10 @@ export class AgentMuxClient {
   }
 
   /** Retained Run/output/attachment facts from ctxmux's public paged inventory, without lifecycle changes. */
-  async runtimeResourceSnapshot(): Promise<AgentMuxRuntimeResourceSnapshot> {
+  async runtimeResourceSnapshot(options?: { signal?: AbortSignal }): Promise<AgentMuxRuntimeResourceSnapshot> {
+    options?.signal?.throwIfAborted()
     this.requireConnected()
-    return await this.kernel.resourceSnapshot()
+    return await this.kernel.resourceSnapshot(options)
   }
 
   /** Read bounded storage facts for the original Run through its public Native owner. */

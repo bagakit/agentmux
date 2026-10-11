@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { isConnectionSetupMethod, parseConnectionSetupParams } from './connection-setup-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
@@ -80,6 +81,7 @@ import { normalizeOperationDevice } from './operation-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { parseRpcNativeResult } from './rpc-native-codec.js'
 import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
+import { observeHostRuntime } from './host-runtime-observation.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
@@ -94,13 +96,14 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
-  'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
+  'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
       Awaited<ReturnType<AgentMuxClient['handOff']>> | Promise<Awaited<ReturnType<AgentMuxClient['handOff']>>>
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
+type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client'>>
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   windows?: AgentMuxRpcWindowsOwner
   moteConnections?: MoteConnectionPort
@@ -124,6 +127,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   spatialState?: AgentMuxSpatialStateStore
   /** Optional host aggregation of original named owners; Core interprets no host target kinds. */
   nameHistory?(query: import('./display-label.js').AgentMuxNameHistoryQuery): Promise<import('./display-label.js').AgentMuxNameHistoryPage>
+  /** Borrow the original Host configuration owner; no configuration is stored by this service. */
+  hostConfiguration?(hostId: string): import('./control.js').AgentMuxControlSettingsResourceFields | null
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
@@ -144,8 +149,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   operationSource?(context: AgentMuxRpcCallContext): import('./types.js').AgentOperationDevice | undefined
   recordDeviceOperation?(source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string): Promise<void>
   /** Borrow the Host's original SDK business owner; never connect a second Runtime. */
-  hostedRuntime?(): Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> |
-    Promise<Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'>>
+  hostedRuntime?(): BorrowedHostedRuntime | Promise<BorrowedHostedRuntime>
   /** Forward canonical GUI work before its original business orchestration begins. */
   forwardControl?<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
@@ -569,6 +573,8 @@ export class AgentMuxRpcService {
     await this.assertRuntimeFence(context)
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
+      if (method === 'settings.hosts.inspect' && !this.ports.coreClients && !this.local) throw new AgentMuxError(
+        'No existing Host Runtime client is available to observe. This read did not start a Runtime.', 'CONTROL_UNAVAILABLE')
       if (method === 'settings.hosts.trust-source' &&
           (context.caller !== undefined || context.principal?.kind !== 'user')) {
         throw new AgentMuxError('Creation-source trust requires a transport-approved user without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
@@ -582,6 +588,21 @@ export class AgentMuxRpcService {
       }
       if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
+      if (method === 'settings.hosts.inspect') {
+        const query = parseHostSettingsParams('settings.hosts.inspect', params)
+        const configuration = structuredClone(this.ports.hostConfiguration?.(input.hostId) ?? null)
+        if (query.expected !== undefined && !isDeepStrictEqual(query.expected, configuration)) throw new AgentMuxError(
+          'The original Host configuration changed or could not be confirmed. Reload this connection before observing it.', 'HOST_CONFIGURATION_CHANGED')
+        const result = await observeHostRuntime(input.hostId, client, async () => {
+          if (client.runtimeOwnerIdentity) return client.runtimeOwnerIdentity()
+          const owner = await this.ports.hostedRuntime?.()
+          return owner?.client === client ? (await owner.call('runtime.owner.identity', {})).owner : null
+        }, context.signal, configuration)
+        const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+        if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, this.ports.hostConfiguration?.(input.hostId) ?? null)) throw new AgentMuxError(
+          'The original Host route changed during this observation. Read the current saved connection again.', 'HOST_CONFIGURATION_CHANGED')
+        return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+      }
       if (method !== 'settings.executors.discover' && method !== 'settings.executors.register') await client.connect()
       if (method === 'settings.executors.discover') {
         const query = parseHostSettingsParams('settings.executors.discover', params)

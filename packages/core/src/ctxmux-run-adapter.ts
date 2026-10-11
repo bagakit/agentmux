@@ -1,3 +1,4 @@
+import { observeRead } from './observation-read.js'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import type { RemoteCoreUpgradeNativeRun } from './remote-core-upgrade.js'
 import { createHash, randomUUID } from 'node:crypto'
@@ -1059,7 +1060,8 @@ export class CtxmuxRunAdapter {
   }
 
   /** Read thin public pages directly: resource observation never needs launch specs or status hydration. */
-  async resourceSnapshot(): Promise<AgentMuxRuntimeResourceSnapshot> {
+  async resourceSnapshot(options?: { signal?: AbortSignal }): Promise<AgentMuxRuntimeResourceSnapshot> {
+    options?.signal?.throwIfAborted()
     const snapshot: AgentMuxRuntimeResourceSnapshot = {
       observedAt: unobservedTimestamp,
       runCount: 0,
@@ -1073,7 +1075,9 @@ export class CtxmuxRunAdapter {
       const client = this.requireClient()
       let cursor: string | null = null
       do {
-        const page = await client.listPage(cursor)
+        options?.signal?.throwIfAborted()
+        const page: Awaited<ReturnType<CtxmuxClient['listPage']>> = await observeRead(client.listPage(cursor), options?.signal)
+        options?.signal?.throwIfAborted()
         for (const run of page.runs) {
           snapshot.runCount += 1
           if (run.state.type === 'running') snapshot.runningRuns += 1
