@@ -34,6 +34,7 @@ import { resolveDesktopSpaceSelection, workbenchSelectionCatalog } from '../src/
 import { api } from '../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
+import { ordinaryAgent } from './fixtures/mote-workface'
 const dragBoundary = vi.hoisted(() => ({ end: undefined as ((event: import('@dnd-kit/core').DragEndEvent) => void) | undefined }))
 // Observe the real component's registered drag callback; all Dnd rendering and Topic owners remain original.
 vi.mock('@dnd-kit/core', async load => {
@@ -143,6 +144,76 @@ async function entry(owner: TopicKnowledgeOwner, topicId: string, title: string,
   return (await owner.call('topic.knowledge.write', { topicId, entryId: crypto.randomUUID(), title, content: 'Useful original conclusion', form: sources.length ? 'reference' : 'derived', certainty: 'decision', sources, expectedRevision: null })).entry
 }
 describe('Topic knowledge UI consumes the real Host content and Core graph owners', () => {
+  it('creates a canonical Topic from the mounted Category action and attaches its first Terminal to the confirmed original Zone', async () => {
+    const f = await fixture(), before = useAppStore.getState()
+    const terminal = { ...ordinaryAgent, id: 'canonical-born-terminal', kind: 'terminal' as const, providerId: null,
+      control: { kind: 'terminal' as const, hostId: 'local', runId: 'canonical-born-run', run: { runId: 'canonical-born-run' } } }
+    vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(terminal)
+    await mount(createElement(WorkspaceTopicsPanel, { workspace: f.workspace, categorySpaceId: f.category.spaceId }))
+    await click(button('Create new Topic'))
+    await settle(() => vi.mocked(api.sessions.launchTerminal).mock.calls.length === 1)
+    const facts = (await f.owner.call('topic.ls', { categoryId: f.category.categoryId })).topics
+    expect(facts).toHaveLength(1)
+    const born = facts[0]!, state = useAppStore.getState()
+    expect(born.directoryPath).toBe(join(f.workspace.path, '..', 'topics', 'topic--' + born.topicId))
+    expect(await readFile(join(born.directoryPath, 'topic.md'), 'utf8')).toContain('# New Topic')
+    const tabs = Object.values(state.tabs).filter(tab => tab.topicId === born.topicId)
+    expect(tabs).toHaveLength(1)
+    const tab = tabs[0]!, regionId = tab.layout.activeRegionId
+    expect(tab.space).toEqual({ spaceId: f.category.spaceId, zoneId: born.zoneId })
+    expect(state.layouts[f.workspace.id]!.groups.find(group => group.id === state.workbenchSpaceSelection?.groupId)?.tabOrder).toContain(tab.id)
+    expect(tab.regions[regionId]).toMatchObject({ kind: 'terminal', phase: 'attached', sessionId: terminal.id })
+    expect(state.workbenchSpaceSelection).toMatchObject({ topicId: born.topicId, zoneId: born.zoneId, spaceId: f.category.spaceId, tabId: tab.id, regionId })
+    expect(api.sessions.launchTerminal).toHaveBeenCalledOnce()
+    for (const original of f.tabs) expect(state.tabs[original.id]).toBe(before.tabs[original.id])
+    expect(state.agentComposerDrafts).toEqual(before.agentComposerDrafts)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
+  it.each(['receipt-topic', 'receipt-zone', 'content-topic', 'content-read'] as const)('keeps the original request without binding or starting when %s is unconfirmed', async variant => {
+    const f = await fixture()
+    const launch = vi.spyOn(api.sessions, 'launchTerminal')
+    let createdId = ''
+    vi.mocked(api.topics.call).mockImplementation((async (method, params) => {
+      if (method !== 'topic.create') return f.owner.call(method, params)
+      const result = await f.owner.call('topic.create', params as { topicId: string; title: string; categoryId?: string })
+      createdId = result.topic.topicId
+      return { ...result, topic: { ...result.topic,
+        ...(variant === 'receipt-topic' ? { topicId: f.first.topicId } : {}),
+        ...(variant === 'receipt-zone' ? { zoneId: f.first.zoneId } : {}) } }
+    }) as typeof api.topics.call)
+    if (variant.startsWith('content-')) vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => {
+      const topic = await new ScratchTopics().read(f.workspace, id)
+      return topic && { ...topic, ...(variant === 'content-topic' ? { id: f.first.topicId } : { readError: 'Original content temporarily unreadable' }) }
+    })
+    await expect(useAppStore.getState().createScratchTopic(undefined, { prompt: 'Keep original unsent input' }, { categoryId: f.category.categoryId })).rejects.toThrow(/original identity is unconfirmed/)
+    expect(createdId).not.toBe('')
+    const state = useAppStore.getState(), tabs = Object.values(state.tabs).filter(tab => tab.topicId === createdId)
+    expect(tabs).toHaveLength(1)
+    expect(tabs[0]!.space).toBeUndefined()
+    expect(state.agentComposerDrafts[tabs[0]!.layout.activeRegionId]).toBe('Keep original unsent input')
+    expect(tabs[0]!.regions[tabs[0]!.layout.activeRegionId]?.kind).toBe('launcher')
+    expect(launch).not.toHaveBeenCalled()
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+    expect((await f.owner.call('topic.inspect', { topicId: createdId })).topic).toMatchObject({ topicId: createdId, categorySpaceIds: [f.category.spaceId] })
+  })
+  it('binds the canonical identity without reclaiming navigation or replacing later input while creation is pending', async () => {
+    const f = await fixture(), scratch = new ScratchTopics()
+    let release!: () => void
+    const ready = new Promise<void>(resolve => { release = resolve })
+    vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => { await ready; return scratch.read(f.workspace, id) })
+    const pending = useAppStore.getState().createScratchTopic(undefined, { prompt: 'Original request' }, { categoryId: f.category.categoryId })
+    const tab = Object.values(useAppStore.getState().tabs).find(item => !f.tabs.some(old => old.id === item.id))!
+    expect(tab).toBeDefined(); expect(tab.space).toBeUndefined()
+    const regionId = tab.layout.activeRegionId
+    useAppStore.getState().setAgentComposerDraft(regionId, 'Later edited request')
+    useAppStore.setState({ mainSurface: 'board', workbenchSpaceSelection: null })
+    release(); const topic = await pending
+    const state = useAppStore.getState(), fact = (await f.owner.call('topic.inspect', { topicId: topic.id })).topic!
+    expect(state.tabs[tab.id]?.space).toEqual({ spaceId: f.category.spaceId, zoneId: fact.zoneId })
+    expect(state.tabs[tab.id]?.regions[regionId]).toBe(tab.regions[regionId])
+    expect(state.agentComposerDrafts[regionId]).toBe('Later edited request')
+    expect(state.mainSurface).toBe('board'); expect(state.workbenchSpaceSelection).toBeNull()
+  })
   it('finds Chinese body-only text in an existing original file and reads its exact public Files source without creating knowledge', async () => {
     const f = await fixture(), body = '# 原文\n挂载磁盘权限与安全清理的原始讨论。\n'
     await writeFile(join(f.first.directoryPath, 'outcome', 'report.md'), body)

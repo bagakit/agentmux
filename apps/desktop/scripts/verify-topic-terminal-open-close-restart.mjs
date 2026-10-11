@@ -51,7 +51,7 @@ try {
   receipt.workspaceMoveHelper = { source: path.relative(root, workspaceMoveHelper),
     deployed: path.relative(privateRoot, privateHelper), sha256: hash(await fs.readFile(privateHelper)) }
   assert.equal(receipt.workspaceMoveHelper.sha256, receipt.inputs[path.relative(root, workspaceMoveHelper)], 'Private deployment must use the exact native workspace helper')
-  await fs.mkdir(path.join(privateRoot, 'topics'), { recursive: true })
+  await fs.mkdir(path.join(privateRoot, 'scratch'), { recursive: true })
   await fs.mkdir(path.join(privateRoot, 'node_modules/@agentmux'), { recursive: true })
   await fs.symlink(path.join(root, 'packages/core'), path.join(privateRoot, 'node_modules/@agentmux/core'))
   await fs.writeFile(path.join(privateRoot, 'producer.cjs'), `for(let n=0;n<1000;n++)process.stdout.write('HISTORY '+String(n).padStart(4,'0')+' local active Run\\n');let tick=0;setInterval(()=>process.stdout.write('LIVE '+(++tick)+'\\n'),100);process.stdin.on('data',data=>process.stdout.write('ACK:'+data.toString().trim()+'\\n'));`)
