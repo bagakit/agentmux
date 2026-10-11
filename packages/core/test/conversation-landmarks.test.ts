@@ -134,3 +134,58 @@ describe('named exact original conversation references', () => {
     await writeFile(join(output, 'discovery-receipt.json'), JSON.stringify({ action, domain, skill }, null, 2) + '\n')
   })
 })
+
+describe('original catalog routes and source record namespaces', () => {
+  it('keeps same-Session source refs intact through actual RPC and compiled CLI while isolating two routes', async () => {
+    const { directory, store } = await fixture()
+    const server = new AgentMuxControlServer({ socketPath: join(directory, 'routes.sock'), conversationLandmarks: store, coreClients: () => [] })
+    servers.push(server); await server.start()
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    const source = { ...captured, hostId: 'original-core-namespace' }
+    const first: ConversationLandmarkWrite = { ...scope, hostId: 'route-a', expectedRevision: 0, operationId: 'route-a-save',
+      change: { kind: 'create', point: { id: 'point-a', name: 'Source on route A', reference: source, routeHostId: 'route-a' } } }
+    const second: ConversationLandmarkWrite = { ...first, hostId: 'route-b', expectedRevision: 1, operationId: 'route-b-save',
+      change: { kind: 'create', point: { id: 'point-b', name: 'Source on route B', reference: source, routeHostId: 'route-b' } } }
+    try {
+      const input = join(directory, 'source-point.json'); await writeFile(input, JSON.stringify(first))
+      const made = await run(cli, ['agent', 'conversation', 'landmark', 'apply', '--input', input], { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
+      expect(made.code, made.stderr + made.stdout).toBe(0)
+      expect(made.result.result.points[0]).toEqual(first.change.kind === 'create' ? first.change.point : null)
+      await expect(client.call('agent.conversation.landmark.apply', second)).resolves.toMatchObject({ points: [second.change.kind === 'create' ? second.change.point : null] })
+      for (const [hostId, id] of [['route-a', 'point-a'], ['route-b', 'point-b']] as const) {
+        const page = await client.call('agent.conversation.landmark.ls', { ...scope, hostId })
+        expect(page.points).toHaveLength(1); expect(page.points[0]!.id).toBe(id)
+        expect(page.points[0]!.reference).toEqual(source)
+      }
+      await expect(client.call('agent.conversation.landmark.apply', { ...scope, hostId: 'route-a', expectedRevision: 2, operationId: 'wrong-route-rename', change: { kind: 'rename', id: 'point-b', name: 'Wrong route' } })).rejects.toMatchObject({ code: 'CONVERSATION_LANDMARK_NOT_FOUND' })
+      await expect(client.call('agent.conversation.landmark.apply', { ...second, operationId: 'wrong-point-route', expectedRevision: 2, hostId: 'route-a' })).rejects.toMatchObject({ code: 'CONVERSATION_LANDMARK_INVALID' })
+      expect(() => parseConversationLandmarkWrite({ ...first, change: { kind: 'create', point: { ...(first.change as any).point, reference: { ...source, agentSessionId: 'another-session' } } } })).toThrow()
+      const current = await store.list({ ...scope, hostId: 'route-a', operationId: first.operationId })
+      expect(current.revision).toBe(2); expect(current.recordedOperation?.input).toEqual(first)
+      expect(() => parseConversationLandmarkPage({ ...current, points: [(second.change as any).point] }, current)).toThrow()
+    } finally { await client.dispose() }
+  })
+
+  it('retains old point and unknown-operation bytes across new source-context saves and original-process rejoin', async () => {
+    const { store } = await fixture(), original = create()
+    await store.apply(original, actor)
+    const before = JSON.parse(await readFile(store.path, 'utf8'))
+    const next: ConversationLandmarkWrite = { ...scope, expectedRevision: 1, operationId: 'source-context-save', change: { kind: 'create',
+      point: { id: 'source-context-point', name: 'Original source', reference: { ...captured, hostId: 'source-namespace' }, routeHostId: scope.hostId } } }
+    await expect(store.apply(next, actor)).resolves.toMatchObject({ revision: 2 })
+    const after = JSON.parse(await readFile(store.path, 'utf8'))
+    expect(JSON.stringify(after.points['point-original'])).toBe(JSON.stringify(before.points['point-original']))
+    expect(JSON.stringify(after.operations[original.operationId])).toBe(JSON.stringify(before.operations[original.operationId]))
+    expect(parseConversationLandmarkWrite(original)).toEqual(original)
+    const reopened = new ConversationLandmarkStore(store.path)
+    const originalReceipt = await reopened.apply(original, actor)
+    expect(originalReceipt.revision).toBe(2); expect(originalReceipt.recordedOperation?.input).toEqual(original)
+    expect(originalReceipt.points).toHaveLength(2)
+    const processRead = await run(worker, [store.path, 'read', JSON.stringify({ ...scope, operationId: original.operationId })])
+    expect(processRead.code, processRead.stderr).toBe(0)
+    expect(processRead.result.page).toEqual(originalReceipt)
+    const retained = await readFile(store.path, 'utf8')
+    await expect(reopened.apply({ ...next, operationId: original.operationId }, actor)).rejects.toMatchObject({ code: 'CONVERSATION_LANDMARK_OPERATION_CONFLICT' })
+    expect(await readFile(store.path, 'utf8')).toBe(retained)
+  })
+})

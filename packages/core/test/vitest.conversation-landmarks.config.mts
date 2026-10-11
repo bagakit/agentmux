@@ -1,9 +1,11 @@
 import { defineConfig } from 'vitest/config'
 import { appendFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import assert from 'node:assert/strict'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations = {
+  routeContext: ['packages/core/src/conversation-landmarks.ts', 'hostId: point.routeHostId ?? point.reference.hostId', 'hostId: point.reference.hostId'],
   causalRevision: ['packages/core/src/conversation-landmarks.ts', 'if (committedRevision !== input.expectedRevision + 1)', 'if (false)'],
   source: ['packages/core/src/conversation-landmarks.ts', "source: { kind: 'native', providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId), recordId }", "source: { kind: 'captured', recordId }"],
   scope: ['packages/core/src/conversation-landmarks.ts', 'return a.hostId === b.hostId && a.agentSessionId === b.agentSessionId', 'return true'],
@@ -15,10 +17,17 @@ const mutations = {
 } as const
 export default defineConfig({ plugins: [{ name: 'conversation-landmark-mutations', enforce: 'pre', transform(source, id) {
   const name = process.env.LANDMARK_MUTATION as keyof typeof mutations | undefined
-  if (!name) return
-  assert.ok(mutations[name]); const [file, needle, replacement] = mutations[name]
-  if (relative(root, id) !== file) return
-  assert.equal(source.split(needle).length - 1, 1)
-  if (process.env.LANDMARK_HITS) appendFileSync(process.env.LANDMARK_HITS, file + '\n')
-  return { code: source.replace(needle, replacement), map: null }
+  const file = relative(root, id.split('?')[0]!)
+  let code = source
+  if (name) {
+    assert.ok(mutations[name]); const [target, needle, replacement] = mutations[name]
+    if (file === target) {
+      assert.equal(source.split(needle).length - 1, 1)
+      if (process.env.LANDMARK_HITS) appendFileSync(process.env.LANDMARK_HITS, file + '\n')
+      code = source.replace(needle, replacement)
+    }
+  }
+  if (process.env.LANDMARK_LOADED && file.startsWith('packages/core/src/') && file.endsWith('.ts')) appendFileSync(process.env.LANDMARK_LOADED,
+    JSON.stringify({ path: file, originalSHA256: createHash('sha256').update(source).digest('hex'), sha256: createHash('sha256').update(code).digest('hex') }) + '\n')
+  if (code !== source) return { code, map: null }
 } }], test: { include: ['packages/core/test/conversation-landmarks.test.ts'], passWithNoTests: false, testTimeout: 30000, hookTimeout: 60000 } })
