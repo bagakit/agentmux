@@ -61,7 +61,7 @@ import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type Work
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
-import { agentContinuityDetail } from '../lib/continuity-presentation'
+import { agentContinuityPresentation } from '../lib/continuity-presentation'
 import { projectConversationRecords, type ConversationItemRef } from '@agentmux/core/conversation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
@@ -927,9 +927,19 @@ export function SessionPane({
       <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Resuming…' : 'Resume'}
     </button>
   )
-  const pendingRestoreDetail = pendingAgentRestore && startupDecision ? continuityNotice?.reason ?? (recoveryCandidate
-    ? session.status.detail
-    : agentContinuityDetail(startupDecision)) : undefined
+  const coreRestorePresentation = session.kind === 'agent' ? agentContinuityPresentation(session) : null
+  const restoreFailed = continuityNotice || session.status.state === 'error' && coreRestorePresentation?.kind !== 'unconfirmed'
+  const restorePresentation = coreRestorePresentation?.kind === 'restoring' ? { ...coreRestorePresentation, phase: 'recovering' as const } : pendingAgentRestore ? {
+    phase: recovering ? 'recovering' as const : restoreFailed ? 'failed' as const : 'parked' as const,
+    title: recovering ? 'Restoring your session' : continuityNotice ? continuityNotice.title
+      : restoreFailed ? recoveryTitle
+        : coreRestorePresentation?.title ?? (exited ? 'Agent process exited' : 'Session state unconfirmed'),
+    detail: continuityNotice?.reason ?? (restoreFailed
+      ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
+      : coreRestorePresentation?.detail ?? (exited && !session.runUnobserved
+        ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
+        : 'The saved Session is retained. Its process state is not yet confirmed.'))
+  } : null
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
   const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore
   const conversationReading = session.kind === 'agent' ? {
@@ -940,7 +950,8 @@ export function SessionPane({
   const activityProps: ComponentProps<typeof ActivityView> = {
     sessionId: session.id, items: timeline, userMessages, nativeHistoryPage, nativeContextItems,
     ...(session.kind === 'agent' ? { executionHostId: session.control.hostId, ...(conversationReading ? { conversationReading } : {}) } : {}),
-    ...(pendingAgentRestore ? { readingNotice: <div className="activity-feed__read-notice" role="status">{pendingRestoreDetail}</div>, readingAction: agentRecoveryAction } : {}),
+    ...(restorePresentation ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{restorePresentation.title}</strong><span>{restorePresentation.detail}</span></div> } : {}),
+    ...(pendingAgentRestore ? { readingAction: agentRecoveryAction } : {}),
     userMessageRead: { loading: userMessagesLoading, error: userMessagesError,
       observationError: userMessagesObservationError, windowFrozen: userMessagesWindowFrozen,
       windowIncomplete: userMessagesWindowIncomplete,
@@ -977,11 +988,9 @@ export function SessionPane({
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
 
-  const restoreSurface = <FullPageLoadingSurface scope="region" phase={recovering ? 'recovering' : continuityNotice || session.status.state === 'error' ? 'failed' : 'parked'} eyebrow="Session retained"
-                title={recovering ? 'Restoring your session' : continuityNotice ? continuityNotice.title : session.status.state === 'error' ? recoveryTitle : 'Ready to restore'}
-                detail={continuityNotice?.reason ?? (session.status.state === 'error'
-                  ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
-                  : pendingRestoreDetail ?? 'The saved Session is retained. Its process state is not yet confirmed.')}
+  const restoreSurface = <FullPageLoadingSurface scope="region" phase={restorePresentation?.phase ?? 'parked'} eyebrow="Session retained"
+                title={restorePresentation?.title ?? 'Session state unconfirmed'}
+                detail={restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
                 actions={!historyOpen ? agentRecoveryAction : null}
                 supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}
                 details={{ summary: 'Retained session', content: <dl>
