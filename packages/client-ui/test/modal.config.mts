@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
@@ -24,8 +24,16 @@ const dependencyMutations: Record<string, [string, string, string]> = {
 }
 if (mutation) assert.ok(mutation in mutations || mutation in dependencyMutations, 'Unknown actual Modal mutation')
 function changedSource(source: string, changed: string, file: string): string {
-  if (process.env.MODAL_MUTATION_HIT) appendFileSync(process.env.MODAL_MUTATION_HIT, JSON.stringify({ mutation, file,
-    sourceSHA256: createHash('sha256').update(source).digest('hex'), changedSHA256: createHash('sha256').update(changed).digest('hex') }) + '\n')
+  if (process.env.MODAL_MUTATION_HIT) {
+    const sha = (value: string) => createHash('sha256').update(value).digest('hex')
+    const loadedSHA256 = sha(source), changedSHA256 = sha(changed)
+    const loadedFile = `${process.env.MODAL_MUTATION_HIT}.${loadedSHA256}.loaded.txt`, changedFile = `${process.env.MODAL_MUTATION_HIT}.${changedSHA256}.changed.txt`
+    writeFileSync(loadedFile, source); writeFileSync(changedFile, changed)
+    // Vite can supply transformed dependency code. Bind the disk owner and the
+    // actual transform input separately instead of calling both the same bytes.
+    appendFileSync(process.env.MODAL_MUTATION_HIT, JSON.stringify({ mutation, file,
+      sourceSHA256: sha(readFileSync(file, 'utf8')), loadedSHA256, changedSHA256, loadedFile, changedFile, productionWritten: false }) + '\n')
+  }
   return changed
 }
 
