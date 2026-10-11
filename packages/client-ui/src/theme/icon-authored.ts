@@ -40,6 +40,13 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: {"kind": "once", "animation": "feedback", "description": "仅正文上方一条线短描一次，纸框、折角与另一条线固定", "trigger": "本次准确资源与正文 revision 获得 written 回执后反馈；旧回执、目录、焦点与点击保存不触发。"}
     }
   },
+  "note-related-blocks": {
+    shapes: [["path",{"d":"M5 3H3v7h2M19 3h2v7h-2M8 6.5h8M5 14H3v7h2M19 14h2v7h-2M8 17.5h5"}]],
+    design: {
+      rest: "两段分开的横向摘录与少量括定提示，表达相关原块；区别于完整单页、书册和邻域关系图",
+      motion: { kind: "still", animation: "none", description: "阅读范围由原正文与按钮状态表达，摘录轮廓保持完整静止", trigger: "原相关块阅读动作；点击与视图切换不代表读取成功、正文写入或持续活动。" }
+    }
+  },
   "work-writing": {
     shapes: [["path",{"d":"M4 6h8 M4 12h5"}],["path",{"d":"M9 20l1-4 9-9 3 3-9 9-4 1Z","data-semantic-icon-part":"writing-pen"}]],
     design: {
