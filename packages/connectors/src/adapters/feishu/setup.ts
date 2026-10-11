@@ -1,4 +1,5 @@
 import type { ConnectionSetupAdapter } from '../../connection-setup-adapter.js'
+import { advanceFeishuSession, FEISHU_QR_HEADERS } from './setup-session.js'
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -15,12 +16,7 @@ export function createFeishuSetup(): ConnectionSetupAdapter {
       try {
         const response = await fetch('https://accounts.feishu.cn/accounts/qrlogin/init', {
           method: 'POST', redirect: 'manual', ...(signal ? { signal } : {}),
-          headers: {
-            'x-app-id': '12', 'x-api-version': '1.0.28', accept: 'application/json', 'content-type': 'application/json',
-            'x-locale': 'zh-CN', 'x-terminal-type': '2',
-            // Reference issuer web-client metadata, never a trusted local device or user identity.
-            'x-device-info': 'device_id=0;device_name=Chrome;device_os=Mac;device_model=Chrome;lark_version=;channel=Release;package_name=feishu;tt_app_id=1658;is_dpop_support=true;is_iframe=false'
-          },
+          headers: FEISHU_QR_HEADERS,
           body: JSON.stringify({ biz_type: null, redirect_uri: 'https://ask.feishu.cn/' })
         })
         if (!response.ok || response.status >= 300) return { kind: 'unknown' }
@@ -32,6 +28,7 @@ export function createFeishuSetup(): ConnectionSetupAdapter {
         const privateState = JSON.stringify({ version: 1, ...input, flowKey, token: step.token, setCookies: response.headers.getSetCookie() })
         return { kind: 'challenge', challenge, privateState }
       } catch { return { kind: 'unknown' } }
-    }
+    },
+    advance: advanceFeishuSession
   }
 }

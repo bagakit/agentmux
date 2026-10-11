@@ -20,7 +20,8 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
     },
     setup: {
       domains: ['open.feishu.cn'],
-      begin: async (input, signal) => (await feishu()).setup.begin(input, signal)
+      begin: async (input, signal) => (await feishu()).setup.begin(input, signal),
+      advance: async (input, signal) => (await feishu()).setup.advance(input, signal)
     },
     enrollment: {
       domains: [{ domain: 'open.feishu.cn', label: 'Feishu' }, { domain: 'open.larksuite.com', label: 'Lark' }],
