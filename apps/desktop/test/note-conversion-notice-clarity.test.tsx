@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { noteHistoryRevision } from '@agentmux/core/note-history'
 import type { NotesResourceChange } from '@agentmux/core/notebook-store'
 import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { FileDocument } from '../src/shared/contracts'
@@ -89,11 +90,11 @@ it('keeps historical save uncertainty visible through real current-file checks, 
   const config = await api.config.get()
   useAppStore.setState({ ...state, config: { ...config, workspaces: [{ id: to.workspaceId, name: 'Notes', hostId: to.hostId, path: to.workspacePath, kind: 'folder' }] } }, true)
   const read = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path: to.path, content: markdown, revision: 'markdown-revision' } })
-  const write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'later-revision' })
+  const write = vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, params) => ({ status: 'written', revision: noteHistoryRevision(params.content), content: params.content }))
   await mount()
   const checkNotice = () => {
     expect(container.querySelector('details')?.open).toBe(false)
-    const notice = container.querySelector('[role="status"]')
+    const notice = container.querySelector('.note-conversion-unknown[role="status"]')
     expect(notice).not.toBeNull()
     expect(notice!.textContent).toContain('original save outcome remains unknown')
     expect(container.querySelector('details')?.contains(container.querySelector('[role="status"]'))).toBe(false)
@@ -132,12 +133,14 @@ it('selects a kept conversion draft through the real notice and preserves both o
   await mount()
   await act(async () => {
     useAppStore.getState().updateDocument('conversion-tab', 'LATER CURRENT INPUT', 'conversion-region')
-    container.querySelector<HTMLButtonElement>('button')!.click()
+    const drafts = container.querySelector<HTMLDetailsElement>('.note-version-history')!
+    drafts.open = true; drafts.dispatchEvent(new Event('toggle'))
   })
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use selected draft; keep current')!.click())
   expect(useAppStore.getState().documents[key]).toMatchObject({ content: markdown, revision: 'current-destination-revision', noteConversion: selected.noteConversion })
   expect(useAppStore.getState().retainedDocumentDrafts[key]?.[0]).toMatchObject({ content: 'LATER CURRENT INPUT', noteConversion: otherBackup })
   expect(container.querySelector('[role="status"].note-conversion-unknown')?.textContent).toContain('original save outcome remains unknown')
-  await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use selected draft; keep current')!.click())
   expect(useAppStore.getState().documents[key]).toMatchObject({ content: 'LATER CURRENT INPUT', noteConversion: otherBackup })
   expect(useAppStore.getState().retainedDocumentDrafts[key]?.[0]?.noteConversion).toEqual(selected.noteConversion)
   expect(container.querySelector('.note-conversion-unknown')?.textContent).toContain('A kept draft contains its original input')
