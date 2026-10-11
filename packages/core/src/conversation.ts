@@ -34,6 +34,30 @@ function recordedTime(at: number | undefined): { recordedAt?: number } {
 /** Source-record adapter over the one Core timeline. Existing row and input keys remain original. */
 export function projectConversationReading(input: ConversationProjectionInput & { routeHostId?: string }): { timeline: ReturnType<typeof projectConversationTimeline>; records: AgentConversationRecord[]; originalRecords: AgentConversationRecord[] } {
   const timeline = projectConversationTimeline(input)
+  return adaptConversationTimeline(input, timeline)
+}
+
+/** Presentation adapter only: accepted backend events, roles and order are unchanged. */
+export function projectConversationWindow(snapshot: import('./conversation-changes.js').ConversationWindowSnapshot) {
+  const units = [...snapshot.units].reverse(), records = units.flatMap(unit => unit.records)
+  const native = snapshot.scope.sources.find(source => source.kind === 'native')
+  const historyPage: AgentSessionHistoryPage | undefined = native?.kind === 'native' ? {
+    agentSessionId: snapshot.agentSessionId, sourceHostId: snapshot.sourceHostId,
+    source: { providerId: native.providerId, nativeSessionId: native.nativeSessionId },
+    items: records.flatMap(record => record.original.kind === 'native' ? [record.original.item] : []), nextCursor: snapshot.window.navigation.older
+  } : undefined
+  const captured: AgentTimelineSnapshot = { agentSessionId: snapshot.agentSessionId, sourceHostId: snapshot.sourceHostId,
+    revision: snapshot.window.revision, items: records.flatMap(record => record.original.kind === 'captured' ? [record.original.item] : []) }
+  const timeline: ReturnType<typeof projectConversationTimeline> = {
+    reference: { hostId: snapshot.sourceHostId, agentSessionId: snapshot.agentSessionId }, agentSessionId: snapshot.agentSessionId,
+    scope: snapshot.scope, records, events: units.map(unit => unit.event), coverage: snapshot.coverage,
+    order: { basis: snapshot.order.basis, crossSource: snapshot.order.crossSource }
+  }
+  return { ...adaptConversationTimeline({ agentSessionId: snapshot.agentSessionId, routeHostId: snapshot.hostId,
+    ...(historyPage ? { historyPage } : {}), timeline: captured }, timeline), historyPage, captured }
+}
+
+function adaptConversationTimeline(input: ConversationProjectionInput & { routeHostId?: string }, timeline: ReturnType<typeof projectConversationTimeline>) {
   const users = projectSessionUserMessages(input)
   const inputs = new Map(users.map(value => [JSON.stringify([value.source.kind, value.rawId]), value]))
   const records = new Map(timeline.records.map(record => [record.id, record]))
