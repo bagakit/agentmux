@@ -8,9 +8,11 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { focusExecution } from '../../../src/renderer/src/lib/agent-focus'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { workbenchProjectionSlotId } from '../../../src/renderer/src/lib/workbench-projection'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath } from '../../../src/shared/scratch-topics'
+import { topicSpatialAddress } from '../../../src/shared/space-addresses'
 import '../../../src/renderer/src/styles/index.css'
 window.terminals = []
 const request = window.topicTerminalBoundary.request
@@ -30,7 +32,7 @@ api.spatial.read = () => request('spatial-read')
 api.spatial.commit = input => request('spatial-commit', input)
 api.spatial.retainLabels = values => request('spatial-labels', values)
 api.spatial.onChange = window.topicTerminalBoundary.onSpatialChange
-api.providers.list = async () => []
+api.providers.list = async options => options?.observation ? { catalog: [], warnings: [] } : []
 api.demands.list = async () => []
 api.sessions.snapshot = async () => request('snapshot')
 api.sessions.launchTerminal = async input => request('launch', input)
@@ -59,6 +61,7 @@ api.scratch.readTopic = async (id, topic) => request('topic', id, topic)
 api.scratch.listTopics = async id => request('topics', id)
 api.scratch.ensureTopic = async (id, topic) => request('ensure-topic', id, topic)
 api.scratch.ensureMote = async (id, topic) => request('ensure-mote', id, topic)
+api.spaceObjects.appearance = target => request('object-appearance', target)
 api.files.readDirectory = async () => []
 api.files.observe = async () => {}
 api.files.unobserve = async () => {}
@@ -67,14 +70,24 @@ api.files.unobserve = async () => {}
 // open claim its own Run through production store owners.
 let seededMote
 if (setup.phase === 'seed') {
-  await api.scratch.ensureMote(workspace.id, PMO_TEAMS_TOPIC_ID)
-  const session = await api.sessions.launchTerminal({ hostId: 'local', workspacePath: workspace.path })
-  const launcher = { ...createWorkbenchTab('mote-launcher-tab', { regionId: 'mote-launcher-region', kind: 'launcher', workspaceId: workspace.id }), topicId: PMO_TEAMS_TOPIC_ID }
-  const tab = { ...createWorkbenchTab('mote-tab', { regionId: 'mote-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: session.id }), topicId: PMO_TEAMS_TOPIC_ID }
+  const mote = await api.scratch.ensureMote(workspace.id, PMO_TEAMS_TOPIC_ID)
+  const space = topicSpatialAddress(setup.config, mote)
+  if (!space) throw new Error('Private Mote must have its original confirmed spatial address')
+  const session = await api.sessions.launchTerminal({ hostId: 'local', workspacePath: scratchTopicPhysicalPath(workspace, mote) })
+  const launcher = { ...createWorkbenchTab('mote-launcher-tab', { regionId: 'mote-launcher-region', kind: 'launcher', workspaceId: workspace.id }), topicId: PMO_TEAMS_TOPIC_ID, space }
+  const tab = { ...createWorkbenchTab('mote-tab', { regionId: 'mote-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: session.id }), topicId: PMO_TEAMS_TOPIC_ID, space }
   const layout = createWorkspaceLayout('original-group', [launcher.id, tab.id])
   layout.groups[0].activeTabId = null
   layout.groups[0].recentTabIds = []
   seededMote = { session, launcher, tab }
+  // The original durable workface belongs to Core. A Renderer-only preference
+  // record cannot supply the execution Host for a saved Region during recovery.
+  const graph = desktopSpatialGraph({ config: setup.config, tabs: { [launcher.id]: launcher, [tab.id]: tab },
+    layouts: { [workspace.id]: layout }, sessions: [session], spaceZoneBindings: {}, spatialRequests: {} }, [mote])
+  const original = graph.regions.find(region => region.regionId === 'mote-region')
+  if (original?.runId !== session.control.run.runId || original.execution?.hostId !== session.hostId)
+    throw new Error('Private saved Mote must retain the exact Core Run and execution Host')
+  await api.spatial.commit({ expectedRevision: 0, graph })
   const { name, version } = useAppStore.persist.getOptions()
   window.localStorage.setItem(name, JSON.stringify({ version, state: {
     restoredWorkbench: projectPersistedWorkbench({ tabs: { [launcher.id]: launcher, [tab.id]: tab }, layouts: { [workspace.id]: layout } }),
