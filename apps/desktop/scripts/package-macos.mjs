@@ -1129,6 +1129,7 @@ async function main() {
 
     if (appOnly) {
       await verifyPackagedRuntime(stagedApp, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
+      if (signingPlan.kind !== 'ad-hoc') await verifyLaunchServices(stagedApp, temporaryRoot)
     } else {
       await createDmg(stagedApp, stagedDmg, temporaryRoot)
       await verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256, signingPlan)
