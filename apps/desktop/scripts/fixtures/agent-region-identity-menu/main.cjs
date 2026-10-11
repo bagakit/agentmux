@@ -19,7 +19,7 @@ const region = `document.querySelector('[data-workbench-region-id="${leftId}"]')
 const surface = `(${region}??document.querySelector('.agent-surface'))`
 const more = `${surface}.querySelector('.agent-region-header__more')`
 const menu = `document.querySelector('.agent-region-menu[data-owner-region-id="${leftId}"]')`
-const item = label => `([...${menu}.querySelectorAll('[role="menuitem"]')].find(item=>item.textContent.trim()===${JSON.stringify(label)}))`
+const item = label => `([...${menu}.querySelectorAll('[role="menuitem"]')].find(item=>(item.getAttribute('aria-label')??item.textContent).trim()===${JSON.stringify(label)}))`
 async function waitFor(expression) {
   for (let i = 0; i < 100; i++) { if (await evaluate(expression)) return; await delay(25) }
   throw new Error('Timed out: ' + expression)
@@ -51,7 +51,11 @@ async function open(kind='mouse') {
   assert.ok(await evaluate(`${menu}.querySelectorAll('[role="menuitem"]').length`)>0,'Actual nonempty menu')
 }
 async function close(expectFocus=true) {
-  if(expectFocus)await key('Escape','Escape',27)
+  if(expectFocus){
+    const swap = `(()=>{const root=${menu},trigger=root&&[...root.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')].find(item=>item.textContent.trim()==='Swap Region…');return trigger?document.getElementById(trigger.getAttribute('aria-controls')):null})()`
+    if(await evaluate(visible(swap))){await key('ArrowLeft','ArrowLeft',37);await waitFor(`!${swap}`)}
+    await key('Escape','Escape',27)
+  }
   else await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:2,y:735,buttons:0})
   await waitFor(`!${menu}`);await painted()
   if(expectFocus)assert.equal(await evaluate(`document.activeElement===${more}`),true,'Keyboard Escape returns to the original More trigger')
@@ -302,7 +306,7 @@ async function selection(label,width,input='mouse') {
   const conjunction=await evaluate(`({active:identityMenu.facts().active,open:${menu}?.dataset.state==='open'})`)
   assert.deepEqual(conjunction,{active:rightId,open:true})
   const before=await evaluate('identityMenu.facts()')
-  const actual=label==='Split'?`([...${menu}.querySelectorAll('[role="menuitem"]')].find(item=>item.textContent.trim()==='Split Down'))`:item(label)
+  const actual=item(label==='Split'?'Split Down':label)
   assert.equal(await evaluate(visible(actual)),true,'Actual selected menu item is visible')
   const menuPng=await capture(`${width}-${label.replaceAll(' ','-')}-${input}-conjunction`)
   // Capture must not change the focus fact. The capture listener also records this at the trusted click.

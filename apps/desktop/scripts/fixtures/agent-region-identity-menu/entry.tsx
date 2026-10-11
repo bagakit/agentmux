@@ -65,8 +65,12 @@ api.ui.writeClipboardText = async text => { clipboard.push(text); if (failCopy) 
 api.sessions.resize = async (...args) => { resizes.push(args); return resize(...args) }
 for(const type of ['pointerdown','click','keydown'])document.addEventListener(type, event => {
   const item = event.target instanceof Element ? event.target.closest('[role="menuitem"]') : null
-  const menu = item?.closest<HTMLElement>('.agent-region-menu')
-  if (menu && (type !== 'keydown' || (event as KeyboardEvent).key === 'Enter')) selections.push({ type, pointerType: event instanceof PointerEvent ? event.pointerType : null, label: item!.textContent?.trim(), trusted: event.isTrusted,
+  const submenu = item?.closest<HTMLElement>('.region-swap-menu[role="menu"]')
+  const owners = submenu ? [...document.querySelectorAll<HTMLElement>('.agent-region-menu')].filter(parent =>
+    [...parent.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')].some(trigger => trigger.getAttribute('aria-controls') === submenu.id)) : []
+  if (submenu && owners.length !== 1) throw new Error('Swap selection must identify one original Region menu through its actual submenu trigger')
+  const menu = submenu ? owners[0] : item?.closest<HTMLElement>('.agent-region-menu')
+  if (menu && (type !== 'keydown' || (event as KeyboardEvent).key === 'Enter')) selections.push({ type, pointerType: event instanceof PointerEvent ? event.pointerType : null, label: (item!.getAttribute('aria-label') ?? item!.textContent)?.trim(), trusted: event.isTrusted,
     owner: menu.dataset.ownerRegionId, open: menu.dataset.state === 'open',
     active: useAppStore.getState().tabs[tabId]?.layout.activeRegionId })
 }, true)

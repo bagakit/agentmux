@@ -56,9 +56,21 @@ export async function readSwapFacts(cdp, ids) {
       headers:${JSON.stringify(ids)}.map(id=>{const region=document.querySelector('[data-workbench-region-id="'+id+'"]'),name=region?.querySelector('.agent-region-header strong');return{regionId:id,name:name?.textContent,title:name?.title,visible:!!region&&region.checkVisibility()}})}})()`)
 }
 
+async function openSwapTargets({ cdp, key, waitFor, menu }) {
+  const trigger = `([...${menu}.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')].find(item=>item.textContent.trim()==='Swap Region…'))`
+  await waitFor('original Swap submenu trigger is visible and focused', () => cdp.evaluate(`(()=>{const root=${menu},items=root&&[...root.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')].filter(item=>item.textContent.trim()==='Swap Region…');if(items?.length!==1||!items[0].checkVisibility())return false;items[0].focus();return document.activeElement===items[0]})()`))
+  await key(cdp, 'ArrowRight', 'ArrowRight')
+  const submenu = `document.getElementById(${trigger}?.getAttribute('aria-controls'))`
+  await waitFor('original Swap submenu exposes two actual targets', () => cdp.evaluate(`(()=>{const root=${menu},trigger=${trigger},child=${submenu};return root?.dataset.state==='open'&&trigger?.dataset.state==='open'&&child?.getAttribute('role')==='menu'&&child.classList.contains('region-swap-menu')&&child.checkVisibility()&&child.querySelectorAll('[role="menuitem"]').length===2})()`))
+  return submenu
+}
+
 export async function selectSwapTarget({ cdp, key, activateButton, waitFor, focusNeighbor, agentRegionId, fileRegionId, identityName, tabId }) {
   await cdp.evaluate(`(async()=>{const spatial=await window.agentmux.spatial.read();if(!spatial)throw new Error('The original Core spatial document is unavailable');window.__swapRestartEvents=[];window.__swapRestartEventSelectionOwner='gui';for(const type of ['keydown','click'])document.addEventListener(type,event=>{
-    const item=event.target instanceof Element?event.target.closest('[role="menuitem"]'):null,menu=item?.closest('.agent-region-menu');
+    const item=event.target instanceof Element?event.target.closest('[role="menuitem"]'):null,child=item?.closest('.region-swap-menu[role="menu"]');
+    const owners=child?[...document.querySelectorAll('.agent-region-menu')].filter(root=>[...root.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')].some(trigger=>trigger.getAttribute('aria-controls')===child.id)):[];
+    if(child&&owners.length!==1)throw new Error('Swap selection must identify one original Region menu through its actual submenu trigger');
+    const menu=child?owners[0]:item?.closest('.agent-region-menu');
     if(menu&&(type!=='keydown'||event.key==='Enter')){
       const visible=node=>node.getClientRects().length>0&&getComputedStyle(node).visibility==='visible'&&!node.closest('[inert]');
       const owner=menu.dataset.ownerRegionId;
@@ -73,17 +85,18 @@ export async function selectSwapTarget({ cdp, key, activateButton, waitFor, focu
         .filter(node=>node.getClientRects().length>0&&getComputedStyle(node).visibility==='visible'&&!node.closest('[inert]'))
         .map(node=>node.dataset.workbenchRegionId);
       if(active.length!==1||!spatial.graph.regions.some(region=>region.regionId===active[0]&&region.tabId===${JSON.stringify(tabId)}))throw new Error('The event does not identify one visible original Region in its actual GUI host');
-      window.__swapRestartEvents.push({type,trusted:event.isTrusted,label:item.textContent.trim(),owner:menu.dataset.ownerRegionId,open:menu.dataset.state==='open',active:active[0]})}
+      window.__swapRestartEvents.push({type,trusted:event.isTrusted,label:(item.getAttribute('aria-label')??item.textContent).trim(),owner:menu.dataset.ownerRegionId,open:menu.dataset.state==='open',active:active[0]})}
   },true)})()`)
   await activateButton(cdp, `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more')`)
   await waitFor('original three-Agent menu is open', () => cdp.evaluate(`document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]')?.dataset.state==='open'`))
-  const focusReceipt = await focusNeighbor()
   const menu = `document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]')`
+  const submenu = await openSwapTargets({ cdp, key, waitFor, menu })
+  const focusReceipt = await focusNeighbor()
   const observed = await waitFor('three Agent Swap targets', () => cdp.evaluate(`(async()=>{const menu=${menu};if(!menu)return null;const spatial=await window.agentmux.spatial.read();return{open:menu.dataset.state==='open',active:spatial.graph.tabLayouts[${JSON.stringify(tabId)}].activeRegionId,
-    entries:[...menu.querySelectorAll('[role="menuitem"]')].filter(item=>item.textContent.trim().startsWith('Swap with ')).map(item=>item.textContent.trim())}})()`)
+    entries:[...${submenu}.querySelectorAll('[role="menuitem"]')].map(item=>(item.getAttribute('aria-label')??item.textContent).trim())}})()`)
     .then(value => value?.open && value.active === fileRegionId ? value : null))
   assert.deepEqual(observed, { open: true, active: fileRegionId, entries: ['Swap with Private saved reviewer', `Swap with ${identityName} 2`] })
-  const target = await cdp.evaluate(`(()=>{const items=[...${menu}.querySelectorAll('[role="menuitem"]')].filter(item=>item.textContent.trim().startsWith('Swap with '));const item=items[1];if(!item||!item.checkVisibility())return false;item.focus();return document.activeElement===item})()`)
+  const target = await cdp.evaluate(`(()=>{const items=[...${submenu}.querySelectorAll('[role="menuitem"]')].filter(item=>(item.getAttribute('aria-label')??item.textContent).trim().startsWith('Swap with '));const item=items[1];if(!item||!item.checkVisibility())return false;item.focus();return document.activeElement===item})()`)
   assert.equal(target, true); await key(cdp, 'Enter', 'Enter')
   const events = await waitFor('trusted original Swap selection', () => cdp.evaluate('window.__swapRestartEvents.length===2&&window.__swapRestartEvents'))
   assert.deepEqual(events, [
@@ -98,8 +111,10 @@ export async function selectSwapTarget({ cdp, key, activateButton, waitFor, focu
 export async function restoreSwapMenu({ cdp, key, activateButton, waitFor, agentRegionId, identityName }) {
   await activateButton(cdp, `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more')`)
   const menu = `document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]')`
-  const entries = await waitFor('restored three-Agent numbered Swap menu', () => cdp.evaluate(`(()=>{const menu=${menu};return menu&&[...menu.querySelectorAll('[role="menuitem"]')].filter(item=>item.textContent.trim().startsWith('Swap with ')).map(item=>item.textContent.trim())})()`))
+  const submenu = await openSwapTargets({ cdp, key, waitFor, menu })
+  const entries = await waitFor('restored three-Agent numbered Swap menu', () => cdp.evaluate(`(()=>{const child=${submenu};return child&&[...child.querySelectorAll('[role="menuitem"]')].map(item=>(item.getAttribute('aria-label')??item.textContent).trim())})()`))
   assert.deepEqual(entries, [`Swap with ${identityName} 1`, 'Swap with Private saved reviewer'])
+  await key(cdp, 'ArrowLeft', 'ArrowLeft'); await waitFor('restored Swap submenu dismissed', () => cdp.evaluate(`!${submenu}`))
   await key(cdp, 'Escape', 'Escape'); await waitFor('restored Swap dismissed', () => cdp.evaluate(`!${menu}`))
   return entries
 }

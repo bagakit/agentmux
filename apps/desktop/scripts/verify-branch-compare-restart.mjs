@@ -313,7 +313,7 @@ async function splitAndGroup(cdp,opened) {
   await click(cdp,selectors(`[data-workbench-tab-id="${opened.tab.tabId}"]`),'right')
   const trigger=await waitFor('actual group submenu',()=>cdp.evaluate(`(() => { const items=${selectors('[role="menuitem"]')}.filter(e=>e.textContent.includes('Move Tab to New Group'));if(items.length!==1)return null;items[0].focus();return document.activeElement===items[0] })()`))
   assert.equal(trigger,true);await key(cdp,'ArrowRight','ArrowRight')
-  await click(cdp,`${selectors('[role="menuitem"]')}.filter(e=>e.textContent==='New Group Right')`)
+  await click(cdp,`${selectors('[role="menuitem"]')}.filter(e=>e.getAttribute('aria-label')==='Move Tab to New Group Right')`)
   const grouped=await waitFor('actual second group persisted',async()=>{const s=await state(cdp);return s.workbench.graph.layouts[workspaceId].groups.length===2?s:null})
   assert.equal(grouped.workbench.graph.layouts[workspaceId].root.type,'split')
   await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.surface.regionId}});await settleFocused(cdp,opened)

@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
       throw new Error(`did not settle: ${expr}`)
     }
     const n = selector => `document.querySelector(${JSON.stringify(selector)})`
-    const row = title => `[...document.querySelectorAll('[role=menuitemradio],[role=menuitem]')].find(node=>node.textContent.trim()===${JSON.stringify(title)})`
+    const row = title => `[...document.querySelectorAll('[role=menuitemradio],[role=menuitem]')].find(node=>(node.getAttribute('aria-label')??node.textContent).trim()===${JSON.stringify(title)})`
     const menu = n('[role=menu]')
     const point = async expr => {
       const value = await read(`(()=>{const node=${expr};if(!node?.isConnected)throw new Error('missing connected target');const r=node.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,hits:[[.5,.5],[.2,.2],[.8,.2],[.2,.8],[.8,.8]].map(([x,y])=>{const at=document.elementFromPoint(r.x+r.width*x,r.y+r.height*y);return at===node||node.contains(at)})}})()`)
@@ -181,7 +181,7 @@ app.whenReady().then(async () => {
       await move(row('Split Left')); await keep('ordinary Item A', input, 'draft', 2)
       await move(row('Split Right')); await keep('ordinary Item A leave/B move', input, 'draft', 2)
       await capture('ordinary-item-active-hover')
-      await move(n('.tab-context-menu__separator')); await keep('ordinary Item gap', input, 'draft', 2)
+      await move(n('.workbench-menu-row__label')); await keep('ordinary Item gap', input, 'draft', 2)
       await capture('ordinary-item-hover')
       await closeByLeave(input); await keep('ordinary Item leave', input, 'draft', 2)
       await move(split); await until(`!!${menu}`); await move(row('Split Right'))

@@ -3,7 +3,18 @@ const assert = require('node:assert/strict')
 module.exports = async function swapProof({ win, evaluate, waitFor, painted, open, close, click, point, key, geometry, capture, probe, report }) {
   const ids = ['region-actions-target', 'region-actions-survivor', 'region-actions-third']
   const menu = `document.querySelector('.agent-region-menu[data-owner-region-id="${ids[0]}"]')`
-  const item = index => `([...${menu}.querySelectorAll('[role="menuitem"]')].filter(n=>n.textContent.trim().startsWith('Swap with '))[${index}])`
+  const trigger = `([...${menu}.querySelectorAll('[role="menuitem"][aria-haspopup="menu"]')].find(node=>node.textContent.trim()==='Swap Region…'))`
+  const submenu = `document.getElementById(${trigger}?.getAttribute('aria-controls'))`
+  const item = index => `([...${submenu}.querySelectorAll('[role="menuitem"]')][${index}])`
+  async function openTargets() {
+    if (!await evaluate(`Boolean(${submenu}?.checkVisibility())`)) {
+      assert.equal(await evaluate(`(()=>{const node=${trigger};if(!node?.checkVisibility())return false;node.focus();return document.activeElement===node})()`), true, 'Original Swap submenu trigger is visible and focused')
+      await key('ArrowRight', 'ArrowRight', 39)
+      await waitFor(`${trigger}?.dataset.state==='open'&&${submenu}?.getAttribute('role')==='menu'&&${submenu}?.checkVisibility()`)
+      await painted()
+    }
+    assert.equal(await evaluate(`${submenu}.querySelectorAll('[role="menuitem"]').length`), 2, 'Disclosed original submenu has exactly two actual targets')
+  }
   const result = { frames: [], updates: [], selections: [], fixture: 'Synthetic public preview Sessions; actual DOM, React owners, CSS and trusted Chromium input.' }
   report(result)
   const order = node => node.type === 'leaf' ? [node.regionId] : [...order(node.first), ...order(node.second)]
@@ -27,12 +38,13 @@ module.exports = async function swapProof({ win, evaluate, waitFor, painted, ope
     return facts
   }
   async function names(expected) {
+    await openTargets()
     const headers = await evaluate(`${JSON.stringify(ids)}.map(id=>{const h=document.querySelector('[data-workbench-region-id="'+id+'"] .agent-region-header strong');return{text:h?.textContent,title:h?.title}})`)
     assert.equal(headers.length, 3)
     assert.ok(headers.every(h => h.text?.trim()), 'Actual three Agent Header names are nonempty')
     assert.deepEqual(headers.map(h => h.title), headers.map(h => h.text))
     if (expected) assert.deepEqual(headers.map(h => h.text), expected)
-    const entries = await evaluate(`[...${menu}.querySelectorAll('[role="menuitem"]')].filter(n=>n.textContent.trim().startsWith('Swap with ')).map(n=>n.textContent.trim())`)
+    const entries = await evaluate(`[...${submenu}.querySelectorAll('[role="menuitem"]')].map(n=>(n.getAttribute('aria-label')??n.textContent).trim())`)
     assert.equal(entries.length, 2, 'Exactly two actual sibling Swap targets')
     assert.deepEqual(entries, headers.slice(1).map((h, index) => {
       const count = headers.filter(other => other.text === h.text).length
@@ -81,7 +93,7 @@ module.exports = async function swapProof({ win, evaluate, waitFor, painted, ope
     const long = 'Investigate uninterrupted durable recovery and preserve every original Agent identity '.repeat(4).trim()
     await evaluate(`identityMenu.rename(1,${JSON.stringify(long)})`); await painted()
     const renamed = await names([initial.headers[0].text, long, initial.headers[2].text])
-    const bounds = await evaluate(`(()=>{const m=${menu},r=m.getBoundingClientRect();return{x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height,viewport:{width:innerWidth,height:innerHeight},items:[...m.querySelectorAll('[role=menuitem]')].filter(n=>n.textContent.trim().startsWith('Swap with ')).map(n=>{const r=n.getBoundingClientRect(),s=n.querySelector('span');return{text:n.textContent.trim(),title:n.title,aria:n.getAttribute('aria-label'),x:r.x,right:r.right,width:r.width,height:r.height,spanWidth:s.clientWidth,spanScrollWidth:s.scrollWidth}})}})()`)
+    const bounds = await evaluate(`(()=>{const m=${submenu},r=m.getBoundingClientRect();return{x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height,viewport:{width:innerWidth,height:innerHeight},items:[...m.querySelectorAll('[role=menuitem]')].map(n=>{const r=n.getBoundingClientRect(),s=n.querySelector('span');return{text:n.textContent.trim(),title:n.title,aria:n.getAttribute('aria-label'),x:r.x,right:r.right,width:r.width,height:r.height,spanWidth:s.clientWidth,spanScrollWidth:s.scrollWidth}})}})()`)
     const menuPng = await capture(`${width}-swap-long-name`)
     result.stage = { width, initial, renamed, bounds, menuPng }
     assert.ok(bounds.width > 0 && bounds.height > 0); assert.ok(bounds.items.length > 0)

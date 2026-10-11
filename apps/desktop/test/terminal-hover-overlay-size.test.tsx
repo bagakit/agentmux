@@ -263,7 +263,7 @@ it('opening and dismissing the real Split menu only occludes the native Browser'
   })))
   await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().portalOverlayCount).toBe(1)) })
   const menu = document.querySelector('[role="menu"]')!
-  expect(menu.textContent).toContain('Split Right')
+  expect(menu.querySelector('[role="menuitem"][aria-label="Split Right"]')).not.toBeNull()
   expect(surfaceVisibility()).toEqual({ browser: 'false', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
   expect(fixture.webglDisposed).toBe(0)
   await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))

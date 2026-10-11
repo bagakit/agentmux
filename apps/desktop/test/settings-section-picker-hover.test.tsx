@@ -107,7 +107,7 @@ it('actual ordinary Split Items preserve text caret across rows, and explicit se
   await browse(input, trigger, items.slice(0, 2), 'draft', 2)
   expect(split).not.toHaveBeenCalled()
   await pointer(trigger, 'pointerover')
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Split Left')!
+  const item = document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Split Left"]')!
   expect(item).toBeTruthy()
   await select(item)
   expect(split).toHaveBeenCalledExactlyOnceWith('left')
