@@ -110,6 +110,23 @@ describe('Knowledge observation presentation keeps authoritative status and orig
     expect(host.textContent).not.toContain('No saved knowledge or text documents match')
     expect(host.querySelector('[aria-label="Knowledge discovery incomplete"]')).not.toBeNull()
   })
+  it('returns focus to the original result only after closing the reader has committed', async () => {
+    await mount([bounded])
+    const row = host.querySelector<HTMLButtonElement>('.topic-knowledge-row')!
+    await act(async () => row.click())
+    expect(host.querySelector('[aria-label="Knowledge detail"]')).not.toBeNull()
+    const originalFocus = row.focus.bind(row)
+    const focus = vi.spyOn(row, 'focus').mockImplementation(() => {
+      expect(host.querySelector('[aria-label="Knowledge detail"]')).toBeNull()
+      originalFocus()
+    })
+    const close = host.querySelector<HTMLButtonElement>('[aria-label="Close knowledge detail"]')
+    expect(close).not.toBeNull()
+    await act(async () => close!.click())
+    expect(focus).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).toBe(row)
+    expect(host.querySelector('[aria-label="Knowledge discovery incomplete"]')).not.toBeNull()
+  })
   it('leaves complete observations quiet and does not infer truncation from count alone', async () => {
     await mount([], Array.from({ length: 100 }, (_, index) => ({ ...saved, entryId: 'entry-' + index })))
     expect(host.querySelectorAll('.topic-knowledge-notice')).toHaveLength(0)
