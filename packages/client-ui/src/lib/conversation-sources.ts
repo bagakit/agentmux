@@ -2,13 +2,23 @@ import type { AgentMuxEvidenceSource } from '@agentmux/core'
 import { conversationInvocationId, conversationRecordId, type ConversationContentRef, type ConversationEvent, type ConversationSelector, type ConversationSourceRecord, type ConversationTimeline } from '@agentmux/core/conversation'
 
 export const NATIVE_CONVERSATION_SOURCE = '原生对话'
-export const COLLECTED_REPLY_TITLE = '采集到的回复'
-const capturedLabels = {
-  'native-hook': 'Hook', 'native-transcript': '原生记录观察', 'terminal-output': '终端输出观察',
-  'run-process': '进程观察', acp: 'ACP', user: 'AgentMux 提交记录', agentmux: 'AgentMux'
-} satisfies Record<AgentMuxEvidenceSource, string>
+export const COLLECTED_REPLY_TITLE = '回复快照'
+const capturedSources = {
+  'native-hook': { label: 'CLI 事件回报', description: 'CLI 通过事件回调或通知上报的内容；具体回调及安装方式须查原始回执。' },
+  'native-transcript': { label: '原生记录观察', description: '从原生记录采集的观察内容。' },
+  'terminal-output': { label: '终端输出观察', description: '从终端输出采集的观察内容。' },
+  'run-process': { label: '进程观察', description: '原运行进程的观察记录。' },
+  acp: { label: 'ACP', description: '通过 ACP 协议取得的记录。' },
+  user: { label: 'AgentMux 提交记录', description: 'AgentMux 保留的原输入提交事实；不单独证明原生采用。' },
+  agentmux: { label: 'AgentMux', description: 'AgentMux 自身记录的系统事实。' }
+} satisfies Record<AgentMuxEvidenceSource, { label: string; description: string }>
+
+/** Display definitions only; never evidence of author, adoption or Hook installation. */
+export function describeCapturedConversationSource(source: AgentMuxEvidenceSource) {
+  return capturedSources[source]
+}
 export type ConversationSourceDisplay = { labels: readonly { id: string; label: string; title: string }[]; unread?: boolean }
-export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; unconfirmed: boolean; collectedReply?: string; submissions?: readonly ConversationSourceRecord[] }
+export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; collectedReply?: string; submissions?: readonly ConversationSourceRecord[] }
 type Slot = ConversationEvent['content'][number]
 const selectorKey = (selector: ConversationSelector) => selector.kind === 'native-part' ? ['native-part', selector.partIndex] : ['captured-field', selector.field]
 const contentKey = (ref: ConversationContentRef) => JSON.stringify([conversationRecordId(ref.record), ref.recordRevision, selectorKey(ref.selector)])
@@ -16,8 +26,12 @@ function display(records: readonly ConversationSourceRecord[], unread = false): 
   const labels = new Map<string, { id: string; label: string; details: string[] }>()
   for (const record of records) {
     const id = record.original.kind === 'native' ? 'native' : record.original.item.source
-    const label = record.original.kind === 'native' ? NATIVE_CONVERSATION_SOURCE : capturedLabels[record.original.item.source]
-    const old = labels.get(id), detail = `${record.id}\nRevision: ${record.revision}`
+    const source = record.original.kind === 'native'
+      ? { label: NATIVE_CONVERSATION_SOURCE, description: '从 Provider 原生会话记录读取的消息或过程。' }
+      : describeCapturedConversationSource(record.original.item.source)
+    const label = source.label
+    const eventName = record.original.kind === 'captured' ? record.original.item.eventName : undefined
+    const old = labels.get(id), detail = [source.description, ...(eventName ? [`原事件：${eventName}`] : []), record.id, `Revision: ${record.revision}`].join('\n')
     if (old) old.details.push(detail)
     else labels.set(id, { id, label, details: [detail] })
   }
@@ -92,11 +106,9 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
       return codes?.has('CONVERSATION_ANCHOR_UNREAD') || codes?.has('CONVERSATION_OBSERVED_TARGET_UNREAD')
     }))
     const relationConflict = originals.some(original => gapCodes.get(original.id)?.has('CONVERSATION_RELATION_CYCLE'))
-    const unconfirmed = Boolean(record.event && originals.length === 1 && timeline.order.crossSource === 'partial')
-    const collectedReply = record.role === 'observation' ? `由 ${main.labels.map(source => source.label).join('、') || '原来源'} 采集的回复内容。${unreadTarget ? '对应的原始记录尚未读到。' : relationConflict ? '记录的对应关系存在冲突。' : ''}` : undefined
+    const collectedReply = record.role === 'observation' ? `事件回报附带的回复文本快照；不单独代表一次新发言。${unreadTarget ? '对应的原始记录尚未读到。' : relationConflict ? '记录的对应关系存在冲突。' : ''}` : undefined
     return { main, parts: slots.map(slotDisplay), fields,
       ...(collectedReply ? { collectedReply } : {}),
-      ...(submissions.length ? { submissions } : {}),
-      unconfirmed }
+      ...(submissions.length ? { submissions } : {}) }
   }
 }
