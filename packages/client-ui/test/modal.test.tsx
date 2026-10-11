@@ -27,6 +27,33 @@ function Attachment({ name = 'attached menu', fallback = overlays }: { name?: st
 function Content({ name }: { name: string }) { return <><Modal.Title>{name}</Modal.Title><Modal.Description>Original {name}</Modal.Description></> }
 
 describe('shared modal presentation ownership', () => {
+  it('reacquires the retained Portal placement before a reopened child traps focus and closes only itself', async () => {
+    const parentChanged = vi.fn(), childOpened = vi.fn()
+    await update(() => root.render(<Modal.Root defaultOpen onOpenChange={parentChanged}>
+      <Modal.Portal container={overlays}><Modal.Overlay /><Modal.Content><Content name="Original parent" />
+        <Modal.Root><Modal.Trigger>Open original child</Modal.Trigger><Modal.Portal container={overlays}>
+          <Modal.Overlay /><Modal.Content onOpenAutoFocus={childOpened}><Content name="Original child" /><Modal.Close>Close original child</Modal.Close></Modal.Content>
+        </Modal.Portal></Modal.Root>
+      </Modal.Content></Modal.Portal>
+    </Modal.Root>))
+    const parent = overlays.querySelector<HTMLElement>('[data-overlay-modal-scope]')!
+    const trigger = [...parent.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open original child')!
+    await update(() => trigger.click())
+    await update(() => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(overlays.querySelectorAll('[data-overlay-modal-scope]')).toHaveLength(1)
+    await update(() => trigger.click())
+    const child = [...overlays.querySelectorAll<HTMLElement>('[data-overlay-modal-scope]')].find(scope => scope !== parent)!
+    expect(childOpened).toHaveBeenCalledTimes(2)
+    expect(child.contains(document.activeElement)).toBe(true)
+    const close = [...child.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Close original child')!
+    await update(() => { close.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })); close.click() })
+    expect(overlays.querySelectorAll('[data-overlay-modal-scope]')).toHaveLength(1)
+    expect(overlays.querySelector('[data-overlay-modal-scope]')).toBe(parent)
+    expect(parentChanged).not.toHaveBeenCalled()
+    await update(() => {}) // Radix returns focus in its deferred unmount callback.
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it('keeps nested modals at the window root and their ordinary overlays in distinct non-scrolling slots', async () => {
     await update(() => root.render(<Modal.Root defaultOpen>
       <Modal.Portal container={overlays}><Modal.Overlay /><Modal.Content><Content name="Parent" />
