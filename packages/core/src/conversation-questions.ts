@@ -14,9 +14,17 @@ export type ConversationQuestionReference = {
   turnId?: string
   questionId: string
 }
-export type ConversationQuestionAnswerFact = AgentSessionHistoryQuestionAnswer & {
+/** Source-qualified reading identity; no physical request record or pending authority is implied. */
+export type ConversationQuestionIdentity = {
+  hostId: string
   agentSessionId: string
   source: AgentSessionHistorySource
+  questionId: string
+}
+export function conversationQuestionIdentity(scope: { hostId?: string | undefined; agentSessionId: string; source: AgentSessionHistorySource }, questionId: string): ConversationQuestionIdentity | null {
+  return scope.hostId ? { hostId: scope.hostId, agentSessionId: scope.agentSessionId, source: scope.source, questionId } : null
+}
+export type ConversationQuestionAnswerFact = AgentSessionHistoryQuestionAnswer & ConversationQuestionIdentity & {
   recordId: string
   turnId?: string
   original: AgentSessionHistoryItem
@@ -49,11 +57,14 @@ export function recordedQuestionAnswerFacts(page: AgentSessionHistoryPage, conte
   const answers = new Map<string, ConversationQuestionAnswerFact>()
   const collect = (value: AgentSessionHistoryPage) => {
     for (const item of value.items) if (item.kind === 'user-message') for (const answer of item.questionAnswers ?? []) {
-      answers.set(answer.questionId, { agentSessionId: page.agentSessionId, source: page.source, recordId: item.id,
+      const identity = conversationQuestionIdentity({ hostId: value.sourceHostId, agentSessionId: value.agentSessionId, source: value.source }, answer.questionId)
+      if (!identity) continue
+      answers.set(answer.questionId, { ...identity, recordId: item.id,
         ...(item.turnId === undefined ? {} : { turnId: item.turnId }), ...answer, original: item })
     }
   }
-  if (context?.agentSessionId === page.agentSessionId && context.source.providerId === page.source.providerId && context.source.nativeSessionId === page.source.nativeSessionId) collect(context)
+  if (!page.sourceHostId) return answers
+  if (context?.sourceHostId === page.sourceHostId && context.agentSessionId === page.agentSessionId && context.source.providerId === page.source.providerId && context.source.nativeSessionId === page.source.nativeSessionId) collect(context)
   collect(page)
   return answers
 }

@@ -3,7 +3,7 @@ import { rpcRecord } from './rpc-data.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { normalizeAgentTimelineItem } from './session-timeline.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
-import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces,
+import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces,
   type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-timeline.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
@@ -246,29 +246,26 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
     }
     if (r.kind === 'answers') {
       rpcRecord(value, ['kind', 'from', 'question'], 'CONTROL_PROTOCOL_ERROR')
-      const q = rpcRecord(r.question, ['agentSessionId', 'executionHostId', 'source', 'recordId', 'turnId', 'questionId'], 'CONTROL_PROTOCOL_ERROR')
-      if (q.executionHostId !== ref.hostId || q.agentSessionId !== ref.agentSessionId) return bad()
+      const q = rpcRecord(r.question, ['hostId', 'agentSessionId', 'source', 'questionId'], 'CONTROL_PROTOCOL_ERROR')
+      if (q.hostId !== ref.hostId || q.agentSessionId !== ref.agentSessionId) return bad()
       const source = rpcRecord(q.source, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
-      const from = itemRef(r.from, ref), question = { agentSessionId: ref.agentSessionId, executionHostId: ref.hostId,
-        source: { providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId) }, recordId: text(q.recordId),
-        questionId: text(q.questionId), ...(q.turnId === undefined ? {} : { turnId: text(q.turnId) }) }
-      const answer = byId.get(conversationRecordId(from)), request = byId.get(conversationRecordId({ ...ref, source: { kind: 'native', ...question.source, recordId: question.recordId } }))
-      if (from.source.kind !== 'native' || from.source.providerId !== question.source.providerId || from.source.nativeSessionId !== question.source.nativeSessionId || !answer && !request ||
-        answer && (answer.original.kind !== 'native' || !answer.original.item.questionAnswers?.some(value => value.questionId === question.questionId)) ||
-        request && (request.original.kind !== 'native' || request.original.item.turnId !== question.turnId || !request.original.item.questionRequest?.questions.some(value => value.id === question.questionId))) return bad()
+      const from = itemRef(r.from, ref), question = { hostId: ref.hostId, agentSessionId: ref.agentSessionId,
+        source: { providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId) }, questionId: text(q.questionId) }
+      if (!byId.has(conversationRecordId(from))) return bad()
       return { kind: 'answers' as const, from, question }
     }
     if (r.kind === 'observes') {
       rpcRecord(value, ['kind', 'from', 'target'], 'CONTROL_PROTOCOL_ERROR')
       const rawTarget = rpcRecord(r.target), from = itemRef(r.from, ref), target = 'recordId' in rpcRecord(rawTarget.source) ? itemRef(rawTarget, ref) : invocation(rawTarget)
-      const observer = byId.get(conversationRecordId(from)), observed = 'recordId' in target.source ? byId.get(conversationRecordId(target as ConversationItemRef)) : undefined
-      if (!observer && !observed || observer && !same(observer.original.item.conversation?.observes, target)) return bad()
+      if (!byId.has(conversationRecordId(from))) return bad()
       return { kind: 'observes' as const, from, target }
     }
     return bad()
   })
   if (!same(relations.filter(relation => relation.kind === 'invocation-member'), records.flatMap(record => conversationInvocationMembers(record))))
     return bad('Conversation invocation membership does not match its original content facts.')
+  if (!same(relations.filter(relation => relation.kind === 'answers' || relation.kind === 'observes'), records.flatMap(record => conversationRecordRelations(record))))
+    return bad('Conversation answer or observation does not match its originating original record facts.')
   const expectedContent = [primary, ...records.filter(record => record !== primary)].flatMap(record => {
     const original = record.original
     const selected = original.kind === 'native' ? original.item.contentParts.map((_, partIndex) => ({ kind: 'native-part' as const, partIndex }))

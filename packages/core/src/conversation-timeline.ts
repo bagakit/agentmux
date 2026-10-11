@@ -2,7 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessageAuthor, AgentTimelineItem, AgentTimelineItemKind, AgentTimelineSnapshot } from './types.js'
 import type { ConversationItemRef, ConversationRef } from './conversation.js'
 import { recordedConversationAuthor } from './conversation-author.js'
-import { projectConversationQuestions, type ConversationQuestionReference } from './conversation-questions.js'
+import { conversationQuestionIdentity, type ConversationQuestionIdentity } from './conversation-questions.js'
 
 export type ConversationAuthor = AgentSessionUserMessageAuthor | { kind: 'system'; providerId?: string }
 export type ConversationSelector = { kind: 'native-part'; partIndex: number }
@@ -25,7 +25,7 @@ export type ConversationContentRef = { record: ConversationItemRef; recordRevisi
 export type ConversationRelation =
   | { kind: 'same-event'; from: ConversationItemRef; to: ConversationItemRef }
   | { kind: 'invocation-member'; part: ConversationContentRef; invocation: ConversationInvocationRef }
-  | { kind: 'answers'; from: ConversationItemRef; question: ConversationQuestionReference }
+  | { kind: 'answers'; from: ConversationItemRef; question: ConversationQuestionIdentity }
   | { kind: 'observes'; from: ConversationItemRef; target: ConversationItemRef | ConversationInvocationRef }
 export type ConversationSourceOrder =
   | { kind: 'native-page'; source: AgentSessionHistorySource; pageWitness?: string; indexInPage: number }
@@ -98,6 +98,23 @@ export function conversationInvocationId(ref: ConversationInvocationRef): string
   return JSON.stringify([ref.hostId, ref.agentSessionId, ref.source.providerId, ref.source.nativeSessionId,
     typeof ref.subject === 'string' ? ['main'] : ['child', ref.subject.nativeActorId],
     ref.scope.kind, ref.scope.kind === 'turn' ? ref.scope.nativeTurnId : null, ref.callId])
+}
+/** Local facts only: accepting an unrelated peer cannot add relations to this record's event. */
+export function conversationRecordRelations(record: ConversationSourceRecord): Extract<ConversationRelation, { kind: 'answers' | 'observes' }>[] {
+  const from = record.reference
+  if (!from) return []
+  const relations: Extract<ConversationRelation, { kind: 'answers' | 'observes' }>[] = []
+  const target = record.original.item.conversation?.observes
+  if (target && target.hostId === from.hostId && target.agentSessionId === from.agentSessionId) relations.push({ kind: 'observes', from, target })
+  if (record.original.kind === 'native' && record.original.item.kind === 'user-message' && from.source.kind === 'native') {
+    const source = { providerId: from.source.providerId, nativeSessionId: from.source.nativeSessionId }
+    const questions = new Set<string>()
+    for (const answer of record.original.item.questionAnswers ?? []) {
+      const question = conversationQuestionIdentity({ ...from, source }, answer.questionId)
+      if (question && !questions.has(question.questionId)) { questions.add(question.questionId); relations.push({ kind: 'answers', from, question }) }
+    }
+  }
+  return relations
 }
 const capturedRoles: Record<AgentTimelineItemKind, ConversationEvent['role']> = {
   user_message: 'message', assistant_message: 'message', system_message: 'notice', tool_call: 'process', permission: 'interaction', lifecycle: 'process'
@@ -281,8 +298,8 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
         if (!byId.has(conversationRecordId(target))) gap(record, 'CONVERSATION_ANCHOR_UNREAD', 'The canonical record is unread; accepted contribution content remains readable.', target)
       }
     }
+    relations.push(...conversationRecordRelations(record))
     if (provenance?.observes && record.reference && provenance.observes.hostId === record.reference.hostId && provenance.observes.agentSessionId === agentSessionId) {
-      relations.push({ kind: 'observes', from: record.reference, target: provenance.observes })
       if (!byId.has(conversationRecordId(provenance.observes))) gap(record, 'CONVERSATION_OBSERVED_TARGET_UNREAD', 'The exact observed target is unread; this original observation remains independently readable.', provenance.observes)
     }
   }
@@ -294,18 +311,11 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
   for (const id of resolved.cyclicRecordIds) { const original = byId.get(id); if (original) gap(original, 'CONVERSATION_RELATION_CYCLE', 'Conflicting event relations retain the original independent record.') }
   const anchor = (record: ConversationSourceRecord): string => resolved.anchors.get(record.id)!
   for (const record of records) relations.push(...conversationInvocationMembers(record))
-  if (page && nativeHost) for (const question of projectConversationQuestions({ agentSessionId, executionHostId: nativeHost, historyPage: page })) for (const value of question.questions) if (value.answer) relations.push({ kind: 'answers',
-    from: { hostId: nativeHost, agentSessionId, source: { kind: 'native', ...value.answer.source, recordId: value.answer.recordId } }, question: value.reference })
   const relationsByRecord = new Map<string, Set<ConversationRelation>>()
   for (const relation of relations) {
     const from = relation.kind === 'invocation-member' ? relation.part.record : relation.from
-    const targets = relation.kind === 'same-event' ? [relation.to] : relation.kind === 'invocation-member' ? []
-      : relation.kind === 'answers' ? [{ hostId: relation.question.executionHostId!, agentSessionId, source: { kind: 'native' as const, ...relation.question.source, recordId: relation.question.recordId } }]
-      : 'recordId' in relation.target.source ? [relation.target as ConversationItemRef] : []
-    for (const ref of [from, ...targets]) {
-      const key = conversationRecordId(ref), group = relationsByRecord.get(key) ?? new Set<ConversationRelation>()
-      group.add(relation); relationsByRecord.set(key, group)
-    }
+    const key = conversationRecordId(from), group = relationsByRecord.get(key) ?? new Set<ConversationRelation>()
+    group.add(relation); relationsByRecord.set(key, group)
   }
   const groups = new Map<string, ConversationSourceRecord[]>()
   for (const record of records) { const id = anchor(record), group = groups.get(id) ?? []; group.push(record); groups.set(id, group) }
