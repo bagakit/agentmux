@@ -10794,7 +10794,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (session?.kind !== 'agent' || !workbenchViewCloseAllowsSession(get().closingWorkbenchViews, sessionId) ||
       !hasAttachedSessionView(get().tabs, sessionId)) throw new Error('The original Agent workface is no longer open. No recovery control was sent.')
     const original = currentContinuitySupervision(session)
-    if (original?.root.operationId !== intentOperationId || original.targetChanged) throw new Error('The original recovery intent changed. Re-read its current facts before choosing a control.')
+    if (original?.root.operationId !== intentOperationId || original.targetChanged && !original.waitingForInitialAttempt) throw new Error('The original recovery intent changed. Re-read its current facts before choosing a control.')
     const key = continuityControlKey(session.hostId, sessionId)
     const scope = continuityControlRequests(get().continuityControlIntents[key], session.hostId, sessionId)
     if (action === 'continue' && scope.some(item => !item.intent || !item.intent.rejection && item.intent.request.intentOperationId === intentOperationId && item.intent.request.action === 'continue')) {

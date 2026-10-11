@@ -52,10 +52,12 @@ export function ContinuitySupervisionNotice({ session, readOnly = false }: { ses
       <ServiceWindowNotice notice={notice} />
       {projection ? <div className="continuity-supervision__record">
         <p>{projection.failure}</p><p>{projection.childInput}</p>
-        {supervision?.nextAttemptAt === undefined ? null : <p>Next automatic attempt: {new Date(supervision.nextAttemptAt).toLocaleString()}.</p>}
+        {projection.waitingForInitialAttempt
+          ? projection.attempt.nextActionAt === undefined ? null : <p>Next recovery check: {new Date(projection.attempt.nextActionAt).toLocaleString()}.</p>
+          : supervision?.nextAttemptAt === undefined ? null : <p>Next automatic attempt: {new Date(supervision.nextAttemptAt).toLocaleString()}.</p>}
         {supervision?.observationError ? <p>Observation unconfirmed: {supervision.observationError.code} · {supervision.observationError.message}</p> : null}
         <dl><dt>Original recovery</dt><dd>{root!.operationId}</dd><dt>Current attempt</dt><dd>{projection.attempt.operationId}</dd>
-          <dt>Current Run</dt><dd>{session.control.run.runId}</dd><dt>Recovery reason</dt><dd>{supervision!.reason}</dd></dl>
+          <dt>Current Run</dt><dd>{session.control.run.runId}</dd><dt>Recovery reason</dt><dd>{projection.waitingForInitialAttempt ? `${projection.attempt.reason} · ` : ''}{supervision!.reason}</dd></dl>
         <p>{projection.originalInput}</p><p>{projection.initialInput}</p>
         {root!.previousInput ? <details><summary>Original earlier input outcome</summary><pre>{JSON.stringify(root!.previousInput, null, 2)}</pre></details> : null}
         {root!.recoveryDelivery ? <details><summary>Initial recovery delivery</summary><pre>{JSON.stringify(root!.recoveryDelivery, null, 2)}</pre></details> : null}
