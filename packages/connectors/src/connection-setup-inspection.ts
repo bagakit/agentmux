@@ -8,7 +8,7 @@ type Parent = { operation: ConnectionSetupOperation; actor: ConnectionEnrollment
 type Snapshot = { stepId: string; attemptId: string; stage: string; privateState: string }
 type Child = { receipt: ConnectionSetupInspectionReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null }
 type Envelope = { binding: string; stepId: string; applicationInfoReadPermission?: 'confirmed' | 'unknown'; readResult?: ConnectionSetupReadSummary; privateState: string }
-export type SetupConfigurationSource = { receipt: ConnectionSetupInspectionReceipt & { subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog' }; authenticationStepId: string; attemptId: string; privateState: string; originalReadState: string }
+export type SetupConfigurationSource = { receipt: ConnectionSetupInspectionReceipt & { subject: ConnectionSetupReadSubject }; authenticationStepId: string; attemptId: string; privateState: string; originalReadState: string }
 type Owner = {
   connections: ConnectionHost; secrets: EnrollmentSecrets | undefined
   read(id: string): Parent | null
@@ -62,7 +62,7 @@ export class SetupApplicationInspection {
   }
   private binding(row: Parent, child: Child): string {
     const o = row.operation
-    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, adapterId: o.adapterId, application: o.application, goal: o.goal, actor: row.actor, authenticationStepId: child.authenticationStepId, ...(child.receipt.subject ? { subject: child.receipt.subject } : {}) })
+    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, adapterId: o.adapterId, application: o.application, goal: o.goal, actor: row.actor, authenticationStepId: child.authenticationStepId, ...(child.receipt.subject ? { subject: child.receipt.subject } : {}), ...(child.receipt.subject === 'publication-version' ? { versionId: child.receipt.versionId } : {}) })
   }
   private envelope(value: string | null, row: Parent, child: Child): Envelope | null {
     try {
@@ -71,7 +71,7 @@ export class SetupApplicationInspection {
       if (p.binding !== this.binding(row, child) || p.stepId !== child.receipt.stepId || typeof p.privateState !== 'string') return null
       if (child.receipt.subject) {
         const summary = parseConnectionSetupReadSummary(p.readResult)
-        return summary.subject === child.receipt.subject && p.applicationInfoReadPermission === undefined ? { ...p, readResult: summary } : null
+        return summary.subject === child.receipt.subject && (summary.subject !== 'publication-version' || summary.versionId === child.receipt.versionId) && p.applicationInfoReadPermission === undefined ? { ...p, readResult: summary } : null
       }
       return p.readResult === undefined && ['confirmed', 'unknown'].includes(p.applicationInfoReadPermission ?? '') ? p : null
     } catch { return null }
@@ -91,20 +91,21 @@ export class SetupApplicationInspection {
       return snapshot?.stage === 'confirmed' && fresh && this.currentAuthentication(fresh) && fresh.operation.authentication?.stepId === snapshot.stepId ? snapshot : null
     } catch { return null }
   }
-  private latestConfigurationRead(row: Parent, subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog'): Child | null {
+  private latestConfigurationRead(row: Parent, subject: ConnectionSetupReadSubject, versionId?: string): Child | null {
     return this.safe(() => {
-      const record = this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL AND json_extract(record_json,'$.receipt.subject')=? ORDER BY ordinal DESC LIMIT 1").get(row.operation.operationId, subject)
+      const version = subject === 'publication-version' ? " AND json_extract(record_json,'$.receipt.versionId')=?" : ''
+      const record = this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL AND json_extract(record_json,'$.receipt.subject')=?" + version + ' ORDER BY ordinal DESC LIMIT 1').get(row.operation.operationId, subject, ...(subject === 'publication-version' ? [versionId ?? ''] : []))
       return record ? this.decode(record) : null
     })
   }
   /** Pure journal predicate; selection of an older public receipt never supplies this source. */
   configurationSourceCurrent(row: Parent, source: SetupConfigurationSource): boolean {
-    const latest = this.latestConfigurationRead(row, source.receipt.subject)
+    const latest = this.latestConfigurationRead(row, source.receipt.subject, source.receipt.versionId)
     return this.currentAuthentication(row) && row.operation.authentication?.stepId === source.authenticationStepId && latest?.receipt.stepId === source.receipt.stepId && latest.receipt.request === 'confirmed' && latest.receipt.secureStorage === 'stored'
   }
   /** Original authenticated raw read, retained only inside the Host/adapter boundary. */
-  async configurationSource(row: Parent, subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog'): Promise<SetupConfigurationSource | null> {
-    const authentication = await this.source(row), child = this.latestConfigurationRead(row, subject)
+  async configurationSource(row: Parent, subject: ConnectionSetupReadSubject, versionId?: string): Promise<SetupConfigurationSource | null> {
+    const authentication = await this.source(row), child = this.latestConfigurationRead(row, subject, versionId)
     if (!authentication || child?.receipt.subject !== subject || child.authenticationStepId !== authentication.stepId || child.receipt.request !== 'confirmed' || child.receipt.secureStorage !== 'stored' || !child.privateRef) return null
     try {
       const original = this.envelope(await this.owner.secrets?.resolve(child.privateRef) ?? null, row, child)
@@ -113,7 +114,8 @@ export class SetupApplicationInspection {
       return this.configurationSourceCurrent(this.owner.read(row.operation.operationId)!, source) ? source : null
     } catch { return null }
   }
-  private newAction(row: Parent, subject?: ConnectionSetupReadSubject): ConnectionSetupInspectionAction {
+  private newAction(row: Parent, subject?: ConnectionSetupReadSubject, versionId?: string): ConnectionSetupInspectionAction {
+    if (subject === 'publication-version') return { kind: 'read-publication-version', versionId: versionId!, expectedRevision: row.operation.revision, actionId: 'setup-version-read:' + digest({ binding: row.operation, actor: row.actor, previous: this.find(row.operation.operationId)?.receipt.stepId ?? null, subject, versionId }) }
     return { kind: subject ? CONNECTION_SETUP_READ_ACTIONS[subject] : 'inspect-application', expectedRevision: row.operation.revision, actionId: (subject ? 'setup-read:' : 'setup-inspect:') + digest({ binding: row.operation, actor: row.actor, previous: this.find(row.operation.operationId)?.receipt.stepId ?? null, ...(subject ? { subject } : {}) }) }
   }
   async view(row: Parent, context: ConnectionEnrollmentCallContext, selector: NonNullable<ConnectionSetupInspect['applicationInspection']> = {}): Promise<NonNullable<ConnectionSetupView['applicationInspection']>> {
@@ -140,6 +142,7 @@ export class SetupApplicationInspection {
     if (current && this.eligible(fresh)) {
       actions.push(this.newAction(fresh))
       for (const subject of readSubjects) if (this.eligible(fresh, subject)) actions.push(this.newAction(fresh, subject))
+      if (selector.versionId && this.eligible(fresh, 'publication-version')) actions.push(this.newAction(fresh, 'publication-version', selector.versionId))
     }
     return { observations: page.slice(0, limit).map(r => this.summary(this.decode(r))), next: page.length > limit ? String(page[limit - 1]!.ordinal) : null, selected: selected ? this.summary(selected) : null, applicationInfoReadPermission: permission, ...(readResult ? { readResult } : {}), actions }
   }
@@ -197,8 +200,8 @@ export class SetupApplicationInspection {
     }
     // Original local recovery precedes all current-auth, revision and adapter predicates.
     if (original) return repeat(original)
-    const subject = readSubjects.find(subject => this.newAction(row, subject).actionId === input.decision.actionId)
-    const action = this.newAction(row, subject)
+    const subject = input.versionId ? 'publication-version' : readSubjects.find(subject => this.newAction(row, subject).actionId === input.decision.actionId)
+    const action = this.newAction(row, subject, input.versionId)
     if (input.decision.actionId !== action.actionId) return null
     if (input.expectedRevision !== action.expectedRevision || input.decision.value !== 'continue') throw failure('This offered application observation action is stale.', 'CONNECTION_SETUP_ACTION_STALE')
     const source = await this.source(row)
@@ -213,8 +216,8 @@ export class SetupApplicationInspection {
         const existing = this.find(input.operationId, { actionId: input.decision.actionId })
         if (existing) { db.exec('COMMIT'); return { child: existing, claimed: false } }
         const fresh = this.owner.read(input.operationId)!
-        if (!this.eligible(fresh, subject) || fresh.operation.authentication?.stepId !== source.stepId || fresh.operation.revision !== input.expectedRevision || this.newAction(fresh, subject).actionId !== input.decision.actionId) throw failure('The original observation target or authentication changed.', 'CONNECTION_SETUP_ACTION_STALE')
-        const receipt: ConnectionSetupInspectionReceipt = { stepId: randomUUID(), input, request: 'dispatching', secureStorage: 'not-started', ...(subject ? { subject } : {}) }
+        if (!this.eligible(fresh, subject) || fresh.operation.authentication?.stepId !== source.stepId || fresh.operation.revision !== input.expectedRevision || this.newAction(fresh, subject, input.versionId).actionId !== input.decision.actionId) throw failure('The original observation target or authentication changed.', 'CONNECTION_SETUP_ACTION_STALE')
+        const receipt: ConnectionSetupInspectionReceipt = { stepId: randomUUID(), input, request: 'dispatching', secureStorage: 'not-started', ...(subject ? { subject } : {}), ...(subject === 'publication-version' ? { versionId: input.versionId } : {}) }
         const child: Child = { receipt, authenticationStepId: source.stepId, recoveryActionId: 'setup-inspection-recover:' + digest(receipt), privateRef: null }
         db.prepare('INSERT INTO connection_setup_inspection(step_id,operation_id,action_id,recovery_action_id,record_json) VALUES(?,?,?,?,?)').run(receipt.stepId, input.operationId, input.decision.actionId, child.recoveryActionId, JSON.stringify({ receipt, authenticationStepId: child.authenticationStepId, recoveryActionId: child.recoveryActionId }))
         this.owner.touch(fresh); db.exec('COMMIT'); return { child, claimed: true }
@@ -234,10 +237,10 @@ export class SetupApplicationInspection {
       if (this.eligible(fresh, child.receipt.subject) && fresh.operation.authentication?.stepId === source.stepId && adapter) {
         const target = { operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState }
         if (child.receipt.subject && adapter.read) {
-          const receipt = await adapter.read({ ...target, subject: child.receipt.subject }, context.signal)
+          const receipt = await adapter.read({ ...target, subject: child.receipt.subject, ...(child.receipt.subject === 'publication-version' ? { versionId: child.receipt.versionId } : {}) }, context.signal)
           if (receipt.kind === 'observed' && typeof receipt.privateState === 'string') {
             const readResult = parseConnectionSetupReadSummary(receipt.readResult)
-            if (readResult.subject === child.receipt.subject) value = { binding: this.binding(row, child), stepId: child.receipt.stepId, readResult, privateState: receipt.privateState }
+            if (readResult.subject === child.receipt.subject && (readResult.subject !== 'publication-version' || readResult.versionId === child.receipt.versionId)) value = { binding: this.binding(row, child), stepId: child.receipt.stepId, readResult, privateState: receipt.privateState }
           }
         } else if (!child.receipt.subject) {
           const receipt = await adapter.inspect(target, context.signal)

@@ -52,15 +52,17 @@ export function parseConnectionSetupOperation(value: unknown): ConnectionSetupOp
 export function parseConnectionSetupParams<M extends ConnectionSetupMethod>(method: M, value: unknown): ConnectionSetupParamsMap[M] {
   if (method === 'connection.setup.begin') return begin(value) as ConnectionSetupParamsMap[M]
   if (method === 'connection.setup.advance') {
-    const p = object(value, ['operationId', 'expectedRevision', 'decision']), d = object(p.decision, ['actionId', 'value'])
-    return { operationId: id(p.operationId), expectedRevision: integer(p.expectedRevision), decision: { actionId: id(d.actionId), value: choice(d.value, ['continue', 'confirm', 'renew']) } } as ConnectionSetupParamsMap[M]
+    const p = object(value, ['operationId', 'expectedRevision', 'decision', 'versionId']), d = object(p.decision, ['actionId', 'value'])
+    const actionId = id(d.actionId)
+    if (p.versionId !== undefined && !actionId.startsWith('setup-version-read:') && !actionId.startsWith('setup-inspection-recover:')) fail()
+    return { operationId: id(p.operationId), expectedRevision: integer(p.expectedRevision), decision: { actionId, value: choice(d.value, ['continue', 'confirm', 'renew']) }, ...(p.versionId === undefined ? {} : { versionId: id(p.versionId) }) } as ConnectionSetupParamsMap[M]
   }
   if (method === 'connection.setup.ls') { const p = object(value, ['connectionId', 'cursor', 'limit']); return { connectionId: id(p.connectionId), ...(p.cursor === undefined ? {} : { cursor: text(p.cursor) }), ...(p.limit === undefined ? {} : { limit: integer(p.limit, 1, 100) }) } as ConnectionSetupParamsMap[M] }
   const p = object(value, ['operationId', 'applicationInspection', 'applicationConfiguration'])
   const result: ConnectionSetupParamsMap['connection.setup.inspect'] = { operationId: id(p.operationId) }
   if (p.applicationInspection !== undefined) {
-    const s = object(p.applicationInspection, ['selectedStepId', 'cursor', 'limit'])
-    result.applicationInspection = { ...(s.selectedStepId === undefined ? {} : { selectedStepId: id(s.selectedStepId) }), ...(s.cursor === undefined ? {} : { cursor: text(s.cursor) }), ...(s.limit === undefined ? {} : { limit: integer(s.limit, 1, 100) }) }
+    const s = object(p.applicationInspection, ['selectedStepId', 'cursor', 'limit', 'versionId'])
+    result.applicationInspection = { ...(s.versionId === undefined ? {} : { versionId: id(s.versionId) }), ...(s.selectedStepId === undefined ? {} : { selectedStepId: id(s.selectedStepId) }), ...(s.cursor === undefined ? {} : { cursor: text(s.cursor) }), ...(s.limit === undefined ? {} : { limit: integer(s.limit, 1, 100) }) }
   }
   if (p.applicationConfiguration !== undefined) {
     const s = object(p.applicationConfiguration, ['effect', 'purpose', 'selectedStepId', 'cursor', 'limit']), effect = configurationEffect(s.effect)
@@ -69,7 +71,8 @@ export function parseConnectionSetupParams<M extends ConnectionSetupMethod>(meth
   }
   return result as ConnectionSetupParamsMap[M]
 }
-const readSubjects = Object.keys(CONNECTION_SETUP_READ_ACTIONS) as ConnectionSetupReadSubject[]
+const readSubjects = [...Object.keys(CONNECTION_SETUP_READ_ACTIONS), 'publication-version'] as ConnectionSetupReadSubject[]
+const versionStatus = (value: unknown) => choice(value, ['draft', 'reviewing', 'approved', 'rejected', 'awaiting-release', 'unknown'] as const)
 export function parseConnectionSetupReadSummary(value: unknown): ConnectionSetupReadSummary {
   const raw = rpcRecord(value), subject = choice(raw.subject, readSubjects)
   if (subject === 'application-details') {
@@ -85,13 +88,20 @@ export function parseConnectionSetupReadSummary(value: unknown): ConnectionSetup
     const p = object(value, ['subject', 'transport'])
     return { subject, transport: choice(p.transport, ['persistent-connection', 'webhook', 'function', 'unknown']) }
   }
+  if (subject === 'publication-version') {
+    const p = object(value, ['subject', 'versionId', 'status']); return { subject, versionId: id(p.versionId), status: versionStatus(p.status) }
+  }
   object(value, ['subject'])
   return { subject }
 }
 export function parseConnectionSetupInspectionReceipt(value: unknown): ConnectionSetupInspectionReceipt {
-  const p = object(value, ['stepId', 'input', 'request', 'secureStorage', 'subject'])
+  const p = object(value, ['stepId', 'input', 'request', 'secureStorage', 'subject', 'versionId'])
   const result: ConnectionSetupInspectionReceipt = { stepId: id(p.stepId), input: parseConnectionSetupParams('connection.setup.advance', p.input), request: requestState(p.request), secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']) }
   if (p.subject !== undefined) result.subject = choice(p.subject, readSubjects)
+  if (result.subject === 'publication-version') {
+    result.versionId = id(p.versionId)
+    if (result.input.versionId !== result.versionId || !result.input.decision.actionId.startsWith('setup-version-read:')) fail()
+  } else if (p.versionId !== undefined || result.input.versionId !== undefined) fail()
   if (result.input.decision.value !== 'continue' || result.secureStorage === 'stored' && result.request !== 'confirmed') fail()
   return result
 }
@@ -193,7 +203,17 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     if (method === 'connection.setup.advance' && (!result.receipt || !selected || selected.stepId !== result.receipt.stepId)) fail()
     const copy = selected && observations.find(o => o.stepId === selected.stepId)
     if (copy && JSON.stringify(copy) !== JSON.stringify(selected)) fail()
-    const actions = (s.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['inspect-application', 'recover-application-inspection', ...Object.values(CONNECTION_SETUP_READ_ACTIONS)] as const) } })
+    const actions = (s.actions as unknown[]).map(value => {
+      const a = object(value, ['actionId', 'expectedRevision', 'kind', 'versionId'])
+      const actionId = id(a.actionId), expectedRevision = integer(a.expectedRevision)
+      if (a.kind === 'read-publication-version') {
+        const versionId = id(a.versionId)
+        if (!actionId.startsWith('setup-version-read:') || method === 'connection.setup.inspect' && selector?.versionId !== versionId) fail()
+        return { actionId, expectedRevision, kind: 'read-publication-version' as const, versionId }
+      }
+      if (a.versionId !== undefined) fail()
+      return { actionId, expectedRevision, kind: choice(a.kind, ['inspect-application', 'recover-application-inspection', ...Object.values(CONNECTION_SETUP_READ_ACTIONS)] as const) }
+    })
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
     if (actions.some(a => a.kind === 'recover-application-inspection') && (!selected || selected.request !== 'confirmed' || selected.secureStorage === 'stored')) fail()
     const permission = choice(s.applicationInfoReadPermission, ['confirmed', 'unknown'] as const)
@@ -201,7 +221,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     result.applicationInspection = { observations, selected, next: s.next === null ? null : text(s.next), applicationInfoReadPermission: permission, actions }
     if (s.readResult !== undefined) {
       const readResult = parseConnectionSetupReadSummary(s.readResult)
-      if (!selected || selected.subject !== readResult.subject || selected.request !== 'confirmed' || selected.secureStorage !== 'stored' || result.reason === 'connection-revised' || operation!.authentication?.stage !== 'confirmed' || operation!.authentication.request !== 'confirmed' || operation!.authentication.secureStorage !== 'stored') fail()
+      if (!selected || selected.subject !== readResult.subject || readResult.subject === 'publication-version' && selected.versionId !== readResult.versionId || selected.request !== 'confirmed' || selected.secureStorage !== 'stored' || result.reason === 'connection-revised' || operation!.authentication?.stage !== 'confirmed' || operation!.authentication.request !== 'confirmed' || operation!.authentication.secureStorage !== 'stored') fail()
       result.applicationInspection.readResult = readResult
     }
   }
