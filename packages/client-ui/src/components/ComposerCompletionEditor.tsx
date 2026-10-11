@@ -147,7 +147,7 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
       onFocusOutside={event => event.preventDefault()}
       onPointerDownOutside={event => { if (shell.current?.contains(event.target as Node)) event.preventDefault() }}
       onEscapeKeyDown={event => { event.preventDefault(); if (!isImeOwnedKeyboardEvent(event)) { setDismissed(queryKey); focusEditor() } }}
-      onDismiss={() => setDismissed(queryKey)}><div ref={panel} className="composer-completion-popover" style={{ position: 'fixed', visibility: 'hidden' }}>
+      onDismiss={() => setDismissed(queryKey)}><div ref={panel} data-state="open" className="composer-completion-popover" style={{ position: 'fixed', visibility: 'hidden' }}>
     {suggestions.length ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${range!.kind}`} onKeyDown={suggestionKeyDown}>
       {[...groups].map(([group, items]) => {
         const options = items.map((item, index) => <button type="button" role="option" aria-selected="false" key={item.id ?? `${group}:${index}:${item.text}`} {...composerChoiceReadingProps(`${item.label ?? item.text}\n${item.description}`)}
