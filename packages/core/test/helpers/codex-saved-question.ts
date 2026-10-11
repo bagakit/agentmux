@@ -8,6 +8,7 @@ import type { AgentMuxStoredAgentSession, AgentProviderSessionHistoryContext } f
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-values.mjs'
 
 
+export const savedQuestionAt = _historyFixtureEpoch(0, 0, 100)
 export const savedQuestionSource = { providerId: 'codex', nativeSessionId: 'saved-question-native' }
 export const savedQuestionTurn = 'original-question-turn'
 export const savedQuestionCall = 'original-async-call'
@@ -15,12 +16,12 @@ export const savedQuestionId = JSON.stringify(['request_user_input_async', saved
 export const savedQuestionPrompt = 'Choose how to continue the original work.'
 export const savedQuestionAnswer = 'Keep the original work'
 export const savedQuestionEvent = (options: string[] | null = ['Keep the original work', 'Review the direction']) => ({
-  timestamp: new Date(_historyFixtureEpoch(0, 0, 100)).toISOString(), type: 'event_msg', payload: {
+  timestamp: new Date(savedQuestionAt).toISOString(), type: 'event_msg', payload: {
     type: 'item_completed', thread_id: savedQuestionSource.nativeSessionId, turn_id: savedQuestionTurn,
     item: { type: 'AgentMessage', id: savedQuestionCall,
       content: [{ type: 'Text', text: savedQuestionPrompt }], phase: 'final_answer', delivery: 'async',
       questions: [{ title: savedQuestionPrompt, options }] },
-    started_at_ms: _historyFixtureEpoch(0, 0, 100), completed_at_ms: _historyFixtureEpoch(0, 0, 100)
+    started_at_ms: savedQuestionAt, completed_at_ms: savedQuestionAt
   }
 })
 export const savedQuestionTool = () => ({ type: 'response_item', payload: { type: 'function_call', id: 'original-tool-record',
@@ -34,7 +35,7 @@ export const savedQuestionReply = () => ({ type: 'response_item', payload: { typ
 export const savedQuestionJsonl = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).join('\n') + '\n'
 
 /** Isolated FileStore and the real built-in Provider. Runtime operations are forbidden. */
-export async function savedQuestionFixture(rows: unknown[]) {
+export async function savedQuestionFixture(rows: unknown[], options: { unifiedCapturedRead?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'agentmux-saved-question-'))
   const transcriptPath = join(root, 'native.jsonl'), storePath = join(root, 'sessions.json')
   const meta = { type: 'session_meta', payload: { id: savedQuestionSource.nativeSessionId, cwd: root } }
@@ -54,7 +55,12 @@ export async function savedQuestionFixture(rows: unknown[]) {
   return { root, client, session, context, transcriptPath, nativeBefore,
     recordId(index: number) { return `codex-record:${Buffer.byteLength(savedQuestionJsonl([meta, ...rows.slice(0, index)]))}` },
     async unchanged() { expect(await readFile(storePath)).toEqual(before); expect(await readFile(transcriptPath)).toEqual(nativeBefore) },
-    async close() { try { expect(await readFile(storePath)).toEqual(before); expect(connect).not.toHaveBeenCalled(); for (const control of controls) expect(control).not.toHaveBeenCalled() }
+    async close() { try {
+      // A unified read activates the original captured stream header in the same
+      // SQLite owner. Physical database pages may change; the Session must not.
+      if (options.unifiedCapturedRead) expect(await store.readMetadata(session.agentSessionId)).toEqual(session)
+      else expect(await readFile(storePath)).toEqual(before)
+      expect(connect).not.toHaveBeenCalled(); for (const control of controls) expect(control).not.toHaveBeenCalled() }
       finally { await client.dispose(); await rm(root, { recursive: true, force: true }) } }
   }
 }

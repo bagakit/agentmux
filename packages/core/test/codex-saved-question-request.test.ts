@@ -8,10 +8,8 @@ import { readCodexSavedSessionHistoryRecord } from '../src/providers/codex-saved
 import { readSessionHistoryTextResource } from '../src/session-history-content.js'
 import { savedQuestionFixture as fixture, savedQuestionEvent as event, savedQuestionTool as tool, savedQuestionResult as result,
   savedQuestionReply as reply, savedQuestionSource as source, savedQuestionTurn as turn, savedQuestionId as questionId,
-  savedQuestionPrompt as prompt, savedQuestionAnswer as answer, savedQuestionJsonl as jsonl } from './helpers/codex-saved-question.js'
+  savedQuestionPrompt as prompt, savedQuestionAnswer as answer, savedQuestionAt as questionAt, savedQuestionJsonl as jsonl } from './helpers/codex-saved-question.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
-import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
-
 const close: Array<() => Promise<void>> = []
 afterEach(async () => { for (const dispose of close.splice(0).reverse()) await dispose(); vi.restoreAllMocks() })
 
@@ -21,7 +19,7 @@ it.each([['options', ['Keep the original work', 'Review the direction']], ['text
   expect(page.items).toHaveLength(4)
   expect(page.items[0]).toMatchObject({ id: 'original-tool-record', kind: 'activity', contentParts: [{ kind: 'tool-call', name: 'request_user_input_async' }] })
   expect(page.items[2]).toMatchObject({ id: 'original-tool-result', kind: 'activity', contentParts: [{ kind: 'tool-result', output: '{"accepted":true}' }] })
-  expect(page.items[1]).toEqual({ id: f.recordId(1), kind: 'assistant-message', turnId: turn, startedAt: _historyFixtureEpoch(0, 0, 100),
+  expect(page.items[1]).toEqual({ id: f.recordId(1), kind: 'assistant-message', turnId: turn, startedAt: questionAt,
     messagePhase: 'final', contentParts: [{ kind: 'text', text: prompt }], questionRequest: { delivery: 'async', questions: [
       { id: questionId, prompt, options: (options ?? []).map((label, n) => ({ id: String(n), label })), acceptsText: true }
     ] } })
@@ -71,9 +69,9 @@ it('preserves every canonical content part and reads deferred original text thro
 
 it('durable changes use the same canonical question projection and retain the original saved byte position', async () => {
   const f = await fixture([tool()]); close.push(f.close)
-  const checkpoint = await f.client.conversationCheckpoint(f.session.agentSessionId)
+  const checkpoint = await f.client.sessionHistoryCheckpoint(f.session.agentSessionId)
   await appendFile(f.transcriptPath, jsonl([event(), result(), reply()]))
-  const change = await f.client.readConversationChanges(f.session.agentSessionId, { checkpoint })
+  const change = await f.client.readSessionHistoryChanges(f.session.agentSessionId, { checkpoint })
   expect(change.items).toHaveLength(3)
   expect(change.items[0]).toMatchObject({ id: f.recordId(1), questionRequest: { delivery: 'async', questions: [{ id: questionId }] } })
   const page = await f.client.sessionHistoryPage(f.session.agentSessionId)
@@ -137,7 +135,7 @@ it('a single oversized question projection keeps the complete original record ac
   const options = Array.from({ length: 150_000 }, (_, index) => 'option-' + index)
   const original = event(options)
   const f = await fixture([]); close.push(f.close)
-  const checkpoint = await f.client.conversationCheckpoint(f.session.agentSessionId)
+  const checkpoint = await f.client.sessionHistoryCheckpoint(f.session.agentSessionId)
   await appendFile(f.transcriptPath, jsonl([original]))
   const reading = f.client.sessionHistoryPage(f.session.agentSessionId, { limit: 1 })
   await expect(reading).resolves.toHaveProperty('items')
@@ -147,6 +145,6 @@ it('a single oversized question projection keeps the complete original record ac
   expect(item.questionDiagnostic).toMatchObject({ code: 'CODEX_QUESTION_REQUEST_DETAILS_UNAVAILABLE' })
   expect(item.contentParts).toEqual([{ kind: 'text', text: JSON.stringify(original.payload) }])
   expect(await readCodexSavedSessionHistoryRecord({ ...f.context, recordId: item.id, turnId: turn })).toEqual(item)
-  const changes = await f.client.readConversationChanges(f.session.agentSessionId, { checkpoint, limit: 1 })
+  const changes = await f.client.readSessionHistoryChanges(f.session.agentSessionId, { checkpoint, limit: 1 })
   expect(changes.items).toEqual(page.items)
 }, 30_000)
