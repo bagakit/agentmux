@@ -21,7 +21,7 @@ export default defineConfig({
   }],
   test: {
     ...owning.test,
-    include: ['test/workbench-window-presentations.test.tsx', 'test/stable-workbench-reading-transition.test.tsx'],
+    include: ['test/workbench-window-presentations.test.tsx', 'test/stable-workbench-reading-transition.test.tsx', 'test/workbench-placement-confirmation.test.tsx'],
     passWithNoTests: false,
     fileParallelism: false,
     maxWorkers: 1,
