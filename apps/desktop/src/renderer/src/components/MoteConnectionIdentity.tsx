@@ -14,6 +14,8 @@ import { clearMoteConnectionSaveIntent, retainMoteConnectionSaveIntent, useAppSt
 import { moteConnectionChoice, moteConnectionTarget } from '../lib/mote-connection-default'
 import { SelectionField } from './SelectionField'
 import { MoteBotSetup } from './MoteBotSetup'
+import { SpaceIconPicker } from './SpaceIconPicker'
+import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { SettingsNavigation } from './SettingsNavigation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import '../styles/mote-connection-identity.css'
@@ -56,7 +58,7 @@ export function MoteConnectionIdentity({ scope, active }: { scope: MoteWorkfaceS
       <BotIcon size={14} /><span>Chat bot</span><strong>{choice?.record?.config.label ?? (ref ? 'Saved bot' : snapshot?.saved.status === 'ready' ? 'Choose a bot' : snapshot || issue ? 'Not confirmed' : 'View bots')}</strong><ForwardIcon size={12} />
     </button>
     {issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue ? <p role="status" className="mote-details__hint">{issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue}</p> : null}
-    {editing ? <MoteConnectionDialog key={identity} target={target} topicId={scope.topic.id} moteName={scope.topic.title} onClose={() => setEditing(false)}
+    {active && editing ? <MoteConnectionDialog key={identity} target={target} topicId={scope.topic.id} moteName={scope.topic.title} onClose={() => setEditing(false)}
       onRead={accept} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
   </section>
 }
@@ -64,7 +66,25 @@ export function MoteConnectionIdentity({ scope, active }: { scope: MoteWorkfaceS
 function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, returnFocus }: {
   target: MotePreferencesTarget | null; topicId: string; moteName: string; onClose(): void; onRead(value: Snapshot): void; returnFocus(): HTMLElement | null
 }) {
-  const ownerDocument = useWorkbenchDocument()
+  const ownerDocument = useWorkbenchDocument(), content = useRef<HTMLDivElement>(null)
+  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
+    <Dialog.Overlay className="dialog-scrim" />
+    <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
+      onCloseAutoFocus={event => { event.preventDefault(); const active = ownerDocument.activeElement, node = returnFocus();
+        if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
+      <header className="mote-connection-dialog__header"><div><Dialog.Title>Bot for {moteName}</Dialog.Title>
+        <Dialog.Description>New group chats use this bot. Existing groups keep their bot.</Dialog.Description></div>
+        <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close bot choice"><CloseIcon size={16} /></button></Dialog.Close>
+      </header>
+      <MoteConnectionPanel target={target} topicId={topicId} moteName={moteName} onRead={onRead} onSaved={onClose} />
+    </Dialog.Content>
+  </DocumentOverlayPortal></Dialog.Root>
+}
+
+/** The same original preference and operation window in Settings and the Mote dialog. */
+export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved, createOnOpen = false, inSettings = false, onCreateIntentConsumed, onManageConnection }: {
+  target: MotePreferencesTarget | null; topicId: string; moteName: string; onRead(value: Snapshot): void; onSaved?(): void; createOnOpen?: boolean; inSettings?: boolean; onCreateIntentConsumed?: (() => void) | undefined; onManageConnection?: ((record: ConnectionRecord) => void) | undefined
+}) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [selection, setSelection] = useState(''), fieldId = useId()
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
   const [attempt, setAttempt] = useState<{ input: MoteConnectionPreferencesSaveParams; receipt: MoteConnectionPreferencesSaveResult | null } | null>(null)
@@ -72,8 +92,11 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
   const retained = Object.values(intents).filter(item => target && sameMotePreferencesTarget(item.input.target, target))
   const [choosing, setChoosing] = useState(false)
   const [reviewed, setReviewed] = useState(false), [newChoice, setNewChoice] = useState(false)
-  const edited = useRef(false), alive = useRef<object | null>(null), flight = useRef(false), readEpoch = useRef(0), content = useRef<HTMLDivElement>(null)
+  const edited = useRef(false), alive = useRef<object | null>(null), flight = useRef(false), readEpoch = useRef(0)
+  const identityOptions = useRef<HTMLDetailsElement>(null)
+  const choose = () => { setChoosing(true); if (identityOptions.current) identityOptions.current.open = true }
   const settings = useContext(SettingsNavigation)
+  const [avatarTarget, setAvatarTarget] = useState<SpaceIconTarget | null>(null), [profileRevision, setProfileRevision] = useState(0)
   useEffect(() => { const token = {}; alive.current = token; void refresh(); return () => { if (alive.current === token) { alive.current = null; readEpoch.current++ } } }, [])
   async function refresh() {
     if (!target) { setIssue('This Mote’s original home is unconfirmed. Its files and discussions are kept; reopen it after refreshing the directory.'); return }
@@ -89,11 +112,11 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
     } catch (error) { if (alive.current === token && readEpoch.current === epoch) setIssue(presentError(error)) }
     finally { if (alive.current === token && readEpoch.current === epoch) setLoading(false) }
   }
-  async function save() {
+  async function save(value = selection) {
     if (!target || !snapshot || flight.current || pending) return
-    const baseline = moteConnectionBaseline(snapshot.saved), chosen = snapshot.connections.find(item => choiceKey(item.config) === selection)
+    const baseline = moteConnectionBaseline(snapshot.saved), chosen = snapshot.connections.find(item => choiceKey(item.config) === value)
     if (!baseline) { setIssue('Read this Mote’s current choice before saving. Your selection is kept.'); return }
-    if (selection && !chosen?.config.enabled) { setIssue('Choose an available bot or update this bot in settings.'); return }
+    if (value && !chosen?.config.enabled) { setIssue('Choose an available bot or update this bot in settings.'); return }
     const input: MoteConnectionPreferencesSaveParams = { kind: 'connection', target, operationId: crypto.randomUUID(), baseline,
       values: { connection: chosen ? { connectionId: chosen.config.connectionId, application: structuredClone(chosen.config.application) } : null } }
     const token = alive.current, epoch = ++readEpoch.current
@@ -116,7 +139,7 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
         const current = parseMotePreferencesReadResult({ kind: 'connection', target, status: 'ready',
           source: { resource: result.source!.resource, result: { status: 'read', document: result.source!.document! } }, values: result.source!.values, issue: null }, { kind: 'connection', target })
         // A later explicit read may already have observed another file revision.
-        if (readEpoch.current === epoch) { onRead({ ...snapshot, saved: current }); onClose() }
+        if (readEpoch.current === epoch) { onRead({ ...snapshot, saved: current }); setSnapshot({ ...snapshot, saved: current }); setSelection(value); setChoosing(false); setAttempt(null); onSaved?.() }
         else { setIssue('This choice was saved. The current choice is shown separately.'); void refresh() }
       } else setIssue(result.message ?? 'This choice was not confirmed. Your original save request is kept.')
     } catch (error) { if (alive.current === token) {
@@ -129,18 +152,13 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
   const current = snapshot?.saved.values?.connection
   const currentChoice = current && snapshot && !snapshot.connectionIssue ? moteConnectionChoice(current, snapshot.connections) : null
   const savedBotIssue = current ? snapshot?.connectionIssue ?? currentChoice?.issue : null
-  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
-    <Dialog.Overlay className="dialog-scrim" />
-      <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
-        onCloseAutoFocus={event => { event.preventDefault(); const active = ownerDocument.activeElement, node = returnFocus();
-          if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
-        <header className="mote-connection-dialog__header"><div><Dialog.Title>Bot for {moteName}</Dialog.Title>
-          <Dialog.Description>New group chats use this bot. Existing groups keep their bot.</Dialog.Description></div>
-          <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close bot choice"><CloseIcon size={16} /></button></Dialog.Close>
-        </header>
+  useEffect(() => { if ((pending || issue || savedBotIssue) && identityOptions.current) identityOptions.current.open = true }, [pending, issue, savedBotIssue])
+  return <div className="mote-connection-panel" data-mote-identity-panel={topicId}>
         <div className="mote-connection-dialog__body">
-          {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={() => setChoosing(true)}>Review saved bot</button></section> : null}
-          <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={() => setChoosing(true)} onCurrent={() => void refresh()} />
+          {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={choose}>Review saved bot</button></section> : null}
+          <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
+            createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} profileRevision={profileRevision} onPrepareAvatar={target ? () => setAvatarTarget({ key: target.spaceId, name: moteName, kind: 'mote', avatarTarget: { workspaceId: target.expectedResource.workspaceId, topicId, objectKey: target.spaceId } }) : undefined} />
+          <details ref={identityOptions} className="mote-identity-options"><summary>Identity options</summary>
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}
             options={[{ value: '', label: 'No default bot' }, ...snapshot.connections.map(item => ({ value: choiceKey(item.config), label: item.config.label,
@@ -152,15 +170,17 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
           <div className="mote-connection-dialog__secondary">
             <button type="button" className="small-button" onClick={() => void refresh()} disabled={loading}>Check current choice</button>
             {pending && reviewed && !busy ? <button type="button" className="small-button" onClick={() => { setAttempt(null); setNewChoice(true); edited.current = true }}>Use current revision for a new choice</button> : null}
-            {settings ? <button type="button" className="small-button" onClick={() => { onClose(); settings.open('chat-connections') }}>Manage bots</button> : null}
+            {!inSettings && settings ? <button type="button" className="small-button" onClick={() => { onSaved?.(); settings.openMoteConnector({ target, topicId, moteName }) }}>Manage bots</button> : null}
           </div>
           {retained.length ? <details className="mote-connection-dialog__requests"><summary>Retained save requests</summary>
             {retained.map(({ input, phase }) => <p key={input.operationId}><code>{input.operationId}</code><br />{input.values.connection?.application.appId ?? 'Remove default bot'} · {phase === 'not-dispatched' ? 'Not sent' : 'Result unconfirmed'}</p>)}
           </details> : null}
+          </details>
+          {current ? <div className="mote-identity-management"><div className="mote-bot-actions">{currentChoice?.record && onManageConnection ? <button type="button" className="small-button" onClick={() => onManageConnection(currentChoice.record!)}>Manage bot application</button> : null}<button type="button" className="small-button" data-mote-identity-unbind disabled={busy || pending || snapshot?.saved.status !== 'ready'} onClick={() => void save('')}>Unbind identity</button></div><p className="mote-details__hint">Unbinding removes this Mote’s default identity. The bot and existing groups are kept.</p></div> : null}
         </div>
-        {choosing || pending || attempt ? <footer className="mote-connection-dialog__footer"><Dialog.Close asChild><button type="button" className="small-button">Cancel</button></Dialog.Close>
+        {choosing || pending || attempt ? <footer className="mote-connection-dialog__footer">
           <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>
         </footer> : null}
-      </Dialog.Content>
-  </DocumentOverlayPortal></Dialog.Root>
+      <SpaceIconPicker target={avatarTarget} onClose={() => { setAvatarTarget(null); setProfileRevision(value => value + 1) }} />
+  </div>
 }
