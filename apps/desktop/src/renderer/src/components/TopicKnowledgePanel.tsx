@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeDocument, TopicKnowledgeItem } from '@agentmux/core/control'
+import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeDocument, TopicKnowledgeItem, TopicUnavailable } from '@agentmux/core/control'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -27,6 +27,26 @@ const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 
+const BOUNDED_DISCOVERY_CODES = new Set(['TOPIC_KNOWLEDGE_PARTIAL', 'TOPIC_DOCUMENTS_GIT_IGNORED',
+  'TOPIC_DOCUMENT_DISCOVERY_LIMIT', 'TOPIC_DOCUMENT_DISCOVERY_BUDGET'])
+
+function KnowledgeIssues({ issues, kind, search }: { issues: readonly TopicUnavailable[]; kind: 'partial' | 'sources' | 'history'; search?: string }) {
+  const partial = kind === 'partial'
+  const summary = kind === 'history' ? 'Search history unavailable' : partial ? 'Results may be incomplete' : 'Some sources are unavailable'
+  return <details className={`topic-knowledge-notice${partial ? '' : ' topic-knowledge-notice--error'}`}
+    aria-label={kind === 'history' ? summary : partial ? 'Knowledge discovery incomplete' : 'Knowledge sources unavailable'}>
+    <summary>{summary}</summary>
+    <div className="topic-knowledge-notice__details">
+      <p>{kind === 'history' ? `${search ? 'Refresh to retry.' : 'Submit a search to retry.'} Search results remain available.` : partial ? 'Narrow your search or open an original file. Refreshing does not remove discovery limits.' : 'Available results and original files remain accessible.'}</p>
+      <ul>{issues.map((issue, index) => <li key={index}>
+        <span>{issue.message}</span>
+        <small><code>{issue.code}</code>{issue.source ? <> · {issue.source}</> : null}</small>
+        {issue.recovery ? <span>{issue.recovery}</span> : null}
+      </li>)}</ul>
+    </div>
+  </details>
+}
+
 
 function documentKey(document: TopicKnowledgeDocument): string {
   const { target } = document
@@ -46,22 +66,26 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
   const [documents, setDocuments] = useState<TopicKnowledgeDocument[]>([])
   const [selectedDocument, setSelectedDocument] = useState<TopicKnowledgeDocument | null>(null)
   const [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null)
-  const [historyIssue, setHistoryIssue] = useState<string | null>(null)
+  const [issues, setIssues] = useState<TopicUnavailable[]>([])
+  const [historyIssues, setHistoryIssues] = useState<TopicUnavailable[]>([])
+  const [confirmedScope, setConfirmedScope] = useState<{ topicId: string | null; title: string; query: string } | null>(null)
   const [moveTarget, setMoveTarget] = useState<TopicMoveTarget | null>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const selectedRow = useRef<HTMLButtonElement>(null)
-  useEffect(() => { setMoveTarget(null); setHistoryIssue(null) }, [topic?.id])
+  useEffect(() => { setMoveTarget(null); setHistoryIssues([]) }, [topic?.id])
   useEffect(() => {
     if (!active) return
     let live = true
-    if (!topic && !search) { setEntries([]); setDocuments([]); setSelected(null); setSelectedDocument(null); setError(null); setLoading(false); return }
+    if (!topic && !search) { setEntries([]); setDocuments([]); setSelected(null); setSelectedDocument(null); setError(null); setIssues([]); setLoading(false); return }
     setLoading(true)
     void Promise.all([topic ? api.topics.call('topic.inspect', { topicId: topic.id }) : Promise.resolve(null), search
       ? api.topics.call('topic.knowledge.search', { ...(topic ? { topicId: topic.id } : {}), query: search, limit: 100 }).then(knowledge => ({ knowledge, historyUnavailable: knowledge.observation.unavailable }))
       : api.topics.call('topic.knowledge.ls', { topicId: topic!.id, limit: 100 }).then(knowledge => ({ knowledge, historyUnavailable: null }))]).then(([inspection, { knowledge, historyUnavailable }]) => {
       if (!live) return
-      setFact(inspection?.topic ?? null); setEntries(knowledge.entries); setDocuments(knowledge.documents); setError([...(inspection?.unavailable ?? []), ...knowledge.unavailable].map(issue => issue.message).join(' ') || null)
-      if (historyUnavailable !== null) setHistoryIssue(historyUnavailable.map(issue => issue.message).join(' ') || null)
+      setFact(inspection?.topic ?? null); setEntries(knowledge.entries); setDocuments(knowledge.documents); setError(null)
+      setIssues([...(inspection?.unavailable ?? []), ...knowledge.unavailable])
+      setConfirmedScope({ topicId: topic?.id ?? null, title: topic?.title ?? 'All Topics', query: search })
+      if (historyUnavailable !== null) setHistoryIssues(historyUnavailable)
       setSelected(previous => previous ? knowledge.entries.find((entry): entry is TopicKnowledge => !('readError' in entry) && entry.topicId === previous.topicId && entry.entryId === previous.entryId) ?? (knowledge.unavailable.length ? previous : null) : null)
       setSelectedDocument(previous => previous ? knowledge.documents.find(document => documentKey(document) === documentKey(previous)) ?? (knowledge.unavailable.length ? previous : null) : null)
     }).catch(cause => { if (live) setError(presentError(cause)) }).finally(() => { if (live) setLoading(false) })
@@ -73,10 +97,14 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
   const title = topic?.title ?? 'All Topics'
   const readableCount = entries.filter(entry => !('readError' in entry)).length + documents.length
   const hasResults = entries.length > 0 || documents.length > 0
-  const resultNoun = search ? (readableCount === 1 ? 'result' : 'results') : (readableCount === 1 ? 'item' : 'items')
-  const resultLabel = loading ? 'Reading knowledge…'
-    : hasResults ? `${readableCount} ${resultNoun}`
-    : error ? 'Search incomplete' : search ? 'No results' : 'Saved knowledge and files'
+  const boundedIssues = issues.filter(issue => BOUNDED_DISCOVERY_CODES.has(issue.code))
+  const failedIssues = issues.filter(issue => !BOUNDED_DISCOVERY_CODES.has(issue.code))
+  const incomplete = Boolean(error || topic?.readError || issues.length)
+  const resultNoun = confirmedScope?.query ? (readableCount === 1 ? 'result' : 'results') : (readableCount === 1 ? 'item' : 'items')
+  const previousResults = hasResults && confirmedScope && (loading || error || confirmedScope.query !== search || confirmedScope.topicId !== (topic?.id ?? null))
+  const resultLabel = previousResults ? `Last confirmed: ${readableCount} ${resultNoun} · ${confirmedScope.title}${confirmedScope.query ? ` · “${confirmedScope.query}”` : ''}` : loading ? 'Reading knowledge…'
+    : hasResults ? `${readableCount} ${resultNoun}${incomplete ? ' shown' : ''}`
+    : incomplete ? 'Search incomplete' : search ? 'No results' : 'Saved knowledge and files'
   function clearSearch() {
     setQuery(''); setSearch(''); setSelected(null); setSelectedDocument(null)
     if (!topic) { setEntries([]); setDocuments([]) }
@@ -98,8 +126,12 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
       {query ? <button type="button" className="icon-button" aria-label="Clear search" title="Clear search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}
       <button type="submit" className="icon-button topic-knowledge-search__submit" aria-label="Search" title="Search · Enter"><ThemeNavigationReturnIcon size={14} /></button>
     </form>
-    {error || topic?.readError ? <div className="surface-inline-error" role="status">{error || topic?.readError} Existing discussions and files remain available.</div> : null}
-    {historyIssue ? <div className="surface-inline-error" role="status" aria-label="Search history unavailable">{historyIssue} {search ? 'Refresh to retry.' : 'Submit a search to retry.'}</div> : null}
+    {error || topic?.readError || issues.length || historyIssues.length ? <div className="topic-knowledge-status">
+      {error || topic?.readError ? <div className="surface-inline-error" role="status">{error || topic?.readError} Existing discussions and files remain available.</div> : null}
+      {failedIssues.length ? <KnowledgeIssues issues={failedIssues} kind="sources" /> : null}
+      {boundedIssues.length ? <KnowledgeIssues issues={boundedIssues} kind="partial" /> : null}
+      {historyIssues.length ? <KnowledgeIssues issues={historyIssues} kind="history" search={search} /> : null}
+    </div> : null}
     <div className="topic-knowledge-results" data-detail-open={selected || selectedDocument ? '' : undefined}>
       <p className="topic-knowledge-results__label" role="status">{resultLabel}</p>
       <div className="topic-knowledge-list" aria-label="Knowledge results">{entries.map(entry => {
@@ -126,7 +158,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
           <small><ThemeFileTextIcon size={11} aria-hidden="true" /><span title={[sourceTitle, document.target.path].filter(Boolean).join(' · ')}>{sourceTitle ? `${sourceTitle} · ` : ''}{document.target.path}</span></small>
         </button>
       })}</div>
-      {!loading && !hasResults ? <div className="topic-knowledge-empty"><ThemeActionSearchIcon size={20} aria-hidden="true" /><strong>{error ? 'Some sources could not be searched' : search ? 'No matches' : topic ? 'A place for useful knowledge' : 'Find something worth keeping'}</strong><p className="topic-knowledge-hint">{error ? 'Refresh or search one Topic to continue. Existing files remain available.' : search ? 'No saved knowledge or text documents match this search.' : topic ? 'Keep useful references and conclusions from your discussions here.' : 'Search across all Topics to find saved knowledge and original text documents.'}</p></div> : null}
+      {!loading && !hasResults ? <div className="topic-knowledge-empty"><ThemeActionSearchIcon size={20} aria-hidden="true" /><strong>{incomplete ? 'Some sources could not be searched' : search ? 'No matches' : topic ? 'A place for useful knowledge' : 'Find something worth keeping'}</strong><p className="topic-knowledge-hint">{incomplete ? 'Narrow your search or open an original file. Existing files remain available.' : search ? 'No saved knowledge or text documents match this search.' : topic ? 'Keep useful references and conclusions from your discussions here.' : 'Search across all Topics to find saved knowledge and original text documents.'}</p></div> : null}
     </div>
     {selected ? <article className="topic-knowledge-entry" aria-label="Knowledge detail" onKeyDown={event => { if (event.key === 'Escape' && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); closeDetail() } }}>
       <header><span><strong title={selected.title}>{selected.title}</strong><small>{selected.certainty}{selected.scope ? ` · ${selected.scope}` : ''}</small></span><button type="button" className="icon-button" aria-label="Edit knowledge" title="Edit knowledge" onClick={() => setEdit({ topicId: selected.topicId, entry: selected })}><ThemeActionEditIcon size={13} /></button><button type="button" className="icon-button" aria-label="Close knowledge detail" title="Back to results" onClick={closeDetail}><ThemeActionCloseIcon size={13} /></button></header>
