@@ -4,7 +4,9 @@ import { createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { resolve, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
+import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-freshness.ts'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
 const require = createRequire(join(desktop, 'package.json')), { build } = await import('vite')
@@ -35,7 +37,7 @@ const candidate = { started: candidateIdentity(), finished: null, unchanged: fal
 const originalInputs = new Map(), dependencyInputs = new Map(), results = []
 const harnessInputs = {}
 for (const path of ['apps/desktop/scripts/verify-ui-layering.mjs', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/radix-overlay-aliases.ts',
-  'apps/desktop/scripts/lib/fixture-values.mjs', 'pnpm-lock.yaml']) {
+  'apps/desktop/scripts/lib/fixture-values.mjs', 'vitest.dist-freshness.ts', 'pnpm-lock.yaml']) {
   const digest = hash(await readFile(join(repository, path))); originalInputs.set(path, digest); harnessInputs[path] = digest
 }
 const dependencyLockSHA256 = harnessInputs['pnpm-lock.yaml']
@@ -63,6 +65,7 @@ function transformSource(source, path, mutation, changes) {
   return changed
 }
 async function run(label, mutation) {
+  await assertWorkspaceDistBuiltFromCurrentSource(repository)
   assert.equal(hash(await readFile(join(repository, 'pnpm-lock.yaml'))), dependencyLockSHA256, 'All proof builds consume the same dependency lock')
   const directory = join(root, label), out = join(directory, 'renderer'); await mkdir(directory, { recursive: true })
   const consumed = {}, dependencies = {}, changes = []
@@ -73,13 +76,38 @@ async function run(label, mutation) {
     return transformSource(source, name, mutation, changes)
   }
   const esPlugin = { name: 'same-ui-layering-main-input', setup(builder) {
+    // Main consumes the same external ESM Core as the product. Its actual loader
+    // bytes are observed below; bundling this package into CJS changes its contract.
+    builder.onResolve({ filter: /^@agentmux\/core(?:\/|$)/ }, args => ({ path: fileURLToPath(import.meta.resolve(args.path)), external: true }))
     builder.onLoad({ filter: /\.(?:ts|tsx)$/ }, async args => {
       const source = await record(args.path)
       return source === undefined ? undefined : { contents: source, loader: args.path.endsWith('.tsx') ? 'tsx' : 'ts' }
     })
   } }
   for (const entry of ['main', 'preload']) await esbuild.build({ absWorkingDir: repository, entryPoints: [join(fixture, entry + '.ts')],
-    outfile: join(directory, entry + '.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], logLevel: 'silent', plugins: [esPlugin] })
+    outfile: join(directory, entry === 'main' ? 'main.mjs' : 'preload.cjs'), bundle: true, platform: 'node', format: entry === 'main' ? 'esm' : 'cjs',
+    ...(entry === 'main' ? { banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } } : {}),
+    external: ['electron'], logLevel: 'silent', plugins: [esPlugin] })
+  // Observe the unmodified Node loader before Main imports external Core. In
+  // particular, a new generated Core file cannot silently escape source binding.
+  await writeFile(join(directory, 'bootstrap.cjs'), `
+const { registerHooks } = require('node:module');
+const { readFileSync, appendFileSync } = require('node:fs');
+const { createHash } = require('node:crypto');
+const { fileURLToPath } = require('node:url');
+registerHooks({ load(url, context, nextLoad) {
+  const loaded = nextLoad(url, context);
+  if (url.startsWith('file:')) {
+    const file = fileURLToPath(url);
+    if (file.startsWith(${JSON.stringify(repository + '/')}) && !file.startsWith(${JSON.stringify(directory + '/')})) {
+      const bytes = loaded.source ?? readFileSync(file);
+      appendFileSync(${JSON.stringify(join(directory, 'node-loads.ndjson'))}, JSON.stringify({ file, sha256: createHash('sha256').update(bytes).digest('hex') }) + '\\n');
+    }
+  }
+  return loaded;
+} });
+import('./main.mjs').catch(error => { console.error(error); require('electron').app.exit(1); });
+`)
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases }, worker: { format: 'es' },
     plugins: [{ name: 'same-ui-layering-renderer-input', enforce: 'pre', async transform(source, id) {
       if (!id.startsWith(repository + '/') || id.includes('/node_modules/') || id.includes('?') || !/\.[jt]sx?$/.test(id)) return
@@ -114,7 +142,7 @@ async function run(label, mutation) {
   const compiled = {}
   for (const entry of await readdir(directory, { recursive: true, withFileTypes: true })) if (entry.isFile()) {
     const path = join(entry.parentPath, entry.name)
-    if (/\.(?:js|cjs|css|html)$/.test(path)) compiled[relative(directory, path)] = hash(await readFile(path))
+    if (/\.(?:m?js|cjs|css|html)$/.test(path)) compiled[relative(directory, path)] = hash(await readFile(path))
   }
   const identity = { consumed, dependencies, compiled, changes, dependencyLockSHA256 }
   await writeFile(join(directory, 'inputs.json'), JSON.stringify(identity, null, 2))
@@ -124,7 +152,7 @@ async function run(label, mutation) {
   // OS capture belongs to the candidate and restored candidate. A deliberately broken
   // mutation still retains native owner/input facts without multiplying OS work.
   if (mutation) delete env.AGENTMUX_VISUAL_ORCA_CLI
-  const lines = [], processReceipt = await runProbeProcess(require('electron'), [join(directory, 'main.cjs')], {
+  const lines = [], processReceipt = await runProbeProcess(require('electron'), [join(directory, 'bootstrap.cjs')], {
     cwd: repository, env, temporaryRoot: directory, timeoutMs: 180000, onLine: line => lines.push(line)
   })
   await writeFile(join(directory, 'process.log'), lines.join('\n')); await writeFile(join(directory, 'process.json'), JSON.stringify(processReceipt, null, 2))
@@ -133,7 +161,29 @@ async function run(label, mutation) {
   assert.deepEqual(remaining, [], 'Only exact private probe descendants are eligible for cleanup')
   assert.equal(processReceipt.timedOut, false, 'A process timeout cannot count as mutation evidence')
   assert.equal(processReceipt.exitConfirmed, true)
+  const nodeLoads = (await readFile(join(directory, 'node-loads.ndjson'), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+  assert.ok(nodeLoads.some(row => row.file.endsWith('/packages/core/dist/index.js')), 'The actual external Core entry must be observed')
+  for (const { file, sha256: digest } of nodeLoads) {
+    const name = relative(repository, file), inputs = file.includes('/node_modules/') ? dependencyInputs : originalInputs
+    assert.equal(hash(await readFile(file)), digest, 'Actual external Node input remains unchanged: ' + name)
+    if (inputs.has(name)) assert.equal(digest, inputs.get(name), 'Every run loads the same actual external Node input: ' + name)
+    else inputs.set(name, digest)
+    ;(file.includes('/node_modules/') ? dependencies : consumed)[name] = digest
+  }
   const receipt = JSON.parse(await readFile(join(directory, 'result.json'), 'utf8'))
+  if (!mutation && !mobileOnly && !fullscreenOnly) {
+    const assets = Object.keys(receipt.avatar?.sourceInputs ?? {})
+    assert.ok(assets.some(name => name.endsWith('.glb')) && assets.some(name => name.endsWith('/series.json')),
+      'The actual Avatar combination must bind nonempty original GLB and catalog source bytes')
+  }
+  for (const [name, digest] of Object.entries(receipt.avatar?.sourceInputs ?? {})) {
+    assert.equal(hash(await readFile(join(repository, name))), digest, 'Original Avatar source bytes remain unchanged: ' + name)
+    if (originalInputs.has(name)) assert.equal(digest, originalInputs.get(name), 'Every run consumes the same original Avatar source: ' + name)
+    else originalInputs.set(name, digest)
+    consumed[name] = digest
+  }
+  identity.nodeLoads = nodeLoads
+  await writeFile(join(directory, 'inputs.json'), JSON.stringify(identity, null, 2))
   const row = { label, expected: mutation ? 'RED' : partial ? 'AVAILABLE_CHECKS' : 'COMPLETE', directory: relative(root, directory), passed: receipt.passed,
     availableChecksPassed: receipt.availableChecksPassed, completeGate: receipt.completeGate, uncovered: receipt.uncovered, caseCount: receipt.cases.length,
     receiptSHA256: hash(await readFile(join(directory, 'result.json'))), failure: receipt.failure, changes, frames: receipt.frames, chromeFrames: receipt.chromeFrames, osFrames: receipt.osFrames }
@@ -154,10 +204,11 @@ async function run(label, mutation) {
       'pure-layout-displacement', 'repeated-top-layer-0', 'repeated-top-layer-1', 'independent-document-native-scope-and-cancel',
       'atomic-preparation-background-input-guard', 'required-content-failure-retry-retains-request', 'accessory-failure-retains-parent-modal',
       'nested-menu-tooltip-scope-and-one-escape', 'focusable-completion-and-editor-retained-through-retry',
+      'mote-avatar-series-native-layer-and-continuous-paint',
       'stable-workbench-original-form-cross-document-roundtrip', 'same-runtime-two-document-modal-focus-and-single-dismissal',
       ...(process.platform === 'darwin' ? ['simple-fullscreen', 'simple-fullscreen-restored', ...(!withoutSystemFullscreen ? systemFullscreen : [])] : [])] : [])]
     for (const label of required) assert.ok(receipt.cases.some(row => row.label === label), 'Candidate must reach the actual nonempty required case: ' + label)
-    if (!mobileOnly && !fullscreenOnly) for (const label of ['normal-stop', 'nested-menu-tooltip', 'content-failure-retry', 'same-request-retry']) {
+    if (!mobileOnly && !fullscreenOnly) for (const label of ['normal-stop', 'nested-menu-tooltip', 'content-failure-retry', 'same-request-retry', 'avatar-series-initial', 'avatar-series-drag']) {
       const frame = receipt.frames.find(row => row.label === label)
       assert.ok(frame?.chrome?.some(owner => !owner.scrim && owner.paintedPixels > 0), 'The exact native Chrome compositor must supply painted pixels for: ' + label)
     }
