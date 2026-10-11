@@ -1,0 +1,5 @@
+.agent-information-reader[data-bookmark-key] { max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+.agent-information-reader__update { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex: none; padding: 5px 16px; border-block: 1px solid var(--line); color: var(--text-3); font-size: var(--fs-meta); }
+.agent-information-reader__update > button { border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
+.agent-bookmarks-issue { position: fixed; z-index: var(--layer-service); left: 12px; bottom: 38px; max-width: min(520px, calc(100vw - 24px)); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); box-shadow: var(--elev-2); }
+.agent-bookmarks-issue > button { margin-left: 8px; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }

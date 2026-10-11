@@ -7,6 +7,7 @@ import type { FocusContextIdentity } from '../lib/focus-context-identity'
 import { agentInformationPreview } from '../lib/agent-information-preview'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { WorkbenchTopology } from './WorkbenchTopology'
+import { agentBookmarks } from '../lib/agent-bookmarks'
 import { AgentInformationReader } from './AgentInformationReader'
 
 /** Mounted once by App, outside transient, filtered and retained surface trees. */
@@ -16,7 +17,9 @@ export function AgentInformationPreviewHost() {
   const nextDocuments = [...new Set([document, ...workbenchDocuments()])]
   if (nextDocuments.length !== observedDocuments.current.length || nextDocuments.some((doc, index) => observedDocuments.current[index] !== doc)) observedDocuments.current = nextDocuments
   const documents = observedDocuments.current
-  const request = useSyncExternalStore(agentInformationPreview.subscribe, agentInformationPreview.get, () => null)
+  const requests = useSyncExternalStore(agentInformationPreview.subscribe, agentInformationPreview.getAll)
+  const bookmarks = useSyncExternalStore(agentBookmarks.subscribe, agentBookmarks.get)
+  useLayoutEffect(() => { agentInformationPreview.restore(bookmarks.bookmarks, document) }, [bookmarks.bookmarks])
   useEffect(() => {
     const cancel = () => agentInformationPreview.cancelIntent()
     const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') cancel() }
@@ -33,10 +36,9 @@ export function AgentInformationPreviewHost() {
     }
   }, [documents])
   useLayoutEffect(() => () => {
-    const original = agentInformationPreview.get()
-    if (original) agentInformationPreview.dismiss(original.token, true)
+    agentInformationPreview.detach()
   }, [])
-  return request ? <AgentInformationReader key={request.id} request={request} /> : null
+  return <>{requests.map(request => <AgentInformationReader key={request.id} request={request} />)}{bookmarks.persistenceIssue ? <div className="agent-bookmarks-issue" role="status">{bookmarks.persistenceIssue.message}<button type="button" onClick={() => void agentBookmarks.retry()}>Retry bookmarks</button></div> : null}</>
 }
 
 /** Each surface retains its own primary action; only a bounded reading intent is shared. */
@@ -48,7 +50,7 @@ export function useAgentInformationPreview(context: FocusContext, requested: boo
   const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const restoringFocus = useRef(false), id = useId()
-  const open = useSyncExternalStore(agentInformationPreview.subscribe, () => agentInformationPreview.get()?.token === token, () => false)
+  const open = useSyncExternalStore(agentInformationPreview.subscribe, () => agentInformationPreview.getAll().some(request => request.token === token), () => false)
   const close = useCallback(() => {
     clearTimeout(intent.current); clearTimeout(departure.current)
     agentInformationPreview.dismiss(token)

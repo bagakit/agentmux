@@ -7,7 +7,7 @@ export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { AgentMuxError, type AgentMuxControlFailure, type AgentMuxErrorData } from './errors.js'
 export { AgentMuxError, parseAgentMuxErrorData, type AgentMuxErrorData } from './errors.js'
-import type { AgentExecutorId, AgentProviderId, AgentPromptExecution, AgentMessageChannel } from './types.js'
+import type { AgentExecutorId, AgentProviderId, AgentPromptExecution, AgentMessageChannel, AgentExecutableObservation } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
@@ -222,11 +222,7 @@ const AGENTMUX_EXECUTOR_AVAILABILITIES = ['unknown', 'check-failed', 'missing', 
 export type AgentMuxExecutorAvailability = typeof AGENTMUX_EXECUTOR_AVAILABILITIES[number]
 
 /** One observed executable fact. A failed check carries its actual cause. */
-export type AgentMuxExecutorProbeResult = { executable: string } & (
-  | { availability: 'available' }
-  | { availability: 'missing'; cause?: { code: string; message: string } }
-  | { availability: 'check-failed'; cause: { code: string; message: string } }
-)
+export type AgentMuxExecutorProbeResult = AgentExecutableObservation
 
 /** 入站的这个值是不是一个合法可用性档位。成员集合派生自 {@link AGENTMUX_EXECUTOR_AVAILABILITIES}。 */
 export function isAgentMuxExecutorAvailability(value: unknown): value is AgentMuxExecutorAvailability {
