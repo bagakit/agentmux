@@ -1,6 +1,10 @@
+// @vitest-environment happy-dom
 import { act, createRef, useState } from 'react'
 import { createRoot, type Root as ReactRoot } from 'react-dom/client'
 import { createPortal } from 'react-dom'
+import { renderToString } from 'react-dom/server'
+import * as RawDialog from '@radix-ui/react-dialog'
+import { Branch, Root as Layer } from '@radix-ui/react-dismissable-layer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as Modal from '../src/components/Modal.js'
 
@@ -34,7 +38,7 @@ describe('shared modal presentation ownership', () => {
     </Modal.Root>))
     const scopes = [...overlays.querySelectorAll<HTMLElement>('[data-overlay-modal-scope]')]
     expect(scopes).toHaveLength(2)
-    expect(scopes[0]!.parentElement).toBe(overlays); expect(scopes[1]!.parentElement).toBe(overlays)
+    expect(scopes[0]!.parentElement?.parentElement).toBe(overlays); expect(scopes[1]!.parentElement?.parentElement).toBe(overlays)
     expect(new Set(scopes.map(scope => scope.id)).size).toBe(2)
     for (const [index, name] of ['parent', 'child'].entries()) {
       const scope = scopes[index]!, slot = scope.querySelector('[data-overlay-modal-slot]')!
@@ -133,6 +137,82 @@ describe('shared modal presentation ownership', () => {
     await update(() => [...overlays.querySelectorAll<HTMLButtonElement>('[role="status"] button')].find(button => button.textContent === 'Cancel')!.click())
     expect(changed).toHaveBeenCalledExactlyOnceWith(false)
     expect(confirmed).not.toHaveBeenCalled()
+  })
+
+  it('does not allocate portal DOM for unopened requests and preserves the original server-safe API', async () => {
+    const scene = (open: boolean) => <Modal.Root open={open}><Modal.Portal container={overlays}><Modal.Overlay /><Modal.Content><Content name="Lazy original" /></Modal.Content></Modal.Portal></Modal.Root>
+    await update(() => root.render(scene(false))); expect(overlays.childElementCount).toBe(0)
+    await update(() => root.render(scene(true))); expect(overlays.querySelectorAll('[data-overlay-modal-host]')).toHaveLength(1)
+    await update(() => root.render(scene(false))); expect(overlays.childElementCount).toBe(0)
+    const originalDocument = document, originalWindow = window
+    try {
+      vi.stubGlobal('document', undefined); vi.stubGlobal('window', undefined)
+      expect(() => renderToString(<Modal.Root open><Modal.Portal><Modal.Overlay /><Modal.Content>Server request</Modal.Content></Modal.Portal></Modal.Root>)).not.toThrow()
+      expect(() => renderToString(<RawDialog.Root open><RawDialog.Content forceMount>Original raw server content</RawDialog.Content></RawDialog.Root>)).not.toThrow()
+    } finally { vi.stubGlobal('document', originalDocument); vi.stubGlobal('window', originalWindow) }
+  })
+
+  it('moves the same draft and input A to B to A while rebinding the only behavior lease to its actual document', async () => {
+    const frame = document.createElement('iframe'); document.body.append(frame)
+    const child = frame.contentDocument!, childRoot = child.createElement('div'), outside = child.createElement('input'); child.body.append(childRoot, outside)
+    const changed = vi.fn(), closed = vi.fn((event: Event) => event.preventDefault())
+    function LocalForm() { const [draft, setDraft] = useState('Original form'); return <><button onClick={() => setDraft('Edited form')}>Edit local form</button><output>{draft}</output><input aria-label="Unsent transfer draft" defaultValue="Original unsent draft" /></> }
+    const scene = (container: HTMLElement) => <Modal.Root open onOpenChange={changed}><Modal.Portal container={container}><Modal.Overlay /><Modal.Content onCloseAutoFocus={closed}><Content name="Moved request" /><LocalForm /></Modal.Content></Modal.Portal></Modal.Root>
+    try {
+      await update(() => root.render(scene(overlays)))
+      const input = overlays.querySelector<HTMLInputElement>('input')!, originalScope = input.closest('[data-overlay-modal-scope]')!
+      input.value = 'Edited unsent draft'; input.setSelectionRange(2, 7)
+      await update(() => overlays.querySelector<HTMLButtonElement>('button')!.click())
+      await update(() => input.focus())
+      for (const container of [childRoot, overlays]) {
+        input.setSelectionRange(2, 7)
+        await update(() => root.render(scene(container))); await update(() => {})
+        expect(container.querySelector('input')).toBe(input); expect(input.ownerDocument).toBe(container.ownerDocument)
+        expect(input.value).toBe('Edited unsent draft'); expect([input.selectionStart, input.selectionEnd]).toEqual([2, 7]); expect(container.querySelector('output')?.textContent).toBe('Edited form')
+        expect(input.closest('[data-overlay-modal-scope]')).toBe(originalScope)
+        expect(container.ownerDocument.body.style.pointerEvents).toBe('none')
+        const previousDocument = container === childRoot ? document : child
+        expect(previousDocument.body.style.pointerEvents).toBe('')
+        const target = container === childRoot ? outside : mount.appendChild(document.createElement('input'))
+        await update(() => input.focus()); await update(() => target.focus())
+        expect(container.ownerDocument.activeElement).toBe(input)
+        await update(() => previousDocument.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+        expect(changed).not.toHaveBeenCalled(); expect(closed).not.toHaveBeenCalled()
+      }
+    } finally { await update(() => root.render(null)); frame.remove() }
+  })
+
+  it('keeps focus, body locks, Escape and backdrop input independent between two actual documents', async () => {
+    const frame = document.createElement('iframe'), outside = document.createElement('input'); document.body.append(frame, outside)
+    const child = frame.contentDocument!, childRoot = child.createElement('div'); child.body.append(childRoot)
+    const changedA = vi.fn(), changedB = vi.fn()
+    try {
+      await update(() => root.render(<><Modal.Root open onOpenChange={changedA}><Modal.Portal container={overlays}><Modal.Overlay data-scrim-a="" /><Modal.Content><Content name="Document A" /><input aria-label="Inside A" /></Modal.Content></Modal.Portal></Modal.Root><Modal.Root open onOpenChange={changedB}><Modal.Portal container={childRoot}><Modal.Overlay /><Modal.Content><Content name="Document B" /><input aria-label="Inside B" /></Modal.Content></Modal.Portal></Modal.Root></>))
+      await update(() => {})
+      const input = overlays.querySelector<HTMLInputElement>('[aria-label="Inside A"]')!
+      await update(() => input.focus()); await update(() => outside.focus())
+      expect(document.activeElement).toBe(input); expect(child.body.style.pointerEvents).toBe('none')
+      await update(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+      expect(changedA).toHaveBeenCalledOnce(); expect(changedB).not.toHaveBeenCalled(); changedA.mockClear()
+      const scrim = overlays.querySelector<HTMLElement>('[data-scrim-a]')!
+      await update(() => { scrim.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 })); scrim.click() })
+      expect(changedA).toHaveBeenCalledOnce(); expect(changedB).not.toHaveBeenCalled()
+    } finally { await update(() => root.render(null)); frame.remove(); outside.remove() }
+  })
+
+  it('rebinds the original Radix branch when its same portal DOM is adopted into another document', async () => {
+    const frame = document.createElement('iframe'), branchHost = document.createElement('div'); document.body.append(frame, branchHost)
+    const child = frame.contentDocument!, childRoot = child.createElement('div'); child.body.append(childRoot)
+    const changed = vi.fn()
+    const scene = (revision: number) => <>{createPortal(<Layer onDismiss={changed}>Original independent layer</Layer>, childRoot)}{createPortal(<Branch data-branch-revision={revision}><button>Independent reading attachment</button></Branch>, branchHost)}</>
+    try {
+      await update(() => root.render(scene(0))); await update(() => {})
+      const original = branchHost.querySelector('button')!
+      await update(() => { child.body.appendChild(branchHost); root.render(scene(1)) })
+      expect(branchHost.querySelector('button')).toBe(original); expect(original.ownerDocument).toBe(child)
+      await update(() => { original.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 })); original.click() })
+      expect(changed).not.toHaveBeenCalled()
+    } finally { await update(() => root.render(null)); frame.remove(); branchHost.remove() }
   })
 
   it('keeps scope, attachments and recovery in the actual supplied document', async () => {
@@ -240,6 +320,69 @@ describe('shared modal presentation ownership', () => {
     await update(() => [...overlays.querySelectorAll<HTMLButtonElement>('[role="status"] button')].find(button => button.textContent === 'Retry')!.click())
     expect(parent!.hidden).toBe(false)
     expect(overlays.querySelector('[data-child-draft]')).toBeNull()
+  })
+
+  it('reports only exact owning slot retirement while the retained target is still connected', async () => {
+    const target = createRef<HTMLDivElement>(), retired = vi.fn(() => expect(target.current?.isConnected).toBe(true))
+    await update(() => root.render(<Modal.Root open><Modal.Portal forceMount container={overlays}><Modal.Overlay /><Modal.Content>
+      <Content name="Retained source" /><div ref={target}>Original native popover target</div>
+      <Modal.ModalAttachmentDismissal active targetRef={target} onEscapeKeyDown={event => event.preventDefault()} onOwnerRemoved={retired} />
+    </Modal.Content></Modal.Portal></Modal.Root>))
+    await update(() => target.current!.dispatchEvent(new CustomEvent(Modal.MODAL_OVERLAY_SLOT_REMOVED, { bubbles: true })))
+    expect(retired).not.toHaveBeenCalled()
+    await update(() => overlays.querySelector<HTMLElement>('[data-overlay-modal-scope]')!.dispatchEvent(new CustomEvent(Modal.MODAL_PRESENTATION_FAILURE_EVENT, { detail: { message: 'Original native paint failed' } })))
+    expect(retired).toHaveBeenCalledOnce(); expect(target.current?.isConnected).toBe(true)
+  })
+
+  it('lets an exact attached retained target own Escape and releases that ownership on detach', async () => {
+    const changed = vi.fn(), escaped = vi.fn((event: KeyboardEvent) => event.preventDefault()), target = createRef<HTMLDivElement>()
+    const scene = (attached: boolean) => <Modal.Root open onOpenChange={changed}><Modal.Portal container={overlays}>
+      <Modal.Overlay /><Modal.Content><Content name="Original modal" /><div ref={target}><input data-retained-attachment="" defaultValue="Original draft" /></div>
+        <Modal.ModalAttachmentDismissal active={attached} targetRef={target} onEscapeKeyDown={escaped} />
+      </Modal.Content>
+    </Modal.Portal></Modal.Root>
+    await update(() => root.render(scene(false)))
+    const original = target.current!, input = original.querySelector('input')!
+    await update(() => root.render(scene(true)))
+    expect(target.current).toBe(original)
+    await update(() => { input.focus(); input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+    expect(escaped).toHaveBeenCalledOnce(); expect(changed).not.toHaveBeenCalled()
+    await update(() => root.render(scene(false)))
+    expect(target.current).toBe(original); expect(original.querySelector('input')).toBe(input)
+    await update(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(changed).toHaveBeenCalledExactlyOnceWith(false); expect(escaped).toHaveBeenCalledOnce()
+  })
+
+  it('puts a reopened retained modal after newer siblings while keeping its original draft DOM', async () => {
+    const scene = (a: boolean, b: boolean) => <><input data-background="" /><Modal.Root open={a}><Modal.Portal forceMount container={overlays}>
+      <Modal.Overlay /><Modal.Content><Content name="Retained A" /><input data-retained-a="" defaultValue="Original draft" /></Modal.Content>
+    </Modal.Portal></Modal.Root><Modal.Root open={b}><Modal.Portal container={overlays}>
+      <Modal.Overlay /><Modal.Content><Content name="Later B" /><input data-later-b="" /></Modal.Content>
+    </Modal.Portal></Modal.Root></>
+    await update(() => root.render(scene(true, false)))
+    const original = overlays.querySelector<HTMLInputElement>('[data-retained-a]')!, scope = original.closest<HTMLElement>('[data-overlay-modal-scope]')!
+    original.value = 'Retained edited draft'; original.setSelectionRange(2, 7)
+    await update(() => root.render(scene(false, false)))
+    await update(() => root.render(scene(false, true)))
+    expect(overlays.lastElementChild).not.toBe(scope.parentElement)
+    await update(() => root.render(scene(true, true)))
+    expect(overlays.lastElementChild).toBe(scope.parentElement)
+    expect(scope.querySelector('[data-retained-a]')).toBe(original); expect(original.value).toBe('Retained edited draft')
+    expect(document.activeElement).toBe(original)
+    await update(() => mount.querySelector<HTMLInputElement>('[data-background]')!.focus())
+    expect(document.activeElement).toBe(original)
+  })
+
+  it('runs the original close autofocus when an open-literal dialog is conditionally removed', async () => {
+    const closed = vi.fn((event: Event) => event.preventDefault())
+    function Scene() { const [show, setShow] = useState(true); return show ? <Modal.Root open><Modal.Portal container={overlays}>
+      <Modal.Overlay /><Modal.Content onCloseAutoFocus={closed}><Content name="Conditional original" /><button onClick={() => setShow(false)}>Close original</button></Modal.Content>
+    </Modal.Portal></Modal.Root> : null }
+    await update(() => root.render(<Scene />))
+    await update(() => overlays.querySelector<HTMLButtonElement>('button')!.click())
+    await update(() => {})
+    expect(overlays.querySelector('[role="dialog"]')).toBeNull()
+    expect(closed).toHaveBeenCalledOnce()
   })
 
   it('uses the original caller busy fact only to present unavailable recovery cancellation', async () => {
