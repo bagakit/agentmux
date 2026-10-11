@@ -208,7 +208,7 @@ it('reports a warm Terminal switch through its actual visibility hook without at
   const original = fixture.terminals[0], readySinceAt = rendererPerformance.snapshot().terminals[0]!.readySinceAt
   const release = tabSwitchObservation.registerPlacement(switchTarget, () => true)
   try {
-    tabSwitchObservation.begin(switchTarget, 'terminal', performance.now()); tabSwitchObservation.selected(switchTarget)
+    tabSwitchObservation.begin(switchTarget, 'terminal', performance.now()); tabSwitchObservation.selected(switchTarget, 'layout-effect')
     expect(tabSwitchObservation.snapshot().at(-1)!.terminal?.visible).toBe(false)
     await render(true)
     await vi.waitFor(() => expect(tabSwitchObservation.snapshot().at(-1)!.frameMs).not.toBeNull())

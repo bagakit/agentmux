@@ -29,7 +29,7 @@ it.each(['address', 'host'] as const)('retains the actual placement owner on rev
     await render(false)
     const content = slot.querySelector('output')
     expect(content).not.toBeNull()
-    tabSwitchObservation.begin(target, 'terminal', performance.now()); tabSwitchObservation.selected(target)
+    tabSwitchObservation.begin(target, 'terminal', performance.now()); tabSwitchObservation.selected(target, 'layout-effect')
     expect(tabSwitchObservation.snapshot().at(-1)).toMatchObject({ state: 'pending', pendingStage: 'placement' })
     await render(true)
     expect(slot.querySelector('output')).toBe(content)

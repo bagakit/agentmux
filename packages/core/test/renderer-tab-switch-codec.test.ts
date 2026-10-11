@@ -6,6 +6,8 @@ import {
   type RendererTabSwitchCost
 } from '../src/metrics.js'
 import { performanceFixture } from './helpers/renderer-performance.js'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const window = { windowId: 1, webContentsId: 2, generation: 3 }
 const counts = { monacoEditors: null, monacoModels: null, documents: 0, runtimeSubscriptions: 1,
@@ -13,7 +15,7 @@ const counts = { monacoEditors: null, monacoModels: null, documents: 0, runtimeS
 const pending = { state: 'pending', observedAt: null, lastSuccessAt: null, reason: null, data: null }
 const decoders = [
   { name: 'Renderer IPC reply', parse(performance: unknown) {
-    return parseMetricsRendererResult({ operation: 'metrics.renderer', window, observedAt: 2, counts, performance }).performance
+    return parseMetricsRendererResult({ operation: 'metrics.renderer', window, observedAt: _historyFixtureEpoch(0, 0, 2), ...rendererMemoryFixture(), counts, performance }).performance
   } },
   { name: 'public metrics observation', parse(performance: unknown) {
     return parseMetricsObservation({ schema: 'agentmux.metrics.v1', observedAt: 2,
@@ -27,7 +29,7 @@ const decoders = [
 function switchFixture(): RendererTabSwitchCost {
   return { id: 1, target: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region', presentationId: 'space' },
     elapsedMs: 35, pendingStage: null,
-    handlerAt: fixtureEpoch(1, 42496, 882), inputDelayMs: 12.5, selectedMs: 1, placedMs: 3, terminalMs: 4, inputReadyMs: 35, frameMs: 21.5,
+    handlerAt: fixtureEpoch(1, 42496, 882), eventAtMonoMs: 87.5, handlerStartMonoMs: 100, actionEndedMs: 2, actionResult: 'returned', selectedSource: 'layout-effect', inputDelayMs: 12.5, selectedMs: 1, placedMs: 3, terminalMs: 4, inputReadyMs: 35, frameMs: 21.5,
     state: 'observed', mode: 'terminal', terminal: { sessionId: 'session', runId: 'run', readySinceAt: fixtureEpoch(1, 38117, 446),
       visible: true, revealed: true, liveReady: true, acceptsInput: true, readOnly: false, replaying: false } }
 }
@@ -50,7 +52,7 @@ describe.each(decoders)('$name tab-switch records', ({ parse }) => {
     const tabSwitches: RendererTabSwitchCost[] = [
       { ...record, state: 'pending', mode: 'unknown', terminal: null,
         pendingStage: 'selection',
-        inputDelayMs: null, selectedMs: null, placedMs: null, terminalMs: null, inputReadyMs: null, frameMs: null },
+        inputDelayMs: null, eventAtMonoMs: null, selectedMs: null, selectedSource: null, actionEndedMs: null, actionResult: null, placedMs: null, terminalMs: null, inputReadyMs: null, frameMs: null },
       { ...record, id: 2, state: 'superseded', mode: 'activity', terminal: null, terminalMs: null, inputReadyMs: null, frameMs: null },
       { ...record, id: 3, state: 'observed', mode: 'other', terminal: null, terminalMs: null, inputReadyMs: null },
       { ...record, id: 4, inputReadyMs: null, terminal: { ...record.terminal!, acceptsInput: false, readOnly: true, readySinceAt: null } }
@@ -70,7 +72,7 @@ describe.each(decoders)('$name tab-switch records', ({ parse }) => {
   })
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])('rejects invalid timestamp or elapsed duration %s', invalid => {
-    for (const field of ['elapsedMs', 'handlerAt', 'inputDelayMs', 'selectedMs', 'placedMs', 'terminalMs', 'inputReadyMs', 'frameMs'] as const) {
+    for (const field of ['elapsedMs', 'handlerAt', 'eventAtMonoMs', 'handlerStartMonoMs', 'actionEndedMs', 'inputDelayMs', 'selectedMs', 'placedMs', 'terminalMs', 'inputReadyMs', 'frameMs'] as const) {
       expect(() => parse({ ...performanceFixture(), tabSwitches: [{ ...switchFixture(), [field]: invalid }] })).toThrow()
     }
     expect(() => parse({ ...performanceFixture(), tabSwitches: [{ ...switchFixture(),
@@ -82,6 +84,7 @@ describe.each(decoders)('$name tab-switch records', ({ parse }) => {
     const invalidRecords = [
       { ...record, id: 1.5 }, { ...record, id: Number.MAX_SAFE_INTEGER + 1 },
       { ...record, pendingStage: 'paint' }, without(record, 'pendingStage'), without(record, 'elapsedMs'),
+      { ...record, actionResult: 'success' }, { ...record, selectedSource: 'paint' }, without(record, 'handlerStartMonoMs'),
       { ...record, state: 'complete' }, { ...record, mode: 'tui' },
       { ...record, target: without(record.target, 'presentationId') },
       { ...record, target: { ...record.target, presentationId: ' ' } },

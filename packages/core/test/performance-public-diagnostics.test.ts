@@ -49,7 +49,7 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   navigation.registerPlacement(target, () => true)
   navigation.registerTerminal(target, () => ({ sessionId: 'public-session', runId: 'public-run', readySinceAt: null,
     visible: true, revealed: true, liveReady: false, acceptsInput: false, readOnly: false, replaying: true }))
-  navigation.begin(target, 'terminal', null); navigation.selected(target)
+  navigation.begin(target, 'terminal', null); navigation.selected(target, 'layout-effect')
   callbacks.shift()!(time); callbacks.shift()!(time); time += 1500
   observation.renderer.data!.performance = { ...renderer.snapshot(), tabSwitches: navigation.snapshot(), tabSwitchesOmitted: navigation.omitted() }
   const pendingRequest = renderer.beginInputRequest('user', renderer.start(), { hostId: 'local', sessionId: 'public-session', runId: 'public-run' })

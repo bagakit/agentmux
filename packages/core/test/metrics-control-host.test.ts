@@ -10,6 +10,9 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../sr
 import { parseMetricsObservation, type AgentMuxMetricsPort, type MetricsObservation } from '../src/metrics.js'
 import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from '../src/public-rpc-frame.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { createTabSwitchObservation } from '../../../apps/desktop/src/renderer/src/lib/tab-switch-observation'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'metrics-proof' } as const
 const pending = { state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null } as const
@@ -61,6 +64,29 @@ function firstFrame(socket: Socket): Promise<Record<string, unknown>> {
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
 describe('public metrics Control owner', () => {
+  it('preserves actual Tab action tails and selected sources through public Unix get and watch', async () => {
+    let now = _historyFixtureEpoch(0, 0, 100)
+    const recorder = createTabSwitchObservation(() => now, () => 1000 + now, () => 1, () => {})
+    const target = { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region', presentationId: 'space' }
+    const id = recorder.begin(target, 'activity', 90, 100)
+    now = 103; recorder.selected(target, 'layout-effect')
+    now = 109; recorder.actionEnded(id, 'returned')
+    const snapshot = observation(), window = { windowId: 1, webContentsId: 2, generation: 3 }
+    snapshot.window = window
+    snapshot.renderer = { state: 'available', observedAt: _historyFixtureEpoch(0, 1, 0), lastSuccessAt: _historyFixtureEpoch(0, 1, 0), reason: null,
+      data: { ...rendererMemoryFixture(), window, counts: { monacoEditors: null, monacoModels: 0,
+        documents: 1, runtimeSubscriptions: 1, terminalViews: 0, terminalAddons: 0, terminalListeners: 0 },
+      performance: { ...performanceFixture(), tabSwitches: recorder.snapshot() } } }
+    const dispose = vi.fn(), { path } = await server({ async subscribe(push) { push(snapshot); return { dispose } } })
+    const expected = { eventAtMonoMs: 90, handlerStartMonoMs: 100, inputDelayMs: 10, selectedMs: 3,
+      selectedSource: 'layout-effect', elapsedMs: 3, actionEndedMs: 9, actionResult: 'returned' }
+    expect((await metricsGet(path)).observation.renderer.data!.performance.tabSwitches[0]).toMatchObject(expected)
+    const frames: any[] = []
+    const subscription = await metricsWatch(path, { onFrame: frame => frames.push(frame), onEnd: () => {} })
+    expect(frames).toHaveLength(1)
+    expect(frames[0].result.initial.observation.renderer.data.performance.tabSwitches[0]).toMatchObject(expected)
+    await subscription.dispose(); await vi.waitFor(() => expect(dispose).toHaveBeenCalledTimes(2))
+  })
   it('releases once when cancellation follows opening fulfillment before its await continuation', async () => {
     const controller = new AbortController(), dispose = vi.fn()
     const service = new AgentMuxRpcService({ metrics: { subscribe(push) {
