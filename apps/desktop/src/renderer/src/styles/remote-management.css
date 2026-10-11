@@ -109,3 +109,54 @@ button.remote-work__row:focus-visible { outline: 1px solid var(--focus-line); ou
 .remote-overview__check-details p { margin: var(--sp-2) 0 0; line-height: 1.6; overflow-wrap: anywhere; user-select: text; }
 
 .remote-overview__connection-action { grid-column: 1 / -1; justify-self: start; }
+
+.application-access { display: grid; gap: var(--sp-4); min-width: 0; margin-block: var(--sp-4) var(--sp-6); padding-block: var(--sp-4); border-bottom: 1px solid var(--line-soft); font-size: var(--fs-body); container: application-access / inline-size; }
+.application-access__header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.application-access__header strong { font-size: 14px; }
+.application-access p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.application-access__header p, .application-access__editor header p, .application-access__empty { margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
+.application-access__rules { display: grid; gap: var(--sp-2); }
+.application-access__rule { display: grid; gap: var(--sp-1); width: 100%; min-width: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text); text-align: left; cursor: pointer; }
+.application-access__rule span, .application-access__rule small { color: var(--text-3); overflow-wrap: anywhere; }
+.application-access__rule[aria-pressed='true'] { border-color: var(--action); background: color-mix(in srgb, var(--action) 8%, var(--surface-1)); box-shadow: inset 3px 0 var(--action); }
+.application-access__rule:focus-visible, .application-access__operation-link:focus-visible { outline: 2px solid var(--action); outline-offset: 2px; }
+.application-access__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.application-access__editor { display: grid; gap: var(--sp-4); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.application-access__fields, .application-access__endpoints { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); min-width: 0; }
+.application-access__full { grid-column: 1 / -1; }
+.application-access label { display: grid; align-content: start; gap: var(--sp-2); min-width: 0; }
+.application-access label > span { color: var(--text-2); font-size: var(--fs-meta); }
+.application-access label small { color: var(--text-3); }
+.application-access input, .application-access select, .application-access textarea { box-sizing: border-box; min-width: 0; width: 100%; }
+.application-access select { min-height: 32px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); color: var(--text); font: inherit; }
+.application-access textarea { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); color: var(--text); font: 12px var(--font-mono); resize: vertical; }
+.application-access__endpoint { display: grid; align-content: start; gap: var(--sp-3); min-width: 0; margin: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+.application-access__endpoint legend { padding-inline: var(--sp-2); color: var(--text-2); font-weight: 600; }
+.application-access__endpoint .small-button { justify-self: start; }
+.application-access__scope { display: grid; gap: var(--sp-1); overflow-wrap: anywhere; }
+.application-access__scope span { color: var(--text-3); font: 11px/1.6 var(--font-mono); }
+.application-access__comparison { display: grid; justify-items: start; gap: var(--sp-3); min-width: 0; }
+.application-access__plan, .application-access__result { display: grid; gap: var(--sp-3); width: 100%; min-width: 0; box-sizing: border-box; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); overflow-wrap: anywhere; }
+.application-access__plan > strong, .application-access__result > strong { line-height: 1.5; }
+.application-access__observations { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.application-access__observations > div { display: grid; align-content: start; gap: var(--sp-2); min-width: 0; padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-0); color: var(--text-2); font-size: var(--fs-meta); }
+.application-access__observations strong { color: var(--text); }
+.application-access__observations span, .application-access__observations small { overflow-wrap: anywhere; }
+.application-access__operations { display: grid; gap: var(--sp-2); min-width: 0; }
+.application-access__operations > strong { color: var(--text-3); font-size: var(--fs-meta); font-weight: 500; }
+.application-access__operation-link { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); width: 100%; padding: var(--sp-2) 0; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--text-2); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.application-access__operation-link[aria-pressed='true'] { padding-inline: var(--sp-3); border-radius: var(--radius); background: var(--surface-1); color: var(--action); box-shadow: inset 3px 0 var(--action); }
+.application-access__operation-link span { overflow-wrap: anywhere; }
+.application-access__result time, .application-access__plan time { color: var(--text-3); font: 11px var(--font-mono); }
+.application-access__result .small-button, .application-access__plan .primary-button { justify-self: start; }
+.application-access details { min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.application-access summary { padding-block: var(--sp-1); cursor: pointer; }
+.application-access code { white-space: normal; overflow-wrap: anywhere; user-select: text; font: 11px/1.6 var(--font-mono); }
+.application-access dl { display: grid; gap: var(--sp-2); margin-block: var(--sp-2) 0; }
+.application-access dl div { display: grid; gap: var(--sp-1); }
+.application-access dt { color: var(--text-3); }
+.application-access dd { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+@container application-access (width < 560px) {
+  .application-access__fields, .application-access__endpoints, .application-access__observations { grid-template-columns: minmax(0, 1fr); }
+  .application-access__editor, .application-access__plan, .application-access__result { padding: var(--sp-3); }
+}
