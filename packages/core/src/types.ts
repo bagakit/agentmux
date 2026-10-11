@@ -1034,7 +1034,7 @@ export type AgentSessionHistoryResourceReadResult = {
   partIndex: number
   reference: string
   label?: string
-  result: { status: 'read'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; dataBase64: string; byteLength: number }
+  result: { status: 'read'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; dataBase64: string; byteLength: number; width: number; height: number }
     | { status: 'fragment'; encoding: 'json-utf8'; dataBase64: string; byteLength: number;
         offsetBytes: number; totalBytes: number; sha256: string; nextOffsetBytes: number | null;
         /** Original Provider renewed this exact read-only extent. Send as the next expectedReference, retaining source/record/part and content metadata. */
