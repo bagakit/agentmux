@@ -480,7 +480,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     while (view.snapshots.size > 3) view.snapshots.delete(view.snapshots.keys().next().value!)
   }
   const batch = snapshot.batch, units = snapshot.units
-  const digests = units.map(unit => ({ id: unit.event.id, sha256: hash(JSON.stringify(unit)) }))
+  const digests = batch.digests.length ? batch.digests : units.map(unit => ({ id: unit.event.id, sha256: hash(JSON.stringify(unit)) }))
   batch.digests = digests
   const budgetBytes = input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES, items: ConversationUnitEntry[] = []
   const navigation = historyNavigation(snapshot.rows, snapshot.history)
