@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true, "lib": ["ES2024", "DOM", "DOM.Iterable"] },
+  "include": ["native-input-adoption.test.ts", "../../client-ui/test/input-receipt-identity.test.tsx", "vitest.native-adoption.config.mts"]
+}
