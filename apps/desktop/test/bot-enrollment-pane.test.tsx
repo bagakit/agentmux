@@ -197,6 +197,10 @@ it('a successful list refresh cannot clear an unconfirmed application save or re
   await dom.render(<ExternalConnectionsSettings active={false} />)
   await dom.render(<ExternalConnectionsSettings active />)
   await vi.waitFor(() => expect(vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.ls').length).toBeGreaterThan(1))
+  await act(async () => {
+    const reader = vi.mocked(api.connections.call)
+    await Promise.all(reader.mock.calls.flatMap(([method], index) => method === 'connection.ls' ? [reader.mock.results[index]!.value] : []))
+  })
   expect(dom.container.querySelector('.connector-issue')?.textContent).toContain('Save result not confirmed')
   expect(writes()).toHaveLength(1)
   expect(writes()[0]![1]).toEqual(original)
