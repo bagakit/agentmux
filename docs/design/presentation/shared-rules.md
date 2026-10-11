@@ -19,6 +19,7 @@
 - [身份归属](#身份归属)
 - [密度预算](#密度预算)
 - [Owner](#owner)
+- [弹层作用域与层级](#弹层作用域与层级)
 - [响应式与可访问性](#响应式与可访问性)
 - [验收](#验收)
 - [样式表的组织](#样式表的组织)
@@ -342,6 +343,14 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 | Agent Launch | Universal New Tab / Topic Launcher | 通过 Core 创建 Session，不属于 Tools 状态 |
 | Goals 清单／看板 | Goals Surface | 消费同一 Goal／Demand 投影；不另立 Branch × 状态矩阵 |
 | Titlebar drag | Titlebar Plane | Breadcrumb 可拖拽；按钮、Tab、输入区全部 no-drag |
+
+## 弹层作用域与层级
+
+共享 client UI 持有语义层级与模态呈现基座；Desktop 和 Mobile 只适配各自窗口根、几何与输入设备，不复制 token 或另写一套数值顺序。层级类别表达同一作用域内的窗口 chrome、tooltip、popover、服务提示与模态；不能把类别的全局数字当作跨父子、跨 document 或跨原生合成层的完整排序。
+
+窗口模态在当前 document 的窗口根按真实打开顺序排列。每个模态建立独立层叠作用域：遮罩在内容后方，所属菜单／tooltip 等附件在内容前方，附件的 Portal 位于滚动内容之外。后开的窗口模态覆盖先前模态的全部附件；非模态 popover 保持原来的轻量语义。共享组件默认取得这份归属，不要求业务组件自行抬高 z-index、猜祖先或申请 Browser 隐藏租约。
+
+模态内容采用主题的实色 Surface，保留细微中性高光、柔和阴影与原字号、密度和圆角；同一 authored 材质在有无原生 Browser 时一致，不临时把透明像素换成伪造背景。遮罩只表达一次背景让位，原生适配补足的区域与 Main 确认的原生页面对应。正常、窄矮、缩放、全屏与独立窗口均保持完整可读内容、命中和有界滚动；失败恢复面沿既有紧凑服务语汇呈现。行为、失败保全与窗口形态责任唯一见[《浮层让位与输入层级》](../behavior/browser-workface.md#浮层让位与输入层级)。
 
 ## 响应式与可访问性
 
