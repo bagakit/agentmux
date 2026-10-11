@@ -2125,6 +2125,12 @@ export class RuntimeController {
     return await client.confirmAgentNativeSession(input)
   }
 
+  /** Metadata control returns the original Core receipt even when presentation reads are unavailable. */
+  async controlContinuity(hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core').AgentMuxContinuityControlResult }> {
+    const client = this.configuredClient(hostId)
+    return { hostId, result: await client.controlAgentContinuity(input) }
+  }
+
   /**
    * Recovers a session whose authoritative Run is ended or missing.
    *

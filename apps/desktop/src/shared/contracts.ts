@@ -1929,6 +1929,7 @@ export type AgentMuxDesktopApi = {
       cols: number,
       rows: number
     ): Promise<{ cols: number; rows: number } | null>
+    controlContinuity(hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core').AgentMuxContinuityControlResult }>
     refresh(session: SessionControl): Promise<SessionSnapshot>
     // Recover a session whose PTY was lost (daemon_restart / tmux_* interruption, or exit).
     // The physical PTY cannot be revived, so this mints a *fresh* Run in the same cwd:

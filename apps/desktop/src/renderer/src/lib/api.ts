@@ -1156,6 +1156,7 @@ const mockApi: AgentMuxDesktopApi = {
     },
     interrupt: async () => {},
     resize: async (_attachmentId, cols, rows) => ({ cols, rows }),
+    controlContinuity: async () => { throw new Error('Recovery controls require the original native Host. This preview does not change a recovery intent.') },
     refresh: async (control) => {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
