@@ -31,6 +31,7 @@ beforeEach(async () => {
 afterEach(async () => { await dom.render(null); await fixture?.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 async function mount() {
   await dom.render(<ExternalConnectionsSettings active />)
+  await ready('[data-enrollment-new]'); await click('[data-enrollment-new]')
   await ready('[data-enrollment-create]')
 }
 async function ready(selector: string) {
@@ -193,7 +194,7 @@ it('a late original begin result preserves the manual draft, composing input nod
     expect(document.activeElement).toBe(input); expect(input.value).toBe('原有机器人-草稿'); expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5])
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe('private-manual-draft')
     await act(async () => input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '组字' })))
-    await click('.connector-back'); await click('[data-enrollment-resume]'); await ready('[data-enrollment-code] svg'); await click('.connector-enrollment > .connector-back'); await click('[data-enrollment-existing]')
+    await click('.connector-back'); await click('[data-enrollment-new]'); await select((await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]!.operationId); await inspectOriginal(); await ready('[data-enrollment-code] svg'); await click('.connector-enrollment > .connector-back'); await click('[data-enrollment-existing]')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app ID"]')?.value).toBe('原有机器人-草稿')
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe('private-manual-draft')
     expect(await fixture.services.connections.list()).toEqual({ connections: [] })
@@ -232,13 +233,13 @@ it('a successful list refresh cannot clear an unconfirmed application save or re
   expect(fixture.begin).not.toHaveBeenCalled()
 })
 
-it('unavailable secure creation keeps original setups and the existing-bot path without pretending a platform picker is ready', async () => {
+it('keeps metadata and the existing-bot path browsable while the original secure action remains locked', async () => {
   await open(); const { operation: original } = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
-  vi.spyOn(fixture.encryption, 'isEncryptionAvailable').mockReturnValue(false)
-  await dom.render(<ExternalConnectionsSettings active />)
+  const secure = vi.spyOn(fixture.encryption, 'isEncryptionAvailable').mockReturnValue(false)
+  await mount()
   await ready('[data-enrollment-existing]')
-  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('In-app bot creation is not available here') })
-  expect(dom.container.querySelector('[data-enrollment-create]')).toBeNull()
+  expect(secure).not.toHaveBeenCalled()
+  expect(dom.container.querySelector('[data-enrollment-create]')).not.toBeNull()
   expect(dom.container.querySelector('[aria-label="Bot creation platform"]')).toBeNull()
   await select(original!.operationId)
   await inspectOriginal()

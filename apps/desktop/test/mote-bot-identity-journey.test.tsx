@@ -10,15 +10,11 @@ beforeEach(async () => { f = await moteBotUi() })
 afterEach(async () => { await f?.close() })
 async function text(value: string) { await vi.waitFor(async () => { await f.settle(); expect(document.body.textContent).toContain(value) }, { timeout: 4000 }) }
 const original = () => f.parentCalls.mock.calls.find(([m]) => m === 'space.mote.connection.create')![1] as any
-async function create() { await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote'); await text('Scan to sign in') }
+async function create(code = true) { await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote'); if (code) await text('Scan to sign in') }
 async function confirmAndCreate() {
   const parent = (await f.client.call('space.mote.connection.inspect', { operationId: original().operationId })).operation!
   let view = await f.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId! })
-  for (let step = 0; step < 8 && view.operation?.authentication?.stage !== 'account'; step++) {
-    if (view.challenge && view.challenge.nextPollAt > Date.now()) await new Promise(resolve => setTimeout(resolve, view.challenge!.nextPollAt - Date.now()))
-    await f.click('Check sign-in')
-    view = await f.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId! })
-  }
+  await vi.waitFor(async () => { await f.settle(); view = await f.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId! }); expect(view.account).not.toBeNull() }, { timeout: 8000 })
   expect(view.account).not.toBeNull(); expect(f.creationCount).toBe(0)
   expect([...document.querySelectorAll('.mote-bot-auth-actions .primary-button')].map(node => node.textContent)).toEqual(['Confirm this account'])
   expect(document.querySelector('.mote-bot-setup > [aria-label="Original bot setup results"]')).toBeNull()
@@ -54,10 +50,10 @@ it('creates from the saved public profile through original IPC/Core/Main/default
 
 it('names the original advertised platform in its confirmation surface', async () => {
   await f.close(); f = await moteBotUi({ generic: true })
-  await create()
-  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Sign in to Signed profile')
+  await create(false); await text('Check the account and enterprise')
+  expect(document.querySelector('.mote-bot-request-heading')?.textContent).toContain('Signed profile')
   const current = document.querySelector('.mote-bot-auth-actions')!
-  expect([...current.querySelectorAll('.primary-button')].map(node => node.textContent)).toEqual(['Check sign-in'])
+  expect([...current.querySelectorAll('.primary-button')].map(node => node.textContent)).toEqual(['Confirm this account'])
   expect([...current.querySelectorAll('.small-button')].map(node => node.textContent)).toEqual([])
   const details = [...document.querySelectorAll<HTMLDetailsElement>('details')].find(node => node.querySelector('summary')?.textContent === 'Original setup details')!
   expect(details.open).toBe(false)
@@ -68,7 +64,7 @@ it('names the original advertised platform in its confirmation surface', async (
   await f.click('View original result')
   await text('Saved progress checked.')
   expect(document.querySelector('.mote-details__issue')).toBeNull()
-  expect(f.counts.begin).toBe(1); expect(f.counts.authentication).toBe(0); expect(f.counts.create).toBe(0)
+  expect(f.counts.begin).toBe(1); expect(f.counts.authentication).toBe(1); expect(f.counts.create).toBe(0)
 })
 
 it.each(['missing', 'unobserved'] as const)('shows a %s saved bot before disclosure and opens recovery without replacing its original reference', async condition => {
@@ -238,7 +234,7 @@ it('keeps the original Mote Profile caller and source preview while leaving the 
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(f.beginCount).toBe(0)
   await f.click('Manage bots')
-  expect(f.navigation.open).toHaveBeenCalledWith('chat-connections')
+  expect(f.navigation.openMoteConnector).toHaveBeenCalledWith({ target: f.target(), topicId: f.scopes[0]!.topic.id, moteName: f.scopes[0]!.topic.title })
 })
 
 it('retains a known not-dispatched request when local persistence is unavailable and explicitly continues that same request after recovery', async () => {

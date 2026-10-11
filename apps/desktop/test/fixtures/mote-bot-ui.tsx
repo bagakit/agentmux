@@ -15,7 +15,7 @@ import { useAppStore } from '../../src/renderer/src/store'
 import { MoteDetailsPanel } from '../../src/renderer/src/components/MoteDetailsPanel'
 import { MoteConnectionIdentity } from '../../src/renderer/src/components/MoteConnectionIdentity'
 import { ExternalConnectionsSettings } from '../../src/renderer/src/components/settings/ExternalConnectionsSettings'
-import { SettingsNavigation } from '../../src/renderer/src/components/SettingsNavigation'
+import { SettingsNavigation, type SettingsNavigationRequest } from '../../src/renderer/src/components/SettingsNavigation'
 import type { MoteWorkfaceScope } from '../../src/renderer/src/lib/mote-workface'
 import { installNativePopover, moteConfig } from './mote-workface'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc'
@@ -70,17 +70,20 @@ export async function moteBotUi(options: Parameters<typeof moteConnectionOwner>[
   vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   const container = document.createElement('div'); document.body.append(container)
   let view = createClientUiRoot(container), mounted = false
-  const navigation = { open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn() }
+  const navigation = { open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn(), openConnector: vi.fn(), openMoteConnector: vi.fn(), chooseAgent: vi.fn() }
   const scopes = await Promise.all(owner.motes.map(async m => {
     const topic = (await owner.topics.read(owner.workspace, m.id))!
     return { topic: { ...topic, title: 'Display title is not the public source', summary: 'DO-NOT-PUBLISH-DISPLAY' }, workspace: owner.workspace, rootPath: topic.directoryPath } satisfies MoteWorkfaceScope
   }))
-  const render = async (index = 0, settings = false) => {
-    await act(async () => view.render(<SettingsNavigation.Provider value={navigation}>{settings ? <ExternalConnectionsSettings active /> : <MoteConnectionIdentity key={index} scope={scopes[index]!} active />}</SettingsNavigation.Provider>)); mounted = true
+  const render = async (index = 0, settings = false, navigationRequest?: SettingsNavigationRequest) => {
+    await act(async () => view.render(<SettingsNavigation.Provider value={navigation}>{settings ? <ExternalConnectionsSettings active navigationRequest={navigationRequest} /> : <MoteConnectionIdentity key={index} scope={scopes[index]!} active />}</SettingsNavigation.Provider>)); mounted = true
   }
   async function click(text: string) {
     let node!: HTMLElement
     await vi.waitFor(async () => { await act(async () => {}); node = [...document.querySelectorAll<HTMLElement>('button,summary')].find(n => n.textContent?.trim() === text || n.getAttribute('aria-label') === text)!; expect(node, text + '\n' + document.body.textContent).toBeTruthy(); expect((node as HTMLButtonElement).disabled).not.toBe(true) })
+    const folded: HTMLDetailsElement[] = []
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement && !parent.open) folded.push(parent)
+    for (const details of folded.reverse()) await act(async () => details.querySelector<HTMLElement>('summary')!.click())
     await act(async () => { node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', buttons: 1 })); node.click() })
     await settle()
   }
