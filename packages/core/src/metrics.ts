@@ -1,4 +1,6 @@
 export * from './renderer-v8-profile.js'
+export * from './renderer-trace.js'
+import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
 import { readInputObservation } from './performance-diagnostics.js'
 import type { ClientPerformanceDiagnostics, InputPerformanceSnapshot } from './performance-diagnostics.js'
@@ -80,6 +82,7 @@ export type PerformanceDiagnostics = {
 export type MetricsSubscription = { dispose(): void }
 /** The host owns observation. Core only frames, validates and releases consumption. */
 export interface AgentMuxMetricsPort {
+  captureTrace?(input: RendererTraceInput, signal?: AbortSignal): Promise<RendererTraceResult>
   captureProfile?(input: RendererV8ProfileInput, signal?: AbortSignal): Promise<RendererV8ProfileResult>
   subscribe(onSnapshot: (value: MetricsObservation) => void, onEnd: (error?: Error) => void,
     signal: AbortSignal): Promise<MetricsSubscription>

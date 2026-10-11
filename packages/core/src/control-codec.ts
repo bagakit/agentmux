@@ -1,4 +1,5 @@
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
+import { parseRendererTraceInput, parseRendererTraceResult } from './renderer-trace.js'
 import { parseBrowserDefaultInspection, parseBrowserDefaultSettingsRequest } from './browser-default.js'
 import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
@@ -301,6 +302,11 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const edited = text(source.text, 'Edited message', code)
     if (!edited.trim() || edited.includes('\0')) throw new AgentMuxError('Edited message is invalid.', code)
     return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code), text: edited }
+  }
+  if (source.operation === 'metrics.trace.capture') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs'], 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...parseRendererTraceInput({ target: source.target, durationMs: source.durationMs }) }
   }
   if (source.operation === 'metrics.profile.capture') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs'], 'INVALID_CONTROL_REQUEST')
@@ -1155,6 +1161,11 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const message = result.message === null ? null : parsePendingMessage(result.message)
     if (message && message.pendingId !== pendingId) throw new AgentMuxError('Pending message send result belongs to another input.', code)
     return { ...base, operation, result: { agentSessionId, pendingId, disposition: result.disposition, message } }
+  }
+  if (operation === 'metrics.trace.capture') {
+    settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { capture: parseRendererTraceResult(result.capture) } }
   }
   if (operation === 'metrics.profile.capture') {
     settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')

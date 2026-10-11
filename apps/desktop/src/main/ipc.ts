@@ -1,4 +1,5 @@
 import { RendererV8Profiler } from './renderer-v8-profile.js'
+import { RendererTimelineTracer } from './renderer-trace.js'
 import { ConversationLandmarkStore } from '@agentmux/core'
 import { registerMoteConnectionIpc } from './mote-connection-ipc.js'
 import { NativeOverlayWindows } from './native-overlay-windows.js'
@@ -479,14 +480,16 @@ export async function registerIpc(args: {
   })
   contents.on('render-process-gone', releaseRendererResources)
   contents.on('did-start-navigation', releaseNavigatedHtmlPreviews)
-  const profiler = new RendererV8Profiler(contents, () => {
+  const currentRendererCaptureTarget = () => {
     const window = currentMetricsWindow()
     if (!window) return null
     const pid = contents.getOSProcessId()
     const processMetric = app.getAppMetrics().find(metric => metric.pid === pid)
     return processMetric && processMetric.creationTime > 0 ? { ...window, pid, creationTime: processMetric.creationTime } : null
-  })
-  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler })
+  }
+  const profiler = new RendererV8Profiler(contents, currentRendererCaptureTarget)
+  const tracer = new RendererTimelineTracer(contents, currentRendererCaptureTarget)
+  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer })
   const closeMetrics = () => metrics.dispose()
   contents.once('destroyed', closeMetrics)
   const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {

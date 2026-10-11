@@ -179,6 +179,19 @@ Function names, URLs and local paths may be present: no automatic watch/Toolkit 
 or error-log export. Busy DevTools/debuggers preserve their original owner and refuse only this
 profile. A lost reply is unknown and is never automatically recaptured; no retained handles,
 restart history, worker/native/compositor CPU coverage or optimization claim.
+system metrics trace capture uses the same exact five-field target and 1000-5000ms interval
+for a Chromium target-related timeline. Original ReportEvents objects and order are preserved;
+the 8 MiB limit bounds RPC result transport, not native buffers, event production or peak memory.
+Start/end acknowledgement, tracingComplete flush, dataLoss/buffer-full, source verification and
+detach are separate facts. Target-related Main/GPU context may appear; neither all-App/Host nor
+complete native stacks are promised. No screenshots, heap dumps or extra CPU sampling are enabled.
+requestedCategories is only the requested filter; actual participating PID/category facts are the
+original traceEvents pid/cat values. Missing events or categories do not prove absent work or coverage.
+Main startedAt/startMonotonicMs mark receipt of the start ACK. Native events may begin earlier;
+trace timestamps and Main/Renderer wall or monotonic clocks must not be equated or summed as CPU.
+--output creates a new local trace JSON atomically and never overwrites files/symlinks. URLs and
+local paths may be sensitive; no automatic watch/Toolkit capture, upload, log export, retained
+handle or recapture on lost replies/local write errors. An incomplete receipt remains incomplete.
 system metrics get returns the first bounded frame and releases its own reader; a
 pending Renderer has not failed. Watch frames may update different sources: use the
 app source observation time and process intervalMs to identify actual CPU intervals.
