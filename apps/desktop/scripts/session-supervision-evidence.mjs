@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { verifyReport, verifySourcePins } from './session-capability-evidence.mjs'
+import { readSupervisionNativeSurfaceOwner, readSupervisionInitialWaitOwner } from './session-supervision-native-evidence.mjs'
 
 const hash = value => createHash('sha256').update(value).digest('hex')
 const parse = async file => JSON.parse(await readFile(file, 'utf8'))
@@ -71,6 +72,7 @@ export async function readSupervisionConsumerOwner(root, kind, receiptFile) {
   const definition = {
     wire: { schema: 'agentmux.continuity-control-wire-proof.v1', gate: 'verify-session-continuity-control-wire.mjs', minimum: 3, mutants: 3 },
     consumer: { schema: 'agentmux.continuity-supervision-consumer-proof.v1', gate: 'verify-session-continuity-supervision.mjs', minimum: 14, mutants: 12 },
+    initialWaiting: { schema: 'agentmux.initial-continuity-supervision-proof.v1', gate: 'verify-initial-continuity-supervision.mjs', minimum: 5, mutants: 6 },
     cleanup: { schema: 'agentmux.probe-cleanup-observation-proof.v1', gate: 'verify-probe-cleanup-observation.mjs', minimum: 24, mutants: 3 }
   }[kind]
   assert.ok(definition, 'Unknown supervision consumer owner')
@@ -149,11 +151,18 @@ export async function readSupervisionSettingsOwner(root, receiptFile) {
 export async function readSessionSupervisionEvidence(root, files) {
   assert.deepEqual(Object.keys(files).sort(), ['T001', 'T002', 'T003', 'T004', 'T006', 'T007'],
     'Every required original supervision task must provide a receipt locator')
-  assert.deepEqual(Object.keys(files.T004).sort(), ['consumer', 'settings', 'wire'])
+  assert.deepEqual(Object.keys(files.T004 ?? {}).sort(), ['cleanup', 'consumer', 'native', 'settings'],
+    'The original surface, settings, cleanup and Native owners are required')
+  for (const kind of ['consumer', 'native']) assert.deepEqual(Object.keys(files.T004[kind] ?? {}).sort(), ['initialWaiting', 'surface'],
+    'Both admitted-attempt and initial-wait original owners are required: ' + kind)
   const results = []
   for (const task of ['T001', 'T002', 'T003', 'T006', 'T007']) results.push(await readSupervisionCoreOwner(root, task, files[task]))
   results.push(await readSupervisionSettingsOwner(root, files.T004.settings))
-  for (const kind of ['wire', 'consumer']) results.push(await readSupervisionConsumerOwner(root, kind, files.T004[kind]))
+  results.push(await readSupervisionConsumerOwner(root, 'consumer', files.T004.consumer.surface))
+  results.push(await readSupervisionConsumerOwner(root, 'initialWaiting', files.T004.consumer.initialWaiting))
+  results.push(await readSupervisionConsumerOwner(root, 'cleanup', files.T004.cleanup))
+  results.push(await readSupervisionNativeSurfaceOwner(root, files.T004.native.surface))
+  results.push(await readSupervisionInitialWaitOwner(root, files.T004.native.initialWaiting))
   return results
 }
 
