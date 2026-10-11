@@ -25,7 +25,7 @@ async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse |
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(remote.http.request)
   const services = await createDesktopConnections({ directory: join(original.root, 'feishu-bidirectional'),
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     publication: createPublicationConversationPort(original.coreClients), ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'sender-credential', secret: 'fixture-credential' }), config = { ...feishuConfig, credentialRef: credential.credentialRef }
@@ -89,7 +89,7 @@ it('default Desktop Host joins SDK intake, original Core and Mailbox, then autom
   const shown = await settings({ socketPath: f.server.path, secrets: f.services.secrets, connectionId: f.config.connectionId })
   const scope = await f.cli(['inspect', '--connection', f.config.connectionId])
   expect(scope.connection.observation.delivery.state).toBe('unknown')
-  expect(shown.groupDeliveryText).toContain('Not confirmed')
+  expect(shown.groupDeliveryText).toBe('View delivery in each Agent’s Shared group details')
   expect((await f.client.readAgentSessions()).map(session => session.agentSessionId)).toEqual([f.session.agentSessionId])
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
   const evidence = join('.bagakit', 'evidence', 'feishu-publication'); await mkdir(evidence, { recursive: true })

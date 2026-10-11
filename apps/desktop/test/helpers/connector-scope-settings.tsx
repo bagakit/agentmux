@@ -19,7 +19,9 @@ export function connectorScopeSettings() {
     })
     const record = Array.from(dom.container.querySelectorAll<HTMLElement>('[data-connection]')).find(item => item.dataset.connection === input.connectionId)!
     expect(record).not.toBeUndefined()
-    const delivery = Array.from(record.querySelectorAll('dl div')).find(item => item.querySelector('dt')?.textContent === 'Group delivery')!
-    return { text: record.textContent, groupDeliveryText: delivery.querySelector('dd')?.textContent }
+    await act(async () => { record.querySelector<HTMLButtonElement>('.connector-record__open')!.click() })
+    const delivery = () => dom.container.querySelector<HTMLElement>('[data-connection-setup-result] [data-connection-stage="delivery"]')
+    await vi.waitFor(() => expect(delivery()?.querySelector('dd')?.textContent).toBe('View delivery in each Agent’s Shared group details'))
+    return { text: dom.container.textContent, groupDeliveryText: delivery()!.querySelector('dd')?.textContent }
   }
 }

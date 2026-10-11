@@ -9,8 +9,9 @@ import { RoomBindingHost } from '../../src/room-binding.js'
 
 export const config: ConnectionConfig = { connectionId: 'sample-connection', adapterId: 'sample', application: { domain: 'chat.example', appId: 'original-app' }, label: 'Team', enabled: true, credentialRef: 'host-credential' }
 export const context = { actor: { kind: 'user' as const, id: 'fixture-user' } }
-export async function roomBindingFixture(native = true, options: { adapters?: readonly ConnectionAdapter[]; secrets?: SecretPort; managedCaller?: boolean } = {}) {
-  const original = await historyReaderFixture(native, true, undefined, options.managedCaller)
+export async function roomBindingFixture(native = true, options: { adapters?: readonly ConnectionAdapter[]; secrets?: SecretPort; managedCaller?: boolean; retired?: boolean; config?: ConnectionConfig } = {}) {
+  const original = await historyReaderFixture(native, options.retired ?? true, undefined, options.managedCaller)
+  const connection = options.config ?? config
   const spatial = new AgentMuxSpatialStateStore(join(original.root, 'spatial.json'))
   const graph: AgentMuxSpatialGraph = {
     spaces: [{ spaceId: 'space', kind: 'topic', name: 'Team', hostId: 'local', directoryPath: original.root, projectId: 'project' }],
@@ -22,13 +23,13 @@ export async function roomBindingFixture(native = true, options: { adapters?: re
   }
   await spatial.commit({ expectedRevision: 0, graph })
   const connections = new ConnectionHost({ databasePath: join(original.root, 'connections.sqlite'), secrets: options.secrets ?? { resolve: async () => 'private-fixture-credential' }, adapters: options.adapters ?? [{ adapterId: 'sample', test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }] })
-  await connections.configure({ operationId: 'configure', expectedRevision: null, connection: config })
+  await connections.configure({ operationId: 'configure', expectedRevision: null, connection })
   const checkpoint = async (ref: { hostId: string; agentSessionId: string }) => {
     if (ref.hostId !== 'local') throw new Error('Exact Host required')
-    return { ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }
+    return await original.client.conversationCheckpoint(ref)
   }
   const bindings = new RoomBindingHost({ connections, spatial, checkpoint }); connections.bindings = bindings
-  const input: RoomBindingBindInput = { operationId: 'bind-original', bindingId: 'original-binding', connectionId: config.connectionId, expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: original.session.agentSessionId, regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-group', scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' }, expectedSource: { providerId: 'claude', nativeSessionId: 'original-native' } }
+  const input: RoomBindingBindInput = { operationId: 'bind-original', bindingId: 'original-binding', connectionId: connection.connectionId, expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: original.session.agentSessionId, regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-group', scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' }, expectedSource: { providerId: 'claude', nativeSessionId: 'original-native' } }
   return { ...original, graph, spatial, connections, bindings, checkpoint, input,
     async change(change: (graph: AgentMuxSpatialGraph) => void) { const state = (await spatial.read())!; change(state.graph); return await spatial.commit({ expectedRevision: state.revision, graph: state.graph }) },
     async close() { connections.close(); await original.close() }

@@ -20,7 +20,7 @@ beforeEach(async () => {
   // Only encryption and platform network I/O are controlled. The original default registry is used.
   services = await createDesktopConnections({ directory: join(original.root, 'settings-feishu'),
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())
   const server = new AgentMuxControlServer({ socketPath: join(original.root, 'settings.sock'), connections: services.connections, coreClients: original.coreClients })
