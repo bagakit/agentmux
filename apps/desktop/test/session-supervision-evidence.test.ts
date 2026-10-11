@@ -1,9 +1,12 @@
+import { fixturePath as _historyFixturePath } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { readSupervisionCoreOwner } from '../scripts/session-supervision-evidence.mjs'
+import { readSupervisionCoreOwner, readSupervisionConsumerOwner, readSessionSupervisionEvidence, verifySupervisionProduct } from '../scripts/session-supervision-evidence.mjs'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const directories: string[] = []
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -48,6 +51,11 @@ it('cannot substitute an archived task receipt or passed flag for the current su
   await expect(f.read()).rejects.toThrow()
 })
 
+it('refuses joined qualification when the required initial-cancellation owner is absent', async () => {
+  await expect(readSessionSupervisionEvidence(_historyFixturePath("unused"), { T001: 'a', T002: 'b', T003: 'c', T004: {}, T006: 'd' }))
+    .rejects.toThrow('Every required original supervision task')
+})
+
 it('rejects missing source pins and changed current owner bytes', async () => {
   const f = await artifacts(); await f.put('packages/core/src/client.ts', 'changed candidate')
   await expect(f.read()).rejects.toThrow('another source candidate')
@@ -87,4 +95,102 @@ it('rejects a process exception even if the producer claims semantic RED', async
 it('compares the exact failed business identity and message with the original producer', async () => {
   const f = await artifacts(); f.receipt.results[1].failures[0].name = 'different target case'; await f.save()
   await expect(f.read()).rejects.toThrow('failure identities and business assertions')
+})
+
+async function consumerArtifacts() {
+  const root = await mkdtemp(path.join(tmpdir(), 'consumer-evidence-')); directories.push(root)
+  const gate = 'apps/desktop/scripts/verify-session-continuity-control-wire.mjs', owner = 'apps/desktop/src/main/runtime-controller.ts'
+  const put = async (file: string, value: any) => {
+    await mkdir(path.dirname(path.join(root, file)), { recursive: true })
+    await writeFile(path.join(root, file), typeof value === 'string' ? value : JSON.stringify(value))
+  }
+  await put(gate, 'original consumer gate'); await put(owner, 'original Main owner')
+  const reports: Record<string, any> = {}, witness = { original: hash('original Main owner'), loaded: hash('changed Main owner') }
+  const runs = await Promise.all(Array.from({ length: 4 }, async (_, index) => {
+    const id = index ? 'mutant-' + index : 'baseline', failed = index > 0
+    const report = { success: !failed, numTotalTests: 3, numPassedTests: failed ? 2 : 3, numFailedTests: failed ? 1 : 0,
+      testResults: [{ message: '', assertionResults: Array.from({ length: 3 }, (_, row) => ({ fullName: 'Main business ' + row,
+        status: failed && row === 0 ? 'failed' : 'passed', failureMessages: failed && row === 0 ? ['AssertionError: expected original packet to be preserved'] : [] })) }] }
+    reports[id] = report
+    const bytes = JSON.stringify(report); await put('proof/' + id + '.json', bytes)
+    if (failed) await put('proof/' + id + '.loaded.json', witness)
+    return { id, exitCode: failed ? 1 : 0, passed: failed ? 2 : 3, failed: failed ? 1 : 0,
+      rawReport: 'proof/' + id + '.json', rawSha256: hash(bytes), ...(failed ? { target: 'Main business 0', witness } : {}) }
+  }))
+  const pins = { [gate]: hash('original consumer gate'), [owner]: hash('original Main owner') }
+  const receipt = { schema: 'agentmux.continuity-control-wire-proof.v1', passed: true, sourceStable: true,
+    sourceBefore: pins, sourceAfter: pins, runs }
+  const save = () => put('proof/receipt.json', receipt); await save()
+  return { root, receipt, reports, put, save, read: () => readSupervisionConsumerOwner(root, 'wire', 'proof/receipt.json') }
+}
+
+it('reads the original Main wire producer without treating it as a full UI proof', async () => {
+  const f = await consumerArtifacts(), read = await f.read()
+  expect(read.task).toBe('T004-wire'); expect(read.baselineCases).toBe(3); expect(read.loadedCounterexamples).toBe(3)
+  await expect(readSupervisionConsumerOwner(f.root, 'consumer', 'proof/receipt.json')).rejects.toThrow()
+})
+
+it('rejects a rewritten consumer raw report even when its counts still agree', async () => {
+  const f = await consumerArtifacts(); f.reports.baseline.testResults[0].assertionResults[0].fullName = 'different business case'
+  await f.put('proof/baseline.json', f.reports.baseline)
+  await expect(f.read()).rejects.toThrow('raw report changed')
+})
+
+it('rejects a changed loaded consumer witness independently of the source passed flag', async () => {
+  const f = await consumerArtifacts(); await f.put('proof/mutant-1.loaded.json', { original: hash('original Main owner'), loaded: hash('different bytes') })
+  await expect(f.read()).rejects.toThrow('loaded witness changed')
+})
+
+it('requires the precise original consumer target rather than another failed case', async () => {
+  const f = await consumerArtifacts(); f.receipt.runs[1].target = 'Main business 1'; await f.save()
+  await expect(f.read()).rejects.toThrow('exact consumer target must fail')
+})
+
+function productArtifact() {
+  const controls = [{ request: { operationId: 'cancel-idle' }, outcome: 'cancelled' },
+    { request: { operationId: 'continue-working' }, outcome: 'continued' }]
+  const initial = { tabs: { work: {}, idle: {} }, drafts: { working: 'working draft', healthy: 'healthy draft', idle: 'idle draft' },
+    focus: { execution: { sessionId: 'healthy' } } }
+  const spatial = { graph: { spaces: { original: {} } } }
+  const root = { policy: { retryMaxAttempts: 0 }, launchInput: { state: 'launch-carried', key: 'original-key' },
+    supervision: { phase: 'retry-wait', attemptCount: 1, attemptLimit: 2, nextAttemptAt: _historyFixtureEpoch(0, 0, 20) } }
+  const cancelled = { root: { supervision: { phase: 'cancelled', attemptCount: 1 } }, run: { runId: 'failed-idle' }, noNewAttempt: true, noInputReplay: true }
+  const healthy = { runId: 'original-healthy', pid: 201 }
+  const nativeBefore = Array.from({ length: 3 }, (_, index) => ({ runId: 'original-' + index, acceptedInputBytes: 0 }))
+  const phases = ['seed', 'restore', 'reconnect'].map((phase, index) => {
+    const supervision: any = { kind: 'durability', schedulerOwnerPid: 101 + index, healthy, controls,
+      authoredControls: controls.map(one => ({ request: one.request, persistedBeforeDispatch: true })),
+      scheduled: { observedAt: _historyFixtureEpoch(0, 0, 10), nextAttemptAt: _historyFixtureEpoch(0, 0, 20) }, cancelled,
+      rawInput: [{ ...healthy, body: phase + '-actual-input', consumedOnce: true }],
+      publicCli: { passed: true, zeroLifecycleOrInput: true, nativeBefore, nativeAfter: nativeBefore,
+        checks: controls.map(receipt => ({ reply: { result: { receipt } } })) }, final: { view: initial, spatial, workingRoot: root } }
+    if (index > 0) supervision.recovered = { root: { ...root, supervision: { ...root.supervision, attemptCount: 2 } },
+      run: { runId: 'context-only-child' }, child: { recoveryInputs: { reminder: '', continuation: '' } },
+      processRunning: true, providerContextConfirmed: false, oldTaskContinuationConfirmed: false, oldInputReplayCount: 0 }
+    if (index === 1) supervision.preDue = { observedAt: _historyFixtureEpoch(0, 0, 15), root }
+    return { phase, exit: { originalPid: 101 + index, exitConfirmed: true, exitCode: 0, timedOut: false, cleanupErrors: [] },
+      native: { pid: 101 + index, passed: true, initial, spatialBefore: spatial, supervision } }
+  })
+  return JSON.parse(JSON.stringify({ schema: 'agentmux.continuity-supervision-product.v1', passed: true, phases,
+    cleanup: { errors: [], remaining: [], temporaryRootRemoved: true } }))
+}
+
+it('checks the three-generation supervision receipt shape without treating synthetic artifacts as Native proof', () => {
+  expect(() => verifySupervisionProduct(productArtifact())).not.toThrow()
+})
+
+it.each([
+  ['a parent process replacing the restarted scheduler', (r: any) => { r.phases[1].native.supervision.schedulerOwnerPid = 999 }],
+  ['a reused Electron generation', (r: any) => { r.phases[1].native.pid = r.phases[0].native.pid }],
+  ['a missing original persisted graph', (r: any) => { r.phases[1].native.spatialBefore = null }],
+  ['a second attempt that replays launch input', (r: any) => { r.phases[1].native.supervision.recovered.child.launchInput = { key: 'copied' } }],
+  ['a second App that first observes an expired schedule', (r: any) => { r.phases[1].native.supervision.preDue.observedAt = 21 }],
+  ['an original input receipt rewritten during recovery', (r: any) => { r.phases[1].native.supervision.recovered.root.launchInput.key = 'new-key' }],
+  ['an extra attempt after durable cancellation', (r: any) => { r.phases[2].native.supervision.cancelled.root.supervision.attemptCount = 2 }],
+  ['a process marker promoted to task continuation', (r: any) => { r.phases[2].native.supervision.recovered.oldTaskContinuationConfirmed = true }],
+  ['a CLI inspection that writes Native input', (r: any) => { r.phases[1].native.supervision.publicCli.nativeAfter = [{ acceptedInputBytes: 99 }] }],
+  ['an unconfirmed private process cleanup', (r: any) => { r.cleanup.remaining = [{ pid: 999 }] }]
+] as const)('rejects %s', (_label, mutate) => {
+  const artifact = productArtifact(); mutate(artifact)
+  expect(() => verifySupervisionProduct(artifact)).toThrow()
 })
