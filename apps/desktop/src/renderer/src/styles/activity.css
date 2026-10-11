@@ -290,7 +290,22 @@
 .activity-feed__history-divider::before, .activity-feed__history-divider::after { content: ''; height: 1px; flex: 1; background: var(--line-soft); }
 
 .activity-feed-frame { position: relative; height: 100%; min-height: 0; }
-.activity-feed__empty-reading { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 18px; color: var(--text-3); font: var(--fs-meta)/1.4 var(--font-sans); }
+/* A reading signal, not placeholder messages or an Agent execution indicator.
+   The continuous opacity cadence belongs only to an actual empty pending read. */
+.activity-feed__empty-reading { display: flex; align-items: center; gap: var(--sp-6); padding: var(--sp-7) var(--sp-6); color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-sans); }
+.activity-feed__reading-caption { display: grid; gap: var(--sp-1); min-width: 0; }
+.activity-feed__reading-caption strong { color: var(--text-2); font-weight: 560; }
+.activity-feed__reading-caption > span { color: var(--text-3); overflow-wrap: anywhere; }
+.activity-feed__reading-signal { display: grid; align-content: center; gap: var(--sp-2); flex: none; width: calc(var(--sp-7) * 2); height: calc(var(--sp-7) * 2); }
+.activity-feed__reading-signal > span { height: var(--sp-1); border-radius: var(--radius-sm); background: currentColor; opacity: .24; }
+.activity-feed__reading-signal > span:nth-child(2) { width: 76%; }
+.activity-feed__reading-signal > span:nth-child(3) { width: 52%; }
+.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal { color: var(--blue); }
+.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span { animation: activity-read-breath var(--dur-breath) linear infinite; }
+.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span:nth-child(2) { animation-delay: var(--dur-fast); }
+.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span:nth-child(3) { animation-delay: calc(var(--dur-fast) * 2); }
+@keyframes activity-read-breath { 0%, 100% { opacity: .24; } 45% { opacity: .76; } }
+@media (prefers-reduced-motion: reduce) { .activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span { animation: none; opacity: .5; } }
 
 /* Captured edit previews sit inside the same shared process detail inset. */
 .wf-native-process__body > .log-diff { margin-inline: 0; }
