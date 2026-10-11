@@ -14,7 +14,8 @@ export default defineConfig({ ...shared, cacheDir: '.tmp/agent-bookmarks/vitest'
       reading:['apps/desktop/src/renderer/src/components/AgentInformationReader.tsx','if (request.bookmark && !protectedNow && changedReading','if (request.bookmark && changedReading'],
       geometry:['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts','if (commit && changed && bookmark)','if (false && commit && changed && bookmark)'],
       cancel:['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts','markWindowOverlayDismissal(event); end(false)','markWindowOverlayDismissal(event); end(true)'],
-      preference:['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts','if (commit && changed && bookmark)','if (commit && bookmark)']
+      preference:['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts','if (commit && changed && bookmark)','if (commit && bookmark)'],
+      focus:['apps/desktop/src/renderer/src/components/AgentInformationReader.tsx','onFocus={() => { cancelDeparture(); if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }}','onFocus={cancelDeparture}']
     }
     const change=mutation?changes[mutation]:undefined
     if(change&&path===change[0]){if(code.split(change[1]).length!==2)throw Error('One exact bookmark consumer required');served=code.replace(change[1],change[2])}
