@@ -13,13 +13,16 @@ export function noteHistoryReadParams(state: SpatialWorkbench, topics: readonly 
   const workspace = surface?.kind === 'file' ? state.config?.workspaces.find(item => item.id === surface.workspaceId) : undefined
   if (!tab?.space || surface?.kind !== 'file' || !workspace) throw Error('The original Note file position is unconfirmed. Its file and draft are retained; restore this same position before reading its history.')
   const catalog = spatialCatalog(state, topics), zones = catalog.zones.filter(zone => zone.zoneId === tab.space!.zoneId), zone = zones[0]
-  if (zones.length !== 1 || !zone || !catalog.bindings.some(binding => binding.zoneId === zone.zoneId && binding.spaceId === tab.space!.spaceId)) throw Error('The exact original Note Space and Zone are unconfirmed. The current file and draft are retained.')
+  if (zones.length !== 1 || !zone) throw Error('The exact original Note Zone is unconfirmed. The current file and draft are retained.')
+  // A Notebook Zone can have a resource context without any display membership.
+  // Files accepts that exact Zone independently; only send a confirmed Space relation.
+  const spaceId = catalog.bindings.some(binding => binding.zoneId === zone.zoneId && binding.spaceId === tab.space!.spaceId) ? tab.space.spaceId : undefined
   const directory = zoneFileResource(workspace, zone, '', topics)
   const prefix = directory.relativeDirectory ? directory.relativeDirectory + '/' : ''
   if (!surface.path.startsWith(prefix) || surface.path.length === prefix.length) throw Error('This Note file does not belong to the original Zone directory. Its current draft is retained.')
   const path = surface.path.slice(prefix.length), mapped = zoneFileResource(workspace, zone, path, topics)
   if (mapped.path !== surface.path) throw Error('The original Note file path cannot be confirmed in this Zone. Its current draft is retained.')
-  return { zoneId: zone.zoneId, spaceId: tab.space.spaceId, path,
+  return { zoneId: zone.zoneId, ...(spaceId === undefined ? {} : { spaceId }), path,
     expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } }
 }
 
