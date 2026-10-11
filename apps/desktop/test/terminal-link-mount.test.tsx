@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -86,8 +87,8 @@ const initial = useAppStore.getState()
 const origin = { workspaceId: 'private-workspace', tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }
 const session = {
   id: 'private-session', kind: 'terminal', hostId: 'local', workspacePath: _hygiene_fixturePath("private/project"),
-  providerId: null, label: 'Private terminal', createdAt: 1, updatedAt: 1, latestOutputBytes: 0,
-  status: { state: 'running', source: 'run-process', observedAt: 1 },
+  providerId: null, label: 'Private terminal', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), latestOutputBytes: 0,
+  status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) },
   processState: 'running', control: { kind: 'terminal', hostId: 'local', runId: 'private-run', run: { runId: 'private-run' } }
 } satisfies SessionSnapshot
 const range = { start: { x: 1, y: 1 }, end: { x: 12, y: 1 } }
@@ -132,6 +133,8 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(listener => { receive = listener; return () => {} })
   vi.spyOn(api.sessions, 'write').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined)
+  vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
+  vi.spyOn(window, 'open').mockReturnValue(null)
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { resized = callback }
     observe() {}; unobserve() {}; disconnect() {}
@@ -205,7 +208,7 @@ async function focusTerminal(destination: 'region' | 'tab' = 'region') {
         [origin.workspaceId]: createWorkspaceLayout(origin.tabGroupId, [origin.tabId]),
         [otherFocusOrigin.workspaceId]: createWorkspaceLayout(otherFocusOrigin.tabGroupId, [otherFocusOrigin.tabId]) },
       agentFocus: { execution: { sessionId: session.id, reference: focusReference(focusOrigin),
-        history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } } })
+        history: [{ sessionId: session.id, focusedAt: _tailFixtureEpoch(0, 0, 1) }] }, pmo: { sessionId: null } } })
     root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={focusOrigin} autoFocus={false} />)
   })
 }
@@ -316,10 +319,59 @@ describe('mounted Terminal link exits', () => {
       expect(host.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Choose where to open the link')
       expect(host.textContent).toContain('https://example.test/path')
       expect(openHttp).not.toHaveBeenCalled()
+      expect(api.ui.openExternal).not.toHaveBeenCalled()
+      expect(window.open).not.toHaveBeenCalled()
       await act(async () => { host.querySelector('button[data-destination="tab"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+      expect(openHttp).toHaveBeenCalledTimes(1)
       expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/path', 'tab', expect.objectContaining({ active: true, retainedRegionId: null }))
+      expect(host.querySelector('[role="dialog"]')).toBeNull()
+      await act(async () => { activate(pointer(), 'https://example.test/explicit-system', range) })
+      expect(openHttp).toHaveBeenCalledTimes(1)
+      await act(async () => { host.querySelector('button[data-destination="system"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+      expect(openHttp).toHaveBeenCalledTimes(2)
+      expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/explicit-system', 'system', expect.objectContaining({ active: true, retainedRegionId: null }))
+      expect(host.querySelector('[role="dialog"]')).toBeNull()
       await act(async () => { activate(new MouseEvent('mouseup', { button: 0, clientX: 50, clientY: 80, metaKey: true }), 'https://example.test/path', range) })
+      expect(openHttp).toHaveBeenCalledTimes(3)
       expect(openHttp).toHaveBeenLastCalledWith(origin, 'https://example.test/path', 'system', expect.objectContaining({ active: true, retainedRegionId: null }))
+      expect(host.querySelector('[role="dialog"]')).toBeNull()
+      expect(api.ui.openExternal).not.toHaveBeenCalled()
+      expect(window.open).not.toHaveBeenCalled()
+    })
+    it(`${provider}: cancelling a chooser never opens and a later exact choice is consumed once`, async () => {
+      const activate = provider === 'bare URL' ? web.activate : terminal.options.linkHandler!.activate
+      const input = terminal.data, providerOwner = terminal.provider, owners = terminalResourceOwnerCounts()
+      for (const cancel of ['Escape', 'outside'] as const) {
+        await act(async () => { activate(pointer(), 'https://example.test/cancel', range) })
+        expect(host.querySelector('[role="dialog"]')).not.toBeNull()
+        expect(openHttp).not.toHaveBeenCalled()
+        expect(api.ui.openExternal).not.toHaveBeenCalled()
+        expect(window.open).not.toHaveBeenCalled()
+        await act(async () => {
+          if (cancel === 'Escape') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+          else element.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true, cancelable: true }))
+        })
+        expect(host.querySelector('[role="dialog"]')).toBeNull()
+        expect(openHttp).not.toHaveBeenCalled()
+        expect(api.ui.openExternal).not.toHaveBeenCalled()
+        expect(window.open).not.toHaveBeenCalled()
+      }
+      await act(async () => { activate(pointer(), 'https://example.test/chosen', range) })
+      expect(openHttp).not.toHaveBeenCalled()
+      const choice = host.querySelector('button[data-destination="left"]')!
+      expect(choice).not.toBeNull()
+      await act(async () => {
+        choice.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        choice.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      expect(openHttp).toHaveBeenCalledExactlyOnceWith(origin, 'https://example.test/chosen', 'left', expect.objectContaining({ active: true, retainedRegionId: null }))
+      expect(host.querySelector('[role="dialog"]')).toBeNull()
+      expect(api.ui.openExternal).not.toHaveBeenCalled()
+      expect(window.open).not.toHaveBeenCalled()
+      expect(renderer.Terminal.instances).toEqual([terminal])
+      expect(terminal.data).toBe(input); expect(terminal.provider).toBe(providerOwner)
+      expect(terminalResourceOwnerCounts()).toEqual(owners)
+      expect(api.sessions.attach).toHaveBeenCalledOnce(); expect(api.sessions.detach).not.toHaveBeenCalled()
     })
     it(`${provider}: right button, drag and selection never open`, async () => {
       const activate = provider === 'bare URL' ? web.activate : terminal.options.linkHandler!.activate
@@ -545,7 +597,7 @@ describe('mounted passive link readout', () => {
     const data = new TextEncoder().encode('later bytes')
     await act(async () => {
       receive({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
-        data: 'later bytes', dataBytes: data, evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
+        data: 'later bytes', dataBytes: data, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
           outputByteRange: { startByte: 0, endByte: data.byteLength } } } })
       await vi.advanceTimersByTimeAsync(50)
     })
@@ -565,7 +617,7 @@ describe('mounted passive link readout', () => {
     const dataBytes = new TextEncoder().encode('pending old bytes')
     await act(async () => {
       receive({ type: 'core', hostId: session.hostId, event: { type: 'terminal-output', run: session.control.run,
-        data: 'pending old bytes', dataBytes, evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
+        data: 'pending old bytes', dataBytes, evidence: { source: 'terminal-output', observedAt: _tailFixtureEpoch(0, 0, 2), run: session.control.run,
           outputByteRange: { startByte: 0, endByte: dataBytes.byteLength } } } })
       await vi.advanceTimersByTimeAsync(50)
     })
