@@ -160,6 +160,29 @@ it('rejects changed action budget root and Run for an accepted operation while p
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
 })
 
+it('accepts retained canonical locator enrichment while rejecting changed or lost known native targets', async () => {
+  const f = await fixture('immediate', { alwaysFail: true }); await f.recover({ retryMaxAttempts: 1 }); const original = await paused(f)
+  const nativeHandle = { kind: 'provider' as const, providerId: f.provider.id, sessionId: 'original-native', transcriptPath: join(f.root, 'canonical-native.json') }
+  await f.store.compareAndSwapMetadata(original, { ...original, nativeHandle })
+  const request = await packet(f, 'enriched-control'), operation = f.client.controlAgentContinuity(request)
+  await expect(operation).resolves.toMatchObject({ receipt: { outcome: 'cancelled' } })
+  const receipt = (await operation).receipt, canonical = await saved(f), root = rootOf(canonical)
+  const active = canonical.continuityOperations![root.supervision!.activeAttemptOperationId]!
+  await f.store.compareAndSwapMetadata(canonical, { ...canonical, continuityOperations: {
+    ...canonical.continuityOperations, [active.operationId]: { ...active, nativeTarget: nativeHandle } } })
+  for (const changed of [{ ...nativeHandle, transcriptPath: join(f.root, 'another-native.json') },
+    { kind: 'provider' as const, providerId: f.provider.id, sessionId: nativeHandle.sessionId },
+    { ...nativeHandle, sessionId: 'another-native' }]) {
+    const current = await saved(f)
+    await f.store.compareAndSwapMetadata(current, { ...current, nativeHandle: changed })
+    await expect(f.client.controlAgentContinuity({ ...request, operationId: 'new-target-control' })).rejects.toMatchObject({ code: 'AGENT_CONTINUITY_SUPERSEDED' })
+  }
+  const latest = await saved(f)
+  await expect(f.store.compareAndSwapMetadata(latest, { ...latest, nativeHandle: { ...nativeHandle, providerId: 'another-provider' } })).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+  await expect(f.client.controlAgentContinuity(request)).resolves.toMatchObject({ receipt })
+  expect(f.start).toHaveBeenCalledTimes(2); expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+})
+
 it('cancels before the original prepare claim without waiting behind its Start reader', async () => {
   const f = await fixture(), prepare = f.store.prepareResume.bind(f.store)
   let enter!: () => void, release!: () => void
