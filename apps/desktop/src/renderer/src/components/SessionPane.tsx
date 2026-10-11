@@ -31,6 +31,7 @@ import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } fro
 import { formatConversationAnnotation } from '../lib/conversation-annotation-delivery'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { ContinuitySupervisionNotice } from './ContinuitySupervisionNotice'
 import { SessionRecoveryActions } from './SessionRecoveryActions'
 import { unobservedRecoveryReference, rereadUnobservedSession, type RecoverySource } from '../lib/session-recovery-actions'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
@@ -1066,6 +1067,7 @@ export function SessionPane({
       />
       {takeoverSurface}
       {launchNotice}
+      {session.kind === 'agent' ? <ContinuitySupervisionNotice key={activitySourceKey} session={session} readOnly={!projectionPolicy.allowsRecovery} /> : null}
       {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }} visible={visible}
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
