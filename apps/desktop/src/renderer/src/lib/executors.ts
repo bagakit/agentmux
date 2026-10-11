@@ -18,8 +18,8 @@ export function executorsForHost(config: AppConfig | null | undefined, hostId: s
   detections: Record<string, ExecutorDetectionState>, inventory: HostExecutorInventoryState | undefined): ExecutorChoice[] {
   const host = config?.hosts.find(item => item.id === hostId)
   if (!host) return []
-  if (host.kind === 'local') return configuredExecutors(config).map(({ id, label, providerId, command }) => ({ id, label, providerId, command,
-    detection: currentExecutorDetection(detections[executorDetectionKey(host.id, id)], id, { providerId, command }, host) }))
+  if (host.kind === 'local') return configuredExecutors(config).map(({ id, label, providerId, command, env }) => ({ id, label, providerId, command,
+    detection: currentExecutorDetection(detections[executorDetectionKey(host.id, id)], id, { providerId, command, env }, host) }))
   if (!hostExecutorInventoryMatches(inventory, host)) return []
   return (inventory.result?.executors ?? []).map(item => ({ id: item.executorId, label: item.label, providerId: item.providerId,
     command: item.command, executorRevision: item.configRevision, detection: {

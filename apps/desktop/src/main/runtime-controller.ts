@@ -1,3 +1,4 @@
+import { executorEnvironmentRevision } from '../shared/executor-probe-context.js'
 import { readInputObservation, type InputObservationReference, type InputPerformanceSender, type InputPerformanceHandle } from '@agentmux/core/control'
 import { MainPerformanceDiagnostics } from './performance-diagnostics.js'
 import { profileAgentContext } from '../shared/user-profile.js'
@@ -798,8 +799,10 @@ export class RuntimeController {
       executorId,
       providerId: executor.providerId,
       command: executor.command,
+      environmentRevision: executorEnvironmentRevision(executor.env),
       host
     })
+    const environment = structuredClone(executor.env)
     const owner = this.hosts.get(hostId)
     const signature = hostSignature(input.host)
     let executable: string | undefined
@@ -814,7 +817,7 @@ export class RuntimeController {
       const current = assertOwner()
       if (current.config.kind !== 'local') await current.client.connect()
       assertOwner()
-      const result = await current.client.probeExecutorAvailability(input.providerId, input.command)
+      const result = await current.client.probeExecutorAvailability(input.providerId, input.command, { env: environment })
       executable = result.executable
       assertOwner()
       return { input, ...result }

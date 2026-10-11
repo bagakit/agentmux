@@ -320,6 +320,7 @@ export type AgentMuxControlSettingsExecutorRefreshResult = {
     executorId: string
     providerId: string
     command: string
+    environmentRevision?: string
     host: AgentMuxControlSettingsResourceFields
   }
 } & (AgentMuxExecutorProbeResult | {
