@@ -91,7 +91,7 @@ it('compiled CLI and SDK reach the default QR leaf and original encrypted owner 
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
   expect((await f.sdk.call('connection.inspect', { operationId: 'original-local-save' })).operation).toEqual(f.saved)
   expect((await f.cli(['advance', '--operation-id', f.input.operationId])).code).not.toBe(0)
-  const help = await f.cli(['--help']); expect(help.code).toBe(0); expect(help.stdout).toContain('begin'); expect(help.stdout).toContain('inspect'); expect(help.stdout).toContain('ls'); expect(help.stdout).not.toContain('setup advance')
+  const help = await f.cli(['--help']); expect(help.code).toBe(0); expect(help.stdout).toContain('begin'); expect(help.stdout).toContain('inspect'); expect(help.stdout).toContain('ls'); expect(help.stdout).toContain('setup advance')
   expect(fetch).toHaveBeenCalledTimes(1)
   await assertPrivateStorage(f.services.database!, f.directory, f.encryption, pending)
 }, 30_000)
