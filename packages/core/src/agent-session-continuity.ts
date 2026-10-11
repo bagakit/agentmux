@@ -31,24 +31,26 @@ export type AgentMuxContinuityPolicy = {
   reminderAppend: string
   continuationEnabled: boolean
   continuationPrompt: string
+  /** Use the last main activity only when the Provider has no native interruption capability. */
+  activeInterruptionFallback: boolean
 }
 
 export const DEFAULT_AGENT_CONTINUITY_REMINDER = 'This is the same conversation restored after its previous process ended. Preserve the existing task, decisions and user constraints. Previous input with an unknown outcome has not been replayed. Review the retained conversation before taking further action.'
-export const DEFAULT_AGENT_CONTINUITY_CONTINUATION = 'Continue the task that was interrupted when the previous process ended, using the retained conversation and current workspace state.'
+export const DEFAULT_AGENT_CONTINUITY_CONTINUATION = '<amux:continue />'
 export const DEFAULT_AGENT_CONTINUITY_POLICY: Readonly<AgentMuxContinuityPolicy> = Object.freeze({
   activeRecovery: 'automatic', activeRecoveryDelayMs: 0,
   confirmedIdleWindowMs: 24 * 60 * 60 * 1000, resumeAfterExit: true,
   recheckIntervalMs: 1000, recheckMaxAttempts: 3,
   retryInitialDelayMs: 1000, retryMaxDelayMs: 30_000, retryMaxAttempts: 3,
-  reminderMode: 'default', reminderAppend: '', continuationEnabled: true,
-  continuationPrompt: DEFAULT_AGENT_CONTINUITY_CONTINUATION
+  reminderMode: 'off', reminderAppend: '', continuationEnabled: true,
+  continuationPrompt: DEFAULT_AGENT_CONTINUITY_CONTINUATION, activeInterruptionFallback: false
 })
 
 export function normalizeAgentContinuityPolicy(authored?: Partial<AgentMuxContinuityPolicy>): AgentMuxContinuityPolicy {
   const policy = { ...DEFAULT_AGENT_CONTINUITY_POLICY, ...authored }
   if (!['automatic', 'manual'].includes(policy.activeRecovery) ||
     !['off', 'default', 'default-plus-custom'].includes(policy.reminderMode) ||
-    typeof policy.resumeAfterExit !== 'boolean' || typeof policy.continuationEnabled !== 'boolean' ||
+    typeof policy.resumeAfterExit !== 'boolean' || typeof policy.continuationEnabled !== 'boolean' || typeof policy.activeInterruptionFallback !== 'boolean' ||
     typeof policy.reminderAppend !== 'string' || typeof policy.continuationPrompt !== 'string' ||
     policy.retryMaxDelayMs < policy.retryInitialDelayMs ||
     ![policy.activeRecoveryDelayMs, policy.confirmedIdleWindowMs, policy.recheckIntervalMs, policy.recheckMaxAttempts,
@@ -67,6 +69,19 @@ export function resolveAgentContinuityReminder(policy: AgentMuxContinuityPolicy)
 }
 
 export type AgentMuxContinuityPendingReason = 'runtime-unverified' | 'active-manual' | 'active-delay' | 'idle-unknown' | 'not-active' | 'idle-window-expired' | 'resume-disabled' | 'provider-unverified' | 'operation-unconfirmed' | 'recovery-supervised' | 'intent-cancelled'
+/** Frozen against the old Run before a native writer is started. This never authorizes live input. */
+export type AgentMuxContinuityInterruption = {
+  support: 'provider' | 'unsupported'
+  state: 'interrupted' | 'not-interrupted' | 'unknown'
+  source: 'native-protocol' | 'active-fallback' | 'none'
+  previousRun: AgentMuxRunRef
+  nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  observedAt: number
+  nativeObservedAt?: number
+  nativeTurnId?: string
+  evidenceId?: string
+  reason: string
+}
 /** Each selected part shares one physical input and its actual delivery receipt. */
 export type AgentMuxContinuityInputPart = {
   selected: boolean
@@ -179,6 +194,7 @@ export type AgentMuxContinuityOperation = {
   observedAt: number
   rechecks: number
   interruptedWorking?: boolean
+  interruption?: AgentMuxContinuityInterruption
   kind: 'pending' | 'starting' | 'resumed' | 'reattachable' | 'unavailable' | 'conflict' | 'retired'
   reason: string
   evidence: AgentMuxAgentContinuityRunEvidence | { kind: 'unknown-session' } | { kind: 'agent-session-store' } | { kind: 'hook-ingress-owner' } | { kind: 'user-retired'; observedAt: number }
@@ -253,6 +269,19 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     const launched = normalizeAgentContinuityLaunchInput(op.launchInput)
     if (launched.key && (launched.key.agentSessionId !== op.agentSessionId || launched.key.expectedRun.runId !== op.newRun?.runId)) throw new TypeError('Continuity launch input changed its exact Run.')
   }
+  const interruption = op.interruption
+  if (interruption && (!['provider', 'unsupported'].includes(interruption.support) ||
+      !['interrupted', 'not-interrupted', 'unknown'].includes(interruption.state) ||
+      !['native-protocol', 'active-fallback', 'none'].includes(interruption.source) ||
+      interruption.previousRun?.runId !== op.previousRun.runId || interruption.nativeTarget?.kind !== 'provider' ||
+      interruption.nativeTarget.providerId !== op.nativeTarget?.providerId || interruption.nativeTarget.sessionId !== op.nativeTarget?.sessionId ||
+      !Number.isSafeInteger(interruption.observedAt) || interruption.observedAt < 0 || typeof interruption.reason !== 'string' ||
+      interruption.source === 'active-fallback' && interruption.support !== 'unsupported' ||
+      interruption.source === 'native-protocol' && interruption.support !== 'provider' ||
+      interruption.nativeObservedAt !== undefined && (!Number.isSafeInteger(interruption.nativeObservedAt) || interruption.nativeObservedAt < 0) ||
+      [interruption.evidenceId, interruption.nativeTurnId].some(value => value !== undefined && (typeof value !== 'string' || !value)))) {
+    throw new TypeError('Invalid original continuity interruption evidence.')
+  }
   const delivery = op.recoveryDelivery
   if (delivery && (!delivery.context || delivery.context.agentSessionId !== op.agentSessionId || delivery.context.newRun?.runId !== op.newRun?.runId ||
     delivery.context.previousRun?.runId !== op.previousRun.runId || delivery.context.interruptedWorking !== true ||
@@ -271,17 +300,22 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
 export function agentContinuityAdmission(input: {
   session: AgentMuxAgentSession; trigger: AgentMuxContinuityTrigger; policy: AgentMuxContinuityPolicy;
   admittedAt: number; now: number; timingOverride?: 'startup' | 'on-open'
+  /** Last accepted durable main-native activity, supplied only by the original Core owner. */
+  lastActivityAt?: number
 }): { kind: 'resume'; reason: string; interruptedWorking: boolean } | { kind: 'pending'; reason: AgentMuxContinuityPendingReason; nextActionAt?: number } {
   const { session, policy, trigger, now } = input
   const status = session.semanticStatus
   const working = Boolean(status && isAgentActivityStatusSource(status.source) && status.state === 'working')
-  if (trigger === 'manual' || trigger === 'input' || input.timingOverride) return { kind: 'resume', reason: input.timingOverride ? 'timing-override' : 'explicit-request', interruptedWorking: working }
+  if (trigger === 'manual' || trigger === 'input') return { kind: 'resume', reason: 'explicit-request', interruptedWorking: false }
   if (!policy.resumeAfterExit) return { kind: 'pending', reason: 'resume-disabled' }
   if (!status || !isAgentActivityStatusSource(status.source)) return { kind: 'pending', reason: 'idle-unknown' }
+  const activityAt = input.lastActivityAt ?? (status.state === 'done' ? status.stateEnteredAt : status.observedAt)
+  if (activityAt === undefined || !Number.isSafeInteger(activityAt) || activityAt < 0 || activityAt > now) return { kind: 'pending', reason: 'idle-unknown' }
+  if (now - activityAt > policy.confirmedIdleWindowMs) return { kind: 'pending', reason: 'idle-window-expired' }
   if (working) {
-    if (policy.activeRecovery === 'manual') return { kind: 'pending', reason: 'active-manual' }
+    if (policy.activeRecovery === 'manual' && !input.timingOverride) return { kind: 'pending', reason: 'active-manual' }
     const nextActionAt = Math.min(Number.MAX_SAFE_INTEGER, input.admittedAt + policy.activeRecoveryDelayMs)
-    return now < nextActionAt ? { kind: 'pending', reason: 'active-delay', nextActionAt } : { kind: 'resume', reason: 'interrupted-working', interruptedWorking: true }
+    return now < nextActionAt ? { kind: 'pending', reason: 'active-delay', nextActionAt } : { kind: 'resume', reason: 'recent-activity', interruptedWorking: false }
   }
   if (status.state !== 'done') return { kind: 'pending', reason: 'not-active' }
   const enteredAt = status.stateEnteredAt
