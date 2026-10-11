@@ -2,6 +2,7 @@ import type { AgentSessionHistoryItem, AgentSessionHistorySource } from './types
 import type { ConversationInvocation, ConversationRecordProvenance, ConversationSelector } from './conversation-timeline.js'
 import { AgentMuxError } from './errors.js'
 import { parseConversationLandmarkRef } from './conversation-landmarks.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Invalid recorded conversation provenance.', 'INVALID_CONVERSATION_PROVENANCE')
@@ -22,9 +23,18 @@ function invocationScope(value: unknown): Omit<ConversationInvocation, 'callId'>
 }
 export function parseConversationProvenance(value: unknown): ConversationRecordProvenance {
   const p = object(value)
+  const native = p.nativeInput === undefined ? undefined : object(p.nativeInput)
+  const source = native === undefined ? undefined : object(native.source)
+  const adopted = p.adoptedInput === undefined ? undefined : object(p.adoptedInput)
+  if (native && Object.keys(native).some(key => !['source', 'semanticItemId', 'turnId', 'clientCorrelation'].includes(key)) ||
+      source && Object.keys(source).some(key => !['providerId', 'nativeSessionId'].includes(key)) ||
+      adopted && (Object.keys(adopted).some(key => key !== 'key') || !native)) throw new AgentMuxError('Invalid native input provenance.', 'INVALID_CONVERSATION_PROVENANCE')
   if (p.invocations !== undefined && (!Array.isArray(p.invocations) || p.invocations.length > 4096)) throw new AgentMuxError('Invalid recorded invocation extent.', 'INVALID_CONVERSATION_PROVENANCE')
   const nativeScope = p.nativeInvocationScope === undefined ? undefined : invocationScope(p.nativeInvocationScope)
   return {
+    ...(native && source ? { nativeInput: { source: { providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId) },
+      semanticItemId: text(native.semanticItemId), turnId: text(native.turnId), clientCorrelation: text(native.clientCorrelation) } } : {}),
+    ...(adopted ? { adoptedInput: { key: validateAgentPromptInputKey(adopted.key) } } : {}),
     ...(nativeScope ? { nativeInvocationScope: { source: nativeScope.source, subject: nativeScope.subject, scope: nativeScope.scope } } : {}),
     ...(p.sameEvent === undefined ? {} : { sameEvent: parseConversationLandmarkRef(p.sameEvent) }),
     ...(p.observes === undefined ? {} : { observes: parseConversationLandmarkRef(p.observes) }),
@@ -43,7 +53,8 @@ export function parseConversationProvenance(value: unknown): ConversationRecordP
 /** Optional reading metadata cannot consume the original body when its shape is unavailable. */
 export function conversationProvenanceFields(value: { conversation?: unknown; conversationDiagnostic?: unknown }): Pick<AgentSessionHistoryItem, 'conversation' | 'conversationDiagnostic'> {
   if (value.conversation === undefined) return value.conversationDiagnostic === undefined ? {} : { conversationDiagnostic: value.conversationDiagnostic as NonNullable<AgentSessionHistoryItem['conversationDiagnostic']> }
-  try { return { conversation: parseConversationProvenance(value.conversation) } }
+  try { return { conversation: parseConversationProvenance(value.conversation),
+    ...(value.conversationDiagnostic === undefined ? {} : { conversationDiagnostic: value.conversationDiagnostic as NonNullable<AgentSessionHistoryItem['conversationDiagnostic']> }) } }
   catch (error) {
     if (!(error instanceof AgentMuxError)) throw error
     return { conversationDiagnostic: { code: error.code, message: error.message, original: value.conversation } }

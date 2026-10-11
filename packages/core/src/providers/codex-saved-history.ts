@@ -129,7 +129,10 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   const messageTurnId = typeof metadata.turn_id === 'string' && metadata.turn_id.length > 0 ? metadata.turn_id : undefined
   // Conflicting native facts cannot assign this original record to either turn.
   const turnId = directTurnId && messageTurnId && directTurnId !== messageTurnId ? undefined : directTurnId ?? messageTurnId
-  const conversation = nativeConversationProvenance(parts, { providerId: 'codex', nativeSessionId })
+  const input = canonicalUser && typeof nativeItem.client_id === 'string' && nativeItem.client_id.length > 0
+    ? { source: { providerId: 'codex', nativeSessionId }, semanticItemId: nativeItem.id as string, turnId: payload.turn_id as string, clientCorrelation: nativeItem.client_id } : undefined
+  const invocation = nativeConversationProvenance(parts, { providerId: 'codex', nativeSessionId })
+  const conversation = input ? { ...invocation, nativeInput: input } : invocation
   return { id, kind, contentParts: parts,
     ...(conversation ? { conversation } : {}),
     ...metrics(record, payload, nativeSessionId),

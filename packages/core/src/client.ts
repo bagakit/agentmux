@@ -1,4 +1,5 @@
 import { AgentSessionContinuitySupervisor } from './agent-session-continuity-supervisor.js'
+import { confirmNativeInputAdoption, confirmNativeInputAdoptions } from './native-input-adoption.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead, type AgentInputMailboxPage, type AgentInputMailboxItem } from './agent-input-mailbox.js'
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
 import { classifyExecutable, executorUnavailableError, type AgentExecutableProbeContext } from './executable-probe.js'
@@ -2394,7 +2395,8 @@ export class AgentMuxClient {
       await read(binding.assertCurrent())
       const record = normalizeSessionHistoryPage(source, { source, items: [item], nextCursor: null }, 1).items[0]!
       if (record.id !== recordId) throw new AgentMuxError('The original lookup returned another native record.', 'CONTROL_PROTOCOL_ERROR')
-      return record
+      return await read(confirmNativeInputAdoption(record, { hostId: binding.sourceHostId, agentSessionId }, originalSource,
+        key => this.inspectAgentPromptSubmission(key), controller.signal))
     } finally { signal?.removeEventListener('abort', cancel); lifetime.close() }
   }
 
@@ -3000,7 +3002,9 @@ export class AgentMuxClient {
       }))
       controller.signal.throwIfAborted()
       await read(binding.assertCurrent())
-      return { agentSessionId, sourceHostId: binding.sourceHostId, ...normalizeSessionHistoryPage(source, page, limit) }
+      const normalized = normalizeSessionHistoryPage(source, page, limit)
+      const items = await read(confirmNativeInputAdoptions(normalized.items, { hostId: binding.sourceHostId, agentSessionId }, source, key => this.inspectAgentPromptSubmission(key), controller.signal))
+      return { agentSessionId, sourceHostId: binding.sourceHostId, ...normalizeSessionHistoryPage(source, { ...normalized, items }, limit) }
     } finally {
       options.signal?.removeEventListener('abort', cancelled)
       lifetime.close()
@@ -3042,7 +3046,9 @@ export class AgentMuxClient {
         ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}) }))
       await read(binding.assertCurrent())
       const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
-      return parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
+      const normalized = parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
+      const items = await read(confirmNativeInputAdoptions(normalized.items, { hostId: binding.sourceHostId, agentSessionId }, source, key => this.inspectAgentPromptSubmission(key), controller.signal))
+      return { ...normalized, items: normalizeSessionHistoryPage(source, { source, items, nextCursor: null }, limit).items }
     } finally { options.signal?.removeEventListener('abort', cancel); lifetime.close() }
   }
 

@@ -1,0 +1,47 @@
+import { isDeepStrictEqual } from 'node:util'
+import { nativeInputCorrelationKey } from './native-input-correlation.js'
+import type { ConversationRef } from './conversation.js'
+import type { AgentPromptInputKey } from './agent-prompt-condition.js'
+import type { AgentSessionHistoryItem, AgentSessionHistorySource, AgentPromptSubmissionRecord } from './types.js'
+
+/** Original claim lookup only. Reading cannot settle, dispatch or rewrite an input. */
+export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, ref: ConversationRef, source: AgentSessionHistorySource,
+  readClaim: (key: AgentPromptInputKey) => Promise<AgentPromptSubmissionRecord | null>, signal?: AbortSignal): Promise<AgentSessionHistoryItem> {
+  const native = item.conversation?.nativeInput
+  const { adoptedInput: _untrusted, ...conversation } = item.conversation ?? {}
+  const original = item.conversation ? { ...item, conversation } : item
+  if (!native) return original
+  const key = nativeInputCorrelationKey(native.clientCorrelation)
+  if (!key && !native.clientCorrelation.startsWith('amux-input-v1.')) return original
+  const unconfirmed = (): AgentSessionHistoryItem => ({ ...original, conversationDiagnostic: { code: 'CONVERSATION_INPUT_ADOPTION_UNCONFIRMED',
+    message: 'The original native input cannot be confirmed against its exact durable claim. Its complete record remains readable; no input is replayed.' } })
+  if (!key || !ref.hostId || key.agentSessionId !== ref.agentSessionId || item.kind !== 'user-message' || native.turnId !== item.turnId ||
+      !isDeepStrictEqual(native.source, source)) return unconfirmed()
+  try {
+    signal?.throwIfAborted()
+    const record = await readClaim(key), claim = record?.admission, intent = claim?.intent, plan = claim?.transport === 'native' ? claim.native.plan : undefined
+    signal?.throwIfAborted()
+    if (!record || !claim || !intent || !plan || record.agentSessionId !== ref.agentSessionId || record.run.runId !== key.expectedRun.runId ||
+        !isDeepStrictEqual(claim.inputKey, key) || !isDeepStrictEqual(intent.run, key.expectedRun) || !isDeepStrictEqual(intent.plan, plan) ||
+        plan.clientCorrelation !== native.clientCorrelation || intent.admissionIntent?.kind !== 'native-conversation' ||
+        !isDeepStrictEqual(intent.admissionIntent.expectedRun, key.expectedRun) || !isDeepStrictEqual(intent.admissionIntent.source, source) ||
+        plan.threadId !== source.nativeSessionId || plan.expectedTurnId !== intent.admissionIntent.expectedTurnId ||
+        plan.expectedTurnId !== undefined && plan.expectedTurnId !== native.turnId || claim.transport !== 'native' ||
+        claim.native.outcome === 'not-applied' || claim.native.outcome === 'admitted' && claim.native.turnId !== native.turnId) return unconfirmed()
+    return { ...original, conversation: { ...conversation, adoptedInput: { key } } }
+  } catch {
+    signal?.throwIfAborted()
+    return unconfirmed()
+  }
+}
+
+/** One bounded page; repeated canonical candidates query their exact original claim once. */
+export async function confirmNativeInputAdoptions(items: readonly AgentSessionHistoryItem[], ref: ConversationRef, source: AgentSessionHistorySource,
+  readClaim: (key: AgentPromptInputKey) => Promise<AgentPromptSubmissionRecord | null>, signal?: AbortSignal): Promise<AgentSessionHistoryItem[]> {
+  const claims = new Map<string, Promise<AgentPromptSubmissionRecord | null>>()
+  return await Promise.all(items.map(item => confirmNativeInputAdoption(item, ref, source, key => {
+    const id = JSON.stringify(key); let reading = claims.get(id)
+    if (!reading) { reading = readClaim(key); claims.set(id, reading) }
+    return reading
+  }, signal)))
+}
