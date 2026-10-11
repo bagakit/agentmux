@@ -100,13 +100,23 @@ it('uses the queue operation index, refuses disagreement and preserves read fail
 it('returns the original initial-message creation without repeating start or input after encoding changes', async () => {
   const f = await fixture(), capability = issueAgentCapability()
   await f.store.compareAndSwap(null, { ...session('source-session', 'source-operation'), run: { runId: 'source-run' }, capabilityHash: hashAgentCapability(capability) })
-  await f.store.compareAndSwap(null, session())
   const inner = f.client as any; await inner.registry.load('local'); inner.connected = true; vi.spyOn(inner.kernel, 'isConnected').mockReturnValue(true)
-  const start = vi.spyOn(inner.kernel, 'start').mockRejectedValue(new Error('must not start a replacement'))
+  inner.kernel.identity = () => ({ daemonInstanceId: 'original-runtime', protocolVersion: 18, buildIdentity: 'fixture' })
+  const start = vi.spyOn(inner.kernel, 'start').mockImplementation(async (input: any) => ({ runId: session().run.runId,
+    lifecycleOperationId: input.operationKey, workspacePath: input.cwd, program: input.program, args: input.args,
+    pid: null, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }))
   const input = vi.spyOn(inner.kernel, 'input').mockRejectedValue(new Error('must not resend first input'))
-  const reserve = vi.spyOn(inner.registry, 'reserveNew').mockRejectedValue(new Error('unexpected second reservation'))
+  vi.spyOn(f.client, 'probeAgent').mockResolvedValue({ providerId: 'claude', executable: 'claude', installed: true,
+    capabilities: f.client.providers.get('claude').catalog.capabilities })
+  inner.hookServer.isRunning = () => true
+  inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+  inner.ensureManagedHooks = async () => {}; inner.ensureTerminalHandshakeOrDegrade = async (value: unknown) => value
   const request = { providerId: 'claude', executorId: 'private', workspacePath: fixturePath("private-workspace"), createOperationId: operation,
     injectAgentMuxGuide: false, prompt: 'first task', initialMessage: { callerAgentSessionId: 'source-session', capability } }
+  // Produce the original frozen receipt through its real owner; its retained SID need not use the current encoding.
+  await f.client.createAgentWithDelivery({ ...request, agentSessionId: oldId })
+  expect(start).toHaveBeenCalledOnce(); start.mockClear()
+  const reserve = vi.spyOn(inner.registry, 'reserveNew').mockRejectedValue(new Error('unexpected second reservation'))
   for (let retry = 0; retry < 2; retry++) {
     await expect(f.client.createAgentWithDelivery(request)).resolves.toMatchObject({ session: { agentSessionId: oldId, run: session().run } })
   }
