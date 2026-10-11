@@ -47,7 +47,7 @@ it('equal text and bare IDs stay independent with explicit unconfirmed source re
  const p=page([{...native('native',[{kind:'text',text:item.content!}]),kind:'user-message' as never}])
  await render(<ConversationView sessionId={sid} executionHostId="remote-route" page={p} timeline={timeline([item])}/>)
  expect(host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(2)
- expect(labels(host)).toContain('native');expect(host.textContent).toContain('跨来源关联未确认');expect(host.textContent).toContain('发送记录')
+ expect(labels(host)).toContain('native');expect(host.textContent).not.toContain('跨来源关联未确认');expect(host.textContent).toContain('发送记录')
  const submission = host.querySelector<HTMLDetailsElement>('[data-submission-id] .message-disclosure')!
  expect(submission.open).toBe(false)
  expect([...host.querySelectorAll('.log-turn__body')].map(n=>n.textContent)).toEqual(['Equal original input'])
@@ -61,7 +61,7 @@ it('the shared source mapping exhausts all captured evidence origins without aut
  const kinds=['native-hook','native-transcript','terminal-output','run-process','acp','user','agentmux'] as const
  await render(<ConversationView sessionId={sid} page={page([])} timeline={timeline(kinds.map((source,index)=>captured('source-'+index,{source})))}/>)
  expect(new Set(labels(host))).toEqual(new Set(kinds))
- for(const text of ['Hook','原生记录观察','终端输出观察','进程观察','ACP','AgentMux 提交记录','AgentMux'])expect(host.textContent).toContain(text)
+ for(const text of ['CLI 事件回报','原生记录观察','终端输出观察','进程观察','ACP','AgentMux 提交记录','AgentMux'])expect(host.textContent).toContain(text)
 })
 
 const call={kind:'tool-call' as const,callId:'same-call',name:'Read',input:'{"path":"document.txt"}'}
@@ -76,7 +76,7 @@ it.each(['shared','desktop'])('exact cross-event invocation labels apply only to
  const recorded=host.querySelector<HTMLElement>('[data-captured-process-id="hook-tool"], [data-message-source-key*="hook-tool"]')!
  expect(recorded).not.toBeNull()
  const step=[...recorded.querySelectorAll<HTMLButtonElement>('button')].find(n=>n.hasAttribute('aria-expanded'))!;await act(async()=>step.click())
- expect(recorded.textContent).toContain('Original output');expect(recorded.textContent).toContain('Hook')
+ expect(recorded.textContent).toContain('Original output');expect(recorded.textContent).toContain('CLI 事件回报')
  const output=recorded.querySelector('[aria-label="Copy tool output"]')!.parentElement!.parentElement!
  expect(output.textContent).toContain('Original output');expect(labels(output)).not.toContain('native')
 })

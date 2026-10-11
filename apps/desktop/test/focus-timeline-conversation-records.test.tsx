@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
@@ -85,7 +86,7 @@ beforeEach(async () => {
   fixture = await nativeHistoryFixture('claude', jsonl(original))
   pages = []
   const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: { claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true } }, workspaces: [{ id: 'project', name: 'Private project', hostId: 'local', path: fixture.root, kind: 'folder' }], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-  const session: SessionSnapshot = { id: ID, kind: 'agent', providerId: 'claude', executorId: 'claude', hostId: 'local', workspacePath: fixture.root, label: 'Original Agent', createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, promptSubmissionPredecessor: null, processState: 'running', latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: NOW }, capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' }, control: { kind: 'agent', hostId: 'local', agentSessionId: ID, run: fixture.session.run } }
+  const session: SessionSnapshot = { id: ID, kind: 'agent', providerId: 'claude', executorId: 'claude', hostId: 'local', workspacePath: fixture.root, label: 'Original Agent', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1), promptSubmissionPredecessor: null, processState: 'running', latestOutputBytes: 0, status: { state: 'running', source: 'run-process', observedAt: NOW }, capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' }, control: { kind: 'agent', hostId: 'local', agentSessionId: ID, run: fixture.session.run } }
   useAppStore.setState({ config, sessions: [session], timelines: {}, agentNames: {}, tabs: {}, layouts: {}, recoveryCandidates: [], workspaceFileRevisions: {}, scratchTopicSnapshots: {}, spaceObjectIcons: {}, activeWorkspaceId: 'project', mainSurface: 'agents', agentComposerDrafts: { [ID]: DRAFT }, agentFocus: { execution: { sessionId: ID, history: [] }, pmo: { sessionId: null } }, error: null })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: fixture.root })
@@ -354,7 +355,7 @@ it('unknown, human and Agent-authored inputs remain distinct from the recipient 
 })
 
 it('zero and missing time remain original facts; only real in-range speech receives a position', async () => {
-  await writeFile(fixture.path, jsonl([native('zero', 'assistant', 'Epoch record', 0), native('untimed', 'assistant', 'Untimed reply', null), native('old', 'assistant', 'Older reply', NOW - 8 * HOUR), native('future', 'assistant', 'Future reply', NOW + HOUR), native('now', 'user', 'In-range input')]))
+  await writeFile(fixture.path, jsonl([native('zero', 'assistant', 'Epoch record', _tailFixtureEpoch(0, 0, 0)), native('untimed', 'assistant', 'Untimed reply', null), native('old', 'assistant', 'Older reply', NOW - 8 * HOUR), native('future', 'assistant', 'Future reply', NOW + HOUR), native('now', 'user', 'In-range input')]))
   await render(); await wait(() => expect(rawIds()).toEqual(['now']))
   await records(); expect(overlay().textContent).toContain('Time unknown')
   const untimed = overlay().querySelector<HTMLElement>('[data-conversation-record-id][data-record-raw-id="untimed"]')!; expect(untimed).not.toBeNull(); await act(async () => untimed.click())
@@ -386,12 +387,12 @@ it('the actual Focus consumer labels one retained Core observation without count
   await render();await wait(()=>expect(recordCount()).toBe(1))
   const marker=markers()[0]!
   expect(marker.dataset.recordKind).toBe('observation')
-  expect(marker.getAttribute('aria-label')).toContain('采集到的回复')
+  expect(marker.getAttribute('aria-label')).toContain('回复快照')
   expect(marker.querySelector('.recent-focus__message-direction')).toBeNull()
   await plotRecord('retained-observation')
-  expect(overlay().querySelector('.recent-focus__message-caption')?.textContent).toContain('采集到的回复')
+  expect(overlay().querySelector('.recent-focus__message-caption')?.textContent).toContain('回复快照')
   expect(overlay().querySelector('.recent-focus__message-body')?.textContent).toContain('Original retained observation, author not declared')
-  expect(overlay().querySelector('[data-conversation-source="native-hook"]')?.textContent).toBe('Hook')
+  expect(overlay().querySelector('[data-conversation-source="native-hook"]')?.textContent).toBe('CLI 事件回报')
   expect(overlay().querySelector('[data-conversation-source="native"]')).toBeNull()
   expect(JSON.parse(overlay().querySelector<HTMLElement>('[data-conversation-author]')!.dataset.conversationAuthor!)).toEqual({kind:'unknown'})
   healthy();expect(reads.mock.calls.length).toBeLessThanOrEqual(2)

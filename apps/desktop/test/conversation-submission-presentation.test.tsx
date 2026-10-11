@@ -169,7 +169,7 @@ it('renders observations as ordinary provenance and keeps expanded body Range th
   expect(host.querySelector('.log-turn__sender-kind')).toBeNull()
   expect(host.querySelectorAll('[data-conversation-source-role="reply-observation"]')).toHaveLength(1)
   expect(host.querySelector('.conversation-reply-observation__notice')).toBeNull()
-  expect(host.querySelector('[data-conversation-source-role]')!.getAttribute('title')).toContain('由 Hook 采集')
+  expect(host.querySelector('[data-conversation-source-role]')!.getAttribute('title')).toContain('事件回报附带的回复文本快照')
   expect(host.querySelector('[data-captured-reply-observation] button[aria-expanded]')!.getAttribute('aria-expanded')).toBe('true')
 })
 it('retains local observation disclosure, exact source key and complete Copy without a highlighted title', async () => {
