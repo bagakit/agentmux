@@ -87,14 +87,16 @@ describe('insertOrGetWorkspace (the chooseLocalFolder / add append path)', () =>
 describe('both existing IPC append paths use the shared current-state registration', () => {
   const ipc = readFileSync(new URL('../src/main/ipc.ts', import.meta.url), 'utf8')
 
-  /** The body of one `handle('<channel>', ...)` registration, up to the next handler. */
+  /** Either registered wrapper keeps the same Workspace business owner. */
   function handlerBody(channel: string): string {
-    const at = ipc.indexOf(`handle('${channel}'`)
+    const registration = new RegExp(`handle(?:WithEvent)?\\('${channel}'`).exec(ipc)
+    const at = registration?.index ?? -1
     expect(at, `self-check: ${channel} handler not found`).toBeGreaterThan(-1)
-    const next = ipc.indexOf("  handle('", at + 1)
+    const nextMatch = /\n  handle(?:WithEvent)?\('/.exec(ipc.slice(at + 1))
+    const next = nextMatch ? at + 1 + nextMatch.index : -1
     expect(next, `self-check: ${channel} handler end not found`).toBeGreaterThan(at)
     const body = ipc.slice(at, next)
-    expect(body).toContain(`handle('${channel}'`)
+    expect(body).toContain(registration![0])
     return body
   }
 
