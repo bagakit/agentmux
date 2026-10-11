@@ -21,6 +21,7 @@ export type MoteAvatarRead = {
   target: MoteAvatarTarget; revision: string;
   /** Original authored data, including unsupported records; never silently discarded. */
   choice: unknown;
+  /** Static PNG of this exact current appearance; read-only derivation does not publish another choice. */
   image?: { dataUrl: string; width: number; height: number };
   source?: { state: 'available' | 'unavailable' | 'changed'; issue?: string };
   operation?: MoteAvatarOperation; issues: string[]

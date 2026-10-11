@@ -23,7 +23,7 @@ const unconfirmed = () =>
     'The exact saved Mote profile is unconfirmed. Its original files, conversations and robot remain available. Refresh that Mote before starting this request.',
     'MOTE_CONNECTION_SOURCE_UNCONFIRMED'
   )
-/** Reads the original saved public topic and appearance. Personality, drafts and generated avatars are outside this source. */
+/** Reads the original public topic and current appearance, including its neutral static image. Personality and drafts are outside this source. */
 export class MoteConnectionSourceOwner {
   constructor(
     private readonly ports: {

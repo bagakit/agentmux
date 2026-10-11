@@ -1,12 +1,17 @@
 import { createHash } from 'node:crypto'
 import { constants, lstat, mkdir, open, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
+import { nativeTheme } from 'electron'
+import { DEFAULT_THEME_ID, resolveTheme } from '@agentmux/client-ui/theme'
+import { moteAvatarSvg } from '@agentmux/client-ui/mote-avatar-svg'
+import { isSpaceIconId } from '@agentmux/client-ui/space-icon-ids'
 import { durableWriteFile } from '@agentmux/core'
 import { avatarSeriesCanonical, isMoteAvatarSeriesChoice, type MoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
 import { parseMoteAvatarSave, parseMoteAvatarTarget, parseMoteAvatarOperationId,
   type MoteAvatarTarget, type MoteAvatarSave, type MoteAvatarOperation, type MoteAvatarRead, type MoteAvatarSaveResult } from '@agentmux/core/mote-avatar-write'
 import type { AppConfig } from '../shared/contracts.js'
-import type { MoteAvatarImage, MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
+import { isMoteFace, type MoteAvatarImage, type MoteAvatarInput, type MoteAvatarRef } from '../shared/mote-avatars.js'
+import { rasterizeMoteAvatar } from './mote-avatar-raster.js'
 import type { ConfigOwner } from './config-owner.js'
 import type { MoteAvatarSeriesOwner } from './mote-avatar-series.js'
 import type { ScratchTopics } from './scratch-topics.js'
@@ -18,9 +23,24 @@ function rawChoice(config: AppConfig, target: MoteAvatarTarget): unknown {
   const icons = config.appearance.spaceObjectIcons
   return icons && Object.hasOwn(icons,target.objectKey) ? icons[target.objectKey] : undefined
 }
-export function moteAvatarRevision(config: AppConfig, target: MoteAvatarTarget): string {
+function avatarSnapshot(config: AppConfig, target: MoteAvatarTarget, prefersDark: boolean) {
   const value = rawChoice(config,target)
-  return hash(avatarSeriesCanonical({...(value===undefined?{present:false}:{present:true,value}),publication:config.appearance.spaceObjectIconRevisions?.[target.objectKey]??null}))
+  let svg: string | null = null, issue: string | undefined
+  try {
+    if (value == null || isSpaceIconId(value)) {
+      const appearance = config.appearance, id = appearance.themeId ?? DEFAULT_THEME_ID
+      const theme = resolveTheme({ themeId: id, appAppearance: appearance.appAppearance ?? 'dark',
+        customThemes: appearance.customThemes && Object.hasOwn(appearance.customThemes, id) ? { [id]: appearance.customThemes[id] } : {} }, prefersDark)
+      if (theme.issues.length) throw new Error(theme.issues.map(item => item.message).join(' '))
+      svg = moteAvatarSvg(value ?? null, theme)
+    } else if (isMoteFace(value)) svg = moteAvatarSvg(value)
+  } catch (error) { issue = message(error) }
+  const revision = hash(avatarSeriesCanonical({...(value===undefined?{present:false}:{present:true,value}),
+    publication:config.appearance.spaceObjectIconRevisions?.[target.objectKey]??null, ...(svg ? { drawing: svg } : {})}))
+  return { choice: structuredClone(value ?? null), revision, svg, issue }
+}
+export function moteAvatarRevision(config: AppConfig, target: MoteAvatarTarget, prefersDark = true): string {
+  return avatarSnapshot(config, target, prefersDark).revision
 }
 
 /** Production IPC, native RPC and bounded fixtures share the actual original owners. */
@@ -34,6 +54,8 @@ export function createMoteAvatarWriter(config:ConfigOwner,sources:MoteAvatarSeri
     directory:target=>topics.avatarTargetDirectory(workspace(target),target.topicId,target.objectKey),
     save:(target,input)=>topics.saveAvatar(workspace(target),target.topicId,input,target.objectKey),
     read:(target,ref)=>topics.readAvatar(workspace(target),target.topicId,ref,target.objectKey),
+    render: rasterizeMoteAvatar,
+    prefersDark: () => nativeTheme.shouldUseDarkColors,
     confirm:saved=>store.confirmSaved(saved)
   })
 }
@@ -47,6 +69,8 @@ export class MoteAvatarWriter {
       directory(target:MoteAvatarTarget):Promise<string>;
       save(target:MoteAvatarTarget,input:MoteAvatarInput):Promise<MoteAvatarRef>;
       read(target:MoteAvatarTarget,ref:MoteAvatarRef):Promise<MoteAvatarImage>;
+      render(svg:string):Promise<MoteAvatarImage>;
+      prefersDark():boolean;
       /** Original configuration owner must acknowledge the exact saved bytes and directory sync. */
       confirm(saved:AppConfig):Promise<void>
     }) {}
@@ -85,8 +109,8 @@ export class MoteAvatarWriter {
   async read(rawTarget:MoteAvatarTarget,operationId?:string):Promise<MoteAvatarRead> {
     const target=parseMoteAvatarTarget(rawTarget)
     await this.original.directory(target)
-    const current=await this.config.inspect(config=>({choice:structuredClone(rawChoice(config,target)??null),revision:moteAvatarRevision(config,target)}))
-    const result:MoteAvatarRead={target,...current,issues:[]}
+    const current=await this.config.inspect(config=>avatarSnapshot(config,target,this.original.prefersDark()))
+    const result:MoteAvatarRead={target,choice:current.choice,revision:current.revision,issues:current.issue ? [current.issue] : []}
     if (operationId!==undefined) { const operation=await this.inspect(target,operationId);if (operation) result.operation=operation }
     if (isMoteAvatarSeriesChoice(current.choice)) {
       try { result.image=await this.original.read(target,current.choice.image) } catch(error) { result.issues.push(message(error)) }
@@ -94,6 +118,15 @@ export class MoteAvatarWriter {
       catch(error) { result.source={state:(error as {code?:string}).code==='AVATAR_SOURCE_REVISION_CONFLICT'?'changed':'unavailable',issue:message(error)} }
     } else if (current.choice && typeof current.choice==='object' && 'kind' in current.choice && current.choice.kind==='image') {
       try { result.image=await this.original.read(target,current.choice as MoteAvatarRef) } catch(error) { result.issues.push(message(error)) }
+    } else if (current.svg) {
+      try {
+        const image = await this.original.render(current.svg)
+        const after = await this.config.inspect(config => moteAvatarRevision(config,target,this.original.prefersDark()))
+        if (after !== current.revision) throw new Error('This Mote avatar changed while its image was being read. Refresh the same Mote profile.')
+        result.image = image
+      } catch (error) { result.issues.push(message(error)) }
+    } else if (!current.issue) {
+      result.issues.push('This saved Mote appearance is unsupported. Its original choice is retained; inspect the same avatar before creating its identity.')
     }
     return result
   }
@@ -123,7 +156,7 @@ export class MoteAvatarWriter {
       const {origin,seriesId,entryId,revision}=input.source
       const prepared=await this.sources.preview({source:{origin,seriesId,entryId},expectedRevision:revision})
       if (avatarSeriesCanonical(prepared.definition)!==avatarSeriesCanonical(input.definition)) throw new Error('The selected original avatar definition changed.')
-      await this.config.inspect(config=>{if (moteAvatarRevision(config,target)!==input.beforeRevision) throw new Error('This Mote avatar changed while editing. Read its current choice before saving again.')})
+      await this.config.inspect(config=>{if (moteAvatarRevision(config,target,this.original.prefersDark())!==input.beforeRevision) throw new Error('This Mote avatar changed while editing. Read its current choice before saving again.')})
     } catch(error) { return {state:'refused',issue:message(error),...(operation?{operation}:{}),current:await this.read(target,operationId)} }
     try {
       operation??={operationId,requestHash,phase:'intent',durability:'unknown'}
@@ -140,7 +173,7 @@ export class MoteAvatarWriter {
         const workspace=current.workspaces.find(value=>value.id===target.workspaceId)
         if (!workspace || avatarSeriesCanonical({id:workspace.id,hostId:workspace.hostId,path:workspace.path,kind:workspace.kind})!==avatarSeriesCanonical(originalWorkspace))
           throw new Error('The original Mote workspace changed before publication. Its current avatar and work remain available.')
-        if (moteAvatarRevision(current,target)!==input.beforeRevision) throw new Error('This Mote avatar changed while the image was saving. Its later choice is retained.')
+        if (moteAvatarRevision(current,target,this.original.prefersDark())!==input.beforeRevision) throw new Error('This Mote avatar changed while the image was saving. Its later choice is retained.')
         return {...current,appearance:{...current.appearance,spaceObjectIcons:{...current.appearance.spaceObjectIcons,[target.objectKey]:choice}}}
       })
       await this.original.confirm(saved)
