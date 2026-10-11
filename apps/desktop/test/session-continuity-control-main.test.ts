@@ -8,10 +8,10 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 it('Main forwards the exact original Core metadata control without waiting for presentation or invoking lifecycle methods', async () => {
   const packet: AgentMuxContinuityControlInput = { agentSessionId: 'original', intentOperationId: 'original-intent', expectedRun: { runId: 'original-run' }, operationId: 'original-cancel', action: 'cancel' }
   const receipt = { request: packet }, reply = { receipt, state: 'retired', retirement: { agentSessionId: 'original', hostId: 'original-host', run: packet.expectedRun, source: 'user', observedAt: _historyFixtureEpoch(0, 0, 1) } }
-  const client = { controlAgentContinuity: vi.fn(async () => reply), stopAgentSession: vi.fn(), ensureAgentContinuity: vi.fn() }
+  const client = { controlAgentContinuity: vi.fn(async () => reply), connect: vi.fn(async () => { throw new Error('Reader Native readiness unavailable') }), stopAgentSession: vi.fn(), ensureAgentContinuity: vi.fn() }
   const runtime = Object.create(RuntimeController.prototype) as RuntimeController
   const connect = vi.fn(() => client), projection = vi.fn(async () => { throw new Error('Display unavailable') })
-  Object.assign(runtime, { configuredClient: connect, sessionByTarget: projection })
+  Object.assign(runtime, { configuredClient: connect, sessionByTarget: projection, endpointWarnings: new Map() })
   const outcome = runtime.controlContinuity('original-host', packet)
   await expect(outcome).resolves.toEqual({ hostId: 'original-host', result: reply })
   expect(connect).toHaveBeenCalledWith('original-host'); expect(client.controlAgentContinuity).toHaveBeenCalledWith(packet)
@@ -53,11 +53,18 @@ it('the actual Main and Hosted Core cancel metadata while Native readiness is un
     await server.start(); rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(directory, 'control.sock') } }); reader = await connectHostedAgentMux({ rpc })
     const nativeConnect = vi.spyOn(reader, 'connect').mockRejectedValue(new Error('Reader Native readiness unavailable'))
     const runtime = Object.create(RuntimeController.prototype) as RuntimeController
-    Object.assign(runtime, { hosts: new Map([['saved-remote', { client: reader }]]), hostReconfigurationReservations: new Set() })
+    Object.assign(runtime, { hosts: new Map([['saved-remote', { client: reader }]]), hostReconfigurationReservations: new Set(), endpointWarnings: new Map() })
     const packet: AgentMuxContinuityControlInput = { agentSessionId: root.agentSessionId, intentOperationId: root.operationId,
       expectedRun: root.newRun, operationId: 'original-remote-cancel', action: 'cancel' }
     const pending = runtime.controlContinuity('saved-remote', packet)
-    await expect(pending).resolves.toMatchObject({ hostId: 'saved-remote', result: { receipt: { request: packet, outcome: 'cancelled' }, state: 'active', session: { hostId: 'local', agentSessionId: root.agentSessionId } } })
+    const outcome = await pending.then(value => ({ value }), error => ({ error }))
+    if ('error' in outcome) {
+      expect(nativeConnect).toHaveBeenCalledOnce()
+      expect(outcome.error).toMatchObject({ message: 'Reader Native readiness unavailable' })
+      expect((await store.readMetadata(root.agentSessionId))?.continuityOperations?.[root.operationId]?.supervision?.phase).toBe('paused')
+    }
+    const checked = 'error' in outcome ? Promise.reject(outcome.error) : Promise.resolve(outcome.value)
+    await expect(checked).resolves.toMatchObject({ hostId: 'saved-remote', result: { receipt: { request: packet, outcome: 'cancelled' }, state: 'active', session: { hostId: 'local', agentSessionId: root.agentSessionId } } })
     expect(nativeConnect).not.toHaveBeenCalled(); expect((client as unknown as { kernel: { isConnected(): boolean } }).kernel.isConnected()).toBe(false)
     expect((await store.readMetadata(root.agentSessionId))?.run).toEqual(root.newRun)
     expect((await store.readMetadata(root.agentSessionId))?.continuityOperations?.[root.operationId]?.supervision?.phase).toBe('cancelled')
