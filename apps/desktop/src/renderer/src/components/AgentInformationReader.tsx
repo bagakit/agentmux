@@ -1,3 +1,4 @@
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { useAgentBookmarkWindow } from '../lib/use-agent-bookmark-window'
 import { useAgentBookmarkReading } from '../lib/agent-bookmark-reading'
@@ -26,6 +27,7 @@ import { FocusContextStateMark } from './FocusContextState'
 import { AgentAvatar } from './AgentAvatar'
 import { WorkbenchTabGlyph, WorkbenchTopology } from './WorkbenchTopology'
 import { getWindowOverlayHost, markWindowOverlayDismissal, wasWindowOverlayDismissed } from './WindowOverlayHost'
+import { getModalOverlayContainer, ModalAttachmentDismissal, MODAL_OVERLAY_SLOT_REMOVED } from '@agentmux/client-ui/components/Modal'
 
 const InfoIcon = semanticIconComponent('status.info')
 const CloseIcon = semanticIconComponent('action.close')
@@ -34,6 +36,21 @@ const ResizeIcon = semanticIconComponent('layout.resize-window')
 const ResetIcon = semanticIconComponent('action.reset-view')
 const OpenIcon = semanticIconComponent('action.open-external')
 const PinIcon = semanticIconComponent('action.pin')
+
+function moveReadingHost(host: HTMLElement, destination: HTMLElement, before: Element | null = null) {
+  const document = host.ownerDocument
+  const selection = document.getSelection(), range = selection?.rangeCount ? selection.getRangeAt(0) : null
+  const saved = range && host.contains(range.startContainer) && host.contains(range.endContainer)
+    ? { range, start: range.startContainer, startOffset: range.startOffset, end: range.endContainer, endOffset: range.endOffset } : null
+  const active = document.activeElement, focus = active && host.contains(active) ? active as HTMLElement : null
+  if (host.isConnected && host.ownerDocument === destination.ownerDocument && typeof destination.moveBefore === 'function') destination.moveBefore(host, before)
+  else destination.insertBefore(host, before)
+  focus?.focus({ preventScroll: true })
+  if (saved && document === destination.ownerDocument) {
+    saved.range.setStart(saved.start, saved.startOffset); saved.range.setEnd(saved.end, saved.endOffset)
+    selection?.removeAllRanges(); selection?.addRange(saved.range)
+  }
+}
 
 function FocusContextStateSummary({ context, explanationVisible }: { context: FocusContext; explanationVisible: boolean }) {
   const session = useAppStore(state => state.sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId))
@@ -77,10 +94,18 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   const requestDocument = opening.anchor.ownerDocument
   const [document, setDocument] = useState(() => requestDocument)
   // A stable Portal container preserves this reading tree when its native shell returns.
-  const [readingHost] = useState(() => { const host = requestDocument.createElement('div'); host.style.display = 'contents'; return host })
+  const [readingHost] = useState(() => {
+    const host = requestDocument.createElement('div'); host.style.display = 'contents'; host.dataset.agentReadingHost = opening.id; return host
+  })
   const window = document.defaultView!
   const visible = useWorkbenchDocumentVisibility(document)
   const request = useAgentBookmarkReading(opening, visible)
+  const readingOrder = agentInformationPreview.getAll()
+  // A durable reader leaves its source scope once. Later unpinning cannot silently
+  // reattach the same reading tree to a modal that may already have closed.
+  const detachedFromModal = useRef(Boolean(opening.pinned || opening.bookmark))
+  if (request.pinned || request.bookmark) detachedFromModal.current = true
+  const attachedToModal = visible && !detachedFromModal.current && opening.anchor.ownerDocument === document && getModalOverlayContainer(opening.anchor) !== null
   const context = request.context
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
   const bookmarkWindow = useAgentBookmarkWindow(request.bookmark, panel, reading, document)
@@ -101,7 +126,10 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   const transferredFocus = useRef<HTMLElement | null>(null)
   const transferredSelection = useRef<{ start: Node; startOffset: number; end: Node; endOffset: number } | null>(null)
   useLayoutEffect(() => {
-    getWindowOverlayHost(document)?.appendChild(readingHost)
+    const modalSlot = !detachedFromModal.current && opening.anchor.ownerDocument === document
+      ? getModalOverlayContainer(opening.anchor) : null
+    const destination = modalSlot ?? getWindowOverlayHost(document)
+    if (destination && readingHost.parentElement !== destination) moveReadingHost(readingHost, destination)
     const saved = transferredSelection.current
     transferredSelection.current = null
     transferredFocus.current?.focus({ preventScroll: true })
@@ -112,7 +140,28 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         const selection = document.getSelection(); selection?.removeAllRanges(); selection?.addRange(range)
       }
     }
-  }, [document, readingHost])
+    const departed = (event: Event) => {
+      if (event.target === modalSlot && !detachedFromModal.current) agentInformationPreview.dismiss(request.token)
+    }
+    modalSlot?.addEventListener(MODAL_OVERLAY_SLOT_REMOVED, departed)
+    return () => modalSlot?.removeEventListener(MODAL_OVERLAY_SLOT_REMOVED, departed)
+  }, [document, readingHost, opening.anchor, request.token, request.pinned, request.bookmark?.key])
+  // Original reading intent owns front-to-back order only within this exact container.
+  // A bookmark never acquires another global layer by accumulating more siblings.
+  useLayoutEffect(() => {
+    const destination = readingHost.parentElement
+    if (!destination) return
+    const requests = readingOrder, index = requests.findIndex(item => item.token === request.token)
+    if (index < 0) return
+    let before: HTMLElement | null = null
+    for (let next = index + 1; next < requests.length; next += 1) {
+      const candidate = document.getElementById(requests[next]!.id)?.parentElement
+      if (candidate?.parentElement === destination && candidate.dataset.agentReadingHost === requests[next]!.id) { before = candidate; break }
+    }
+    let following = readingHost.nextElementSibling
+    while (following && !following.hasAttribute('data-agent-reading-host')) following = following.nextElementSibling
+    if (following !== before) moveReadingHost(readingHost, destination, before)
+  }, [document, readingHost, request.token, readingOrder, request.pinned, request.bookmark?.key])
   useLayoutEffect(() => observeWorkbenchDocumentReturn((source, destination) => {
     if (source !== document) return
     const selection = source.getSelection(), range = selection?.rangeCount ? selection.getRangeAt(0) : null
@@ -124,6 +173,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     const heldRange = held && panel.current?.contains(held.startContainer) && panel.current.contains(held.endContainer)
       ? { start: held.startContainer, startOffset: held.startOffset, end: held.endContainer, endOffset: held.endOffset } : null
     // Move before the old native shell may close; React keeps the exact same Portal target.
+    detachedFromModal.current = true
     getWindowOverlayHost(destination)?.appendChild(readingHost)
     if (heldRange) {
       const rebound = destination.createRange(); rebound.setStart(heldRange.start, heldRange.startOffset); rebound.setEnd(heldRange.end, heldRange.endOffset)
@@ -285,32 +335,32 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     const stop = autoUpdate(request.anchor, surface, () => { void update() })
     return () => { current = false; stop(); cancelDeparture() }
   }, [request.token, request.pinned, request.bookmark?.bounds, document, visible])
+  function escapeReading(event: KeyboardEvent) {
+    if (event.defaultPrevented || wasWindowOverlayDismissed(event) || isImeOwnedKeyboardEvent(event)) return
+    if (event.key.toLowerCase() === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && panel.current?.contains(document.activeElement) &&
+      !(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('input, textarea, [contenteditable="true"]'))) { event.preventDefault(); togglePin(); return }
+    if (event.key !== 'Escape') return
+    if (!panel.current?.contains(document.activeElement) && panel.current?.contains(event.target as Node) !== true &&
+      (document.activeElement !== request.anchor || agentInformationPreview.get()?.token !== request.token)) return
+    if (request.pinned && !panel.current?.contains(document.activeElement)) return
+    markWindowOverlayDismissal(event); event.preventDefault()
+    if (tab) showReading()
+    else close(true)
+  }
   useEffect(() => {
-    const escape = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || wasWindowOverlayDismissed(event)) return
-      if (event.key.toLowerCase() === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && panel.current?.contains(document.activeElement) &&
-        !(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('input, textarea, [contenteditable="true"]'))) { event.preventDefault(); togglePin(); return }
-      if (event.key !== 'Escape') return
-      if (!panel.current?.contains(document.activeElement) && panel.current?.contains(event.target as Node) !== true &&
-        (document.activeElement !== request.anchor || agentInformationPreview.get()?.token !== request.token)) return
-      if (request.pinned && !panel.current?.contains(document.activeElement)) return
-      markWindowOverlayDismissal(event); event.preventDefault()
-      if (tab) showReading()
-      else close(true)
-    }
     const outside = (event: Event) => { if (!panel.current?.contains(event.target as Node)) agentInformationPreview.dismiss(request.token) }
-    document.addEventListener('keydown', escape)
+    document.addEventListener('keydown', escapeReading)
     document.addEventListener('pointerdown', outside, true)
     window.addEventListener('scroll', outside, true)
     const resize = () => agentInformationPreview.dismiss(request.token)
     window.addEventListener('resize', resize)
     return () => {
-      document.removeEventListener('keydown', escape)
+      document.removeEventListener('keydown', escapeReading)
       document.removeEventListener('pointerdown', outside, true); window.removeEventListener('scroll', outside, true); window.removeEventListener('resize', resize)
     }
   }, [request, tab, document])
   return createPortal(<WorkbenchDocumentContext.Provider value={{ document, window: workbenchDocumentIdentity(document) }}><DesktopClientUiProvider document={document}><div ref={panel} id={request.id} className="focus-context-hover agent-information-reader" role="region"
-    data-state="open" data-pinned={request.pinned || undefined} data-bookmark-key={request.bookmark?.key} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden', zIndex: `calc(var(--layer-popover) + ${agentInformationPreview.getAll().findIndex(item => item.token === request.token)})` }}
+    data-state="open" data-pinned={request.pinned || undefined} data-bookmark-key={request.bookmark?.key} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden', zIndex: 'var(--layer-popover)' }}
     onPointerDownCapture={() => { if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }}
     onPointerEnter={cancelDeparture} onPointerLeave={leave} onFocus={() => { cancelDeparture(); if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }} onBlur={event => {
       if (event.relatedTarget && (event.relatedTarget as Node).nodeType && (panel.current?.contains(event.relatedTarget as Node) || event.relatedTarget === request.anchor)) return
@@ -356,5 +406,5 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       }}>Open Agent <OpenIcon size={13} aria-hidden="true" /></button>
       <button type="button" className="agent-information-reader__close" onClick={() => close(true)} aria-label="Close Agent reading" title="Close · Esc"><CloseIcon size={15} aria-hidden="true" /></button>
     </footer>
-  </div></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>, readingHost)
+  </div><ModalAttachmentDismissal active={attachedToModal} targetRef={panel} onEscapeKeyDown={escapeReading} /></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>, readingHost)
 }
