@@ -49,21 +49,27 @@ it.each(['focus', 'workspace'] as const)('recalls six loaded original inputs and
   await key(body, 'Escape'); expect(detail()).toBeNull(); expect(panel()).toBe(originalPanel); expect(document.activeElement).toBe(entry)
   await key(entry, 'Escape'); expect(panel()).toBeNull()
 })
-it('waits for hover intent, transfers to full text and never takes later outside focus', async () => {
-  await open(); const entry = entries().at(-1)!, outside = document.createElement('input'); document.body.append(outside); outside.focus()
+it.each(['focus', 'workspace'] as const)('requires explicit input reading and keeps it through pointer transfer in %s', async surface => {
+  await open(surface); const originalPanel = panel(), entry = entries().at(-1)!, outside = document.createElement('input'); document.body.append(outside); outside.focus()
   try {
-    await pointer(entry, 'pointerover'); expect(detail()).toBeNull(); await settle()
-    expect(detail()!.textContent).toContain('COMPLETE ORIGINAL INPUT TAIL'); expect(document.activeElement).toBe(outside)
-    await pointer(entry, 'pointerout', detail()!); await pointer(detail()!, 'pointerover', entry); await settle(); expect(detail()).not.toBeNull()
-    await act(async () => detail()!.querySelector<HTMLElement>('.agent-input-recall__original-body')!.focus())
+    await pointer(entry, 'pointerover'); await settle()
+    expect(detail()).toBeNull(); expect(panel()).toBe(originalPanel); expect(document.activeElement).toBe(outside)
+    expect(panel().querySelector('.agent-input-recall h4')!.textContent).toContain('Click or Enter to read')
+    await inspect()
+    const original = detail()!, body = original.querySelector<HTMLElement>('[data-agent-input-reading]')!
+    await pointer(entry, 'pointerout', body); await pointer(original, 'pointerover', entry); await settle()
+    expect(detail()).toBe(original); expect(body.textContent).toContain('COMPLETE ORIGINAL INPUT TAIL')
+    const footer = panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!
+    await pointer(original, 'pointerout', footer); await act(async () => footer.focus()); await settle()
+    expect(detail()).toBe(original); expect(document.activeElement).toBe(footer)
     await act(async () => outside.focus()); await settle()
-    expect(detail()).toBeNull(); expect(document.activeElement).toBe(outside)
+    expect(panel()).toBeNull(); expect(document.activeElement).toBe(outside)
   } finally { outside.remove() }
 })
-it('keeps inspected original DOM and selection across pin and metadata, then discards it when its source is replaced', async () => {
+it('keeps inspected original DOM and selection across pin and metadata, then holds the earlier reading when its Run changes', async () => {
   await open(); await inspect()
   const original = detail()!, prose = original.querySelector('p')!, range = document.createRange(); range.selectNodeContents(prose); document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
-  const selection = document.getSelection()!.toString(), reads = vi.mocked(api.sessions.historyPage).mock.calls.length
+  const selection = document.getSelection()!.toString()
   await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click())
   await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
   await act(async () => panel().querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
@@ -75,7 +81,7 @@ it('keeps inspected original DOM and selection across pin and metadata, then dis
     expect(detail()).toBe(original); expect(document.activeElement).toBe(outside)
   } finally { outside.remove() }
   await act(async () => useAppStore.setState({ sessions: [{ ...agent, control: { ...agent.control, run: { runId: 'replacement-recall-run' } } }, neighbor] }))
-  expect(detail()).toBeNull(); expect(panel().textContent).toContain('Original Run or source is no longer confirmed')
+  expect(detail()).toBe(original); expect(original.querySelector('p')).toBe(prose); expect(panel().textContent).toContain('Reading an earlier Run or source')
   await act(async () => useAppStore.setState({ sessions: [agent, neighbor] }))
-  expect(detail()).toBeNull(); expect(api.sessions.historyPage).toHaveBeenCalledTimes(reads)
+  expect(detail()).toBe(original); expect(api.sessions.historyPage).toHaveBeenLastCalledWith(agent.control, { limit: 30 })
 })

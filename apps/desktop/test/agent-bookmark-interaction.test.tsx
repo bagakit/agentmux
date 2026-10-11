@@ -71,12 +71,12 @@ it('keeps pinned hover on the summary without changing the Agent workface', asyn
   expect(panel().querySelector('.agent-information-reader__reading')!.textContent).toContain('Original reply.')
   expect(select).not.toHaveBeenCalled(); expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
 })
-it('cancels the pending unpinned hover intent when the same window is pinned', async () => {
+it('keeps original input closed across unpinned hover and pin', async () => {
   await open(); await hover(entries()[0]!); await pin(400); await settle()
   expect(inspection()).toBeNull(); expect(panel().dataset.pinned).toBe('true')
 })
-it('retains ordinary unpinned hover and the already inspected input across pin', async () => {
-  await open(); await hover(entries()[0]!); await settle()
+it('retains the explicitly inspected input across pin', async () => {
+  await open(); await act(async () => entries()[0]!.click())
   const held = inspection()!; expect(held.textContent).toContain('Original input 0')
   await pin(400); await hover(entries()[1]!); await settle()
   expect(inspection()).toBe(held); expect(held.textContent).not.toContain('Original input 1')

@@ -9,7 +9,8 @@ export default defineConfig({ ...shared, cacheDir: '.tmp/agent-bookmark-interact
     const path = relative(root, id.split('?')[0]!), mode = process.env.PINNED_WINDOW_MUTATION
     const mutations: Record<string, [string, string, string]> = {
       size: ['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts', 'Math.max(1, bounds.height)', 'Math.max(260, bounds.height)'],
-      hover: ['apps/desktop/src/renderer/src/components/AgentInputRecap.tsx', "event.pointerType === 'touch' || request.pinned", "event.pointerType === 'touch'"],
+      hover: ['apps/desktop/src/renderer/src/components/AgentInputRecap.tsx', 'aria-expanded={inspected?.message.id === message.id}', 'aria-expanded={inspected?.message.id === message.id} onPointerEnter={event => openInput(message, event.currentTarget)}'],
+      departure: ['apps/desktop/src/renderer/src/components/AgentInputRecap.tsx', 'className="agent-input-recall__inspection"', 'className="agent-input-recall__inspection" onPointerLeave={() => setInspected(null)}'],
       pointer: ['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts', 'onPointerCancel(event: ReactPointerEvent<HTMLElement>) { if (event.pointerId === gesture.current?.pointerId) end(false) }', 'onPointerCancel() { end(false) }']
     }
     const mutation = mode ? mutations[mode] : undefined
@@ -18,4 +19,4 @@ export default defineConfig({ ...shared, cacheDir: '.tmp/agent-bookmark-interact
     if (process.env.PINNED_WINDOW_LOADED && path.startsWith('apps/desktop/src/')) appendFileSync(process.env.PINNED_WINDOW_LOADED, JSON.stringify({ path, sourceSha256: createHash('sha256').update(code).digest('hex'), servedSha256: createHash('sha256').update(served).digest('hex'), mutated: served !== code }) + '\n')
     return served === code ? undefined : { code: served, map: null }
   }
-}], test: { ...shared.test, include: ['apps/desktop/test/agent-bookmark-interaction.test.tsx', 'apps/desktop/test/agent-bookmarks.integration.test.tsx'], maxWorkers: 1, fileParallelism: false, passWithNoTests: false } })
+}], test: { ...shared.test, include: ['apps/desktop/test/agent-bookmark-interaction.test.tsx', 'apps/desktop/test/agent-bookmarks.integration.test.tsx', 'apps/desktop/test/agent-input-recall.test.tsx', 'apps/desktop/test/agent-reading-images.test.tsx'], maxWorkers: 1, fileParallelism: false, passWithNoTests: false } })
