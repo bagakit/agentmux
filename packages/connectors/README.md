@@ -733,6 +733,17 @@ amux connection setup inspect --operation-id management-confirmation
 amux connection setup ls --connection saved-bot
 ```
 
+`setup ls` also returns `support`, a local implementation declaration for the
+current saved Connection revision. An existing bot has
+`{ "connectionRevision": 1, "capabilities": ["management-authentication"] }`
+when its registered adapter supports that application's domain; an unsupported
+bot has an empty capability array, and an absent Connection has `support: null`.
+This read does not load the native adapter, inspect the Vault or contact the
+platform. Pausing a bot or automatic traffic preserves management discovery.
+Support never confirms login, application authority, grants, publication or a
+live connection. Clients match the revision before offering a new scan and keep
+existing manual setup and original-result recovery available.
+
 The begin input is:
 
 ```json
@@ -746,8 +757,9 @@ The begin input is:
 
 The native Feishu leaf issues one raw QR authentication challenge. Its payload,
 flow key, cookies, console CSRF and account/enterprise identity are encrypted
-through the original secret port. Safe durable records and list results contain
-only request, authentication-stage and secure-handoff facts. Begin and inspect
+through the original secret port. Safe durable records and list summaries contain
+only request, authentication-stage and secure-handoff facts; local support is
+reported separately. Begin and inspect
 reveal active confirmation material only to the original transport-approved actor.
 Present it only on that confirmation surface and redact ordinary logs. Inspect
 and list perform local reads; a changed bot revision withholds the old challenge
