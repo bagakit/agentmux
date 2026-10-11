@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { NoteViewToolbarContext } from '../lib/note-view-toolbar'
 import { documentKey } from '../lib/workbench-tabs'
@@ -30,13 +30,13 @@ function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () 
 }
 
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
-export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty, onCheckOriginal, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }: {
+export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty, onCheckOriginal, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, sourceCoverage }: {
   resource?: NoteResource; document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string, editorBefore?: string) => void; onSave: () => void
   onOpen: (source: NoteSource, blockId: string) => void; revealBlock?: NoteBlockTarget; onRevealed?: () => void
   focusRequest?: number; canFocus?: () => boolean; onFocused?: (nonce: number) => void
   restoredBlock?: NoteBlockTarget; onSelectedBlock?: (target: NoteBlockTarget) => void
   onOpenPage?: (page: NotebookPage, blockId?: string) => Promise<void> | void
-  dirty?: boolean; onCheckOriginal?: () => void
+  dirty?: boolean; onCheckOriginal?: () => void; sourceCoverage?: ReactNode
   onCompositionChange?: (composing: boolean) => void
   onSnapshotIssue?: (displayedRaw: string, incomingRaw: string, reason: string) => void
   onKeepDisplayedDraft?: (displayedRaw: string, incomingRaw: string) => void
@@ -143,8 +143,12 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const links = useNoteLinkNavigation(openLinkedPage, catalog, presentation.active && !canvasOpen,
     (link, target) => link.referenceId ? handle?.bindLink(link, target) ?? false : true,
     sourceIdentity)
-  if (read.status === 'invalid') return <div><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
-    <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div></div>
+  const footer = registered || sourceCoverage ? <footer className="note-reading-footer" aria-label="Note references and sources">
+    {read.status === 'valid' && registered ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active && !canvasOpen} onOpen={openLinkedPage} selectedBlockId={restoredBlock?.blockId} /> : null}
+    {sourceCoverage}
+  </footer> : null
+  if (read.status === 'invalid') return <div className="note-file-view"><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
+    <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>{footer}</div>
   const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active && !canvasOpen} />
   return <div className="note-file-view">
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
@@ -173,6 +177,6 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       } } : {})} />
     </WorkbenchPresentationContext.Provider></div>
     {links.dialog}
-    {registered ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active && !canvasOpen} onOpen={openLinkedPage} selectedBlockId={restoredBlock?.blockId} /> : null}
+    {footer}
   </div>
 }
