@@ -33,10 +33,13 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
   const position = useAppStore(state => positionKey(state, tabId, regionId)), agentNames = useAppStore(state => state.agentNames)
   const [refresh, setRefresh] = useState(0)
   const [timeline, setTimeline] = useState<Timeline | null>(null), [preview, setPreview] = useState<Preview | null>(null)
+  const [selected, setSelected] = useState<NoteHistoryEntry | null>(null)
   const [loading, setLoading] = useState(false), [previewing, setPreviewing] = useState<string | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [previewIssue, setPreviewIssue] = useState<string | null>(null)
   const [action, setAction] = useState<NoteHistorySelection | null>(null), [working, setWorking] = useState(false)
   const epoch = useRef(0), readRequest = useRef(0), previewRequest = useRef(0), running = useRef<number | null>(null)
+  const activityOpener = useRef<HTMLButtonElement | null>(null), backButton = useRef<HTMLButtonElement | null>(null), restoreActivityFocus = useRef(false)
+  const confirmationPanel = useRef<HTMLElement | null>(null)
   const shown = useRef(false); shown.current = active
   const current = (ticket: number) => epoch.current === ticket && shown.current && positionKey(useAppStore.getState(), tabId, regionId) === position
   function checkedHistory(target: NoteHistoryTarget, value: Awaited<ReturnType<typeof api.files.historyPublic>>, params: { before?: number; eventId?: string; includeContent?: boolean } = {}): NoteHistorySnapshot {
@@ -48,7 +51,8 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
     const ticket = ++epoch.current
     ++readRequest.current; ++previewRequest.current
     running.current = null; setWorking(false)
-    setLoading(false); setPreviewing(null); setPreview(null); setAction(null); setIssue(null); setPreviewIssue(null); setTimeline(null)
+    restoreActivityFocus.current = false; activityOpener.current = null
+    setLoading(false); setPreviewing(null); setPreview(null); setSelected(null); setAction(null); setIssue(null); setPreviewIssue(null); setTimeline(null)
     if (active) {
       setLoading(true)
       void (async () => {
@@ -65,6 +69,15 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
     }
     return () => { ++epoch.current; ++previewRequest.current }
   }, [tabId, regionId, noteId, position, active, refresh])
+  useEffect(() => {
+    if (!active) { restoreActivityFocus.current = false; return }
+    if (selected) backButton.current?.focus()
+    else if (restoreActivityFocus.current) {
+      restoreActivityFocus.current = false
+      if (activityOpener.current?.isConnected) activityOpener.current.focus()
+    }
+  }, [selected, active])
+  useEffect(() => { if (active && action) confirmationPanel.current?.focus() }, [action, active])
   const activities = useMemo(() => {
     const groups = new Map<string, NoteHistoryEntry[]>()
     for (const entry of timeline?.entries ?? []) {
@@ -92,10 +105,11 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
     } catch (error) { if (current(ticket) && readRequest.current === request) setIssue(presentError(error)) }
     finally { if (current(ticket) && readRequest.current === request) setLoading(false) }
   }
-  async function showVersion(entry: NoteHistoryEntry) {
-    if (!timeline || !active) return
+  async function showVersion(entry: NoteHistoryEntry, opener: HTMLButtonElement) {
+    if (!timeline || !active || working || running.current !== null) return
     const ticket = epoch.current, request = ++previewRequest.current, target = timeline.target
-    setPreview(null); setPreviewIssue(null); setPreviewing(entry.eventId); setAction(null)
+    activityOpener.current = opener; restoreActivityFocus.current = false
+    setSelected(entry); setPreview(null); setPreviewIssue(null); setPreviewing(entry.eventId); setAction(null)
     try {
       const params = { eventId: entry.eventId, includeContent: true }
       const value = await api.files.historyPublic({ ...target, ...params, limit: 50 })
@@ -105,6 +119,12 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
       setPreview({ target, entry: { ...original, content: original.content, beforeContent: original.beforeContent } })
     } catch (error) { if (current(ticket) && previewRequest.current === request) setPreviewIssue(presentError(error)) }
     finally { if (current(ticket) && previewRequest.current === request) setPreviewing(null) }
+  }
+  function backToActivities() {
+    if (!active || working || running.current !== null) return
+    ++previewRequest.current
+    restoreActivityFocus.current = true
+    setSelected(null); setPreview(null); setPreviewIssue(null); setPreviewing(null); setAction(null)
   }
   async function applySelection() {
     if (!action || !active || running.current !== null) return
@@ -117,12 +137,19 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
     finally { if (running.current === ticket) { running.current = null; setWorking(false) } }
   }
   if (!active) return null
+  const detailEntry = preview?.entry ?? selected
+  const confirmation = action ? <section ref={confirmationPanel} tabIndex={-1} className="note-version-history__confirm" aria-label="Confirm history change">
+    <p>{'eventId' in action ? 'Replace the saved document with this entire version? Your current local draft will be kept.' : 'Undo all edits in this saved activity while keeping later nonconflicting changes. Overlapping edits are kept for review.'}</p>
+    <button type="button" className="note-text-button" disabled={!active || working} onClick={() => void applySelection()}>{working ? 'Applying…' : 'eventId' in action ? 'Replace saved document' : 'Undo selected activity'}</button>
+    <button type="button" className="note-text-button" disabled={working} onClick={() => setAction(null)}>Cancel</button>
+  </section> : null
   return <section className="note-version-history" aria-label="Saved versions">
     <div className="note-version-history__body">
+      {issue ? <p className="note-version-history__issue" role="status">{issue}</p> : null}
+      <div hidden={selected !== null} inert={selected !== null}>
       <div className="note-version-history__heading"><h3>Saved versions</h3>
         <button type="button" className="note-text-button" disabled={!active || loading || working} onClick={() => setRefresh(value => value + 1)}>Refresh history</button></div>
       <p className="note-version-history__scope">Grouped by activity. Previewing a version does not change your Note.</p>
-      {issue ? <p className="note-version-history__issue" role="status">{issue}</p> : null}
       {timeline?.reason ? <p className="note-version-history__issue" role="status">History is partly unconfirmed. {timeline.reason}</p> : null}
       {loading && !timeline ? <p role="status">Reading saved history…</p> : null}
       {timeline && !timeline.entries.length ? <p>No saved versions in this history window.</p> : null}
@@ -133,7 +160,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
             <summary><DisclosureIcon size={12} />{author(latest.actor)}<EventTime at={latest.at} /><span>{entries.length} loaded {entries.length === 1 ? 'revision' : 'revisions'}</span></summary>
             <div className="note-version-history__revisions">{entries.map(entry => <div className="note-version-history__revision" key={entry.eventId}>
               <span title={entry.eventId}>{operationLabel[entry.operation]} · {statusLabel[entry.status]}<small><EventTime at={entry.at} timeOnly /></small></span>
-              <button type="button" className="note-text-button" disabled={!active || working || previewing === entry.eventId} aria-label={`Preview version ${entry.eventId}`} onClick={() => void showVersion(entry)}>{previewing === entry.eventId ? 'Reading…' : 'Preview changes'}</button>
+              <button type="button" className="note-text-button" disabled={!active || working || previewing === entry.eventId} aria-label={`Preview version ${entry.eventId}`} onClick={event => void showVersion(entry, event.currentTarget)}>{previewing === entry.eventId ? 'Reading…' : 'Preview changes'}</button>
             </div>)}</div>
             <details className="note-version-history__identity">
               <summary>Activity details</summary>
@@ -142,22 +169,24 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
               </dl>
             </details>
             {canUndo ? <button type="button" className="note-text-button" disabled={!active || working} onClick={() => setAction({ target: timeline.target, batchId, batchLastEventId: latest.eventId })}>Undo this activity…</button> : null}
+            {action && 'batchId' in action && action.batchId === batchId ? confirmation : null}
           </details>
         })}</div>
         {timeline.hasMore ? <button type="button" className="note-text-button" disabled={!active || loading || working} onClick={() => void older()}>{loading ? 'Reading…' : 'Load older changes'}</button> : null}
       </> : null}
-      {previewIssue ? <p className="note-version-history__issue" role="status">{previewIssue}</p> : null}
-      {preview && active ? <section className="note-version-history__preview" aria-label="Version preview">
-        <div className="note-version-history__heading"><h3>{operationLabel[preview.entry.operation]} · {statusLabel[preview.entry.status]}</h3>{author(preview.entry.actor)}
-          {preview.entry.status === 'committed' ? <button type="button" className="note-text-button" disabled={!active || working} onClick={() => setAction({ target: preview.target, eventId: preview.entry.eventId })}>Restore this entire version…</button> : null}</div>
-        <p>{preview.entry.beforeContent === null ? 'Before: file did not exist' : 'Before this change'} → After this change</p>
-        <div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening version comparison…</p>}><ReadonlyDiffEditor original={preview.entry.beforeContent ?? ''} modified={preview.entry.content} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div>
+      </div>
+      {selected && detailEntry ? <section className="note-version-history__preview" aria-label="Version preview">
+        <button ref={backButton} type="button" className="note-text-button" disabled={working} onClick={backToActivities}>Back to activities</button>
+        <div className="note-version-history__heading"><h3>{operationLabel[detailEntry.operation]} · {statusLabel[detailEntry.status]}</h3>{author(detailEntry.actor)}<EventTime at={detailEntry.at} /></div>
+        {previewing ? <p role="status">Reading saved version…</p> : null}
+        {previewIssue ? <p className="note-version-history__issue" role="status">{previewIssue}</p> : null}
+        {preview ? <>
+          {preview.entry.status === 'committed' ? <button type="button" className="note-text-button" disabled={!active || working} onClick={() => setAction({ target: preview.target, eventId: preview.entry.eventId })}>Restore this entire version…</button> : null}
+          <p>{preview.entry.beforeContent === null ? 'Before: file did not exist' : 'Before this change'} → After this change</p>
+          <div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening version comparison…</p>}><ReadonlyDiffEditor original={preview.entry.beforeContent ?? ''} modified={preview.entry.content} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div>
+        </> : null}
       </section> : null}
-      {action ? <section className="note-version-history__confirm" aria-label="Confirm history change">
-        <p>{'eventId' in action ? 'Replace the saved document with this entire version? Your current local draft will be kept.' : 'Undo all edits in this saved activity while keeping later nonconflicting changes. Overlapping edits are kept for review.'}</p>
-        <button type="button" className="note-text-button" disabled={!active || working} onClick={() => void applySelection()}>{working ? 'Applying…' : 'eventId' in action ? 'Replace saved document' : 'Undo selected activity'}</button>
-        <button type="button" className="note-text-button" disabled={working} onClick={() => setAction(null)}>Cancel</button>
-      </section> : null}
+      {action && 'eventId' in action ? confirmation : null}
     </div>
   </section>
 }
