@@ -9,8 +9,8 @@ import { AgentMuxControlServer } from '../packages/core/src/public-rpc-server.js
 import { connectAgentMuxRpc } from '../packages/core/src/public-rpc-client.js'
 import { AgentMuxSpatialStateStore } from '../packages/core/src/spatial-state.js'
 import { createWorkspaceLayout } from '../packages/core/src/spatial-layout.js'
-import { consumeJsonReadEntry, parseConversationUnit, projectConversationReading, conversationRecordId,
-  type AgentConversationReadPage, type ConversationContentRef, type ConversationTimelineReadInput, type ConversationUnit, type JsonReadAssembly } from '../packages/core/src/conversation.js'
+import { consumeConversationWindowPage, projectConversationReading, conversationRecordId,
+  type AgentConversationReadPage, type ConversationContentRef, type ConversationTimelineReadInput, type ConversationUnit, type ConversationWindowAssembly } from '../packages/core/src/conversation.js'
 import type { AgentMuxStoredAgentSession, AgentTimelineItem } from '../packages/core/src/types.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../packages/core/test/helpers/object-cli-rpc.js'
 import { ConnectionHost } from '../packages/connectors/src/connection-host.js'
@@ -30,23 +30,25 @@ import { fixtureEpoch as _historyFixtureEpoch } from './fixture-values.mjs'
 const closes: Array<() => Promise<void> | void> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function collect(read: (input: ConversationTimelineReadInput) => Promise<AgentConversationReadPage>, reference: { hostId: string; agentSessionId: string }, limit: number, maxBytes?: number) {
-  const units: ConversationUnit[] = [], pages: AgentConversationReadPage[] = []
-  let cursor: string | undefined, pending: JsonReadAssembly | undefined
+  let units: ConversationUnit[] = []
+  const pages: AgentConversationReadPage[] = []
+  let cursor: string | undefined, pending: ConversationWindowAssembly | undefined
   for (let count = 0; count < 100; count++) {
     const page = await read({ ...reference, limit, ...(maxBytes ? {maxBytes} : {}), ...(cursor ? { cursor } : {}) }); pages.push(page)
     expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(page.budgetBytes)
-    for (const entry of page.items) {
-      const result = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify([reference, page.scope]), ...(pending ? { pending } : {}), maxTotalBytes: 8 * 1024 * 1024 })
-      if (result.kind === 'pending') pending = result.pending
-      else { pending = undefined; units.push(parseConversationUnit(result.value, { ...reference, hostId: page.sourceHostId }, page.scope)) }
-    }
-    if (!page.nextCursor) { expect(pending).toBeUndefined(); return { units: units.reverse(), pages } }
+    const result = consumeConversationWindowPage(page, pending)
+    if (result.kind === 'pending') pending = result.pending
+    else { pending = undefined; units = [...result.snapshot.units].reverse() }
+    if (!page.nextCursor) { expect(pending).toBeUndefined(); return { units, pages } }
     expect(page.nextCursor).not.toBe(cursor); cursor = page.nextCursor
   }
   throw Error('Original joint source did not make bounded progress')
 }
 function ledger(units: ConversationUnit[]) {
-  return units.map(({ event, records }) => ({ event, records: records.map(record => ({ ...record })) }))
+  // Page witnesses and indexes describe each read's physical page. Event order,
+  // exact references, versions and complete originals must agree across limits.
+  return units.map(({ event, records }) => ({ event, records: records.map(({ order, ...record }) => ({ ...record,
+    order: order.kind === 'native-page' ? { kind: order.kind, source: order.source } : order })) }))
 }
 
 it('one original inventory is conserved across SDK, RPC, compiled CLI and the actual publication adapter', async () => {
