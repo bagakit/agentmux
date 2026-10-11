@@ -6,12 +6,47 @@ import { NoteReader } from '@agentmux/client-ui/components/NoteReader'
 import { noteKnowledge, projectNoteBlocks } from '@agentmux/client-ui/note/note-knowledge'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
+import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 
 const dom = composerDOM()
 const paragraph = (blockId: string, text: string) => ({ type: 'paragraph', attrs: { blockId }, content: [{ type: 'text', text }] })
 const reference = (blockId: string, target: string) => ({ type: 'blockReference', attrs: { blockId, referenceId: 'ref-' + blockId, mode: 'reference', target: { noteId: 'original', blockId: target } } })
 const file = (content: import('@tiptap/core').JSONContent[]) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'original', content: { type: 'doc', content } })
 const input = (content: string) => [{ location: { workspaceId: 'notes', path: 'original.note.md' }, document: { path: 'original.note.md', revision: 'r1', content } }]
+
+it('retains equivalent read-only scopes and changes only the requested excerpt or full presentation', async () => {
+  installNoteCanvasGeometry()
+  const originalWorker = globalThis.Worker
+  vi.stubGlobal('Worker', NoteSnapshotTestWorker)
+  try {
+    const content = file([paragraph('first', 'First original block'), paragraph('second', 'Second original block'), paragraph('context', 'Full original context')])
+    const original = { path: 'original.note.md', workspaceId: 'notes', content, revision: 'r1' }
+    await dom.render(<NoteReader {...original} blockIds={['first', 'second']} />)
+    const excerpt = dom.container.querySelector('.mobile-note-body')!
+    expect(excerpt).not.toBeNull()
+    expect(dom.container.textContent).not.toContain('Full original context')
+    const updated = { ...original, revision: 'r2', content: file([paragraph('first', 'Updated first original block'), paragraph('second', 'Second original block'), paragraph('context', 'Full original context')]) }
+    await dom.render(<NoteReader {...updated} blockIds={['second', 'first', 'first']} highlightBlockIds={['first']} />)
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-note-selected-block="first"]')).not.toBeNull())
+    await vi.waitFor(() => expect(excerpt.textContent).toContain('Updated first original block'))
+    expect(dom.container.querySelector('.mobile-note-body')).toBe(excerpt)
+    expect(dom.container.querySelector('[aria-label="Incoming update recovery"]')).toBeNull()
+    await dom.render(<NoteReader {...updated} blockIds={['first', 'second']} clipBlocks={false} />)
+    const unclipped = dom.container.querySelector('.mobile-note-body')!
+    expect(unclipped).not.toBe(excerpt)
+    expect(unclipped.querySelector('.note-reader-excerpt')).toBeNull()
+    expect(unclipped.textContent).not.toContain('Full original context')
+    await dom.render(<NoteReader {...updated} clipBlocks={false} />)
+    const full = dom.container.querySelector('.mobile-note-body')!
+    expect(full).not.toBe(unclipped)
+    expect(full.textContent).toContain('Full original context')
+    await dom.render(<NoteReader {...updated} revision="r3" clipBlocks={true} highlightBlockIds={['first']} />)
+    expect(dom.container.querySelector('.mobile-note-body')).toBe(full)
+    expect(full.textContent).toContain('Full original context')
+    expect(dom.container.querySelector('[aria-label="Incoming update recovery"]')).toBeNull()
+    expect(full.getAttribute('contenteditable')).toBe('false')
+  } finally { vi.stubGlobal('Worker', originalWorker) }
+})
 
 it('projects exact ordered items and paragraph sources with original numbering, nested lists and no duplicated original IDs', async () => {
   installNoteCanvasGeometry()
