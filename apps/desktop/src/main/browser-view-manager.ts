@@ -1016,10 +1016,16 @@ export class BrowserViewManager {
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
     try {
+      // An unattached view forwards its size to WebContents. Once hidden in a
+      // Widget, native layout hides the child without forwarding new bounds.
+      view.setVisible(false)
+      const drawingSize = browserViewportSize(viewport) ?? this.window.getContentBounds()
+      if (Number.isFinite(drawingSize.width) && drawingSize.width > 0 && Number.isFinite(drawingSize.height) && drawingSize.height > 0) {
+        view.setBounds({ x: 0, y: 0, width: drawingSize.width, height: drawingSize.height })
+      }
       childRegistrationAttempted = true
       // BrowserWindow's original Renderer is below contentView. Native Chrome sits above Browsers.
       this.placeView(view, this.window)
-      view.setVisible(false)
       this.attach(entry, view)
       this.emit(entry)
       if (this.demonstrations) void this.getDemonstration(id).catch(() => {
