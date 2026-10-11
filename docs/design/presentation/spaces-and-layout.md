@@ -309,6 +309,8 @@ Survey 左侧以 Browser 的浏览／研究导航为起点，不在顶部提供 
 
 Note 使用有内容线的单页轮廓表达单份原记录，与 Notebook 集合、书册及关系图保持可辨；目录、返回与历史默认静止。侧栏页入口、Notebook 目录行及卡片与原正文身份槽共用 `object.note`，同一主题覆盖作用于这些准确 Note 对象；普通及尚未确认类型的文件保持各自文件语义，不以文件名、后缀或展示文案推断为 Note。原编辑面仅在本次准确资源与 revision 的正文写入回执后，可让一条内容线短描一次，纸框固定并归完整静止态；不从焦点、输入、切换 Note／Graph 或点击保存猜成功。正文写入、来源归属、历史和目录登记仍按[原 Note 行为](../behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑)分别表达，metadata 未确认提示不被局部反馈遮蔽。共享作者、用户资产和动态规则沿[语义图标合同](shared-rules.md#语义图标密度与性能)。
 
+图谱卡片将 Notebook 来源、单篇 Note 身份与阅读动作分开：已登记页面的收纳来源使用 `object.notebook`，未登记的 Note 目标以 `object.note` 和原来源未知说明表达，不假称已知 Notebook。完整原文与回到相关块分别使用可独立定制的 `action.show-full-note`、`action.show-related-blocks`，前者沿单页轮廓，后者用少量括定摘录表达片段；两者与展开邻域的关系图形可辨。来源和两个阅读动作均保持静止，切换不表示正文写入、读取成功或 Notebook 登记完成；原范围、文字、可访问状态、禁用条件、打开目标与草稿保持。
+
 Recall 与 Survey 并列，使用共享主导航的图标、字号、选中态和完整命中区；不以 Wiki 或 Notes 作为第二个顶级模块名称。进入后直接显示 Notebook 导航与页面阅读／编辑，不先进入 Survey 再通过侧栏切换。独立选择、内容与存储行为只见交互合同[《Recall、Notebook 与块知识》](../behavior/knowledge-workflows.md#recallnotebook-与块知识)，本层不复制内容或另定义动作 owner。
 
 - **当前 Notebook 是稳定入口。** 顶部以当前 Notebook 图标、名称和轻量展开标记组成单一触发器，打开创建／切换浮层；当前选择与既有 Notebook 清楚可辨，新建仍明确命名并提交。默认直接显示当前 Notebook 页面树，不先经过独立目录总览或叠「Notebook／返回 Recall／目录名」多行标题；新建页面、搜索和已归档入口沿原目录就地可达。浮层关闭返回原触发器焦点，窄栏保完整命中区与名称 tooltip，未知目录留可读恢复说明。
