@@ -1,3 +1,4 @@
+import { parseRuntimeResources } from './runtime-observation-codec.js'
 export * from './renderer-v8-profile.js'
 export * from './renderer-trace.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
@@ -257,8 +258,7 @@ const appParser = record({ processCount: nullable(count), cpuPercent: nullable(n
   groups: boundedArray(6, record({ role: appRoleParser, processCount: count, cpuPercent: nullable(number), rssKib: number })),
   processes: boundedArray(256, appProcessParser), omittedProcesses: count, logicalCpuCount: nullable(positiveCount), unavailable: nullable(text) })
 const runtimeParser = record({ hostId: identity,
-  resources: nullable(record({ observedAt: number, runCount: count, runningRuns: count, terminatedRuns: count,
-    terminatedUnattachedRuns: count, attachments: count, retainedOutputBytes: number })),
+  resources: nullable(parseRuntimeResources),
   unavailable: nullable(text), process: record({ cpuPercent: literal(null), rssKib: literal(null), unavailable: identity }),
   runtimeStorage: nullable(record({ path: identity, bytes: number })), runtimeStorageUnavailable: nullable(text),
   runtimeStorageObservedAt: nullable(number) })

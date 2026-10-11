@@ -1,3 +1,4 @@
+import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
@@ -400,16 +401,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         array(p.unavailable, value => { const issue = record(value, ['source', 'code', 'message', 'recovery']); member(issue.source, ['captured', 'native', 'session', 'status', 'runtime']); string(issue.code); text(issue.message); text(issue.recovery) })
         string(p.nextCursor, true)
-        if (p.runtimeDiagnostics !== null) {
-          const d = record(p.runtimeDiagnostics, ['nodeVersion', 'platform', 'arch', 'supported', 'ctxmux'])
-          for (const key of ['nodeVersion', 'platform', 'arch']) string(d[key]); bool(d.supported)
-          const kernel = record(d.ctxmux, ['state', 'serving', 'bundled', 'ready', 'capabilities']), state = record(kernel.state, ['configuredDirectory', 'servingDirectory'])
-          string(state.configuredDirectory); string(state.servingDirectory, true); bool(kernel.ready)
-          const serving = record(kernel.serving, ['buildIdentity', 'protocolVersion', 'instanceId', 'sourceCommit']); string(serving.buildIdentity); string(serving.instanceId); count(serving.protocolVersion); if (serving.sourceCommit !== null) fail()
-          const bundled = record(kernel.bundled, ['version', 'sourceCommit', 'artifactPlatform']); for (const key of ['version', 'sourceCommit', 'artifactPlatform']) string(bundled[key])
-          const capabilities = record(kernel.capabilities, ['transport', 'orderedOutputBytes', 'boundedReplay', 'recoverableInput', 'resize', 'interrupt', 'completeStop'])
-          if (capabilities.transport !== 'local-unix') fail(); for (const key of ['orderedOutputBytes', 'boundedReplay', 'recoverableInput', 'resize', 'interrupt', 'completeStop']) if (capabilities[key] !== true) fail()
-        }
+        if (p.runtimeDiagnostics !== null) parseRuntimeDiagnostics(p.runtimeDiagnostics)
         return { ...p, native: nativePage }
       }
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break

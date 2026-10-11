@@ -685,6 +685,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.executors.refresh', '<id> --host <id>', 'Refresh one Executor availability observation.', 1),
   settings('settings.executors.discover', '--host <id>', 'Discover registered and supported default Executors on the exact target Host.'),
   settings('settings.executors.register', '<id> --host <id> --input <file|->', 'Save an explicit Executor configuration on its executing Host.', 1),
+  settings('settings.hosts.inspect', '--host <id>', 'Read one exact Host Runtime: source-scoped identity, capabilities and retained resource facts; never starts Native or changes Sessions.'),
   settings('settings.hosts.ls', '', 'List actual configured Hosts.'),
   settings('settings.hosts.test', '<id>|--input <file|->', 'Test an exact saved Host or a complete draft.', 1),
   settings('settings.hosts.trusted-sources', '--host <id>', 'Read this Host creation authority and explicitly trusted source keys.'),

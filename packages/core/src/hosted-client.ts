@@ -163,7 +163,8 @@ export async function connectHostedAgentMux(options: {
   const invoke = async (method: AgentMuxHostedMethod, args: unknown[]): Promise<unknown> => {
     args = sanitizeInputObservationArguments(method, args)
     if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
-    const sourceSignal = method === 'sessionHistorySources' ? (args[0] as Parameters<AgentMuxHostedClient['sessionHistorySources']>[0])?.signal : undefined
+    const sourceSignal = method === 'sessionHistorySources' || method === 'runtimeDiagnostics' || method === 'runtimeResourceSnapshot'
+      ? (args[0] as { signal?: AbortSignal } | undefined)?.signal : undefined
     if (sourceSignal !== undefined && !isAbortSignal(sourceSignal)) throw new AgentMuxError('Source observation requires an AbortSignal.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
     sourceSignal?.throwIfAborted()
     if (method === 'sessionHistoryResource') {
@@ -180,7 +181,7 @@ export async function connectHostedAgentMux(options: {
       if (isAbortSignal(cancellation)) signal = cancellation
       wireArgs = [scope, ...args.slice(1)]
     }
-    if (method === 'clientPerformanceDiagnostics') {
+    if (method === 'clientPerformanceDiagnostics' || method === 'runtimeDiagnostics' || method === 'runtimeResourceSnapshot') {
       const options = args[0] as { signal?: AbortSignal } | undefined
       if (isAbortSignal(options?.signal)) { signal = options.signal; wireArgs = [] }
     }

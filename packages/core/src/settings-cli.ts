@@ -42,6 +42,9 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     return { method, params: { id, input: value } }
   }
   if (resource === 'hosts') {
+    if (action === 'inspect' && args.length === 4 && id === '--host' && args[3]?.length) {
+      return { method: 'settings.hosts.inspect', params: { hostId: args[3] } }
+    }
     if (action === 'trusted-sources' && args.length === 4 && id === '--host' && args[3]?.length) {
       return { method: 'settings.hosts.trusted-sources', params: { hostId: args[3] } }
     }

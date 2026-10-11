@@ -164,6 +164,12 @@ const api: AgentMuxPreloadApi = {
     }
   },
   hosts: {
+    inspect: async (host, context) => {
+      const token = crypto.randomUUID()
+      const pending = ipcRenderer.invoke('hosts:inspect', token, host)
+      const release = context?.onAbort?.(() => { void ipcRenderer.invoke('hosts:cancelInspect', token).catch(() => {}) })
+      try { return await pending } finally { release?.() }
+    },
     check: (host: HostConfig) => ipcRenderer.invoke('hosts:check', host),
     creationTrust: host => ipcRenderer.invoke('hosts:creationTrust', host),
     trustCreationSource: (host, expected) => ipcRenderer.invoke('hosts:trustCreationSource', host, expected),

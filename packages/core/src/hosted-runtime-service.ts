@@ -14,6 +14,7 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOST
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
+  'runtimeDiagnostics', 'runtimeResourceSnapshot',
   'controlAgentContinuity',
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
@@ -265,7 +266,7 @@ export class AgentMuxHostedRuntimeService {
     if (context.signal && invocation.method === 'readAgentSessionHistory') invocation.args[1] = { signal: context.signal }
     if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
       invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
-    if (context.signal && invocation.method === 'clientPerformanceDiagnostics') invocation.args[0] = { signal: context.signal }
+    if (context.signal && (invocation.method === 'clientPerformanceDiagnostics' || invocation.method === 'runtimeDiagnostics' || invocation.method === 'runtimeResourceSnapshot')) invocation.args[0] = { signal: context.signal }
     if (invocation.method === 'sessionHistorySources') {
       if (invocation.args.length > 1) throw new AgentMuxError('Source observation accepts one exact optional scope.', 'INVALID_CONTROL_REQUEST')
       const scope = record(invocation.args[0] === undefined ? {} : invocation.args[0], ['agentSessionId'])

@@ -34,11 +34,6 @@
 .remote-overview__identity { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2); padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); font-size: var(--fs-meta); }
 .remote-overview__identity > strong { font-weight: 500; color: var(--text-2); }
 .remote-overview__identity time, .remote-overview__identity p { grid-column: 1 / -1; margin: 0; color: var(--text-3); line-height: 1.6; overflow-wrap: anywhere; }
-.remote-overview__technical { color: var(--text-3); font-size: var(--fs-meta); }
-.remote-overview__technical summary { cursor: pointer; padding-block: var(--sp-2); }
-.remote-overview__technical dl { display: grid; gap: var(--sp-3); margin-bottom: 0; }
-.remote-overview__technical dt { color: var(--text-3); }
-.remote-overview__technical dd { margin: var(--sp-1) 0 0; color: var(--text-2); overflow-wrap: anywhere; user-select: text; }
 .remote-work { min-width: 0; }
 .remote-work > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-3); font-size: var(--fs-body); }
 .remote-work > header strong { font-weight: 550; }

@@ -16,6 +16,7 @@ import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { HostUpgradePanel } from './HostUpgradePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
 import { HostTopology } from './HostTopology'
+import { HostRuntimePanel } from './HostRuntimePanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
 import '../../styles/remote-management.css'
 
@@ -51,12 +52,14 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const hosts = orderedHosts(resource.value)
   const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
-  const [selectedId, setSelectedId] = useState<string | null>(() => config.hosts[0]?.id ?? null)
-  const [panel, setPanel] = useState<HostConnectionPanel>('overview')
+  const requestedHostId = navigationRequest?.section === 'hosts' ? navigationRequest.hostId : undefined
+  const [selectedId, setSelectedId] = useState<string | null>(() => requestedHostId ?? config.hosts[0]?.id ?? null)
+  const [panel, setPanel] = useState<HostConnectionPanel>(() => requestedHostId === undefined ? 'overview' : 'connection')
   const [projectHosts, setProjectHosts] = useState<string[]>([])
   const [upgradeHosts, setUpgradeHosts] = useState<string[]>([])
   const [mode, setMode] = useState<'topology' | 'list'>('topology')
-  const [wide, setWide] = useState(true)
+  const [measuredWide, setWide] = useState<boolean | null>(null)
+  const wide = measuredWide !== false
   const container = useRef<HTMLDivElement>(null)
   const showTopology = mode === 'topology' && wide
   useLayoutEffect(() => {
@@ -68,12 +71,14 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
-  const [view, setView] = useState<'library' | 'editor'>('library')
+  const [view, setView] = useState<'library' | 'editor'>(() => requestedHostId === undefined ? 'library' : 'editor')
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({})
   const [requestedHost, setRequestedHost] = useState<string | null>(null)
+  const appliedNavigation = useRef(navigationRequest)
+  const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
   const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   useEffect(() => { if (!active) setRemoveRequest(null) }, [active])
@@ -109,6 +114,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   }, [])
 
   useEffect(() => {
+    appliedNavigation.current = navigationRequest
     if (navigationRequest?.section !== 'hosts' || navigationRequest.hostId === undefined) return
     const id = navigationRequest.hostId
     setRequestedHost(id)
@@ -274,8 +280,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
                 <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { useAppStore.getState().selectSession(id); onClose?.() }} />
-                <details className="remote-overview__technical"><summary>Environment identity</summary><dl><div><dt>Host route</dt><dd><code>{host.id}</code></dd></div>
-                  <div><dt>Runtime binding</dt><dd><code>{host.kind === 'ssh' ? host.runtimeId ?? 'Not confirmed' : 'Local service'}</code></dd></div></dl></details>
+                <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
               </div> : null}
               {panel === 'agents' ? <HostExecutorsSummary config={config} host={host} active={active && (wide || view === 'editor')} /> : null}
               {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (

@@ -76,6 +76,7 @@ import { inspectDesktopClient } from './client-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from './rpc-client-observations.js'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
+import { registerHostRuntimeObservationIpc } from './host-runtime-observation-ipc.js'
 import { registerSearchIpc } from './search-ipc.js'
 import { SessionHistoryReadOwners } from './session-history-read.js'
 import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
@@ -652,6 +653,8 @@ export async function registerIpc(args: {
   }
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
+  const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent, trust: requireTrustedSender,
+    inspect: (host, signal) => callUserRpc('settings.hosts.inspect', { hostId: host.id, expected: host }, { signal }) })
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
   const creationTrustPorts = { savedHost: (id: string) => config.hosts.find(host => host.id === id), call: callUserRpc }
   handleWithEvent('hosts:creationTrust', async (event, input: HostConfig) => {
@@ -2129,6 +2132,7 @@ export async function registerIpc(args: {
     notebookStore,
     notebookObservation: notebookObservation.owner,
     goalDelegations,
+    hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     nativeAgentSessions: params => args.runtime.nativeAgentSessions({ hostId: params.hostId, executorId: params.executorId,
@@ -2202,6 +2206,7 @@ export async function registerIpc(args: {
       { owner: 'connections', dispose: () => connectorServices.close() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
+      { owner: 'host-runtime-reads', dispose: () => hostRuntimeReads.dispose() },
       { owner: 'search-reads', dispose: () => searchReads.dispose() },
       { owner: 'history-reads', dispose: () => historyReads.dispose() },
       { owner: 'resource-observation', dispose: () => releaseResourceObservation() },

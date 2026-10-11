@@ -34,6 +34,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'connections:call': 'external connection administration',
   'connections:storeCredential': 'secure credential entry',
   'connections:inspectCredential': 'credential operation observation',
+  'hosts:inspect': 'Host Runtime observation',
+  'hosts:cancelInspect': 'Host Runtime observation cancellation',
   'hosts:creationTrust': 'creation source identity',
   'hosts:trustCreationSource': 'creation source approval',
   'files:createPublic': 'original file creation',
