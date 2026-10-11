@@ -3,7 +3,7 @@ import { rpcRecord } from './rpc-data.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { normalizeAgentTimelineItem } from './session-timeline.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
-import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, conversationNativeInputWitness, conversationInputKey,
+import { conversationRecordId, conversationRevision, conversationValuesEqual, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, conversationNativeInputWitness, conversationInputKey,
   type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-timeline.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
@@ -95,7 +95,7 @@ function integer(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): number
   if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) return bad()
   return Number(value)
 }
-function same(a: unknown, b: unknown): boolean { return conversationRevision(a) === conversationRevision(b) }
+function same(a: unknown, b: unknown): boolean { return conversationValuesEqual(a, b) }
 export function parseConversationSource(value: unknown): ConversationSourceRef {
   const p = rpcRecord(value, ['kind', 'providerId', 'nativeSessionId', 'epoch'], 'CONTROL_PROTOCOL_ERROR')
   if (p.kind === 'native') {

@@ -93,6 +93,10 @@ function canonical(value: unknown): unknown {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => [k, canonical(v)]))
   return value
 }
+/** Compare the same canonical values as content versions, without computing two digests. */
+export function conversationValuesEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
+}
 /** Content version only: never consulted by association or order. Browser-safe. */
 export function conversationRevision(value: unknown): string {
   return Array.from(sha256(new TextEncoder().encode(JSON.stringify(canonical(value)))), byte => byte.toString(16).padStart(2, '0')).join('')
