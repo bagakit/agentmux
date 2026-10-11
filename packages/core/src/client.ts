@@ -4194,11 +4194,18 @@ export class AgentMuxClient {
         await hookBinding.bindRun(run.runId)
         this.pendingLifecycleBindings.delete(lifecycleOperationId)
         creationStep = 'handshake'
-        // 超时不回滚。下面的 catch 会关 hook 绑定、退休 run、删 session——那是在用我们一次
-        // 慢探测杀掉一个刚启动好的健康 Agent。只有 run 真的退出了才该走那条路。
+        // Hook and terminal observation cannot undo an acknowledged Session commit.
         readySession = await this.ensureTerminalHandshakeOrDegrade(readySession, run)
       } catch (error) {
-        if (durableCreate) {
+        if (error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {
+          readySession = await this.retainCreationFailure(persisted ?? session, creationStep, error, !persisted)
+          preservePreparedCreation = !persisted
+          this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
+          this.pendingLifecycleBindings.delete(lifecycleOperationId)
+          await this.publishCurrentRunState(readySession)
+          throw error
+        }
+        if (persisted || durableCreate) {
           if (!persisted) {
             try {
               const canonical = (await this.store.readMetadata(agentSessionId))
@@ -4213,14 +4220,25 @@ export class AgentMuxClient {
               this.pendingLifecycleBindings.delete(lifecycleOperationId)
               creationStep = 'handshake'; readySession = await this.ensureTerminalHandshakeOrDegrade(persisted, run)
             } catch (observationError) {
+              if (observationError instanceof AgentMuxError && observationError.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {
+                readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
+                await this.publishCurrentRunState(readySession)
+                throw observationError
+              }
               readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
               this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
+              this.pendingLifecycleBindings.delete(lifecycleOperationId)
+              this.queueNativeIdentityCapture(readySession, input)
+              await this.publishCurrentRunState(readySession)
               return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
             }
           } else {
             preservePreparedCreation = !persisted
             readySession = await this.retainCreationFailure(persisted ?? session, creationStep, error, !persisted)
             this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
+            this.pendingLifecycleBindings.delete(lifecycleOperationId)
+            this.queueNativeIdentityCapture(readySession, input)
+            await this.publishCurrentRunState(readySession)
             return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
           }
         } else {
@@ -4314,6 +4332,18 @@ export class AgentMuxClient {
     }
   }
 
+  private async publishCurrentRunState(session: AgentMuxStoredAgentSession): Promise<void> {
+    try {
+      const run = await this.kernel.status(session.run.runId)
+      this.publisher.publishRunState(this.projectRun(run, session), session.agentSessionId)
+    } catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: 'AGENT_RUN_OBSERVATION_UNCONFIRMED',
+        message: `Current Run state is unknown. Refresh the original Session. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', run: session.run, observedAt: Date.now() } })
+    }
+  }
+
   private async retainCreationFailure(session: AgentMuxStoredAgentSession,
     step: NonNullable<NonNullable<AgentMuxAgentSession['creation']>['failure']>['step'], error: unknown,
     unconfirmedPersistence: boolean): Promise<AgentMuxStoredAgentSession> {
@@ -4328,8 +4358,11 @@ export class AgentMuxClient {
       catch { /* The actual Run and the returned observation remain available despite this save failure. */ }
     }
     this.publishSession(next)
-    this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_CREATION_UNCONFIRMED',
-      message: `Agent started on Run ${session.run.runId}; ${step} is unconfirmed. Keep this Run and inspect the same creation operation. ${failure.message}`,
+    if (step === 'hook-bind') this.observeHookRestoreFailure(next, 'binding', error)
+    const exited = error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED
+    this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+      code: exited ? AGENT_TERMINAL_HANDSHAKE_FAILED : 'AGENT_CREATION_UNCONFIRMED',
+      message: exited ? failure.message : `Agent started on Run ${session.run.runId}; ${step} is unconfirmed. Keep this Run and inspect the same creation operation. ${failure.message}`,
       evidence: { source: 'agentmux', observedAt: Date.now(), run: session.run } })
     return next
   }
@@ -4930,62 +4963,11 @@ export class AgentMuxClient {
         }
       }
       let readySession = next
-      try {
-        try { persisted = await this.registry.commitLifecycle(reservation, next) }
-        catch (error) { persisted = this.retainUnconfirmedLifecycle(error, next); readySession = persisted }
-        await hookBinding.bindRun(run.runId)
-        hookBound = true
-        // 同 launch：超时降级，只有 run 退出才回滚。
-        readySession = await this.ensureTerminalHandshakeOrDegrade(
-          retirement ? this.registry.get(current.agentSessionId) : readySession, run)
-      } catch (error) {
-        if (reopening || continuity?.operationId === input.operationId) {
-          const recoveredCommit = !persisted
-          if (!persisted) {
-            try {
-              const canonical = (await this.store.readMetadata(current.agentSessionId))
-              if (canonical?.run.runId === run.runId && (reopening ? canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
-                canonical.reopenedFrom.run.runId === retirement!.run.runId : canonical.continuity?.operationId === input.operationId && canonical.continuity.newRun?.runId === run.runId)) {
-                await this.registry.load('local')
-                persisted = this.registry.get(current.agentSessionId)
-              }
-            } catch (readError) {
-              // Unknown commit acknowledgement cannot authorize stopping a possibly committed healthy Run.
-              preserveUnconfirmedRun = true
-              this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
-              throw new AggregateError([error, readError], 'Continue result is unconfirmed. Read the same Session; no operation was resent.')
-            }
-          }
-          if (persisted) {
-            if (hookBound) this.hookBindings.set(run.runId, hookBinding)
-            else this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
-            readySession = this.registry.get(current.agentSessionId)
-            let observationError: unknown = error
-            if (recoveredCommit) {
-              try {
-                await hookBinding.bindRun(run.runId)
-                hookBound = true
-                this.hookBindings.set(run.runId, hookBinding)
-                this.pendingLifecycleBindings.delete(lifecycleOperationId)
-                readySession = await this.ensureTerminalHandshakeOrDegrade(readySession, run)
-                observationError = null
-              } catch (readError) { observationError = readError }
-            }
-            if (observationError !== null) this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
-              code: 'AGENT_REOPEN_OBSERVATION_UNCONFIRMED',
-              message: `The original conversation continued on Run ${run.runId}, but its Hook or terminal observation is unconfirmed. Keep this Run and refresh its observation. ${observationError instanceof Error ? observationError.message : String(observationError)}`,
-              evidence: { source: 'agentmux', observedAt: Date.now() } })
-          } else {
-            const failures: unknown[] = [error]
-            try { await hookBinding.close(); await this.retireUncommittedRun(run.runId); abandonedRun = runRef(run.runId) }
-            catch (cleanupError) { preserveUnconfirmedRun = true; failures.push(cleanupError) }
-            if (failures.length > 1) throw new AggregateError(failures, 'Continue preparation and cleanup are unconfirmed. Retained history is kept.')
-            throw error
-          }
-        } else {
-        const rollbackErrors: unknown[] = [error]
+      const rollbackFailedResume = async (failure: unknown): Promise<never> => {
+        const rollbackErrors: unknown[] = [failure]
         try {
-          await hookBinding.close()
+          await hookBinding!.close()
+          this.hookBindings.delete(run.runId)
           await this.retireUncommittedRun(run.runId)
           abandonedRun = runRef(run.runId)
         }
@@ -5013,7 +4995,69 @@ export class AgentMuxClient {
         if (rollbackErrors.length > 1) {
           throw new AggregateError(rollbackErrors, 'Resume persistence and Run rollback failed.')
         }
-        throw error
+        throw failure
+      }
+      try {
+        try { persisted = await this.registry.commitLifecycle(reservation, next) }
+        catch (error) { persisted = this.retainUnconfirmedLifecycle(error, next); readySession = persisted }
+        await hookBinding.bindRun(run.runId)
+        hookBound = true
+        // Keep the committed native identity even when its observation fails.
+        readySession = await this.ensureTerminalHandshakeOrDegrade(
+          retirement ? this.registry.get(current.agentSessionId) : readySession, run)
+      } catch (error) {
+        if (!(error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) &&
+          (persisted || reopening || continuity?.operationId === input.operationId)) {
+          const recoveredCommit = !persisted
+          if (!persisted) {
+            try {
+              const canonical = (await this.store.readMetadata(current.agentSessionId))
+              if (canonical?.run.runId === run.runId && (reopening ? canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
+                canonical.reopenedFrom.run.runId === retirement!.run.runId : canonical.continuity?.operationId === input.operationId && canonical.continuity.newRun?.runId === run.runId)) {
+                await this.registry.load('local')
+                persisted = this.registry.get(current.agentSessionId)
+              }
+            } catch (readError) {
+              // Unknown commit acknowledgement cannot authorize stopping a possibly committed healthy Run.
+              preserveUnconfirmedRun = true
+              this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+              throw new AggregateError([error, readError], 'Continue result is unconfirmed. Read the same Session; no operation was resent.')
+            }
+          }
+          if (persisted) {
+            this.hookBindings.set(run.runId, hookBinding)
+            this.pendingLifecycleBindings.delete(lifecycleOperationId)
+            readySession = this.registry.get(current.agentSessionId)
+            if (!hookBound) this.observeHookRestoreFailure(readySession, 'binding', error)
+            let observationError: unknown = error
+            if (recoveredCommit) {
+              try {
+                await hookBinding.bindRun(run.runId)
+                hookBound = true
+                this.hookBindings.set(run.runId, hookBinding)
+                this.pendingLifecycleBindings.delete(lifecycleOperationId)
+                readySession = await this.ensureTerminalHandshakeOrDegrade(readySession, run)
+                observationError = null
+              } catch (readError) {
+                if (readError instanceof AgentMuxError && readError.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {
+                  await rollbackFailedResume(readError)
+                }
+                observationError = readError
+              }
+            }
+            if (observationError !== null) this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
+              code: 'AGENT_REOPEN_OBSERVATION_UNCONFIRMED',
+              message: `The original conversation continued on Run ${run.runId}, but its Hook or terminal observation is unconfirmed. Keep this Run and refresh its observation. ${observationError instanceof Error ? observationError.message : String(observationError)}`,
+              evidence: { source: 'agentmux', run: { ...next.run }, observedAt: Date.now() } })
+          } else {
+            const failures: unknown[] = [error]
+            try { await hookBinding.close(); await this.retireUncommittedRun(run.runId); abandonedRun = runRef(run.runId) }
+            catch (cleanupError) { preserveUnconfirmedRun = true; failures.push(cleanupError) }
+            if (failures.length > 1) throw new AggregateError(failures, 'Continue preparation and cleanup are unconfirmed. Retained history is kept.')
+            throw error
+          }
+        } else {
+          await rollbackFailedResume(error)
         }
       }
       if (hookBound) this.hookBindings.set(run.runId, hookBinding)
@@ -5021,7 +5065,7 @@ export class AgentMuxClient {
       this.runPids.set(run.runId, run.pid)
       this.queueNativeIdentityCapture(readySession, input)
       this.publishSession(readySession)
-      this.publisher.publishRunState(this.projectRun(run, readySession), readySession.agentSessionId)
+      await this.publishCurrentRunState(readySession)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
       let promptConfirmed = await this.deliverPostLaunchPrompt(
@@ -6758,7 +6802,17 @@ export class AgentMuxClient {
     const restoring = (async () => {
       try { await this.hookServer.start() }
       catch (error) { this.observeHookRestoreFailure(session, 'listen', error); return }
-      if (this.hookBindings.has(session.run.runId)) { this.settleHookRestore(session); return }
+      const retained = this.hookBindings.get(session.run.runId)
+      if (retained) {
+        try {
+          const observation = this.hookIngressObservations.get(session.agentSessionId)
+          if (observation?.phase === 'binding' && sameRun(observation.run, session.run)) {
+            await retained.bindRun(session.run.runId)
+          }
+          this.settleHookRestore(session)
+        } catch (error) { this.observeHookRestoreFailure(session, 'binding', error) }
+        return
+      }
       let binding: AgentHookBinding | undefined
       try {
         binding = this.hookServer.createBinding(session.agentSessionId, session.providerId, session.hookBindingId, session.hookToken)
