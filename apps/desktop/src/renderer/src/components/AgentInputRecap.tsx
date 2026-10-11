@@ -18,18 +18,18 @@ function inputReading(reader: ReturnType<typeof useSessionUserMessages>): InputR
 }
 
 /** The original reader supplies facts; a pin retains only the presented inputs. */
-export function AgentInputRecap({ request, enabled, available }: { request: PreviewRequest; enabled: boolean; available: boolean }) {
+export function AgentInputRecap({ request, enabled, available, follow = false }: { request: PreviewRequest; enabled: boolean; available: boolean; follow?: boolean }) {
   const [paused, setPaused] = useState(false), [frozen, setFrozen] = useState<InputReading | null>(null)
   const reader = useSessionUserMessages(paused || frozen && !enabled ? undefined : request.control, { enabled: enabled && !paused })
   const region = useRef<HTMLElement>(null), held = useRef<InputReading | null>(null)
   const reflow = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
   const current = inputReading(reader)
   useLayoutEffect(() => {
-    if (enabled && !request.pinned && !frozen) held.current = current
-    if (request.pinned && !frozen) setFrozen(held.current ?? current)
+    if (enabled && (!request.pinned || follow) && !frozen) held.current = current
+    if (request.pinned && !follow && !frozen) setFrozen(held.current ?? current)
   })
   useEffect(() => {
-    if (!enabled || !frozen || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
+    if (!enabled || !frozen || request.bookmark || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
     // Keep every already presented input. Only the original in-flight native batch
     // may fill unused slots; later captured requests cannot evict selected text.
     const ids = new Set(frozen.messages.map(message => message.id)), slots = Math.max(0, 6 - frozen.messages.length)
@@ -44,6 +44,7 @@ export function AgentInputRecap({ request, enabled, available }: { request: Prev
   useLayoutEffect(() => {
     if (reflow.current) { restoreReadingAnchor(reflow.current.container, reflow.current.anchor); reflow.current = null }
   }, [frozen])
+  useEffect(() => { if (follow) { setFrozen(null); setPaused(false) } }, [follow])
   const [inspected, setInspected] = useState<InspectedInput | null>(null)
   const original = useRef<HTMLDivElement>(null)
   const returnToEntry = useRef<{ anchor: HTMLElement; focused: Element } | null>(null)

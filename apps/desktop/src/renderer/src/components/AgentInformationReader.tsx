@@ -1,3 +1,5 @@
+import { useAgentBookmarkReading } from '../lib/agent-bookmark-reading'
+import { agentBookmarks } from '../lib/agent-bookmarks'
 import { WorkbenchDocumentContext } from '../lib/workbench-document'
 import { observeWorkbenchDocumentReturn, workbenchDocumentIdentity, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
@@ -49,7 +51,7 @@ function FocusContextStateSummary({ context, explanationVisible }: { context: Fo
 }
 
 
-const HeldReading = memo(function HeldReading({ request, enabled, available }: { request: PreviewRequest; enabled: boolean; available: boolean }) {
+const HeldReading = memo(function HeldReading({ request, enabled, available, follow = false }: { request: PreviewRequest; enabled: boolean; available: boolean; follow?: boolean }) {
   const context = request.context
   return <>
     {!context.recap && request.contentChanged ? <small className="agent-information-reader__change">Card content changed · Reading kept</small> : null}
@@ -60,17 +62,20 @@ const HeldReading = memo(function HeldReading({ request, enabled, available }: {
       </small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} active={enabled} />
     </section> : !context.detailIsRecap && context.detailKind !== 'service' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
-    {context.kind === 'agent' ? <AgentInputRecap request={request} enabled={enabled} available={available} /> : null}
+    {context.kind === 'agent' ? <AgentInputRecap request={request} enabled={enabled} available={available} follow={follow} /> : null}
     <p className="agent-information-reader__end">End of this reading window <span>Earlier records remain in History.</span></p>
   </>
 })
 
 /** From first peek onward this is the same window-owned tree, never a row's Portal. */
-export function AgentInformationReader({ request }: { request: PreviewRequest }) {
-  const [document, setDocument] = useState(() => request.anchor.ownerDocument)
+export function AgentInformationReader({ request: opening }: { request: PreviewRequest }) {
+  const requestDocument = opening.anchor.ownerDocument
+  const [document, setDocument] = useState(() => requestDocument)
   // A stable Portal container preserves this reading tree when its native shell returns.
-  const [readingHost] = useState(() => { const host = request.anchor.ownerDocument.createElement('div'); host.style.display = 'contents'; return host })
+  const [readingHost] = useState(() => { const host = requestDocument.createElement('div'); host.style.display = 'contents'; return host })
   const window = document.defaultView!
+  const visible = useWorkbenchDocumentVisibility(document)
+  const request = useAgentBookmarkReading(opening, visible)
   const context = request.context
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -79,7 +84,6 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   const heldReadingSurface = useRef<HTMLElement | null>(null)
   const heldSelection = useRef<Range | null>(null), laterSelection = useRef(false)
   const [tab, setTab] = useState<AgentInformationTab | null>(null)
-  const visible = useWorkbenchDocumentVisibility(document)
   useEffect(() => { if (!visible) agentInformationPreview.dismiss(request.token) }, [visible, request.token])
   const transferredFocus = useRef<HTMLElement | null>(null)
   const transferredSelection = useRef<{ start: Node; startOffset: number; end: Node; endOffset: number } | null>(null)
@@ -116,7 +120,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
   }), [document, readingHost])
   useLayoutEffect(() => () => { readingHost.remove() }, [readingHost])
   const lastVisibleSession = useRef(request.session)
-  const session = useAppStore(state => !visible ? lastVisibleSession.current : state.sessions.find(session => session.id === context.id && session.hostId === context.hostId &&
+  const session = useAppStore(state => !visible ? lastVisibleSession.current : request.bookmark ? request.session : state.sessions.find(session => session.id === context.id && session.hostId === context.hostId &&
     session.control.run.runId === context.runId && (context.kind !== 'agent' || session.kind === 'agent' &&
       session.control.hostId === request.control?.hostId && session.control.agentSessionId === request.control?.agentSessionId && nativeBindingKey(session) === request.sourceKey)))
   useLayoutEffect(() => { if (visible) lastVisibleSession.current = session }, [visible, session])
@@ -129,13 +133,38 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     const timer = setTimeout(() => setObservationNow(Date.now()), Math.min(...delays))
     return () => clearTimeout(timer)
   }, [visible, session, observationNow])
+  const [readingRequest, setReadingRequest] = useState(request)
+  const currentReading = request.bookmark ? readingRequest : request
+  const displayedReading = useMemo(() => request.bookmark ? { ...currentReading, pinned: true, bookmark: request.bookmark } : currentReading, [currentReading, request.bookmark])
+  const changedReading = Boolean(request.bookmark && request.session && (readingRequest.context.runId !== request.context.runId || readingRequest.sourceKey !== request.sourceKey ||
+    (readingRequest.context.recap?.reading?.text ?? readingRequest.context.recap?.text) !== (request.context.recap?.reading?.text ?? request.context.recap?.text) ||
+    readingRequest.context.recap?.source !== request.context.recap?.source || !request.context.detailIsRecap && readingRequest.context.detail !== request.context.detail))
+  const [readingProtected, setReadingProtected] = useState(false)
+  function protectedReading() {
+    const selection = document.getSelection()
+    return Boolean(tab || reading.current?.querySelector('[data-agent-input-reading]') || (reading.current?.scrollTop ?? 0) > 1 ||
+      selection && !selection.isCollapsed && reading.current?.contains(selection.anchorNode))
+  }
+  useLayoutEffect(() => {
+    const protectedNow = protectedReading()
+    if (protectedNow !== readingProtected) setReadingProtected(protectedNow)
+    if (request.bookmark && !protectedNow && changedReading && visible && session) setReadingRequest(request)
+  }, [request, changedReading, tab, visible, session, readingProtected])
+  useEffect(() => {
+    if (!request.bookmark) return
+    const changed = () => setReadingProtected(protectedReading())
+    document.addEventListener('selectionchange', changed)
+    return () => document.removeEventListener('selectionchange', changed)
+  }, [document, request.bookmark?.key, tab])
+  const readingSameSource = Boolean(session && session.control.run.runId === currentReading.context.runId && (session.kind !== 'agent' || nativeBindingKey(session) === currentReading.sourceKey))
   const sameSource = Boolean(session)
   const currentContext = useMemo(() => visible && session
     ? { ...agentContextForSession(session, undefined, context.name, context.workspace, context.topicId), lastActivityAt: context.lastActivityAt } : context,
   [visible, session, context, observationNow])
   const observation = session?.kind === 'agent' ? observeAgentSession(session, Date.now()) : undefined
   const usage = session?.kind === 'agent' ? session.turnUsage : request.session?.kind === 'agent' ? request.session.turnUsage : undefined
-  const sourceNotice = !sameSource ? 'Original Run or source is no longer confirmed. This reading is kept; new source data is not attached.' : null
+  const sourceNotice = !sameSource ? 'Original Run or source is no longer confirmed. This reading is kept; new source data is not attached.'
+    : request.bookmark && !readingSameSource ? 'Reading an earlier Run or source. Show latest to follow the current Agent.' : null
   const service = observation?.reason && currentContext.bucket === 'idle' && currentContext.state !== 'disconnected' ? `${observation.reason === 'activity-stale' ? 'Work signal expired' : 'Current activity unconfirmed'} · Run ${observation.process}`
     : !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
   const displayPath = usePathDisplay(), path = displayPath(context.workspacePath, context.hostId)
@@ -143,7 +172,7 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     <h3>Status and source</h3><p>{currentContext.detail}</p>
     {currentContext.detail !== context.detail ? <p>At opening: {context.detail}</p> : null}
     <dl className="agent-information-reader__source">
-      <div><dt>Host</dt><dd>{context.hostId}</dd></div><div><dt>Session</dt><dd>{request.control?.agentSessionId ?? context.id}</dd></div>
+      <div><dt>Host</dt><dd>{request.bookmark?.hostId ?? context.hostId}</dd></div><div><dt>Session</dt><dd>{request.control?.agentSessionId ?? request.bookmark?.agentSessionId ?? context.id}</dd></div>
       <div><dt>Run</dt><dd>{context.runId}</dd></div><div><dt>Project</dt><dd>{context.workspaceName}</dd></div>
       <div><dt>Directory</dt><dd>{path}</dd></div>{context.originAddress ? <div><dt>Origin</dt><dd>{context.originAddress}</dd></div> : null}
     </dl>
@@ -175,7 +204,8 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     cancelDeparture()
     const container = reading.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reading.current
     reflowAnchor.current = container ? { container, anchor: captureReadingAnchor(container) } : null
-    agentInformationPreview.pin(request.token)
+    const bounds = panel.current?.getBoundingClientRect()
+    agentInformationPreview.pin(request.token, bounds && bounds.width > 0 && bounds.height > 0 ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : undefined)
   }
   useLayoutEffect(() => {
     if (reflowAnchor.current) restoreReadingAnchor(reflowAnchor.current.container, reflowAnchor.current.anchor)
@@ -229,6 +259,11 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
         if (request.enterReading && document.activeElement === request.anchor && !request.anchor.closest('[inert]')) reading.current?.focus({ preventScroll: true })
       }
     }
+    if (request.bookmark) {
+      const bounds = request.bookmark.bounds
+      Object.assign(surface.style, { left: `${bounds.x}px`, top: `${bounds.y}px`, width: `${bounds.width}px`, height: `${bounds.height}px`, visibility: 'visible' })
+      return () => { current = false; cancelDeparture() }
+    }
     if (request.pinned || !request.anchor.isConnected || request.anchor.closest('[inert]')) {
       const contain = () => {
         const bounds = surface.getBoundingClientRect()
@@ -240,13 +275,15 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     }
     const stop = autoUpdate(request.anchor, surface, () => { void update() })
     return () => { current = false; stop(); cancelDeparture() }
-  }, [request.token, request.pinned, document, visible])
+  }, [request.token, request.pinned, request.bookmark?.bounds, document, visible])
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
       if (event.defaultPrevented || wasWindowOverlayDismissed(event)) return
       if (event.key.toLowerCase() === 'p' && !event.metaKey && !event.ctrlKey && !event.altKey && panel.current?.contains(document.activeElement) &&
         !(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('input, textarea, [contenteditable="true"]'))) { event.preventDefault(); togglePin(); return }
       if (event.key !== 'Escape') return
+      if (!panel.current?.contains(document.activeElement) && panel.current?.contains(event.target as Node) !== true &&
+        (document.activeElement !== request.anchor || agentInformationPreview.get()?.token !== request.token)) return
       if (request.pinned && !panel.current?.contains(document.activeElement)) return
       markWindowOverlayDismissal(event); event.preventDefault()
       if (tab) showReading()
@@ -264,7 +301,8 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     }
   }, [request, tab, document])
   return createPortal(<WorkbenchDocumentContext.Provider value={{ document, window: workbenchDocumentIdentity(document) }}><DesktopClientUiProvider document={document}><div ref={panel} id={request.id} className="focus-context-hover agent-information-reader" role="region"
-    data-state="open" data-pinned={request.pinned || undefined} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden' }}
+    data-state="open" data-pinned={request.pinned || undefined} data-bookmark-key={request.bookmark?.key} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden', zIndex: `calc(var(--layer-popover) + ${agentInformationPreview.getAll().findIndex(item => item.token === request.token)})` }}
+    onPointerDownCapture={() => { if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }}
     onPointerEnter={cancelDeparture} onPointerLeave={leave} onFocus={cancelDeparture} onBlur={event => {
       if (event.relatedTarget && (event.relatedTarget as Node).nodeType && (panel.current?.contains(event.relatedTarget as Node) || event.relatedTarget === request.anchor)) return
       leave()
@@ -279,10 +317,11 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
     {sourceNotice || service ? <div className="agent-information-reader__service" role={sourceNotice ? 'status' : undefined}>
       <InfoIcon size={13} aria-hidden="true" /><p>{sourceNotice ?? service}</p><button type="button" onPointerDown={event => { if (event.button === 0) event.preventDefault() }} onClick={() => showMetadata('source')}>Source</button>
     </div> : null}
+    {changedReading ? <div className="agent-information-reader__update" role="status">New Agent content <button type="button" onClick={() => { setReadingRequest(request); setReadingProtected(false) }}>Show latest</button></div> : null}
     <div className="agent-information-reader__body">
-      <div ref={reading} className="agent-information-reader__reading" tabIndex={0} aria-label="Original Agent content"
+      <div ref={reading} className="agent-information-reader__reading" tabIndex={0} aria-label="Original Agent content" onScroll={() => setReadingProtected(protectedReading())}
         style={tab ? { visibility: 'hidden' } : undefined} inert={tab !== null}>
-        <HeldReading request={request} enabled={visible && sameSource && tab === null} available={visible && sameSource} />
+        <HeldReading key={JSON.stringify([currentReading.context.runId, currentReading.sourceKey])} request={displayedReading} enabled={visible && readingSameSource && tab === null} available={visible && (Boolean(request.bookmark) || readingSameSource)} follow={Boolean(request.bookmark) && !readingProtected && !changedReading} />
       </div>
       {tab ? <div className="agent-information-reader__metadata">
         <div className="agent-information-reader__metadata-heading"><button ref={back} type="button" onClick={showReading} aria-label="Back to original content">←</button><h3>Agent information</h3></div>
@@ -294,8 +333,8 @@ export function AgentInformationReader({ request }: { request: PreviewRequest })
         aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
         <InfoIcon size={14} aria-hidden="true" /><AgentInformationSummary usage={usage} goalLinks={request.goalLinks} />
       </button>
-      <button type="button" className="agent-information-reader__pin" aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Release reading · P' : 'Keep this reading while you work · P'}>
-        <PinIcon size={13} aria-hidden="true" />{request.pinned ? 'Pinned' : 'Pin'}
+      <button type="button" className="agent-information-reader__pin" aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Remove bookmark · P' : 'Pin Agent bookmark · P'}>
+        <PinIcon size={13} aria-hidden="true" />{request.pinned ? 'Bookmarked' : 'Pin'}
       </button>
       <button type="button" className="agent-information-reader__open" onClick={() => {
         const original = useAppStore.getState().sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId)

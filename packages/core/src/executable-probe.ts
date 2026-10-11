@@ -4,6 +4,7 @@ import { delimiter, isAbsolute, join, resolve } from 'node:path'
 import type { AgentMuxExecutorProbeResult } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { missingExecutableCause } from './executable-diagnostics.js'
+import type { AgentCapabilitySnapshot } from './types.js'
 
 /** The executing Host's original invocation context. Omission never selects a workspace. */
 export type AgentExecutableProbeContext = {
@@ -51,14 +52,16 @@ export async function classifyExecutable(executable: string, context: AgentExecu
   return { executable, availability: 'missing', cause: notFile ?? missingExecutableCause(executable) }
 }
 
-/** Keep the actual launch check's context when explaining a failed preflight. */
-export async function executorUnavailableError(label: string, executable: string, context: AgentExecutableProbeContext): Promise<AgentMuxError> {
-  const result = await classifyExecutable(executable, context)
+/** Explain the original preflight without replacing it with a second filesystem observation. */
+export function executorUnavailableError(label: string, capability: AgentCapabilitySnapshot): AgentMuxError {
+  const result = capability.executableObservation
+  if (!result || result.executable !== capability.executable) return new AgentMuxError(
+    `${label} did not confirm support for this executable. Check the Provider configuration before retrying.`, 'AGENT_NOT_FOUND', 'provider-unavailable')
   if (result.availability === 'check-failed') return new AgentMuxError(
     `Could not verify the ${label} executable on this host: ${result.cause.code}: ${result.cause.message}`,
     'AGENT_NOT_FOUND', 'executor-check-failed')
   if (result.availability === 'available') return new AgentMuxError(
-    `${label} executable availability changed while preparing the launch. Retry the launch.`, 'AGENT_NOT_FOUND', 'executor-check-failed')
+    `${label} did not confirm support for this executable despite its available filesystem observation. Check the Provider configuration before retrying.`, 'AGENT_NOT_FOUND', 'provider-unavailable')
   return new AgentMuxError(result.cause ? `The configured ${label} executable is not available: ${result.cause.message}`
-    : missingExecutableCause(executable).message, 'AGENT_NOT_FOUND', 'executor-missing')
+    : missingExecutableCause(capability.executable).message, 'AGENT_NOT_FOUND', 'executor-missing')
 }

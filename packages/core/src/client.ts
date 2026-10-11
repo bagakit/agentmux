@@ -1,5 +1,6 @@
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
 import { classifyExecutable, executorUnavailableError, type AgentExecutableProbeContext } from './executable-probe.js'
+import { unconfirmedExecutableObservation } from './executable-observation.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
 import type { AgentConversationReadPage } from './conversation.js'
@@ -3225,10 +3226,23 @@ export class AgentMuxClient {
   }
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentCapabilitySnapshot> {
-    return await this.providers.get(providerId).probeCapabilities(
-      { hasExecutable: async executable => (await classifyExecutable(executable, context)).availability === 'available' },
+    const observations: AgentMuxExecutorProbeResult[] = []
+    const observe = async (executable: string) => {
+      const observation = await classifyExecutable(executable, context)
+      observations.push(structuredClone(observation))
+      return observation
+    }
+    const capability = await this.providers.get(providerId).probeCapabilities(
+      { hasExecutable: async executable => (await observe(executable)).availability === 'available', observeExecutable: observe },
       commandOverride
     )
+    const observation = capability.executableObservation
+    if (!observation) return capability
+    const original = [...observations].reverse().find(value => value.executable === observation.executable)
+    // Pair machine facts only. Provider wording cannot grant or revoke execution;
+    // expose the Host's original cause instead of the Provider's presentation.
+    const { executableObservation: _contributed, ...originalCapability } = capability
+    return { ...originalCapability, ...(original?.availability === observation.availability ? { executableObservation: original } : {}) }
   }
 
   /**
@@ -3237,7 +3251,7 @@ export class AgentMuxClient {
    * 复用 Provider 自己的命令解析（commandOverride 优先，否则 catalog executable——那段逻辑住在
    * agent-provider 的 probeCapabilities 里，是唯一出处），只把它解析出的那条命令交给 classifyExecutable
    * 三态归类：`probeAgent` 里的 boolean `installed` 会把「查不成」折进「没装」，而发现列表必须区分二者
-   * （那正是那次误报要防的）。启动路径仍走 `probeAgent().installed`（=== 'available'），行为不变。
+   * （那正是那次误报要防的）。启动仅把准确缺失作为文件前置拒绝；检查失败由原 Native 执行裁定。
    */
   async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentMuxExecutorProbeResult> {
     // 借 probeCapabilities 的命令解析：它把解析后的命令传给 hasExecutable，我们截下那条命令再三态归类，
@@ -3998,7 +4012,9 @@ export class AgentMuxClient {
         : provider.buildLaunch(launchContext)
       const executableContext = { workspacePath: input.workspacePath, env: terminalEnvironment(plan.env) }
       const capability = await this.probeAgent(input.providerId, plan.command, executableContext)
-      if (!capability.installed) throw await executorUnavailableError(provider.label, capability.executable, executableContext)
+      if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command))) {
+        throw executorUnavailableError(provider.label, capability)
+      }
       // Binding 必须先于 Hook 安装：一个把 hook 投递代码**写进文件**的 Provider（opencode 的 JS
       // 插件）跑在自己进程里，拿不到 AgentMux 注入 PTY 的 `AGENTMUX_HOOK_URL`/`TOKEN`，所以 endpoint
       // 必须在安装那一刻就内联进被写出去的内容。写命令的那九家不受影响——它们的命令在运行时才从
@@ -4059,6 +4075,7 @@ export class AgentMuxClient {
         preservePreparedCreation = false
         throw error
       })
+      this.publishExecutableCheckFailure(provider.label, agentSessionId, lifecycleOperationId, plan.command, capability, run)
       const now = Date.now()
       const session: AgentMuxStoredAgentSession = {
         kind: 'agent',
@@ -4301,6 +4318,19 @@ export class AgentMuxClient {
     this.publishSession(ready)
     this.publisher.publishRunState(this.projectRun(run, ready), ready.agentSessionId)
     return ready
+  }
+
+  private publishExecutableCheckFailure(label: string, agentSessionId: string, operationId: string,
+    executable: string, capability: AgentCapabilitySnapshot, run: CtxmuxAdapterRun): void {
+    const observation = unconfirmedExecutableObservation(capability, executable)
+    if (!observation) return
+    // An unscoped diagnostic reaches System without assigning an error semantic state to this Run.
+    this.publisher.publish({ type: 'agent-error', code: 'AGENT_EXECUTABLE_CHECK_UNCONFIRMED',
+      message: `Executable preflight for ${label} (Agent ${agentSessionId}, operation ${operationId}) could not be confirmed: ` +
+        `${observation.cause.code}: ${observation.cause.message}. Native start returned Run ${run.runId} in ${run.state.type} state; ` +
+        'CLI readiness and task completion are separate facts. Original Session controls remain available. ' +
+        'Recheck this Executor’s availability in its configuration or through the public executor refresh command. Keep this Session and do not resend unconfirmed input.',
+      evidence: { source: 'agentmux', run: runRef(run.runId), observedAt: Date.now() } })
   }
 
   /**
@@ -4727,7 +4757,9 @@ export class AgentMuxClient {
       const { plan, deferredResumePrompt } = this.buildResumePlan(current, input, prompt)
       const executableContext = { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) }
       const capability = await this.probeAgent(current.providerId, plan.command, executableContext)
-      if (!capability.installed) throw await executorUnavailableError(provider.label, capability.executable, executableContext)
+      if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command))) {
+        throw executorUnavailableError(provider.label, capability)
+      }
       await this.requireHookIngressOwner()
       await this.hookBindings.get(current.run.runId)?.close()
       this.hookBindings.delete(current.run.runId)
@@ -4809,6 +4841,7 @@ export class AgentMuxClient {
         }
         throw error
       })
+      this.publishExecutableCheckFailure(provider.label, current.agentSessionId, lifecycleOperationId, plan.command, capability, run)
       const nativeBindingObservedAt = Date.now()
       const next: AgentMuxStoredAgentSession = {
         ...current,
@@ -5238,6 +5271,7 @@ export class AgentMuxClient {
       handle?.kind === 'provider' && handle.providerId === current?.providerId &&
       (catalog.resumeStrategy.locator !== 'transcript-path' || Boolean(handle.transcriptPath))
     let capability: AgentCapabilitySnapshot | null = null
+    let launchExecutable: string | undefined
     if (canProbe && current) {
       try {
         input = await this.sessionExecutorOptions(current, input)
@@ -5255,6 +5289,7 @@ export class AgentMuxClient {
         if (launchInput) receipt.launchInput = launchInput
         const originalPrompt = composeAgentPrompt(receipt.launchInput?.input.prompt, receipt.launchInput?.input.agentMuxNote).text
         const { plan } = this.buildResumePlan(current, input, originalPrompt || undefined)
+        launchExecutable = plan.command
         capability = await this.probeAgent(current.providerId, plan.command, { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) })
       } catch (error) {
         receipt.error = error instanceof Error ? error.message : String(error)
@@ -5265,7 +5300,7 @@ export class AgentMuxClient {
     const decision = decideAgentSessionContinuity({ agentSessionId: input.agentSessionId,
       hostId: current?.hostId ?? retirement?.hostId ?? 'local', expectedRun: input.expectedRun, observedAt: now,
       session: current ? this.projectSession(current) : null, retirement: retirement ? structuredClone(retirement) : null,
-      run, catalog, capability })
+      run, catalog, capability, ...(launchExecutable === undefined ? {} : { launchExecutable }) })
     if (decision.kind === 'reattachable' && current && input.env !== undefined) {
       try { await this.ensureManagedHooks(this.providers.get(current.providerId), current.workspacePath, current.agentSessionId,
         input.env, this.hookBindings.get(current.run.runId)?.endpoint) }

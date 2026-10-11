@@ -11,6 +11,7 @@ import type {
 } from './types.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { isAgentActivityStatusSource } from './agent-status-freshness.js'
+import { unconfirmedExecutableObservation } from './executable-observation.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
 export type AgentMuxContinuityPolicy = {
@@ -320,6 +321,8 @@ export type AgentMuxAgentContinuityFacts = {
   run: AgentMuxRun | null
   catalog: AgentCatalogEntry | null
   capability: AgentCapabilitySnapshot | null
+  /** The actual native resume plan's command, independently of installed capability projection. */
+  launchExecutable?: string
 }
 
 export type AgentMuxAgentContinuityDecision =
@@ -442,7 +445,8 @@ export function decideAgentSessionContinuity(
     }
   }
   if (
-    !facts.capability?.installed ||
+    !facts.capability ||
+    (!facts.capability.installed && !unconfirmedExecutableObservation(facts.capability, facts.launchExecutable ?? '')) ||
     facts.capability.providerId !== session.providerId ||
     !facts.capability.capabilities.providerResume
   ) {

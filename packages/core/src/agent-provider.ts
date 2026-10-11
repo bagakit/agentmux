@@ -22,6 +22,7 @@ import type { AgentManagedHookPlan } from './managed-hook-installer.js'
 import { createBuiltInAgentProviders } from './providers/index.js'
 import type {
   AgentCapabilitySnapshot,
+  AgentExecutableObservation,
   AgentCatalogEntry,
   AgentProviderId,
   AgentLaunchPlan,
@@ -61,6 +62,8 @@ import type {
 
 export type AgentExecutableProbe = {
   hasExecutable(executable: string): Promise<boolean>
+  /** Optional richer Host observation. Providers keep unsupported capabilities independent of it. */
+  observeExecutable?(executable: string): Promise<AgentExecutableObservation>
 }
 
 export type AgentManagedHookPlanContext = {
@@ -386,10 +389,12 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     } } : {}),
     async probeCapabilities(probe, commandOverride) {
       const command = resolveAgentExecutable(commandOverride, catalog.executable)
+      const observation = await probe.observeExecutable?.(command)
       return {
         providerId: catalog.id,
         executable: command,
-        installed: await probe.hasExecutable(command),
+        installed: observation ? observation.availability === 'available' : await probe.hasExecutable(command),
+        ...(observation ? { executableObservation: observation } : {}),
         capabilities: { ...catalog.capabilities }
       }
     },

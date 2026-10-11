@@ -638,10 +638,19 @@ export type AgentCatalogEntry = {
   }
 }
 
+/** The original Host's filesystem observation; failure is not proof that execution is unavailable. */
+export type AgentExecutableObservation = { executable: string } & (
+  | { availability: 'available' }
+  | { availability: 'missing'; cause?: { code: string; message: string } }
+  | { availability: 'check-failed'; cause: { code: string; message: string } }
+)
+
 export type AgentCapabilitySnapshot = {
   providerId: AgentProviderId
   executable: string
   installed: boolean
+  /** Contributed by the Provider's executable probe, independently of its supported capabilities. */
+  executableObservation?: AgentExecutableObservation
   capabilities: AgentCapabilities
 }
 
