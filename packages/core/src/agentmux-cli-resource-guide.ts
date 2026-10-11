@@ -48,6 +48,7 @@ Executor refresh takes exact Executor and Host IDs and only checks availability.
 means a regular executable was found; missing means no usable executable; check-failed
 retains cause.code/message. It does not launch, stop, resume, save configuration or imply
 Agent health. Use settings hosts test --input <file|-> for an unsaved connection draft.
+Repair an already-bound SSH route with settings hosts update <id> --input <file|->, carrying complete expected and candidate Host records. This confirms the same Runtime and preserves Sessions and Runs. An unknown reply requires settings hosts ls readback; never replay Run operations.
 Use settings hosts inspect --host <id> for one exact route's passive Runtime observation.
 It returns the original configuration snapshot (null without a Host configuration owner),
 separate semantic owner, Native identity, diagnostics and retained Run/attachment/output

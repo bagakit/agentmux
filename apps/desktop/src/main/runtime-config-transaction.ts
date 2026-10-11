@@ -28,6 +28,7 @@ export async function saveRuntimeConfig(args: {
   const preparation = await args.runtime.prepare(args.next)
   let saved: AppConfig
   try {
+    args.runtime.validatePreparation(preparation)
     saved = await args.configWriter.save(configWithRuntimeBindings(args.next, preparation))
   } catch (error) {
     try {

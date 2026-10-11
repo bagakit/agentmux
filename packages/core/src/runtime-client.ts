@@ -2,9 +2,10 @@ import type { AgentProvider } from './agent-provider.js'
 import { AgentMuxClient } from './client.js'
 import { connectHostedAgentMux } from './hosted-client.js'
 import type { AgentMuxHostedClient } from './hosted-client-contract.js'
-import { agentMuxRpcSshArguments, connectAgentMuxRpc } from './public-rpc-client.js'
+import { connectAgentMuxRpc, type AgentMuxPreparedSshRoute } from './public-rpc-client.js'
 import type { AgentMuxRpcEndpoint } from './public-rpc.js'
 export type { AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
+import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
 
 export type AgentMuxRuntimeClient = AgentMuxClient | AgentMuxHostedClient
@@ -12,6 +13,8 @@ export type AgentMuxRuntimeClient = AgentMuxClient | AgentMuxHostedClient
 export type AgentMuxSshHostedClient = AgentMuxHostedClient & {
   /** Validate and update the launcher for future SSH channels, retaining current readers. */
   setRemoteCommand(command?: string): void
+  /** Prepare only the authenticated semantic identity; adoption retains this consumer. */
+  prepareRoute(target: AgentMuxSshRuntimeClientOptions['target'], signal?: AbortSignal): Promise<AgentMuxPreparedSshRoute>
 }
 
 type AgentMuxRuntimeClientCommonOptions = {
@@ -92,13 +95,17 @@ export async function connectSshAgentMux(
     })
     const releaseConsumer = client.dispose
     client.dispose = async () => { try { await releaseConsumer() } finally { await rpc.dispose() } }
-    return Object.assign(client, { setRemoteCommand(command?: string): void {
-      const next = { ...endpoint }
-      if (command === undefined) delete next.command
-      else next.command = command
-      agentMuxRpcSshArguments(next)
-      if (command === undefined) delete endpoint.command
-      else endpoint.command = command
+    return Object.assign(client, { async prepareRoute(target: AgentMuxSshRuntimeClientOptions['target'], signal?: AbortSignal) {
+      const expected = options.expectedRuntimeId ?? client.runtimeOwnerIdentity()?.runtimeId
+      if (!expected || target.hostId !== options.target.hostId) throw new AgentMuxError('Route repair requires the original bound SSH Host.', 'INVALID_CONTROL_REQUEST')
+      const next: Extract<AgentMuxRpcEndpoint, { transport: 'ssh' }> = { transport: 'ssh', host: target.hostname,
+        ...(target.user === undefined ? {} : { user: target.user }), ...(target.port === undefined ? {} : { port: target.port }),
+        ...(target.identityFile === undefined ? {} : { identityFile: target.identityFile }),
+        ...(target.remoteCommand === undefined ? {} : { command: target.remoteCommand }),
+        ...(target.remoteSocketPath === undefined ? {} : { socketPath: target.remoteSocketPath }) }
+      return await rpc.prepareSshRoute(next, expected, signal)
+    }, setRemoteCommand(command?: string): void {
+      rpc.setSshRemoteCommand(command)
     } })
   } catch (error) { await rpc.dispose(); throw error }
 }

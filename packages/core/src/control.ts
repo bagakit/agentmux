@@ -328,6 +328,7 @@ export type AgentMuxControlSettingsExecutorRefreshResult = {
 /** Host configuration belongs to the client; Core transports bounded JSON and diagnostic facts. */
 export type AgentMuxControlSettingsHostsRequest = RequestBase & (
   | { operation: 'settings.hosts.list' }
+  | { operation: 'settings.hosts.update'; id: string; expected: AgentMuxControlSettingsResourceFields; candidate: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.hosts.test'; id: string; input?: never }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; id?: never }
   | { operation: 'settings.hosts.upgrade-check'; id: string; input?: never }
@@ -338,6 +339,7 @@ export type AgentMuxControlSettingsHostsRequest = RequestBase & (
 export type AgentMuxHostCheckOutcome = 'ready' | 'unsupported' | 'check-failed'
 export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.list'; hosts: AgentMuxControlSettingsResourceFields[] }
+  | { operation: 'settings.hosts.update'; host: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; outcome: AgentMuxHostCheckOutcome; detail: string }
   | { operation: 'settings.hosts.upgrade-check'; check: import('./remote-core-upgrade.js').RemoteCoreUpgradeCheck }
   | { operation: 'settings.hosts.upgrade'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
@@ -1044,6 +1046,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'diagnostics.crash-log.get': 'short',
   'diagnostics.crash-log.reveal': 'short',
   'settings.hosts.list': 'short',
+  'settings.hosts.update': 'long',
   'settings.hosts.test': 'long',
   'settings.hosts.upgrade-check': 'long',
   'settings.hosts.upgrade': 'long',
