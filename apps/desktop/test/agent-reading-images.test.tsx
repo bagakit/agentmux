@@ -91,10 +91,14 @@ it('does not attach a late image or issue more reads after the original pinned R
   await open(); await intersect()
   expect(api.ui.readPastedImage).toHaveBeenCalledWith(pasted)
   await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click())
+  await act(async () => {
+    const prose = panel().querySelector('.focus-context-hover__recap p')!, range = document.createRange(); range.selectNodeContents(prose)
+    document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range); document.dispatchEvent(new Event('selectionchange'))
+  })
   const before = vi.mocked(api.ui.readPastedImage).mock.calls.length
   await act(async () => useAppStore.setState({ sessions: [{ ...agent, control: { ...agent.control, run: { runId: 'replacement-image-run' } } }, neighbor] }))
   await act(async () => resolve({ dataUrl: 'data:image/png;base64,' + png }))
   expect(panel().querySelector('.focus-context-hover__recap img')).toBeNull()
-  expect(panel().textContent).toContain('Original Run or source is no longer confirmed')
+  expect(panel().textContent).toContain('Reading an earlier Run or source')
   await intersect(); expect(api.ui.readPastedImage).toHaveBeenCalledTimes(before)
 })
