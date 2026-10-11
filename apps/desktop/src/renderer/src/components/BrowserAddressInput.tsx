@@ -56,7 +56,6 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
       const result = await api.browser.listInputHistory(target)
       if (!live(key, token)) return
       setLoadedHistory({ key, snapshot: result }); setSelected(-1); setNotice(null)
-      if (document.activeElement === input.current && !composing.current) setOpen(true)
     } catch (error) {
       if (live(key, token)) setNotice(`Input history could not be read: ${presentError(error)}. Your input and browsing remain available; retry history here.`)
     } finally { if (live(key, token)) setLoading(false) }
@@ -91,6 +90,12 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
 
   function dismiss(): void { ++request.current; setOpen(false); setLoading(false); setSelected(-1) }
 
+  function showSuggestions(): void {
+    if (composing.current) return
+    setOpen(true)
+    void reload()
+  }
+
   useLayoutEffect(() => {
     const anchor = input.current, floating = panel.current
     if (!open || !anchor || !floating) return
@@ -123,12 +128,12 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   return <>
     <TextInput {...props} ref={input} role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls={open ? id : undefined} aria-activedescendant={open && selected >= 0 && entries[selected] ? `${id}-${selected}` : undefined}
       value={composerRenderValue(value, composition)} autoComplete="off"
-      onChange={event => { setSelected(-1); setFiltering(true); ime.change(event.currentTarget.value); if (!composing.current) setOpen(true) }}
+      onChange={event => { setSelected(-1); setFiltering(true); ime.change(event.currentTarget.value); if (!open) showSuggestions() }}
       onCompositionStart={event => { composing.current = true; dismiss(); ime.compositionStart(event.currentTarget.value) }}
       onCompositionUpdate={event => ime.compositionUpdate(event.currentTarget.value)}
       onCompositionEnd={event => { composing.current = false; setFiltering(true); ime.compositionEnd(event.currentTarget.value) }}
-      onFocus={event => { onFocus?.(event); if (!composing.current) { setOpen(true); void reload() } }}
-      onClick={event => { onClick?.(event); if (!open && !composing.current) { setOpen(true); void reload() } }}
+      onFocus={onFocus}
+      onClick={event => { onClick?.(event); if (!open) showSuggestions() }}
       onBlur={event => { onBlur?.(event); if (!panel.current?.contains(event.relatedTarget as Node)) dismiss() }}
       onContextMenu={event => { event.stopPropagation(); dismiss(); onContextMenu?.(event) }}
       onKeyDown={event => {
@@ -137,8 +142,9 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
         if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) { if (event.key === 'Enter') event.preventDefault(); return }
         if (event.key === 'Escape') { if (open) { event.preventDefault(); event.stopPropagation() }; dismiss(); return }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-          if (!entries.length) { void reload(); return }
-          event.preventDefault(); setOpen(true); setSelected(previous => previous < 0 ? event.key === 'ArrowDown' ? 0 : entries.length - 1 : (previous + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length); return
+          event.preventDefault()
+          if (!entries.length) { showSuggestions(); return }
+          setOpen(true); setSelected(previous => previous < 0 ? event.key === 'ArrowDown' ? 0 : entries.length - 1 : (previous + (event.key === 'ArrowDown' ? 1 : -1) + entries.length) % entries.length); return
         }
         if (event.key === 'Enter') {
           event.preventDefault()
