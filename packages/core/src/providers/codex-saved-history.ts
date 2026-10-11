@@ -4,7 +4,7 @@ import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, readNativeConversationChanges, NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES } from '../native-jsonl-history-reader.js'
 import { normalizeSessionHistoryMetrics, SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
-import { isNativeText, nativeJsonStringify, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
+import { isNativeText, nativeJsonStringify, nativeTextConcat, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
 import { codexQuestionAnswers, codexQuestionRequest } from './codex-question.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryRecordContext, AgentSessionHistoryItem } from '../types.js'
@@ -65,6 +65,28 @@ function contentParts(content: unknown, userInput = false): NativeHistoryContent
   })
 }
 
+function mcpFileParts(payload: Record<string, unknown>, nativeItem: Record<string, unknown>): NativeHistoryContentPart[] | undefined {
+  const result = object(nativeItem.result)
+  if (!Array.isArray(result.content)) return undefined
+  const parts: NativeHistoryContentPart[] = []
+  const content = result.content.map(value => {
+    const block = object(value), resource = object(block.resource), mime = resource.mimeType
+    if (block.type !== 'resource' || typeof resource.uri !== 'string' || !resource.uri ||
+      !isNativeText(resource.blob) || !resource.blob.length || typeof mime !== 'string' || !mime ||
+      mime.toLowerCase().startsWith('image/') || mime.toLowerCase().startsWith('audio/')) return value
+    parts.push({ kind: 'resource', resourceType: 'file', contentEligibility: 'public', reference: nativeTextConcat(`data:${mime};base64,`, resource.blob),
+      ...(typeof resource.name === 'string' ? { label: resource.name } : {}) })
+    // Preserve the original metadata without serializing the same payload twice.
+    const { blob: _blob, ...metadata } = resource
+    return { ...block, resource: metadata }
+  })
+  if (!parts.length) return undefined
+  parts.push({ kind: 'tool-result', contentEligibility: 'unconfirmed', callId: nativeItem.id as string,
+    output: nativeJsonStringify({ ...payload, item: { ...nativeItem, result: { ...result, content } } }),
+    ...(nativeItem.status === 'failed' || result.isError === true ? { failed: true } : {}) })
+  return parts
+}
+
 function item(record: Record<string, unknown>, start: number, nativeSessionId: string, paginated: boolean, projectQuestion = true): NativeHistoryItem | null {
   const payload = object(record.payload), type = payload.type
   if (record.type === 'session_meta' || record.type === 'turn_context') return null
@@ -74,6 +96,10 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   const canonicalUser = paginated && record.type === 'event_msg' && type === 'item_completed' &&
     payload.thread_id === nativeSessionId && typeof payload.turn_id === 'string' && payload.turn_id.length > 0 &&
     nativeItem.type === 'UserMessage' && typeof nativeItem.id === 'string' && nativeItem.id.length > 0 && Array.isArray(nativeItem.content)
+  const mcpParts = paginated && record.type === 'event_msg' && type === 'item_completed' &&
+    payload.thread_id === nativeSessionId && typeof payload.turn_id === 'string' && payload.turn_id.length > 0 &&
+    nativeItem.type === 'McpToolCall' && typeof nativeItem.id === 'string' && nativeItem.id.length > 0 &&
+    (nativeItem.status === 'completed' || nativeItem.status === 'failed') ? mcpFileParts(payload, nativeItem) : undefined
   const asyncQuestion = record.type === 'event_msg' && type === 'item_completed' &&
     payload.thread_id === nativeSessionId && typeof payload.turn_id === 'string' && payload.turn_id.length > 0 &&
     nativeItem.type === 'AgentMessage' && nativeItem.delivery === 'async'
@@ -98,6 +124,9 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   } else if (canonicalUser) {
     kind = 'user-message'
     parts = contentParts(nativeItem.content, true)
+  } else if (mcpParts) {
+    // Only the typed tool result's file purpose is known; metadata stays unconfirmed.
+    parts = mcpParts
   } else if (record.type === 'response_item' && type === 'message') {
     const system = systemMessage(payload)
     contentEligibility = system || payload.role === 'user' && paginated ? 'private'
@@ -141,7 +170,8 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     ? { source: { providerId: 'codex', nativeSessionId }, semanticItemId: nativeItem.id as string, turnId: payload.turn_id as string, clientCorrelation: nativeItem.client_id } : undefined
   const invocation = nativeConversationProvenance(parts, { providerId: 'codex', nativeSessionId })
   const conversation = input ? { ...invocation, nativeInput: input } : invocation
-  return { id, kind, contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
+  return { id, kind, contentParts: parts.map(part => ({ ...part, contentEligibility: mcpParts ? part.contentEligibility ?? 'unconfirmed'
+      : contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
     ...(conversation ? { conversation } : {}),
     ...metrics(record, payload, nativeSessionId),
     ...(kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'final_answer' ? { messagePhase: 'final' as const }
