@@ -4,6 +4,7 @@ import { parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseC
 import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 import { SetupApplicationInspection } from './connection-setup-inspection.js'
+import { SetupApplicationConfiguration } from './connection-setup-configuration.js'
 
 type Row = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
 type PrivateEnvelope = { operationId: string; connectionId: string; attemptId: string; challenge: ConnectionSetupView['challenge']; privateState: string }
@@ -23,14 +24,17 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private readonly unsettled = new Map<string, PrivateEnvelope>()
   private readonly unsettledAuthentication = new Map<string, AuthEnvelope>()
   private readonly inspection: SetupApplicationInspection
+  private readonly configuration: SetupApplicationConfiguration
   constructor(private readonly connections: ConnectionHost, private readonly secrets?: EnrollmentSecrets) {
     connections.database.exec('CREATE TABLE IF NOT EXISTS connection_setup_operation (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT UNIQUE NOT NULL, connection_id TEXT NOT NULL, actor_json TEXT NOT NULL, record_json TEXT NOT NULL, private_ref TEXT)')
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_by_connection ON connection_setup_operation(connection_id,ordinal)')
+    connections.database.exec("CREATE INDEX IF NOT EXISTS connection_setup_by_application ON connection_setup_operation(json_extract(record_json,'$.application.domain'),json_extract(record_json,'$.application.appId'))")
     connections.database.exec('CREATE TABLE IF NOT EXISTS connection_setup_auth_step (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, step_id TEXT UNIQUE NOT NULL, operation_id TEXT NOT NULL, action_id TEXT UNIQUE NOT NULL, input_json TEXT NOT NULL, record_json TEXT NOT NULL, private_ref TEXT)')
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_auth_by_operation ON connection_setup_auth_step(operation_id,ordinal)')
     this.inspection = new SetupApplicationInspection({ connections, secrets, read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), snapshot: row => this.authenticationSnapshot(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
+    this.configuration = new SetupApplicationConfiguration({ connections, secrets, inspection: this.inspection, read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
   }
-  close(): void { this.closed = true; this.nativeRequests.clear(); this.unsettled.clear(); this.unsettledAuthentication.clear(); this.inspection.close() }
+  close(): void { this.closed = true; this.nativeRequests.clear(); this.unsettled.clear(); this.unsettledAuthentication.clear(); this.inspection.close(); this.configuration.close() }
   private safe<T>(run: () => T): T {
     try { return run() } catch (error) {
       if (error instanceof AgentMuxError) throw error
@@ -152,6 +156,8 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     let row = this.read(input.operationId)
     if (!row) throw failure('The exact original management request is unknown.', 'UNKNOWN_CONNECTION_OPERATION')
     await this.authority(context, row)
+    const configured = await this.configuration.advance(input, context)
+    if (configured) return configured
     const inspected = await this.inspection.advance(input, context)
     if (inspected) return inspected
     if (!this.current(row)) throw failure('The exact saved bot revision changed. The original management intent is retained.', 'CONNECTION_REVISION_CONFLICT')
@@ -374,8 +380,9 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   async inspect(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const input = parseConnectionSetupParams('connection.setup.inspect', value), row = this.read(input.operationId)
     await this.authority(context, row)
-    const view = await this.view(row, context)
-    return row && input.applicationInspection ? this.inspection.attach(view, row, context, input.applicationInspection) : view
+    let view = await this.view(row, context)
+    if (row && input.applicationInspection) view = await this.inspection.attach(view, row, context, input.applicationInspection)
+    return row && input.applicationConfiguration ? this.configuration.attach(view, row, context, input.applicationConfiguration) : view
   }
   async list(value: { connectionId: string; cursor?: string; limit?: number }): Promise<ConnectionSetupListing> {
     const input = parseConnectionSetupParams('connection.setup.ls', value), limit = input.limit ?? 25
@@ -389,7 +396,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       const setup = current && this.connections.registeredAdapter(current.config.adapterId)?.setup
       const support: ConnectionSetupListing['support'] = current ? {
         connectionRevision: current.revision,
-        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : [])]
+        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : [])]
       } : null
       const rows = this.connections.database.prepare('SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(input.connectionId, before, limit + 1)
       return { operations: rows.slice(0, limit).map(r => this.summary(this.read(String(r.operation_id))!)), next: rows.length > limit ? String(rows[limit - 1]!.ordinal) : null, support }

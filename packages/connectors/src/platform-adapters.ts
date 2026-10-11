@@ -22,6 +22,11 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       domains: ['open.feishu.cn'],
       begin: async (input, signal) => (await feishu()).setup.begin(input, signal),
       advance: async (input, signal) => (await feishu()).setup.advance(input, signal),
+      applicationConfiguration: {
+        domains: ['open.feishu.cn'],
+        messagingCapability: async state => (await feishu()).setup.applicationConfiguration!.messagingCapability(state),
+        enableMessaging: async (input, signal) => (await feishu()).setup.applicationConfiguration!.enableMessaging(input, signal)
+      },
       applicationInspection: {
         domains: ['open.feishu.cn'],
         inspect: async (input, signal) => (await feishu()).setup.applicationInspection!.inspect(input, signal),

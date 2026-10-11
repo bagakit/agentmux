@@ -1,9 +1,10 @@
-import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability } from '@agentmux/core/connections'
 
 export type SetupAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; application: Readonly<ConnectionApplication> }>
 export type SetupChallengeReceipt = { kind: 'challenge'; challenge: ConnectionSetupChallenge; privateState: string } | { kind: 'unknown' }
 export type SetupAuthenticationReceipt = { kind: 'progress'; stage: ConnectionSetupAuthenticationStage; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; privateState: string } | { kind: 'unknown' }
 export type SetupReadReceipt = { kind: 'observed'; readResult: ConnectionSetupReadSummary; privateState: string } | { kind: 'unknown' }
+export type SetupConfigurationReceipt = { kind: 'accepted'; privateState: string } | { kind: 'unknown' }
 export type SetupInspectionReceipt = { kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }
 export interface ConnectionSetupAdapter {
   /** Local implementation availability only, never exact-application management eligibility. */
@@ -13,6 +14,13 @@ export interface ConnectionSetupAdapter {
   /** One HTTP request, including at most one redirect hop; the Host owns its durable claim. */
   advance(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupAuthenticationReceipt>
   /** Separate local implementation declaration; only an admitted current-auth action calls it. */
+  readonly applicationConfiguration?: {
+    readonly domains: readonly string[]
+    /** Local interpretation of the exact already-bound raw bot read, with zero network effects. */
+    messagingCapability(originalReadState: string): Promise<ConnectionSetupCapability>
+    /** Exactly one native enable-only request, never menu, modes or publication. */
+    enableMessaging(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
+  }
   readonly applicationInspection?: {
     readonly domains: readonly string[]
     inspect(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupInspectionReceipt>
