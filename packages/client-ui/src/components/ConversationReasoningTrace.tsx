@@ -1,3 +1,5 @@
+import { ConversationSourceLabels } from './ConversationSourceLabels.js'
+import type { ConversationSourceDisplay } from '../lib/conversation-sources.js'
 import { ContentCopyButton } from './ContentCopyButton.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { memo, useMemo, useState } from 'react'
@@ -7,6 +9,7 @@ import type { ReadPastedImage } from './ConversationImage.js'
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationReasoningTraceProps = {
+  sources?: ConversationSourceDisplay | undefined
   active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'reasoning' }>
   copyIdentity?: object
@@ -28,6 +31,7 @@ export type ConversationReasoningTraceProps = {
 export const ConversationReasoningTrace = memo(function ConversationReasoningTrace({
   active = true,
   part,
+  sources,
   traceId,
   copyIdentity,
   expanded,
@@ -58,7 +62,7 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
       open={open}
       onToggle={handleToggle}
     >
-      <summary className="log-turn__trace-summary">Reasoning</summary>
+      <summary className="log-turn__trace-summary">Reasoning <ConversationSourceLabels sources={sources} /></summary>
       {open ? (
         <div className="log-turn__trace-payload">
           {!part.redacted && part.text.length > 0 ? <div className="conversation-detail-actions"><ContentCopyButton text={part.text} identity={identity} label="Copy reasoning" /></div> : null}

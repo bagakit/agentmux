@@ -27,7 +27,7 @@ type ObservedToolProps = {
     title: string
     status?: WorkflowObservationStatus
     recordedTime?: WorkflowRecordedTime
-    source: string
+    source: ReactNode
     persistentSource: boolean
   }
   className: string

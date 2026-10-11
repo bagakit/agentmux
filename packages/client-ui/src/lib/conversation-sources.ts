@@ -1,0 +1,74 @@
+import type { AgentMuxEvidenceSource } from '@agentmux/core'
+import { conversationRecordId, type ConversationContentRef, type ConversationEvent, type ConversationInvocationRef, type ConversationSelector, type ConversationSourceRecord, type ConversationTimeline } from '@agentmux/core/conversation'
+
+export const NATIVE_CONVERSATION_SOURCE = '原生对话'
+const capturedLabels = {
+  'native-hook': 'Hook', 'native-transcript': '原生记录观察', 'terminal-output': '终端输出观察',
+  'run-process': '进程观察', acp: 'ACP', user: 'AgentMux 提交记录', agentmux: 'AgentMux'
+} satisfies Record<AgentMuxEvidenceSource, string>
+export type ConversationSourceDisplay = { labels: readonly { id: string; label: string; title: string }[]; unread?: boolean }
+export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; unconfirmed: boolean }
+type Slot = ConversationEvent['content'][number]
+const selectorKey = (selector: ConversationSelector) => selector.kind === 'native-part' ? ['native-part', selector.partIndex] : ['captured-field', selector.field]
+const contentKey = (ref: ConversationContentRef) => JSON.stringify([conversationRecordId(ref.record), ref.recordRevision, selectorKey(ref.selector)])
+const invocationKey = (ref: ConversationInvocationRef) => JSON.stringify([ref.hostId, ref.agentSessionId, ref.source.providerId, ref.source.nativeSessionId,
+  typeof ref.subject === 'string' ? ['main'] : ['child', ref.subject.nativeActorId], ref.scope.kind, ref.scope.kind === 'turn' ? ref.scope.nativeTurnId : null, ref.callId])
+function display(records: readonly ConversationSourceRecord[], unread = false): ConversationSourceDisplay {
+  const labels = new Map<string, { id: string; label: string; details: string[] }>()
+  for (const record of records) {
+    const id = record.original.kind === 'native' ? 'native' : record.original.item.source
+    const label = record.original.kind === 'native' ? NATIVE_CONVERSATION_SOURCE : capturedLabels[record.original.item.source]
+    const old = labels.get(id), detail = `${record.id}\nRevision: ${record.revision}`
+    if (old) old.details.push(detail)
+    else labels.set(id, { id, label, details: [detail] })
+  }
+  return { labels: [...labels.values()].map(({ id, label, details }) => ({ id, label, title: details.join('\n') })), ...(unread ? { unread: true } : {}) }
+}
+
+/** Disposable display lookup over accepted Core relations. It never changes event membership or reads a source. */
+export function conversationSourcePresenter(timeline: ConversationTimeline) {
+  const inventory = new Map(timeline.records.map(record => [record.id, record]))
+  const invocationParts = new Map<string, Map<string, ConversationContentRef>>()
+  for (const relation of new Set(timeline.events.flatMap(event => event.relations))) if (relation.kind === 'same-invocation') {
+    const key = invocationKey(relation.invocation), group = invocationParts.get(key) ?? new Map<string, ConversationContentRef>()
+    for (const part of [relation.from, relation.to]) group.set(contentKey(part), part)
+    invocationParts.set(key, group)
+  }
+  const related = new Map<string, ConversationSourceDisplay[]>()
+  for (const group of invocationParts.values()) {
+    const known = new Map<string, ConversationSourceRecord>(); let unread = false
+    for (const ref of group.values()) {
+      const id = conversationRecordId(ref.record), record = inventory.get(id)
+      if (record?.revision === ref.recordRevision) known.set(id, record)
+      else unread = true
+    }
+    const sources = display([...known.values()], unread)
+    for (const key of group.keys()) { const values = related.get(key) ?? []; values.push(sources); related.set(key, values) }
+  }
+  const byContent = new Map([...related].map(([key, groups]) => {
+    const labels = new Map<string, { id: string; label: string; titles: Set<string> }>()
+    for (const group of groups) for (const source of group.labels) {
+      const value = labels.get(source.id) ?? { id: source.id, label: source.label, titles: new Set<string>() }
+      value.titles.add(source.title); labels.set(source.id, value)
+    }
+    return [key, { labels: [...labels.values()].map(({ id, label, titles }) => ({ id, label, title: [...titles].join('\n') })),
+      ...(groups.some(group => group.unread) ? { unread: true } : {}) }] as const
+  }))
+  function slotDisplay(slot: Slot): ConversationSourceDisplay {
+    const owner = inventory.get(slot.recordId)
+    if (!owner || owner.revision !== slot.recordRevision) return display([], true)
+    if (!owner.reference) return display([owner])
+    return byContent.get(contentKey({ record: owner.reference, recordRevision: owner.revision, selector: slot.selector })) ?? display([owner])
+  }
+  return (record: { records?: readonly ConversationSourceRecord[]; event?: ConversationEvent }): ConversationSources => {
+    const originals = record.records ?? [], primary = originals.find(item => item.id === record.event?.anchorId) ?? originals[0]
+    const slots: readonly Slot[] = record.event ? record.event.content.filter(slot => slot.placement === 'body') : primary
+      ? primary.original.kind === 'native' ? primary.original.item.contentParts.map((_, partIndex) => ({ recordId: primary.id, recordRevision: primary.revision, selector: { kind: 'native-part' as const, partIndex }, placement: 'body' as const }))
+        : (['content', 'toolInput', 'toolOutput'] as const).filter(field => primary.original.kind === 'captured' && primary.original.item[field] !== undefined).map(field => ({ recordId: primary.id, recordRevision: primary.revision, selector: { kind: 'captured-field' as const, field }, placement: 'body' as const })) : []
+    const fields: ConversationSources['fields'] = {}
+    if (primary?.original.kind === 'captured') for (const field of ['content', 'toolInput', 'toolOutput'] as const) if (primary.original.item[field] !== undefined)
+      fields[field] = slotDisplay({ recordId: primary.id, recordRevision: primary.revision, selector: { kind: 'captured-field', field }, placement: 'body' })
+    return { main: display(originals), parts: slots.map(slotDisplay), fields,
+      unconfirmed: Boolean(record.event && originals.length === 1 && timeline.order.crossSource === 'partial') }
+  }
+}

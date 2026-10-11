@@ -121,7 +121,7 @@ export const ConversationView = memo(function ConversationView({
       const itemRef = conversationItemRef(record)
       const speaker = record.role === 'process' ? undefined : record.speaker
       const described = speaker && item.kind !== 'system-message' ? describeSpeaker?.(speaker) : undefined
-      const body = <ConversationMessage {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
+      const body = <ConversationMessage sources={record.sources} {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           {...(itemRef ? { itemRef } : {})}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}

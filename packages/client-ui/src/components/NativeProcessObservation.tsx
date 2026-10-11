@@ -1,3 +1,4 @@
+import { NATIVE_CONVERSATION_SOURCE } from '../lib/conversation-sources.js'
 import type { AgentSessionHistoryItem, AgentSessionHistorySource } from '@agentmux/core'
 import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { describeActivityRecordTime } from '../lib/activity-record-time.js'
@@ -94,7 +95,7 @@ function NativeProcessStep({ item, origin, children, expanded: controlledExpande
     onExpandedChange?.(!expanded)
   }
   return <div className="wf-native-process" data-native-step-id={item.id}>
-    <WorkflowToolRow observation={{ id: item.id, title, source: 'Native', persistentSource: true,
+    <WorkflowToolRow observation={{ id: item.id, title, source: NATIVE_CONVERSATION_SOURCE, persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
       className="log-row" icon={collaboration ? <SemanticIcon name="object.collaboration" size={12} /> : <SemanticIcon name="object.terminal" size={12} />}
       expanded={expanded} controls={bodyId} onToggle={toggle} />

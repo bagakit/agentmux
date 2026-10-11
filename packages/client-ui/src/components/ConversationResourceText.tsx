@@ -1,3 +1,4 @@
+import type { ConversationSourceDisplay } from '../lib/conversation-sources.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
@@ -11,8 +12,9 @@ import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationHistoryResourceReader, ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 
-export function ConversationResourceText({ active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
+export function ConversationResourceText({ sources, active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
   openWorkspaceFile, readPastedImage, openHttpLink }: {
+  sources?: ConversationSourceDisplay | undefined
   active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>; partIndex: number
   record: ConversationNativeResourceRecord; readResource: ConversationHistoryResourceReader
@@ -63,8 +65,8 @@ export function ConversationResourceText({ active = true, part, partIndex, recor
       <AgentMarkdown visible={active} content={prefix?.body ?? text} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
     </div> :
-      content?.kind === 'tool-call' || content?.kind === 'tool-result' ? <ConversationToolTrace copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} /> :
-      content?.kind === 'reasoning' ? <ConversationReasoningTrace active={active} copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} homeDir={homeDir}
+      content?.kind === 'tool-call' || content?.kind === 'tool-result' ? <ConversationToolTrace sources={sources} copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} /> :
+      content?.kind === 'reasoning' ? <ConversationReasoningTrace sources={sources} active={active} copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> :
       content?.kind === 'resource' ? <div className="log-turn__resource"><span>{content.label ?? content.resourceType}</span><code>{content.reference}</code></div> : null}
   </div>

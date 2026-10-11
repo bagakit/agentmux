@@ -24,6 +24,9 @@ import { ConversationQuestionReply } from './ConversationQuestionReply.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
+import { ConversationSourceLabels } from './ConversationSourceLabels.js'
+import type { ConversationSources } from '../lib/conversation-sources.js'
+
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationMessageProps = {
@@ -50,6 +53,8 @@ export type ConversationMessageProps = {
   speaker?: ConversationSpeaker
   /** Read-only identity/role from the one Core timeline; never grants control. */
   conversationEvent?: Pick<import('@agentmux/core/conversation').ConversationEvent, 'id' | 'revision' | 'role' | 'author'>
+  /** Recorded source labels from the accepted Core inventory and relations. */
+  sources?: ConversationSources | undefined
   /** Current conversation identity, supplied by its host; never inferred from a name. */
   conversationSessionId?: string
   /** Location metadata for any original speech, independent of user input semantics. */
@@ -135,7 +140,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   active = true, compact = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationEvent, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -327,7 +332,8 @@ export function ConversationMessage({
               </button>
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
             </span> : null
-  const metadata = hasMetadata ? <div className="log-turn__meta">
+  const metadata = hasMetadata || sources && !detailsOnlyMetadata ? <div className="log-turn__meta">
+        {!detailsOnlyMetadata ? <ConversationSourceLabels sources={sources?.main} unconfirmed={sources?.unconfirmed ?? false} /> : null}
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
@@ -406,6 +412,7 @@ export function ConversationMessage({
           declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : null}{messageDetails}</ConversationInputDetails> : null}
       </div>
       {!detailsOnlyMetadata ? metadata : null}
+      {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} unconfirmed={sources.unconfirmed} /></div> : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
@@ -439,7 +446,7 @@ export function ConversationMessage({
               {...(readPastedImage ? { readPastedImage } : {})}
               {...(openHttpLink ? { openHttpLink } : {})}
             />}</div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
-              <ConversationToolTrace key={key} part={part} workspaceRoot={workspaceRoot}
+              <ConversationToolTrace sources={sources?.parts[index]} key={key} part={part} workspaceRoot={workspaceRoot}
                 copyIdentity={readingIdentity}
                 traceId={traceDisclosureKey(messageId, key)}
                 {...(expandedTraces ? { expanded: expandedTraces.has(traceDisclosureKey(messageId, key)) } : {})}
@@ -449,6 +456,7 @@ export function ConversationMessage({
                 active={active}
                 key={key}
                 part={part}
+                sources={sources?.parts[index]}
                 copyIdentity={readingIdentity}
                 workspaceRoot={workspaceRoot}
                 homeDir={homeDir}
@@ -460,7 +468,7 @@ export function ConversationMessage({
                 {...(openHttpLink ? { openHttpLink } : {})}
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
-              <ConversationResourceText active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown}
+              <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceImage active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
