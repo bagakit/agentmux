@@ -10,6 +10,8 @@ export type RoomBindingScope = {
   publication: 'future-native-user-facing' | 'future-shared-conversation'
 }
 export type RoomBindingTarget = { executionHostId: string; agentSessionId: string; regionAnchor: { regionId: string } }
+/** Explicit source selection for future input, independent of publication/read scope. Never freezes a per-message turn. */
+export type RoomBindingInputTarget = Omit<Extract<import('./agent-prompt-condition.js').AgentDirectedPromptTarget, { kind: 'native-conversation' }>, 'expectedTurnId'>
 /** An immutable authorized audience snapshot. A Region is navigation, never an execution route. */
 export type RoomBinding = RoomBindingTarget & {
   bindingId: string
@@ -19,6 +21,7 @@ export type RoomBinding = RoomBindingTarget & {
   application: ConnectionApplication
   externalConversationId: string
   scope: RoomBindingScope
+  inputTarget?: RoomBindingInputTarget
   /** Only original native sources are eligible in this scope. No captured or wall-clock substitute. */
   sourceCheckpoints: NativeConversationCheckpoint[]
   /** Frozen original source cuts accepted by this Binding revision, never discovery authorization. */
@@ -28,6 +31,7 @@ export type RoomBinding = RoomBindingTarget & {
 export type RoomBindingBindInput = RoomBindingTarget & {
   operationId: string; bindingId: string; connectionId: string; expectedConnectionRevision: number
   externalConversationId: string; scope: RoomBindingScope; expectedSource: AgentSessionHistorySource
+  inputTarget?: RoomBindingInputTarget
 }
 /** Relinking includes an explicit fresh source cut, also when continuing a paused binding to the same audience. */
 export type RoomBindingRelinkInput = RoomBindingBindInput & { expectedRevision: number }

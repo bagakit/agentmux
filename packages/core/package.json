@@ -330,7 +330,8 @@
     "node-diff3": "3.2.1",
     "stream-json": "3.7.0",
     "wa-sqlite": "1.0.0",
-    "yaml": "2.9.0"
+    "yaml": "2.9.0",
+    "ws": "8.21.3"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
@@ -352,6 +353,7 @@
     "@types/node": "^24.0.0",
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0",
-    "vitest": "^3.2.0"
+    "vitest": "^3.2.0",
+    "@types/ws": "8.18.1"
   }
 }

@@ -168,6 +168,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (!allowPendingReply) fail('INGRESS_ADDRESSING_UNCONFIRMED')
     }
     const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: record.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, grantId: grant.grantId, grantRevision: grant.revision })
+    if (expected?.admissionIntent) { const { expectedRun: _run, ...target } = expected.admissionIntent; if (!isDeepStrictEqual(target, binding.inputTarget ?? { kind: 'manual-actor' })) fail('INGRESS_AUTHORITY_REVISED') }
     if (expected && (expected.hostId !== binding.executionHostId || expected.agentSessionId !== binding.agentSessionId || !equal(expected.author, author))) fail('INGRESS_AUTHORITY_REVISED')
     return { binding, author, event }
   }
@@ -207,7 +208,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   private context(record: ConnectionIngressMessage): AgentInputCallContext {
     const ref = record.input!
     return { externalAuthor: { identity: ref.author, assertCurrent: intent => {
-      if (intent.agentSessionId !== ref.agentSessionId || !equal(intent.expectedRun, ref.expectedRun) || intent.operationId !== ref.operationId || intent.messageId !== ref.messageId || intent.body !== record.body) fail('INGRESS_INPUT_MISMATCH')
+      if (intent.agentSessionId !== ref.agentSessionId || !equal(intent.expectedRun, ref.expectedRun) || intent.operationId !== ref.operationId || intent.messageId !== ref.messageId || intent.body !== record.body || !ref.admissionIntent || !isDeepStrictEqual(intent.admissionIntent, ref.admissionIntent)) fail('INGRESS_INPUT_MISMATCH')
       this.safe(() => this.authorize(record, ref))
     } } }
   }
@@ -248,7 +249,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const current = this.read(ingressId)!
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
-      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: `ingress-operation-${randomUUID()}`, messageId: `ingress-message-${randomUUID()}`, author: original.author }
+      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: `ingress-operation-${randomUUID()}`, messageId: `ingress-message-${randomUUID()}`, author: original.author, admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
       this.authorize(current, frozen)
       return { record: this.write({ ...current, state: 'claimed', input: frozen }), own: true as const }
     })
@@ -257,7 +258,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: ref.messageId, operationId: ref.operationId, createdAt: Date.now(),
       sender: ref.author, recipient: { kind: 'agent-session', agentSessionId: ref.agentSessionId }, threadId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalConversationId]), correlationId: JSON.stringify(['external', record.application.domain, record.application.appId, record.externalMessageId]), replyTo: null, workspaceId: null, senderSessionId: null, senderRunId: null, recipientSessionId: ref.agentSessionId, recipientRunId: ref.expectedRun.runId, body: record.body }
     try {
-      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: { kind: 'manual-actor', expectedRun: ref.expectedRun }, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(claimed.record))
+      await client.submitAgentMessage({ agentSessionId: ref.agentSessionId, envelope, admissionIntent: ref.admissionIntent!, execution: 'immediate', sourceChannel: 'agent-message' }, this.context(claimed.record))
     } catch { /* A Core call may have saved or dispatched input. Only inspect this original operation. */ }
     return await this.inspect({ ingressId })
   }

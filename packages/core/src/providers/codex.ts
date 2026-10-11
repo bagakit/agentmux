@@ -3,6 +3,7 @@ import { listCodexNativeSessions, assertCodexNativeResumeSource } from './codex-
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution, inspectCodexPromptPreparationWait } from './codex-prompt-execution.js'
 import { observeCodexSessionStatus } from './codex-session-status.js'
+import { prepareCodexManagedLaunch, prepareCodexNativeInput } from './codex-native-input.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
@@ -177,6 +178,8 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
   })
   const verifyPromptExecutionTransport = createCodexPromptExecutionTransportVerifier()
   return defineAgentProvider({
+    prepareManagedLaunch: prepareCodexManagedLaunch,
+    prepareNativeInput: prepareCodexNativeInput,
     planManagedHooks: ({ workspacePath }) => createCodexManagedHookPlan(workspacePath),
     catalog: catalog({
       composer: {"skillRoots": [".agents/skills", ".codex/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/status", "description": "Session and usage"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/diff", "description": "Review changes"}]},
@@ -187,7 +190,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       acpStrategy: { kind: 'none' },
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
-        providerResume: true, replyCorrelation: 'none',
+        providerResume: true, replyCorrelation: 'none', nativeConversationInput: { managedRuns: true },
         asyncQuestionReply: 'terminal',
         providerFork: { current: true },
         promptExecution: { immediate: 'terminal-submit' },

@@ -85,6 +85,7 @@ function promptExecution(value: unknown): void {
 function agentCapabilities(value: unknown): void {
   const capabilities = record(value)
   promptExecution(capabilities.promptExecution)
+  if (capabilities.nativeConversationInput !== undefined && record(capabilities.nativeConversationInput, ['managedRuns']).managedRuns !== true) fail()
   if (capabilities.asyncQuestionReply !== undefined) member(capabilities.asyncQuestionReply, ['terminal'])
   if (capabilities.terminal !== true) fail()
   member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
@@ -106,7 +107,7 @@ function issues(value: unknown, source = false): void {
 }
 export function parseRpcAgentSession(value: unknown): ReturnType<typeof normalizeAgentSession> {
   const source = record(value)
-  if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken')) fail()
+  if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor')) fail()
   try {
     const session = normalizeAgentSession(source)
     if (source.turnUsage !== undefined) {
@@ -299,7 +300,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.native.ls': {
         record(p, ['hostId', 'executorId', 'providerId', 'capabilities', 'availability', 'sessions', 'issues'])
         string(p.hostId); string(p.executorId); string(p.providerId)
-        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'usage'])
+        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'nativeConversationInput', 'usage'])
         agentCapabilities(p.capabilities)
         if (p.hostId !== input.hostId || p.executorId !== input.executorId) fail()
         member(p.availability, ['available', 'unsupported'])
@@ -533,7 +534,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           const intent = p.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(p.admissionIntent)
           const capturedRun = envelope.recipientRunId ?? (p.promptCondition === undefined || p.promptCondition === null ? undefined :
             validateAgentPromptCondition(p.promptCondition).expectedRun.runId) ??
-            (intent?.kind === 'manual-actor' ? intent.expectedRun.runId : intent?.condition.expectedRun.runId)
+            (intent?.kind === 'exact-condition' ? intent.condition.expectedRun.runId : intent?.expectedRun.runId)
           if (capturedRun !== runRef(input.expectedRun).runId) fail()
         }
         if (p.inputReceipt !== undefined) {
@@ -544,7 +545,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         if (p.admissionIntent !== undefined) {
           const intent = validateAgentPromptAdmissionIntent(p.admissionIntent)
-          if (intent.kind !== 'manual-actor' || input.execution !== 'immediate' || intent.expectedRun.runId !== envelope.recipientRunId) fail()
+          if (intent.kind === 'exact-condition' || input.execution !== 'immediate' || intent.expectedRun.runId !== envelope.recipientRunId) fail()
+          if (input.admissionIntent !== undefined && !isDeepStrictEqual(input.admissionIntent, intent)) fail()
         }
         for (const key of ['queueId', 'receiptId', 'messageId']) string(p[key])
         if (p.messageId !== envelope.messageId || input.messageId === undefined && envelope.operationId !== input.operationId || envelope.body !== input.text ||

@@ -258,12 +258,12 @@ export class AgentMuxHostedRuntimeService {
     if (RUNTIME_METHODS.has(invocation.method)) await observe(this.client.connectRuntime(), context.signal)
     else if (!OFFLINE_METHODS.has(invocation.method) && !(
       (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage') &&
-      (invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind === 'manual-actor')) await observe(this.client.connect(), context.signal)
+      ['manual-actor', 'native-conversation'].includes((invocation.args[0] as { admissionIntent?: { kind?: string } } | undefined)?.admissionIntent?.kind ?? ''))) await observe(this.client.connect(), context.signal)
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (attachment && this.consumers.get(id) !== original) throw new AgentMuxError('Attachment observation changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (invocation.method === 'submitAgentPrompt') {
       const { signal: _wireSignal, ...prompt } = invocation.args[0]
-      invocation.args[0] = { ...prompt, ...(prompt.admissionIntent?.kind !== 'manual-actor' && context.signal ? { signal: context.signal } : {}) }
+      invocation.args[0] = { ...prompt, ...(!prompt.admissionIntent && context.signal ? { signal: context.signal } : {}) }
     }
     if (invocation.method === 'readAgentConversation' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges') {
       if (invocation.args.length > 2) throw new AgentMuxError('Conversation reading accepts one original request and cancellation options.', 'INVALID_CONTROL_REQUEST')

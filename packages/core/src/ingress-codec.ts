@@ -1,3 +1,4 @@
+import { validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
@@ -45,10 +46,12 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...base, state: 'refused', code: text(p.code) } }
   if (p.code !== undefined) fail()
   if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...base, state: 'received' } }
-  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author']), run = object(input.expectedRun, ['runId'])
+  const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent']), run = object(input.expectedRun, ['runId'])
+  const admissionIntent = input.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(input.admissionIntent)
+  if (admissionIntent && (admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== run.runId)) fail()
   const author = parseAgentExternalMessageAuthor(input.author), operationId = text(input.operationId), messageId = text(input.messageId)
   if (operationId === messageId || author.connectionId !== base.connectionId || !equal(author.actor, actor) || author.externalMessageId !== base.externalMessageId || author.externalConversationId !== base.externalConversationId) fail()
-  return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author } }
+  return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
 }
 export function parseIngressParams<M extends ConnectionIngressMethod>(method: M, value: unknown): ConnectionIngressParamsMap[M] {
   if (method === 'connection.ingress.authority') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionIngressParamsMap[M] }

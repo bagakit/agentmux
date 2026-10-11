@@ -224,8 +224,8 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
   const source = record(value, 'promptCompletionAdmission.intent')
   const originalRun = runRef(source.run)
   const admissionIntent = source.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(source.admissionIntent)
-  if (admissionIntent && (admissionIntent.kind === 'manual-actor' ? admissionIntent.expectedRun.runId
-    : admissionIntent.condition.expectedRun.runId) !== originalRun.runId || admissionIntent?.kind === 'manual-actor' && source.execution !== 'immediate') {
+  if (admissionIntent && (admissionIntent.kind === 'exact-condition' ? admissionIntent.condition.expectedRun.runId
+    : admissionIntent.expectedRun.runId) !== originalRun.runId || admissionIntent !== undefined && admissionIntent.kind !== 'exact-condition' && source.execution !== 'immediate') {
     throw new AgentMuxError('Frozen admission intent changed its original Run or execution.', 'INVALID_AGENT_SESSION_STORE')
   }
   const plan = record(source.plan, 'promptCompletionAdmission.intent.plan')
@@ -272,11 +272,11 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
 
 function nativePromptPlan(value: unknown): import('./types.js').AgentNativePromptInputPlan {
   const plan = record(value, 'native prompt plan')
-  if (plan.kind !== 'native-rpc' || Object.keys(plan).some(key => !['kind', 'protocolId', 'sourceId', 'actorId', 'threadId', 'operation', 'expectedTurnId'].includes(key))) {
+  if (plan.kind !== 'native-rpc' || Object.keys(plan).some(key => !['kind', 'protocolId', 'sourceId', 'actorId', 'threadId', 'operation', 'expectedTurnId', 'clientCorrelation'].includes(key))) {
     throw new AgentMuxError('Invalid native prompt plan.', 'INVALID_AGENT_SESSION_STORE')
   }
   const common = { kind: 'native-rpc' as const, protocolId: string(plan.protocolId, 'native protocol contract'), sourceId: string(plan.sourceId, 'native input source'), actorId: string(plan.actorId, 'native input actor'),
-    threadId: string(plan.threadId, 'native input thread') }
+    threadId: string(plan.threadId, 'native input thread'), ...(plan.clientCorrelation === undefined ? {} : { clientCorrelation: string(plan.clientCorrelation, 'original native input correlation', 8192) }) }
   if (plan.operation === 'start-or-steer') {
     if (plan.expectedTurnId !== undefined) throw new AgentMuxError('A start-or-steer plan cannot claim an exact turn.', 'INVALID_AGENT_SESSION_STORE')
     return { ...common, operation: 'start-or-steer' }

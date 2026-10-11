@@ -537,6 +537,9 @@ importers:
       wa-sqlite:
         specifier: 1.0.0
         version: 1.0.0
+      ws:
+        specifier: 8.21.3
+        version: 8.21.3
       yaml:
         specifier: 2.9.0
         version: 2.9.0
@@ -547,6 +550,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12

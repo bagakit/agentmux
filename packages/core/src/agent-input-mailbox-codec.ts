@@ -32,9 +32,10 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
       const intent = object(entry.intent, ['key', 'admissionIntent', 'execution', 'source'])
       key = validateAgentPromptInputKey(intent.key)
       const admission = validateAgentPromptAdmissionIntent(intent.admissionIntent)
-      if (admission.kind !== 'manual-actor' || admission.expectedRun.runId !== key.expectedRun.runId || intent.execution !== 'immediate') fail()
+      if (admission.kind === 'exact-condition' || admission.expectedRun.runId !== key.expectedRun.runId || intent.execution !== 'immediate') fail()
       const receipt = entry.receipt === null ? null : parseAgentInputSubmissionReceipt(entry.receipt)
       if (receipt && !dequal(receipt.key, key) || !receipt && entry.failure === undefined || receipt && entry.failure !== undefined) fail()
+      if (receipt?.admission?.admission && !dequal(receipt.admission.admission.intent?.admissionIntent, admission)) fail()
       const source = object(intent.source, ['kind', 'prompt', 'agentMuxNote', 'authorHuman', 'sourceChannel', 'sourceDevice', 'messageId', 'originalControlOperationId'])
       if (source.kind === 'prompt') {
         if (key.kind !== 'prompt' || typeof source.prompt !== 'string' || source.agentMuxNote !== undefined && typeof source.agentMuxNote !== 'string' ||

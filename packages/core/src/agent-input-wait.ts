@@ -34,7 +34,7 @@ export type AgentInputSavedEnvironment = {
 }
 export type AgentInputJournalIntent = {
   key: AgentPromptInputKey
-  admissionIntent: { kind: 'manual-actor'; expectedRun: AgentPromptInputKey['expectedRun'] }
+  admissionIntent: Exclude<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'exact-condition' }>
   execution: 'immediate'
   environment: AgentInputSavedEnvironment
   source:

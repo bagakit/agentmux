@@ -13,6 +13,32 @@ export type NativeProcessFile = {
   access?: 'r' | 'w' | 'u'
 }
 
+/** OS-owned listeners in this exact Runtime process group, independent of native logs. */
+export async function nativeProcessTcpListeners(processId: number, signal: AbortSignal): Promise<{ processId: number; endpoint: string }[]> {
+  signal.throwIfAborted()
+  if (!['darwin', 'linux'].includes(process.platform) || !Number.isSafeInteger(processId) || processId <= 0) throw unavailable('The original Run process group is unavailable.')
+  const options = { signal, timeoutMs: 2_000, maxOutputBytes: 64 * 1024 }
+  const group = await runProcess('ps', ['-p', String(processId), '-o', 'pgid='], options)
+  if (group.exitCode !== 0 || group.stderr || group.stdout.trim() !== String(processId)) throw unavailable('The original Run process group changed.')
+  const output = await runProcess('lsof', ['-nP', '-a', '-g', String(processId), '-iTCP', '-sTCP:LISTEN', '-F0pgn'], options)
+  if (output.exitCode === 1 && !output.stdout && !output.stderr) return []
+  if (output.exitCode !== 0 || output.stderr || !output.stdout.endsWith('\0\n')) throw unavailable('The original Run listeners could not be fully observed.')
+  const listeners: { processId: number; endpoint: string }[] = []
+  let pid = 0, pgid = 0
+  for (const part of output.stdout.split('\0')) {
+    const field = part.replace(/^\n/u, '')
+    if (!field) continue
+    if (field[0] === 'p') { pid = Number(field.slice(1)); pgid = 0 }
+    else if (field[0] === 'g') pgid = Number(field.slice(1))
+    else if (field[0] === 'f' && /^\d+$/u.test(field.slice(1))) { /* lsof's original socket descriptor boundary */ }
+    else if (field[0] === 'n') {
+      if (pgid !== processId || !Number.isSafeInteger(pid) || pid <= 0) throw unavailable('A listener changed its original Run identity.')
+      if (/^127\.0\.0\.1:[1-9]\d*$/u.test(field.slice(1))) listeners.push({ processId: pid, endpoint: `ws://${field.slice(1)}` })
+    } else throw unavailable('The original listener observation is incomplete.')
+  }
+  return listeners
+}
+
 function unavailable(message: string): AgentMuxError {
   return new AgentMuxError(message, 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
 }
