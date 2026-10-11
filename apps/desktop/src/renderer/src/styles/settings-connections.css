@@ -248,7 +248,23 @@
 .connector-management > .connector-optional > button { margin-top: var(--sp-3); }
 .connector-management > .connector-optional > p { margin: var(--sp-4) 0 0; }
 .connector-management__originals { display: grid; gap: var(--sp-2); min-width: 0; }
+.connector-management__account--confirmed { padding-block: var(--sp-4); }
+.connector-management__account--confirmed dd { margin-top: var(--sp-1); }
+.connector-configuration { display: grid; gap: var(--sp-5); min-width: 0; }
+.connector-configuration .connector-enrollment__action { align-items: flex-start; }
+.connector-configuration__notice { display: grid; justify-items: start; gap: var(--sp-3); padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
+.connector-configuration__notice p { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.connector-configuration__notice .connector-diagnostics { width: 100%; }
+.connector-configuration__activity > .settings-group-note { margin-block: var(--sp-3); }
+.connector-configuration__results { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+.connector-configuration__result { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-3); min-width: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.connector-configuration__result[aria-pressed="true"] { background: var(--surface-2); border-color: var(--text-3); }
+.connector-configuration__result small { color: var(--text-2); font-size: var(--fs-meta); }
+.connector-configuration__result .connector-configuration__selection { grid-column: 1 / -1; }
+.connector-configuration__result code { grid-column: 1 / -1; overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-meta); }
+.connector-configuration__result:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 @container (width < 480px) { .connector-management__account { grid-template-columns: minmax(0, 1fr); } }
+@container (width < 380px) { .connector-configuration__result { grid-template-columns: minmax(0, 1fr); } }
 .connector-list-feedback > button { justify-self: start; }
 .connector-enrollment__text-action { display: inline-flex; align-items: center; justify-self: start; gap: var(--sp-2); width: fit-content; max-width: 100%; min-height: 32px; padding: var(--sp-2) 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: var(--fs-body)/1.5 var(--font-sans); text-align: left; cursor: pointer; }
 .connector-enrollment__text-action > svg { flex: none; color: var(--text-3); }

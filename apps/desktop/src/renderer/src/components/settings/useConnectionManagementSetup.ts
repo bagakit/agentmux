@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupBegin, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
+import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupBegin, ConnectionSetupInspect, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
 import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 
 type Source = typeof api.connections.call
 type Submission = { key: string; source: Source; input: ConnectionSetupBegin }
 type Catalog = { key: string; source: Source; value: ConnectionSetupListing | null; issue: string }
-type Reading = { key: string; source: Source; id: string; value: ConnectionSetupView | null; issue: string; absent: boolean; pending: boolean }
+type Reading = { key: string; source: Source; id: string; value: ConnectionSetupView | null; issue: string; absent: boolean; pending: boolean; actionKind?: ConnectionSetupAction['kind'] | undefined; configurationIssue?: string }
 const scope = (record: ConnectionRecord | null) => record ? JSON.stringify([record.config.connectionId, record.config.adapterId, record.config.application, record.revision]) : ''
 const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: operation.operationId, connectionId: operation.connectionId, expectedConnectionRevision: operation.expectedConnectionRevision, goal: operation.goal })
 
@@ -48,23 +48,43 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     } finally { if (currentSource() && request === listOccurrence.current) setListing(false) }
   }
 
-  function matches(operation: ConnectionSetupOperation) {
+  function sameApplication(operation: ConnectionSetupOperation) {
     return !!record && operation.connectionId === record.config.connectionId && operation.adapterId === record.config.adapterId &&
-      operation.expectedConnectionRevision === record.revision && operation.application.domain === record.config.application.domain && operation.application.appId === record.config.application.appId &&
+      operation.application.domain === record.config.application.domain && operation.application.appId === record.config.application.appId &&
       operation.goal.kind === 'agent-conversation' && operation.goal.interaction === 'messages'
   }
-  async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean) {
+  function matches(operation: ConnectionSetupOperation) { return sameApplication(operation) && operation.expectedConnectionRevision === record?.revision }
+  async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean, actionKind?: ConnectionSetupAction['kind']) {
     if (!currentSource() || !context.current.opened) return
     const request = ++occurrence.current
     selection.current = id; setDriving(run)
     setReading(previous => previous?.key === key && previous.source === source && previous.id === id
-      ? { ...previous, issue: '', absent: false, pending: true } : { key, source, id, value: null, issue: '', absent: false, pending: true })
+      ? { ...previous, issue: '', absent: false, pending: true, actionKind } : { key, source, id, value: null, issue: '', absent: false, pending: true, actionKind })
     const accepts = () => currentSource() && context.current.opened && selection.current === id && request === occurrence.current
     try {
-      const value = await work()
+      let value = await work()
+      const validate = (result: ConnectionSetupView) => {
+        if (result.operation && (result.operation.operationId !== id || !matches(result.operation) && !(sameApplication(result.operation) && result.reason === 'connection-revised' && !result.challenge && !result.continuation))) throw new Error('This result could not be matched to the saved application. The original request is kept.')
+      }
       if (!accepts()) return
-      if (value.operation && (value.operation.operationId !== id || !matches(value.operation)) && !(value.reason === 'connection-revised' && !value.challenge && !value.continuation)) throw new Error('This result could not be matched to the saved application. The original request is kept.')
-      setReading({ key, source, id, value, issue: '', absent: !value.operation, pending: false })
+      validate(value)
+      // Discover offered actions locally. Account confirmation never reads or changes platform settings.
+      let configurationIssue = ''
+      if (value.operation && value.continuation?.stage === 'confirmed' && (!value.applicationInspection || !value.applicationConfiguration)) {
+        try {
+          const details = await source('connection.setup.inspect', {
+            operationId: id,
+            applicationInspection: value.applicationInspection?.selected ? { selectedStepId: value.applicationInspection.selected.stepId } : {},
+            applicationConfiguration: value.applicationConfiguration?.selected ? { selectedStepId: value.applicationConfiguration.selected.stepId } : {}
+          })
+          if (!accepts()) return
+          validate(details); value = details
+        } catch (error) {
+          if (!accepts()) return
+          configurationIssue = presentError(error)
+        }
+      }
+      setReading({ key, source, id, value, issue: '', absent: !value.operation, pending: false, configurationIssue })
       if (value.operation) setCatalog(previous => previous?.key === key && previous.source === source && previous.value
         ? { ...previous, value: { ...previous.value, operations: [value.operation!, ...previous.value.operations.filter(o => o.operationId !== id)] } } : previous)
       if (!value.operation || value.reason || !value.continuation || !['waiting', 'scanned', 'handoff'].includes(value.continuation.stage)) setDriving(false)
@@ -85,16 +105,20 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function choose(input: ConnectionSetupBegin) {
     setFresh(false)
     submittedActions.current.clear()
-    void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId }), true)
+    void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId, applicationInspection: {}, applicationConfiguration: {} }), true)
   }
-  function inspect() {
-    if (visible) void perform(visible.id, () => source('connection.setup.inspect', { operationId: visible.id }), false)
+  function inspectOriginal(selectors: Omit<ConnectionSetupInspect, 'operationId'> = {}, originalOperationId?: string) {
+    const id = originalOperationId ?? visible?.id
+    if (id) void perform(id, () => source('connection.setup.inspect', {
+      operationId: id, applicationInspection: {}, applicationConfiguration: {}, ...selectors
+    }), false)
   }
+  function inspect() { inspectOriginal() }
   function advance(action: ConnectionSetupAction) {
     if (!operation) return
     const input = { operationId: operation.operationId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) } } as const
     submittedActions.current.add(action.actionId)
-    void perform(input.operationId, () => source('connection.setup.advance', input), action.kind === 'continue' || action.kind === 'renew')
+    void perform(input.operationId, () => source('connection.setup.advance', input), action.kind === 'continue' || action.kind === 'renew', action.kind)
   }
   function continueOriginal() {
     const action = view?.continuation?.actions.find(action => action.kind === 'continue')
@@ -136,7 +160,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, choose, inspect, advance, continueOriginal, another }
+  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, choose, inspect, inspectOriginal, advance, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>
