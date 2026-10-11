@@ -28,7 +28,9 @@
 
 `readAgentConversation`、`conversationCheckpoint`、`readConversationChanges` 与 `observeConversation` 持有统一公共读取合同。读取结果以 `{event, records}` 为语义单元，分片重组完整后才交语义消费者；deferred part 则沿原资源接口读取。窗口 cursor、耐久 source frontier 与通知分别由[协议](../specs/conversation-protocol.md)定义，通知只唤醒权威读取。`sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，原 `agent.history` 继续提供原来源读取。
 
-纯投影只对本次已接受的 records 计算关系。公共 Reader 的有界候选集与客户端已接受的阅读窗口可以不同；共用投影函数或读到 cursor 末尾，本身不证明跨批关系已闭合。精确原文、来源覆盖与已闭合关系必须分别解释，不能由接入方另做关联。
+调用关联以每个准确 part 对原 scoped invocation 的 `invocation-member` 归属表达，单成员也保留；`conversationInvocationId` 由 Core 唯一定义。归属及其所在事件版本不依赖同批是否读到另一成员，公共 Reader 不反查全史。相同调用身份不合并父发言，也不表示未读的对端内容已经可读。
+
+其他关系仍只对本次已接受的 records 闭合。公共 Reader 的有界候选集与客户端已接受的阅读窗口可以不同；共用投影函数或读到 cursor 末尾，本身不证明 same-event／answers 等跨批关系已闭合。精确原文、来源覆盖与已闭合关系必须分别解释，不能由接入方另做关联。
 
 Core 经 [`SessionHistoryObservationPool`](../../packages/core/src/session-history-observation-pool.ts) 共享准确 native source 的 watch；captured 通知沿原 Session Timeline publisher。取消一个 reader 不终止 Run。来源失败保留已接受的其他记录、准确 Gap 与重试位置，不用最新版本替换失效的原锚点。
 
@@ -53,7 +55,7 @@ flowchart LR
 
 [`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 与 [`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx) 消费共同 records／originals；[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、完整 Copy、Question、reasoning、tool 与 resource。captured 输入保原输入身份，回复和系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 薄适配。原生与 captured 过程使用共同 [`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 和 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)。
 
-来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
+来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源按 Core 归属与唯一调用身份只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
 
 用户命名阅读点由 [`ConversationLandmarks`](../../apps/desktop/src/renderer/src/components/ConversationLandmarks.tsx) 经原 Main／公共控制服务到同一 [`ConversationLandmarkStore`](../../packages/core/src/conversation-landmark-store.ts)。该 Store 只持引用元数据。返回沿原 SessionPane 导航 owner；未确认写入保留原 operation 与暂存草稿，不建立第二份已保存事实。
 
