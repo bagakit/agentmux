@@ -25,7 +25,7 @@ export async function roomBindingFixture(native = true, options: { adapters?: re
   await connections.configure({ operationId: 'configure', expectedRevision: null, connection: config })
   const checkpoint = async (ref: { hostId: string; agentSessionId: string }) => {
     if (ref.hostId !== 'local') throw new Error('Exact Host required')
-    return { ...ref, checkpoint: await original.client.conversationCheckpoint(ref.agentSessionId) }
+    return { ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }
   }
   const bindings = new RoomBindingHost({ connections, spatial, checkpoint }); connections.bindings = bindings
   const input: RoomBindingBindInput = { operationId: 'bind-original', bindingId: 'original-binding', connectionId: config.connectionId, expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: original.session.agentSessionId, regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-group', scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' }, expectedSource: { providerId: 'claude', nativeSessionId: 'original-native' } }

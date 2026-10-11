@@ -30,7 +30,7 @@ export async function ingressFixture(running = false, config: ConnectionConfig =
   } })
   const connections = new ConnectionHost({ databasePath: join(h.root, 'connections.sqlite'), secrets })
   await connections.configure({ operationId: 'configure-ingress', expectedRevision: null, connection: config })
-  const bindings = new RoomBindingHost({ connections, spatial, checkpoint: async ref => ({ ...ref, checkpoint: await h.client.conversationCheckpoint(ref.agentSessionId) }) }); connections.bindings = bindings
+  const bindings = new RoomBindingHost({ connections, spatial, checkpoint: async ref => ({ ...ref, checkpoint: await h.client.sessionHistoryCheckpoint(ref.agentSessionId) }) }); connections.bindings = bindings
   const input = { operationId: 'bind-ingress', bindingId: 'original-binding', connectionId: config.connectionId, expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'original-region' }, externalConversationId: 'original-room', scope: { input: 'mentions-and-replies' as const, publication: 'future-native-user-facing' as const }, expectedSource: { providerId: 'claude', nativeSessionId: 'ingress-native' } }
   expect(await bindings.bind(input, context)).toMatchObject({ state: 'applied' })
   const actor = { application: config.application, idType: 'open_id', userId: 'original-external-user' }

@@ -57,7 +57,7 @@ it('public sharing consent keeps the old scope and unknown effect, then explicit
   expect(result(await f.cli(['bind', '--input', '-'], { ...replacement, operationId: 'no-silent-expansion' })))
     .toMatchObject({ state: 'refused', code: 'ROOM_BINDING_MAPPING_CONFLICT' })
   expect((await f.sdk.call('connection.binding.inspect', { bindingId: bound.bindingId })).current).toEqual(bound)
-  const cut = await f.client.conversationCheckpoint(f.input.agentSessionId)
+  const cut = await f.client.sessionHistoryCheckpoint(f.input.agentSessionId)
   const relink = result(await f.cli(['binding', 'relink', '--input', '-'], { ...replacement, expectedRevision: 1 }))
   expect(relink).toMatchObject({ state: 'applied', binding: { bindingId: bound.bindingId, revision: 2, scope: { publication: shared }, sourceCheckpoints: [cut] } })
   expect(f.services.bindings!.publicationAuthority(bound.bindingId, 1).authorized).toBe(false)

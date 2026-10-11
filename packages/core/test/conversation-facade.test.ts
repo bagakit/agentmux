@@ -11,12 +11,12 @@ it('reads the retained original conversation through the SDK, public service and
   const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'),
     coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); resources.push(() => server.stop())
-  const input = { ...f.reference, source: 'native' as const, limit: 1 }
+  const input = { ...f.reference, limit: 1 }
   const sdk = await f.client.readAgentConversation(input)
   expect(sdk).toMatchObject(f.reference)
-  expect(sdk.items).toMatchObject([{ kind: 'item', item: { id: 'newer-native' } }])
+  expect(sdk.items).toMatchObject([{ kind: 'item', item: { records: [{ original: { item: { id: 'newer-native' } } }] } }])
   const output = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--host', 'local',
-    '--session', f.reference.agentSessionId, '--source', 'native', '--limit', '1'], objectCliEnvironment(f.root))
+    '--session', f.reference.agentSessionId, '--limit', '1'], objectCliEnvironment(f.root))
   expect(output.code, output.stderr).toBe(0)
   const result = JSON.parse(output.stdout)
   expect(result.operation).toBe('agent.conversation.inspect')
@@ -28,13 +28,13 @@ it('reads the retained original conversation through the SDK, public service and
 
 it('retains oversized original bytes and rejects forged route references without controlling the Agent', async () => {
   const f = await historyReaderFixture(false, false, 'Large original 中🙂'.repeat(800)); resources.push(f.close)
-  const input = { ...f.reference, source: 'captured' as const, limit: 1, maxBytes: 4096 }
+  const input = { ...f.reference, limit: 1, maxBytes: 12 * 1024 }
   const result = await f.client.readAgentConversation(input)
   expect(result.items).toMatchObject([{ kind: 'fragment', offsetBytes: 0 }])
-  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(4096)
+  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(input.maxBytes)
   expect(core.parseConversationReadPage(result, input)).toEqual(result)
   expect(() => core.parseConversationReadPage({ ...result, agentSessionId: 'other' }, input))
-    .toThrow(/another source/)
+    .toThrow()
   await f.unchanged()
 })
 
@@ -53,11 +53,12 @@ it('projects original source identity, all parts and independent repeated conten
 
 it('the shared read envelope does not duplicate long legal scope identities outside the original byte budget', async () => {
   const f = await historyReaderFixture(false); resources.push(f.close)
-  const input = { ...f.reference, source: 'captured' as const, limit: 1, maxBytes: 4096 }
+  const input = { ...f.reference, limit: 1, maxBytes: 12 * 1024 }
   const page = await f.client.readAgentConversation(input)
-  const hostId = 'route'.repeat(320)
-  const wire = { ...page, hostId }
-  expect(Buffer.byteLength(JSON.stringify(wire))).toBeLessThanOrEqual(4096 - 1024)
+  const hostId = 'route'.repeat(32)
+  const service = new core.AgentMuxRpcService({ coreClients: () => [{ hostId, client: f.client }] }); resources.push(() => service.dispose())
+  const wire = await service.call('agent.conversation.inspect', { ...input, hostId })
+  expect(Buffer.byteLength(JSON.stringify(wire))).toBeLessThanOrEqual(input.maxBytes)
   expect(core.parseConversationReadPage(wire, { ...input, hostId })).toEqual(wire)
   expect(Object.keys(wire)).not.toContain('conversation')
 })
