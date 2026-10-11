@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
+import { writeRendererTrace } from './renderer-trace-cli.js'
 import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
 import { randomUUID } from 'node:crypto'
@@ -47,6 +48,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (['file.build', 'file.build.inspect', 'file.build.cancel'].includes(method) && !['running', 'succeeded', 'cancelled'].includes(String(body.status))) return true
   if (method === 'file.format' && body.status !== 'formatted' && body.status !== 'unchanged') return true
   if (method === 'system.metrics.profile.capture' && (body.capture as { status: string }).status !== 'completed') return true
+  if (method === 'system.metrics.trace.capture' && (body.capture as { status: string }).status !== 'completed') return true
   if (body.outcome === 'partial' || body.outcome === 'unknown' || body.outcome === 'refused') return true
   if (method === 'space.inspect' && Object.hasOwn(body, 'request')) {
     const request = body.request as { known?: boolean; report?: { outcome?: string } | null } | null
@@ -203,11 +205,12 @@ async function main(): Promise<number> {
     let output: { path: string } | undefined
     try {
       output = invocation.output === undefined ? undefined : method === 'system.metrics.profile.capture'
-        ? await writeRendererV8Profile(invocation.output, result) : await writeCliResourceDocument(invocation.output, result)
+        ? await writeRendererV8Profile(invocation.output, result) : method === 'system.metrics.trace.capture'
+          ? await writeRendererTrace(invocation.output, result) : await writeCliResourceDocument(invocation.output, result)
     } catch (error) {
-      if (method !== 'system.metrics.profile.capture') throw error
+      if (method !== 'system.metrics.profile.capture' && method !== 'system.metrics.trace.capture') throw error
       const source = error instanceof Error ? error as Error & { code?: string } : null
-      write({ ok: false, operation: method, result, outputError: { code: source?.code ?? 'PROFILE_FILE_WRITE_FAILED',
+      write({ ok: false, operation: method, result, outputError: { code: source?.code ?? (method === 'system.metrics.trace.capture' ? 'TRACE_FILE_WRITE_FAILED' : 'PROFILE_FILE_WRITE_FAILED'),
         message: source?.message ?? String(error) } })
       return 1
     }

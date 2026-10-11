@@ -1,6 +1,5 @@
-import { open, link, unlink } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
+import { writeNewCliFile } from './cli-atomic-file.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseRendererV8ProfileResult, rendererV8ProfileJSON } from './renderer-v8-profile.js'
@@ -13,14 +12,6 @@ export async function writeRendererV8Profile(path: string, result: unknown): Pro
   const text = rendererV8ProfileJSON(capture.profile)
   const sha256 = createHash('sha256').update(text).digest('hex')
   if (sha256 !== capture.sha256) throw new AgentMuxError('The original profile checksum did not match. No file was written.', 'CONTROL_PROTOCOL_ERROR')
-  const destination = resolve(path), temporary = join(dirname(destination), `.amux-profile-${randomUUID()}.tmp`)
-  let created = false
-  try {
-    const file = await open(temporary, 'wx', 0o600)
-    created = true
-    try { await file.writeFile(text, 'utf8'); await file.sync() } finally { await file.close() }
-    // Publish a complete new file atomically; existing files and symlinks stay untouched.
-    await link(temporary, destination)
-    return { path: destination, sha256, bytes: Buffer.byteLength(text) }
-  } finally { if (created) await unlink(temporary).catch(() => {}) }
+  const written = await writeNewCliFile(path, text)
+  return { path: written.path, sha256, bytes: written.bytes }
 }

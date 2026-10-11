@@ -86,6 +86,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'system.crash-log.reveal': 'diagnostics.crash-log.reveal',
   'system.metrics.get': 'metrics.get', 'system.metrics.watch': 'metrics.watch',
   'system.metrics.profile.capture': 'metrics.profile.capture',
+  'system.metrics.trace.capture': 'metrics.trace.capture',
   'toolkit.ls': 'toolkit.list', 'toolkit.inspect': 'toolkit.get', 'toolkit.script': 'toolkit.script',
   'toolkit.run': 'toolkit.run', 'toolkit.evaluate': 'toolkit.evaluate', 'toolkit.stop': 'toolkit.stop', 'toolkit.watch': 'toolkit.watch',
   'toolkit.create': 'toolkit.add', 'toolkit.update': 'toolkit.update',

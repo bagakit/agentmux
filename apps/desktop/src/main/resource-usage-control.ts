@@ -17,10 +17,15 @@ function source<T>(data: T | null, observedAt: number | null, reason: string | n
 export function createResourceMetricsPort(args: {
   sampler: ProcessResourceSampler; currentWindow(): MetricsWindow | null; now?: () => number
   profiler?: { capture: NonNullable<AgentMuxMetricsPort['captureProfile']>; dispose(): void }
+  tracer?: { capture: NonNullable<AgentMuxMetricsPort['captureTrace']>; dispose(): void }
 }): AgentMuxMetricsPort & { dispose(): void } {
   const consumers = new Set<() => void>()
   let disposed = false
   return {
+    ...(args.tracer ? { captureTrace: (async (input, signal) => {
+      if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      return args.tracer!.capture(input, signal)
+    }) satisfies NonNullable<AgentMuxMetricsPort['captureTrace']> } : {}),
     ...(args.profiler ? { captureProfile: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       return args.profiler!.capture(input, signal)
@@ -70,6 +75,7 @@ export function createResourceMetricsPort(args: {
       if (disposed) return
       disposed = true
       args.profiler?.dispose()
+      args.tracer?.dispose()
       for (const close of [...consumers]) close()
     }
   }

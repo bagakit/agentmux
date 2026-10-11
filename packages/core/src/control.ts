@@ -20,6 +20,7 @@ import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDe
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
 export * from './browser-task-control.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
+import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
 import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
 export * from './metrics.js'
 export { createInputPerformanceRecorder, readInputObservation } from './performance-diagnostics.js'
@@ -242,7 +243,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
-export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput))
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client' }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
@@ -744,6 +745,7 @@ export type AgentMuxControlResult =
   | { operation: 'metrics.get'; observation: MetricsObservation }
   | { operation: 'metrics.watch' }
   | { operation: 'metrics.profile.capture'; capture: RendererV8ProfileResult }
+  | { operation: 'metrics.trace.capture'; capture: RendererTraceResult }
   | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
   | { operation: 'inspect.mote-context'; observation: AgentMuxMoteContextObservation }
@@ -1005,6 +1007,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'metrics.get': 'short',
   'metrics.watch': 'short',
   'metrics.profile.capture': 'long',
+  'metrics.trace.capture': 'long',
   'inspect.client': 'short',
   'inspect.mote-context': 'short',
   'inspect.tab': 'short',

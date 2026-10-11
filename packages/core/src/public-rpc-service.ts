@@ -1,4 +1,5 @@
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
+import { parseRendererTraceResult } from './renderer-trace.js'
 import { ConversationLandmarkStore } from './conversation-landmark-store.js'
 import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
@@ -1027,6 +1028,7 @@ export class AgentMuxRpcService {
         }
       }
       result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal, nameContext)
+        : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
         : await this.execute(request, nameContext)
@@ -1553,6 +1555,10 @@ export class AgentMuxRpcService {
   private async captureProfile(input: import('./renderer-v8-profile.js').RendererV8ProfileInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.captureProfile) throw new AgentMuxError('Renderer profiling is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
     return parseRendererV8ProfileResult(await this.ports.metrics.captureProfile(input, signal), input)
+  }
+  private async captureTrace(input: import('./renderer-trace.js').RendererTraceInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.captureTrace) throw new AgentMuxError('Renderer tracing is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererTraceResult(await this.ports.metrics.captureTrace(input, signal), input)
   }
   private async metrics(signal?: AbortSignal): Promise<import('./metrics.js').MetricsObservation> {
     const metrics = this.ports.metrics

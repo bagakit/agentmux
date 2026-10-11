@@ -1,4 +1,5 @@
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
+import { parseRendererTraceResult } from './renderer-trace.js'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { parseGitOpenResult } from './public-rpc-git.js'
@@ -306,6 +307,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       break
     case 'metrics.profile.capture':
       parseRendererV8ProfileResult(actual.capture, request)
+      break
+    case 'metrics.trace.capture':
+      parseRendererTraceResult(actual.capture, request)
       break
     case 'browser.operation': case 'browser.stop':
       if (actual.runOperation && (actual.runOperation as Record<string, unknown>).id !== request.operationId) fail()
