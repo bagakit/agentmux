@@ -1114,7 +1114,7 @@ export class RuntimeController {
   }
 
   async nativeAgentHistoryResource(input: NativeAgentHistoryResourceInput, config: AppConfig, signal?: AbortSignal): Promise<NativeAgentHistoryResourceResult> {
-    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['hostId', 'executorId', 'nativeSource', 'source', 'recordId', 'partIndex', 'expectedReference', 'turnId', 'offsetBytes', 'maxBytes'].includes(key)) ||
+    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['hostId', 'executorId', 'nativeSource', 'source', 'recordId', 'partIndex', 'expectedReference', 'turnId', 'offsetBytes', 'maxBytes', 'representation'].includes(key)) ||
       typeof input.hostId !== 'string' || !input.hostId || typeof input.executorId !== 'string' || !input.executorId) {
       throw new AgentMuxError('Reading recorded content requires its exact conversation and original part reference.', 'INVALID_CONTROL_REQUEST')
     }
@@ -1460,6 +1460,7 @@ export class RuntimeController {
       ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
       ...(input.offsetBytes === undefined ? {} : { offsetBytes: input.offsetBytes }),
       ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
+      ...(input.representation === undefined ? {} : { representation: input.representation }),
       ...executor
     })
     if (this.hosts.get(control.hostId) !== host) throw new Error('History host configuration changed while reading. Reopen conversation history.')
