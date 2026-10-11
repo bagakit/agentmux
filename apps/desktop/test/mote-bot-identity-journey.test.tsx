@@ -20,6 +20,8 @@ async function confirmAndCreate() {
     view = await f.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId! })
   }
   expect(view.account).not.toBeNull(); expect(f.creationCount).toBe(0)
+  expect([...document.querySelectorAll('.mote-bot-auth-actions .primary-button')].map(node => node.textContent)).toEqual(['Confirm this account'])
+  expect(document.querySelector('.mote-bot-setup > [aria-label="Original bot setup results"]')).toBeNull()
   await f.click('Confirm this account'); expect(f.creationCount).toBe(0)
   await f.click('Create this bot')
 }
@@ -29,6 +31,10 @@ it('creates from the saved public profile through original IPC/Core/Main/default
   expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Sign in to Feishu')
   expect(document.body.textContent).not.toContain('DO-NOT-PUBLISH-DISPLAY')
   expect(f.beginCount).toBe(1); expect(f.authenticationCount).toBe(0); expect(f.creationCount).toBe(0)
+  const current = document.querySelector('.mote-bot-auth-actions')!
+  expect([...current.querySelectorAll('.primary-button')].map(node => node.textContent)).toEqual(['Check sign-in'])
+  expect([...current.querySelectorAll('.small-button')].map(node => node.textContent)).toEqual([])
+  expect(document.querySelector('.mote-details__issue')).toBeNull()
   const input = original()
   expect(useAppStore.getState().moteBotRequests[input.operationId]?.input).toEqual(input)
   expect(input.source.target).toEqual(f.target())
@@ -50,7 +56,18 @@ it('names the original advertised platform in its confirmation surface', async (
   await f.close(); f = await moteBotUi({ generic: true })
   await create()
   expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Sign in to Signed profile')
-  expect([...document.querySelectorAll('button')].some(node => node.textContent === 'Check Signed profile confirmation')).toBe(true)
+  const current = document.querySelector('.mote-bot-auth-actions')!
+  expect([...current.querySelectorAll('.primary-button')].map(node => node.textContent)).toEqual(['Check sign-in'])
+  expect([...current.querySelectorAll('.small-button')].map(node => node.textContent)).toEqual([])
+  const details = [...document.querySelectorAll<HTMLDetailsElement>('details')].find(node => node.querySelector('summary')?.textContent === 'Original setup details')!
+  expect(details.open).toBe(false)
+  expect(details.querySelector('[aria-label="Original bot setup results"]')).not.toBeNull()
+  expect(details.textContent).toContain('Check saved progress')
+  expect(document.querySelector('.mote-details__issue')).toBeNull()
+  await f.click('Original setup details')
+  await f.click('View original result')
+  await text('Saved progress checked.')
+  expect(document.querySelector('.mote-details__issue')).toBeNull()
   expect(f.counts.begin).toBe(1); expect(f.counts.authentication).toBe(0); expect(f.counts.create).toBe(0)
 })
 
@@ -187,7 +204,7 @@ it('keeps another original operation readable while an older query response is w
   await act(async () => (document.querySelector('[data-mote-bot-operation="' + a + '"]') as HTMLElement).click())
   await vi.waitFor(() => expect(release).toBeTypeOf('function'))
   await act(async () => (document.querySelector('[data-mote-bot-operation="' + b + '"]') as HTMLElement).click())
-  await text('The latest saved result')
+  await text('Saved progress checked.')
   await act(async () => release()); await f.settle()
   expect(document.body.textContent).not.toContain('Controlled old A query error')
   expect(f.parentCalls.mock.calls.some(([method,input]) => method === 'space.mote.connection.inspect' && (input as any).operationId === b)).toBe(true)
