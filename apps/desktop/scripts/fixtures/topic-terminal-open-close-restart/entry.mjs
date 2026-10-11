@@ -61,6 +61,7 @@ api.scratch.readTopic = async (id, topic) => request('topic', id, topic)
 api.scratch.listTopics = async id => request('topics', id)
 api.scratch.ensureTopic = async (id, topic) => request('ensure-topic', id, topic)
 api.scratch.ensureMote = async (id, topic) => request('ensure-mote', id, topic)
+api.topics.call = (method, params) => request('topic-call', method, params)
 api.spaceObjects.appearance = target => request('object-appearance', target)
 api.files.readDirectory = async () => []
 api.files.observe = async () => {}
@@ -98,18 +99,17 @@ const initialize = useAppStore.getState().initialize
 useAppStore.setState({ initialize: async () => {
   const dispose = await initialize()
   if (setup.phase === 'seed') {
-    await api.scratch.ensureTopic(workspace.id, 'launcher:ordinary')
-    // Empty Topic selection only navigates. Explicit New Tab and Terminal actions own
-    // the original workface before rapid repeated navigation exercises its reuse.
-    await useAppStore.getState().openScratchTopic('launcher:ordinary', workspace.id, { newTab: true })
-    const born = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === 'launcher:ordinary')
-    if (!born) throw new Error('Explicit Topic New Tab required')
-    await useAppStore.getState().promoteWarmTerminal(useAppStore.getState().layouts[workspace.id].activeGroupId,
-      { tabId: born.id, regionId: born.layout.activeRegionId })
-    await Promise.all([useAppStore.getState().openScratchTopic('launcher:ordinary'), useAppStore.getState().openScratchTopic('launcher:ordinary')])
-    const ordinary = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === 'launcher:ordinary')
+    // The real creation owner must bind its canonical topics/ identity before
+    // the existing Terminal lifecycle starts. Scratch is a separate logical root.
+    const created = await useAppStore.getState().createScratchTopic()
+    const fact = (await api.topics.call('topic.inspect', { topicId: created.id })).topic
+    const born = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === created.id)
+    if (!born || born.space?.zoneId !== fact.zoneId || created.physicalDirectoryPath !== fact.directoryPath)
+      throw new Error('Created Topic must use its original owner-confirmed identity')
+    await Promise.all([useAppStore.getState().openScratchTopic(created.id), useAppStore.getState().openScratchTopic(created.id)])
+    const ordinary = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === created.id)
     if (!ordinary || Object.values(ordinary.regions).length !== 1) throw new Error('One default Topic Region required')
-    window.topicDefault = { tabId: ordinary.id, regionId: ordinary.layout.activeRegionId,
+    window.topicDefault = { topicId: created.id, zoneId: fact.zoneId, directoryPath: fact.directoryPath, tabId: ordinary.id, regionId: ordinary.layout.activeRegionId,
       sessionId: ordinary.regions[ordinary.layout.activeRegionId].sessionId }
     const second = await api.sessions.launchTerminal({ hostId: 'local', workspacePath: workspace.path })
     const split = { ...ordinary, layout: splitWorkbenchRegion(ordinary.layout, ordinary.layout.activeRegionId, 'right', 'secondary-region'),
@@ -117,7 +117,7 @@ useAppStore.setState({ initialize: async () => {
     split.layout.root.ratio = 0.61
     const { session: moteSession, launcher: moteLauncher, tab: mote } = seededMote
     const closeSession = await api.sessions.launchTerminal({ hostId: 'local', workspacePath: workspace.path })
-    const close = { ...createWorkbenchTab('close-tab', { regionId: 'close-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: closeSession.id }), topicId: 'launcher:ordinary' }
+    const close = { ...createWorkbenchTab('close-tab', { regionId: 'close-region', kind: 'terminal', phase: 'attached', workspaceId: workspace.id, sessionId: closeSession.id }), topicId: created.id }
     const layout = createWorkspaceLayout('original-group', [ordinary.id, moteLauncher.id, mote.id, close.id])
     layout.groups[0].activeTabId = ordinary.id
     useAppStore.setState({ sessions: [await request('resolve', window.topicDefault.sessionId), second, moteSession, closeSession],

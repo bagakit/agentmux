@@ -8,13 +8,16 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { SpaceObjectImages } from '../../../src/main/space-object-images'
+import { WorkspaceFiles } from '../../../src/main/workspace-files'
+import { TopicKnowledgeOwner } from '../../../src/main/topic-knowledge'
+import { TopicSpatialOwner } from '../../../src/main/topic-spatial-owner'
 const [html, privateRoot, phase, preload, resultDirectory, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
-const scratch = { id: '__scratch__', hostId: 'local', name: 'Topics', path: path.join(privateRoot, 'topics'), kind: 'folder' as const }
+const scratch = { id: '__scratch__', hostId: 'local', name: 'Topics', path: path.join(privateRoot, 'scratch'), kind: 'folder' as const }
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local' as const, label: 'Private fixture' }], executors: {},
   workspaces: [scratch], appearance: { terminalTheme: 'graphite' },
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
@@ -28,6 +31,10 @@ const images = new SpaceObjectImages(async target => {
 })
 const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')), localRuntimeConnector, topics)
 const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial-state.json'))
+const knowledge = new TopicKnowledgeOwner(topics, new WorkspaceFiles(() => config.hosts[0]!), () => scratch)
+knowledge.setSpatialPort(new TopicSpatialOwner({ state: spatial, workspace: () => scratch,
+  topics: () => knowledge.listTopicSnapshots(), categories: () => knowledge.listCategories(),
+  ensureDefaultCategory: () => knowledge.ensureDefaultCategoryContent() }))
 const calls: { operation: string; args: any[]; at: number }[] = []
 let win: BrowserWindow
 let disposeSpatial: (() => void) | undefined
@@ -55,6 +62,7 @@ ipcMain.handle('topic-terminal:request', async (event, operation, ...args) => {
     case 'topic': return topics.read(scratch, args[1])
     case 'ensure-topic': return topics.ensure(scratch, args[1])
     case 'ensure-mote': return topics.ensureMote(scratch, args[1])
+    case 'topic-call': return knowledge.call(args[0], args[1])
     case 'object-appearance': return images.appearance(args[0])
     case 'save-ids': await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(args[0])); return
     case 'flush': await win.webContents.session.flushStorageData(); return
@@ -81,6 +89,14 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('window.topicTerminalReady === true && window.topicTerminalUi().terminals.length === 4')
     const ids = JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8'))
+    const originalTopic = (await knowledge.call('topic.inspect', { topicId: ids.topicId })).topic!
+    assert.equal(originalTopic.topicId, ids.topicId)
+    assert.equal(originalTopic.zoneId, ids.zoneId)
+    assert.equal(originalTopic.directoryPath, ids.directoryPath)
+    assert.equal(path.dirname(originalTopic.directoryPath), path.join(privateRoot, 'topics'), 'Canonical content is outside the logical Scratch root')
+    assert.equal(calls.filter(call => call.operation === 'topic-call' && call.args[0] === 'topic.create').length,
+      phase === 'seed' ? 1 : 0, 'Restart reads the same saved Topic without creating another')
+    result.originalTopic = originalTopic
     const snapshotForIdentity = await runtime.snapshot(config)
     assert.ok(snapshotForIdentity.sessions.length >= 4)
     const state = () => win.webContents.executeJavaScript('topicTerminalState()')
@@ -91,6 +107,8 @@ app.whenReady().then(async () => {
     // seeing Terminal DOM alone cannot certify that the read has completed.
     await until('window.topicTerminalState().error === null')
     result.initial = { state: await state(), ui: await ui(), savedFloatingAtStartup: await win.webContents.executeJavaScript('window.topicTerminalFloatingAtStartup') }
+    assert.equal(result.initial.state.tabs[ids.tabId].topicId, ids.topicId)
+    assert.equal(result.initial.state.tabs[ids.tabId].space.zoneId, ids.zoneId)
     assert.equal(result.initial.savedFloatingAtStartup.open, true, 'Both App generations start from the saved open floating state')
     assert.equal(result.initial.savedFloatingAtStartup.targetTabId, 'mote-tab', 'Both App generations read the original saved explicit target')
     assert.deepEqual(result.initial.ui.floating.activeTabIds, ['mote-tab'])
