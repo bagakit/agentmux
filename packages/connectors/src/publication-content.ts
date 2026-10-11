@@ -1,10 +1,11 @@
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
-import { conversationRecordId, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
-import type { ConnectionDeliveryGap, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
+import { conversationRecordAuthor, conversationRecordId, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
+import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
 export type PublicationContentPlan = {
   text: string
-  pieces: Array<{ part: ConversationContentRef; text: string }>
+  pieces: Array<{ part: ConversationContentRef; text: string; relay?: ConnectionDeliveryRelay['sources'][number] }>
+  relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
   gaps: ConnectionDeliveryGap[]
   origins: ConnectionOriginRepresentation[]
@@ -76,11 +77,14 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       if (slot.selector.field !== 'content') value = `${slot.selector.field === 'toolInput' ? 'Tool input' : 'Tool output'}\n${value ?? ''}`
     }
     if (value !== undefined) {
+      const author = original.kind === 'captured' && original.item.kind === 'user_message' && slot.selector.kind === 'captured-field' && slot.selector.field === 'content'
+        ? conversationRecordAuthor(record, unit.event.reference!.agentSessionId) : undefined
       const source = original.kind === 'native' ? 'Original conversation' : original.item.source
-      const label = narrow || unit.event.role === 'message' && unit.event.author.kind === 'agent' && slot.placement === 'body' ? ''
+      const label = author ? `${({ human: 'Human user', unknown: 'Unknown author', agent: 'Agent input', external: 'External user', system: 'System' } as const)[author.kind]} · via amux\n`
+        : narrow || unit.event.role === 'message' && unit.event.author.kind === 'agent' && slot.placement === 'body' ? ''
         : `[${unit.event.role} · ${source} · ${unit.event.author.kind}${original.kind === 'captured' ? ` · ${original.item.status}` : ''}${unit.event.role === 'message' ? ' · via amux' : ' · read-only'}]\n`
       const text = value ? label + value : ''
-      pieces.push({ part, text })
+      pieces.push({ part, text, ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
       if (text) sections.push(text)
     }
   }

@@ -104,21 +104,27 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       if (!mapping) feishuFailure('FEISHU_PUBLICATION_MAPPING_REQUIRED')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: { method: 'DELETE', path: `${path}/${encodeURIComponent(mapping.messageId)}` } }
     }
+    let card: Record<string, unknown> | undefined
     if (operation.payload.kind === 'permission') {
       const payload = operation.payload
       const status = { pending: 'Choose one original permission option.', 'response-sent': 'Response returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original response is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
-      const card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: payload.title } }, elements: [
+      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: payload.title } }, elements: [
         ...(payload.context === undefined ? [] : [{ tag: 'div', text: { tag: 'plain_text', content: payload.context } }]),
         { tag: 'div', text: { tag: 'plain_text', content: status } },
         ...payload.options.map(option => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: option.label }, value: { actionRef: option.actionRef } }] }))
       ] }
+    } else if (operation.payload.relay) {
+      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared message · via amux' } },
+        elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } }] }
+    }
+    if (card) {
       const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId, msg_type: 'interactive', uuid: key(operation.operationId) }), content: JSON.stringify(card) })
       if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
         method: mapping ? 'PATCH' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
         ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
     }
-    const text = publicationSpeechText(operation.payload)
+    const text = operation.payload.kind === 'speech' ? publicationSpeechText(operation.payload) : ''
     if (!text) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
     const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId }), msg_type: 'post', content: post(text), ...(mapping ? {} : { uuid: key(operation.operationId) }) })
     // The platform limit applies after both JSON encodings, including exact target and envelope overhead.
