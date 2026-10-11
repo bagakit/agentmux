@@ -389,7 +389,7 @@
 .conversation-submission .conversation-input-details__facts { margin: var(--sp-2) 0; }
 .conversation-reply-observation__preview {
   margin: 0 var(--sp-3) var(--sp-3) var(--sp-7);
-  color: var(--text-3);
+  color: var(--text);
   font-size: var(--fs-meta);
   line-height: 1.5;
   overflow-wrap: anywhere;
