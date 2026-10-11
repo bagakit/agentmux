@@ -125,6 +125,14 @@ const variants = [
     "to": "",
     "target": "Hosted and actual compiled CLI consume the original control without exposing private execution options",
     "expected": "not to contain"
+  },
+  {
+    "name": "replay-original-launch-input",
+    "path": "packages/core/src/client.ts",
+    "from": "...(receipt.launchInput ? { prompt: receipt.launchInput.input.prompt,\n          ...(receipt.launchInput.input.agentMuxNote === undefined ? {} : { agentMuxNote: receipt.launchInput.input.agentMuxNote }) } : {})",
+    "to": "...((receipt.launchInput ?? (receipt.intentOperationId ? current.continuityOperations?.[receipt.intentOperationId]?.launchInput : undefined)) ? { prompt: (receipt.launchInput ?? current.continuityOperations![receipt.intentOperationId!]!.launchInput)!.input.prompt, agentMuxNote: (receipt.launchInput ?? current.continuityOperations![receipt.intentOperationId!]!.launchInput)!.input.agentMuxNote } : {})",
+    "target": "retains the exact SDK invocation for the context-only retry with Host owner false",
+    "expected": "to deeply equal"
   }
 ]
 const receipt = { schema: 'agentmux.session-continuity-executor-proof.v1', passed: false, sourceStable: false, results: [],
