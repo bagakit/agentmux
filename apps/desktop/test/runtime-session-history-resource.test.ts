@@ -2,9 +2,11 @@ const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => awa
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import {EventEmitter} from 'node:events'
+import {createHash} from 'node:crypto'
 import {rm} from 'node:fs/promises'
 import {afterAll,afterEach,expect,it,vi} from 'vitest'
 import {AgentMuxMemoryAgentSessionStore,type AgentMuxClient,type AgentSessionHistoryPage,type AgentSessionHistoryObservationHandle} from '@agentmux/core'
+import {readSessionHistoryTextResource} from '@agentmux/core/session-history-content'
 import type {BrowserWindow,IpcMainInvokeEvent} from 'electron'
 import type {AgentMuxPreloadApi,AgentSessionControl,AppConfig} from '../src/shared/contracts'
 import {SESSION_HISTORY_OBSERVATION_CHANNEL} from '../src/shared/contracts'
@@ -78,6 +80,25 @@ it('resource reads strip Renderer invocation and reject another exact response t
  const rejectedTarget=await controller.sessionHistoryResource(control,resourceRequest,config).then(()=>null,(error:Error)=>error)
  expect(rejectedTarget).toBeInstanceOf(Error);expect(rejectedTarget?.message).toContain('another recorded target')
  await controller.write(control,'healthy input','user');expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({agentSessionId:control.agentSessionId,expectedRun:control.run,data:'healthy input',source:'user'})
+})
+it('complete recorded text follows every original resource offset through the Session owner',async()=>{
+ const {controller,client,config}=await owner()
+ const original={kind:'text' as const,text:'original start '+ 'recorded body '.repeat(22000)+' original end'}
+ const bytes=Buffer.from(JSON.stringify(original)),sha256=createHash('sha256').update(bytes).digest('hex')
+ const request={...resourceRequest,partIndex:0}
+ const part={kind:'resource' as const,resourceType:'text' as const,reference:request.expectedReference,
+  content:{encoding:'json-utf8' as const,kind:'text' as const,byteLength:bytes.length,sha256}}
+ client.sessionHistoryResource.mockImplementation(async(_id,input)=>{
+  const offsetBytes=input.offsetBytes??0,fragment=bytes.subarray(offsetBytes,offsetBytes+input.maxBytes)
+  return {...resourceResponse,partIndex:0,result:{status:'fragment' as const,encoding:'json-utf8' as const,
+   dataBase64:fragment.toString('base64'),byteLength:fragment.length,offsetBytes,totalBytes:bytes.length,sha256,
+   nextOffsetBytes:offsetBytes+fragment.length===bytes.length?null:offsetBytes+fragment.length}}
+ })
+ await expect(readSessionHistoryTextResource(part,0,request,input=>controller.sessionHistoryResource(control,input,config))).resolves.toEqual(original)
+ const offsets=client.sessionHistoryResource.mock.calls.map(([,input])=>input.offsetBytes)
+ expect(offsets).toEqual([0,128*1024,256*1024])
+ expect(client.sessionHistoryResource.mock.calls.every(([id,input])=>id===control.agentSessionId&&input.expectedReference===request.expectedReference&&input.recordId===request.recordId)).toBe(true)
+ expect(client.connect).not.toHaveBeenCalled();expect(client.connectRuntime).not.toHaveBeenCalled();expect(client.writeAgent).not.toHaveBeenCalled()
 })
 it('resource Host removal while reading cannot return stale bytes, and unknown Hosts do not call another device',async()=>{
  const {controller,client,config}=await owner();let resolve!:(value:typeof resourceResponse)=>void
