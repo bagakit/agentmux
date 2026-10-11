@@ -103,6 +103,14 @@ const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
 const NO_BROWSER_ANNOTATIONS: readonly BrowserAnnotation[] = []
 
 type BrowserIdentity = Pick<BrowserSnapshot, 'id' | 'navigationId'>
+type BookmarkSource = Pick<BrowserWorkbenchSurface, 'browserId' | 'navigationId' | 'workspaceId' | 'url' | 'title'>
+type BookmarkSave = BookmarkSource & ({ status: 'saving' } | { status: 'saved'; path: string } | { status: 'error'; message: string })
+type UnconfirmedBookmark = BookmarkSource & { path: string | null; message: string }
+
+function sameBookmarkSource(source: BookmarkSource, current: BookmarkSource): boolean {
+  return source.browserId === current.browserId && source.navigationId === current.navigationId &&
+    source.workspaceId === current.workspaceId && source.url === current.url
+}
 
 export function browserCaptureMatchesIdentity(
   capture: Pick<BrowserScreenshotCapture, 'browserId' | 'navigationId'>,
@@ -298,12 +306,9 @@ function BrowserPaneContent({
   const addressBrowser = useRef(tab.browserId)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   const [historyRevision, setHistoryRevision] = useState(0)
-  const [savedBookmark, setSavedBookmark] = useState<{
-    browserId: string
-    navigationId: BrowserSnapshot['navigationId']
-    workspaceId: string
-    path: string
-  } | null>(null)
+  const [bookmarkSave, setBookmarkSave] = useState<BookmarkSave | null>(null)
+  const [unconfirmedBookmarks, setUnconfirmedBookmarks] = useState<UnconfirmedBookmark[]>([])
+  const bookmarkRequest = useRef<BookmarkSource | null>(null)
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -868,15 +873,35 @@ function BrowserPaneContent({
   const pageToolDisabled = tab.url === 'about:blank' || busy
   const selectElement = () => selectionBusy ? cancelElementSelection() : void beginElementSelection()
   const openDevTools = () => void runCommand(async () => await api.browser.openDevTools(tab.browserId))
-  const saveBookmark = () => void runCommand(async () => {
-    const identity = browserIdentity.current
-    setSavedBookmark(null)
-    const path = await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
-    if (browserIdentity.current.id !== identity.id || browserIdentity.current.navigationId !== identity.navigationId) return
-    setSavedBookmark({ browserId: identity.id, navigationId: identity.navigationId, workspaceId: tab.workspaceId, path })
-  })
-  const currentBookmark = savedBookmark?.browserId === tab.browserId && savedBookmark.navigationId === tab.navigationId &&
-    savedBookmark.workspaceId === tab.workspaceId ? savedBookmark : null
+  async function saveBookmark(): Promise<void> {
+    // Only this original page's duplicate save waits. File I/O never owns navigation or page tools.
+    if (busy || bookmarkRequest.current && sameBookmarkSource(bookmarkRequest.current, tab)) return
+    const source: BookmarkSource = { browserId: tab.browserId, navigationId: tab.navigationId,
+      workspaceId: tab.workspaceId, url: tab.url, title: tab.title }
+    bookmarkRequest.current = source
+    setBookmarkSave({ ...source, status: 'saving' })
+    try {
+      const path = await saveBrowserBookmark(source.workspaceId, source.url, source.title)
+      if (bookmarkRequest.current === source) setBookmarkSave({ ...source, status: 'saved', path })
+    } catch (cause) {
+      const failure = cause !== null && typeof cause === 'object' ? cause as { status?: unknown; path?: unknown } : null
+      if (failure?.status === 'error') {
+        if (bookmarkRequest.current === source) setBookmarkSave({ ...source, status: 'error', message: presentError(cause) })
+      } else {
+        // An unknown write may already have published. Keep its exact candidate when another copy is requested.
+        setUnconfirmedBookmarks(current => [...current, { ...source,
+          path: typeof failure?.path === 'string' ? failure.path : null, message: presentError(cause) }])
+        if (bookmarkRequest.current === source) setBookmarkSave(null)
+      }
+    } finally {
+      if (bookmarkRequest.current === source) bookmarkRequest.current = null
+    }
+  }
+  const currentBookmarkSave = bookmarkSave && sameBookmarkSource(bookmarkSave, tab) ? bookmarkSave : null
+  const currentBookmark = currentBookmarkSave?.status === 'saved' ? currentBookmarkSave : null
+  const bookmarkSaving = currentBookmarkSave?.status === 'saving'
+  const currentUnconfirmedBookmarks = unconfirmedBookmarks.filter(source => sameBookmarkSource(source, tab))
+  const bookmarkSaveLabel = currentUnconfirmedBookmarks.length ? 'Save another copy as a bookmark' : 'Save this page as a bookmark'
   const openSavedBookmark = () => void runCommand(async () => {
     if (!currentBookmark || browserIdentity.current.id !== currentBookmark.browserId ||
       browserIdentity.current.navigationId !== currentBookmark.navigationId) return
@@ -1176,9 +1201,9 @@ function BrowserPaneContent({
           <button
             type="button"
             className="browser-toolbar__secondary"
-            aria-label="Save this page as a bookmark"
-            title="Save this page as a .webloc bookmark in the workspace"
-            disabled={pageToolDisabled}
+            aria-label={bookmarkSaveLabel}
+            title={currentUnconfirmedBookmarks.length ? 'Save another .webloc copy; the previous write is still unconfirmed' : 'Save this page as a .webloc bookmark in the workspace'}
+            disabled={pageToolDisabled || bookmarkSaving}
             onClick={saveBookmark}
           >
             <ThemeObjectBookmarkIcon size={14} />
@@ -1236,8 +1261,8 @@ function BrowserPaneContent({
                 {toolbar?.devTools ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open DevTools" disabled={pageToolDisabled} onSelect={openDevTools}>
                   <ThemeObjectToolsIcon size={12} /><span>Open DevTools</span>
                 </DropdownMenu.Item> : null}
-                {toolbar?.saveBookmark ? <DropdownMenu.Item className="browser-menu__item" aria-label="Save this page as a bookmark" disabled={pageToolDisabled} onSelect={saveBookmark}>
-                  <ThemeObjectBookmarkIcon size={12} /><span>Save bookmark</span>
+                {toolbar?.saveBookmark ? <DropdownMenu.Item className="browser-menu__item" aria-label={bookmarkSaveLabel} disabled={pageToolDisabled || bookmarkSaving} onSelect={saveBookmark}>
+                  <ThemeObjectBookmarkIcon size={12} /><span>{currentUnconfirmedBookmarks.length ? 'Save another copy' : 'Save bookmark'}</span>
                 </DropdownMenu.Item> : null}
                 {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={() => viewBookmarkSource(presentation?.target)}>
                   <ThemeFileCodeIcon size={12} /><span>View bookmark source</span>
@@ -1255,10 +1280,23 @@ function BrowserPaneContent({
           </DropdownMenu.Root>
         {regionCloseButton}
       </form>
+      {bookmarkSaving ? <p className="browser-bookmark-result" role="status">
+        <ThemeStatusLoadingIcon size={12} animation="spin" aria-hidden="true" /><span>Saving bookmark…</span>
+      </p> : null}
       {currentBookmark ? <p className="browser-bookmark-result" role="status">
         <ThemeStatusSavedIcon size={12} aria-hidden="true" /><span>Saved</span>
         <code title={currentBookmark.path}>{currentBookmark.path}</code>
         <button type="button" className="small-button" disabled={busy} onClick={openSavedBookmark}>Open bookmark</button>
+      </p> : null}
+      {currentBookmarkSave?.status === 'error' ? <p className="browser-address-error" role="alert">
+        Bookmark could not be saved: {currentBookmarkSave.message}. <button type="button" className="small-button" disabled={busy} onClick={saveBookmark}>Retry bookmark save</button>
+      </p> : null}
+      {currentUnconfirmedBookmarks.map((original, index) => <p key={index} className="browser-address-error browser-bookmark-error" role="alert">
+        Bookmark save not confirmed{original.path ? <>: <code>{original.path}</code></> : null}. {original.message}. Check the workspace before saving another copy.
+        {original.path ? <button type="button" className="small-button" onClick={() => void openFile(original.path!, undefined, undefined, original.workspaceId).catch(reportError)}>Check bookmark</button> : null}
+      </p>)}
+      {currentUnconfirmedBookmarks.length ? <p className="browser-bookmark-result">
+        <button type="button" className="small-button" disabled={pageToolDisabled || bookmarkSaving} onClick={saveBookmark}>Save another copy</button>
       </p> : null}
       {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
