@@ -5,16 +5,17 @@ import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 import { SetupApplicationInspection } from './connection-setup-inspection.js'
 import { SetupApplicationConfiguration } from './connection-setup-configuration.js'
+import type { EnrollmentSetupSnapshot } from './connection-enrollment.js'
 
 type Row = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
-type PrivateEnvelope = { operationId: string; connectionId: string; attemptId: string; challenge: ConnectionSetupView['challenge']; privateState: string }
+type PrivateEnvelope = { operationId: string; connectionId: string; attemptId: string; challenge: ConnectionSetupView['challenge']; privateState: string; source?: NonNullable<ConnectionSetupBegin['source']>; sourceAuthAttemptId?: string; localAccount?: ReturnType<typeof parseConnectionSetupAccount> }
 type Authentication = NonNullable<ConnectionSetupOperation['authentication']>
 type AuthStep = { operationId: string; input: ConnectionSetupAdvance; authentication: Authentication; privateRef: string | null }
 type AuthEnvelope = PrivateEnvelope & { stepId: string; stage: Authentication['stage']; account: ReturnType<typeof parseConnectionSetupAccount> | null }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const sameActor = (a: ConnectionEnrollmentCallContext['actor'], b: ConnectionEnrollmentCallContext['actor']) => a.kind === b.kind && a.id === b.id
 const failure = (message: string, code = 'CONNECTION_SETUP_UNCONFIRMED') => new AgentMuxError(message, code)
-const admitted = (o: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: o.operationId, connectionId: o.connectionId, expectedConnectionRevision: o.expectedConnectionRevision, goal: o.goal })
+const admitted = (o: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: o.operationId, connectionId: o.connectionId, expectedConnectionRevision: o.expectedConnectionRevision, goal: o.goal, ...(o.source ? { source: o.source } : {}) })
 
 /** Finite authentication intent in the original Connection DB. Never owns current bot configuration. */
 export class ConnectionSetupHost implements ConnectionSetupPort {
@@ -25,7 +26,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private readonly unsettledAuthentication = new Map<string, AuthEnvelope>()
   private readonly inspection: SetupApplicationInspection
   private readonly configuration: SetupApplicationConfiguration
-  constructor(private readonly connections: ConnectionHost, private readonly secrets?: EnrollmentSecrets) {
+  constructor(private readonly connections: ConnectionHost, private readonly secrets?: EnrollmentSecrets, private readonly enrollmentSource?: (source: NonNullable<ConnectionSetupBegin['source']>, target: Pick<ConnectionSetupOperation, 'connectionId' | 'adapterId' | 'application'>, context: ConnectionEnrollmentCallContext) => Promise<EnrollmentSetupSnapshot>) {
     connections.database.exec('CREATE TABLE IF NOT EXISTS connection_setup_operation (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT UNIQUE NOT NULL, connection_id TEXT NOT NULL, actor_json TEXT NOT NULL, record_json TEXT NOT NULL, private_ref TEXT)')
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_by_connection ON connection_setup_operation(connection_id,ordinal)')
     connections.database.exec("CREATE INDEX IF NOT EXISTS connection_setup_by_application ON connection_setup_operation(json_extract(record_json,'$.application.domain'),json_extract(record_json,'$.application.appId'))")
@@ -93,7 +94,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     const step = this.authStep(row.operation.operationId)
     if (step) return step.privateRef && step.authentication.secureStorage === 'stored' ? this.authEnvelope(await this.secrets.resolve(step.privateRef), row, step) : null
     const original = row.privateRef ? this.envelope(await this.secrets.resolve(row.privateRef), row) : null
-    return original ? { ...original, stepId: original.attemptId, stage: 'waiting', account: null } : null
+    return original ? { ...original, stepId: original.attemptId, stage: original.localAccount ? 'account' : 'waiting', account: original.localAccount ?? null } : null
   }
   private async authenticationView(row: Row, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const operation = this.summary(row), auth = operation.authentication!
@@ -212,7 +213,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private async runAuthentication(step: AuthStep, source: AuthEnvelope | null, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const row = this.read(step.operationId)!, adapter = this.connections.registeredAdapter(row.operation.adapterId)?.setup
     await this.authority(context, row)
-    if (!this.current(row) || row.operation.authentication?.stepId !== step.authentication.stepId || !adapter?.domains.includes(row.operation.application.domain)) return this.advanceView(this.updateAuth(step, a => { a.request = 'unknown'; a.stage = 'unknown' }), context)
+    if (!this.current(row) || row.operation.authentication?.stepId !== step.authentication.stepId || step.input.decision.value !== 'confirm' && !adapter?.domains.includes(row.operation.application.domain)) return this.advanceView(this.updateAuth(step, a => { a.request = 'unknown'; a.stage = 'unknown' }), context)
     let snapshot: AuthEnvelope | null = null
     const input = { operationId: row.operation.operationId, connectionId: row.operation.connectionId, attemptId: step.authentication.attemptId, application: row.operation.application }
     this.nativeRequests.add(step.authentication.stepId)
@@ -222,10 +223,10 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
         snapshot = { ...source, ...input, stepId: step.authentication.stepId, stage: 'confirmed', challenge: null }
       } else if (step.input.decision.value === 'renew') {
         const timeout = AbortSignal.timeout(20_000), signal = context.signal ? AbortSignal.any([context.signal, timeout]) : timeout
-        const receipt = await adapter.begin(input, signal)
+        const receipt = await adapter!.begin(input, signal)
         if (receipt.kind === 'challenge') snapshot = { ...input, stepId: step.authentication.stepId, stage: 'waiting', account: null, challenge: parseConnectionSetupChallenge(receipt.challenge), privateState: receipt.privateState }
       } else if (source) {
-        const receipt = await adapter.advance({ ...input, privateState: source.privateState }, context.signal)
+        const receipt = await adapter!.advance({ ...input, privateState: source.privateState }, context.signal)
         if (receipt.kind === 'progress' && ['waiting', 'scanned', 'handoff', 'account', 'expired'].includes(receipt.stage)) {
           const account = receipt.account === null ? null : parseConnectionSetupAccount(receipt.account)
           const challenge = receipt.challenge === null ? null : parseConnectionSetupChallenge(receipt.challenge)
@@ -280,17 +281,18 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     const operation = this.summary(row)
     if (!this.current(row)) return { operation, challenge: null, reason: 'connection-revised' }
     if (operation.authentication) return this.authenticationView(row, context)
-    if (operation.secureStorage !== 'stored' || !row.privateRef || !this.secrets) return { operation, challenge: null, ...(operation.request.state === 'confirmed' ? { reason: 'challenge-unavailable' as const } : {}), continuation: { stage: 'unknown', account: null, actions: operation.request.state === 'unknown' ? this.actions(row, 'unknown', null) : [] } }
+    if (operation.secureStorage !== 'stored' || !row.privateRef || !this.secrets) return { operation, challenge: null, ...(operation.request.state === 'confirmed' ? { reason: 'challenge-unavailable' as const } : {}), continuation: { stage: 'unknown', account: null, actions: operation.request.state === 'unknown' && !operation.source ? this.actions(row, 'unknown', null) : [] } }
     try {
       const value = await this.secrets.resolve(row.privateRef)
       const envelope = this.envelope(value, row)
-      if (!envelope?.challenge || envelope.challenge.expiresAt !== null && envelope.challenge.expiresAt <= Date.now()) return { operation, challenge: null, reason: 'challenge-unavailable' }
+      if (!envelope || !envelope.localAccount && (!envelope.challenge || envelope.challenge.expiresAt !== null && envelope.challenge.expiresAt <= Date.now())) return { operation, challenge: null, reason: 'challenge-unavailable' }
       await this.authority(context, row)
       // Credential service calls can yield; a later configuration cannot receive this challenge.
       if (this.closed || !this.current(row)) return { operation, challenge: null, reason: 'connection-revised' }
       const fresh = this.read(row.operation.operationId)
       if (!fresh || fresh.operation.revision !== row.operation.revision) return { operation: fresh ? this.summary(fresh) : operation, challenge: null, reason: 'challenge-unavailable' }
-      return { operation, challenge: envelope.challenge, continuation: { stage: 'waiting', account: null, actions: this.actions(row, 'waiting', null) } }
+      const account = envelope.localAccount ?? null, stage = account ? 'account' as const : 'waiting' as const
+      return { operation, challenge: envelope.challenge, continuation: { stage, account, actions: this.actions(row, stage, account) } }
     } catch { return { operation, challenge: null, reason: 'challenge-unavailable' } }
   }
   private envelope(value: string | null, row: Row): PrivateEnvelope | null {
@@ -298,17 +300,32 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       if (value === null) return null
       const p = JSON.parse(value) as PrivateEnvelope
       if (p.operationId !== row.operation.operationId || p.connectionId !== row.operation.connectionId || p.attemptId !== row.operation.request.attemptId || typeof p.privateState !== 'string') return null
+      if (row.operation.request.kind === 'enrollment-handoff') {
+        if (!row.operation.source || !same(p.source, row.operation.source) || typeof p.sourceAuthAttemptId !== 'string' || !p.sourceAuthAttemptId || p.challenge !== null) return null
+        return { operationId: p.operationId, connectionId: p.connectionId, attemptId: p.attemptId, challenge: null, privateState: p.privateState, source: row.operation.source, sourceAuthAttemptId: p.sourceAuthAttemptId, localAccount: parseConnectionSetupAccount(p.localAccount) }
+      }
       return { operationId: p.operationId, connectionId: p.connectionId, attemptId: p.attemptId, challenge: parseConnectionSetupChallenge(p.challenge), privateState: p.privateState }
     } catch { return null }
   }
   private secretOperation(row: Row): string { return `connection-setup-auth:${row.operation.request.attemptId!}` }
-  private async secure(row: Row): Promise<Row> {
+  private async secure(row: Row, admission?: { context: ConnectionEnrollmentCallContext; source: EnrollmentSetupSnapshot }): Promise<Row> {
     if (!this.secrets || !row.operation.request.attemptId) return row
     try {
       await this.secrets.assertAvailable()
       let saved = await this.secrets.inspect(this.secretOperation(row))
       const live = this.unsettled.get(row.operation.operationId)
-      if (!saved && live?.attemptId === row.operation.request.attemptId) saved = await this.secrets.store({ operationId: this.secretOperation(row), secret: JSON.stringify(live) })
+      if (!saved && live?.attemptId === row.operation.request.attemptId) {
+        if (row.operation.source) {
+          // Only a new store needs the still-current source; an existing Vault commit is independent.
+          if (!admission) return row
+          await this.authority(admission.context, row)
+          admission.source.assertCurrent()
+          if (!this.current(row)) return row
+          const current = this.read(row.operation.operationId)
+          if (!current || current.operation.revision !== row.operation.revision || current.operation.request.attemptId !== row.operation.request.attemptId) return current ?? row
+        }
+        saved = await this.secrets.store({ operationId: this.secretOperation(row), secret: JSON.stringify(live) })
+      }
       if (!saved || !this.envelope(await this.secrets.resolve(saved.credentialRef), row)) return row
       row = this.save(row, o => { o.request.state = 'confirmed'; o.secureStorage = 'stored'; delete o.reason }, saved.credentialRef)
       this.unsettled.delete(row.operation.operationId)
@@ -332,7 +349,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
           const current = this.connections.readConfiguration(input.connectionId)
           if (!current) throw failure('The exact saved bot is unknown.', 'UNKNOWN_CONNECTION')
           if (current.revision !== input.expectedConnectionRevision) throw failure('The exact saved bot revision changed. Read it before admitting a new request.', 'CONNECTION_REVISION_CONFLICT')
-          const operation: ConnectionSetupOperation = { ...input, revision: 1, adapterId: current.config.adapterId, application: current.config.application, request: { state: 'not-dispatched', attemptId: null }, secureStorage: 'not-started' }
+          const operation: ConnectionSetupOperation = { ...input, revision: 1, adapterId: current.config.adapterId, application: current.config.application, request: { ...(input.source ? { kind: 'enrollment-handoff' as const } : {}), state: 'not-dispatched', attemptId: null }, secureStorage: 'not-started' }
           parseConnectionSetupOperation(operation)
           db.prepare('INSERT INTO connection_setup_operation(operation_id,connection_id,actor_json,record_json) VALUES(?,?,?,?)').run(input.operationId, input.connectionId, JSON.stringify(context.actor), JSON.stringify(operation))
           row = { operation, actor: { kind: context.actor.kind, id: context.actor.id }, privateRef: null }
@@ -347,6 +364,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     try { return await work } finally { this.pending.delete(input.operationId) }
   }
   private async run(original: Row, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+    if (original.operation.source) return this.runEnrollment(original, context)
     let row = original
     await this.authority(context, row)
     if (!this.current(row)) return this.view(row, context)
@@ -377,6 +395,36 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       return this.view(row, context)
     } catch { return this.view(this.save(row, o => { o.secureStorage = 'unknown'; o.reason = 'challenge-unconfirmed' }), context) }
   }
+  private async runEnrollment(original: Row, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+    let row = original
+    await this.authority(context, row)
+    // An admitted local receipt is repaired before asking its old source or adapter anything.
+    if (row.operation.request.attemptId && row.operation.secureStorage !== 'stored') row = await this.secure(row)
+    await this.authority(context, row)
+    if (row.operation.secureStorage === 'stored' || !this.current(row)) return this.view(row, context)
+    const continuation = this.connections.registeredAdapter(row.operation.adapterId)?.setup?.enrollmentContinuation
+    if (!continuation?.domains.includes(row.operation.application.domain) || !this.enrollmentSource) return this.view(this.save(row, o => { o.reason = 'adapter-unavailable' }), context)
+    if (!this.secrets) throw failure('Original secure management storage is unavailable.')
+    await this.secrets.assertAvailable()
+    await this.authority(context, row)
+    if (!this.current(row)) return this.view(row, context)
+    if (!row.operation.request.attemptId) row = this.save(row, o => { o.request = { kind: 'enrollment-handoff', state: 'dispatching', attemptId: randomUUID() }; delete o.reason })
+    const source = await this.enrollmentSource(row.operation.source!, row.operation, context)
+    await this.authority(context, row)
+    source.assertCurrent()
+    if (!this.current(row)) return this.view(row, context)
+    const receipt = await continuation.resume({ operationId: row.operation.operationId, connectionId: row.operation.connectionId, attemptId: row.operation.request.attemptId!, application: row.operation.application, privateState: source.privateState, account: source.account })
+    await this.authority(context, row)
+    source.assertCurrent()
+    if (!this.current(row)) return this.view(row, context)
+    const fresh = this.read(row.operation.operationId)
+    if (!fresh || fresh.operation.revision !== row.operation.revision || fresh.operation.request.attemptId !== row.operation.request.attemptId) return this.view(fresh, context)
+    if (receipt.kind !== 'progress' || receipt.stage !== 'account' || receipt.challenge !== null || !receipt.account || receipt.account.userId !== source.account.userId || receipt.account.tenantId !== source.account.tenantId || typeof receipt.privateState !== 'string' || !receipt.privateState) return this.view(this.save(row, o => { o.request.state = 'unknown'; o.reason = 'request-unconfirmed' }), context)
+    const envelope: PrivateEnvelope = { operationId: row.operation.operationId, connectionId: row.operation.connectionId, attemptId: row.operation.request.attemptId!, challenge: null, privateState: receipt.privateState, source: row.operation.source!, sourceAuthAttemptId: source.authAttemptId, localAccount: parseConnectionSetupAccount(receipt.account) }
+    this.unsettled.set(row.operation.operationId, envelope)
+    row = this.save(row, o => { o.request.state = 'confirmed'; o.secureStorage = 'storing'; delete o.reason })
+    return this.view(await this.secure(row, { context, source }), context)
+  }
   async inspect(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const input = parseConnectionSetupParams('connection.setup.inspect', value), row = this.read(input.operationId)
     await this.authority(context, row)
@@ -396,7 +444,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       const setup = current && this.connections.registeredAdapter(current.config.adapterId)?.setup
       const support: ConnectionSetupListing['support'] = current ? {
         connectionRevision: current.revision,
-        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : [])]
+        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && typeof setup.enrollmentContinuation.resume === 'function' ? ['enrollment-continuation' as const] : [])]
       } : null
       const rows = this.connections.database.prepare('SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(input.connectionId, before, limit + 1)
       return { operations: rows.slice(0, limit).map(r => this.summary(this.read(String(r.operation_id))!)), next: rows.length > limit ? String(rows[limit - 1]!.ordinal) : null, support }

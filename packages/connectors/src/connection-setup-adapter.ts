@@ -13,6 +13,11 @@ export interface ConnectionSetupAdapter {
   begin(input: SetupAdapterInput, signal?: AbortSignal): Promise<SetupChallengeReceipt>
   /** One HTTP request, including at most one redirect hop; the Host owns its durable claim. */
   advance(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupAuthenticationReceipt>
+  /** Pure local conversion of an owner-qualified Enrollment snapshot; never an authentication or app request. */
+  readonly enrollmentContinuation?: {
+    readonly domains: readonly string[]
+    resume(input: SetupAdapterInput & { privateState: string; account: ConnectionSetupAccount }): Promise<SetupAuthenticationReceipt>
+  }
   /** Separate local implementation declaration; only an admitted current-auth action calls it. */
   readonly applicationConfiguration?: {
     readonly domains: readonly string[]

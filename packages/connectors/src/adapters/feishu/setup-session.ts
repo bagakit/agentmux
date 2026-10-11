@@ -1,6 +1,7 @@
 import type { ConnectionSetupReadSubject, ConnectionSetupReadSummary } from '@agentmux/core/connections'
 import type { SetupAdapterInput, SetupChallengeReceipt, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt, SetupConfigurationReceipt } from '../../connection-setup-adapter.js'
 import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, type NativeAccountInitialState, type NativeAccountState } from './native-account.js'
+import { enrollmentAccountSession } from './enrollment.js'
 
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const opaque = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && !/[\u0000-\u001f\u007f\s]/u.test(v)
@@ -19,6 +20,11 @@ export async function beginFeishuSession(input: SetupAdapterInput, signal?: Abor
   if (input.application.domain !== 'open.feishu.cn') return { kind: 'unknown' }
   const receipt = await beginFeishuNativeAccount(signal)
   return receipt.kind === 'challenge' ? { kind: 'challenge', challenge: receipt.challenge, privateState: serializeSnapshot(input, receipt.state) } : receipt
+}
+export async function continueFeishuEnrollment(input: SetupAdapterInput & { privateState: string; account: import('@agentmux/core/connections').ConnectionSetupAccount }): Promise<SetupAuthenticationReceipt> {
+  const native = enrollmentAccountSession(input.privateState, input.application)
+  if (!native || !native.account || native.account.userId !== input.account.userId || native.account.tenantId !== input.account.tenantId) return { kind: 'unknown' }
+  return { kind: 'progress', stage: 'account', challenge: null, account: native.account, privateState: serializeSnapshot(input, native) }
 }
 /** Setup retains its original scope; native authentication receives no fabricated application. */
 export async function advanceFeishuSession(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupAuthenticationReceipt> {

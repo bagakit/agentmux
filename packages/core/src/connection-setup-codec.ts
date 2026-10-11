@@ -24,20 +24,23 @@ export function parseConnectionSetupAuthentication(value: unknown): NonNullable<
   return result
 }
 function begin(value: unknown): ConnectionSetupBegin {
-  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal']), g = object(p.goal, ['kind', 'interaction'])
-  return { operationId: id(p.operationId), connectionId: id(p.connectionId), expectedConnectionRevision: integer(p.expectedConnectionRevision), goal: { kind: choice(g.kind, ['agent-conversation']), interaction: choice(g.interaction, ['messages', 'cards']) } }
+  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source']), g = object(p.goal, ['kind', 'interaction'])
+  const source = p.source === undefined ? undefined : object(p.source, ['kind', 'operationId', 'expectedRevision'])
+  return { operationId: id(p.operationId), connectionId: id(p.connectionId), expectedConnectionRevision: integer(p.expectedConnectionRevision), goal: { kind: choice(g.kind, ['agent-conversation']), interaction: choice(g.interaction, ['messages', 'cards']) }, ...(source ? { source: { kind: choice(source.kind, ['enrollment']), operationId: id(source.operationId), expectedRevision: integer(source.expectedRevision) } } : {}) }
 }
 export function parseConnectionSetupChallenge(value: unknown): ConnectionSetupChallenge {
   const p = object(value, ['qrPayload', 'expiresAt', 'nextPollAt'])
   return { qrPayload: text(p.qrPayload), expiresAt: p.expiresAt === null ? null : integer(p.expiresAt, 0), nextPollAt: integer(p.nextPollAt, 0) }
 }
 export function parseConnectionSetupOperation(value: unknown): ConnectionSetupOperation {
-  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'revision', 'adapterId', 'application', 'request', 'secureStorage', 'reason', 'authentication'])
-  const input = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal'].map(k => [k, p[k]])))
-  const a = object(p.application, ['domain', 'appId']), r = object(p.request, ['state', 'attemptId']), domain = text(a.domain)
+  const p = object(value, ['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source', 'revision', 'adapterId', 'application', 'request', 'secureStorage', 'reason', 'authentication'])
+  const input = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source'].map(k => [k, p[k]])))
+  const a = object(p.application, ['domain', 'appId']), r = object(p.request, ['kind', 'state', 'attemptId']), domain = text(a.domain)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
   const result: ConnectionSetupOperation = { ...input, revision: integer(p.revision), adapterId: id(p.adapterId), application: { domain, appId: id(a.appId) }, request: { state: choice(r.state, ['not-dispatched', 'dispatching', 'confirmed', 'unknown', 'refused']), attemptId: r.attemptId === null ? null : id(r.attemptId) }, secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']), ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['adapter-unavailable', 'secure-storage-unavailable', 'request-unconfirmed', 'challenge-unconfirmed']) }) }
   if (result.request.state === 'not-dispatched' && result.request.attemptId !== null || result.request.state !== 'not-dispatched' && result.request.attemptId === null || result.secureStorage === 'stored' && result.request.state !== 'confirmed') fail()
+  if (input.source) result.request.kind = choice(r.kind, ['enrollment-handoff'])
+  else if (r.kind !== undefined) fail()
   if (p.authentication !== undefined) {
     result.authentication = parseConnectionSetupAuthentication(p.authentication)
   }
@@ -103,8 +106,9 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     let support: ConnectionSetupResultMap['connection.setup.ls']['support'] = null
     if (p.support !== null) {
       const s = object(p.support, ['connectionRevision', 'capabilities'])
-      if (!Array.isArray(s.capabilities) || s.capabilities.length > 3) fail()
-      const capabilities = (s.capabilities as unknown[]).map(value => choice(value, ['management-authentication', 'application-inspection', 'messaging-capability'] as const))
+      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'enrollment-continuation'] as const
+      if (!Array.isArray(s.capabilities) || s.capabilities.length > supportedCapabilities.length) fail()
+      const capabilities = (s.capabilities as unknown[]).map(value => choice(value, supportedCapabilities))
       if (new Set(capabilities).size !== capabilities.length) fail()
       support = { connectionRevision: integer(s.connectionRevision), capabilities }
     }
@@ -114,12 +118,13 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   if (operation && operation.operationId !== (input as { operationId: string }).operationId || !operation && (method === 'connection.setup.begin' || challenge !== null)) fail()
   if (method === 'connection.setup.begin' && operation) {
     // Select the admitted fields explicitly: summaries also contain safe result fields.
-    const admitted = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal'].map(k => [k, operation[k as keyof ConnectionSetupOperation]])))
+    const admitted = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal', 'source'].map(k => [k, operation[k as keyof ConnectionSetupOperation]])))
     if (JSON.stringify(admitted) !== JSON.stringify(input)) fail()
   }
   const challengeRequest = operation?.authentication?.request ?? operation?.request.state
   const challengeStorage = operation?.authentication?.secureStorage ?? operation?.secureStorage
   if (challenge && (challengeRequest !== 'confirmed' || challengeStorage !== 'stored')) fail()
+  if (challenge && operation?.request.kind === 'enrollment-handoff' && !operation.authentication) fail()
   const result: ConnectionSetupView = { operation, challenge, ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['connection-revised', 'challenge-unavailable']) }) }
   if (method === 'connection.setup.inspect' && operation && (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationInspection && p.applicationInspection === undefined) fail()
   if (method === 'connection.setup.inspect' && operation && (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration && p.applicationConfiguration === undefined) fail()
@@ -131,6 +136,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
     result.continuation = { stage: stage(c.stage), account: c.account === null ? null : parseConnectionSetupAccount(c.account), actions }
     if (result.continuation.account && !['account', 'confirmed'].includes(result.continuation.stage) || ['account', 'confirmed'].includes(result.continuation.stage) && !result.continuation.account) fail()
+    if (operation && !operation.authentication && operation.request.kind === 'enrollment-handoff' && result.continuation.account && (result.continuation.stage !== 'account' || operation.request.state !== 'confirmed' || operation.secureStorage !== 'stored')) fail()
   }
   if (p.receipt !== undefined) {
     if (method !== 'connection.setup.advance' || !operation) fail()
