@@ -31,6 +31,13 @@ beforeEach(async () => {
   vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.sessions, 'historySources').mockImplementation(historySourcesReader())
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [original, healthy], timelines: Object.fromEntries([original, healthy].map(session => [session.id, { agentSessionId: session.id, revision: 0, items: [] }])), recoveryCandidates: [] })
+  const currentSession = (control: Parameters<typeof api.sessions.refresh>[0]) => {
+    const session = [original, healthy].find(session => control.kind === 'agent' && session.id === control.agentSessionId && session.control.run.runId === control.run.runId)
+    if (!session) throw new Error('The fixture received another Session or Run')
+    return session
+  }
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => currentSession(control))
+  vi.spyOn(api.sessions, 'recover').mockImplementation(async control => ({ kind: 'reattachable', session: currentSession(control) }))
   useAppStore.setState({ ...initial, loading: true }, true)
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
   await act(async () => { root.render(<App />) })
@@ -207,7 +214,7 @@ it('retains the active startup producer while ordinary events remain independent
     await vi.waitFor(() => expect(useAppStore.getState().errorNoticeContext).toBeNull())
   })
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null })
-  expect(currentNotificationRows(container)).toHaveLength(0)
+  expect(currentNotificationRows(container), currentNotificationRows(container).map(row => row.textContent).join('\n')).toHaveLength(0)
   expect(notificationEventRows(container)).toHaveLength(1)
   expect(notificationEventRows(container)[0]!.textContent).toContain(diagnostic)
   expect(useAppStore.getState().noticeReadReceipts['global:events']).toEqual(receipts['global:events'])
@@ -220,14 +227,13 @@ it('reopens complete diagnostics, copies their original content and navigates th
   const details = row.querySelector<HTMLDetailsElement>('details')!
   expect(details.open).toBe(false)
   await toggleNotificationCenter(container, 'open')
-  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('true')
   await act(async () => { details.open = true })
   expect(row.querySelector('[aria-label^="Complete details:"]')?.textContent).toContain(diagnostic)
   const nestedToggle = new Event('toggle', { bubbles: true })
   Object.defineProperty(nestedToggle, 'newState', { value: 'closed' })
   await act(async () => { details.dispatchEvent(nestedToggle) })
   expect(notificationTrigger(container).getAttribute('aria-expanded')).toBe('true')
-  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
   await act(async () => row.querySelector<HTMLButtonElement>('.notification-item__original button')!.click())
   expect(clipboard).toHaveBeenCalledExactlyOnceWith(diagnostic)
   expect(row.textContent).toContain('Copied')

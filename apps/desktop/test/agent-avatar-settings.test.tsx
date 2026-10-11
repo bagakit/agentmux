@@ -131,8 +131,7 @@ it('shows details on hover and focus, then routes the settings action to the mat
   expect(document.querySelector('.agent-identity-popover')).toBeNull()
 })
 
-it('holds one native-surface lease per visible avatar panel and releases it on close and unmount', async () => {
-  useAppStore.setState({ nativeSurfaceOverlayCount: 0 })
+it('keeps each actual avatar panel independent and leaves unrelated Browser geometry untouched', async () => {
   const browserStage = document.createElement('div')
   browserStage.dataset.nativeBrowserStage = ''
   browserStage.style.visibility = 'visible'
@@ -141,11 +140,7 @@ it('holds one native-surface lease per visible avatar panel and releases it on c
     toJSON: () => ({})
   })
   document.body.append(browserStage)
-  const onPanelVisibilityChange = (visible: boolean) => {
-    if (visible) useAppStore.getState().acquireNativeSurfaceOverlay()
-    else useAppStore.getState().releaseNativeSurfaceOverlay()
-  }
-  await dom.render(<ExecutorIdentityContext.Provider value={{ config: null, onPanelVisibilityChange }}>
+  await dom.render(<ExecutorIdentityContext.Provider value={{ config: null }}>
     <AgentAvatar label="Left Agent" providerId="codex" />
     <AgentAvatar label="Second Agent" providerId="claude" />
   </ExecutorIdentityContext.Provider>)
@@ -155,13 +150,13 @@ it('holds one native-surface lease per visible avatar panel and releases it on c
     avatars[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
     avatars[0]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true }))
   })
-  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  expect(document.querySelectorAll('.agent-identity-popover').length).toBe(1)
   await act(async () => avatars[1]!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
-  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(2)
+  expect(document.querySelectorAll('.agent-identity-popover').length).toBe(2)
   await act(async () => avatars[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  expect(document.querySelectorAll('.agent-identity-popover').length).toBe(1)
   await dom.render(null)
-  expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  expect(document.querySelectorAll('.agent-identity-popover').length).toBe(0)
   browserStage.remove()
 })
 

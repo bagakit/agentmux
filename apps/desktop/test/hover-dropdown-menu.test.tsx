@@ -25,7 +25,7 @@ async function pointer(target: Element, type: string, pointerType = 'mouse', rel
 async function pause() { await act(async () => { await new Promise((r) => setTimeout(r, 220)) }) }
 async function split(disabled = false) {
   // 没有 onOpenChange：原生视图让位已不再逐个菜单接线，改由 App 的那个 MutationObserver 按
-  // Radix 的 DOM 协议统一观察（lib/native-surface-overlay.ts）。适配器本身仍会通知它的 owner，
+  // 共享浮层 DOM 协议统一投影（lib/native-overlay-regions.ts）。适配器本身仍会通知它的 owner，
   // 那条性质由下面直接用 Menu.Root 的那个用例守。
   const action = vi.fn()
   await act(async () => root.render(<><input aria-label="editor" /><PaneSplitMenu disabled={disabled} regionCount={2} onSplit={action} onArrange={vi.fn()} /></>))

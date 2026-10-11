@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
@@ -9,9 +10,9 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
-import { observeOverlays } from '../src/renderer/src/lib/native-surface-overlay'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
+import { composerConfig } from './helpers/composer-dom-fixture'
 
 type FixtureTerminal = HeadlessTerminal & { element?: HTMLElement }
 type FixtureObserver = { targets: Set<Element>; callback: ResizeObserverCallback }
@@ -47,8 +48,11 @@ vi.mock('@xterm/xterm', async () => {
     focus() {}
     refresh() {}
     onRender() { return { dispose() {} } }
+    onUserInput() { return { dispose() {} } }
     onSelectionChange() { return { dispose() {} } }
     getSelection() { return '' }
+    getSelectionSnapshot() { return undefined }
+    restoreSelection() {}
     hasSelection() { return false }
     registerLinkProvider() { return { dispose() {} } }
     attachCustomKeyEventHandler() {}
@@ -74,11 +78,14 @@ vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
   dispose() { fixture.webglDisposed += 1 }
   onContextLoss() { return { dispose() {} } }
 } }))
-vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
+vi.mock('../src/renderer/src/lib/api', async importOriginal => {
+  const { api } = await importOriginal<typeof import('../src/renderer/src/lib/api')>()
+  return { api: { ...api, sessions: { ...api.sessions,
   attach: fixture.attach, detach: fixture.detach, resize: fixture.resize,
   acknowledge: vi.fn().mockResolvedValue(undefined),
   onEvent: () => () => {}
-} } }))
+} } }
+})
 // SessionPane contributes agent chrome. The Workbench's actual visibility decision is forwarded
 // unchanged into the production TerminalView, the same seam SessionPane owns in the application.
 vi.mock('../src/renderer/src/components/SessionPane', async () => {
@@ -97,8 +104,8 @@ vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
 vi.mock('../src/renderer/src/components/BrowserPane', () => ({
   BrowserPane: ({ visible }: { visible: boolean }) => <div data-fixture-browser data-visible={String(visible)} />
 }))
-vi.mock('../src/renderer/src/components/EditorPane', () => ({
-  EditorPane: ({ visible, surface }: { visible: boolean; surface: { path: string } }) =>
+vi.mock('../src/renderer/src/components/FileSurfaceView', () => ({
+  FileSurfaceView: ({ visible, surface }: { visible: boolean; surface: { path: string } }) =>
     <div data-fixture-editor={surface.path} data-visible={String(visible)} />
 }))
 vi.mock('../src/renderer/src/components/NewTabSurface', () => ({
@@ -107,14 +114,13 @@ vi.mock('../src/renderer/src/components/NewTabSurface', () => ({
 
 const session: SessionSnapshot = {
   id: 'session-hover', hostId: 'local', workspacePath: _hygiene_fixturePath("fixture"), label: 'Hover fixture',
-  createdAt: 1, updatedAt: 1, processState: 'running',
-  status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+  createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), processState: 'running',
+  status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
   kind: 'terminal', providerId: null,
   control: { kind: 'terminal', hostId: 'local', runId: 'run-hover', run: { runId: 'run-hover' } }
 }
 let root: Root | null = null
 let container: HTMLElement
-let disconnect: (() => void) | undefined
 
 function renderWorkbench(visible = true): ReactNode {
   return <><WorkspaceWorkbench workspaceId="workspace-hover" visible={visible} /><SurfaceSwitch /></>
@@ -144,12 +150,15 @@ async function frames(): Promise<void> {
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+  const requestFrame = (callback: FrameRequestCallback) => {
     const id = ++fixture.nextFrame
     fixture.frames.set(id, callback)
     return id
-  })
+  }
+  vi.stubGlobal('requestAnimationFrame', requestFrame)
   vi.stubGlobal('cancelAnimationFrame', (id: number) => fixture.frames.delete(id))
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(requestFrame)
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { fixture.frames.delete(id) })
   vi.stubGlobal('ResizeObserver', class {
     targets = new Set<Element>()
     constructor(readonly callback: ResizeObserverCallback) { fixture.observers.push(this) }
@@ -165,8 +174,8 @@ beforeEach(async () => {
   fixture.webglCreated = 0
   fixture.webglDisposed = 0
   vi.clearAllMocks()
-  fixture.attach.mockResolvedValue({ attachmentId: 'attachment-hover', currentSize: { cols: 80, rows: 24 },
-    gap: null, replay: [] })
+  fixture.attach.mockResolvedValue({ attachmentId: 'attachment-hover', session, currentSize: { cols: 80, rows: 24 },
+    terminal: { type: 'unknown', reason: 'origin_unknown' }, resizeRevision: 0, gap: null, replay: [] })
   fixture.detach.mockResolvedValue(undefined)
   fixture.resize.mockImplementation(async (_lease: string, cols: number, rows: number) => ({ cols, rows }))
   const tab = createWorkbenchTab('tab-hover', { regionId: 'region-hover', workspaceId: 'workspace-hover',
@@ -188,29 +197,32 @@ beforeEach(async () => {
     first: layout.root, second: { type: 'leaf', groupId: 'group-editor' } }
   layout.groups.push({ id: 'group-editor', tabOrder: [editor.id, inactive.id], activeTabId: editor.id,
     recentTabIds: [editor.id] })
-  useAppStore.setState({ config: null, mainSurface: 'workbench', sessions: [session],
-    tabs: { [tab.id]: tab, [editor.id]: editor, [inactive.id]: inactive }, layouts: { 'workspace-hover': layout },
-    portalOverlayCount: 0, nativeSurfaceOverlayCount: 0 })
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [{ id: 'workspace-hover', name: 'Hover fixture', hostId: 'local', path: session.workspacePath, kind: 'folder' }] },
+    mainSurface: 'workbench', activeWorkspaceId: 'workspace-hover', workbenchSpaceSelection: null, retainedSpatialFocus: null, sessions: [session],
+    tabs: { [tab.id]: tab, [editor.id]: editor, [inactive.id]: inactive }, layouts: { 'workspace-hover': layout }
+ })
   container = document.createElement('div')
   container.id = 'root'
   document.body.append(container)
   root = createRoot(container)
-  disconnect = observeOverlays(document.body, useAppStore.getState().setPortalOverlayCount, MutationObserver)
   await act(async () => {
     root!.render(renderWorkbench())
   })
   await frames()
+  expect(container.textContent, container.textContent ?? '').not.toContain('Attaching this Region’s output')
   expect(fixture.terminals).toHaveLength(1)
-  expect(fixture.resize).toHaveBeenCalledWith('attachment-hover', 80, 24)
-  expect(surfaceVisibility()).toEqual({ browser: 'true', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
+  expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+  expect({ cols: fixture.terminals[0]!.cols, rows: fixture.terminals[0]!.rows }).toEqual({ cols: 80, rows: 24 })
+  expect(fixture.resize, 'the real attachment reaches its initial live viewport synchronization').toHaveBeenCalledExactlyOnceWith('attachment-hover', 80, 24)
+  expect(surfaceVisibility(), JSON.stringify(surfaceVisibility())).toEqual({ browser: 'true', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
   fixture.resize.mockClear()
   fixture.fit.mockClear()
 })
 afterEach(async () => {
-  disconnect?.()
   await act(async () => root?.unmount())
   root = null
   document.body.replaceChildren()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
@@ -231,11 +243,11 @@ it('hovering Goals preserves terminal pixels, parser grid, PTY size and the exis
   expect(terminal.buffer.active.baseY).toBeGreaterThan(5)
   expect(terminal.buffer.active.viewportY).toBe(5)
   await act(async () => goal.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
-  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().portalOverlayCount).toBe(1)) })
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('[role="tooltip"], [role="menu"]')).not.toBeNull()) })
   expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Organize goals and follow their progress')
-  expect(surfaceVisibility()).toEqual({ browser: 'false', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
+  expect(surfaceVisibility()).toEqual({ browser: 'true', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
   await act(async () => goal.dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
-  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().portalOverlayCount).toBe(0)) })
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('[role="tooltip"], [role="menu"]')).toBeNull()) })
   await frames()
   expect(terminal.element!.parentElement!.getBoundingClientRect()).toMatchObject({
     width: pixels.width, height: pixels.height, left: pixels.left, top: pixels.top
@@ -253,7 +265,7 @@ it('hovering Goals preserves terminal pixels, parser grid, PTY size and the exis
   expect(useAppStore.getState().mainSurface).toBe('workbench')
 })
 
-it('opening and dismissing the real Split menu only occludes the native Browser', async () => {
+it('opening and dismissing the real Split menu retains Browser and terminal owners', async () => {
   const terminal = fixture.terminals[0]!
   fixture.proposed = { cols: 79, rows: 24 }
   const trigger = container.querySelector('button[aria-label="Choose split direction"]') as HTMLButtonElement
@@ -261,13 +273,13 @@ it('opening and dismissing the real Split menu only occludes the native Browser'
   await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', {
     bubbles: true, pointerType: 'mouse', buttons: 0
   })))
-  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().portalOverlayCount).toBe(1)) })
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('[role="tooltip"], [role="menu"]')).not.toBeNull()) })
   const menu = document.querySelector('[role="menu"]')!
   expect(menu.querySelector('[role="menuitem"][aria-label="Split Right"]')).not.toBeNull()
-  expect(surfaceVisibility()).toEqual({ browser: 'false', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
+  expect(surfaceVisibility()).toEqual({ browser: 'true', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
   expect(fixture.webglDisposed).toBe(0)
   await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().portalOverlayCount).toBe(0)) })
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('[role="tooltip"], [role="menu"]')).toBeNull()) })
   await frames()
   expect(surfaceVisibility()).toEqual({ browser: 'true', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
   expect({ cols: terminal.cols, rows: terminal.rows }).toEqual({ cols: 80, rows: 24 })
@@ -279,10 +291,13 @@ it('opening and dismissing the real Split menu only occludes the native Browser'
   expect(fixture.detach).not.toHaveBeenCalled()
 })
 
-it('a real Region size change synchronizes the existing parser and PTY even while Browser occlusion is leased', async () => {
+it('a real Region size change synchronizes the existing parser and PTY while a real menu is open', async () => {
   const terminal = fixture.terminals[0]!
-  await act(async () => useAppStore.getState().acquireNativeSurfaceOverlay())
-  expect(surfaceVisibility()).toEqual({ browser: 'false', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
+  const trigger = container.querySelector('button[aria-label="Choose split direction"]') as HTMLButtonElement
+  await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
+  const menu = document.querySelector('[role="menu"]')!
+  expect(menu).not.toBeNull()
+  expect(surfaceVisibility()).toEqual({ browser: 'true', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
   fixture.pixels = { width: 900, height: 600 }
   fixture.proposed = { cols: 90, rows: 30 }
   await act(async () => observeTerminalViewport(terminal))
@@ -290,7 +305,7 @@ it('a real Region size change synchronizes the existing parser and PTY even whil
   expect(fixture.fit).toHaveBeenCalledOnce()
   expect({ cols: terminal.cols, rows: terminal.rows }).toEqual({ cols: 90, rows: 30 })
   expect(fixture.resize).toHaveBeenCalledExactlyOnceWith('attachment-hover', 90, 30)
-  await act(async () => useAppStore.getState().releaseNativeSurfaceOverlay())
+  await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   await frames()
   expect(surfaceVisibility()).toEqual({ browser: 'true', editor: 'true', inactiveEditor: 'false', launcher: 'true' })
   expect(fixture.resize).toHaveBeenCalledOnce()

@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import React from 'react'
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
@@ -89,7 +90,7 @@ const probe = {
       agentNames: { [sessions[0]!.id]: 'Original Agent', [sessions[1]!.id]: 'Neighbor Agent' },
       timelines: { [sessions[0]!.id]: { agentSessionId: sessions[0]!.id, revision: 1, items: [{
         id: 'result-preview', kind: 'assistant_message', status: 'complete', source: 'native-hook',
-        content: 'Preview https://preview.example.test/result', createdAt: 1, updatedAt: 1
+        content: 'Preview https://preview.example.test/result', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1)
       }] } }, agentComposerDrafts: { [sessions[0]!.id]: 'This original draft stays unsent while the Agent result becomes ready.', [sessions[1]!.id]: 'Neighbor draft' } }))
     generation += 1
     flushSync(() => root.render(<React.Fragment key={generation}>
@@ -111,7 +112,7 @@ const probe = {
     const state = useAppStore.getState()
     return { sessions: state.sessions.map(session => ({ id: session.id, control: session.control, processState: session.processState })),
       tab: state.tabs[tabId], layout: state.layouts[workspaceId], drafts: state.agentComposerDrafts, writes, pastes, resizes, inputs, routes, gitCalls,
-      nativeOverlays: state.nativeSurfaceOverlayCount, tabs: state.tabs, editorDiffs: state.editorRegionDiffs }
+      tabs: state.tabs, editorDiffs: state.editorRegionDiffs }
   },
   terminal() {
     const element = document.querySelector(`[data-workbench-region-id="${regionId}"] .xterm`) ?? document.querySelector('.xterm')

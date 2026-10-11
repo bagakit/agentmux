@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -57,7 +58,7 @@ let root: Root | undefined, container: HTMLDivElement, overlay: HTMLDivElement, 
 function agent(id: string): Agent {
   const providerId = id === 'unknown' ? 'claude' : 'codex'
   return { id, kind: 'agent', providerId, executorId: providerId, hostId: 'local', workspacePath: _hygiene_fixturePath("private/headroom"),
-    label: id, createdAt: 1, updatedAt: NOW - 100, agentSessionUpdatedAt: NOW - 100, processState: 'running', latestOutputBytes: 0,
+    label: id, createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: NOW - 100, agentSessionUpdatedAt: NOW - 100, processState: 'running', latestOutputBytes: 0,
     status: { state: 'working', source: 'native-hook', observedAt: NOW - 100 },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true,
       replyCorrelation: 'none', usage: { kind: 'native-transcript', transcriptFormat: providerId === 'codex' ? 'codex-rollout' : 'claude-jsonl' } },
@@ -84,7 +85,7 @@ function publication(id: string, usage: AgentTurnUsage | undefined, observedAt =
   return { type: 'core', hostId: 'local', event: { type: 'agent-session', session: {
     kind: 'agent', agentSessionId: id, providerId: session.providerId, executorId: session.executorId,
     hostId: session.hostId, workspacePath: session.workspacePath, run: { ...session.control.run },
-    retiredRuns: [],  createdAt: 1, updatedAt: observedAt,
+    retiredRuns: [],  createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: observedAt,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt },
     ...(usage === undefined ? {} : { turnUsage: usage })
   } } }
@@ -289,10 +290,10 @@ it('the real Composer closes a retained context reader when its occurrence becom
   })
   await act(async () => chip.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
   await act(async () => chip.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })))
-  expect(opened).toBe(true); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(1)
+  expect(opened).toBe(true)
   await act(async () => root!.render(<Workbench visible={false} />))
   expect(composer('low').details).toBe(details); expect(opened).toBe(false)
-  expect(chip.getAttribute('aria-expanded')).toBe('false'); expect(useAppStore.getState().nativeSurfaceOverlayCount).toBe(0)
+  expect(chip.getAttribute('aria-expanded')).toBe('false')
   await act(async () => chip.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 })))
   expect(opened).toBe(false)
   await act(async () => root!.render(<Workbench />))
