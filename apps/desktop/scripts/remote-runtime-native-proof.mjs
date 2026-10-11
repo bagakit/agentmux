@@ -40,6 +40,10 @@ export async function runRemoteDesktopProof({ privateRoot, evidence, input, owne
   await fs.symlink(candidate.core, path.join(privateRoot, 'node_modules/@agentmux/core'))
   const inputPath = path.join(privateRoot, 'remote-input.json')
   await fs.writeFile(inputPath, JSON.stringify(input, null, 2))
+  const shellPath = path.join(privateRoot, 'proof-shell')
+  // The real Host hydrates a login shell. Keep that production path while
+  // preventing this private proof from executing the user's startup files.
+  await fs.writeFile(shellPath, '#!/bin/sh\nexec /bin/bash --noprofile --norc "$@"\n', { mode: 0o700 })
   const preload = path.join(privateRoot, 'preload.cjs')
   await fs.copyFile(path.join(fixture, 'preload.cjs'), preload)
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
@@ -98,25 +102,32 @@ export async function connectSshAgentMux(options) {
   }
   let poll
   try {
-    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
+    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, esbuild: { jsx: 'automatic' },
       plugins: [candidate.capture],
       define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"', __TERMINAL_WHEEL_UMD_URL__: '"unused"' },
       resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
       build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
-    await build({ configFile: false, root: fixture, logLevel: 'error', plugins: [candidate.capture, ...(selectorTransform ? [selectorTransform] : [])],
+    await build({ configFile: false, root: fixture, logLevel: 'error', plugins: [candidate.capture, ...(selectorTransform ? [selectorTransform] : [])], ssr: { noExternal: true },
       build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
         rollupOptions: { external: id => id === 'electron' || id === '@agentmux/core' || id.startsWith('@agentmux/core/') || id.startsWith('file:'),
-          output: { format: 'es', entryFileNames: 'main.mjs' } } } })
+          output: { format: 'es', entryFileNames: 'main.mjs', chunkFileNames: '[name]-[hash].js' } } } })
     await candidate.buildHost(build)
     await candidate.seal()
     const immutableInputs = async () => ({ ...await candidate.identity(), ...Object.fromEntries(await Promise.all([
       ...await files(path.join(privateRoot, 'renderer')), ...await files(path.join(privateRoot, 'main')),
-      preload, inputPath, ...(input.remoteEndpoint.transport === 'unix' ? [selector] : [])
+      preload, inputPath, shellPath, ...(input.remoteEndpoint.transport === 'unix' ? [selector] : [])
     ].map(async file => [file.startsWith(privateRoot + '/') ? path.relative(privateRoot, file) : 'fixture/preload.cjs', hash(await fs.readFile(file))]))) })
     proof.compiledInputs = await immutableInputs()
     proof.inputBefore = proof.compiledInputs
     if (input.remoteEndpoint.transport === 'unix') assert.ok(proof.mainSelector, 'The private Unix selector was consumed')
-    const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+    // A private native proof must not inherit the invoking Agent's identity,
+    // Hook/endpoint/queue context or application credential environment.
+    const systemEnvironment = ['PATH', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE',
+      'USER', 'LOGNAME', '__CF_USER_TEXT_ENCODING', 'DISPLAY', 'WAYLAND_DISPLAY',
+      'XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS', 'SystemRoot', 'WINDIR']
+    const env = Object.fromEntries(systemEnvironment.filter(name => process.env[name] !== undefined).map(name => [name, process.env[name]]))
+    env.HOME = path.join(privateRoot, 'home')
+    env.SHELL = shellPath
     poll = setInterval(() => { void pump().catch(error => { proof.coordinatorFailure = error.message }) }, 20)
     for (const phase of ['seed', 'restore']) {
       const phaseRoot = path.join(privateRoot, `phase-${phase}`); await fs.mkdir(phaseRoot)
@@ -133,6 +144,8 @@ export async function connectSshAgentMux(options) {
       const native = JSON.parse(await fs.readFile(path.join(evidence, `${phase}.json`), 'utf8'))
       recorded.native = native
       assert.equal(native.passed, true, native.failure?.message)
+      assert.deepEqual(native.privateApplicationPaths, { home: path.join(privateRoot, 'home'), appData: path.join(privateRoot, 'app-data'),
+        userData: path.join(privateRoot, 'user-data'), sessionData: path.join(privateRoot, 'session-data') })
     }
     assert.equal(new Set(proof.phases.map(item => item.native.pid)).size, 2)
     const ownerGenerations = proof.phases.map(item => item.native.remoteIdentity.owner.ownerInstanceId)
@@ -154,6 +167,8 @@ export async function connectSshAgentMux(options) {
   } catch (error) { proof.failure = { name: error.name, message: error.message, stack: error.stack } }
   finally {
     clearInterval(poll); if (ownerOperation) await ownerOperation
+    try { await fs.copyFile(path.join(privateRoot, 'agentmux-host.log'), path.join(evidence, 'local-host.log')) }
+    catch (error) { if (error.code !== 'ENOENT') proof.hostLogFailure = error.message }
     let localClient
     const errors = []
     let remaining = []

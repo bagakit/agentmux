@@ -9,6 +9,7 @@ import { readTerminalViewObservation } from '../../../src/renderer/src/lib/termi
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import '../../../src/renderer/src/styles/index.css'
 
 window.terminals = []
@@ -21,12 +22,17 @@ api.spatial = {
   commit: async input => request('spatial-commit', input),
   onChange: listener => window.remoteProof.onSpatialChange(listener)
 }
-api.providers.list = async () => []
+api.providers.list = async options => request('providers', options)
 api.demands.list = async () => []
 api.files.readDirectory = async () => []
 api.files.observe = async () => {}
 api.files.unobserve = async () => {}
 api.sessions.snapshot = async () => request('snapshot')
+api.sessions.historySources = async options => request('history-sources', options)
+api.sessions.timeline = async control => request('timeline', control)
+api.sessions.observeStorage = async control => request('observe-storage', control)
+api.sessions.notifyInputOccupation = async control => request('input-occupation', control)
+api.sessions.inspectInput = async (control, key) => request('inspect-input', control, key)
 api.sessions.attach = async (control, byte) => request('attach', control, byte)
 api.sessions.replay = async (id, byte) => request('replay', id, byte)
 api.sessions.detach = async id => request('detach', id)
@@ -71,9 +77,26 @@ if (setup.phase === 'seed') {
       readingTab.id, 'original-remote-group', 'original-remote-group', 'down', 'original-terminal-group')
     workbench.layouts[reading.workspaceId] = { ...layout, activeGroupId: 'original-remote-group' }
   }
+  for (const workspace of setup.config.workspaces) {
+    if (!workbench.layouts[workspace.id]) workbench.layouts[workspace.id] = createWorkspaceLayout(`private-empty-${workspace.id}`)
+  }
+  if (await api.spatial.read() !== null) throw Error('The private seed cannot overwrite an existing Core spatial document')
+  // Durable references include the original execution Host. Read those facts
+  // from the actual Runtime before saving, exactly as an ordinary workbench does.
+  const expected = [identity.sessionId, ...(setup.terminalReading || setup.splitTerminal ? [(setup.terminalReading ?? setup.splitTerminal).sessionId] : [])]
+  const deadline = Date.now() + 20000
+  let snapshot
+  for (;;) {
+    snapshot = await api.sessions.snapshot()
+    if (expected.every(id => snapshot.sessions.some(session => session.id === id && (!setup.recovery || session.hostId === identity.hostId)))) break
+    if (Date.now() >= deadline) throw Error('The actual Runtime did not confirm the original seed Session/Run references')
+    await new Promise(resolve => setTimeout(resolve, 35))
+  }
+  await api.spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph({ config: setup.config, sessions: snapshot.sessions,
+    ...workbench, spaceZoneBindings: {}, spatialRequests: {} }, []) })
   const { name, version } = useAppStore.persist.getOptions()
   localStorage.setItem(name, JSON.stringify({ version, state: {
-    restoredWorkbench: projectPersistedWorkbench(workbench), activeWorkspaceId: identity.workspaceId,
+    activeWorkspaceId: identity.workspaceId,
     mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
     agentComposerDrafts: setup.recovery ? { [identity.sessionId]: 'Original remote unsent draft' }
       : { [identity.sessionId]: 'Original local unsent draft', 'unconfirmed-remote-agent': 'Original remote unsent draft' }
@@ -161,6 +184,7 @@ window.remoteAttachmentNotices = () => [identity.regionId, (setup.terminalReadin
     }
     return { regionId, regionPresent: Boolean(region), unavailable: Boolean(notice),
       noticeCount: notice?.querySelectorAll('.service-window').length ?? 0,
+      steps: [...(notice?.querySelectorAll('.service-window__step') ?? [])].map(step => step.textContent),
       recoveryAvailable: recovery?.textContent === 'Refresh observation' && !recovery.disabled,
       recoveryPainted }
   })
