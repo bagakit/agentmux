@@ -238,7 +238,7 @@ it('keeps failed hidden source return observable without destroying the original
 })
 
 it('keeps a stale native window document from confirming coverage without hiding the original page', async () => {
-  const f = await fixture(), host = f.manager.windowForView(f.source)
+  const f = await fixture(), host = f.manager.windowForView(f.source as never)
   let current = true
   f.manager.setPresentationWindowOwner(() => { if (!current) throw new Error('Original host document changed'); return host })
   const lease = f.register('A'), capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
@@ -264,7 +264,7 @@ it('prepares a never-selected source in a hidden native shell without covering t
   expect(shell.options).toMatchObject({ show: false, focusable: false, width: geometry.bounds.width, height: geometry.bounds.height })
   expect(shell.views).toEqual([f.source])
   expect(f.views).toEqual([])
-  expect(f.manager.windowForView(f.source)).toBe(f.window)
+  expect(f.manager.windowForView(f.source as never)).toBe(f.window)
   expect(f.source.getBounds()).toEqual({ ...geometry.bounds, x: 0, y: 0 })
   expect(f.source.getVisible()).toBe(true)
   expect(f.manager.nativeOwner('browser')).toBeUndefined()
@@ -444,6 +444,24 @@ it('retains exact requester lifetime on same-document navigation', async () => {
   f.app.url += '#view'; f.frame.url = f.app.url
   f.app.emit('did-navigate-in-page', {}, f.app.url, true)
   expect(f.request()).toEqual({ video: f.source.webContents.mainFrame }); expect(f.events()).toEqual([])
+})
+it('retires only the ended requester capture token while keeping its Browser available', async () => {
+  const f = await fixture(), lease = f.register('A')
+  const capture = f.manager.armPresentationCapture(f.app as never, f.frame as never, lease.leaseId)
+  expect(f.request()).toEqual({ video: f.source.webContents.mainFrame })
+  f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'ready', trackIds: ['original-track'] })
+  const entry = Reflect.get(f.manager, 'entries').get('browser')
+  expect(entry.captureId).toBe(capture.captureId)
+  f.app.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: f.app.url })
+  expect(entry.captureId).toBeNull()
+  expect(Reflect.get(f.manager, 'presentationCaptures').has(capture.captureId)).toBe(false)
+  expect(f.source.webContents.dead).toBe(false)
+  const nextLease = f.register('next')
+  const next = f.manager.armPresentationCapture(f.app as never, f.frame as never, nextLease.leaseId)
+  expect(next.captureId).not.toBe(capture.captureId)
+  expect(entry.captureId).toBe(next.captureId)
+  expect(() => f.manager.ackPresentationCapture(f.app as never, f.frame as never, capture.captureId, { outcome: 'stopped', trackIds: ['original-track'] })).toThrow('Unknown')
+  expect(entry.captureId).toBe(next.captureId)
 })
 it('releases the resource rather than closing the projection and rejects stale leases after restore', async () => {
   const f = await fixture(), a = f.register('A')
