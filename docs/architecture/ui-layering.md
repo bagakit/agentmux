@@ -23,6 +23,10 @@ Portal 使用稳定的 DOM host。工作面跨 document 移动时，host 随原�
 
 内部描述和失败回执归 [`shared/native-overlay.ts`](../../apps/desktop/src/shared/native-overlay.ts)。它们是展示协议，不进入 Core 的 Session、Run、权限或恢复事实。
 
+内容投影可见时，`NativeOverlaySurfaces` 在准确 Renderer 上保留一个合成帧订阅。SDK 帧用于比较原投影区域的像素；像素变化才沿原 `capturePage` 取得带原色彩描述的 PNG。动态更新只保留一轮在途工作和最新待处理帧，解码完成后重新核对原订阅与投影版本再安装；几何准备、隐藏、撤去和销毁释放旧订阅。逐帧检查只消费本 owner 的投影和准确宿主，不遍历 Session 或 Browser manager 的全局条目。
+
+SDK 订阅仍读取完整 Renderer 帧。区域比较避免无变化时重复捕获、PNG 编码和原生解码，不表示底层读回已缩小到弹层矩形；这项成本只在存在可见内容投影时承担。
+
 系统文件／目录选择、保存和确认框不经过 Browser 位图投影。发起组件沿 [`WorkbenchDocument`](../../apps/desktop/src/renderer/src/lib/workbench-document.tsx) 携带当前窗口身份，原 preload／IPC 透传给 [`WorkbenchWindows.windowForDocument`](../../apps/desktop/src/main/workbench-windows.ts) 取得准确原生 parent。工作面移动仍复用原 Root 桥，因此 IPC sender 只证明可信来源，不决定对话框位置；窗口身份与代次继续由原窗口 owner 校验。
 
 ## 防退化验证
