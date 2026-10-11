@@ -98,6 +98,12 @@ export const CODEX_HOOKS: AgentNativeHookSpecification = {
     }
   },
   processNativeIdentity: true,
+  continuity(eventName, payload) {
+    // Interrupt has no human-origin cancellation fact; internal compaction can emit it too.
+    const nativeSessionId = normalizeNativeSessionId(payload.session_id)
+    return eventName === 'SessionStart' && payload.hook_event_name === 'SessionStart' && payload.source === 'resume' && nativeSessionId
+      ? { kind: 'context-restored', nativeSessionId } : undefined
+  },
   resolveSubject(payload, context) {
     const main = context.processNativeHandle
     const nativeId = normalizeNativeSessionId(payload.session_id)

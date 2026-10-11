@@ -31,7 +31,8 @@ import {
 } from './session-timeline.js'
 import {
   normalizeNativeSessionId,
-  normalizeNativeTranscriptPath
+  normalizeNativeTranscriptPath,
+  matchesProviderNativeSessionTarget
 } from './agent-native-locator.js'
 import type {
   AgentFuturePromptIntent,
@@ -1927,7 +1928,9 @@ function assertSupervisedResumeClaim(reservation: Extract<AgentMuxLifecycleReser
   if (!rootId) return
   const current = sessions.find(session => session.agentSessionId === reservation.agentSessionId), root = current?.continuityOperations?.[rootId]
   if (!root?.supervision || !operation || root.supervision.activeAttemptOperationId !== operation.operationId ||
-    ['cancelled', 'settled', 'paused'].includes(root.supervision.phase) || !isDeepStrictEqual(root.nativeTarget, reservation.preparedSession!.nativeHandle)) {
+    ['cancelled', 'settled', 'paused'].includes(root.supervision.phase) || !matchesProviderNativeSessionTarget(root.nativeTarget, reservation.preparedSession!.nativeHandle) ||
+    !matchesProviderNativeSessionTarget(root.nativeTarget, current?.nativeHandle) ||
+    !matchesProviderNativeSessionTarget(reservation.preparedSession!.nativeHandle, current?.nativeHandle)) {
     throw new AgentMuxError('The original recovery intent no longer authorizes this unclaimed attempt.', 'AGENT_CONTINUITY_SUPERSEDED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
   }
 }

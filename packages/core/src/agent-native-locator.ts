@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path'
+import type { AgentNativeSessionHandle } from './types.js'
 
 /**
  * Provider-owned values that may cross the Hook/store boundary and later be
@@ -52,4 +53,12 @@ export function normalizeNativeSessionId(value: unknown): string | undefined {
 export function normalizeNativeTranscriptPath(value: unknown): string | undefined {
   const normalized = boundedText(value, MAX_NATIVE_TRANSCRIPT_PATH_BYTES)
   return normalized && isAbsolute(normalized) ? normalized : undefined
+}
+
+
+/** A verified locator may add information, but cannot change an already known target. */
+export function matchesProviderNativeSessionTarget(original: AgentNativeSessionHandle | undefined, observed: AgentNativeSessionHandle | undefined): boolean {
+  return original?.kind === 'provider' && observed?.kind === 'provider' &&
+    original.providerId === observed.providerId && original.sessionId === observed.sessionId &&
+    (original.transcriptPath === undefined || original.transcriptPath === observed.transcriptPath)
 }

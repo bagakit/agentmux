@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentContinuityInput, AgentMuxAgentContinuityResult, AgentMuxContinuityOperation, AgentMuxContinuitySupervision } from './agent-session-continuity.js'
 import type { AgentMuxLifecycleReservation } from './agent-session-store.js'
@@ -191,15 +192,15 @@ export class AgentSessionContinuitySupervisor {
       if (terminal(phase)) { this.clearTimer(id, rootId); this.roots.get(id)?.delete(rootId); if (!this.roots.get(id)?.size) this.release(id) }
     }
     if (session.hostId !== 'local') { this.release(id); throw new AgentMuxError('The original recovery Host changed; its metadata and Run are retained.', 'AGENT_CONTINUITY_SUPERSEDED') }
-    if (!active || !root.nativeTarget || !isDeepStrictEqual(root.nativeTarget, session.nativeHandle) ||
-      !isDeepStrictEqual(active.nativeTarget, root.nativeTarget)) return await settle('paused', 'original-target-changed')
+    if (!active || !root.nativeTarget || !matchesProviderNativeSessionTarget(root.nativeTarget, session.nativeHandle) ||
+      !matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) || !matchesProviderNativeSessionTarget(active.nativeTarget, session.nativeHandle)) return await settle('paused', 'original-target-changed')
     // A failed lifecycle read is not evidence that Stop is absent.
     const lifecycle = await this.deps.lifecycle(id)
     if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, session.run) && active.newRun &&
       sameRun(active.newRun, session.run)) return await settle('cancelled', 'user-stop')
     const cancellation = supervision.cancellation
     if (cancellation && active.newRun && sameRun(cancellation.run, active.newRun) &&
-      sameRun(cancellation.run, session.run) && isDeepStrictEqual(cancellation.nativeTarget, root.nativeTarget)) return await settle('cancelled', 'explicit-cancellation')
+      sameRun(cancellation.run, session.run) && matchesProviderNativeSessionTarget(root.nativeTarget, cancellation.nativeTarget) && matchesProviderNativeSessionTarget(cancellation.nativeTarget, session.nativeHandle)) return await settle('cancelled', 'explicit-cancellation')
     if (!active.newRun || !sameRun(active.newRun, session.run)) {
       if (!sameRun(active.previousRun, session.run)) return await settle('paused', 'current-run-changed')
       // Prepared/unknown Start is the same original action. Its own re-entry never starts again.
@@ -239,7 +240,7 @@ export class AgentSessionContinuitySupervisor {
       ...(run.state.type === 'exited' ? { exitCode: run.state.code, exitSignal: run.state.signal } : {}) }
     if (run.state.type === 'running') {
       const context = supervision.contextEvidence
-      if (context && sameRun(context.run, session.run) && isDeepStrictEqual(context.nativeTarget, root.nativeTarget)) return await settle('settled', 'context-observed', process)
+      if (context && sameRun(context.run, session.run) && matchesProviderNativeSessionTarget(root.nativeTarget, context.nativeTarget) && matchesProviderNativeSessionTarget(context.nativeTarget, session.nativeHandle)) return await settle('settled', 'context-observed', process)
       if (supervision.phase !== 'observing' || supervision.process?.state !== 'running' || !sameRun(supervision.process.run, session.run)) {
         await this.save(session, root, { ...supervision, phase: 'observing', reason: 'context-unconfirmed', process, observedAt: Date.now() }, undefined, { rechecks: root.rechecks })
       }

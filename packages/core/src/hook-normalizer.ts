@@ -13,6 +13,7 @@ import type {
   AgentStatus,
   AgentNativeActivityEvent,
   AgentHookObservationFailure,
+  AgentHookContinuityObservation,
   NativeHookEnvelope,
   NormalizedHookEvent
 } from './types.js'
@@ -59,6 +60,9 @@ export type AgentNativeSubagentTracking = {
 }
 
 export type AgentNativeHookSpecification = {
+  /** Pure projection from the original native payload, only after current main-subject verification. */
+  continuity?: (eventName: string, payload: Readonly<Record<string, unknown>>,
+    context: AgentProviderHookNormalizationContext) => AgentHookContinuityObservation | undefined
   /** Pure diagnostic from the authenticated Run; it cannot promote an unknown native actor. */
   observationFailure?: (eventName: string, payload: Readonly<Record<string, unknown>>,
     context: AgentProviderHookNormalizationContext) => AgentHookObservationFailure | undefined
@@ -708,6 +712,25 @@ export function normalizeNativeHook(
   )
   const currentActivity = mainSubject ? specification.currentActivity?.(eventName, payload, context) : undefined
   const observationFailure = specification.observationFailure?.(eventName, payload, context)
+  let continuity: AgentHookContinuityObservation | undefined, continuityObservationFailure: AgentHookObservationFailure | undefined
+  try {
+    const fact = mainSubject ? specification.continuity?.(eventName, rawPayload, context) : undefined
+    if (fact) {
+      const kind = fact.kind, nativeSessionId = fact.nativeSessionId
+      if (typeof nativeSessionId === 'string' && nativeSessionId.trim()) {
+        if (kind === 'context-restored') continuity = { kind, nativeSessionId }
+        else if (kind === 'explicit-user-cancelled') {
+          const scope = fact.scope, nativeOperationId = fact.nativeOperationId
+          if (scope === 'recovery-intent' && typeof nativeOperationId === 'string' && nativeOperationId.trim()) {
+            continuity = { kind, scope, nativeSessionId, nativeOperationId }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    // This optional observation cannot consume the original activity/receipt on failure.
+    continuityObservationFailure = { code: 'AGENT_CONTINUITY_HOOK_UNCONFIRMED', message: `Native recovery observation failed. ${error instanceof Error ? error.message : String(error)}` }
+  }
   return {
     agentSessionId: envelope.agentSessionId,
     run: {
@@ -718,6 +741,8 @@ export function normalizeNativeHook(
     mainSubject,
     ...(currentActivity ? { currentActivity } : {}),
     ...(observationFailure ? { observationFailure } : {}),
+    ...(continuity ? { continuity } : {}),
+    ...(continuityObservationFailure ? { continuityObservationFailure } : {}),
     ...(nativeTurnId ? { nativeTurnId } : {}),
     subject,
     ...(childActivity ? { childActivity: true } : {}),
