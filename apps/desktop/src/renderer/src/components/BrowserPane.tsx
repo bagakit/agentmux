@@ -9,11 +9,9 @@ import { StableWorkbenchView } from './StableWorkbenchView'
 import { createRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import {
-  BROWSER_VIEWPORT_PRESETS,
   type BrowserScreenshotCapture,
   type BrowserElementSelection,
   type BrowserSnapshot,
-  type BrowserViewport,
   type BrowserReplayPlan,
   type BrowserScriptRunReport
 } from '../../../shared/contracts'
@@ -35,6 +33,7 @@ import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarnin
 import { BrowserStartPage } from './BrowserStartPage'
 import type { BrowserStartPageConfig } from '../../../shared/browser-start-page'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
+import { BrowserViewportOptions, BrowserViewportSizeDialog } from './BrowserViewportControls'
 import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
 import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
@@ -72,7 +71,6 @@ import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './Bro
 
 const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
 const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
-const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeActionInspectIcon = semanticIconComponent('action.inspect')
@@ -86,19 +84,13 @@ const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCaptureIcon = semanticIconComponent('action.capture')
 const ThemeObjectToolsIcon = semanticIconComponent('object.tools')
 const ThemeObjectDisplayIcon = semanticIconComponent('object.display')
+const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeObjectBookmarkIcon = semanticIconComponent('object.bookmark')
 const ThemeFileCodeIcon = semanticIconComponent('file.code')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeObjectHistoryIcon = semanticIconComponent('object.history')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 
-
-const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
-  responsive: 'Responsive',
-  mobile: 'Mobile',
-  tablet: 'Tablet',
-  desktop: 'Desktop'
-}
 
 const NO_BROWSER_ANNOTATIONS: readonly BrowserAnnotation[] = []
 
@@ -312,6 +304,7 @@ function BrowserPaneContent({
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [customViewport, setCustomViewport] = useState<string | null>(null)
   const [managementOpen, setManagementOpen] = useState(false)
   const [managementVisited, setManagementVisited] = useState(false)
   const research = useRef<{ url: string; mode: BrowserSnapshot['mode']; preparation: SurveyBrowserPreparation | null } | null>(null)
@@ -952,23 +945,9 @@ function BrowserPaneContent({
         fileOnly: true, split: { tabId: reference.tabId, regionId: reference.regionId, direction: 'right' }, projection })
     } finally { release() }
   })
-  const viewportOptions = (
-    <DropdownMenu.RadioGroup
-      value={tab.viewport}
-      onValueChange={(viewport) => void run(() => api.browser.setViewport(tab.browserId, viewport as BrowserViewport))}
-    >
-      {(Object.keys(BROWSER_VIEWPORT_PRESETS) as BrowserViewport[]).map((viewport) => {
-        const size = BROWSER_VIEWPORT_PRESETS[viewport]
-        return (
-          <DropdownMenu.RadioItem key={viewport} value={viewport} className="browser-menu__item" disabled={busy}>
-            <span className="browser-menu__indicator"><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></span>
-            <span>{VIEWPORT_LABELS[viewport]}</span>
-            <small>{size ? `${size.width} × ${size.height}` : 'Fit pane'}</small>
-          </DropdownMenu.RadioItem>
-        )
-      })}
-    </DropdownMenu.RadioGroup>
-  )
+  const viewportOptions = (presentationId: string) => <BrowserViewportOptions value={tab.viewport} disabled={busy}
+    onSelect={viewport => void run(() => api.browser.setViewport(tab.browserId, viewport))}
+    onCustom={() => setCustomViewport(presentationId)} />
 
   const regionCloseButton = onRegionClose ? <button
     type="button" className="browser-toolbar__close" title="Close split" aria-label="Close split"
@@ -1190,9 +1169,9 @@ function BrowserPaneContent({
               </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
+              <DropdownMenu.Content className="browser-menu browser-viewport-menu" align="end" sideOffset={5} collisionPadding={8}>
                 <DropdownMenu.Label className="browser-menu__label">Viewport</DropdownMenu.Label>
-                {viewportOptions}
+                {viewportOptions(key)}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
@@ -1267,7 +1246,17 @@ function BrowserPaneContent({
                 {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={() => viewBookmarkSource(presentation?.target)}>
                   <ThemeFileCodeIcon size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
-                {toolbar?.viewport ? <><DropdownMenu.Separator className="browser-menu__separator" /><DropdownMenu.Label className="browser-menu__label">Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
+                {toolbar?.viewport ? <>
+                  <DropdownMenu.Separator className="browser-menu__separator" />
+                  <DropdownMenu.Sub>
+                    <DropdownMenu.SubTrigger className="browser-menu__item" disabled={busy}>
+                      <ThemeObjectDisplayIcon size={12} /><span>Viewport</span><ThemeNavigationSubmenuIcon size={12} aria-hidden="true" />
+                    </DropdownMenu.SubTrigger>
+                    <DropdownMenu.Portal><DropdownMenu.SubContent className="browser-menu browser-viewport-menu" sideOffset={5} collisionPadding={8}>
+                      {viewportOptions(key)}
+                    </DropdownMenu.SubContent></DropdownMenu.Portal>
+                  </DropdownMenu.Sub>
+                </> : null}
                 <DropdownMenu.Separator className="browser-menu__separator" />
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setManagementVisited(true); setManagementOpen(true) }}>
                   <ThemeActionAdjustIcon size={12} /><span>Browser tools…</span>
@@ -1452,6 +1441,9 @@ function BrowserPaneContent({
         </aside>
       ) : null}
       </div>
+      {customViewport === key ? <BrowserViewportSizeDialog value={tab.viewport} visible={visible}
+        onApply={async viewport => { const browser = await api.browser.setViewport(tab.browserId, viewport); applyBrowserEvent({ type: 'updated', browser }) }}
+        onClose={() => setCustomViewport(null)} /> : null}
     </section>
   )
   }
