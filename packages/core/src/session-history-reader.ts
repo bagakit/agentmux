@@ -1,18 +1,18 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxClient } from './client.js'
-import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionHistoryDescriptor } from './types.js'
+import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionHistoryDescriptor, AgentCapturedTimelineRead, AgentCapturedTimelinePage } from './types.js'
 import { readAgentSessionHistoryQuery } from './session-history-query.js'
 
 export * from './session-history-read-codec.js'
 import { validateSessionHistoryReadInput, isSessionHistoryQuery, type AgentSessionContextReference, type AgentSessionHistoryReadInput, type AgentSessionHistoryReadPage, type AgentSessionHistoryReadEntry } from './session-history-read-codec.js'
 
 export type AgentSessionHistoryReader = Pick<AgentMuxClient, 'sessionHistorySources' | 'sessionTimeline' | 'sessionHistoryPage' | 'sessionHistoryResource'>
-type Reader = Pick<AgentSessionHistoryReader, 'sessionHistorySources' | 'sessionTimeline' | 'sessionHistoryPage'> & Partial<Pick<AgentSessionHistoryReader, 'sessionHistoryResource'>>
+type Reader = Pick<AgentSessionHistoryReader, 'sessionHistorySources' | 'sessionTimeline' | 'sessionHistoryPage'> & Partial<Pick<AgentSessionHistoryReader, 'sessionHistoryResource'>> & Partial<Pick<AgentMuxClient, 'readAgentSessionHistory'>>
 /** Host-local owner port, never a wire parameter or caller-supplied source fact. */
-export type AgentSessionHistoryReadContext = { signal?: AbortSignal; resolveSource?: (agentSessionId: string) => Promise<AgentSessionHistoryDescriptor> }
+export type AgentSessionHistoryReadContext = { signal?: AbortSignal; resolveSource?: (agentSessionId: string) => Promise<AgentSessionHistoryDescriptor>; readCapturedHistory?: (agentSessionId: string, input?: AgentCapturedTimelineRead) => Promise<AgentCapturedTimelinePage> }
 type Cursor = AgentSessionContextReference & { version: 1; source: 'captured' | 'native';
-  revision?: string; index: number; offset: number; nativeCursor?: string; nativeLimit?: number }
+  revision?: string; index: number; offset: number; nativeCursor?: string; nativeLimit?: number; captured?: { epoch: string; throughSequence: number; beforeFirstSequence?: number } }
 // A cursor is a scoped read continuation, not a second history ledger. Host restart invalidates it.
 const cursorKey = randomBytes(32)
 const digest = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
@@ -42,6 +42,10 @@ function decode(input: AgentSessionHistoryReadInput): Cursor {
 export async function readAgentSessionHistory(client: Reader, input: AgentSessionHistoryReadInput, options: AgentSessionHistoryReadContext = {}): Promise<AgentSessionHistoryReadPage> {
   validateSessionHistoryReadInput(input)
   options.signal?.throwIfAborted()
+  if (input.source === 'captured' && !options.readCapturedHistory) {
+    if (client.readAgentSessionHistory) return await client.readAgentSessionHistory(input, options.signal ? { signal: options.signal } : {})
+    return fail('The original captured history reader is unavailable; its recent display window cannot certify full history.', 'AGENT_SESSION_HISTORY_CAPTURE_UNCONFIRMED')
+  }
   if (isSessionHistoryQuery(input)) return await readAgentSessionHistoryQuery(client, input, options)
   const cursor = decode(input)
   const descriptor = options.resolveSource ? await options.resolveSource(input.agentSessionId)
@@ -49,13 +53,12 @@ export async function readAgentSessionHistory(client: Reader, input: AgentSessio
   if (!descriptor || descriptor.hostId !== input.hostId || descriptor.agentSessionId !== input.agentSessionId) return fail('No exact retained Session exists at the requested Host.', 'UNKNOWN_AGENT_SESSION')
   const limit = input.limit ?? 30
   let items: Array<AgentSessionHistoryItem | AgentTimelineItem>, revision: string, afterNative: string | null = null
-  let nativeSource: AgentSessionHistorySource | undefined
+  let nativeSource: AgentSessionHistorySource | undefined, capturedPage: AgentCapturedTimelinePage | undefined
   if (input.source === 'captured') {
-    const snapshot = await client.sessionTimeline(input.agentSessionId)
-    if (snapshot.agentSessionId !== input.agentSessionId) return fail('Captured history belongs to another Session.', 'CONTROL_PROTOCOL_ERROR')
-    // Most recent captured items first; each item retains its original fields and provenance.
-    items = [...snapshot.items].reverse()
-    revision = digest(JSON.stringify(snapshot))
+    capturedPage = await options.readCapturedHistory!(input.agentSessionId, { ...cursor.captured, limit: cursor.nativeLimit ?? limit })
+    if(capturedPage.agentSessionId!==input.agentSessionId) return fail('Captured history belongs to another Session.','CONTROL_PROTOCOL_ERROR')
+    items=capturedPage.records.map(record=>record.item)
+    revision=digest(JSON.stringify([capturedPage.stream.epoch,capturedPage.stream.sequence]))
   } else {
     const page = await client.sessionHistoryPage(input.agentSessionId, {
       limit: cursor.nativeLimit ?? limit, ...(cursor.nativeCursor === undefined ? {} : { cursor: cursor.nativeCursor }), ...(options.signal ? { signal: options.signal } : {})
@@ -77,11 +80,14 @@ export async function readAgentSessionHistory(client: Reader, input: AgentSessio
   const result: AgentSessionHistoryReadPage = { hostId: input.hostId, agentSessionId: input.agentSessionId,
     source: input.source, revision, availability: items.length ? 'available' : 'empty',
     order: input.source === 'captured' ? 'newest-first' : 'chronological-page', items: [], nextCursor: null, budgetBytes,
-    ...(nativeSource ? { nativeSource } : {}) }
+    ...(nativeSource ? { nativeSource } : {}), ...(capturedPage ? { capturedStream: capturedPage.stream } : {}) }
   let index = cursor.index, offset = cursor.offset
   const continuation = (nextIndex: number, nextOffset: number): string | null => {
+    const captured = capturedPage ? {epoch:capturedPage.stream.epoch,throughSequence:capturedPage.stream.sequence,...(cursor.captured?.beforeFirstSequence===undefined?{}:{beforeFirstSequence:cursor.captured.beforeFirstSequence})} : undefined
     if (nextIndex < items.length) return encode({ ...cursor, revision, index: nextIndex, offset: nextOffset,
-      ...(input.source === 'native' ? { nativeLimit: cursor.nativeLimit ?? limit } : {}) })
+      nativeLimit: cursor.nativeLimit ?? limit,...(captured?{captured}:{}) })
+    if(capturedPage?.nextBeforeFirstSequence!==null && capturedPage?.nextBeforeFirstSequence!==undefined) return encode({version:1,hostId:input.hostId,agentSessionId:input.agentSessionId,source:input.source,
+      index:0,offset:0,nativeLimit:cursor.nativeLimit??limit,captured:{epoch:capturedPage.stream.epoch,throughSequence:capturedPage.stream.sequence,beforeFirstSequence:capturedPage.nextBeforeFirstSequence}})
     return input.source === 'native' && afterNative !== null
       ? encode({ version: 1, hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.source,
           index: 0, offset: 0, nativeCursor: afterNative, nativeLimit: cursor.nativeLimit ?? limit }) : null

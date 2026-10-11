@@ -11,9 +11,8 @@ import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
-import { createHash } from 'node:crypto'
-import type { BigIntStats } from 'node:fs'
-import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, open, readFile, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -26,9 +25,10 @@ import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-
 import { continuityExecutorEntries } from './agent-continuity-executor.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
+import { conversationRevision } from './conversation-timeline.js'
+import { beginCapturedStream, capturedHistorySchema, capturedStream, commitCapturedMutation, readCapturedPage, readRecentCaptured, readyCapturedStream } from './captured-history.js'
+import { archiveCapturedOriginal, capturedFileWitness, importCapturedFile } from './captured-history-import.js'
 import {
-  applyAgentTimelineMutation,
-  normalizeAgentTimeline,
   normalizeAgentTimelineMutation
 } from './session-timeline.js'
 import {
@@ -60,6 +60,8 @@ import type {
   AgentTerminalPromptDeliveryState,
   AgentTerminalOutputChannelState,
   AgentTerminalPromptReadinessSource,
+  AgentCapturedTimelineRead,
+  AgentCapturedTimelinePage,
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineMutation,
@@ -217,6 +219,7 @@ export type AgentMuxAgentSessionStore = {
     reservation: AgentMuxLifecycleReservation,
     next: AgentMuxStoredAgentSession | null
   ): Promise<void>
+  readCapturedHistory(agentSessionId: string, input?: AgentCapturedTimelineRead): Promise<AgentCapturedTimelinePage>
   loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot>
   applyTimelineMutation(
     mutation: AgentTimelineMutation,
@@ -2076,7 +2079,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   private readonly reservations = new Map<string, AgentMuxLifecycleReservation>()
   private retiredRuns: AgentMuxRunRef[] = []
   private retiredAgentSessions: AgentMuxRetiredAgentSession[] = []
-  private readonly timelines = new Map<string, AgentTimelineSnapshot>()
+  private readonly timelines = new Map<string, { stream: AgentCapturedTimelinePage['stream']; heads: Map<string, AgentCapturedTimelinePage['records'][number]>; versions: AgentCapturedTimelinePage['records'] }>()
 
   private promptRecordKey(value: AgentPromptSubmissionRecord): string {
     return JSON.stringify([value.agentSessionId, value.run.runId, promptRecordId(value)])
@@ -2182,7 +2185,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (future && !isDeepStrictEqual(current?.futurePromptIntents?.[future.intentId] ?? null, future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
     const reservation = this.reservations.get(id)
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
-    if (!next) { this.setSession(id, null); this.timelines.delete(id); return }
+    if (!next) { this.setSession(id, null); return }
     const normalized = normalizeStoredAgentSession(agentSessionMetadata(next))
     const values = [...this.sessions.values()].filter(session => session.agentSessionId !== id).map(agentSessionMetadata)
     const all = normalizeAgentSessions([...values, normalized])
@@ -2255,7 +2258,6 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.setSession(agentSessionId, structuredClone(normalized))
     } else {
       this.setSession(agentSessionId, null)
-      this.timelines.delete(agentSessionId)
     }
   }
 
@@ -2370,7 +2372,6 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     )
     this.retiredRuns = merged
     this.retiredAgentSessions = retainedSessions
-    this.pruneTimelines()
     this.reservations.delete(reservation.agentSessionId)
   }
 
@@ -2385,7 +2386,6 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     )
     this.retiredRuns = merged
     this.retiredAgentSessions = retainedSessions
-    this.pruneTimelines()
   }
 
   async commitLifecycle(
@@ -2433,67 +2433,72 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     assertUnboundRetiredRuns(sessions, retiredRuns)
     assertRetiredAgentSessions(sessions, retiredRuns, retiredAgentSessions)
     if (normalized) {
-      if (reservation.kind === 'create') this.timelines.delete(normalized.agentSessionId)
       this.setSession(normalized.agentSessionId, structuredClone(normalized))
     } else {
       this.setSession(reservation.agentSessionId, null)
     }
     this.retiredRuns = retiredRuns
     this.retiredAgentSessions = retiredAgentSessions
-    this.pruneTimelines()
     this.reservations.delete(reservation.agentSessionId)
   }
 
-  private pruneTimelines(): void {
-    const retained = new Set([...this.sessions.keys(), ...this.retiredAgentSessions.map(session => session.agentSessionId)])
-    for (const id of this.timelines.keys()) if (!retained.has(id)) this.timelines.delete(id)
+  private memoryCaptured(id: string) {
+    let history = this.timelines.get(id);
+    if (!history) {
+      history = { stream: { epoch: randomUUID(), sequence: 0, revision: 0, origin: 'beginning' as const, gaps: [] }, heads: new Map(), versions: [] };
+      this.timelines.set(id, history);
+    }
+    return history;
+  }
+
+  async readCapturedHistory(id: string, input: AgentCapturedTimelineRead = {}): Promise<AgentCapturedTimelinePage> {
+    if (!this.timelines.has(id) && !this.sessions.has(id) && !this.retiredAgentSessions.some(session => session.agentSessionId === id))
+      throw new AgentMuxError(`Unknown Agent Session: ${id}`, "UNKNOWN_AGENT_SESSION");
+    const history = this.memoryCaptured(id), stream = history.stream, cut = input.throughSequence ?? stream.sequence, limit = input.limit ?? 100;
+    if (input.epoch !== undefined && input.epoch !== stream.epoch || !Number.isSafeInteger(cut) || cut < 0 || cut > stream.sequence || !Number.isSafeInteger(limit) || limit < 1 || limit > 200 ||
+      [input.beforeFirstSequence, input.afterSequence].some(v => v !== undefined && (!Number.isSafeInteger(v) || v < 0)) || input.recordRevision !== undefined && !input.recordId)
+      throw new AgentMuxError('Captured continuation does not identify this original stream/cut.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED');
+    let rows: AgentCapturedTimelinePage['records'];
+    if (input.afterSequence !== undefined)
+      rows = history.versions.filter(r => r.sequence > input.afterSequence! && r.sequence <= cut);
+    else if (input.recordId !== undefined && input.recordRevision !== undefined)
+      rows = history.versions.filter(r => r.item.id === input.recordId && r.revision === input.recordRevision && r.sequence <= cut).slice(-1);
+    else {
+      const atCut = new Map<string, AgentCapturedTimelinePage['records'][number]>();
+      for (const row of history.versions)
+        if (row.sequence <= cut)
+          atCut.set(row.item.id, row);
+      rows = [...atCut.values()].filter(r => r.firstSequence < (input.beforeFirstSequence ?? Number.MAX_SAFE_INTEGER) && (input.recordId === undefined || r.item.id === input.recordId)).sort((a, b) => b.firstSequence - a.firstSequence);
+    }
+    const more = rows.length > limit, records = rows.slice(0, limit);
+    return structuredClone({ agentSessionId: id, stream: { ...stream, sequence: cut, revision: cut }, records, nextBeforeFirstSequence: more && input.afterSequence === undefined ? records.at(-1)!.firstSequence : null, more });
   }
 
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
-    return structuredClone(this.timelines.get(agentSessionId) ?? {
-      agentSessionId,
-      revision: 0,
-      items: []
-    })
+    if (!this.timelines.has(agentSessionId) && !this.sessions.has(agentSessionId) && !this.retiredAgentSessions.some(session => session.agentSessionId === agentSessionId))
+      return { agentSessionId, revision: 0, items: [] };
+    const history = this.memoryCaptured(agentSessionId), all = [...history.heads.values()].sort((a, b) => a.firstSequence - b.firstSequence);
+    const counts = [0, 0, 0], rows = all.reverse().filter(({ item }) => { const index = item.activityState ? 0 : item.kind === 'user_message' ? 1 : 2; counts[index] = counts[index]! + 1; return counts[index]! <= 200; }).reverse();
+    return structuredClone({ agentSessionId, revision: history.stream.revision, items: rows.map(r => r.item), stream: { ...history.stream, positions: rows.map(({ item, ...r }) => ({ id: item.id, ...r })) } });
   }
 
-  async applyTimelineMutation(
-    mutation: AgentTimelineMutation,
-    signal?: AbortSignal
-  ): Promise<AgentTimelineCommit> {
-    signal?.throwIfAborted()
-    const canonicalMutation = normalizeAgentTimelineMutation(mutation)
-    if (!this.sessions.has(canonicalMutation.agentSessionId) &&
-      !acceptedRetiredActivity(this.retiredAgentSessions, canonicalMutation)) {
-      throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
-    }
-    const current = this.timelines.get(canonicalMutation.agentSessionId) ?? {
-      agentSessionId: canonicalMutation.agentSessionId,
-      revision: 0,
-      items: []
-    }
-    const next = applyAgentTimelineMutation(
-      current.items,
-      canonicalMutation
-    )
-    const changed = JSON.stringify(next) !== JSON.stringify(current.items)
-    const commit: AgentTimelineCommit = {
-      agentSessionId: canonicalMutation.agentSessionId,
-      revision: changed ? nextTimelineRevision(current.revision) : current.revision,
-      changed,
-      mutation: canonicalMutation
-    }
+  async applyTimelineMutation(mutation: AgentTimelineMutation, signal?: AbortSignal): Promise<AgentTimelineCommit> {
+    signal?.throwIfAborted();
+    const canonicalMutation = normalizeAgentTimelineMutation(mutation), id = canonicalMutation.agentSessionId;
+    if (!this.sessions.has(id) && !acceptedRetiredActivity(this.retiredAgentSessions, canonicalMutation))
+      throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION');
+    const history = this.memoryCaptured(id), recordId = canonicalMutation.type === 'update' ? canonicalMutation.itemId : canonicalMutation.item.id, previous = history.heads.get(recordId);
+    const current = previous ? [previous.item] : [], next = applyNormalizedTimelineMutation(current, canonicalMutation), changed = next !== current;
     if (changed) {
-      signal?.throwIfAborted()
-      this.timelines.set(canonicalMutation.agentSessionId, {
-        agentSessionId: canonicalMutation.agentSessionId,
-        revision: commit.revision,
-        items: next
-      })
-    } else {
-      signal?.throwIfAborted()
+      signal?.throwIfAborted();
+      const sequence = nextTimelineRevision(history.stream.sequence), revision = nextTimelineRevision(history.stream.revision);
+      const item = next[0]!, row = { item, firstSequence: previous?.firstSequence ?? sequence, sequence, revision: conversationRevision(item) };
+      history.versions.push(row);
+      history.heads.set(recordId, row);
+      history.stream.sequence = sequence;
+      history.stream.revision = revision;
     }
-    return structuredClone(commit)
+    return structuredClone({ agentSessionId: id, revision: history.stream.revision, changed, mutation: canonicalMutation });
   }
 
 }
@@ -2504,70 +2509,6 @@ type AgentSessionStoreDocument = {
   reservations: AgentMuxLifecycleReservation[]
   retiredRuns: AgentMuxRunRef[]
   retiredAgentSessions: AgentMuxRetiredAgentSession[]
-}
-
-type AgentTimelineFileState = {
-  agentSessionId: string
-  revision: number
-  items: AgentTimelineItem[]
-  mutationLines: number
-  journalBytes: number
-  exists: boolean
-  version: string | null
-  sourceBytes: number
-  appendSafe: boolean
-}
-
-// Disposable decoded facts, not a business/history limit or a heap-size promise.
-const TIMELINE_CACHE_ENTRIES = 8
-const TIMELINE_CACHE_SOURCE_BYTES = 16 * 1024 * 1024
-
-function timelineFileVersion(metadata: BigIntStats): string {
-  return `${metadata.dev}:${metadata.ino}:${metadata.size}:${metadata.mtimeNs}:${metadata.ctimeNs}`
-}
-
-/** Compact appended journal growth; the retained snapshot itself is not replay overhead. */
-const TIMELINE_COMPACTION_MUTATION_LINES = 256
-// Compaction is maintenance, never an admission limit or a reason to trim history.
-const TIMELINE_COMPACTION_BYTES = 4 * 1024 * 1024
-
-function shouldCompactTimeline(timeline: AgentTimelineFileState): boolean {
-  return (
-    timeline.mutationLines >= TIMELINE_COMPACTION_MUTATION_LINES ||
-    timeline.journalBytes >= TIMELINE_COMPACTION_BYTES
-  )
-}
-
-function parseTimelineSnapshotLine(
-  line: string | undefined,
-  agentSessionId: string
-): { revision: number; items: unknown[] } {
-  // 快照行由临时文件加原子 rename 写入，不会被撕裂；解析失败就是损坏，fail-closed。
-  let value: unknown
-  try {
-    value = JSON.parse(line ?? '')
-  } catch {
-    throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-  }
-  const snapshot = value as {
-    version?: unknown
-    agentSessionId?: unknown
-    revision?: unknown
-    items?: unknown
-  }
-  if (
-    snapshot.version !== 3 ||
-    snapshot.agentSessionId !== agentSessionId ||
-    !Number.isSafeInteger(snapshot.revision) ||
-    (snapshot.revision as number) < 0 ||
-    !Array.isArray(snapshot.items)
-  ) {
-    throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-  }
-  return { revision: snapshot.revision as number, items: snapshot.items }
 }
 
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -2632,8 +2573,7 @@ export class AgentMuxSessionDurabilityError extends AgentMuxError {
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
   private readonly timelineTails = new Map<string, Promise<void>>()
-  private readonly timelines = new Map<string, AgentTimelineFileState>()
-  private timelineSourceBytes = 0
+  private readonly capturedPreparations = new Map<string, Promise<AgentCapturedTimelinePage['stream']['gaps']>>()
   private pendingLockRelease: (() => Promise<void>) | null = null
   /** 已报过的抢救事件（键是隔离文件的内容寻址路径），防同一份坏字节在一次加载里刷多条告警。 */
   private readonly reportedSalvages = new Set<string>()
@@ -2687,21 +2627,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.tail
     const result = await this.withReadDatabase(db => db.prepare('SELECT id FROM sessions ORDER BY rowid').all()
       .map(row => this.completeSession(db, String(row.id))!), document => document.sessions)
-    await this.sweepOrphanTimelines()
     return result
-  }
-
-  private async sweepOrphanTimelines(): Promise<void> {
-    let release: (() => Promise<void>) | undefined
-    try {
-      release = await this.acquireLock(undefined, 1)
-      const current = await readCurrentSessionDatabase(this.path)
-      if (!current) return // Partial original-file rescue is not authoritative membership for deletion.
-      current.close()
-      await this.maintainTimelineFiles(await this.read())
-    } catch (error) {
-      if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_SESSION_STORE_BUSY') throw error
-    } finally { await release?.() }
   }
 
   async loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]> {
@@ -2864,12 +2790,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const reservation = this.db.prepare('SELECT 1 FROM reservations WHERE id=?').get(id)
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     if (future && !isDeepStrictEqual(this.futureIntent(this.db, id, future.intentId), future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
-    if (next && !expected) await this.removeTimelineFile(id)
     if (next) this.saveSession(this.db, normalizeStoredAgentSession(complete ? next : agentSessionMetadata(next)), complete)
     else this.deleteSession(this.db, id)
     if (future && !isDeepStrictEqual(future.expected, future.next)) this.saveFutureIntent(this.db, id, future)
     this.dirty = true
-    if (!next) await this.removeTimelineFile(id).catch(() => {})
   }
 
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
@@ -3055,7 +2979,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         reservations: document.reservations.filter(
           (item) => item.reservationId !== reservation.reservationId
         )
-      }, undefined, true)
+      })
     })
   }
 
@@ -3077,7 +3001,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         ...document,
         retiredRuns,
         retiredAgentSessions
-      }, undefined, true)
+      })
     })
   }
 
@@ -3131,9 +3055,6 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       )
       assertUnboundRetiredRuns(committedSessions, retiredRuns)
       assertRetiredAgentSessions(committedSessions, retiredRuns, retiredAgentSessions)
-      if (reservation.kind === 'create') {
-        await this.removeTimelineFile(reservation.agentSessionId)
-      }
       await this.write({
         version: 5,
         sessions: committedSessions,
@@ -3142,83 +3063,160 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         ),
         retiredRuns,
         retiredAgentSessions
-      }, undefined, reservation.kind === 'stop')
+      })
     })
+  }
+
+  private async withCapturedRead<T>(read: (db: DatabaseSync) => T): Promise<T> {
+    // Reuse the original connection/cleanup owner, with a committed public reader.
+    return await this.withReadDatabase(read, () => {
+      throw new AgentMuxError('Original Session persistence is unavailable for this captured read.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+    }, undefined, true)
+  }
+
+  private async prepareCapturedHistory(id: string, signal?: AbortSignal): Promise<AgentCapturedTimelinePage['stream']['gaps']> {
+    const pending = this.capturedPreparations.get(id);
+    if (pending)
+      return await pending;
+    const work = (async () => {
+      await observeRead(this.tail, signal);
+      // Schema creation and initial source ownership use the original writer, once.
+      const committed = await readCurrentSessionDatabase(this.path);
+      let existing: ReturnType<typeof capturedStream>;
+      try {
+        existing = committed?.prepare("SELECT 1 FROM sqlite_schema WHERE name='captured_streams'").get() ? capturedStream(committed, id) : undefined;
+      }
+      finally {
+        committed?.close();
+      }
+      const path = this.timelinePath(id);
+      if (existing?.state === 'ready') {
+        try {
+          const observed = await capturedFileWitness(path);
+          return observed !== null && observed !== existing.source_witness
+            ? [{ code: 'CAPTURED_ORIGINAL_CHANGED_AFTER_HANDOVER', message: 'The preserved original JSONL changed after its acknowledged handover. The original SQLite epoch and accepted facts remain readable; the changed original file is retained for exact repair.' }]
+            : [];
+        } catch (error) {
+          return [{ code: 'CAPTURED_ORIGINAL_OBSERVATION_UNAVAILABLE', message: `The preserved original file could not be observed: ${error instanceof Error ? error.message : String(error)}. Accepted SQLite facts and ordinary input remain available.` }];
+        }
+      }
+      const witness = await capturedFileWitness(path);
+      await this.enqueue(async () => {
+        const row = capturedStream(this.db, id);
+        if (row?.state === 'ready')
+          return;
+        if (!this.db.prepare('SELECT 1 FROM sessions WHERE id=? UNION ALL SELECT 1 FROM retired_sessions WHERE id=?').get(id, id))
+          throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION');
+        const stream = beginCapturedStream(this.db, id, witness);
+        if (stream.source_witness !== witness)
+          throw new AgentMuxError('Original captured source changed before handover confirmation; retain its original file and retry repair.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED');
+        this.dirty = true;
+      }, signal);
+      let index = 0, gaps: Array<{
+        code: string;
+        message: string;
+      }> = [];
+      if (witness !== null) {
+        const imported = await importCapturedFile(path, id, async (units) => {
+          const start = index;
+          index += units.length;
+          await this.enqueue(async () => {
+            const stream = capturedStream(this.db, id)!;
+            if (stream.state === 'ready')
+              return;
+            for (let at = 0; at < units.length; at++) {
+              const ordinal = start + at + 1;
+              if (ordinal <= stream.import_index)
+                continue;
+              const unit = units[at]!;
+              if (unit.kind === 'snapshot') {
+                this.db.prepare('UPDATE captured_streams SET revision=? WHERE session_id=?').run(unit.revision, id);
+                this.db.prepare('UPDATE captured_record_versions SET timeline_revision=? WHERE session_id=? AND epoch=? AND sequence=(SELECT sequence FROM captured_streams WHERE session_id=?)').run(unit.revision, id, stream.epoch, id);
+              }
+              else
+                commitCapturedMutation(this.db, unit.kind === 'item' ? { type: 'append', agentSessionId: id, item: unit.item } : unit.mutation, true);
+              this.db.prepare('UPDATE captured_streams SET import_index=? WHERE session_id=?').run(ordinal, id);
+              this.dirty = true;
+            }
+          }, signal);
+        }, signal);
+        gaps = imported.gaps;
+        if (await capturedFileWitness(path) !== witness)
+          throw new AgentMuxError('Original captured source changed during handover; no ready stream was published.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED');
+        await archiveCapturedOriginal(path, imported.sha256);
+      }
+      await this.enqueue(async () => {
+        if (capturedStream(this.db, id)?.state === 'ready') {
+          this.dirty = true;
+          return;
+        }
+        if (await capturedFileWitness(path) !== witness)
+          throw new AgentMuxError('Original captured source changed before its handover ACK.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED');
+        const row = capturedStream(this.db, id)!;
+        readyCapturedStream(this.db, id, witness, row.revision, gaps);
+        this.dirty = true;
+      }, signal);
+      return [];
+    })();
+    this.capturedPreparations.set(id, work);
+    try {
+      return await work;
+    }
+    finally {
+      if (this.capturedPreparations.get(id) === work)
+        this.capturedPreparations.delete(id);
+    }
+  }
+
+  async readCapturedHistory(agentSessionId: string, input: AgentCapturedTimelineRead = {}): Promise<AgentCapturedTimelinePage> {
+    await this.timelineTails.get(agentSessionId);
+    await this.tail;
+    const observedGaps = await this.prepareCapturedHistory(agentSessionId);
+    const page = await this.withCapturedRead(db => readCapturedPage(db, agentSessionId, input));
+    page.stream.gaps.push(...observedGaps);
+    return page;
   }
 
   async loadTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
-    await this.timelineTails.get(agentSessionId)
-    const timeline = await this.readTimeline(agentSessionId)
-    return structuredClone({
-      agentSessionId: timeline.agentSessionId,
-      revision: timeline.revision,
-      items: timeline.items
-    })
+    await this.timelineTails.get(agentSessionId);
+    await this.tail;
+    let observedGaps: AgentCapturedTimelinePage['stream']['gaps'];
+    try { observedGaps = await this.prepareCapturedHistory(agentSessionId); }
+    catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'UNKNOWN_AGENT_SESSION') return { agentSessionId, revision: 0, items: [] };
+      throw error;
+    }
+    const snapshot = await this.withCapturedRead(db => readRecentCaptured(db, agentSessionId));
+    snapshot.stream!.gaps.push(...observedGaps);
+    return snapshot;
   }
 
-  async applyTimelineMutation(
-    mutation: AgentTimelineMutation,
-    signal?: AbortSignal
-  ): Promise<AgentTimelineCommit> {
-    const canonicalMutation = normalizeAgentTimelineMutation(mutation)
-    const id = canonicalMutation.agentSessionId
-    // Preserve local Timeline call order for this Session; unrelated cold histories do
-    // not reserve the global commit queue. Membership is still checked in its transaction.
+  async applyTimelineMutation(mutation: AgentTimelineMutation, signal?: AbortSignal): Promise<AgentTimelineCommit> {
+    const canonicalMutation = normalizeAgentTimelineMutation(mutation), id = canonicalMutation.agentSessionId;
     const current = (this.timelineTails.get(id) ?? Promise.resolve()).then(async () => {
-      try {
-        let timeline = await this.readTimeline(id, signal)
-        for (;;) {
-          let result: AgentTimelineCommit | undefined
-          let committedTimeline: AgentTimelineFileState | undefined
-          await this.enqueue(async () => {
-            signal?.throwIfAborted()
-            if (!await this.timelineMutationAllowed(canonicalMutation, signal)) {
-              throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION')
-            }
-            // Another process/lifecycle may have changed the original while cold
-            // preparation ran. Rebuild outside this lock, never from a guessed suffix.
-            if (await this.readTimelineVersion(id, signal) !== timeline.version) return
-            const items = applyNormalizedTimelineMutation(timeline.items, canonicalMutation)
-            const changed = items !== timeline.items
-            result = { agentSessionId: id, revision: changed ? nextTimelineRevision(timeline.revision) : timeline.revision,
-              changed, mutation: canonicalMutation }
-            if (!changed) return
-            const snapshot = !timeline.exists || !timeline.appendSafe || shouldCompactTimeline(timeline)
-            const writtenBytes = snapshot
-              ? await this.writeTimelineSnapshot({ agentSessionId: id, revision: result.revision, items }, signal)
-              : await this.appendTimelineMutation(canonicalMutation, signal)
-            const version = await this.readTimelineVersion(id, signal)
-            // Retain only the version witnessed under the original writer lock.
-            // Publication waits for the complete transaction/cleanup receipt below.
-            if (version !== null) committedTimeline = { agentSessionId: id, revision: result.revision, items,
-              mutationLines: snapshot ? 0 : timeline.mutationLines + 1,
-              journalBytes: snapshot ? 0 : timeline.journalBytes + writtenBytes,
-              sourceBytes: snapshot ? writtenBytes : timeline.sourceBytes + writtenBytes,
-              exists: true, version, appendSafe: true }
-          }, signal)
-          if (result) {
-            if (this.pendingLockRelease) this.forgetTimeline(id)
-            else if (committedTimeline) this.retainTimeline(committedTimeline)
-            else if (result.changed) this.forgetTimeline(id)
-            return structuredClone(result)
-          }
-          timeline = await this.readTimeline(id, signal)
-        }
-      } catch (error) {
-        this.forgetTimeline(id)
-        throw sessionStorageFailure(error, 'mutation')
-      }
-    })
-    const settled = current.then(() => {}, () => {})
-    this.timelineTails.set(id, settled)
-    void settled.then(() => { if (this.timelineTails.get(id) === settled) this.timelineTails.delete(id) })
-    return current
+      await this.prepareCapturedHistory(id, signal);
+      let result!: AgentTimelineCommit;
+      await this.enqueue(async () => {
+        if (!await this.timelineMutationAllowed(canonicalMutation, signal))
+          throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION');
+        result = commitCapturedMutation(this.db, canonicalMutation);
+        // Replaying the same original record also confirms a previous lost sync ACK.
+        // This does not add a version, move its position or publish a new event.
+        this.dirty = true;
+      }, signal);
+      return structuredClone(result);
+    });
+    const settled = current.then(() => { }, () => { });
+    this.timelineTails.set(id, settled);
+    void settled.then(() => { if (this.timelineTails.get(id) === settled)
+      this.timelineTails.delete(id); });
+    return await current;
   }
 
   private async withReadDatabase<T>(read: (db: DatabaseSync) => T,
-    rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal): Promise<T> {
+    rescue: (document: AgentSessionStoreDocument) => T, signal?: AbortSignal, committedOnly = false): Promise<T> {
     signal?.throwIfAborted()
-    if (this.database) return read(this.database)
+    if (this.database && !committedOnly) return read(this.database)
     let db: DatabaseSync | null = null
     let failure: unknown
     try {
@@ -3542,11 +3540,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
 
-  private async write(document: AgentSessionStoreDocument, signal?: AbortSignal, pruneTimelines = false): Promise<void> {
+  private async write(document: AgentSessionStoreDocument, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
     this.writeDocument(this.db, document)
     this.dirty = true
-    if (pruneTimelines) await this.maintainTimelineFiles(document)
+    // Captured facts retain their original Session identity across active/retired transitions.
   }
 
   private writeDocument(db: DatabaseSync, document: AgentSessionStoreDocument): void {
@@ -3574,209 +3572,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     for (const session of document.sessions) this.saveSession(db, session, false)
   }
 
-  private async maintainTimelineFiles(document: AgentSessionStoreDocument): Promise<void> {
-    try {
-      await this.removeOrphanTimelineFiles(document.sessions, document.retiredAgentSessions)
-    } catch (error) {
-      // Persistence already succeeded. Maintenance must not reject that lifecycle
-      // and send the public Client down its uncommitted-Run rollback path.
-      process.emitWarning(`Agent Session timeline cleanup failed; retained history and committed Sessions remain usable. ` +
-        `Cleanup will retry on the next Store load: ${error instanceof Error ? error.message : String(error)}`, {
-        code: 'AGENT_SESSION_TIMELINE_CLEANUP_FAILED'
-      })
-    }
-  }
-
   private timelinePath(agentSessionId: string): string {
-    const filename = createHash('sha256').update(agentSessionId).digest('base64url')
-    return join(dirname(this.path), 'agent-timelines', `${filename}.jsonl`)
-  }
-
-  /**
-   * Timeline 文件是 JSONL：首行是原子写入的快照（version 3），其后每行一条已生效的 mutation，
-   * 加载时按序重放。追加行可能被崩溃撕裂——只容忍**最后一行**解析或重放失败（当它没发生过），
-   * 中间行坏了是数据损坏，fail-closed。
-   */
-  private async readTimeline(
-    agentSessionId: string,
-    signal?: AbortSignal,
-    underWriterLock = false
-  ): Promise<AgentTimelineFileState> {
-    const path = this.timelinePath(agentSessionId)
-    try {
-      let originalChanged = false
-      for (;;) {
-        signal?.throwIfAborted()
-        if (!underWriterLock && originalChanged) {
-          // A continuously changing original must not starve a public read with no
-          // AbortSignal. Contention returns to the existing serialized owner for one
-          // stable observation; this is not a data limit or a second lock protocol.
-          let stable!: AgentTimelineFileState
-          await this.enqueue(async () => { stable = await this.readTimeline(agentSessionId, signal, true) }, signal)
-          return stable
-        }
-        const version = await this.readTimelineVersion(agentSessionId, signal)
-        const cached = this.timelines.get(agentSessionId)
-        if (cached && cached.version === version) {
-          this.retainTimeline(cached)
-          return cached
-        }
-        this.forgetTimeline(agentSessionId)
-        if (version === null) return { agentSessionId, revision: 0, items: [], mutationLines: 0,
-          journalBytes: 0, exists: false, version: null, sourceBytes: 0, appendSafe: true }
-        let content: string, openedVersion: string, finishedVersion: string
-        try {
-          const handle = await open(path, 'r')
-          try {
-            const before = await handle.stat({ bigint: true })
-            if (!before.isFile()) throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-            openedVersion = timelineFileVersion(before)
-            content = await handle.readFile({ encoding: 'utf8', signal })
-            finishedVersion = timelineFileVersion(await handle.stat({ bigint: true }))
-          } finally { await handle.close() }
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') { originalChanged = true; continue }
-          throw error
-        }
-        // An open descriptor can outlive an atomic pathname replacement. Validate
-        // both its generation and the current path before retaining decoded facts.
-        if (openedVersion !== finishedVersion || finishedVersion !== await this.readTimelineVersion(agentSessionId, signal)) {
-          originalChanged = true
-          continue
-        }
-        const timeline = this.decodeTimeline(agentSessionId, content, finishedVersion)
-        this.retainTimeline(timeline)
-        return timeline
-      }
-    } catch (error) {
-      this.forgetTimeline(agentSessionId)
-      throw error
-    }
-  }
-
-  private async readTimelineVersion(agentSessionId: string, signal?: AbortSignal): Promise<string | null> {
-    try {
-      signal?.throwIfAborted()
-      const metadata = await stat(this.timelinePath(agentSessionId), { bigint: true })
-      signal?.throwIfAborted()
-      if (!metadata.isFile()) {
-        throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-      }
-      return timelineFileVersion(metadata)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
-      throw error
-    }
-  }
-
-  private forgetTimeline(agentSessionId: string): void {
-    const previous = this.timelines.get(agentSessionId)
-    if (previous) this.timelineSourceBytes -= previous.sourceBytes
-    this.timelines.delete(agentSessionId)
-  }
-
-  private retainTimeline(timeline: AgentTimelineFileState): void {
-    this.forgetTimeline(timeline.agentSessionId)
-    if (timeline.sourceBytes > TIMELINE_CACHE_SOURCE_BYTES) return
-    this.timelines.set(timeline.agentSessionId, timeline)
-    this.timelineSourceBytes += timeline.sourceBytes
-    while (this.timelines.size > TIMELINE_CACHE_ENTRIES || this.timelineSourceBytes > TIMELINE_CACHE_SOURCE_BYTES) {
-      this.forgetTimeline(this.timelines.keys().next().value!)
-    }
-  }
-
-  private decodeTimeline(agentSessionId: string, content: string, version: string): AgentTimelineFileState {
-    const lines = content.split('\n').filter((line, index) => line !== '' || index === 0)
-    const snapshotEnd = content.indexOf('\n')
-    const snapshot = parseTimelineSnapshotLine(lines[0], agentSessionId)
-    let revision = snapshot.revision
-    let items = normalizeAgentTimeline(agentSessionId, snapshot.items)
-    let mutationLines = 0
-    let appendSafe = content.endsWith('\n')
-    for (let index = 1; index < lines.length; index += 1) {
-      const line = lines[index]!
-      try {
-        const mutation = normalizeAgentTimelineMutation(JSON.parse(line))
-        if (mutation.agentSessionId !== agentSessionId) {
-          throw new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-        }
-        const next = applyNormalizedTimelineMutation(items, mutation)
-        if (next !== items) revision = nextTimelineRevision(revision)
-        items = next
-      } catch (error) {
-        if (index === lines.length - 1) { appendSafe = false; break }
-        throw error instanceof AgentMuxError
-          ? error
-          : new AgentMuxError('Agent Timeline store is invalid.', 'INVALID_AGENT_TIMELINE_STORE')
-      }
-      mutationLines += 1
-    }
-    return {
-      agentSessionId,
-      revision,
-      items,
-      mutationLines,
-      journalBytes: snapshotEnd < 0 ? 0 : Buffer.byteLength(content.slice(snapshotEnd + 1)),
-      exists: true,
-      version,
-      sourceBytes: Buffer.byteLength(content),
-      appendSafe
-    }
-  }
-
-  private async writeTimelineSnapshot(
-    document: { agentSessionId: string; revision: number; items: readonly AgentTimelineItem[] },
-    signal?: AbortSignal
-  ): Promise<number> {
-    signal?.throwIfAborted()
-    const content = `${JSON.stringify({ version: 3, ...document })}\n`
-    const path = this.timelinePath(document.agentSessionId)
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-    await durableWriteFile(path, content, { mode: 0o600, ...(signal ? { signal } : {}) })
-    return Buffer.byteLength(content)
-  }
-
-  private async appendTimelineMutation(
-    mutation: AgentTimelineMutation,
-    signal?: AbortSignal
-  ): Promise<number> {
-    signal?.throwIfAborted()
-    const content = `${JSON.stringify(mutation)}\n`
-    await appendFile(
-      this.timelinePath(mutation.agentSessionId),
-      content,
-      { mode: 0o600 }
-    )
-    signal?.throwIfAborted()
-    return Buffer.byteLength(content)
-  }
-
-  private async removeTimelineFile(agentSessionId: string): Promise<void> {
-    this.forgetTimeline(agentSessionId)
-    await unlink(this.timelinePath(agentSessionId)).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'ENOENT') throw error
-    })
-  }
-
-  private async removeOrphanTimelineFiles(
-    sessions: readonly AgentMuxStoredAgentSession[],
-    retired: readonly AgentMuxRetiredAgentSession[]
-  ): Promise<void> {
-    const directory = join(dirname(this.path), 'agent-timelines')
-    const currentPaths = new Set([...sessions, ...retired].map((session) => this.timelinePath(session.agentSessionId)))
-    let entries: string[]
-    try {
-      entries = await readdir(directory)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
-      throw error
-    }
-    await Promise.all(entries
-      .filter((entry) => entry.endsWith('.json') || entry.endsWith('.jsonl'))
-      .map(async (entry) => {
-        const path = join(directory, entry)
-        if (!currentPaths.has(path)) await unlink(path)
-      }))
+    const filename = createHash('sha256').update(agentSessionId).digest('base64url');
+    return join(dirname(this.path), 'agent-timelines', `${filename}.jsonl`);
   }
 
   private async enqueue(operation: () => Promise<void>, signal?: AbortSignal): Promise<void> {
@@ -3801,6 +3599,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) {
           this.db.exec(promptAdmissionSchema); this.dirty = true
         }
+        if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name='captured_streams'").get()) { this.db.exec(capturedHistorySchema); this.dirty=true }
         stage = 'mutation'
         await operation()
         signal?.throwIfAborted()
