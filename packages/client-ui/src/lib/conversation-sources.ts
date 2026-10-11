@@ -8,7 +8,7 @@ const capturedLabels = {
   'run-process': '进程观察', acp: 'ACP', user: 'AgentMux 提交记录', agentmux: 'AgentMux'
 } satisfies Record<AgentMuxEvidenceSource, string>
 export type ConversationSourceDisplay = { labels: readonly { id: string; label: string; title: string }[]; unread?: boolean }
-export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; unconfirmed: boolean; collectedReply?: string }
+export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; unconfirmed: boolean; collectedReply?: string; submissions?: readonly ConversationSourceRecord[] }
 type Slot = ConversationEvent['content'][number]
 const selectorKey = (selector: ConversationSelector) => selector.kind === 'native-part' ? ['native-part', selector.partIndex] : ['captured-field', selector.field]
 const contentKey = (ref: ConversationContentRef) => JSON.stringify([conversationRecordId(ref.record), ref.recordRevision, selectorKey(ref.selector)])
@@ -83,6 +83,10 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
     if (primary?.original.kind === 'captured') for (const field of ['content', 'toolInput', 'toolOutput'] as const) if (primary.original.item[field] !== undefined)
       fields[field] = slotDisplay({ recordId: primary.id, recordRevision: primary.revision, selector: { kind: 'captured-field', field }, placement: 'body' })
     const main = display(originals)
+    // Membership is already decided by Core. Only expose original submission facts
+    // beside a readable native canonical body; never search another event for a match.
+    const submissions = primary?.original.kind === 'native' && record.event
+      ? originals.filter(source => source.original.kind === 'captured' && source.original.item.kind === 'user_message' && source.original.item.source === 'user') : []
     const unreadTarget = originals.some(original => [...(targetRelations.get(original.id) ?? [])].some(target => {
       const codes = gapCodes.get(target)
       return codes?.has('CONVERSATION_ANCHOR_UNREAD') || codes?.has('CONVERSATION_OBSERVED_TARGET_UNREAD')
@@ -92,6 +96,7 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
     const collectedReply = record.role === 'observation' ? `由 ${main.labels.map(source => source.label).join('、') || '原来源'} 采集的回复内容。${unreadTarget ? '对应的原始记录尚未读到。' : relationConflict ? '记录的对应关系存在冲突。' : ''}` : undefined
     return { main, parts: slots.map(slotDisplay), fields,
       ...(collectedReply ? { collectedReply } : {}),
+      ...(submissions.length ? { submissions } : {}),
       unconfirmed }
   }
 }

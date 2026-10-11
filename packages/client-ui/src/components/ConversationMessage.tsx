@@ -24,6 +24,7 @@ import { ConversationQuestionReply } from './ConversationQuestionReply.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
+import { ConversationSubmissionMetadata } from './ConversationSubmissionMetadata.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import type { ConversationSources } from '../lib/conversation-sources.js'
 
@@ -319,7 +320,7 @@ export function ConversationMessage({
   const expandedTraces = controlledTraces ?? traceDisclosure?.expandedTraces
   const onToggleTrace = controlledToggle ?? traceDisclosure?.onToggleTrace
 
-  const showOrigin = Boolean(inputOrigin && !isSystemContext && (showInputSource || inputSource?.kind === 'captured' && inputSource.device))
+  const showOrigin = Boolean(inputOrigin && !isSystemContext && !(sources?.submissions?.length && inputSource?.kind === 'native') && (showInputSource || inputSource?.kind === 'captured' && inputSource.device))
   const hasMetadata = Boolean(described?.project || isDeclaredSender || showOrigin || located ||
     prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender || prefix?.packet && (!isDeclaredSender || !agentReference))
 
@@ -333,7 +334,8 @@ export function ConversationMessage({
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
             </span> : null
   const metadata = hasMetadata || sources && !detailsOnlyMetadata ? <div className="log-turn__meta">
-        {!detailsOnlyMetadata ? <ConversationSourceLabels sources={sources?.main} unconfirmed={sources?.unconfirmed ?? false} /> : null}
+        {sources?.submissions ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} /> : null}
+        {!detailsOnlyMetadata ? <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply} unconfirmed={sources?.unconfirmed ?? false} /> : null}
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
@@ -412,8 +414,7 @@ export function ConversationMessage({
           declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : null}{messageDetails}</ConversationInputDetails> : null}
       </div>
       {!detailsOnlyMetadata ? metadata : null}
-      {sources?.collectedReply ? <p className="conversation-reply-observation__notice">{sources.collectedReply}</p> : null}
-      {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} unconfirmed={sources.unconfirmed} /></div> : null}
+      {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} unconfirmed={sources.unconfirmed} /></div> : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
