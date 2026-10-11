@@ -1,0 +1,4 @@
+{
+  "extends": "./tsconfig.native-input.json",
+  "include": ["native-managed-launch.test.ts", "helpers/native-resume-source.ts", "vitest.native-resume.config.mts"]
+}
