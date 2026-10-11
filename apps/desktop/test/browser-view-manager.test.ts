@@ -267,6 +267,7 @@ function fakeWindow() {
         }
       },
       isDestroyed: () => false,
+      getContentBounds: () => ({ x: 0, y: 0, width: 1200, height: 800 }),
       webContents: {
         isDestroyed: () => false,
         send(channel: string, value: unknown) {
@@ -1063,7 +1064,7 @@ describe('BrowserViewManager', () => {
     const bounds = { x: 5, y: 6, width: 640, height: 480 }
     manager.setBounds('browser-paint', bounds)
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[policy]])
-    expect(view.boundsHistory).toEqual([bounds])
+    expect(view.boundsHistory).toEqual([fixture.window.getContentBounds(), bounds])
     // Position and size updates are layout work, not another visibility edge.
     manager.setBounds('browser-paint', { ...bounds, x: 9 })
     manager.setBounds('browser-paint', { ...bounds, x: 9 })
@@ -1100,7 +1101,7 @@ describe('BrowserViewManager', () => {
     finish()
     await Promise.resolve()
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
-    expect(view.boundsHistory).toEqual([{ x: 1, y: 2, width: 300, height: 200 }])
+    expect(view.boundsHistory).toEqual([fixture.window.getContentBounds(), { x: 1, y: 2, width: 300, height: 200 }])
     manager.close('browser-loading')
   })
 
@@ -1119,7 +1120,7 @@ describe('BrowserViewManager', () => {
     await manager.reload('browser-load-stop')
     expect(loadingAtEvents).toEqual([true, false])
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
-    expect(view.boundsHistory).toEqual([bounds])
+    expect(view.boundsHistory).toEqual([fixture.window.getContentBounds(), bounds])
     manager.close('browser-load-stop')
   })
 
@@ -1166,7 +1167,7 @@ describe('BrowserViewManager', () => {
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([])
     view.webContents.finishLoad('https://example.com/new')
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[true]])
-    expect(view.boundsHistory).toEqual([{ x: 5, y: 6, width: 300, height: 200 }])
+    expect(view.boundsHistory).toEqual([fixture.window.getContentBounds(), { x: 5, y: 6, width: 300, height: 200 }])
     manager.close('browser-known-url-loading')
   })
 
