@@ -6,7 +6,7 @@ import { relative } from 'node:path'
 const mutation = process.env.AGENTMUX_CHRONOLOGY_MUTATION
 const replacements: Record<string, [string, string, string]> = {
   'stack-inputs': ['ActivityView.tsx', 'const beforeRecordId = nativePage?.items[nativeIndex]?.id', 'const beforeRecordId = undefined'],
-  'swallow-input': ['conversation-record-sequence.ts', 'if (interruptions?.has(item.id)) flush()', 'if (false) flush()'],
+  'swallow-input': ['conversation-record-sequence.ts', 'insert(item.id)', 'if (!process.length) insert(item.id)'],
   'captured-range': ['ActivityView.tsx', 'const holdCapturedLayout = committedLayout.current.source === layoutSource', 'const holdCapturedLayout = false && committedLayout.current.source === layoutSource'],
   'native-range': ['ConversationRecordSequence.tsx', 'if (held) {', 'if (held && false) {'],
   'forget-disclosure': ['ConversationRecordSequence.tsx', 'const choices = disclosure.source === sourceKey ? disclosure :', 'const choices = false ? disclosure :']

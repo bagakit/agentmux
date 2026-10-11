@@ -1,0 +1,9 @@
+{
+  "extends": "../scripts/fixtures/activity-unified-history/tsconfig.owning.json",
+  "include": [
+    "conversation-source-roles.test.tsx",
+    "conversation-chronological-reading.test.tsx",
+    "native-process-reading.test.tsx",
+    "../src/renderer/src/global.d.ts"
+  ]
+}
