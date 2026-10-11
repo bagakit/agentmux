@@ -63,7 +63,8 @@ const variants = [
     to: "current.kind !== 'create' || current.operationId !== operationId",
     target: 'rejects a changed body', expected: 'promise resolved' },
   { name: 'lose-confirmed-not-applied', path: 'packages/core/src/client.ts',
-    from: "if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied'))", to: 'if (true)',
+    from: "if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {\n          throw new AgentMuxError(`Agent start is unconfirmed.",
+    to: "if (true) {\n          throw new AgentMuxError(`Agent start is unconfirmed.",
     target: 'releases only unused preparation', expected: 'not_applied' }
 ]
 const receipt = { schema: 'agentmux.durable-local-creation-proof.v1', passed: false, sourceStable: false, results: [],
@@ -126,7 +127,7 @@ try {
       failed: tests.numFailedTests, total: assertions.filter(test => test.status !== 'pending').length, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 31 && tests.success, 'Actual nonempty creation baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 32 && tests.success, 'Actual nonempty creation baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
   for (const path of inputs.keys()) await bind(path)
