@@ -7,8 +7,8 @@ export type ConnectionSetupEnrollmentSource = { kind: 'enrollment'; operationId:
 export type ConnectionSetupBegin = { operationId: string; connectionId: string; expectedConnectionRevision: number; goal: ConnectionSetupGoal; source?: ConnectionSetupEnrollmentSource }
 export type ConnectionSetupInput = { operationId: string }
 /** Local child selection only. It never requests the platform or repairs a secure ACK. */
-export type ConnectionSetupInspect = ConnectionSetupInput & { applicationInspection?: { selectedStepId?: string; cursor?: string; limit?: number }; applicationConfiguration?: ConnectionSetupConfigurationSelector }
-export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' } }
+export type ConnectionSetupInspect = ConnectionSetupInput & { applicationInspection?: { selectedStepId?: string; cursor?: string; limit?: number; versionId?: string }; applicationConfiguration?: ConnectionSetupConfigurationSelector }
+export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' }; versionId?: string }
 export type ConnectionSetupList = { connectionId: string; cursor?: string; limit?: number }
 /** Local implementation discovery for this exact revision, never platform authority or readiness. */
 export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection' | 'messaging-capability' | 'persistent-event-transport' | 'application-permissions' | 'message-reception' | 'enrollment-continuation'> }
@@ -25,14 +25,24 @@ export const CONNECTION_SETUP_READ_ACTIONS = {
   'bot-settings': 'read-bot-settings',
   'permission-catalog': 'read-permission-catalog',
   'application-permissions': 'read-application-permissions',
-  'event-catalog': 'read-event-catalog'
+  'event-catalog': 'read-event-catalog',
+  'publication-pending': 'read-publication-pending',
+  'publication-versions': 'read-publication-versions',
+  'publication-visibility': 'read-publication-visibility',
+  'publication-sharing': 'read-publication-sharing',
+  'publication-features': 'read-publication-features'
 } as const
-export type ConnectionSetupReadSubject = keyof typeof CONNECTION_SETUP_READ_ACTIONS
+export type ConnectionSetupReadSubject = keyof typeof CONNECTION_SETUP_READ_ACTIONS | 'publication-version'
+export type ConnectionSetupVersionStatus = 'draft' | 'reviewing' | 'approved' | 'rejected' | 'awaiting-release' | 'unknown'
 export type ConnectionSetupReadSummary =
   | { subject: 'application-details'; name: string | null; description: string | null }
   | { subject: 'event-settings'; transport: 'persistent-connection' | 'webhook' | 'function' | 'unknown' }
-  | { subject: 'callback-settings' | 'bot-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog' }
-export type ConnectionSetupInspectionAction = { actionId: string; expectedRevision: number; kind: 'inspect-application' | 'recover-application-inspection' | typeof CONNECTION_SETUP_READ_ACTIONS[ConnectionSetupReadSubject] }
+  | { subject: 'publication-version'; versionId: string; status: ConnectionSetupVersionStatus }
+  | { subject: Exclude<ConnectionSetupReadSubject, 'application-details' | 'event-settings' | 'publication-version'> }
+export type ConnectionSetupInspectionAction = { actionId: string; expectedRevision: number } & (
+  | { kind: 'inspect-application' | 'recover-application-inspection' | typeof CONNECTION_SETUP_READ_ACTIONS[keyof typeof CONNECTION_SETUP_READ_ACTIONS] }
+  | { kind: 'read-publication-version'; versionId: string }
+)
 export type ConnectionSetupScalarEffect = 'enable-messaging' | 'use-persistent-connection'
 export type ConnectionSetupConfigurationEffect = ConnectionSetupScalarEffect | 'add-application-permissions' | 'add-message-reception'
 export type ConnectionSetupMessageReceptionReview = {
@@ -73,12 +83,13 @@ export type ConnectionSetupConfigurationReceipt = {
 export type ConnectionSetupAction = ConnectionSetupAuthenticationAction | ConnectionSetupInspectionAction | ConnectionSetupConfigurationAction
 /** Effect selection belongs to the offered kind, never to the shared decision string. */
 export function connectionSetupDecisionForAction(action: ConnectionSetupAction): ConnectionSetupAdvance['decision']['value'] {
-  const decisions = { continue: 'continue', 'confirm-account': 'confirm', renew: 'renew', 'inspect-application': 'continue', 'recover-application-inspection': 'continue', 'read-application-details': 'continue', 'read-event-settings': 'continue', 'read-callback-settings': 'continue', 'read-bot-settings': 'continue', 'read-permission-catalog': 'continue', 'read-application-permissions': 'continue', 'read-event-catalog': 'continue', 'enable-messaging': 'confirm', 'use-persistent-connection': 'confirm', 'add-application-permissions': 'confirm', 'add-message-reception': 'confirm', 'recover-configuration-effect': 'continue' } as const satisfies Record<ConnectionSetupAction['kind'], ConnectionSetupAdvance['decision']['value']>
+  const decisions = { continue: 'continue', 'confirm-account': 'confirm', renew: 'renew', 'inspect-application': 'continue', 'recover-application-inspection': 'continue', 'read-application-details': 'continue', 'read-event-settings': 'continue', 'read-callback-settings': 'continue', 'read-bot-settings': 'continue', 'read-permission-catalog': 'continue', 'read-application-permissions': 'continue', 'read-event-catalog': 'continue', 'read-publication-pending': 'continue', 'read-publication-versions': 'continue', 'read-publication-visibility': 'continue', 'read-publication-sharing': 'continue', 'read-publication-features': 'continue', 'read-publication-version': 'continue', 'enable-messaging': 'confirm', 'use-persistent-connection': 'confirm', 'add-application-permissions': 'confirm', 'add-message-reception': 'confirm', 'recover-configuration-effect': 'continue' } as const satisfies Record<ConnectionSetupAction['kind'], ConnectionSetupAdvance['decision']['value']>
   return decisions[action.kind]
 }
 export type ConnectionSetupInspectionReceipt = {
   /** Absence is the permission observation; data subjects carry their own exact identity. */
   subject?: ConnectionSetupReadSubject
+  versionId?: string
   stepId: string
   input: ConnectionSetupAdvance
   request: 'dispatching' | 'confirmed' | 'unknown'

@@ -154,7 +154,12 @@ it never sends HTTP or repairs an ACK. Copy an offered inspect-application,
 read-application-details, read-event-settings, read-callback-settings, read-bot-settings,
 read-permission-catalog, read-application-permissions, read-event-catalog or
 recover-application-inspection action and use decision continue. Current data subjects
-retain independent receipts, not a complete configuration snapshot or readiness. New observation requires current
+retain independent receipts, not a complete configuration snapshot or readiness. Publication observations
+include read-publication-pending, read-publication-versions, read-publication-visibility,
+read-publication-sharing and read-publication-features. With --application-inspection --version-id ID,
+copy the offered read-publication-version action and its exact versionId into advance input.
+The request route and original binding select that version; list position and labels do not.
+Version review status is separate from the online version pointer and actual message intake. New observation requires current
 confirmed stored auth; original actor local recovery needs only the frozen original child/input,
 even after renewal, revision or restart. Old private results stay withheld and an unrecoverable
 old result never blocks a separate eligible new observation. Reported basic-info read permission

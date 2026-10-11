@@ -44,6 +44,6 @@ export interface ConnectionSetupAdapter {
     readonly domains: readonly string[]
     inspect(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupInspectionReceipt>
     /** One frozen current-data subject, distinct from reported read permission. */
-    read?(input: SetupAdapterInput & { privateState: string; subject: ConnectionSetupReadSubject }, signal?: AbortSignal): Promise<SetupReadReceipt>
+    read?(input: SetupAdapterInput & { privateState: string; subject: ConnectionSetupReadSubject; versionId?: string }, signal?: AbortSignal): Promise<SetupReadReceipt>
   }
 }

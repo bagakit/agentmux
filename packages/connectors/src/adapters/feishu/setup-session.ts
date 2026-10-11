@@ -4,6 +4,7 @@ import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccount
 import { supportedScopeId } from './setup-permissions.js'
 import { enrollmentAccountSession } from './enrollment.js'
 import { feishuMessageReceptionIntent } from './setup-message-reception.js'
+import { feishuVersionStatus } from './setup-publication.js'
 import { FEISHU_MESSAGE_EVENT } from './message.js'
 
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
@@ -40,13 +41,16 @@ export async function advanceFeishuSession(input: SetupAdapterInput & { privateS
 
 /** The exact sourced console origin is qualified separately from authentication aliases. */
 async function applicationEnvelope(input: SetupAdapterInput & { privateState: string; assertCurrent?: () => void }, path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  return applicationRequest(input, path + encodeURIComponent(input.application.appId), body, signal, path === '/developers/v1/scope/update/')
+}
+async function applicationRequest(input: SetupAdapterInput & { privateState: string; assertCurrent?: () => void }, path: string, body: Record<string, unknown>, signal?: AbortSignal, developerPanel = false): Promise<Record<string, unknown> | null> {
   if (input.application.domain !== 'open.feishu.cn') return null
   try {
     const { state, cookies } = readNativeAccountState(snapshot(input))
     if (state.phase !== 'account' || !state.account || !opaque(state.csrf) || state.consoleOrigin !== 'https://open.feishu.cn') return null
-    const target = new URL(path + encodeURIComponent(input.application.appId), state.consoleOrigin)
+    const target = new URL(path, state.consoleOrigin)
     const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
-    if (path === '/developers/v1/scope/update/') headers['X-AppPlatform-RequestFrom'] = 'develop_panel'
+    if (developerPanel) headers['X-AppPlatform-RequestFrom'] = 'develop_panel'
     const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
     const bounded = AbortSignal.timeout(20_000)
     input.assertCurrent?.()
@@ -99,10 +103,14 @@ export async function inspectFeishuApplication(input: SetupAdapterInput & { priv
 }
 
 /** A current read is one native subject; catalogs and UI-defaulted objects are excluded. */
-export async function readFeishuApplication(input: SetupAdapterInput & { privateState: string; subject: ConnectionSetupReadSubject }, signal?: AbortSignal): Promise<SetupReadReceipt> {
-  const paths = { 'application-details': '/developers/v1/app/', 'event-settings': '/developers/v1/event/', 'callback-settings': '/developers/v1/callback/', 'bot-settings': '/developers/v1/robot/', 'permission-catalog': '/developers/v1/scope/all/', 'application-permissions': '/developers/v1/scope/applied/', 'event-catalog': '/developers/v1/event/all/' } as const
-  if (!Object.hasOwn(paths, input.subject)) return { kind: 'unknown' }
-  const data = await applicationData(input, paths[input.subject], input.subject === 'event-settings' ? { needEventDetail: true } : {}, signal)
+export async function readFeishuApplication(input: SetupAdapterInput & { privateState: string; subject: ConnectionSetupReadSubject; versionId?: string }, signal?: AbortSignal): Promise<SetupReadReceipt> {
+  const paths = { 'application-details': '/developers/v1/app/', 'event-settings': '/developers/v1/event/', 'callback-settings': '/developers/v1/callback/', 'bot-settings': '/developers/v1/robot/', 'permission-catalog': '/developers/v1/scope/all/', 'application-permissions': '/developers/v1/scope/applied/', 'event-catalog': '/developers/v1/event/all/', 'publication-pending': '/developers/v1/app_version/change/', 'publication-versions': '/developers/v1/app_version/list/', 'publication-visibility': '/developers/v1/visible/online/', 'publication-sharing': '/developers/v1/b2c_share/' } as const
+  if (input.subject === 'publication-version') {
+    if (!opaque(input.versionId)) return { kind: 'unknown' }
+    const data = record((await applicationRequest(input, '/developers/v1/app_version/detail/' + encodeURIComponent(input.application.appId) + '/' + encodeURIComponent(input.versionId), {}, signal))?.data)
+    return data && (data.versionId === undefined || data.versionId === input.versionId) ? { kind: 'observed', readResult: { subject: input.subject, versionId: input.versionId, status: feishuVersionStatus(data.versionStatus) }, privateState: JSON.stringify(data) } : { kind: 'unknown' }
+  }
+  const data = input.subject === 'publication-features' ? record((await applicationRequest(input, '/developers/v1/developer_panel/config', { clientId: input.application.appId }, signal))?.data) : Object.hasOwn(paths, input.subject) ? await applicationData(input, paths[input.subject as keyof typeof paths], input.subject === 'event-settings' ? { needEventDetail: true } : {}, signal) : null
   if (!data) return { kind: 'unknown' }
   const display = (v: unknown, max: number): string | null => typeof v === 'string' && v.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v) ? v : null
   const readResult: ConnectionSetupReadSummary = input.subject === 'application-details'
