@@ -13,7 +13,7 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_RESU
 if (process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT) expect(Reflect.get(core, 'AGENTMUX_RESUME_CONTEXT_MUTANT')).toBe(process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; witnessAlternative?: boolean; unresolvedSubject?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
+async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; witnessAlternative?: boolean; unresolvedSubject?: boolean; customNormalization?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-context-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'runtime'), state = join(root, 'state')
@@ -33,7 +33,7 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
   const reused: any = {}
   const explicitHook: any = { eventNameSource: { kind: 'payload', payloadKey: 'eventName' }, nativeHandle: { sessionIdKeys: ['nativeKey'] }, processNativeIdentity: true,
     resolveSubject: (payload: any, context: any) => ({ kind: payload.nativeKey !== context.processNativeHandle?.sessionId ? 'foreign' : payload.actorScope === 'child' ? 'child' : 'main', basis: 'provider-protocol', nativeSessionId: payload.nativeKey, reason: 'declared-native-subject' }),
-    rules: [{ events: ['context_ready'], state: 'working', lifecycleEvent: 'session-start' }, { events: ['intent_cancelled', 'turn_end'], state: 'unknown', lifecycleEvent: 'turn-end' }],
+    rules: [{ events: ['native_locator_observed'], state: 'unknown', lifecycleEvent: null }, { events: ['context_ready'], state: 'working', lifecycleEvent: 'session-start' }, { events: ['intent_cancelled', 'turn_end'], state: 'unknown', lifecycleEvent: 'turn-end' }],
     continuity: (eventName: string, payload: any) => {
       if (options.callbackFailure) throw new Error('Original Provider continuity observation cause')
       const value = eventName === 'context_ready' && payload.recovered === true ? { kind: 'context-restored', nativeSessionId: payload.nativeKey }
@@ -59,6 +59,14 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
       return { handle: { kind: 'provider', providerId, sessionId: witness.id, ...(options.witnessPath ? { transcriptPath: join(root, witness.locator) } : {}) }, childSessionIds: witness.children,
         async assertCurrent() { context.signal.throwIfAborted(); expect(JSON.parse(await readFile(join(root, 'native.json'), 'utf8'))).toEqual(witness) } }
     } })
+  const normalized = vi.spyOn(provider, 'normalizeHook')
+  if (options.customNormalization) normalized.mockImplementation((envelope: any) => ({
+    agentSessionId: envelope.agentSessionId, providerId, run: { runId: envelope.runId }, eventName: envelope.payload.eventName,
+    mainSubject: true, subject: { kind: 'main', basis: 'provider-protocol', nativeSessionId: 'native-original', reason: 'native-main' },
+    semanticState: 'done', lifecycleEvent: 'turn-end', status: { state: 'done', source: 'native-hook', observedAt: Date.now() },
+    currentActivity: { state: 'active', nativeSessionId: 'native-original', nativeTurnId: 'provider-turn', sourceId: 'provider-source', sequence: 1 },
+    continuity: { kind: 'explicit-user-cancelled', scope: 'recovery-intent', nativeSessionId: 'native-original', nativeOperationId: 'provider-cancel' }, timeline: []
+  }))
   const store = new core.AgentMuxFileAgentSessionStore(join(root, 'sessions.sqlite')), client = new core.AgentMuxClient({ store, providers: [provider] }), inner = client as any
   Object.defineProperty(inner.hookServer, 'port', { value: 0 }); await client.connect()
   const nativeStart = inner.kernel.start.bind(inner.kernel), start = vi.spyOn(inner.kernel, 'start'), input = vi.spyOn(inner.kernel, 'input'), stop = vi.spyOn(inner.kernel, 'stop')
@@ -88,7 +96,7 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
   const saved = async () => (await store.readMetadata(original.agentSessionId))!
   const rootOf = async () => (await saved()).continuityOperations!['automatic-root']!
   const events: any[] = []; client.onEvent(event => { events.push(event) })
-  return { root, store, client, inner, current, original, binding, start, input, stop, post, saved, rootOf, events }
+  return { root, store, client, inner, current, original, binding, start, input, stop, post, saved, rootOf, events, normalized }
 }
 
 it('persists an exact resumed main context through the original authenticated Hook without replaying native first input', async () => {
@@ -104,6 +112,7 @@ it('persists an exact resumed main context through the original authenticated Ho
 
 const resumed = { hook_event_name: 'SessionStart', source: 'resume', session_id: 'native-original' }
 const ready = { eventName: 'context_ready', recovered: true, nativeKey: 'native-original' }
+const locatorOnly = { eventName: 'native_locator_observed', nativeKey: 'native-original' }
 const cancelled = { eventName: 'intent_cancelled', actor: 'human', scope: 'recovery-intent', nativeOperationId: 'native-cancel', nativeKey: 'native-original' }
 async function raw(f: Awaited<ReturnType<typeof fixture>>) {
   await f.client.writeAgent({ agentSessionId: f.current.agentSessionId, expectedRun: f.current.run, source: 'user', data: 'still-working' })
@@ -368,4 +377,19 @@ it.each([true, false])('retains a known locator and usable Hook context when a v
   expect(saved.hookReceipt).toMatchObject({ id: 'retained-locator', subject: { kind: 'main' } })
   await vi.waitFor(async () => expect((await f.rootOf()).supervision).toMatchObject({ phase: 'settled', reason: 'context-observed', contextEvidence: { nativeTarget: f.original.nativeHandle } }))
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.input).not.toHaveBeenCalled(); await raw(f)
+})
+
+
+it('keeps an exact conflicting witness neutral before a custom Provider can declare main activity, readiness or cancellation', async () => {
+  const f = await fixture({ shape: 'explicit', originalPath: true, witnessPath: true, witnessAlternative: true, customNormalization: true }), before = await f.saved()
+  expect((await f.post(locatorOnly, 'custom-conflict')).status).toBe(204)
+  const saved = await f.saved()
+  expect(saved.nativeHandle).toEqual(before.nativeHandle)
+  expect(saved.observedNativeHandle).toHaveProperty('transcriptPath', join(f.root, 'observed-native.json'))
+  expect(saved.nativeSourceObservation).toMatchObject({ state: 'changed', run: f.current.run })
+  expect(saved.hookReceipt).toMatchObject({ id: 'custom-conflict', subject: { kind: 'unknown' }, decision: { activityApplied: false, lifecycleApplied: false } })
+  expect(saved.semanticStatus).toEqual(before.semanticStatus); expect(saved.terminalPromptReadiness).toEqual(before.terminalPromptReadiness)
+  expect(f.inner.hookTurnPhases.get(f.current.run.runId)).toBeUndefined()
+  expect((await f.rootOf()).supervision!.cancellation).toBeUndefined(); expect((await f.rootOf()).supervision!.contextEvidence).toBeUndefined()
+  expect(f.events.filter(event => event.type === 'agent-hook')).toEqual([]); expect(f.normalized).not.toHaveBeenCalled(); await raw(f)
 })
