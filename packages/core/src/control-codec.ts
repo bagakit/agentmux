@@ -1,5 +1,6 @@
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererTraceInput, parseRendererTraceResult } from './renderer-trace.js'
+import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
 import { parseBrowserDefaultInspection, parseBrowserDefaultSettingsRequest } from './browser-default.js'
 import { parseDemandPatrols } from '@agentmux/demand'
 import { parseDemandDelegations } from '@agentmux/demand/delegations'
@@ -392,8 +393,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return request
   }
   if (source.operation === 'inspect.client') {
-    settingsFields(source, ['schemaVersion', 'requestId', 'operation'], 'INVALID_CONTROL_REQUEST')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'conversation'], 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...(source.conversation === undefined ? {} : { conversation: parseConversationConsumerQuery(source.conversation) }) }
   }
   if (source.operation === 'inspect.mote-context') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'includeRaw', 'maxBytes'], 'INVALID_CONTROL_REQUEST')

@@ -31,6 +31,8 @@ export type * from './space-control.js'
 export type * from './desktop-focus-control.js'
 export * from './mote-context-observation.js'
 import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextObservation } from './mote-context-observation.js'
+import type { ConversationConsumerQuery } from './conversation-consumer-query.js'
+export { parseConversationConsumerQuery, type ConversationConsumerQuery } from './conversation-consumer-query.js'
 
 export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
@@ -245,7 +247,7 @@ export type AgentMuxArrangeMode =
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
 export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
-export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client' }
+export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client'; conversation?: ConversationConsumerQuery }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
   operation: 'inspect.mote-context'; target: AgentMuxMoteContextEvidenceTarget; includeRaw: boolean; maxBytes: number
 }
