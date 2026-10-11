@@ -41,8 +41,8 @@ function Reading({ visible = true, identity = control.run.runId, facts = stored,
 }
 async function flush() { for (let i = 0; i < 8; i++) await act(async () => { await Promise.allSettled([...reads]); await new Promise(resolve => setTimeout(resolve, 15)) }) }
 async function render(visible = true, identity = control.run.runId, facts: AgentNativeSourceFacts = stored, opened = false) { await act(async () => root.render(<Reading visible={visible} identity={identity} facts={facts} opened={opened} />)); await flush() }
-async function publish(from: number, count = 100) {
- await appendFile(transcript, Array.from({ length: count }, (_, n) => JSON.stringify(record(from + n))).join('\n') + '\n')
+async function publish(from: number, count = 100, makeRecord = record) {
+ await appendFile(transcript, Array.from({ length: count }, (_, n) => JSON.stringify(makeRecord(from + n))).join('\n') + '\n')
  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
 }
 function ids() { return [...container.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(node => node.dataset.nativeRecordId!) }
@@ -132,12 +132,15 @@ beforeEach(async () => {
  })
 })
 afterEach(async () => {
+ try {
  await act(async () => root.unmount()); container.remove(); window.getSelection()?.removeAllRanges()
  expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
  expect(requests.length).toBeGreaterThan(0); expect(requests.every(input => input.limit !== undefined && input.limit > 0 && input.limit <= 100)).toBe(true)
  expect(await readFile(join(directory, 'sessions.json'))).toEqual(originalStore)
  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original unsent draft')
+ } finally {
  await client.dispose(); await rm(directory, { recursive: true }); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+ }
 })
 
 it('automatically reads a same-source no-overlap current tail without requiring Show latest messages', async () => {
@@ -344,4 +347,65 @@ it('keeps the return path for a real no-overlap gap at a detached loaded tail an
  await followAt(700); await followAt(900); await flush()
  expect(ids().at(-1)).toBe('original-159'); expect(currentButton()).toBeNull()
  expect(requests.filter(input => input.limit === 100)).toHaveLength(before + 1)
+})
+
+const coverageNotice = 'The requested time range exceeds this bounded reading window. Loaded records are kept; scroll earlier to continue.'
+function denseRecord(n: number) { return { ...record(n), timestamp: new Date(_hygiene_fixtureTime(0) + n * 1000).toISOString() } }
+async function denseHistory() {
+ await writeFile(transcript, Array.from({ length: 1300 }, (_, n) => JSON.stringify(denseRecord(n))).join('\n') + '\n')
+ await render()
+ await vi.waitFor(async () => { await flush(); expect(container.textContent).toContain(coverageNotice) }, { timeout: 8000, interval: 25 })
+ expect(ids().at(-1)).toBe('original-1299')
+ await followAt(900)
+}
+
+it('an older coverage record bound keeps the independent current tail connected without a button or repeated reads', async () => {
+ await denseHistory(); const before = requests.filter(input => input.limit === 100).length
+ expect(before).toBe(12)
+ await publish(1300, 100, denseRecord)
+ expect(ids().at(-1)).toBe('original-1399'); expect(currentButton()).toBeNull()
+ await vi.waitFor(async () => { await flush(); expect(requests.filter(input => input.limit === 100)).toHaveLength(before + 12) }, { timeout: 8000, interval: 25 })
+ expect(container.textContent).toContain(coverageNotice)
+ const count = requests.length; await render(); await render()
+ expect(requests).toHaveLength(count)
+})
+
+it.each(['upward reading', 'selection'] as const)('coverage bounds preserve %s before permitting a current-tail replacement', async protection => {
+ await denseHistory()
+ extent = 30000; await followAt(extent - viewportHeight)
+ const body = container.querySelector<HTMLElement>('[data-native-record-id="original-1299"] .log-turn__body p')!
+ expect(body).not.toBeNull()
+ if (protection === 'selection') {
+  const range = document.createRange(); range.selectNodeContents(body); window.getSelection()!.addRange(range)
+ } else await followAt(extent - viewportHeight - 200)
+ const before = requests.filter(input => input.limit === 100).length
+ await publish(1300, 100, denseRecord)
+ expect(ids().at(-1)).toBe('original-1299'); expect(body.isConnected).toBe(true)
+ expect(requests.filter(input => input.limit === 100)).toHaveLength(before)
+ if (protection === 'selection') await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+ else await followAt(extent - viewportHeight)
+ await flush(); expect(ids().at(-1)).toBe('original-1399')
+})
+
+it.each(['same display text', 'source change', 'position change'] as const)('a real %s failure during older coverage retains Retry and cannot borrow range-bound permission', async failure => {
+ const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
+ let head: AgentSessionHistoryPage | undefined
+ vi.mocked(api.sessions.historyPage).mockImplementation(async (reference, options) => {
+  const page = await original(reference, options)
+  if (options?.limit !== 100) return page
+  head ??= page
+  if (requests.filter(input => input.limit === 100).length !== 4) return page
+  if (failure === 'same display text') throw new Error(coverageNotice)
+  if (failure === 'source change') return { ...page, source: { ...page.source, nativeSessionId: 'different-original-source' } }
+  return { ...page, items: [head.items.at(-1)!, ...page.items.slice(1)] }
+ })
+ await writeFile(transcript, Array.from({ length: 1300 }, (_, n) => JSON.stringify(denseRecord(n))).join('\n') + '\n')
+ await render(); await followAt(900)
+ expect(container.textContent).toContain(failure === 'same display text' ? coverageNotice : failure === 'source change' ? 'Native source changed' : 'original page range changed')
+ const before = requests.filter(input => input.limit === 100).length
+ expect(before).toBe(4)
+ await publish(1300, 100, denseRecord)
+ expect(ids().at(-1)).toBe('original-1299')
+ expect(requests.filter(input => input.limit === 100)).toHaveLength(before)
+ expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Retry')).toBe(true)
 })
