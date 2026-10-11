@@ -570,6 +570,7 @@ const api: AgentMuxPreloadApi = {
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),
     observeStorage: (session: SessionControl) => ipcRenderer.invoke('sessions:observeStorage', session),
+    controlContinuity: async (hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput) => unwrapSessionObservationResult<{ hostId: string; result: import('@agentmux/core').AgentMuxContinuityControlResult }>(await ipcRenderer.invoke('sessions:controlContinuity', hostId, input)),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
     recover: (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) =>
       ipcRenderer.invoke('sessions:recover', session, workspacePath, operationId, request),
