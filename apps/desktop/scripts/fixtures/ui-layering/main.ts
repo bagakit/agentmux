@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { app, BrowserWindow, WebContentsView, ipcMain } from 'electron'
-import { writeFile, readFile } from 'node:fs/promises'
+import { writeFile, readFile, appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -43,6 +43,7 @@ const pageId = 'layering-original-browser'
 const independentWindows = new Map<number, { window: BrowserWindow; page: WebContentsView; overlays: NativeOverlaySurfaces; bounds: typeof pageBounds; revision: number; last?: any; publishing: number; publications: any[] }>()
 const read = (source: string) => window.webContents.executeJavaScript(source)
 const facts = () => read('layeringProbe.read()')
+const visibleNativeBounds = (target: BrowserWindow, view: WebContentsView) => target.contentView.children.includes(view) && view.getVisible() && !view.webContents.isDestroyed() ? [view.getBounds()] : []
 const owners = (target = window, nativePage = page) => target.contentView.children.filter(view => 'webContents' in view).map((view: any) => ({ id: view.webContents.id, visible: view.getVisible(), bounds: view.getBounds(), page: view === nativePage }))
 const positive = () => owners().filter(owner => !owner.page && owner.visible && owner.bounds.x >= 0 && owner.bounds.y >= 0 && owner.bounds.width > 0 && owner.bounds.height > 0)
 const atPoint = (bounds: any, point: any) => point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
@@ -53,7 +54,20 @@ async function wait(test: () => Promise<any> | any, message: string) {
   receipt.waitState = { owners: owners(), last, facts: await facts().catch(() => null) }; assert.fail(message)
 }
 async function painted() { await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); await delay(120) }
-function visibility() { return { revision: ++revision, zoomFactor: window.webContents.getZoomFactor(), bounds: [{ ...pageBounds }] } }
+function visibility() {
+  const value = { revision: ++revision, zoomFactor: window.webContents.getZoomFactor(), bounds: visibleNativeBounds(window, page) }
+  receipt.nativeVisibility ??= []
+  receipt.nativeVisibility.push({ ...value, pageVisible: page.getVisible(), browserId: page.webContents.id, windowId: window.id })
+  return value
+}
+async function setNativePageVisible(visible: boolean) {
+  const publicationsBefore = receipt.publications.length
+  page.setVisible(visible)
+  const demand = visibility(); window.webContents.send('layering:visibility', demand)
+  await wait(() => receipt.publications.length > publicationsBefore && publishing === 0 &&
+    (visible || last?.projected === 0 && positive().length === 0), 'Actual Browser visibility must reach its original Renderer and native projection owner')
+  return { demand, pageVisible: page.getVisible(), publicationsBefore, publicationsAfter: receipt.publications.length, last }
+}
 function layout() {
   const { width, height } = window.getContentBounds()
   Object.assign(pageBounds, { x: Math.floor(width * .48), y: 56, width: width - Math.floor(width * .48), height: height - 56 })
@@ -135,7 +149,10 @@ async function frame(label: string, target = window, nativePage: WebContentsView
   await writeFile(join(root, renderer), (await target.webContents.capturePage()).toPNG())
   if (nativePage) await writeFile(join(root, native), (await nativePage.webContents.capturePage()).toPNG())
   const chrome = await chromeFrames(label, target)
-  receipt.frames.push({ label, renderer, ...(nativePage ? { native } : {}), chrome, owners: owners(target, nativePage ?? page), fact: await target.webContents.executeJavaScript('layeringProbe.read()'), scope: nativePage ? 'Independent actual Renderer, native page and original Chrome compositor readbacks; never an OS composition.' : 'Actual Mobile browser Renderer. Original Desktop native page is retained hidden; never an OS composition.' })
+  if (nativePage && !nativePage.getVisible()) assert.equal(chrome.length, 0, 'A hidden original Browser must not retain native Chrome projections for document-only scenarios')
+  receipt.frames.push({ label, renderer, ...(nativePage ? { native } : {}), chrome, owners: owners(target, nativePage ?? page),
+    nativeDemand: { ...(nativePage ? { pageVisible: nativePage.getVisible(), bounds: visibleNativeBounds(target, nativePage) } : { bounds: [] }), ...(target === window ? { sourceRevision: revision } : {}) },
+    fact: await target.webContents.executeJavaScript('layeringProbe.read()'), scope: nativePage ? 'Independent actual Renderer, native page and original Chrome compositor readbacks; never an OS composition.' : 'Actual Mobile browser Renderer. Original Desktop native page is retained hidden; never an OS composition.' })
   if (process.env.AGENTMUX_VISUAL_ORCA_CLI && !receipt.osCaptureFailure) {
     const cli = process.env.AGENTMUX_VISUAL_ORCA_CLI, appSelector = `pid:${process.pid}`
     const call = async (args: string[]) => {
@@ -262,7 +279,12 @@ async function verifyCrossDocumentWorkbench() {
   const probe = 'layeringProbe.crossDocument', samples: any[] = []
   let primaryFailed = false
   const value = () => read(probe + '.read()')
-  const act = async (source: string) => { await read(probe + '.' + source); await painted(); return value() }
+  const stage = async (step: string, source?: string, state?: unknown) => appendFile(join(root, 'cross-document-progress.jsonl'), JSON.stringify({ at: Date.now(), step, source, state,
+    native: { pageVisible: page.getVisible(), sourceRevision: revision, bounds: visibleNativeBounds(window, page), publishing, last, owners: owners(), publication: receipt.publications.at(-1) } }) + '\n')
+  const act = async (source: string) => {
+    await stage('operation-start', source); await read(probe + '.' + source); await stage('operation-returned', source)
+    await painted(); const state = await value(); await stage('painted', source, state); return state
+  }
   const assertRetained = (state: any, destination: 'A' | 'B') => {
     for (const fact of ['sameHost', 'sameEditor', 'sameForm', 'sameContent', 'sameIdentity', 'frameSameDocument']) assert.equal(state[fact], true, 'Actual cross-document placement retains the original ' + fact)
     assert.equal(state.hostDocument, destination, 'The actual retained Workbench host moves into the exact document')
@@ -278,8 +300,9 @@ async function verifyCrossDocumentWorkbench() {
     assert.equal(state.documents[destination].liveModals.length, 1)
     assert.equal(state.documents[destination].pointerEvents, 'none')
   }
-  page.setVisible(false)
+  receipt.crossDocumentNativeDemand = {}
   try {
+    receipt.crossDocumentNativeDemand.hidden = await setNativePageVisible(false)
     await act('start()')
     await wait(() => read('!!document.querySelector("[data-cross-document-form=moving] [role=textbox]")'), 'The actual retained workface must mount its original AgentComposer')
     await click('[data-cross-document-form=moving] [role=textbox]')
@@ -362,8 +385,8 @@ async function verifyCrossDocumentWorkbench() {
   } catch (error) { primaryFailed = true; throw error }
   finally {
     const failures: Array<{ step: string; error: unknown }> = []
-    try { await read(probe + '.dispose()') } catch (error) { failures.push({ step: 'dispose-original-documents', error }) }
-    try { page.setVisible(true); layout(); await painted() } catch (error) { failures.push({ step: 'restore-original-native-page', error }) }
+    try { await stage('dispose-start'); await read(probe + '.dispose()'); await stage('dispose-returned') } catch (error) { failures.push({ step: 'dispose-original-documents', error }) }
+    try { receipt.crossDocumentNativeDemand.restored = await setNativePageVisible(true); layout(); await painted() } catch (error) { failures.push({ step: 'restore-original-native-page', error }) }
     if (failures.length) {
       receipt.crossDocumentCleanupFailures = failures.map(({ step, error }) => ({ step, ...failureDetails(error) }))
       if (!primaryFailed) throw new Error('Cross-document fixture cleanup failed: ' + JSON.stringify(receipt.crossDocumentCleanupFailures))
@@ -372,7 +395,7 @@ async function verifyCrossDocumentWorkbench() {
   await nativeReady(0)
 }
 async function verifyMobile() {
-  page.setVisible(false); await overlays.update([])
+  await setNativePageVisible(false); await overlays.update([])
   window.setContentSize(390, 844); window.webContents.setZoomFactor(1)
   await window.loadFile(process.env.AGENTMUX_UI_LAYERING_MOBILE_HTML!)
   await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -423,8 +446,8 @@ async function run() {
   window.contentView.addChildView(page)
   const originalURL = 'data:text/html,' + encodeURIComponent('<!doctype html><style>body{background:#17313d;color:#eaf5f8;font:16px system-ui;padding:28px}input{display:block;width:85%;margin:24px 0;padding:8px}button{padding:10px}</style><h2>Original Browser</h2><p>The page, its input and history remain intact.</p><input value="Original Browser draft stays here"><button id="background">Background action</button><output id="count">0</output><script>window.clicks=0;document.querySelector("button").onclick=()=>{document.querySelector("output").textContent=String(++window.clicks)}</script>')
   await page.webContents.loadURL(originalURL)
-  const owner = () => ({ browserId: pageId, view: page, bounds: pageBounds, workspaceId: 'isolated-workspace', windowId: 'isolated-window' })
-  overlays = new NativeOverlaySurfaces(window, { visibleNativeBounds: () => [pageBounds], nativeOwner: id => id === pageId ? owner() as any : undefined,
+  const owner = () => visibleNativeBounds(window, page).length ? ({ browserId: pageId, view: page, bounds: page.getBounds(), workspaceId: 'isolated-workspace', windowId: 'isolated-window' }) : undefined
+  overlays = new NativeOverlaySurfaces(window, { visibleNativeBounds: () => visibleNativeBounds(window, page), nativeOwner: id => id === pageId ? owner() as any : undefined,
     nativeOwnerForView: view => view === page ? owner() as any : undefined }, (message, modalId) => {
     receipt.warnings.push({ message, modalId }); if (!window.isDestroyed()) window.webContents.send('layering:warning', { message, modalId })
   }, input => window.webContents.send('layering:input', input))
@@ -440,7 +463,7 @@ async function run() {
   }) as typeof window.webContents.capturePage
   ipcMain.handle('layering:visibility', event => {
     const independent = independentWindows.get(event.sender.id)
-    return independent ? { revision: ++independent.revision, zoomFactor: independent.window.webContents.getZoomFactor(), bounds: [{ ...independent.bounds }] } : visibility()
+    return independent ? { revision: ++independent.revision, zoomFactor: independent.window.webContents.getZoomFactor(), bounds: visibleNativeBounds(independent.window, independent.page) } : visibility()
   })
   ipcMain.handle('layering:publish', async (event, regions: NativeOverlayRegion[]) => {
     const independent = independentWindows.get(event.sender.id)
@@ -527,9 +550,9 @@ async function run() {
   const independentBounds = { x: 394, y: 56, width: 426, height: 512 }
   independent.contentView.addChildView(independentPage); independentPage.setBounds(independentBounds)
   await independentPage.webContents.loadURL(originalURL)
-  const independentOwner = () => ({ browserId: 'independent-original-browser', view: independentPage, bounds: independentBounds })
+  const independentOwner = () => visibleNativeBounds(independent, independentPage).length ? ({ browserId: 'independent-original-browser', view: independentPage, bounds: independentPage.getBounds() }) : undefined
   const independentOverlays = new NativeOverlaySurfaces(independent, {
-    visibleNativeBounds: () => [independentBounds], nativeOwner: id => id === 'independent-original-browser' ? independentOwner() as any : undefined,
+    visibleNativeBounds: () => visibleNativeBounds(independent, independentPage), nativeOwner: id => id === 'independent-original-browser' ? independentOwner() as any : undefined,
     nativeOwnerForView: view => view === independentPage ? independentOwner() as any : undefined
   }, (message, modalId) => independent.webContents.send('layering:warning', { message, modalId }), input => independent.webContents.send('layering:input', input))
   const independentContext = { window: independent, page: independentPage, overlays: independentOverlays, bounds: independentBounds, revision: 0, publishing: 0, publications: [] as any[], last: undefined as any }
