@@ -5,7 +5,7 @@ import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act, useLayoutEffect } from 'react'
@@ -26,6 +26,9 @@ import { noteCanvasScopeKey } from '../src/renderer/src/lib/note-canvas-state'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
+import { GRAPHITE_THEME, mountThemeRuntime, previewTheme, serializeThemeFile } from '@agentmux/client-ui/theme'
+import { ICON_GLYPHS, semanticIconHref, type SemanticIconId } from '@agentmux/client-ui/icons'
+import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 
 const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
 let directory: string, store: AgentMuxNotebookStore
@@ -124,6 +127,155 @@ it('reads related originals by default, reuses full context, and opens a selecte
   await dom.click('[aria-label="Show related blocks: Original target"]')
   expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target')
   expect((await store.read()).trail).toHaveLength(2)
+})
+
+function graphReadingIcon(host: Element, role: SemanticIconId) {
+  const icon = host.querySelector<SVGSVGElement>(`svg[data-semantic-icon="${role}"]`)
+  expect(icon, `actual graph consumer for ${role}`).not.toBeNull()
+  expect(icon!.getAttribute('width')).toBe('12')
+  expect(icon!.getAttribute('height')).toBe('12')
+  expect(icon!.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref(role))
+  expect(icon!.closest('[data-icon-animation]')).toBeNull()
+  return icon!
+}
+function graphReadingShapes(role: SemanticIconId) {
+  const symbol = document.getElementById(semanticIconHref(role).slice(1))
+  expect(symbol, `mounted theme sprite for ${role}`).not.toBeNull()
+  expect(symbol!.children.length).toBeGreaterThan(0)
+  return [...symbol!.children].map(shape => [shape.localName, Object.fromEntries([...shape.attributes].map(attr => [attr.name, attr.value]))])
+}
+function fixedReadingLayout() {
+  const layout = { positions: { target: { x: 0, y: 0 }, 'closed-source': { x: 380, y: 0 } }, viewport: { x: 20, y: 20, zoom: 1 }, expandedNoteIds: ['target'], previewNoteIds: [] }
+  useAppStore.setState({ noteCanvasLayouts: { [noteCanvasScopeKey(scope)]: layout } })
+  return structuredClone(layout)
+}
+
+it('graph reading icons preserve exact original full and related content, action roles, nodes and saved positions', async () => {
+  vi.stubGlobal('Worker', NoteSnapshotTestWorker)
+  const release = mountThemeRuntime(window)
+  try {
+    const original = noteFromMarkdown(body('target', 'Saved target'))
+    original.content.content!.push({ type: 'paragraph', attrs: { blockId: 'context-only' }, content: [{ type: 'text', text: 'Extra original context outside this relationship' }] })
+    const saved = serializeNoteDocument(original), path = join(directory, 'target.note.md')
+    await writeFile(path, saved)
+    const heldLayout = fixedReadingLayout(), open = vi.fn(), heldCatalog = await store.read()
+    await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
+    const node = dom.container.querySelector('.react-flow__node[data-id="target"]')!, source = node.querySelector('.note-canvas-book')!
+    const button = node.querySelector<HTMLButtonElement>('footer > button')!, title = node.querySelector<HTMLButtonElement>('.note-canvas-title')!
+    await vi.waitFor(() => expect(node.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target'))
+    graphReadingIcon(source, 'object.notebook')
+    expect(source.textContent).toContain(heldCatalog.notebooks[heldCatalog.pages.target!.notebookId]!.name)
+    graphReadingIcon(button, 'action.show-full-note')
+    expect(button.getAttribute('aria-expanded')).toBe('false'); expect(button.disabled).toBe(false)
+    expect(button.getAttribute('aria-label')).toBe('Full note: Original target')
+    expect(node.querySelector('.note-canvas-reader')?.textContent).not.toContain('Extra original context outside this relationship')
+    expect(node.querySelector('.note-canvas-body')?.getAttribute('data-reading-mode')).toBe('related')
+    const readCount = vi.mocked(api.notebooks.content).mock.calls.length
+    expect(readCount).toBeGreaterThan(0)
+    const positions = structuredClone(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]!)
+    await act(async () => button.click())
+    await vi.waitFor(() => expect(node.querySelector('.note-canvas-reader')?.textContent).toContain('Extra original context outside this relationship'))
+    graphReadingIcon(button, 'action.show-related-blocks')
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(button.getAttribute('aria-label')).toBe('Show related blocks: Original target')
+    expect(node.querySelector('.note-canvas-body')?.getAttribute('data-reading-mode')).toBe('document')
+    expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]).toEqual({ ...positions, previewNoteIds: ['target'] })
+    await act(async () => button.click())
+    await vi.waitFor(() => expect(node.querySelector('.note-canvas-reader')?.textContent).not.toContain('Extra original context outside this relationship'))
+    graphReadingIcon(button, 'action.show-full-note')
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    expect(dom.container.querySelector('.react-flow__node[data-id="target"]')).toBe(node)
+    expect(node.querySelector('footer > button')).toBe(button); expect(node.querySelector('.note-canvas-title')).toBe(title)
+    expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]).toEqual(positions)
+    expect(positions.positions).toEqual(heldLayout.positions); expect(positions.viewport).toEqual(heldLayout.viewport)
+    expect(api.notebooks.content).toHaveBeenCalledTimes(readCount); expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+    expect(open).not.toHaveBeenCalled(); expect(await readFile(path, 'utf8')).toBe(saved); expect(await store.read()).toEqual(heldCatalog)
+    await act(async () => title.click())
+    expect(open).toHaveBeenCalledExactlyOnceWith(heldCatalog.pages.target)
+  } finally { release(); vi.unstubAllGlobals() }
+})
+
+it('graph reading icons independently consume original user glyph and paths while preserving old file and Note assets', async () => {
+  vi.stubGlobal('Worker', NoteSnapshotTestWorker)
+  const release = mountThemeRuntime(window)
+  try {
+    fixedReadingLayout()
+    await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+    const node = dom.container.querySelector('.react-flow__node[data-id="target"]')!, source = node.querySelector('.note-canvas-book')!, button = node.querySelector<HTMLButtonElement>('footer > button')!
+    await vi.waitFor(() => expect(node.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target'))
+    const before = structuredClone(useAppStore.getState().noteCanvasLayouts), theme = structuredClone(GRAPHITE_THEME)
+    theme.id = 'custom.graph-reading'; theme.name = 'Independent original graph assets'
+    theme.icons = {
+      'object.notebook': { kind: 'paths', paths: [{ d: 'M3 4H19V20H3Z' }] },
+      'action.show-full-note': { kind: 'glyph', glyph: 'book-open' },
+      'action.show-related-blocks': { kind: 'paths', paths: [{ d: 'M4 5H20M4 19H14' }] },
+      'object.note': { kind: 'paths', paths: [{ d: 'M3 12L12 3L21 12L12 21Z' }] },
+      'file.text': { kind: 'paths', paths: [{ d: 'M5 3H19V21H5Z' }] },
+    }
+    const serialized = serializeThemeFile(theme)
+    await act(async () => { expect(previewTheme(theme).applied).toBe(true) })
+    expect(serializeThemeFile(theme)).toBe(serialized)
+    graphReadingIcon(source, 'object.notebook'); graphReadingIcon(button, 'action.show-full-note')
+    expect(graphReadingShapes('object.notebook')).toEqual([['path', { d: 'M3 4H19V20H3Z' }]])
+    expect(graphReadingShapes('action.show-full-note')).toEqual(ICON_GLYPHS['book-open'])
+    expect(graphReadingShapes('action.show-related-blocks')).toEqual([['path', { d: 'M4 5H20M4 19H14' }]])
+    const oldNote = graphReadingShapes('object.note'), oldFile = graphReadingShapes('file.text')
+    expect(oldNote).toEqual([['path', { d: 'M3 12L12 3L21 12L12 21Z' }]])
+    expect(oldFile).toEqual([['path', { d: 'M5 3H19V21H5Z' }]])
+    await act(async () => button.click())
+    graphReadingIcon(button, 'action.show-related-blocks')
+    theme.icons['object.notebook'] = { kind: 'glyph', glyph: 'library' }
+    theme.icons['action.show-full-note'] = { kind: 'paths', paths: [{ d: 'M4 4H20V20H4Z' }] }
+    theme.icons['action.show-related-blocks'] = { kind: 'glyph', glyph: 'text-select' }
+    const secondSerialized = serializeThemeFile(theme)
+    await act(async () => { expect(previewTheme(theme).applied).toBe(true) })
+    expect(serializeThemeFile(theme)).toBe(secondSerialized)
+    expect(graphReadingShapes('object.notebook')).toEqual(ICON_GLYPHS.library)
+    expect(graphReadingShapes('action.show-full-note')).toEqual([['path', { d: 'M4 4H20V20H4Z' }]])
+    expect(graphReadingShapes('action.show-related-blocks')).toEqual(ICON_GLYPHS['text-select'])
+    graphReadingIcon(source, 'object.notebook'); graphReadingIcon(button, 'action.show-related-blocks')
+    expect(graphReadingShapes('object.note')).toEqual(oldNote); expect(graphReadingShapes('file.text')).toEqual(oldFile)
+    await act(async () => button.click())
+    graphReadingIcon(button, 'action.show-full-note')
+    expect(node.querySelector('footer > button')).toBe(button); expect(dom.container.querySelector('.react-flow__node[data-id="target"]')).toBe(node)
+    expect(useAppStore.getState().noteCanvasLayouts).toEqual(before)
+    expect(api.notebooks.graph).toHaveBeenCalledTimes(1); expect(api.notebooks.content).toHaveBeenCalledTimes(2)
+  } finally { release(); vi.unstubAllGlobals() }
+})
+
+it('graph reading icons keep pending original reading static and uncatalogued targets explicit with the original disabled action', async () => {
+  vi.stubGlobal('Worker', NoteSnapshotTestWorker)
+  const release = mountThemeRuntime(window)
+  try {
+    const sourceNote = noteFromMarkdown(body('closed-source', 'Saved closed-source', true))
+    sourceNote.content.content!.push({ type: 'blockReference', attrs: { blockId: 'outside-reference', referenceId: 'outside-original', target: { noteId: 'outside-note', blockId: 'outside-block' }, mode: 'reference' } })
+    await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(sourceNote))
+    const layout = fixedReadingLayout(); layout.expandedNoteIds.push('closed-source')
+    useAppStore.setState({ noteCanvasLayouts: { [noteCanvasScopeKey(scope)]: layout } })
+    const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!, resume: (() => void)[] = []
+    vi.mocked(api.notebooks.content).mockImplementation(async (...args) => { await new Promise<void>(resolve => resume.push(resolve)); return readOriginal(...args) })
+    const open = vi.fn()
+    await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
+    await vi.waitFor(() => expect(resume).toHaveLength(2))
+    const registered = dom.container.querySelector('.react-flow__node[data-id="target"]')!, pendingButton = registered.querySelector<HTMLButtonElement>('footer > button')!
+    graphReadingIcon(registered.querySelector('.note-canvas-book')!, 'object.notebook')
+    graphReadingIcon(pendingButton, 'action.show-full-note'); expect(pendingButton.disabled).toBe(false)
+    expect(registered.textContent).toContain('Reading related original blocks…')
+    await act(async () => pendingButton.click())
+    graphReadingIcon(pendingButton, 'action.show-related-blocks')
+    expect(api.notebooks.content).toHaveBeenCalledTimes(2)
+    const outside = dom.container.querySelector('.react-flow__node[data-id="outside-note"]')!, caption = outside.querySelector('.note-canvas-book')!, button = outside.querySelector<HTMLButtonElement>('footer > button')!
+    expect(outside).not.toBeNull(); expect(caption.textContent).toContain('Outside this directory')
+    graphReadingIcon(caption, 'object.note'); expect(caption.querySelector('[data-semantic-icon="object.notebook"]')).toBeNull()
+    graphReadingIcon(button, 'action.show-full-note'); expect(button.disabled).toBe(true); expect(button.getAttribute('aria-expanded')).toBe('false')
+    const heldLayout = structuredClone(useAppStore.getState().noteCanvasLayouts)
+    await act(async () => button.click())
+    expect(useAppStore.getState().noteCanvasLayouts).toEqual(heldLayout); expect(open).not.toHaveBeenCalled()
+    await act(async () => { for (const complete of resume) complete() })
+    await vi.waitFor(() => expect(registered.querySelector('.note-canvas-reader')?.textContent).toContain('Saved target'))
+    graphReadingIcon(pendingButton, 'action.show-related-blocks'); graphReadingIcon(caption, 'object.note')
+    expect(api.notebooks.content).toHaveBeenCalledTimes(2); expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+  } finally { release(); vi.unstubAllGlobals() }
 })
 
 it('keeps newer bytes out of an older card and refreshes explicitly without replacing graph truth with drafts', async () => {
