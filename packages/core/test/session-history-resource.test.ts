@@ -198,13 +198,17 @@ describe('exact native recorded image through the original public Core owner',()
   const h=await fixture(),identity={hostId:'local',buildIdentity:'private-unverified-fixture',protocolVersion:1,processId:null,instanceId:'private-unverified-runtime',ownership:'unverified' as const}
   vi.spyOn(h.client,'runtimeIdentity').mockReturnValue(identity)
   let instance='private-image-host-owner'
-  const runtime=new AgentMuxHostedRuntimeService(h.client,null,()=>({runtimeId:'private-image-semantic-host',ownerInstanceId:instance,protocolVersion:1,processId:process.pid,ctxmux:identity,availability:'unverified'}))
+  const runtime=new AgentMuxHostedRuntimeService(h.client,null,()=>({runtimeId:'private-image-semantic-host',ownerInstanceId:instance,protocolVersion:2,processId:process.pid,ctxmux:identity,availability:'unverified'}))
   const server=new AgentMuxControlServer({coreClients:()=>[{hostId:'local',client:h.client}],hostedRuntime:()=>runtime},join(h.home,'hosted.sock'))
   await server.start();closes.push(()=>server.stop());closes.push(()=>runtime.dispose())
   const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}});closes.push(()=>rpc.dispose())
+  const initialProjection=Promise.withResolvers<void>()
   let corrupt=false
   const port={call:async(...args:Parameters<typeof rpc.call>)=>{
-   const response=await rpc.call(...args)
+   const request=rpc.call(...args)
+   if(args[0]==='runtime.invoke'&&(args[1] as {invocation?:{method?:string}}).invocation?.method==='runtimeProjection')
+    void request.then(()=>initialProjection.resolve(),()=>initialProjection.resolve())
+   const response=await request
    if(corrupt&&args[0]==='runtime.invoke'){
     const value=decodeHostedValue((response as {value:unknown}).value) as Record<string,unknown>
     return {value:encodeHostedValue({...value,recordId:'foreign-resource-record'})}
@@ -213,10 +217,12 @@ describe('exact native recorded image through the original public Core owner',()
   },subscribe:rpc.subscribe.bind(rpc)}
   const hosted=await connectHostedAgentMux({rpc:port as Parameters<typeof connectHostedAgentMux>[0]['rpc'],consumerId:'private-image-consumer'});closes.push(()=>hosted.dispose())
   // Existing Hosted admission probes runtimeProjection; this fixture rejects any actual Runtime connection.
-  // Clear that independent observation attempt before measuring native image operations.
+  // Its asynchronous RPC must settle before measuring the independent native image operations.
+  await initialProjection.promise
+  expect(h.client.connect).toHaveBeenCalledTimes(1)
   vi.mocked(h.client.connect).mockClear()
   const abort=new AbortController()
-  expect((await hosted.sessionHistoryResource('image-session',{...h.request,signal:abort.signal})).result.status).toBe('read')
+  expect((await hosted.sessionHistoryResource('image-session',{...h.request,signal:abort.signal})).result).toMatchObject({status:'read',width:1,height:1})
   const mutable={...h.request,source:{...h.request.source}}
   const originalRead=hosted.sessionHistoryResource('image-session',mutable)
   mutable.source.nativeSessionId='caller-switched-source';mutable.recordId='caller-switched-record';mutable.expectedReference='caller-switched-reference'
