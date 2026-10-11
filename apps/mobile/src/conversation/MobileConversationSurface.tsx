@@ -581,7 +581,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     },
     ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? `${session.providerId} Agent`, providerId: session.providerId } } : {})
   }), [client, session, agentSessionId, displayName])
-  const mailboxMessages = useMemo(() => reading.projection?.records.flatMap(record => record.input ? [record.input] : []) ?? [], [reading.projection])
+  const mailboxMessages = useMemo(() => reading.projection?.inputs ?? [], [reading.projection])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
   const readHistoryResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
     if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，原资源引用和草稿保留。')
