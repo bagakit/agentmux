@@ -13,12 +13,15 @@ import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { fixtureEpoch as _historyTailFixtureEpoch } from '../../../test/fixture-values.mjs'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { activityReadingProps } from './helpers/activity-reading-props'
 
 const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 async function mount() {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   const state = useAppStore.getState(); useAppStore.setState({ sessions: [], timelines: {}, agentNames: {} })
   closes.push(async () => useAppStore.setState(state, true))
   const container = document.createElement('div'); document.body.append(container)
@@ -32,13 +35,16 @@ it('the mounted original Activity retains full native text and Copy while showin
   const body = composeAgentPrompt('Original public request 中文🙂', 'internal generated context sentinel').text
   await writeFile(f.transcript, JSON.stringify({ type: 'user', uuid: 'native-input', sessionId: 'original-native', message: { role: 'user',
     content: [{ type: 'text', text: body }, { type: 'tool_result', tool_use_id: 'original-tool', content: 'Original tool output' }] } })+'\n')
-  const page = await f.client.sessionHistoryPage(f.session.agentSessionId)
-  const read = await f.client.readAgentConversation({ ...f.reference, source: 'native', kind: 'user-message' })
+  const read = await f.client.readAgentSessionHistory({ ...f.reference, source: 'native', kind: 'user-message' })
   expect(read.userMessages).toHaveLength(1)
+  expect(read.userMessages![0]).toMatchObject({ publicContent: 'unknown', author: { kind: 'unknown' } })
+  await desktopConversationReadBridge({ root: f.root, client: f.client }, closes)
+  const inspect = vi.spyOn(f.client, 'readAgentConversation')
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
   const { container, root } = await mount()
-  await act(async () => root.render(<ActivityView sessionId={f.session.agentSessionId} executionHostId="local" items={[]}
-    capability="complete-events" nativeHistoryPage={page} userMessages={read.userMessages} />))
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: { ...f.reference, run: f.session.run } })} />))
+  await vi.waitFor(async () => { await act(async () => {}); expect(container.querySelector('[data-native-record-id="native-input"]')).not.toBeNull() }, { timeout: 10_000 })
+  expect(inspect).toHaveBeenCalled()
   const record = container.querySelector('[data-native-record-id="native-input"]')!
   expect(record).not.toBeNull()
   expect(record.textContent).toContain('Original public request')
@@ -66,13 +72,16 @@ it('the mounted original Activity consumes exact writer facts and keeps a known-
     prompt: body, agentMuxNote: 'Internal context stays in its original system record', authorHuman: true })
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: 'private-agent', item: { id: 'legacy-input', agentSessionId: 'private-agent', kind: 'user_message',
     source: 'user', status: 'complete', title: 'Legacy original input', content: body, authorHuman: true, createdAt: _historyTailFixtureEpoch(0, 0, 1), updatedAt: _historyTailFixtureEpoch(0, 0, 1) } })
-  const timeline = await f.core.sessionTimeline('private-agent')
   const read = await f.hosted.readAgentSessionHistory({ hostId: 'local', agentSessionId: 'private-agent', source: 'captured', kind: 'user-message' })
   expect(read.userMessages).toHaveLength(2)
   expect(read.userMessages!.map(message => message.publicContent).sort()).toEqual(['confirmed', 'unknown'])
+  expect(read.userMessages!.every(message => message.author.kind === 'human')).toBe(true)
+  await desktopConversationReadBridge({ root: folder, client: f.core }, closes)
+  const inspect = vi.spyOn(f.core, 'readAgentConversation')
   const { container, root } = await mount()
-  await act(async () => root.render(<ActivityView sessionId="private-agent" executionHostId="local" items={timeline.items}
-    userMessages={read.userMessages} capability="complete-events" />))
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: { hostId: 'local', agentSessionId: 'private-agent', run: { runId: 'original' } } })} />))
+  await vi.waitFor(async () => { await act(async () => {}); expect([...container.querySelectorAll<HTMLElement>('.log-turn')].filter(record => record.textContent?.includes(body))).toHaveLength(2) }, { timeout: 10_000 })
+  expect(inspect).toHaveBeenCalled()
   const records = [...container.querySelectorAll<HTMLElement>('.log-turn')].filter(record => record.textContent?.includes(body))
   expect(records).toHaveLength(2)
   for (const record of records) await act(async () => record.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
