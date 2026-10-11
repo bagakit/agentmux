@@ -10,4 +10,5 @@ const reactAliases = ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 're
 // Match the actual Renderer primitive stacks and client-ui browser source exports.
 export default defineConfig({ ...original, resolve: { conditions: ['browser', 'module', 'import'],
   alias: [...reactAliases, ...Object.entries(radixOverlayAliases).map(([find, replacement]) => ({ find, replacement }))] },
-  test: { ...original.test, passWithNoTests: false, maxWorkers: 2 } })
+  test: { ...original.test, passWithNoTests: false, maxWorkers: 2,
+    server: { deps: { inline: [/@radix-ui\//] } } } })
