@@ -11,7 +11,13 @@ const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 
 
-export type HostConnectionPanel = 'overview' | 'projects' | 'agents' | 'connection'
+export const HOST_PANELS = [
+  { id: 'overview', title: 'Overview' },
+  { id: 'projects', title: 'Projects' },
+  { id: 'agents', title: 'Apps & access' },
+  { id: 'connection', title: 'Connection' }
+] as const
+export type HostConnectionPanel = typeof HOST_PANELS[number]['id']
 type HostRow = { id: string; name: string; detail: string; mark: ReactNode; status: ReactNode; projectCount: number }
 
 /** Disclosure navigation only; the original Host pane owns every draft and operation. */
@@ -64,13 +70,13 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
           <span className="settings-resource-row__status">{item.status}</span>
         </summary>
         <div className="settings-host-branch__pages">
-          {(['overview', 'projects', 'agents', 'connection'] as const).map((page) => {
+          {HOST_PANELS.map(({ id: page, title }) => {
             const selected = selectedId === item.id && panel === page
             return <button type="button" key={page} data-host-panel={page}
               {...(page === 'connection' ? { 'data-resource-row': item.id } : {})}
               aria-current={selected ? 'page' : undefined} className="settings-host-page" onClick={() => onSelect(item.id, page)}>
               {page === 'connection' ? <ThemeActionAdjustIcon size={13} aria-hidden="true" /> : page === 'projects' ? <ThemeObjectFolderOpenIcon size={13} aria-hidden="true" /> : page === 'agents' ? <ThemeObjectAgentIcon size={13} aria-hidden="true" /> : <ThemeObjectTopologyIcon size={13} aria-hidden="true" />}
-              <span>{{ overview: 'Overview', projects: 'Projects', agents: 'Agents', connection: 'Connection' }[page]}</span>
+              <span>{title}</span>
               {page === 'projects' ? <small>{item.projectCount}</small> : null}
               {selected ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
             </button>

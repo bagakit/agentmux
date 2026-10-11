@@ -4,7 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { HostIcon } from '../HostBadge'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
-import { HostConnectionLibrary, type HostConnectionPanel } from './HostConnectionLibrary'
+import { HostConnectionLibrary, HOST_PANELS, type HostConnectionPanel } from './HostConnectionLibrary'
 import { HostProjectsPane } from './HostProjectsPane'
 import type { AppConfig, HostConfig, SessionSnapshot, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
 import { useAppStore, type HostCheckState } from '../../store'
@@ -56,7 +56,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const [selectedId, setSelectedId] = useState<string | null>(() => requestedHostId ?? config.hosts[0]?.id ?? null)
   const [panel, setPanel] = useState<HostConnectionPanel>(() => requestedHostId === undefined ? 'overview' : 'connection')
   const [projectHosts, setProjectHosts] = useState<string[]>([])
-  const [upgradeHosts, setUpgradeHosts] = useState<string[]>([])
+  const [maintenanceHosts, setMaintenanceHosts] = useState<string[]>([])
   const [mode, setMode] = useState<'topology' | 'list'>('topology')
   const [measuredWide, setWide] = useState<boolean | null>(null)
   const wide = measuredWide !== false
@@ -118,7 +118,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     if (navigationRequest?.section !== 'hosts' || navigationRequest.hostId === undefined) return
     const id = navigationRequest.hostId
     setRequestedHost(id)
-    setUpgradeHosts(current => current.includes(id) ? current : [...current, id])
+    setMaintenanceHosts(current => current.includes(id) ? current : [...current, id])
     setSelectedId(id)
     setPanel('connection')
     setView('editor')
@@ -145,7 +145,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   }
   function selectHost(id: string): void {
     setRequestedHost(null)
-    setUpgradeHosts(current => current.includes(id) ? current : [...current, id])
+    setMaintenanceHosts(current => current.includes(id) ? current : [...current, id])
     setSelectedId(id)
     setView('editor')
     setPendingEdit({ id, select: false })
@@ -178,7 +178,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
 
   function addHost(): void {
     const id = mintObjectId()
-    setUpgradeHosts(current => [...current, id])
+    setMaintenanceHosts(current => [...current, id])
     setHosts((current) => [...current, {
       id,
       kind: 'ssh',
@@ -248,7 +248,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             }
           })} />}
         <div ref={editor} className="settings-resource-editor">
-          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All connections</button>
+          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All environments</button>
         {hosts.filter((host) => host.id === selectedId).map((host) => {
           const check = currentHostCheck(checks[host.id], host)
           const hostSessions = sessionsByHost.get(host.id) ?? NO_SESSIONS
@@ -269,15 +269,16 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><ThemeActionRemoveIcon size={14} /></button> : null}
               </header>
               <nav className="remote-detail-tabs" aria-label={`Sections for ${host.label}`}>
-                {(['overview', 'projects', 'agents', 'connection'] as const).map(page => <button type="button" key={page} data-host-panel={page}
+                {HOST_PANELS.map(({ id: page, title }) => <button type="button" key={page} data-host-panel={page}
                   aria-current={panel === page ? 'page' : undefined} onClick={() => selectHostPanel(host.id, page)}>
-                  {{ overview: 'Overview', projects: 'Projects', agents: 'Agents', connection: 'Connection' }[page]}</button>)}
+                  {title}</button>)}
               </nav>
               {panel === 'overview' ? <div className="remote-overview">
                 <dl className="remote-overview__facts"><div><dt>Projects</dt><dd>{projectFacts.get(host.id)?.count ?? 0}<small>registered</small></dd></div>
                   <div><dt>Sessions</dt><dd>{sessionCount}<small>client references</small></dd></div></dl>
                 <div className="remote-overview__identity"><span>Last connection test</span><strong>{hostCheckLabel(check ?? { state: 'idle' })}</strong>
                   {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
+                  {check?.state === 'error' ? <button type="button" className="small-button remote-overview__connection-action" onClick={() => selectHostPanel(host.id, 'connection')}>Review connection</button> : null}
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
                 <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { useAppStore.getState().selectSession(id); onClose?.() }} />
                 <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
@@ -302,12 +303,16 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             </section>
           )
         })}
-          {upgradeHosts.map(id => {
+          {maintenanceHosts.map(id => {
             const draft = hosts.find(host => host.id === id)
             const committed = config.hosts.find(host => host.id === id)
-            return draft?.kind === 'ssh' ? <div key={id} hidden={selectedId !== id || panel !== 'connection'} inert={selectedId !== id || panel !== 'connection'}>
-              <HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'connection'} />
-              <HostCreationTrustPanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'connection'} />
+            return draft?.kind === 'ssh' ? <div key={id}>
+              <div hidden={selectedId !== id || panel !== 'connection'} inert={selectedId !== id || panel !== 'connection'}>
+                <HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'connection'} />
+              </div>
+              <div data-host-access={id} hidden={selectedId !== id || panel !== 'agents'} inert={selectedId !== id || panel !== 'agents'}>
+                <HostCreationTrustPanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'agents'} />
+              </div>
             </div> : null
           })}
           {projectHosts.filter(id => hosts.some(host => host.id === id)).map(id => {

@@ -7,6 +7,7 @@ import type { SettingsPageId } from './settings-modules'
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences', overviewColumn: 'left' },
   { id: 'message-tool', title: 'Message Tool', overviewColumn: 'left' },
+  { id: 'remote', title: 'Remote', overviewColumn: 'left' },
   { id: 'connections', title: 'Connections', overviewColumn: 'left' },
   { id: 'toolkit', title: 'Mods', overviewColumn: 'left' },
   { id: 'resources', title: 'Resources', overviewColumn: 'right' },
