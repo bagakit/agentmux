@@ -19,6 +19,7 @@ function runtimeFixture(overrides: Partial<RuntimeController> = {}) {
   const runtime = {
     prepare: vi.fn(async () => preparation),
     commit: vi.fn(),
+    validatePreparation: vi.fn(),
     discard: vi.fn(async () => {}),
     ...overrides
   } as unknown as RuntimeController

@@ -29,6 +29,7 @@ async function fixture() {
     return { config, identity, connect: vi.fn(async () => {}), connectRuntime: vi.fn(async () => {}),
       runtimeOwnerIdentity: () => identity, runtimeIdentity: () => native, onEvent: vi.fn(() => () => {}),
       dispose: vi.fn(async () => {}), setRemoteCommand: vi.fn(),
+      prepareRoute: vi.fn(async () => ({ owner: identity, assertCurrent: vi.fn(), activate: vi.fn(), dispose: vi.fn(async () => {}) })),
       listRuns: vi.fn(async () => [{ runId: control.run.runId, state: 'running' }]),
       stopAgent: vi.fn(), stopTerminal: vi.fn(), writeAgent: vi.fn(async () => {}),
       observeSessionHistory: vi.fn(async () => ({ source: { providerId: 'claude', nativeSessionId: 'native-history' }, dispose: vi.fn() })) }
@@ -122,15 +123,28 @@ it('does not update the active launcher when durable save fails and retries only
   expect(f.manager.inspect).toHaveBeenCalledTimes(2); expect(f.manager.upgrade).not.toHaveBeenCalled()
 })
 
-it.each(['hostname', 'user', 'port', 'identityFile', 'remoteSocketPath', 'runtimeId', 'unbound'] as const)('preserves the live target-change guard for %s changes', async field => {
+it.each(['hostname', 'user', 'port', 'identityFile', 'remoteSocketPath'] as const)('repairs a bound %s route alongside the launcher change while retaining its consumer', async field => {
+  const f = await fixture()
+  const changed = { ...next }
+  if (field === 'port') changed.port++
+  else changed[field] += '-different'
+  await f.owner.update(current => ({ ...current, hosts: [changed] }))
+  expect(f.config().hosts[0]).toEqual(changed)
+  expect(f.original.prepareRoute).toHaveBeenCalledWith({ ...changed, hostId: changed.id })
+  const prepared = await f.original.prepareRoute.mock.results[0]!.value
+  expect(prepared.activate).toHaveBeenCalledOnce()
+  expect(f.runtime.rpcClients()[0]!.client).toBe(f.original)
+  expect(f.original.listRuns).not.toHaveBeenCalled(); expect(f.original.dispose).not.toHaveBeenCalled()
+})
+
+it.each(['runtimeId', 'unbound'] as const)('preserves the live identity-change guard for %s changes', async field => {
   const f = await fixture()
   const changed = { ...next }
   if (field === 'unbound') delete (changed as Partial<typeof changed>).runtimeId
-  else if (field === 'port') changed.port++
-  else changed[field] += '-different'
+  else changed.runtimeId += '-different'
   await expect(f.owner.update(current => ({ ...current, hosts: [changed] }))).rejects.toThrow()
   expect(f.save).not.toHaveBeenCalled(); expect(f.original.setRemoteCommand).not.toHaveBeenCalled()
-  expect(f.original.dispose).not.toHaveBeenCalled()
+  expect(f.original.prepareRoute).not.toHaveBeenCalled(); expect(f.original.dispose).not.toHaveBeenCalled()
 })
 
 it('keeps an unpersisted Runtime binding under the existing live target-change guard', async () => {
@@ -160,7 +174,7 @@ it.each(['signature', 'consumer'] as const)('rejects a stale prepared launcher %
   f.runtime.commit({ hosts: changed === 'consumer' ? [{ id: host.id, client: replacement as unknown as DesktopRuntimeClient,
     config: host, executionHost: { kind: 'ssh', dispose: async () => {} } as never }] : [], removedHostIds: [], reservedHostIds: [],
     hostSignatures: changed === 'signature' ? new Map([['remote', 'other-signature']]) : new Map(originalSignatures) })
-  expect(() => f.runtime.commit(prepared)).toThrow()
+  expect(() => f.runtime.validatePreparation(prepared)).toThrow()
   expect(f.original.setRemoteCommand).not.toHaveBeenCalled()
   expect(replacement.setRemoteCommand).not.toHaveBeenCalled()
 })
