@@ -74,13 +74,19 @@ it('uses real Claude native tool IDs and verified Hook subject fields for exact 
   if (tool.type === 'update') throw Error('The original Hook must provide a complete item.')
   const result = projectConversationTimeline({ agentSessionId: sid, executionHostId: 'local', historyPage: native, timeline: snapshot([tool.item]) })
   expect(result.events).toHaveLength(2)
-  const links = result.events[0]!.relations.filter(relation => relation.kind === 'same-invocation')
-  expect(links).toHaveLength(1)
-  expect(links[0]).toMatchObject({ from: { selector: { kind: 'native-part', partIndex: 1 } }, to: { selector: { kind: 'captured-field', field: 'toolInput' } }, invocation: { source, subject: 'main', scope: { kind: 'session' }, callId: 'toolu_exact' } })
+  const members = result.events.flatMap(event => event.relations).filter(relation => relation.kind === 'invocation-member')
+  expect(members).toHaveLength(3)
+  expect(members).toContainEqual(expect.objectContaining({ part: expect.objectContaining({ selector: { kind: 'native-part', partIndex: 1 } }), invocation: expect.objectContaining({ source, subject: 'main', scope: { kind: 'session' }, callId: 'toolu_exact' }) }))
+  expect(members).toContainEqual(expect.objectContaining({ part: expect.objectContaining({ selector: { kind: 'captured-field', field: 'toolInput' } }), invocation: expect.objectContaining({ source, subject: 'main', scope: { kind: 'session' }, callId: 'toolu_exact' }) }))
   expect(result.events[0]!.content).toHaveLength(4); expect(result.events[0]!.coalesces).toBeUndefined()
   const foreign = structuredClone(tool.item); foreign.conversation!.invocations![0]!.invocation.source.nativeSessionId = 'another-native'
   const wrongActor = structuredClone(tool.item); wrongActor.conversation!.invocations![0]!.invocation.subject = { kind: 'child', nativeActorId: 'different-child' }
-  for (const candidate of [foreign, wrongActor]) expect(projectConversationTimeline({ agentSessionId: sid, executionHostId: 'local', historyPage: native, timeline: snapshot([candidate]) }).events.flatMap(event => event.relations)).toEqual([])
+  for (const candidate of [foreign, wrongActor]) {
+    const separated = projectConversationTimeline({ agentSessionId: sid, executionHostId: 'local', historyPage: native, timeline: snapshot([candidate]) })
+    expect(separated.events.flatMap(event => event.relations).filter(relation => relation.kind === 'invocation-member')).toHaveLength(3)
+    expect(separated.events[0]!.revision).toBe(result.events[0]!.revision)
+    expect(separated.events).toHaveLength(2)
+  }
   expect(f.controls.every(control => control.mock.calls.length === 0)).toBe(true)
 })
 
@@ -157,7 +163,7 @@ it('keeps relation storage linear on a nonempty large invocation page and preser
       nativeInvocationScope: { source, subject: 'main' as const, scope: { kind: 'session' as const } } } })))
   const result = projectConversationTimeline({ agentSessionId: sid, executionHostId: 'local', historyPage: native })
   expect(result.records).toHaveLength(total); expect(result.events).toHaveLength(total)
-  expect(result.events.flatMap(event => event.relations)).toHaveLength(2 * (total - 1))
+  expect(result.events.flatMap(event => event.relations)).toHaveLength(total)
   expect(result.events.flatMap(event => event.content)).toHaveLength(total)
   expect(result.events.flatMap(event => event.coalesces ?? [])).toEqual([])
 })

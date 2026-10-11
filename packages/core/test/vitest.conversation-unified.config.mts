@@ -14,7 +14,7 @@ const changes: Record<string, [string, string, string]> = {
   'trust-event-anchor': ['conversation-changes.ts', "if (records.some(record => record.id !== id && anchors.get(record.id) !== id))", 'if (false)'],
   'trust-answer-claim': ['conversation-changes.ts', "value.questionId === question.questionId", 'true'],
   'trust-observation-claim': ['conversation-changes.ts', "if (!observer && !observed || observer && !same(observer.original.item.conversation?.observes, target)) return bad()", 'if (false) return bad()'],
-  'trust-invocation-claim': ['conversation-changes.ts', 'if (!local.length || local.some(', 'if (false && local.some('],
+  'trust-invocation-claim': ['conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'invocation-member'), records.flatMap(record => conversationInvocationMembers(record))))", 'if (false)'],
   'trust-event-role': ['conversation-changes.ts', 'e.role !== conversationRecordRole(primary) || ', ''],
   'cross-session-watch': ['client-event-publisher.ts', 'this.timelineListeners.get(event.agentSessionId) ?? []', 'new Map([...this.timelineListeners.values()].flatMap(listeners => [...listeners]))'],
   'forge-source-host-receipt': ['client.ts', 'return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: descriptor.hostId }', "return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: 'local' }"],
