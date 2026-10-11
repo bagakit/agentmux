@@ -59,7 +59,7 @@ Object.assign(window, { layeringProbe: {
       description="Nested controls retain their parent modal and keyboard ownership." confirmLabel="Confirm"
       onCancel={closeGallery} onConfirm={() => actions.push('confirm')} feedback={<>
         <Menu.Root><Menu.Trigger id="nested-menu-trigger" className="small-button">Nested menu</Menu.Trigger>
-          <Menu.Portal><Menu.Content className="tab-context-menu"><Menu.Item className="tab-context-menu__item" onSelect={() => actions.push('nested-action')}>Nested action</Menu.Item></Menu.Content></Menu.Portal>
+          <Menu.Portal><Menu.Content className="tab-context-menu" side="right" align="start"><Menu.Item className="tab-context-menu__item" onSelect={() => actions.push('nested-action')}>Nested action</Menu.Item></Menu.Content></Menu.Portal>
         </Menu.Root>
         <WindowOverlayPortal layer="tooltip"><span id="nested-tooltip" role="tooltip" className="layering-fixture-tooltip"
           style={{ position: 'fixed', top: 'calc(50% - 108px)', left: '50%', padding: 8, background: 'var(--surface-2)', pointerEvents: 'auto' }}>Attached tooltip</span></WindowOverlayPortal>

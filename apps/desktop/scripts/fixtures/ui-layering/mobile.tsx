@@ -26,6 +26,12 @@ const readImage = async (path: string) => {
   return { dataUrl: originalImage }
 }
 mountThemeRuntime(window)
+const events: unknown[] = []
+for (const type of ['pointerdown', 'click', 'focusin']) document.addEventListener(type, event => {
+  const target = event.target as Element | null
+  events.push({ type, trusted: event.isTrusted, tag: target?.tagName, label: target?.closest('button')?.getAttribute('aria-label'),
+    scope: target?.closest('[data-overlay-modal-scope]')?.id })
+}, true)
 createRoot(document.getElementById('root')!).render(<ClientUiProvider platform={platform}>
   <main className="mobile-app"><header className="mobile-sheet-title"><h1>Original conversation</h1>
     <MobileMailbox session={session} connected messages={[message]} platform={platform} describeSpeaker={() => ({ name: 'Original author' })}
@@ -41,5 +47,7 @@ Object.assign(window, { layeringProbe: { read() {
   const rect = (node: Element) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
   return { nodes: [...document.querySelectorAll<HTMLElement>('[data-overlay-modal-id]')].filter(node => node.getClientRects().length > 0).map(node => ({
     role: node.getAttribute('role'), modal: node.dataset.overlayModalId, part: node.dataset.overlayModalPart, bounds: rect(node) })),
-    active: document.activeElement?.outerHTML, messageId: message.id, originalContent: message.content, imageSource: originalImage }
+    active: { tag: document.activeElement?.tagName, role: document.activeElement?.getAttribute('role'), label: document.activeElement?.getAttribute('aria-label'),
+      scope: document.activeElement?.closest('[data-overlay-modal-scope]')?.id }, events,
+    messageId: message.id, originalContent: message.content, imageSource: originalImage }
 } } })

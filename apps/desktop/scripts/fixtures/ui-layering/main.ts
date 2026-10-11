@@ -303,7 +303,10 @@ async function verifyMobile() {
     await read('document.querySelector(".mobile-message-tools .md-conversation-image").scrollIntoView({block:"nearest"})'); await painted()
     await click('.mobile-message-tools .md-conversation-image')
     await wait(() => read('!!document.querySelector(".md-conversation-image__lightbox")'), 'The original Mobile thumbnail must open the shared real image lightbox')
-    const mobile = await read('(()=>{const sheet=document.querySelector(".mobile-message-tools"),lightbox=document.querySelector(".md-conversation-image__lightbox"),scope=lightbox.closest("[data-overlay-modal-scope]"),sheetScope=sheet.closest("[data-overlay-modal-scope]"),r=lightbox.getBoundingClientRect();return{sheetId:sheetScope.id,scopeId:scope.id,sibling:scope.parentElement===sheetScope.parentElement,notInSheet:!sheetScope.contains(scope),hit:!!document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(".md-conversation-image__lightbox"),source:lightbox.querySelector("img.md-conversation-image__full")?.getAttribute("src"),viewport:{width:innerWidth,height:innerHeight},bounds:{x:r.x,y:r.y,width:r.width,height:r.height},layer:getComputedStyle(lightbox).zIndex,token:getComputedStyle(document.documentElement).getPropertyValue("--layer-dialog")}})()')
+    // Each retained Portal owns a display:contents host. The hosts are window-root
+    // siblings; comparing the scope's immediate parent would compare distinct hosts.
+    const mobile = await read('(()=>{const sheet=document.querySelector(".mobile-message-tools"),lightbox=document.querySelector(".md-conversation-image__lightbox"),scope=lightbox.closest("[data-overlay-modal-scope]"),sheetScope=sheet.closest("[data-overlay-modal-scope]"),host=scope.closest("[data-overlay-modal-host]"),sheetHost=sheetScope.closest("[data-overlay-modal-host]"),r=lightbox.getBoundingClientRect();return{sheetId:sheetScope.id,scopeId:scope.id,sibling:!!host&&!!sheetHost&&host!==sheetHost&&host.parentElement===sheetHost.parentElement&&host.parentElement?.id==="mobile-overlays",notInSheet:!!sheetHost&&!!host&&!sheetScope.contains(scope)&&!sheetHost.contains(host),hit:!!document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest(".md-conversation-image__lightbox"),source:lightbox.querySelector("img.md-conversation-image__full")?.getAttribute("src"),viewport:{width:innerWidth,height:innerHeight},bounds:{x:r.x,y:r.y,width:r.width,height:r.height},layer:getComputedStyle(lightbox).zIndex,token:getComputedStyle(document.documentElement).getPropertyValue("--layer-dialog")}})()')
+    receipt.mobileAttempts ??= []; receipt.mobileAttempts.push({ close, ...mobile, source: mobile.source ? { sha256: createHash('sha256').update(mobile.source).digest('hex') } : null })
     assert.equal(mobile.sheetId, mobileSheetId, 'Mobile image opening preserves the original sheet identity')
     assert.ok(mobile.sibling && mobile.notInSheet && mobile.hit, 'The real mobile lightbox is a window sibling above the original sheet')
     assert.ok(mobile.source?.startsWith('data:image/'), 'The real mobile lightbox shows the same retained original image bytes')
@@ -519,6 +522,9 @@ async function run() {
   await nativeReady(); nested = await facts()
   const menu = nested.nodes.find((node: any) => node.role === 'menu')
   assert.ok(menu?.inSlot && menu.hit, 'Actual nested menu stays above the parent modal')
+  assert.ok(menu.bounds.x < pageBounds.x + pageBounds.width && menu.bounds.x + menu.bounds.width > pageBounds.x &&
+    menu.bounds.y < pageBounds.y + pageBounds.height && menu.bounds.y + menu.bounds.height > pageBounds.y,
+  'The actual nested menu must overlap the original native Browser before its independent projection is required')
   assert.ok(receipt.publications.at(-1)?.regions.some((region: NativeOverlayRegion) => !region.modal &&
     Math.abs(region.bounds.x - menu.bounds.x) < 1 && Math.abs(region.bounds.y - menu.bounds.y) < 1 && Math.abs(region.bounds.width - menu.bounds.width) < 1),
   'The original Popper-wrapped nested menu has its own native projection, independent of parent content capture')
