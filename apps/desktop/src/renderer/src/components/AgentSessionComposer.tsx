@@ -1,3 +1,4 @@
+import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { ConnectorSharing } from './ConnectorSharing'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
@@ -203,6 +204,8 @@ export function AgentSessionComposer({
   }
 
 
+  const dialogDocument = useWorkbenchWindowDocument() ?? undefined
+
   function addFileReference(): void {
     if (!activeFile || !submitMode.canType) return
     void feedback.run(() => insertionRef.current?.insert(() => appendSelectedFileReferences('', [activeFile]), { separate: true }))
@@ -212,7 +215,7 @@ export function AgentSessionComposer({
     if (!submitMode.canType) return
     const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
     await insertionRef.current?.insert(async () => {
-      const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined)
+      const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined, dialogDocument)
       return chosen?.length ? appendSelectedFileReferences('', chosen, workspacePath) : null
     }, { separate: true })
   }

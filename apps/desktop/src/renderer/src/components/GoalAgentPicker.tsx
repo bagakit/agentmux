@@ -1,3 +1,4 @@
+import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { TextInput } from '@agentmux/client-ui/input'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxSpaceMutationReport } from '@agentmux/core/control'
@@ -134,9 +135,10 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { setBusy(false) }
   }
+  const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   async function chooseFolder() {
     setBusy(true); setIssue(null)
-    try { const workspace = await api.workspaces.chooseLocalFolder(); if (workspace) setWorkspaceId(workspace.id) }
+    try { const workspace = await api.workspaces.chooseLocalFolder(dialogDocument); if (workspace) setWorkspaceId(workspace.id) }
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { setBusy(false) }
   }

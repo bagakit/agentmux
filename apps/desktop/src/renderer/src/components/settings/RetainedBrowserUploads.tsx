@@ -1,3 +1,4 @@
+import { useWorkbenchWindowDocument } from '../../lib/workbench-document'
 import { useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { BrowserRetainedUploads } from '../../../../shared/browser-upload'
@@ -9,6 +10,7 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 
 /** Original upload snapshots, retained without reconnecting or reading a page. */
 export function RetainedBrowserUploads() {
+  const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const [retained, setRetained] = useState<BrowserRetainedUploads | null>(null)
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -32,7 +34,7 @@ export function RetainedBrowserUploads() {
         setBusy(selection.id)
         void (async () => {
           try {
-            const discarded = await api.browser.discardRetainedUpload(selection.id)
+            const discarded = await api.browser.discardRetainedUpload(selection.id, dialogDocument)
             setRetained(await api.browser.listRetainedUploads())
             setNotice(discarded ? 'These selected-file snapshots were discarded. The original page may no longer upload them.' : 'Files kept. No other selection was changed.')
           } catch (error) { setNotice(presentError(error)) }

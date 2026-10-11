@@ -1,5 +1,6 @@
 import type { ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import type { ThemeDocument } from '@agentmux/client-ui/theme'
+import type { WorkbenchWindowDocument } from './workbench-windows'
 import type { DeliveryAttempt, DeliveryAttemptLookup } from '@agentmux/core'
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
@@ -1653,9 +1654,9 @@ export type AgentMuxDesktopApi = {
   }
   workspaces: {
     appearance(id: string): Promise<{ kind: 'repository' | 'directory'; icon: string | null }>
-    chooseLocalFolder(): Promise<WorkspaceRecord | null>
+    chooseLocalFolder(document?: WorkbenchWindowDocument): Promise<WorkspaceRecord | null>
     /** Pick a replacement directory while preserving the existing Workspace identity. */
-    rebindLocalFolder(workspaceId: string): Promise<WorkspaceRecord | null>
+    rebindLocalFolder(workspaceId: string, document?: WorkbenchWindowDocument): Promise<WorkspaceRecord | null>
     add(input: CreateWorkspaceInput): Promise<WorkspaceRecord>
     listBranches(workspaceId: string): Promise<WorkspaceBranchesSnapshot>
     openBranch(workspaceId: string, branch: string): Promise<WorkspaceSelectionResult>
@@ -1807,9 +1808,9 @@ export type AgentMuxDesktopApi = {
     writeClipboardImage(image: BrowserPng): Promise<void>
     openExternal(url: string): Promise<void>
     /** Export a validated, complete theme through the native save dialog; cancellation never writes. */
-    exportTheme(document: ThemeDocument): Promise<ThemeFileExportResult>
+    exportTheme(document: ThemeDocument, window?: WorkbenchWindowDocument): Promise<ThemeFileExportResult>
     /** Native file picker. Returns absolute paths, or null when dismissed. */
-    chooseFiles(input?: { defaultPath?: string }): Promise<string[] | null>
+    chooseFiles(input?: { defaultPath?: string }, document?: WorkbenchWindowDocument): Promise<string[] | null>
     /** Persists pasted image bytes and returns the path an Agent can read them from. */
     savePastedImage(input: { bytes: Uint8Array; extension: string }): Promise<string>
     /**
@@ -1951,7 +1952,7 @@ export type AgentMuxDesktopApi = {
   toolkit: ToolkitDesktopApi
   browser: {
     listRetainedUploads(): Promise<import('./browser-upload.js').BrowserRetainedUploads>
-    discardRetainedUpload(selectionId: string): Promise<boolean>
+    discardRetainedUpload(selectionId: string, document?: WorkbenchWindowDocument): Promise<boolean>
     listTargets(workspaceId?: string): Promise<{ targets: AgentMuxBrowserTarget[]; warning?: string }>
     createExternalPairing(workspaceId: string): Promise<AgentMuxExternalBrowserPairing>
     revealExternalExtension(): Promise<void>

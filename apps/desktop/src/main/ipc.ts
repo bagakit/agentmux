@@ -694,24 +694,21 @@ export async function registerIpc(args: {
   handle('hosts:upgradeInspect', async (input: HostConfig, operationId: string) => await hostUpgrades.inspect(input, operationId))
   // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
   // main-process capability. It returns paths only — reading the file is the Agent's own job.
-  //
-  // 注意这里**没有** event 形参：上面那个 `handle` 包装已经把它剥掉了。此前这里写成
-  // `(_event, input)`，于是 input 恒为 undefined——`defaultPath` 永远送不到，选择器每次都开在
-  // 上一次的位置而不是这个 workspace。tsc 沉默是因为 TArgs 是**从 listener 反推**的：多写一个
-  // 形参只会让它推出「这个频道传两个值」，而不是报错。判据在 ipc-parity.test.ts 里。
-  handleWithEvent('ui:exportTheme', async (event, document: unknown) => {
+  handleWithEvent('ui:exportTheme', async (event, document: unknown, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
     requireTrustedSender('ui:exportTheme', event)
+    const parent = args.workbenchWindows.windowForDocument(scope)
     return await exportThemeFile(document, {
       chooseFile: async filename => {
-        const selection = await dialog.showSaveDialog(args.window, { defaultPath: filename,
+        const selection = await dialog.showSaveDialog(parent, { defaultPath: filename,
           filters: [{ name: 'AgentMux theme', extensions: ['json'] }] })
         return selection.canceled || !selection.filePath ? null : selection.filePath
       },
       writeFile: writeThemeFile
     })
   })
-  handle('ui:chooseFiles', async (input: { defaultPath?: string } | undefined) => {
-    const selection = await dialog.showOpenDialog(args.window, {
+  handleWithEvent('ui:chooseFiles', async (event, input: { defaultPath?: string } | undefined, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
+    requireTrustedSender('ui:chooseFiles', event)
+    const selection = await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), {
       properties: ['openFile', 'multiSelections'],
       ...(input?.defaultPath ? { defaultPath: input.defaultPath } : {})
     })
@@ -722,8 +719,9 @@ export async function registerIpc(args: {
     const item = workspace(config, id)
     return item.hostId === 'local' ? await projectAppearance(item.repoPath ?? item.path) : { kind: item.repoPath ? 'repository' : 'directory', icon: null }
   })
-  handle('workspaces:chooseLocalFolder' , async () => {
-    const selection = await dialog.showOpenDialog(args.window, { properties: ['openDirectory'] })
+  handleWithEvent('workspaces:chooseLocalFolder', async (event, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
+    requireTrustedSender('workspaces:chooseLocalFolder', event)
+    const selection = await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), { properties: ['openDirectory'] })
     const path = selection.filePaths[0]
     if (selection.canceled || !path) return null
     return (await registerWorkspace({ hostId: 'local', path }, configOwner, id => args.runtime.executionHost(id))).workspace
@@ -731,10 +729,11 @@ export async function registerIpc(args: {
   // 重绑一个本地文件夹 Workspace。编排在 `workspace-rebind` 里，所以测试够得着：这个 handler
   // 只剩一个转发表达式，没有可以插早退的语句位置。文本守卫看不见这里的早退——插一句
   // `return null`，重绑对用户永久失效而 2 条断言全绿（见 rebindLocalFolder 的注释）。
-  handle('workspaces:rebindLocalFolder', async (workspaceId: string) => {
+  handleWithEvent('workspaces:rebindLocalFolder', async (event, workspaceId: string, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
+    requireTrustedSender('workspaces:rebindLocalFolder', event)
     const result = await rebindLocalFolder(workspaceId, config, {
       chooseDirectory: async (defaultPath) =>
-        await dialog.showOpenDialog(args.window, { properties: ['openDirectory'], defaultPath }),
+        await dialog.showOpenDialog(args.workbenchWindows.windowForDocument(scope), { properties: ['openDirectory'], defaultPath }),
       save: async (next, expected) => await configOwner.edit(expected, next)
     })
     return result.workspace
@@ -1816,15 +1815,16 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:listRetainedUploads', event)
     return await browserUploads.retained()
   })
-  handleWithEvent('browser:discardRetainedUpload', async (event, selectionId: string) => {
+  handleWithEvent('browser:discardRetainedUpload', async (event, selectionId: string, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
     requireTrustedSender('browser:discardRetainedUpload', event)
+    const parent = args.workbenchWindows.windowForDocument(scope)
     return await browserUploads.confirmDiscardSelection(selectionId, async selection => {
-      if (args.window.isDestroyed()) return false
-      const answer = await dialog.showMessageBox(args.window, { type: 'warning', title: 'Discard selected files?',
+      if (parent.isDestroyed()) return false
+      const answer = await dialog.showMessageBox(parent, { type: 'warning', title: 'Discard selected files?',
         message: '原页面后续上传将不可读，先完成或取消上传',
         detail: `${selection.files.join(', ') || 'Unknown document selection'}\n${selection.byteLength} bytes will be removed. Other pages and selections are kept.`,
         buttons: ['Keep files', 'Discard files'], defaultId: 0, cancelId: 0, noLink: true })
-      return !args.window.isDestroyed() && answer.response === 1
+      return !parent.isDestroyed() && answer.response === 1
     })
   })
   handleWithEvent('browser:listTargets', async (event, workspaceId?: string) => {
