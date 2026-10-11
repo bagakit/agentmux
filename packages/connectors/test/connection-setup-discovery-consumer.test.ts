@@ -51,7 +51,7 @@ it('compiled CLI and SDK discover the original registered implementation with no
   const off = await f.sdk.call('connection.service.configure', { operationId: 'discovery-service-off', expectedRevision: 0, service: { enabled: false } })
   const before = await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId }), originalFacts = facts(f.services.database!)
   const available = vi.spyOn(f.encryption, 'isEncryptionAvailable').mockReturnValue(false), encrypt = vi.spyOn(f.encryption, 'encryptString'), decrypt = vi.spyOn(f.encryption, 'decryptString'), vault = vaultReads()
-  const expected: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication'] } }
+  const expected: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection'] } }
   expect(result(await f.cli(['ls', '--connection', f.config.connectionId]))).toEqual(expected)
   expect(await f.sdk.call('connection.setup.ls', { connectionId: f.config.connectionId })).toEqual(expected)
   expect(await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).toEqual(before)
@@ -89,7 +89,7 @@ it('discovery reads the latest saved revision while preserving original safe ope
   }
   expect(available).toHaveBeenCalledTimes(3)
   const revised = await f.sdk.call('connection.configure', { operationId: 'discovery-revised-save', expectedRevision: 1, connection: { ...f.config, label: 'Revised local label', enabled: false } })
-  const before = facts(f.services.database!), vault = vaultReads(), expectedSupport = { connectionRevision: 2, capabilities: ['management-authentication'] }
+  const before = facts(f.services.database!), vault = vaultReads(), expectedSupport = { connectionRevision: 2, capabilities: ['management-authentication', 'application-inspection'] }
   const first = result(await f.cli(['ls', '--connection', f.config.connectionId, '--limit', '1']))
   expect(first).toEqual({ operations: [originals[2]], next: expect.any(String), support: expectedSupport })
   expect(first.next).not.toBe('')
@@ -136,7 +136,7 @@ async function wireFault(f: Awaited<ReturnType<typeof fixture>>) {
 
 it('real SDK and compiled CLI reject malformed support on the wire without changing the original owner or taking away valid discovery', async () => {
   const f = await fixture(), wire = await wireFault(f), before = facts(f.services.database!)
-  const valid: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication'] } }
+  const valid: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection'] } }
   expect(await wire.sdk.call('connection.setup.ls', { connectionId: f.config.connectionId })).toEqual(valid)
   const faults = [
     (value: Discovery) => ({ ...value, support: { ...value.support, capabilities: ['future-platform-authority'] } }),
