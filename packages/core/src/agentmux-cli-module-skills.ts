@@ -129,7 +129,8 @@ application authority, grants, publication or connection readiness; a paused bot
 Keep the original input after an unknown init; repeat begin only for original lookup or secure
 handoff recovery, never a second native request. Scan material belongs on its exact confirmation
 surface, not ordinary logs. Setup advance uses the exact actionId and expectedRevision from
-continuation.actions with decision.value continue, confirm or renew. One action performs at most
+continuation.actions or applicationInspection.actions with decision.value continue, confirm or
+renew. One action performs at most
 one HTTP request or its original local secure handoff; repeating the same input never replays it.
 Renew explicitly abandons authentication within this intent, retaining old requests and snapshots;
 it never creates an application. Scan, phone confirmation and exact account/enterprise confirmation
@@ -137,12 +138,14 @@ are separate stages. A confirmed management session does not establish app permi
 membership, configuration, publication or chat readiness. App eligibility, configuration and
 publication continuations remain separate. With --application-inspection, setup inspect can
 locally page original safe application observations and select an exact old --inspection-step;
-it never sends HTTP or repairs an ACK. Copy its offered inspect-application or
-recover-application-inspection action and use decision continue. New observation requires current
+it never sends HTTP or repairs an ACK. Copy an offered inspect-application,
+read-application-details, read-event-settings, read-callback-settings, read-bot-settings or
+recover-application-inspection action and use decision continue. The four current data subjects
+retain independent receipts, not a complete configuration snapshot or readiness. New observation requires current
 confirmed stored auth; original actor local recovery needs only the frozen original child/input,
-even after renewal, revision or restart. Old private permission stays withheld and an unrecoverable
+even after renewal, revision or restart. Old private results stay withheld and an unrecoverable
 old result never blocks a separate eligible new observation. Reported basic-info read permission
-is not actual app data, owning tenant or write authority. Configuration and publication remain
+is not actual app data, owning tenant or write authority. Configuration changes and publication remain
 unimplemented; this does not qualify live platform rights or the combined Settings journey.
 
 Configure or bind only within the user's authorized target. Inspect current values before

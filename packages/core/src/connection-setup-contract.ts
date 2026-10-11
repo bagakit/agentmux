@@ -16,14 +16,28 @@ export type ConnectionSetupReason = 'adapter-unavailable' | 'secure-storage-unav
 export type ConnectionSetupAuthenticationStage = 'waiting' | 'scanned' | 'handoff' | 'account' | 'confirmed' | 'expired' | 'unknown'
 export type ConnectionSetupAccount = { userId: string; tenantId: string; userName?: string; tenantName?: string }
 export type ConnectionSetupAuthenticationAction = { actionId: string; expectedRevision: number; kind: 'continue' | 'confirm-account' | 'renew' }
-export type ConnectionSetupInspectionAction = { actionId: string; expectedRevision: number; kind: 'inspect-application' | 'recover-application-inspection' }
+/** Read subjects are independent observations, never a combined configuration snapshot. */
+export const CONNECTION_SETUP_READ_ACTIONS = {
+  'application-details': 'read-application-details',
+  'event-settings': 'read-event-settings',
+  'callback-settings': 'read-callback-settings',
+  'bot-settings': 'read-bot-settings'
+} as const
+export type ConnectionSetupReadSubject = keyof typeof CONNECTION_SETUP_READ_ACTIONS
+export type ConnectionSetupReadSummary =
+  | { subject: 'application-details'; name: string | null; description: string | null }
+  | { subject: 'event-settings'; transport: 'persistent-connection' | 'webhook' | 'function' | 'unknown' }
+  | { subject: 'callback-settings' | 'bot-settings' }
+export type ConnectionSetupInspectionAction = { actionId: string; expectedRevision: number; kind: 'inspect-application' | 'recover-application-inspection' | typeof CONNECTION_SETUP_READ_ACTIONS[ConnectionSetupReadSubject] }
 export type ConnectionSetupAction = ConnectionSetupAuthenticationAction | ConnectionSetupInspectionAction
 /** Effect selection belongs to the offered kind, never to the shared decision string. */
 export function connectionSetupDecisionForAction(action: ConnectionSetupAction): ConnectionSetupAdvance['decision']['value'] {
-  const decisions = { continue: 'continue', 'confirm-account': 'confirm', renew: 'renew', 'inspect-application': 'continue', 'recover-application-inspection': 'continue' } as const satisfies Record<ConnectionSetupAction['kind'], ConnectionSetupAdvance['decision']['value']>
+  const decisions = { continue: 'continue', 'confirm-account': 'confirm', renew: 'renew', 'inspect-application': 'continue', 'recover-application-inspection': 'continue', 'read-application-details': 'continue', 'read-event-settings': 'continue', 'read-callback-settings': 'continue', 'read-bot-settings': 'continue' } as const satisfies Record<ConnectionSetupAction['kind'], ConnectionSetupAdvance['decision']['value']>
   return decisions[action.kind]
 }
 export type ConnectionSetupInspectionReceipt = {
+  /** Absence is the permission observation; data subjects carry their own exact identity. */
+  subject?: ConnectionSetupReadSubject
   stepId: string
   input: ConnectionSetupAdvance
   request: 'dispatching' | 'confirmed' | 'unknown'
@@ -55,7 +69,7 @@ export type ConnectionSetupView = {
   /** Original actor only. Account identity is never ordinary discovery/history data. */
   continuation?: { stage: ConnectionSetupAuthenticationStage; account: ConnectionSetupAccount | null; actions: ConnectionSetupAuthenticationAction[] }
   /** Original actor only; stale children retain safe receipts, never current permission. */
-  applicationInspection?: { observations: ConnectionSetupInspectionReceipt[]; next: string | null; selected: ConnectionSetupInspectionReceipt | null; applicationInfoReadPermission: 'confirmed' | 'unknown'; actions: ConnectionSetupInspectionAction[] }
+  applicationInspection?: { observations: ConnectionSetupInspectionReceipt[]; next: string | null; selected: ConnectionSetupInspectionReceipt | null; applicationInfoReadPermission: 'confirmed' | 'unknown'; readResult?: ConnectionSetupReadSummary; actions: ConnectionSetupInspectionAction[] }
   /** Exact admitted advance result, distinct from today's current continuation. */
   receipt?: ConnectionSetupStepReceipt
 }

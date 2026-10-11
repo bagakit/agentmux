@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { CONNECTION_SETUP_READ_ACTIONS, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary } from './connection-setup-contract.js'
 import type { ConnectionSetupBegin, ConnectionSetupChallenge, ConnectionSetupInspectionReceipt, ConnectionSetupMethod, ConnectionSetupOperation, ConnectionSetupParamsMap, ConnectionSetupResultMap, ConnectionSetupView } from './connection-setup-contract.js'
 
 export const CONNECTION_SETUP_RPC_METHODS = { 'connection.setup.begin': 'long', 'connection.setup.advance': 'long', 'connection.setup.inspect': 'long', 'connection.setup.ls': 'long' } as const
@@ -57,9 +58,29 @@ export function parseConnectionSetupParams<M extends ConnectionSetupMethod>(meth
   }
   return result as ConnectionSetupParamsMap[M]
 }
+const readSubjects = Object.keys(CONNECTION_SETUP_READ_ACTIONS) as ConnectionSetupReadSubject[]
+export function parseConnectionSetupReadSummary(value: unknown): ConnectionSetupReadSummary {
+  const raw = rpcRecord(value), subject = choice(raw.subject, readSubjects)
+  if (subject === 'application-details') {
+    const p = object(value, ['subject', 'name', 'description'])
+    const display = (v: unknown, max: number): string | null => {
+      if (v === null) return null
+      if (typeof v !== 'string' || v.length > max || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(v)) fail()
+      return v as string
+    }
+    return { subject, name: display(p.name, 512), description: display(p.description, 4096) }
+  }
+  if (subject === 'event-settings') {
+    const p = object(value, ['subject', 'transport'])
+    return { subject, transport: choice(p.transport, ['persistent-connection', 'webhook', 'function', 'unknown']) }
+  }
+  object(value, ['subject'])
+  return { subject }
+}
 export function parseConnectionSetupInspectionReceipt(value: unknown): ConnectionSetupInspectionReceipt {
-  const p = object(value, ['stepId', 'input', 'request', 'secureStorage'])
+  const p = object(value, ['stepId', 'input', 'request', 'secureStorage', 'subject'])
   const result: ConnectionSetupInspectionReceipt = { stepId: id(p.stepId), input: parseConnectionSetupParams('connection.setup.advance', p.input), request: requestState(p.request), secureStorage: choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown']) }
+  if (p.subject !== undefined) result.subject = choice(p.subject, readSubjects)
   if (result.input.decision.value !== 'continue' || result.secureStorage === 'stored' && result.request !== 'confirmed') fail()
   return result
 }
@@ -108,9 +129,9 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   }
   if (p.applicationInspection !== undefined) {
     if (!operation || method === 'connection.setup.begin' || method === 'connection.setup.inspect' && !(input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationInspection) fail()
-    const s = object(p.applicationInspection, ['observations', 'next', 'selected', 'applicationInfoReadPermission', 'actions'])
+    const s = object(p.applicationInspection, ['observations', 'next', 'selected', 'applicationInfoReadPermission', 'readResult', 'actions'])
     const limit = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationInspection?.limit ?? 25 : 25
-    if (!Array.isArray(s.observations) || s.observations.length > limit || !Array.isArray(s.actions) || s.actions.length > 2) fail()
+    if (!Array.isArray(s.observations) || s.observations.length > limit || !Array.isArray(s.actions) || s.actions.length > 6) fail()
     const observations = (s.observations as unknown[]).map(parseConnectionSetupInspectionReceipt), selected = s.selected === null ? null : parseConnectionSetupInspectionReceipt(s.selected)
     if (new Set(observations.map(o => o.stepId)).size !== observations.length || new Set(observations.map(o => o.input.decision.actionId)).size !== observations.length) fail()
     if ([...observations, ...(selected ? [selected] : [])].some(o => o.input.operationId !== operation!.operationId)) fail()
@@ -119,12 +140,17 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     if (method === 'connection.setup.advance' && (!result.receipt || !selected || selected.stepId !== result.receipt.stepId)) fail()
     const copy = selected && observations.find(o => o.stepId === selected.stepId)
     if (copy && JSON.stringify(copy) !== JSON.stringify(selected)) fail()
-    const actions = (s.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['inspect-application', 'recover-application-inspection'] as const) } })
+    const actions = (s.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['inspect-application', 'recover-application-inspection', ...Object.values(CONNECTION_SETUP_READ_ACTIONS)] as const) } })
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
     if (actions.some(a => a.kind === 'recover-application-inspection') && (!selected || selected.request !== 'confirmed' || selected.secureStorage === 'stored')) fail()
     const permission = choice(s.applicationInfoReadPermission, ['confirmed', 'unknown'] as const)
-    if (permission === 'confirmed' && (!selected || selected.request !== 'confirmed' || selected.secureStorage !== 'stored' || result.reason === 'connection-revised' || operation!.authentication?.stage !== 'confirmed' || operation!.authentication.request !== 'confirmed' || operation!.authentication.secureStorage !== 'stored')) fail()
+    if (permission === 'confirmed' && (!selected || selected.subject !== undefined || selected.request !== 'confirmed' || selected.secureStorage !== 'stored' || result.reason === 'connection-revised' || operation!.authentication?.stage !== 'confirmed' || operation!.authentication.request !== 'confirmed' || operation!.authentication.secureStorage !== 'stored')) fail()
     result.applicationInspection = { observations, selected, next: s.next === null ? null : text(s.next), applicationInfoReadPermission: permission, actions }
+    if (s.readResult !== undefined) {
+      const readResult = parseConnectionSetupReadSummary(s.readResult)
+      if (!selected || selected.subject !== readResult.subject || selected.request !== 'confirmed' || selected.secureStorage !== 'stored' || result.reason === 'connection-revised' || operation!.authentication?.stage !== 'confirmed' || operation!.authentication.request !== 'confirmed' || operation!.authentication.secureStorage !== 'stored') fail()
+      result.applicationInspection.readResult = readResult
+    }
   }
   return result as ConnectionSetupResultMap[M]
 }

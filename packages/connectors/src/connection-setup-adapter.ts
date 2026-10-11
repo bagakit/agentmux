@@ -1,8 +1,9 @@
-import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary } from '@agentmux/core/connections'
 
 export type SetupAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; application: Readonly<ConnectionApplication> }>
 export type SetupChallengeReceipt = { kind: 'challenge'; challenge: ConnectionSetupChallenge; privateState: string } | { kind: 'unknown' }
 export type SetupAuthenticationReceipt = { kind: 'progress'; stage: ConnectionSetupAuthenticationStage; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; privateState: string } | { kind: 'unknown' }
+export type SetupReadReceipt = { kind: 'observed'; readResult: ConnectionSetupReadSummary; privateState: string } | { kind: 'unknown' }
 export type SetupInspectionReceipt = { kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }
 export interface ConnectionSetupAdapter {
   /** Local implementation availability only, never exact-application management eligibility. */
@@ -15,5 +16,7 @@ export interface ConnectionSetupAdapter {
   readonly applicationInspection?: {
     readonly domains: readonly string[]
     inspect(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupInspectionReceipt>
+    /** One frozen current-data subject, distinct from reported read permission. */
+    read?(input: SetupAdapterInput & { privateState: string; subject: ConnectionSetupReadSubject }, signal?: AbortSignal): Promise<SetupReadReceipt>
   }
 }
