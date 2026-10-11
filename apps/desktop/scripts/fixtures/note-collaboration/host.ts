@@ -16,7 +16,7 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import type { AppConfig } from '../../../src/shared/contracts'
 
 /** Private fixture transport only. These are the original product owners, not a second save model. */
-export async function start(root: string, notify: (event: unknown) => void) {
+export async function start(root: string, notify: (event: unknown) => void, options: { notebook?: boolean } = {}) {
   if (!root.startsWith('/private/tmp/amux-note-t5-') && !root.startsWith('/tmp/amux-note-t5-')) throw Error('An explicit private fixture root is required')
   const workspace = { id: 'fixture-workspace', hostId: 'local', path: join(root, 'workspace'), name: 'Private knowledge', kind: 'folder' as const }
   const path = 'collaboration.note.md', noteId = 'fixture-note', tabId = 'fixture-tab', regionId = 'fixture-file', groupId = 'fixture-group', zoneId = 'fixture-zone', spaceId = 'fixture-space'
@@ -24,7 +24,7 @@ export async function start(root: string, notify: (event: unknown) => void) {
   let config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }], executors: {}, workspaces: [workspace],
     appearance: { terminalTheme: 'graphite', appAppearance: 'dark', spaceObjectIcons: {} }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   const spatial = new AgentMuxSpatialStateStore(join(root, 'state/spatial.json'))
-  if (!await spatial.read()) {
+  if (!options.notebook && !await spatial.read()) {
     let tab = { ...createWorkbenchTab(tabId, { kind: 'file', workspaceId: workspace.id, path, regionId }), space: { spaceId, zoneId } }
     tab = { ...addWorkbenchRegion(tab, regionId, 'right', { kind: 'launcher', workspaceId: workspace.id, regionId: 'fixture-neighbor' }), space: tab.space }
     tab.layout.activeRegionId = regionId
@@ -39,42 +39,56 @@ export async function start(root: string, notify: (event: unknown) => void) {
   const metadata = new AgentMuxNotebookStore(undefined, storage), files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }) as never)
   const writer = new NoteFileWriter(files, undefined, metadata), actor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'local') }
   const write = (input: Parameters<NoteFileWriter['write']>[1]) => notes.write(workspace, input, owner => writer.write(owner, input, { actor }))
-  const initial = await writer.read(workspace, path)
-  if (initial.status === 'deleted' && !(await metadata.read()).pages[noteId]) {
+  const initial = options.notebook ? null : await writer.read(workspace, path)
+  if (initial?.status === 'deleted' && !(await metadata.read()).pages[noteId]) {
     const document = newNoteDocument('Original shared paragraph', noteId, 'original-block', 'Shared knowledge')
     document.content.content!.push({ type: 'paragraph', attrs: { blockId: 'independent-block' }, content: [{ type: 'text', text: 'Independent original paragraph' }] })
     const created = await write({ path, expectedRevision: null, content: serializeNoteDocument(document) })
     if (created.status !== 'written') throw Error('The original private fixture Note could not be created')
     const state = await metadata.read()
     await metadata.apply({ expectedRevision: state.revision, operationId: 'register-fixture-note', change: { kind: 'register', noteId, title: 'Shared knowledge', resource: { hostId: 'local', workspaceId: workspace.id, workspacePath: workspace.path, path } } }, actor)
-  } else if (initial.status !== 'read') throw Error('The existing fixture Note is unreadable; it was not reseeded: ' + JSON.stringify(initial))
+  } else if (initial && initial.status !== 'read') throw Error('The existing fixture Note is unreadable; it was not reseeded: ' + JSON.stringify(initial))
   const owner = new FileReadOwner({ workspace: id => config.workspaces.find(value => value.id === id), catalog: async () => spatialCatalog((await spatial.read())!.graph),
     files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer),
       write: (target, input, context) => notes.write(target, input, actual => writer.write(actual, input, context)),
       restore: (target, input, context) => notes.write(target, input, actual => writer.restore(actual, input, context)),
       undo: (target, input, context) => notes.write(target, input, actual => writer.undo(actual, input, context)) } })
-  const observation = new NotebookObservationOwner({ workspace: id => config.workspaces.find(value => value.id === id), files })
+  const observation = new NotebookObservationOwner({ workspace: id => config.workspaces.find(value => value.id === id), files, metadata })
   const socketPath = join(root, 'control.sock'), server = new AgentMuxControlServer({ socketPath, files: owner, notebookStore: metadata, notebookObservation: observation, coreClients: () => [] })
   await server.start()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }), watches = new Map<string, () => Promise<void>>()
   let invalidations = 0, lost = false, unavailable = false
   const pausePath = join(root, 'state/observation-paused')
   let observationPaused = await readFile(pausePath, 'utf8').then(() => true, error => { if (error.code === 'ENOENT') return false; throw error })
-  const calls: string[] = []
+  const calls: string[] = [], requests: { method: string; args: unknown[] }[] = []
+  const originalWorkspace = (id: string) => {
+    const target = config.workspaces.find(value => value.id === id)
+    if (!target) throw Error('The exact private Workspace is unavailable: ' + id)
+    return target
+  }
   async function invoke(method: string, args: any[]) {
     calls.push(method)
+    if (options.notebook) requests.push({ method, args: structuredClone(args) })
     switch (method) {
-      case 'bootstrap': return { config, workspace, path, noteId, tabId, regionId, groupId, zoneId, spaceId, socketPath, actor, pid: process.pid }
+      case 'bootstrap': return { config, workspace, path, noteId, tabId, regionId, groupId, zoneId, spaceId, socketPath, actor, pid: process.pid, ...(options.notebook ? { mode: 'notebook' } : {}) }
       case 'config.get': return config
       case 'spatial.read': return spatial.read()
       case 'spatial.commit': return spatial.commit(args[0])
       case 'spatial.retainLabels': return spatial.retainDisplayLabels(args[0])
       case 'notes.inspect': return notes.inspect()
       case 'notebooks.read': return metadata.read()
-      case 'read': return observationPaused ? { status: 'error', code: 'PRIVATE_OBSERVATION_PAUSED', message: 'The private fixture retained the original operation while its read transport is unavailable.' } : writer.read(workspace, args[1])
-      case 'list': return files.listFiles(workspace, args[1], args[2])
+      case 'notebooks.apply': {
+        const state = await metadata.apply(args[0], actor)
+        notify({ channel: 'notebook', value: { state } }); return state
+      }
+      case 'notebooks.graph': { const catalog = await metadata.read(); return { catalog, graph: await observation.graph(catalog, args[0]) } }
+      case 'notebooks.content': return observation.content(await metadata.read(), args[0])
+      case 'notebooks.resolve': return observation.resolve(await metadata.read(), args[0])
+      case 'read': return observationPaused ? { status: 'error', code: 'PRIVATE_OBSERVATION_PAUSED', message: 'The private fixture retained the original operation while its read transport is unavailable.' } : writer.read(options.notebook ? originalWorkspace(args[0]) : workspace, args[1])
+      case 'readDirectory': return files.readDirectory(originalWorkspace(args[0]), args[1])
+      case 'list': return files.listFiles(options.notebook ? originalWorkspace(args[0]) : workspace, args[1], args[2])
       case 'write': {
-        const result = await write(args[1])
+        const result = options.notebook ? await notes.write(originalWorkspace(args[0]), args[1], target => writer.write(target, args[1], { actor })) : await write(args[1])
         if ((lost || unavailable) && result.status === 'written') {
           const dropOutcome = lost; lost = unavailable = false; observationPaused = true
           await writeFile(pausePath, 'Original operation observation unavailable')
@@ -85,13 +99,18 @@ export async function start(root: string, notify: (event: unknown) => void) {
         return result
       }
       case 'rpc': return observationPaused && args[0] === 'file.history' ? { resource: args[1].expectedResource, result: { status: 'unknown', code: 'FILE_HISTORY_UNCONFIRMED', message: 'The original private history transport is unavailable; its records remain in SQLite.' } } : rpc.call(args[0], args[1])
-      case 'observe': { const source = args[1]; if (!watches.has(source)) watches.set(source, await files.observe(workspace, source, () => { invalidations++; notify({ channel: 'file', value: { workspaceId: workspace.id, path: source } }) })); return null }
-      case 'unobserve': { await watches.get(args[1])?.(); watches.delete(args[1]); return null }
+      case 'observe': { const source = args[1], target = options.notebook ? originalWorkspace(args[0]) : workspace, watchKey = options.notebook ? JSON.stringify([target.id, source]) : source; if (!watches.has(watchKey)) watches.set(watchKey, await files.observe(target, source, () => { invalidations++; notify({ channel: 'file', value: { workspaceId: target.id, path: source } }) })); return null }
+      case 'unobserve': { const key = options.notebook ? JSON.stringify([args[0], args[1]]) : args[1]; await watches.get(key)?.(); watches.delete(key); return null }
       case 'storage.flush': await writeFile(join(root, 'state/workbench-observed.json'), args[0] ?? 'null'); return null
       case 'loseNextReply': lost = true; return null
       case 'omitNextCanonical': unavailable = true; return null
       case 'resumeObservation': observationPaused = false; await rm(pausePath, { force: true }); return null
-      case 'facts': return { pid: process.pid, invalidations, observationPaused, calls, catalog: await metadata.read(), disk: await writer.read(workspace, path), history: await metadata.readHistory({ noteId, resource: { hostId: 'local', workspaceId: workspace.id, workspacePath: workspace.path, path } }), spatial: await spatial.read(), workbench: await readFile(join(root, 'state/workbench-observed.json'), 'utf8').catch(() => null) }
+      case 'facts': {
+        const catalog = await metadata.read(), page = options.notebook ? catalog.pages[args[0]] : undefined
+        return { pid: process.pid, invalidations, observationPaused, calls, ...(options.notebook ? { requests } : {}), catalog,
+          disk: page ? await writer.read(originalWorkspace(page.resource.workspaceId), page.resource.path) : options.notebook ? null : await writer.read(workspace, path),
+          history: page ? await metadata.readHistory({ noteId: page.noteId, resource: page.resource }) : options.notebook ? null : await metadata.readHistory({ noteId, resource: { hostId: 'local', workspaceId: workspace.id, workspacePath: workspace.path, path } }), spatial: await spatial.read(), workbench: await readFile(join(root, 'state/workbench-observed.json'), 'utf8').catch(() => null) }
+      }
       default: throw Error('Unimplemented private fixture transport: ' + method)
     }
   }

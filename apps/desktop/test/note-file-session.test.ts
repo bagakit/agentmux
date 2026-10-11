@@ -165,12 +165,16 @@ it('reconciles a written original history event before merging a later observed 
   expect(f.current().noteEditing?.receipt?.noteHistory).toMatchObject({ eventId: operation.operationId, replayed: true })
 })
 
-it('restores the saved version through the original queue while preserving the current and later unsaved draft', async () => {
+it.each([true, false])('restores the saved version through the original queue while preserving current and later unsaved drafts (display binding: %s)', async bound => {
   const f = fixture(), saved = body(undefined, 'Restored last')
+  if (!bound) useAppStore.setState(state => ({ spaceZoneBindings: { ...state.spaceZoneBindings,
+    [f.tab.space.zoneId]: { ...state.spaceZoneBindings[f.tab.space.zoneId]!, relations: { [f.tab.space.spaceId]: false } } } }))
   const selected = await useAppStore.getState().inspectNoteHistory(f.tab.id, 'note-region', 'session-note')
+  expect(selected.target.spaceId).toBe(bound ? f.tab.space.spaceId : undefined)
   f.edit(body('Unsaved human'))
   let release!: (value: unknown) => void
   const restore = vi.spyOn(api.files, 'restorePublic').mockImplementation(async params => {
+    expect(params.spaceId).toBe(bound ? f.tab.space.spaceId : undefined)
     expect(params.expectedRevision).toBe(noteHistoryRevision(body()))
     return await new Promise(resolve => { release = resolve }) as never
   })
