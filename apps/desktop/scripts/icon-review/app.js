@@ -438,7 +438,7 @@ async function init() {
     $('#search-icon').innerHTML=icon('search',16);
     $('#snapshot-label').textContent=data.head.slice(0,8)+' · '+data.generatedAt.slice(0,10);
     $('#source-mode').textContent=data.sourceMode==='live'?'当前源码 · 自动刷新':'源码快照';
-    $('#catalog-version').textContent='共享语义图标 · v2';
+    $('#catalog-version').textContent=data.sourceMode==='live'?'当前源码 · 自动刷新':'发布快照';
     applyPreview();renderSamples();attachEvents();renderSaveState();renderCategories();renderInventory();renderInspector();
     window.iconReview={ready:true,buildPacket,sourceSnapshot:data.snapshot,exportTheme:()=>ThemeBridge.serializeThemeFile(currentTheme()),parseThemeFile:ThemeBridge.parseThemeFile};
   }catch(error){$('#inventory-content').textContent=error.message;$('#save-state').textContent='目录读取失败';$('#save-state').classList.add('error');}
