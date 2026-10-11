@@ -14,8 +14,9 @@ export interface ConnectionIngressTransport {
     receive(input: ConnectionTransportEvent, acknowledge: () => void | Promise<void>): ReturnType<DurableIngressHost['receive']>
   }): Promise<ConnectionIngressReceiver>
 }
-type Lane = { record: ConnectionRecord; abort: AbortController; receiver?: ConnectionIngressReceiver; opening: boolean; failed?: 'credential-missing' | 'check-failed'; after?: string }
+type Lane = { record: ConnectionRecord; abort: AbortController; receiver?: ConnectionIngressReceiver; opening: boolean; failed?: 'credential-missing' | 'check-failed'; recoveryFailed?: boolean; dispatchFailures: Set<string>; rechecks?: Iterator<string>; after?: string }
 type ReceiverObservation = Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'>
+const RECOVERY_BATCH = 25
 
 /** Own only registered transport lifetimes. Durable intake and original Core queues retain their facts. */
 export class ConnectionReceivers {
@@ -51,19 +52,30 @@ export class ConnectionReceivers {
         if (!record.config.enabled || !adapter?.ingress || !adapter.transport) continue
         let lane = this.lanes.get(record.config.connectionId)
         if (!lane) {
-          lane = { record, abort: new AbortController(), opening: false }
+          lane = { record, abort: new AbortController(), opening: false, dispatchFailures: new Set() }
           this.lanes.set(record.config.connectionId, lane)
         }
         if (!lane.receiver && !lane.opening) void this.start(lane, adapter.transport)
-        // One bounded page per connection and recovery tick. Unknown qualification cannot starve later intake.
+        // Bound intake and failed-observation work separately. Neither cursor is an admission limit.
+        const retry = new Set<string>()
         try {
-          const page = this.ingress.received(record.config.connectionId, lane.after)
+          const page = this.ingress.received(record.config.connectionId, lane.after, RECOVERY_BATCH)
           if (page.nextAfterIngressId) lane.after = page.nextAfterIngressId
           else delete lane.after
-          for (const id of page.ingressIds) this.defer(lane, id)
-        } catch { lane.failed = 'check-failed' }
+          delete lane.recoveryFailed
+          for (const id of page.ingressIds) retry.add(id)
+        } catch { lane.recoveryFailed = true }
+        // A previously failed original may have been claimed elsewhere. Recheck it without
+        // replaying a claimed input; keep an iterator so earlier failures cannot starve later ones.
+        const rechecks = lane.rechecks ??= lane.dispatchFailures.values()
+        for (let n = 0; n < RECOVERY_BATCH; n++) {
+          const next = rechecks.next()
+          if (next.done) { delete lane.rechecks; break }
+          retry.add(next.value)
+        }
+        for (const id of retry) this.defer(lane, id)
       }
-    }, () => { for (const lane of this.lanes.values()) lane.failed = 'check-failed' }).finally(() => {
+    }, () => { for (const lane of this.lanes.values()) lane.recoveryFailed = true }).finally(() => {
       this.reading = false; if (this.dirty && !this.closed) this.refresh()
     })
   }
@@ -103,17 +115,16 @@ export class ConnectionReceivers {
   private defer(lane: Lane, ingressId: string): void {
     setImmediate(() => {
       if (this.closed || lane.abort.signal.aborted) return
-      void this.ingress.dispatch(ingressId).then(() => { delete lane.failed }, () => { if (!lane.abort.signal.aborted) lane.failed = 'check-failed' })
+      void this.ingress.dispatch(ingressId).then(() => { lane.dispatchFailures.delete(ingressId) }, () => { if (!lane.abort.signal.aborted) lane.dispatchFailures.add(ingressId) })
     }).unref()
   }
   observation(connectionId: string, revision: number): ReceiverObservation | null {
     const lane = this.lanes.get(connectionId)
     if (!lane || lane.record.revision !== revision) return null
-    if (lane.failed) return { authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unavailable', reason: lane.failed }, intake: { state: 'unknown', reason: 'not-started' } }
-    if (!lane.receiver) return { authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' } }
+    if (!lane.receiver) return { authentication: { state: 'unknown', reason: 'not-tested' }, transport: lane.failed ? { state: 'unavailable', reason: lane.failed } : { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' } }
     try {
       const { authentication, transport, intake } = parseConnectionObservation(lane.receiver.observation())
-      return { authentication, transport, intake }
+      return { authentication, transport, intake: lane.recoveryFailed || lane.dispatchFailures.size ? { state: 'unknown', reason: 'check-failed' } : intake }
     } catch { return { authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unknown', reason: 'check-failed' }, intake: { state: 'unknown', reason: 'not-started' } } }
   }
   private release(lane: Lane): void {
