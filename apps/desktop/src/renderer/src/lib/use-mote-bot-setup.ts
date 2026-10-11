@@ -80,8 +80,9 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     [selectedId, setSelected] = useState<string | null>(null)
   const [profile, setProfile] = useState<SavedMoteBotProfile | null>(null),
     [capabilities, setCapabilities] = useState<ConnectionEnrollmentCapability[]>([])
-  const [issue, setIssue] = useState(''),
-    [busy, setBusy] = useState<string[]>([]),
+  const [message, setMessage] = useState<{ kind: 'issue' | 'notice'; text: string }>({ kind: 'issue', text: '' })
+  const setIssue = (text: string) => setMessage({ kind: 'issue', text })
+  const [busy, setBusy] = useState<string[]>([]),
     [next, setNext] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [enrollmentView, setEnrollmentView] = useState<{
@@ -224,7 +225,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
             setEnrollmentView({ parentId: id, value: view })
         }
         if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
-          setIssue('The original result is available. Any unfinished step stays with this setup.')
+          setMessage({ kind: 'notice', text: '' })
       }
     } catch (error) {
       if (!dispatched) {
@@ -299,7 +300,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     const token = lifetime.current,
       order = occurrence(id)
     pick(id)
-    setIssue(advance ? 'Checking this setup…' : 'Reading the original result…')
+    setMessage({ kind: 'notice', text: advance ? 'Checking this setup…' : 'Reading the original result…' })
     if (advance) pending(id, true)
     try {
       const child = enrollmentView?.parentId === id ? enrollmentView.value.operation : null
@@ -328,10 +329,9 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
             setEnrollmentView({ parentId: id, value: view })
         }
         if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
-          setIssue(
-            operation
-              ? 'The latest saved result is available. Any unfinished step stays with this setup.'
-              : 'No recorded result was found. Keep the original request; this does not confirm that nothing happened.'
+          setMessage(operation
+            ? { kind: 'notice', text: 'Saved progress checked.' }
+            : { kind: 'issue', text: 'No recorded result was found. Keep the original request; this does not confirm that nothing happened.' }
           )
       }
     } catch (error) {
@@ -349,7 +349,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     selectedId,
     enrollmentView: enrollmentView?.parentId === selectedId ? enrollmentView.value : null,
     operation: operations.find((item) => item.operationId === selectedId) ?? null,
-    issue,
+    issue: message.text,
+    issueKind: message.kind,
     busy,
     loading,
     next,

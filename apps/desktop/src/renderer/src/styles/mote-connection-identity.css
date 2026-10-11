@@ -40,3 +40,7 @@
 .mote-bot-history button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .mote-bot-existing[open] { display: grid; gap: var(--sp-3); }
 @media (max-width: 380px) { .mote-bot-stages > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); } }
+
+.mote-bot-setup > .small-button { justify-self: start; }
+.mote-bot-auth-actions { align-items: center; }
+.mote-bot-feedback { margin: 0; }
