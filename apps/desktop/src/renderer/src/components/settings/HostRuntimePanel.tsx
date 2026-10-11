@@ -8,6 +8,7 @@ import './host-runtime-panel.css'
 
 const RefreshIcon = semanticIconComponent('action.refresh')
 const InfoIcon = semanticIconComponent('status.info')
+const NATIVE_CAPABILITIES = [['orderedOutputBytes', 'Ordered output'], ['boundedReplay', 'Bounded replay'], ['recoverableInput', 'Recoverable input'], ['resize', 'Resize'], ['interrupt', 'Interrupt'], ['completeStop', 'Complete stop']] as const
 type State = { target: string; current?: HostRuntimeObservation; confirmed?: HostRuntimeObservation; error?: string | undefined; busy?: boolean | undefined }
 function route({ label: _label, ...host }: HostConfig) { return host }
 function keep<T>(current: HostRuntimeSource<T>, previous?: HostRuntimeSource<T>): HostRuntimeSource<T> {
@@ -71,6 +72,7 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
   const busy = active && visible && saved && state.target === target && state.busy === true
   const failed = state.target === target ? state.error : undefined
   const partial = current && [current.owner, current.nativeIdentity, current.diagnostics, current.resources].some(source => source.state === 'unavailable')
+  const diagnosticEvidence = diagnostic ? !busy && !failed && current?.diagnostics.state === 'available' ? 'current' : 'retained' : 'unconfirmed'
   return <section className="host-runtime" aria-label="Runtime observation" data-host-runtime={host.id}>
     <header className="host-runtime__header"><div><strong>Runtime</strong><span>{!saved ? 'Save this connection to observe its Runtime.' :
       !current ? busy ? 'Reading this environment…' : 'No confirmed observation yet' :
@@ -101,8 +103,19 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
           <div><dt>Native process</dt><dd>{native?.processId ?? 'Not provided by Runtime'}</dd></div>
           <div><dt>Bundled Native</dt><dd>{diagnostic ? `${diagnostic.ctxmux.bundled.version} · ${diagnostic.ctxmux.bundled.artifactPlatform}` : 'Not observed'}</dd></div>
         </dl>
-        <p className="host-runtime__capabilities">{diagnostic ? ([['orderedOutputBytes', 'Ordered output'], ['boundedReplay', 'Bounded replay'], ['recoverableInput', 'Recoverable input'], ['resize', 'Resize'], ['interrupt', 'Interrupt'], ['completeStop', 'Complete stop']] as const)
-          .filter(([capability]) => diagnostic.ctxmux.capabilities[capability] === true).map(([, label]) => label).join(' · ') || 'No capabilities confirmed' : 'Capabilities not observed'}</p>
+        <section className="host-runtime__capabilities" aria-label="Native capability declarations" data-diagnostic-evidence={diagnosticEvidence}>
+          <header><strong>Native capabilities</strong><span>Source · Native diagnostics</span></header>
+          <p className="host-runtime__sample">{retained?.diagnostics.state === 'available' ? <>
+            {diagnosticEvidence === 'current' ? 'Current observation' : 'Last confirmed'} · read <time dateTime={new Date(retained.diagnostics.readAt).toISOString()}>{time(retained.diagnostics.readAt)}</time>
+          </> : 'Capabilities not observed'}</p>
+          <ul>{NATIVE_CAPABILITIES.map(([capability, label]) => {
+            const declared = diagnostic?.ctxmux.capabilities[capability] === true
+            return <li key={capability} data-native-capability={capability}><span>{label}</span><strong data-declaration={declared ? 'confirmed' : 'unconfirmed'}>
+              {declared ? diagnosticEvidence === 'retained' ? 'Last confirmed' : 'Declared' : 'Unconfirmed'}
+            </strong></li>
+          })}</ul>
+          <p className="host-runtime__sample">Runtime declarations. Access to an individual Run is checked separately.</p>
+        </section>
         {current ? <p className="host-runtime__sample">This read {time(current.requestedAt)}–{time(current.completedAt)}. Resource sample time comes from the original Runtime; other times describe this service’s read.</p> : null}
         <SourceIssue source={current?.nativeIdentity} retained={retained?.nativeIdentity} />
       </details>
