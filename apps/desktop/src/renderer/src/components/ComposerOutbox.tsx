@@ -28,6 +28,8 @@ const ReadIcon = semanticIconComponent('object.history')
 
 export type ComposerQueuedMessage = {
   id: string
+  /** Exact original intent scope, never inferred from its body or the current Run. */
+  inputOrigin?: { hostId: string; key: import('@agentmux/core/prompt-condition').AgentPromptInputKey }
   text: string
   enqueuedAt?: number
   status: 'queued' | 'restoring' | 'deferred' | 'failed'

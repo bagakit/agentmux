@@ -97,6 +97,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'search:query': 'original global search query',
   'search:cancel': 'global search read cancellation',
   'sessions:readHistory': 'input history query',
+  'sessions:inputMailbox': 'original input mailbox reading',
   'sessions:cancelHistoryRead': 'history read cancellation',
   'sessions:releaseHistoryObservation': 'history observation',
   'continuousProgress:list': 'continuous progress',
