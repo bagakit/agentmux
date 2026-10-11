@@ -3,7 +3,7 @@ import { parse as parseHtml, type DefaultTreeAdapterTypes } from 'parse5'
 import { parse as parseScript, type Node, type Program } from 'acorn'
 import { Cookie, CookieJar, type SerializedCookieJar } from 'tough-cookie'
 import type { ConnectionSetupAccount } from '@agentmux/core/connections'
-import type { SetupAdapterInput, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt } from '../../connection-setup-adapter.js'
+import type { SetupAdapterInput, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt, SetupConfigurationReceipt } from '../../connection-setup-adapter.js'
 
 export const FEISHU_QR_HEADERS = {
   'x-app-id': '12', 'x-api-version': '1.0.28', accept: 'application/json', 'content-type': 'application/json',
@@ -198,7 +198,7 @@ export async function advanceFeishuSession(input: SetupAdapterInput & { privateS
 }
 
 /** The exact sourced console origin is qualified separately from authentication aliases. */
-async function applicationData(input: SetupAdapterInput & { privateState: string }, path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+async function applicationEnvelope(input: SetupAdapterInput & { privateState: string; assertCurrent?: () => void }, path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
   if (input.application.domain !== 'open.feishu.cn') return null
   try {
     const { state, cookies } = session(input)
@@ -207,11 +207,30 @@ async function applicationData(input: SetupAdapterInput & { privateState: string
     const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
     const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
     const bounded = AbortSignal.timeout(20_000)
+    input.assertCurrent?.()
     const response = await fetch(target.href, { method: 'POST', redirect: 'manual', headers, body: JSON.stringify(body), signal: signal ? AbortSignal.any([signal, bounded]) : bounded })
     if (!response.ok || response.redirected || response.url && new URL(response.url).href !== target.href || response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return null
     const payload = record(JSON.parse(await page(response)))
-    return payload?.code === 0 ? record(payload.data) : null
+    return payload?.code === 0 ? payload : null
   } catch { return null }
+}
+
+async function applicationData(input: SetupAdapterInput & { privateState: string }, path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  return record((await applicationEnvelope(input, path, body, signal))?.data)
+}
+
+/** Local raw-field interpretation only; a missing field is never the UI's false default. */
+export async function feishuMessagingCapability(originalReadState: string): Promise<'enabled' | 'disabled' | 'unknown'> {
+  try {
+    const data = record(JSON.parse(originalReadState))
+    return data && Object.hasOwn(data, 'enable') && typeof data.enable === 'boolean' ? data.enable ? 'enabled' : 'disabled' : 'unknown'
+  } catch { return 'unknown' }
+}
+
+/** One exact scalar command. Acceptance is neither enabled readback nor online readiness. */
+export async function enableFeishuMessaging(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
+  const envelope = await applicationEnvelope(input, '/developers/v1/robot/switch/', { enable: true }, signal)
+  return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
 }
 
 /** One exact console permission read, not an app-data read or a configuration grant. */

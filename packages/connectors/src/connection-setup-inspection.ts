@@ -8,6 +8,7 @@ type Parent = { operation: ConnectionSetupOperation; actor: ConnectionEnrollment
 type Snapshot = { stepId: string; attemptId: string; stage: string; privateState: string }
 type Child = { receipt: ConnectionSetupInspectionReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null }
 type Envelope = { binding: string; stepId: string; applicationInfoReadPermission?: 'confirmed' | 'unknown'; readResult?: ConnectionSetupReadSummary; privateState: string }
+export type SetupMessagingSource = { receipt: ConnectionSetupInspectionReceipt; authenticationStepId: string; attemptId: string; privateState: string; originalReadState: string }
 type Owner = {
   connections: ConnectionHost; secrets: EnrollmentSecrets | undefined
   read(id: string): Parent | null
@@ -48,9 +49,9 @@ export class SetupApplicationInspection {
   private find(operationId: string, selector?: { stepId?: string; actionId?: string }): Child | null {
     return this.safe(() => {
       const db = this.owner.connections.database
-      const row = selector?.stepId ? db.prepare('SELECT * FROM connection_setup_inspection WHERE operation_id=? AND step_id=?').get(operationId, selector.stepId)
-        : selector?.actionId ? db.prepare('SELECT * FROM connection_setup_inspection WHERE operation_id=? AND (action_id=? OR recovery_action_id=?)').get(operationId, selector.actionId, selector.actionId)
-          : db.prepare('SELECT * FROM connection_setup_inspection WHERE operation_id=? ORDER BY ordinal DESC LIMIT 1').get(operationId)
+      const row = selector?.stepId ? db.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL AND step_id=?").get(operationId, selector.stepId)
+        : selector?.actionId ? db.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL AND (action_id=? OR recovery_action_id=?)").get(operationId, selector.actionId, selector.actionId)
+          : db.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL ORDER BY ordinal DESC LIMIT 1").get(operationId)
       return row ? this.decode(row) : null
     })
   }
@@ -90,6 +91,28 @@ export class SetupApplicationInspection {
       return snapshot?.stage === 'confirmed' && fresh && this.currentAuthentication(fresh) && fresh.operation.authentication?.stepId === snapshot.stepId ? snapshot : null
     } catch { return null }
   }
+  private latestBot(row: Parent): Child | null {
+    return this.safe(() => {
+      const record = this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL AND json_extract(record_json,'$.receipt.subject')='bot-settings' ORDER BY ordinal DESC LIMIT 1").get(row.operation.operationId)
+      return record ? this.decode(record) : null
+    })
+  }
+  /** Pure journal predicate; selection of an older public receipt never supplies this source. */
+  messagingSourceCurrent(row: Parent, source: SetupMessagingSource): boolean {
+    const latest = this.latestBot(row)
+    return this.currentAuthentication(row) && row.operation.authentication?.stepId === source.authenticationStepId && latest?.receipt.stepId === source.receipt.stepId && latest.receipt.request === 'confirmed' && latest.receipt.secureStorage === 'stored'
+  }
+  /** Original authenticated raw read, retained only inside the Host/adapter boundary. */
+  async messagingSource(row: Parent): Promise<SetupMessagingSource | null> {
+    const authentication = await this.source(row), child = this.latestBot(row)
+    if (!authentication || child?.authenticationStepId !== authentication.stepId || child.receipt.request !== 'confirmed' || child.receipt.secureStorage !== 'stored' || !child.privateRef) return null
+    try {
+      const original = this.envelope(await this.owner.secrets?.resolve(child.privateRef) ?? null, row, child)
+      if (!original) return null
+      const source: SetupMessagingSource = { receipt: structuredClone(child.receipt), authenticationStepId: authentication.stepId, attemptId: authentication.attemptId, privateState: authentication.privateState, originalReadState: original.privateState }
+      return this.messagingSourceCurrent(this.owner.read(row.operation.operationId)!, source) ? source : null
+    } catch { return null }
+  }
   private newAction(row: Parent, subject?: ConnectionSetupReadSubject): ConnectionSetupInspectionAction {
     return { kind: subject ? CONNECTION_SETUP_READ_ACTIONS[subject] : 'inspect-application', expectedRevision: row.operation.revision, actionId: (subject ? 'setup-read:' : 'setup-inspect:') + digest({ binding: row.operation, actor: row.actor, previous: this.find(row.operation.operationId)?.receipt.stepId ?? null, ...(subject ? { subject } : {}) }) }
   }
@@ -97,7 +120,7 @@ export class SetupApplicationInspection {
     await this.owner.authority(context, row)
     const limit = selector.limit ?? 25, before = selector.cursor === undefined ? Number.MAX_SAFE_INTEGER : Number(selector.cursor)
     if (!Number.isSafeInteger(before) || before < 1 || selector.cursor !== undefined && !/^[1-9][0-9]*$/u.test(selector.cursor)) throw failure('The original observation cursor is invalid.', 'INVALID_CONNECTION_SETUP_DATA')
-    const page = this.safe(() => this.owner.connections.database.prepare('SELECT * FROM connection_setup_inspection WHERE operation_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(row.operation.operationId, before, limit + 1))
+    const page = this.safe(() => this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL AND ordinal<? ORDER BY ordinal DESC LIMIT ?").all(row.operation.operationId, before, limit + 1))
     const selected = this.find(row.operation.operationId, selector.selectedStepId ? { stepId: selector.selectedStepId } : undefined)
     let permission: 'confirmed' | 'unknown' = 'unknown'
     let readResult: ConnectionSetupReadSummary | undefined

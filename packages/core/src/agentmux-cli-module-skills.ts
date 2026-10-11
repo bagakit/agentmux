@@ -145,8 +145,13 @@ retain independent receipts, not a complete configuration snapshot or readiness.
 confirmed stored auth; original actor local recovery needs only the frozen original child/input,
 even after renewal, revision or restart. Old private results stay withheld and an unrecoverable
 old result never blocks a separate eligible new observation. Reported basic-info read permission
-is not actual app data, owning tenant or write authority. Configuration changes and publication remain
-unimplemented; this does not qualify live platform rights or the combined Settings journey.
+is not actual app data, owning tenant or write authority. With --application-configuration, inspect locally reads original finite enable-only effects and
+the latest exact bot source. Copy an offered enable-messaging action with explicit confirm;
+recover-configuration-effect uses continue and only repairs its original encrypted ACK. An unknown
+effect cannot be replayed through renewal, a new setup or a known application alias; unresolved
+identifies the original actor-owned request when available. A new current read never signs that
+old ACK. This action does not change menus/modes/events/scopes/ranges or publish. Publication
+remains unimplemented; this does not qualify live rights or the combined Settings journey.
 
 Configure or bind only within the user's authorized target. Inspect current values before
 changing them; use the current help's exact input and operation identities. A grant is an
