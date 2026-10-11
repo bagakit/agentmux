@@ -1,3 +1,5 @@
+import { RendererAllocationSampler } from './renderer-allocations.js'
+import type { PerformanceSceneOwner } from './performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
@@ -273,6 +275,7 @@ export async function registerIpc(args: {
   onRendererStartupFailure?: (input: unknown) => boolean
   webLinks?: WebUrlIngress
   spatialLinks?: SpatialLinkIngress
+  performanceScene?: PerformanceSceneOwner
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
@@ -505,10 +508,13 @@ export async function registerIpc(args: {
     const processMetric = app.getAppMetrics().find(metric => metric.pid === pid)
     return processMetric && processMetric.creationTime > 0 ? { ...window, pid, creationTime: processMetric.creationTime } : null
   }
+  const allocations = new RendererAllocationSampler(contents, currentRendererCaptureTarget)
   const profiler = new RendererV8Profiler(contents, currentRendererCaptureTarget)
   const memory = new RendererMemoryInspector(contents, currentRendererCaptureTarget)
   const tracer = new RendererTimelineTracer(contents, currentRendererCaptureTarget)
-  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory })
+  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory, allocations,
+    ...(args.performanceScene ? { scene: { owner: args.performanceScene, currentTarget: currentRendererCaptureTarget, loaded: () => ({ mainPid: process.pid,
+      package: args.loadedPackage ?? null, renderer: contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null }) } } : {}) })
   const closeMetrics = () => metrics.dispose()
   contents.once('destroyed', closeMetrics)
   const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {

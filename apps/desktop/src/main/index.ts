@@ -1,3 +1,4 @@
+import { PerformanceSceneOwner } from './performance-scene.js'
 import { createDesktopApplicationAccessOwner } from './application-access-owner.js'
 import { WorkbenchWindows } from './workbench-windows.js'
 import { WorkbenchWindowStore } from './workbench-window-store.js'
@@ -93,6 +94,8 @@ function startPrimaryInstance(): void {
   // macOS declares its scheme in the packaged Info.plist; development never takes the user's handler.
   if (app.isPackaged && process.platform !== 'darwin') app.setAsDefaultProtocolClient('amux')
   const loadedPackage = readLoadedPackageIdentity(join(import.meta.dirname, '../../package-identity.json'))
+  const performanceScene = new PerformanceSceneOwner(join(app.getPath('userData'), 'performance-scene.json'))
+  app.once('will-quit', () => performanceScene.dispose())
   const scratchTopics = new ScratchTopics()
   const runtime = new RuntimeController(
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
@@ -268,7 +271,7 @@ function startPrimaryInstance(): void {
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
-      loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
+      performanceScene, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')

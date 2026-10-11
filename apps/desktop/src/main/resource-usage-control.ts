@@ -1,3 +1,5 @@
+import { readSceneResources, type PerformanceSceneOwner } from './performance-scene.js'
+import type { RendererV8ProfileTarget, RendererSceneLoaded } from '@agentmux/core/control'
 import { hostname } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import {
@@ -15,13 +17,27 @@ function source<T>(data: T | null, observedAt: number | null, reason: string | n
 /** This composes the original sampler; it owns neither a polling clock nor resource facts. */
 export function createResourceMetricsPort(args: {
   sampler: ProcessResourceSampler; currentWindow(): MetricsWindow | null; now?: () => number
+  allocations?: { capture: NonNullable<AgentMuxMetricsPort['captureAllocations']>; dispose(): void }
+  scene?: { owner: PerformanceSceneOwner; currentTarget(): RendererV8ProfileTarget | null; loaded(): RendererSceneLoaded }
   profiler?: { capture: NonNullable<AgentMuxMetricsPort['captureProfile']>; dispose(): void }
   memory?: { inspect: NonNullable<AgentMuxMetricsPort['inspectMemory']>; dispose(): void }
   tracer?: { capture: NonNullable<AgentMuxMetricsPort['captureTrace']>; dispose(): void }
 }): AgentMuxMetricsPort & { dispose(): void } {
   const consumers = new Set<() => void>()
   let disposed = false
-  return {
+  const port: AgentMuxMetricsPort & { dispose(): void } = {
+    ...(args.scene ? {
+      inspectScene: (input, signal) => args.scene!.owner.inspect(input, signal),
+      captureScene: async (input, signal) => {
+        if (disposed || !port.captureProfile || !port.captureTrace || !port.captureAllocations || !port.inspectMemory) throw new AgentMuxError('Original Window scene dependencies are unavailable.', 'METRICS_UNSUPPORTED')
+        return args.scene!.owner.capture(input, { currentTarget: args.scene!.currentTarget, loaded: args.scene!.loaded,
+          resources: signal => readSceneResources(port, signal), captureProfile: port.captureProfile, captureAllocations: port.captureAllocations, captureTrace: port.captureTrace, inspectMemory: port.inspectMemory }, signal)
+      }
+    } : {}),
+    ...(args.allocations ? { captureAllocations: (async (input, signal) => {
+      if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      return args.allocations!.capture(input, signal)
+    }) satisfies NonNullable<AgentMuxMetricsPort['captureAllocations']> } : {}),
     ...(args.memory ? { inspectMemory: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       return args.memory!.inspect(input, signal)
@@ -78,12 +94,14 @@ export function createResourceMetricsPort(args: {
     dispose() {
       if (disposed) return
       disposed = true
+      args.allocations?.dispose()
       args.profiler?.dispose()
       args.memory?.dispose()
       args.tracer?.dispose()
       for (const close of [...consumers]) close()
     }
   }
+  return port
 }
 
 export async function observeRendererResources(
