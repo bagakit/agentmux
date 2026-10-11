@@ -21,7 +21,7 @@
 | 目标对齐、结果核对、Demand、Board 与 Task | [Goals 与 Demand 闭环](behavior/goals-and-demand.md) |
 | 执行焦点、项目泳道、历史与时间音轨 | [Focus 执行上下文](behavior/focus-context.md) |
 | Session/Run/View、健康能力、重启和启动事实 | [Session、恢复与启动交付](behavior/session-recovery.md) |
-| 对话模式、当前与历史阅读、消息／过程／资源、答复与局部阅读动作 | [对话模式与共同阅读](behavior/conversation-mode.md) |
+| 对话视图目标、当前与历史阅读、消息／过程／资源、答复及产品验收 | [对话视图 PRD](behavior/conversation-mode.md) |
 | Composer、Message Tools、草稿、队列、邮箱与持续推进 | [输入与邮箱](behavior/conversation-input.md) |
 | 交互模式与外部群聊的共同语义、状态与投递边界 | [共同对话协议与外部交流入口](behavior/conversation-mode.md#共同对话协议与外部交流入口) |
 | Provider 能力、语义身份、AgentMux 注入上下文、A2A 与持久消息 | [Provider、身份与 Agent 消息](behavior/agent-capabilities-and-messaging.md) |
