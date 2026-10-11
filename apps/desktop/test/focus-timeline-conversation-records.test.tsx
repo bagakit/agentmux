@@ -525,3 +525,119 @@ it('disabled latest projection leaves actual historical reading fixed and return
   selection.removeAllRanges()
   expect(disabledCalls, 'disabled latest projection must not consume historical live Timeline updates').toBe(0)
 })
+
+// These probes count only the original Track fallback and holder admission.
+// The source config leaves both projectors and their Core implementation intact.
+function observeEmptyReadProjection() {
+  const tracks: { sessionId: string; timeline: AgentTimelineSnapshot }[] = []
+  const holders: { reference: { hostId: string; agentSessionId: string }; page: AgentSessionHistoryPage | null; timeline: AgentTimelineSnapshot | undefined }[] = []
+  vi.stubGlobal('__focusEmptyTrackProbe', (sessionId: string, timeline: AgentTimelineSnapshot) => tracks.push({ sessionId, timeline }))
+  vi.stubGlobal('__focusEmptyHolderProbe', (reference: { hostId: string; agentSessionId: string }, page: AgentSessionHistoryPage | null, timeline: AgentTimelineSnapshot | undefined) => holders.push({ reference, page, timeline }))
+  return { tracks, holders }
+}
+function processRecord(id: string, state?: 'working' | 'done'): AgentTimelineItem {
+  const at = NOW - HOUR / 4 + (state === 'done' ? 1000 : 0)
+  return { id, agentSessionId: ID, kind: state ? 'lifecycle' : 'tool_call', source: 'native-hook', status: 'complete', title: 'Original process observation', createdAt: at, updatedAt: at,
+    ...(state ? { activityState: { run: fixture.session.run, state, stateEnteredAt: at } } : {}) }
+}
+
+it.each(['empty-native', 'process-only'] as const)('accepted empty read avoids repeated Track projection for %s', async trigger => {
+  await writeFile(fixture.path, '')
+  await seedCaptured(trigger === 'process-only' ? [processRecord('initial-process')] : [])
+  await render(); await records()
+  await wait(() => expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read earlier records')?.disabled).toBe(false))
+  await textButton('Read earlier records')
+  await wait(() => expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1'))
+  expect(pages.some(page => page.items.length === 0)).toBe(true)
+  expect(overlay().querySelectorAll('[data-conversation-record-id]')).toHaveLength(0)
+  const probe = observeEmptyReadProjection()
+  const updates: AgentTimelineSnapshot[] = []
+  for (const item of [processRecord('active-work', 'working'), processRecord('finished-work', 'done')]) {
+    await seedCaptured([item]); updates.push(useAppStore.getState().timelines[ID]!)
+  }
+  await wait(() => expect(host.querySelector('.recent-focus__working--history')).not.toBeNull())
+  expect(host.querySelector('[data-focus-timeline-id="private-agent"]')).not.toBeNull()
+  expect(host.querySelector<HTMLElement>('.recent-focus__project')!.hidden).toBe(false)
+  expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.workRecordCount).toBe('2')
+  const repeated = probe.tracks.filter(call => call.sessionId === ID && updates.includes(call.timeline)).length
+  const admitted = probe.holders.filter(call => call.reference.hostId === 'local' && call.reference.agentSessionId === ID && call.timeline && updates.includes(call.timeline)).length
+  expect(admitted).toBeGreaterThan(0)
+  expect(recordCount()).toBe(0); healthy()
+  if (process.env.AGENTMUX_FOCUS_EMPTY_FACTS) await appendFile(process.env.AGENTMUX_FOCUS_EMPTY_FACTS, JSON.stringify({ trigger, repeated, admitted, updates: updates.map(timeline => timeline.revision), workRecords: 2, trackPresent: true, projectPresent: true, controls: controls.map(spy => spy.mock.calls.length) }) + '\n')
+  expect(repeated, 'accepted empty read must not repeat the Track fallback projection').toBe(0)
+})
+
+it('empty handoff control keeps an unread work-only Context on the original captured fallback', async () => {
+  await writeFile(fixture.path, '')
+  await seedCaptured([]); await render(); await records()
+  await wait(() => expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read earlier records')?.disabled).toBe(false))
+  await textButton('Read earlier records')
+  await wait(() => expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1'))
+  const otherId = 'unread-work-context', run = { runId: 'other-private-run' }
+  const otherSession = { ...fixture.session, agentSessionId: otherId, run, hookBindingId: 'other-private-binding' }
+  delete otherSession.nativeHandle
+  await fixture.store.compareAndSwap(null, otherSession)
+  const items = [captured('unread-original-message', 'user_message', { agentSessionId: otherId, content: 'Unread captured speech', authorHuman: true }),
+    { ...processRecord('unread-work', 'working'), agentSessionId: otherId, activityState: { run, state: 'working' as const, stateEnteredAt: NOW - HOUR / 4 } }]
+  for (const item of items) await fixture.store.applyTimelineMutation({ type: 'append', agentSessionId: otherId, item })
+  const timeline = await fixture.client.sessionTimeline(otherId)
+  const session = useAppStore.getState().sessions[0]!
+  if (session.kind !== 'agent') throw new Error('Fixture requires the original Agent')
+  const probe = observeEmptyReadProjection(), beforeReads = reads.mock.calls.length
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, { ...session, id: otherId, label: 'Unread Context', control: { ...session.control, agentSessionId: otherId, run } }], timelines: { ...state.timelines, [otherId]: timeline } })))
+  await wait(() => expect(rawIds()).toContain('unread-original-message'))
+  expect(probe.tracks.filter(call => call.sessionId === otherId && call.timeline === timeline).length).toBeGreaterThan(0)
+  expect(host.querySelector('[data-focus-timeline-id="unread-work-context"] .recent-focus__working--history')).not.toBeNull()
+  expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1')
+  expect(reads.mock.calls.length).toBe(beforeReads)
+  probe.tracks.length = 0
+  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [] } }, agentNames: { unrelated: 'Changed name' } })))
+  expect(probe.tracks).toHaveLength(0); expect(rawIds()).toContain('unread-original-message'); healthy()
+})
+
+it('empty handoff control preserves the pinned body and accepts later real messages', async () => {
+  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
+  await records()
+  await act(async () => overlay().querySelector<HTMLElement>('[data-record-raw-id="u"]')!.click())
+  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!
+  const text = body.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
+  range.setStart(text, 0); range.setEnd(text, 8); selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 8
+  await writeFile(fixture.path, '')
+  // Read the genuine empty snapshot without reopening the list, which is an
+  // explicit navigation action that clears the previously selected message.
+  await wait(() => expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read earlier records')?.disabled).toBe(false))
+  await textButton('Read earlier records')
+  await wait(() => expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1'))
+  expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.nativeRecordCount).toBe('0')
+  await seedCaptured([processRecord('body-work', 'working')])
+  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
+  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(8)
+  await seedCaptured([captured('later-real-message', 'assistant_message', { content: 'Later original reply' })])
+  await wait(() => expect(rawIds()).toContain('later-real-message'))
+  expect(overlay().querySelector('[data-record-raw-id="later-real-message"]')).not.toBeNull()
+  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
+  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(8)
+  const expectedLocal = projectConversationRecords({ agentSessionId: ID, executionHostId: 'local', timeline: useAppStore.getState().timelines[ID] }).filter(record => record.role !== 'process')
+  expect(recordIds()).toEqual(expectedLocal.map(record => record.id))
+  expect(expectedLocal.every(record => record.executionHostId === 'local' && record.agentSessionId === ID)).toBe(true)
+  const other = await nativeHistoryFixture('claude', jsonl([native('other-host-input', 'user', 'Other original Host input')]))
+  extraFixtures.push(other)
+  reads.mockImplementation(async (control, options) => { expect(control.hostId).toBe('other'); const page = await other.client.sessionHistoryPage(control.agentSessionId, options); pages.push(page); return page })
+  vi.spyOn(api.sessions, 'timeline').mockImplementation(control => other.client.sessionTimeline(control.agentSessionId))
+  const state = useAppStore.getState(), session = state.sessions[0]!
+  if (session.kind !== 'agent') throw new Error('Fixture requires the original Agent')
+  const otherTimeline = await other.client.sessionTimeline(ID)
+  await act(async () => useAppStore.setState({
+    config: { ...state.config!, hosts: [...state.config!.hosts, { id: 'other', kind: 'ssh', label: 'Other logical Host', hostname: 'unused.invalid' }], workspaces: state.config!.workspaces.map(workspace => ({ ...workspace, hostId: 'other' })) },
+    sessions: [{ ...session, hostId: 'other', control: { ...session.control, hostId: 'other' } }], timelines: { [ID]: otherTimeline }
+  }))
+  await wait(() => expect(overlay().querySelector('[data-record-raw-id="other-host-input"]')).not.toBeNull())
+  const otherRecord = overlay().querySelector<HTMLElement>('[data-record-raw-id="other-host-input"]')!
+  const acceptedOther = pages.find(page => page.items.some(item => item.id === 'other-host-input'))!
+  const expectedOther = projectConversationRecords({ agentSessionId: ID, executionHostId: 'other', historyPage: acceptedOther })[0]!
+  expect(otherRecord.dataset.conversationRecordId).toBe(expectedOther.id)
+  expect(expectedOther.executionHostId).toBe('other'); expect(expectedOther.agentSessionId).toBe(ID)
+  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
+  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(8)
+  expect(useAppStore.getState().agentComposerDrafts[ID]).toBe(DRAFT); selection.removeAllRanges()
+})
