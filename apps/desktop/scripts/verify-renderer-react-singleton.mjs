@@ -97,7 +97,7 @@ try {
   await bind(electron); await bind(require.resolve('vite')); await bind(require.resolve('electron/package.json'))
   const foreign = join(attempt, 'foreign'), foreignModules = join(foreign, 'node_modules')
   await mkdir(foreignModules, { recursive: true })
-  const contextResolver = createRequire(require.resolve('@radix-ui/react-dialog'))
+  const contextResolver = createRequire(createRequire(join(root, 'packages/client-ui/package.json')).resolve('@radix-ui/react-dialog'))
   receipt.dependencies = []
   for (const [name, resolver] of [['react', require], ['react-dom', require], ['@radix-ui/react-context', contextResolver]]) {
     receipt.dependencies.push(await cloneDependency(name, resolver, foreignModules))

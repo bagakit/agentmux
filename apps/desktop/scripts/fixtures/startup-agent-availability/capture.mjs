@@ -60,7 +60,7 @@ export async function captureStartupProduct({ root, evidence }) {
     await mkdir(resolve(compiled, 'node_modules')); await symlink(nativeRoot, resolve(compiled, 'node_modules/fs-native-extensions'), 'dir')
     const alias = [...aliases.entries()].map(([name, replacement]) => ({ find: new RegExp('^' + name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement }))
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
-    const dialog = createRequire(require.resolve('@radix-ui/react-dialog'))
+    const dialog = createRequire(createRequire(resolve(root, 'packages/client-ui/package.json')).resolve('@radix-ui/react-dialog'))
     for (const name of ['@radix-ui/react-dismissable-layer', '@radix-ui/react-focus-scope']) alias.push({ find: name, replacement: dialog.resolve(name) })
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias, dedupe: ['react', 'react-dom'] }, esbuild: { jsx: 'automatic' }, worker: { format: 'es' },
       define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },

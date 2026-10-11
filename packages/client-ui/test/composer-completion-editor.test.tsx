@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { act, useState, type Dispatch, type SetStateAction } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import type { Editor } from '@tiptap/core'
