@@ -1,4 +1,5 @@
-import type { AgentNativeSessionCandidate, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentNativeSessionCandidate, AgentProviderSessionHistoryPage, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import { projectConversationRecords } from '@agentmux/core/conversation'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { sessionUserMessageText } from '@agentmux/core/session-user-messages'
 import type { AgentSessionRecoveryCandidate, AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
@@ -7,7 +8,7 @@ import { resolveAgentName } from './display-name'
 import { firstPromptFromTimeline } from './workbench-tabs'
 import { workspaceProjectId } from './workspace-projects'
 
-export type LauncherRecap = { text: string; displayText?: string; reading?: { text: string; truncated: boolean }; source: 'Last assistant message' | 'Last prompt'; origin: 'timeline' | 'native' }
+export type LauncherRecap = { text: string; displayText?: string; reading?: { text: string; truncated: boolean }; source: 'Last assistant message' | 'Last prompt' | 'Last reply observation' | 'Saved conversation excerpt'; origin: 'timeline' | 'native' }
 
 function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displayText' | 'reading'> | null {
   const value = text?.replace(/\s+/gu, ' ').trim()
@@ -24,25 +25,33 @@ function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displa
 /** A recap is a labelled excerpt of observed conversation, never an invented summary. */
 export function launcherTimelineRecap(timeline: AgentTimelineSnapshot | undefined): LauncherRecap | null {
   if (!timeline) return null
-  for (const kind of ['assistant_message', 'user_message'] as const) {
-    for (let index = timeline.items.length - 1; index >= 0; index -= 1) {
-      const item = timeline.items[index]!
-      if (item.kind !== kind) continue
-      const text = excerpt(item.content)
-      if (text) return { ...text, source: kind === 'assistant_message' ? 'Last assistant message' : 'Last prompt', origin: 'timeline' }
-    }
+  const records = projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline })
+  const latestFirst = [...records].reverse()
+  const replies = latestFirst.filter(record => record.role === 'observation' || record.role === 'message' && record.author?.kind === 'agent')
+  for (const record of replies.length ? replies : latestFirst) {
+    if (record.role !== 'message' && record.role !== 'observation') continue
+    const text = excerpt(record.content)
+    if (text) return { ...text, source: record.role === 'observation' ? 'Last reply observation'
+      : record.author?.kind === 'agent' ? 'Last assistant message' : 'Last prompt', origin: 'timeline' }
   }
   return null
 }
 
-export function launcherNativeRecap(page: Pick<AgentSessionHistoryPage, 'items'>): LauncherRecap | null {
-  for (const kind of ['assistant-message', 'user-message'] as const) {
-    for (let index = page.items.length - 1; index >= 0; index -= 1) {
-      const item = page.items[index]!
-      if (item.kind !== kind) continue
-      const text = excerpt(sessionUserMessageText(item.contentParts, kind === 'user-message' ? item.questionAnswers : undefined))
-      if (text) return { ...text, source: kind === 'assistant-message' ? 'Last assistant message' : 'Last prompt', origin: 'native' }
-    }
+export function launcherNativeRecap(page: AgentSessionHistoryPage): LauncherRecap | null {
+  const records = projectConversationRecords({ agentSessionId: page.agentSessionId, historyPage: page })
+  for (const record of [...records].reverse()) {
+    if (record.role !== 'message' && record.role !== 'interaction') continue
+    const text = excerpt(record.input ? sessionUserMessageText(record.input.contentParts, record.input.questionAnswers) : record.content)
+    if (text) return { ...text, source: record.author?.kind === 'agent' ? 'Last assistant message' : 'Last prompt', origin: 'native' }
+  }
+  return null
+}
+
+/** Unregistered Provider history has no Core Session, author or unified event identity. */
+export function launcherSavedNativeRecap(page: AgentProviderSessionHistoryPage): LauncherRecap | null {
+  for (const item of [...page.items].reverse()) {
+    const text = excerpt(sessionUserMessageText(item.contentParts, item.questionAnswers))
+    if (text) return { ...text, source: 'Saved conversation excerpt', origin: 'native' }
   }
   return null
 }

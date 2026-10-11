@@ -10,7 +10,7 @@ import { useAppStore } from '../store'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { formatRelativeAge } from '../lib/relative-age'
-import { filterLauncherResumeRows, launcherCandidateIdentity, launcherCandidateKey, launcherManagedCandidates, launcherNativeRecap, launcherNativeResumeRows, launcherResumeRows, launcherResumeShortId, launcherTimelineRecap, type LauncherRecap, type LauncherResumeRow } from '../lib/launcher-resume'
+import { filterLauncherResumeRows, launcherCandidateIdentity, launcherCandidateKey, launcherManagedCandidates, launcherNativeRecap, launcherSavedNativeRecap, launcherNativeResumeRows, launcherResumeRows, launcherResumeShortId, launcherTimelineRecap, type LauncherRecap, type LauncherResumeRow } from '../lib/launcher-resume'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentAvatar } from './AgentAvatar'
@@ -196,7 +196,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
         page.source.providerId !== nativeCandidate.providerId || page.source.nativeSessionId !== nativeCandidate.nativeSessionId) {
         throw new Error('Conversation details returned another saved source.')
       }
-      setNativeReads(values => ({ ...values, [key]: { state: 'ready', recap: launcherNativeRecap(page), page, sourceKey } }))
+      setNativeReads(values => ({ ...values, [key]: { state: 'ready', recap: launcherSavedNativeRecap(page), page, sourceKey } }))
     }).catch(error => {
       if (current && nativeRequestOwner.current === owner) setNativeReads(values => ({ ...values, [key]: { state: 'error', recap: null, error: presentError(error), sourceKey } }))
     })
@@ -382,7 +382,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                   <strong>{row.name}</strong>{active ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
                   <time dateTime={new Date(candidate.updatedAt).toISOString()} title={new Date(candidate.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</time></span>
                 <span className="launcher-resume__row-recap" title={row.recap ? `${row.recap.source}: ${row.recap.displayText ?? row.recap.text}` : preview?.error}>
-                  {row.recap ? <><span>{row.recap.source === 'Last assistant message' ? 'Reply' : 'Input'} · </span>{row.recap.displayText ?? row.recap.text}</>
+                  {row.recap ? <><span>{row.recap.source === 'Last assistant message' ? 'Reply' : row.recap.source === 'Last prompt' ? 'Input' : row.recap.source === 'Last reply observation' ? 'Reply observation' : 'Saved conversation excerpt'} · </span>{row.recap.displayText ?? row.recap.text}</>
                     : preview?.state === 'error' ? 'Preview could not be read'
                     : preview?.state === 'ready' ? 'No text on this page'
                     : preview?.state === 'loading' ? 'Reading preview…' : 'Preview not read yet'}

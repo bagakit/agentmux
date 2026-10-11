@@ -1,3 +1,4 @@
+import { projectConversationRecords } from '@agentmux/core/conversation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
@@ -95,7 +96,8 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
 export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
   const state = session.status.state, items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
-  const result = latest?.kind === 'assistant_message' && latest.status === 'complete' && latest.content?.trim() ? latest : null
+  const latestRecord = timeline ? projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline }).filter(record => record.role === 'message' || record.role === 'observation').at(-1) : undefined
+  const result = (latestRecord?.role === 'observation' || latestRecord?.role === 'message' && latestRecord.author?.kind === 'agent') && latestRecord.rawId === latest?.id && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim() ? latestRecord : null
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
   const now = Date.now()
   const bucket = focusBucketForSession(session, Boolean(result), now)
@@ -132,16 +134,16 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
         ? 'Run interrupted · Cause unknown' : 'Process exited · Cause unknown'
   } else if (result && (bucket === 'results' || bucket === 'idle' && state === 'running')) {
     const response = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
-    detail = state === 'running' ? `Response · ${response}` : response
+    detail = state === 'running' ? `${result.role === 'observation' ? 'Reply observation' : 'Response'} · ${response}` : response
     detailIsMessage = true
     detailKind = 'message'
   }
   else {
     const activity = sessionRecentActivity(session, items, session.workspacePath)
     if (activity !== state) detail = activity
-    else if (session.kind === 'agent' && latest?.content && (latest.kind === 'user_message' || latest.kind === 'assistant_message')) {
-      const label = latest.kind === 'user_message' ? 'Prompt' : 'Response'
-      detail = `${label} · ${clampStep(latest.content.replace(/\s+/g, ' ').trim(), 'head', 140)}`
+    else if (session.kind === 'agent' && latestRecord?.content) {
+      const label = latestRecord.role === 'observation' ? 'Reply observation' : latestRecord.author?.kind === 'agent' ? 'Response' : 'Prompt'
+      detail = `${label} · ${clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140)}`
       detailIsMessage = true
       detailKind = 'message'
     } else if (state === 'running') detail = session.kind === 'agent' ? 'Run is alive · No current work signal' : 'Terminal context · No task signal'
@@ -149,8 +151,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   }
   // The latest non-lifecycle record can only be the recap's record if its kind matches
   // the helper's chosen kind and it is nonempty. A newer prompt is a different fact.
-  const detailIsRecap = Boolean(detailIsMessage && recap && latest?.content?.trim()
-    && latest.kind === (recap.source === 'Last assistant message' ? 'assistant_message' : 'user_message'))
+  const detailIsRecap = Boolean(detailIsMessage && recap && latestRecord?.content.trim() && (recap.source === 'Last reply observation' ? latestRecord.role === 'observation' : latestRecord.role === 'message' && (recap.source === 'Last assistant message') === (latestRecord.author?.kind === 'agent')))
   const displayState = bucket === 'working' && activitySemantic === 'active' ? 'working'
     : state === 'working' && activitySemantic !== 'active' || bucket === 'idle' && activitySemantic === 'idle' && session.kind === 'agent' && session.currentActivity
       ? 'running' : state
