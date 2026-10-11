@@ -1019,11 +1019,11 @@ export type AgentSessionHistoryResourceRequest = {
   recordId: string
   partIndex: number
   expectedReference: string
-  /** May only reduce the fixed image budget; text fragments use at most 128 KiB. */
+  /** May only reduce the fixed 16 MiB binary budget; text fragments use at most 128 KiB. */
   maxBytes?: number
-  /** Explicit raster bytes for this same original resource, including a signed semantic wrapper. Omit for its recorded representation. */
-  representation?: 'image'
-  /** Byte position in the exact serialized text part. Explicit image representation does not accept an offset. */
+  /** Explicit image or self-contained file bytes for this same original part, including a signed wrapper. Omit for its recorded representation. */
+  representation?: 'image' | 'file'
+  /** Byte position in the exact serialized text part. Explicit binary representations do not accept an offset. */
   offsetBytes?: number
 }
 export type AgentSessionHistoryResourceReadOptions = AgentSessionHistoryResourceRequest & Pick<AgentSessionHistoryPageOptions,
@@ -1037,6 +1037,8 @@ export type AgentSessionHistoryResourceReadResult = {
   reference: string
   label?: string
   result: { status: 'read'; mimeType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'; dataBase64: string; byteLength: number; width: number; height: number }
+    /** Recorded media type and label are metadata, not a verified file format or sharing permission. */
+    | { status: 'file'; mimeType: string; dataBase64: string; byteLength: number; label?: string }
     | { status: 'fragment'; encoding: 'json-utf8'; dataBase64: string; byteLength: number;
         offsetBytes: number; totalBytes: number; sha256: string; nextOffsetBytes: number | null;
         /** Original Provider renewed this exact read-only extent. Send as the next expectedReference, retaining source/record/part and content metadata. */

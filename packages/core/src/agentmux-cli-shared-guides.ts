@@ -14,8 +14,10 @@ hostId, executorId and that exact source; limit and cursor page the original Pro
 Follow nextCursor with the same source. Reading and cancellation operate no Session or Run.
 Use agent native history resource --input FILE|- for a recorded resource, preserving nativeSource,
 source, recordId, turnId, partIndex and expectedReference from that exact page.
-For raster bytes, add representation: image; keep the same outer signed reference and omit offsetBytes.
-Omitting representation preserves the original exact JSON fragment reads and offsets. Image maxBytes
+For raster bytes use representation: image; for self-contained recorded file bytes use representation: file.
+Keep the same outer signed reference and omit offsetBytes. Files never authorize path or URL reads.
+File results retain recorded MIME and optional label; those metadata do not verify file format or sharing.
+Omitting representation preserves the original exact JSON fragment reads and offsets. Binary maxBytes
 only reduces the fixed image budget. Local read permission and external sharing eligibility are separate.
 Keep partial issues and unsupported availability visible. A managed candidate names the original
 AgentMux Session, Executor and Run. Inspect and reuse that Session: attach its healthy Run,

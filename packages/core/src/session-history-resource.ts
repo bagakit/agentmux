@@ -26,10 +26,10 @@ export function parseSessionHistoryResourceOptions(value: unknown): AgentSession
   exactString(p.expectedReference, 'Expected reference', code, MAX_REFERENCE_CHARS)
   if (!Number.isSafeInteger(p.partIndex) || (p.partIndex as number) < 0) invalid('A resource requires its exact content-part index.', code)
   if (p.maxBytes !== undefined && (!Number.isSafeInteger(p.maxBytes) || (p.maxBytes as number) < 1 || (p.maxBytes as number) > SESSION_HISTORY_IMAGE_MAX_BYTES))
-    invalid('Image maxBytes may only reduce the fixed 16 MiB budget.', code)
+    invalid('Resource maxBytes may only reduce the fixed 16 MiB budget.', code)
   if (p.offsetBytes !== undefined && (!Number.isSafeInteger(p.offsetBytes) || (p.offsetBytes as number) < 0)) invalid('Content offset must be a nonnegative safe byte position.', code)
-  if (p.representation !== undefined && p.representation !== 'image' || p.representation === 'image' && p.offsetBytes !== undefined)
-    invalid('Image representation requires its explicit image purpose and no text offset.', code)
+  if (p.representation !== undefined && p.representation !== 'image' && p.representation !== 'file' || p.representation !== undefined && p.offsetBytes !== undefined)
+    invalid('Binary representation requires an explicit image or file purpose and no text offset.', code)
   if (p.signal !== undefined && !(p.signal instanceof AbortSignal)) invalid('Resource cancellation requires an AbortSignal.', code)
   if (p.commandOverride !== undefined) exactString(p.commandOverride, 'Executor command', code)
   if (p.args !== undefined && (!Array.isArray(p.args) || p.args.some(arg => typeof arg !== 'string' || arg.includes('\0')))) invalid('Executor args must be strings.', code)
@@ -95,6 +95,14 @@ export function imageBytes(bytes: Uint8Array, maxBytes: number, declaredMime?: s
   return { status: 'read', mimeType: image.mimeType, dataBase64: encodeBase64(bytes), byteLength: bytes.length, width: image.width, height: image.height }
 }
 
+/** Opaque recorded document bytes: no format sniffing, inferred name or audience authority. */
+export function fileBytes(bytes: Uint8Array, maxBytes: number, mimeType: string, label?: string): AgentSessionHistoryResourceReadResult['result'] {
+  if (!bytes.length || bytes.length > maxBytes) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_TOO_LARGE', 'The recorded file is empty or exceeds this read’s byte budget. Its reference is kept.')
+  if (!/^[\w!#$%&'*+.^`|~-]+\/[\w!#$%&'*+.^`|~-]+$/u.test(mimeType))
+    return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'The recorded file has no qualified media type. Its reference is kept.')
+  return { status: 'file', mimeType, dataBase64: encodeBase64(bytes), byteLength: bytes.length, ...(label === undefined ? {} : { label }) }
+}
+
 /** Validate the Provider's complete exact resource without inventing a Core Session identity. */
 export function parseProviderSessionHistoryResourceReadResult(value: unknown,
   expected: AgentSessionHistoryResourceRequest): AgentProviderSessionHistoryResourceReadResult {
@@ -111,6 +119,7 @@ export function parseProviderSessionHistoryResourceReadResult(value: unknown,
     exactString(result.code, 'Resource failure code', code)
     if (typeof result.message !== 'string') invalid('Resource failure requires its readable reason.', code)
   } else if (result.status === 'read') {
+    if (expected.representation === 'file') invalid('A file representation returned image bytes.', code)
     rpcRecord(result, ['status', 'mimeType', 'dataBase64', 'byteLength', 'width', 'height'], code)
     if (typeof result.dataBase64 !== 'string' || result.dataBase64.length > Math.ceil((expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES) / 3) * 4 ||
       !Number.isSafeInteger(result.byteLength) || (result.byteLength as number) < 1) invalid('Resource bytes exceed their read budget.', code)
@@ -120,8 +129,17 @@ export function parseProviderSessionHistoryResourceReadResult(value: unknown,
     const checked = imageBytes(bytes, expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, String(result.mimeType))
     if (bytes.length !== result.byteLength || encodeBase64(bytes) !== result.dataBase64 || checked.status !== 'read' ||
       checked.width !== result.width || checked.height !== result.height) invalid('Recorded resource bytes, MIME or dimensions are invalid.', code)
+  } else if (result.status === 'file') {
+    rpcRecord(result, ['status', 'mimeType', 'dataBase64', 'byteLength', 'label'], code)
+    if (expected.representation !== 'file' || typeof result.mimeType !== 'string' || result.label !== undefined && typeof result.label !== 'string' ||
+      typeof result.dataBase64 !== 'string' || result.dataBase64.length > Math.ceil((expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES) / 3) * 4 ||
+      !Number.isSafeInteger(result.byteLength) || (result.byteLength as number) < 1) invalid('File bytes or metadata do not match the original read.', code)
+    let bytes: Uint8Array
+    try { bytes = decodeBase64(result.dataBase64) } catch { invalid('Recorded file base64 is invalid.', code) }
+    const checked = fileBytes(bytes, expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, result.mimeType)
+    if (bytes.length !== result.byteLength || checked.status !== 'file' || checked.dataBase64 !== result.dataBase64) invalid('Recorded file bytes or media type are invalid.', code)
   } else if (result.status === 'fragment') {
-    if (expected.representation === 'image') invalid('The original image representation did not return raster bytes.', code)
+    if (expected.representation !== undefined) invalid('A binary representation returned text fragments.', code)
     rpcRecord(result, ['status', 'encoding', 'dataBase64', 'byteLength', 'offsetBytes', 'totalBytes', 'sha256', 'nextOffsetBytes', 'continuationReference'], code)
     if (result.continuationReference !== undefined) exactString(result.continuationReference, 'Renewed content authority', code, MAX_REFERENCE_CHARS)
     const max = expected.maxBytes ?? 64 * 1024
