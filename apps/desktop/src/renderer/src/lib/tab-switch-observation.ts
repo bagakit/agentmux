@@ -1,6 +1,10 @@
 import type { RendererTabSwitchCost, RendererTabSwitchTarget, RendererTabSwitchTerminal } from '@agentmux/core/control'
 
 const key = (target: RendererTabSwitchTarget) => JSON.stringify([target.presentationId, target.displayWorkspaceId, target.groupId, target.tabId, target.regionId])
+/** Only the original Window's trusted event supplies this recorder's event clock. */
+export function tabSwitchEventTimestamp(event: Pick<MouseEvent, 'isTrusted' | 'view' | 'timeStamp'>, view: Window): number | null {
+  return event.isTrusted && event.view === view ? event.timeStamp : null
+}
 /** A local frame and an open input gate are observations, never paint or input acknowledgements. */
 export function createTabSwitchObservation(now = () => performance.now(), wall = Date.now,
   requestFrame = (callback: FrameRequestCallback) => requestAnimationFrame(callback),
@@ -83,12 +87,13 @@ export function createTabSwitchObservation(now = () => performance.now(), wall =
     }
   }
   return {
-    begin(target: RendererTabSwitchTarget, mode: RendererTabSwitchCost['mode'], eventTimestamp: number | null) {
+    begin(target: RendererTabSwitchTarget, mode: RendererTabSwitchCost['mode'], eventTimestamp: number | null, start = now()) {
       finish('superseded'); cancel()
-      const start = now()
-      const inputDelayMs = eventTimestamp !== null && Number.isFinite(eventTimestamp) && eventTimestamp > 0 && eventTimestamp <= start
-        ? start - eventTimestamp : null
+      const eventAtMonoMs = eventTimestamp !== null && Number.isFinite(eventTimestamp) && eventTimestamp > 0 && eventTimestamp <= start
+        ? eventTimestamp : null
+      const inputDelayMs = eventAtMonoMs === null ? null : start - eventAtMonoMs
       const record: RendererTabSwitchCost = { id: ++serial, target: { ...target }, handlerAt: wall(), inputDelayMs,
+        eventAtMonoMs, handlerStartMonoMs: start, actionEndedMs: null, actionResult: null, selectedSource: null,
         selectedMs: null, placedMs: null, terminalMs: null, frameMs: null, inputReadyMs: null,
         elapsedMs: 0, pendingStage: 'selection', state: 'pending', mode, terminal: null }
       if (records.length === 16) records.shift()
@@ -96,9 +101,16 @@ export function createTabSwitchObservation(now = () => performance.now(), wall =
       observe()
       return record.id
     },
-    selected(target: RendererTabSwitchTarget) {
+    actionEnded(id: number, result: NonNullable<RendererTabSwitchCost['actionResult']>) {
+      const record = records.find(record => record.id === id)
+      if (!record || record.actionEndedMs !== null) return
+      // A nested selection may already have finished or superseded this occurrence.
+      record.actionEndedMs = Math.max(0, now() - record.handlerStartMonoMs)
+      record.actionResult = result
+    },
+    selected(target: RendererTabSwitchTarget, source: NonNullable<RendererTabSwitchCost['selectedSource']>) {
       if (!active || !matches(target)) return
-      active.record.selectedMs ??= elapsed()
+      if (active.record.selectedMs === null) { active.record.selectedMs = elapsed(); active.record.selectedSource = source }
       // The selected mode is a fact at this click. Activity is not a failed Terminal load.
       if (active.record.mode === 'activity' || active.record.mode === 'other') { finish('observed'); return }
       active.record.pendingStage = 'terminal'
