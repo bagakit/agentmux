@@ -44,7 +44,7 @@ async function fixture(publication: 'future-native-user-facing' | 'future-shared
   expect(bound.state).toBe('applied'); if (bound.state !== 'applied') throw Error('Binding not applied')
   const host = new PublicationHost({ connections: f.connections, bindings: f.bindings, conversation: port }); cleanup.push(() => host.close())
   const posts = () => remote.messageCalls().filter(call => call.method === 'POST')
-  const texts = () => posts().map(call => JSON.parse(JSON.parse(call.body).content).zh_cn.content[0][0].text as string)
+  const texts = () => posts().map(call => { const body = JSON.parse(call.body), content = JSON.parse(body.content); return body.msg_type === 'interactive' ? content.elements.map((element: { text: { content: string } }) => element.text.content).join('\n') : content.zh_cn.content[0][0].text as string })
   return { ...f, remote, adapter, port, binding: bound.binding, host, posts, texts }
 }
 
