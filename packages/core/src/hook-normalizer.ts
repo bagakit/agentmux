@@ -634,6 +634,12 @@ export function normalizeNativeHook(
   // 缺席/空白/非字符串时不读其他合法键；flag/generated-code 不借 payload 补名）。读不出时如实记为 'unknown'。
   // 来源声明读取原始负载，与 Hook 子进程一致；展开的 extra 只供事件规则和内容读取。
   const eventName = resolveHookEventName(envelope.eventName, rawPayload, specification.eventNameSource ?? null) ?? 'unknown'
+  if (context.protectedNativeTarget === true && context.nativeTargetMismatch === true) {
+    const observedAt = Date.now()
+    return { agentSessionId: envelope.agentSessionId, providerId: envelope.providerId, run: { runId: envelope.runId }, eventName,
+      mainSubject: false, subject: { kind: 'unknown', basis: 'process-native-record', reason: 'resume-target-mismatch' },
+      lifecycleEvent: null, semanticState: 'unknown', status: { state: agentDisplayState('unknown'), source: 'native-hook', observedAt, detail: eventName }, timeline: [] }
+  }
   const rule = eventRule(specification, eventName, payload)
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
@@ -650,7 +656,7 @@ export function normalizeNativeHook(
   )
   // Authentication binds the Core Session/Run. A different native identity still needs an
   // explicit Provider membership/transition rule; absence of a witness never grants one.
-  const protectedTargetMismatch = context.protectedNativeTarget === true && (context.nativeTargetMismatch === true || knownLocatorChanged && !childSubject)
+  const protectedTargetMismatch = context.protectedNativeTarget === true && knownLocatorChanged && !childSubject
   const nativeSessionMatches = !protectedTargetMismatch && (declaredSubject
     ? declaredSubject.kind === 'main' || declaredSubject.kind === 'child'
     : specification.matchesNativeSession?.(eventName, rawPayload, context) ?? !knownLocatorChanged)

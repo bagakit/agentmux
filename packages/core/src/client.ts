@@ -41,7 +41,7 @@ import {
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
 import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
-import { releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, nativeHookHasSubagentSubject, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
+import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, nativeHookHasSubagentSubject, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
 import {
@@ -8536,11 +8536,6 @@ export class AgentMuxClient {
       session.providerId !== envelope.providerId
     ) return
     const provider = this.providers.get(envelope.providerId)
-    if (provider.hook.nativeSessionTransition?.(envelope.eventName ?? '', envelope.payload ?? {}) &&
-        !nativeHookHasSubagentSubject(provider.hook, envelope.eventName ?? '', envelope.payload ?? {})) {
-      const previous = this.nativeCurrentActivities.get(session.agentSessionId)
-      if (previous?.runId === session.run.runId) previous.invalidated = true
-    }
     const witness = await this.hookNativeWitness(session, envelope, signal)
     if (this.endedRuns.has(envelope.runId)) return
     // Source change is an observation, never permission to apply the new conversation's semantics to the old binding.
@@ -8577,6 +8572,11 @@ export class AgentMuxClient {
       // A conflicting locator still has an authenticated Hook envelope; retain its neutral receipt.
       if (!witnessTargetMismatch || witness.handle?.sessionId !== session.nativeHandle?.sessionId) return
     }
+    if (!witnessTargetMismatch && provider.hook.nativeSessionTransition?.(envelope.eventName ?? '', envelope.payload ?? {}) &&
+        !nativeHookHasSubagentSubject(provider.hook, envelope.eventName ?? '', envelope.payload ?? {})) {
+      const previous = this.nativeCurrentActivities.get(session.agentSessionId)
+      if (previous?.runId === session.run.runId) previous.invalidated = true
+    }
     const context: AgentProviderHookNormalizationContext = Object.freeze({
       ...(session.nativeHandle ? { nativeHandle: Object.freeze({ ...session.nativeHandle }) } : {}),
       ...(session.hookReceipt && sameRun(session.hookReceipt.run, session.run)
@@ -8588,7 +8588,7 @@ export class AgentMuxClient {
       ...(protectedTarget && witnessTargetMismatch ? { nativeTargetMismatch: true as const, nativeIdentityReason: 'resume-target-mismatch' } : witness.reason ? { nativeIdentityReason: witness.reason } : {})
     })
     const childrenWereActive = agentHasActiveSubagents(session.run.runId)
-    const normalized = provider.normalizeHook(envelope, context)
+    const normalized = witnessTargetMismatch ? normalizeNativeHook(provider.hook, envelope, context) : provider.normalizeHook(envelope, context)
     if (normalized.observationFailure) {
       const observation = { run: { ...session.run }, phase: 'binding' as const,
         ...normalized.observationFailure, observedAt: normalized.status.observedAt }
@@ -8746,7 +8746,7 @@ export class AgentMuxClient {
         existingReadiness?.id === receipt.id && existingReadiness.outputCursorBytes !== undefined
         ? { ...receipt, outputCursorBytes: existingReadiness.outputCursorBytes }
         : receipt
-      if (provider.hook.toolInvocation) {
+      if (!witnessTargetMismatch && provider.hook.toolInvocation) {
         // Another Core may have observed a second open call since normalization.
         // Recompute only the pure Provider contribution from the actual CAS state;
         // replaying normalizeHook would repeat roster and lifecycle effects.
@@ -8764,7 +8764,7 @@ export class AgentMuxClient {
         delete currentBase.terminalPromptReadiness
       }
       if (witness.handle && canPromoteLocator && normalized.nativeHandle) delete currentBase.observedNativeHandle
-      if (witness.handle && normalized.mainSubject) delete currentBase.nativeSourceObservation
+      if (witness.handle && !witnessTargetMismatch && normalized.mainSubject) delete currentBase.nativeSourceObservation
       const promotedHandle = witness.handle ?? normalized.nativeHandle
       const next: AgentMuxStoredAgentSession = {
         ...currentBase,
@@ -8822,7 +8822,7 @@ export class AgentMuxClient {
               : {})
       }
       const continuity = normalized.continuity, nativeTarget = next.nativeHandle
-      if (continuity && normalized.mainSubject && normalized.subject?.kind === 'main' &&
+      if (!witnessTargetMismatch && continuity && normalized.mainSubject && normalized.subject?.kind === 'main' &&
         normalized.agentSessionId === current.agentSessionId && normalized.providerId === current.providerId && sameRun(normalized.run, current.run) &&
         current.hookToken === session.hookToken && current.hookBindingId === session.hookBindingId &&
         current.nativeHandle?.kind === 'provider' && nativeTarget?.kind === 'provider' && continuity.nativeSessionId === current.nativeHandle.sessionId &&
