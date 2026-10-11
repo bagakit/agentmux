@@ -28,6 +28,9 @@ import { getWindowOverlayHost, markWindowOverlayDismissal, wasWindowOverlayDismi
 
 const InfoIcon = semanticIconComponent('status.info')
 const CloseIcon = semanticIconComponent('action.close')
+const DragIcon = semanticIconComponent('action.drag')
+const ResizeIcon = semanticIconComponent('layout.resize-window')
+const ResetIcon = semanticIconComponent('action.reset-view')
 const OpenIcon = semanticIconComponent('action.open-external')
 const PinIcon = semanticIconComponent('action.pin')
 
@@ -313,7 +316,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       leave()
     }}>
     <header className="agent-information-reader__header" {...bookmarkWindow.header}>
-      {request.bookmark ? <button type="button" data-bookmark-move className="agent-bookmark__move" aria-label="Move Agent bookmark" title="Drag to move · Arrow keys move · Shift+Arrow keys resize" onKeyDown={bookmarkWindow.moveKey}>⠿</button> : null}
+      {request.bookmark ? <button type="button" data-bookmark-move className="agent-bookmark__move" aria-label="Move Agent bookmark" title="Drag title to move · Arrow keys move · Shift+Arrow keys resize" onKeyDown={bookmarkWindow.moveKey}><DragIcon size={14} aria-hidden="true" /></button> : null}
       <span className="agent-information-reader__identity">{request.identity?.tabs.length
         ? <WorkbenchTopology tabs={request.identity.tabs} interactive={false} enabled={false} />
         : <AgentAvatar executorId={context.executorId} label={context.name} state={currentContext.state} providerId={context.providerId ?? undefined} size={24} visible={false} />}</span>
@@ -334,15 +337,15 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         <AgentInformationDetails context={context} goalLinks={request.goalLinks} usage={usage} control={visible && sameSource ? request.control : undefined} tab={tab} onTab={setTab} source={source} />
       </div> : null}
     </div>
-    {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag or use Arrow keys to resize" {...bookmarkWindow.resize}>⌟</button> : null}
+    {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag corner or use Arrow keys to resize" {...bookmarkWindow.resize}><ResizeIcon size={14} aria-hidden="true" /></button> : null}
     <footer className="agent-information-reader__footer" onPointerDown={event => { if (event.button === 0) event.preventDefault() }}>
       <button type="button" className="agent-information-reader__facts" onClick={() => tab ? showReading() : showMetadata('usage')}
         aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
         <InfoIcon size={14} aria-hidden="true" /><AgentInformationSummary usage={usage} goalLinks={request.goalLinks} />
       </button>
-      {request.bookmark ? <button type="button" className="agent-bookmark__reset" onClick={bookmarkWindow.reset} title="Reset bookmark position and size" aria-label="Reset bookmark position and size">↺</button> : null}
+      {request.bookmark ? <button type="button" className="agent-bookmark__reset" onClick={bookmarkWindow.reset} title="Reset bookmark position and size" aria-label="Reset bookmark position and size"><ResetIcon size={13} aria-hidden="true" /></button> : null}
       <button type="button" className="agent-information-reader__pin" aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Remove bookmark · P' : 'Pin Agent bookmark · P'}>
-        <PinIcon size={13} aria-hidden="true" />{request.pinned ? 'Bookmarked' : 'Pin'}
+        <PinIcon size={13} aria-hidden="true" />{request.pinned ? 'Pinned' : 'Pin'}
       </button>
       <button type="button" className="agent-information-reader__open" onClick={() => {
         const original = useAppStore.getState().sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId)
