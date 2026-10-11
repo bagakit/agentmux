@@ -13,7 +13,44 @@ MECE (mutually exclusive, collectively exhaustive) applies to logical conversati
 - **Evidence-based association:** only authoritative identities and explicit source relationships can establish that signals describe the same event. Equal text, nearby timestamps, display names and body hashes do not establish a join. Unassociated runtime snapshots remain explicit observations with their original content and provenance, rather than being promoted into another Agent utterance or discarded as a duplicate.
 - **One semantic order:** preserve original source order and confirmed relationships. Missing time, association or coverage stays unknown; merging does not invent timestamps, causality, authorship, input adoption or operation completion. Presentation and platform mapping retain these semantics.
 
-These are required protocol invariants. The source-record projection and separate source reads documented below do not by themselves prove that the unified merge contract is implemented or verified across consumers. Exact merge DTOs, correlation and ordering contracts, and any additional public API remain design work; this section registers no new API, wire field or CLI command. Consumer obligations belong to [the conversation view](../design/behavior/conversation-mode.md#连续统一的对话列表) and [external conversation integration](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口).
+These are required protocol invariants. The contract below defines the unified target; separate source reads do not by themselves prove its implementation or verification across consumers. Consumer obligations belong to [the conversation view](../design/behavior/conversation-mode.md#连续统一的对话列表) and [external conversation integration](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口). Current wiring belongs to the [mechanism map](../architecture/conversation.md).
+
+### Records, events and content ownership
+
+A source record retains its source-qualified identity, original item, revision and source-order witness. Native items and captured items keep their own shapes. The timeline accounts for every captured kind, including process, permission, lifecycle and system records. A browser-safe Core projection is the only owner of event role, recorded author, cross-source association and ordering policy; input projections reuse the same author interpretation.
+
+An event has a source-qualified anchor, a Core-produced revision token, a role (`message`, `process`, `observation`, `interaction` or `notice`), its contributing record IDs, and ordered content references. Original bodies occur only in the source records; content references identify a native part or an existing captured field together with the original record revision. Mixed message text, reasoning, tools and resources retain their original positions and remain reachable. Source records, events, messages, observations, revisions and transport fragments are distinct counting units. Execution counts require an accurately scoped invocation identity.
+
+Only an explicit `same-event` relation coalesces event identity. `same-invocation`, `answers` and `observes` retain their distinct meanings. Invocation relations target exact content parts, not entire mixed messages. Providers and the original Core producers supply the typed references and their actual uniqueness scope; clients cannot manufacture them from opaque IDs, text, timestamps or display. A later authoritative association is an explicit coalescence/update, preserving every original record reference and unresolved operation. It does not append another utterance or create an alias Store.
+
+Explicit recorded Agent, external or human authors take precedence over generic captured roles. An unattributed Hook reply snapshot is an observation of a reply, not an additional utterance. Missing native data never removes that observation's original body. Missing Host identity permits reading but yields no navigable `ConversationItemRef`; it cannot be filled from current focus. Public reads always require the exact Host and Session.
+
+### Ordering and coverage
+
+Each source's original order and each record's part order are hard constraints. A native page index is only an order witness within that accepted page; it is not a global sequence number. Core uses one deterministic merge policy over frozen source cuts. Recorded times may rank otherwise unrelated candidates, while missing, equal or conflicting times retain an explicit partial cross-source order. A stable tie-break does not establish causality, authorship or input adoption. Clients consume the resulting order without their own timestamp insertion rules.
+
+Every source reports its accepted extent, continuation and coverage: earlier records may be available, exhausted or unknown; the current cut may be read, partial, unavailable or unsupported. Missing relationship targets are explicit unread references. A bounded or empty recent snapshot cannot certify the whole Session. Source failure does not erase another source's accepted records, and cancellation releases only the relevant reader.
+
+Captured history remains owned by the original Session store. Its current/recent window is a query, never a retention limit. The original Session SQLite database holds captured stream identity, immutable record versions and latest-record/order pointers; native history is not copied into it. Updates preserve the record's first position, while durable change sequence counts committed versions. Pages and writes use the exact Session's indexes and bounded results, without loading cumulative history or scanning unrelated Sessions.
+
+Existing captured JSONL is handed over once through the original writer, transaction, source-generation and durability boundaries. The handover preserves all existing complete records and the original file, confirms the same source witness, and leaves one active fact owner without dual writes or a fallback reader. An uncertain acknowledgement is reconciled against that original transaction. An incomplete trailing record retains its bytes and diagnostic; earlier complete history is preserved. Corruption is never skipped as successful coverage. A retained old snapshot has an unknown earlier prefix; previously compacted-away data cannot be declared recovered. Epoch and committed sequence survive restart, and an actual source replacement is reported rather than silently recut.
+
+### Unified reading and changes
+
+The existing Conversation operations carry the unified contract. Raw source inspection remains under `agent.history`; the Conversation API does not retain a second raw-output mode.
+
+| Operation | Input and result |
+| --- | --- |
+| `agent.conversation.inspect` | Exact `hostId`, `agentSessionId`, optional `limit`, `cursor`, `maxBytes` or an exact versioned original-record anchor; returns the scope, per-source coverage, order witness, bounded items, `nextCursor` and byte budget. |
+| `agent.conversation.checkpoint` | Exact Host/Session and authorized source scope; returns a frontier vector containing original native cuts and the captured epoch/committed sequence. It does not export earlier content or authorize sharing. |
+| `agent.conversation.changes` | The exact original frontier, optional bounded limit/budget and fragment continuation; returns event updates, explicit coalescences and coverage with the next frontier. It is not a list of new utterances. |
+| `agent.conversation.watch` | Relevant original-source invalidation or unavailability in the exact scope. Notifications wake durable catch-up and are not a message log or publishing receipt. |
+
+A bounded item contains one semantic unit: an event and its contributing original records. Oversized units use the existing exact JSON UTF-8 fragment fields (`itemId`, encoding, digest, offset, total and base64 bytes). The entire unit, including relation and question metadata, is within that fragmentation boundary; no unbounded outer event array bypasses the budget. Reassemble and verify the complete unit before semantic use. Fragment continuation freezes its original scope/cuts; a durable frontier cannot advance past an unfinished unit. Page size cannot change the concatenated semantic order.
+
+An exact retry locator retains the original `ConversationItemRef`, record revision, content selector and source-cut frontier. Inspection by anchor reads that exact retained record version at that cut; a returned fragment cursor remains bound to the same anchor. A different anchor cannot reuse it. Captured versions come from their original durable owner; native reads revalidate the original source and revision. An unavailable or changed native version remains a gap instead of being replaced by latest content. Event revision tokens summarize accepted source revisions and relationships; they verify updates and never establish identity or authorize sharing.
+
+The local SDK, Hosted contract, RPC parsers, discovery and CLI consume this same owner and result. CLI inspection accepts ordinary `--host`, `--session`, `--limit`, `--cursor` and `--max-bytes`, or `--input FILE|-` for the exact typed request including an anchor. Exact-source `--source` inspection belongs to `agent.history`. Native source checkpoint/change readers remain primitives of the original history owner, explicitly distinct from the unified frontier. Existing source cuts are retained verbatim; no client cursor or snapshot revision substitutes for a durable publication frontier.
 
 ## Reading and projection
 
@@ -25,10 +62,10 @@ Typed user-message reads expose `publicContent` independently of the recorded au
 
 Use the existing `agent.history --host HOST --session SESSION --source captured|native --kind user-message` query for the same bounded observation through public RPC and the CLI. The original conversation projection and first-party message details consume that result. Plain conversation reads retain the original records and fragments; no native-reference association is invented. Sharing still requires the original audience, binding and authorization scope.
 
-`AgentMuxClient.readAgentConversation` and public `agent.conversation.inspect` reuse that owner's bounded read envelope. Required fields are `hostId`, `agentSessionId` and `source` (`native` or `captured`); `limit`, `cursor` and `maxBytes` retain the original history contract. The envelope keeps the original source identity, revision, ordering, items and opaque continuation. Scope and bodies are not duplicated in an outer snapshot.
+Raw `agent.history` reads reuse that owner's bounded read envelope. Required fields are `hostId`, `agentSessionId` and `source` (`native` or `captured`); `limit`, `cursor` and `maxBytes` retain the original history contract. The envelope keeps the original source identity, revision, ordering, items and opaque continuation. These are the source primitives of the unified Conversation reader, not an alternative Conversation output mode.
 
 ```sh
-amux agent conversation inspect --host HOST --session SESSION --source native
+amux agent history --host HOST --session SESSION --source native
 ```
 
 A complete item retains the original record. An oversized item remains a sequence of exact JSON UTF-8 byte fragments with contiguous offsets and a SHA-256 digest. Reconstruct and verify the complete record before projecting it; a fragment is not a partial semantic message. A missing native source does not erase captured work. Cancelling a read releases only that reader.
@@ -58,7 +95,7 @@ Client adapters must carry this resource reader to the actual shared message con
 
 ## Relevant observation and durable changes
 
-`agent.conversation.watch` observes one exact Host and Session through the original Provider watcher. Notifications are source invalidations or unavailable observations, never a message log or delivery receipt. Desktop, Hosted clients and public readers share the original Session observation. Cancelling one reader leaves the others and the Run intact.
+`agent.conversation.watch` observes the exact scope through the original Provider observation pool and relevant captured commits. Notifications are source invalidations or unavailable observations, never a message log or delivery receipt. Desktop, Hosted clients and public readers share the original source observations. Cancelling one reader leaves the others and the Run intact.
 
 ```sh
 amux agent conversation watch --host HOST --session SESSION
@@ -66,11 +103,11 @@ amux agent conversation checkpoint --host HOST --session SESSION
 amux agent conversation changes --input CHECKPOINT_REQUEST.json
 ```
 
-The checkpoint result contains `hostId`, `agentSessionId` and `checkpoint`; it can be supplied unchanged to `changes`, with an optional `limit` from 1 to 100. SDK consumers use `conversationCheckpoint` and `readConversationChanges`. Each page retains its original source, records, next checkpoint and `more` flag. Empty bookkeeping pages can advance the checkpoint with `more: true`.
+The checkpoint result contains `hostId`, `agentSessionId`, the exact scope and a source-cut vector in `checkpoint`; that original result supplies the next changes request. SDK consumers use `conversationCheckpoint` and `readConversationChanges`. Each bounded result retains the scope, original records, semantic units, per-source coverage, next checkpoint and `more` flag. A fragment continuation is completed before acknowledging the corresponding next frontier. Empty source bookkeeping pages may advance their original cut without inventing an event.
 
-The first checkpoint cuts after the last complete persisted record. Existing history is excluded. A partial append is not consumed before its delimiter arrives. Catch-up resumes in original source order after reader or Host restart, independently of notification loss and UI reading cursors. Saved Claude and Codex sources reuse their original physical reader and Provider converter. Providers without durable catch-up report that capability as unsupported while retaining history, input and the original Run.
+Each first source cut follows the last complete committed record; existing history is excluded. A partial append is not consumed before its delimiter arrives. Catch-up resumes in original source order after reader or Host restart, independently of notification loss and UI reading cursors. Saved Claude and Codex sources reuse their original physical reader and Provider converter; captured changes reuse the original Session store's committed versions. Providers without durable catch-up report that source's capability as unsupported while retaining history, other available sources, input and the original Run.
 
-A checkpoint is a read continuation, never sharing or input authority. It contains no transcript path. Source replacement, truncation, changed identity or changed saved boundary returns an explicit source error and retains the original continuation. A connector must inspect and authorize a new source cut before publishing from it. Multiple sources keep independent checkpoints; their readers do not manufacture a global event order.
+A checkpoint is a read continuation, never sharing or input authority. It contains no transcript path. Source replacement, truncation, changed identity or changed saved boundary reports the exact source failure and retains the original continuation. A connector must inspect and authorize a new source cut before publishing from it. Constituent cuts stay independent within the vector; only the common Core projection supplies cross-source ordering and its uncertainty.
 
 ## Asynchronous question references
 
@@ -102,11 +139,11 @@ External publication is required to preserve [shared conversation parity and acc
 
 The original `RoomBinding.scope.publication` distinguishes existing `future-native-user-facing` grants, which retain assistant speech, from explicit `future-shared-conversation` consent. A new scope goes through `connection.binding.relink` with the exact expected revision and a fresh source cut; another `connection.bind` cannot silently broaden an existing binding. Original pending and unknown publications retain their own scope and revision. Consent does not establish a qualified public-content boundary, authorship, platform identity or complete adapter coverage.
 
-For broader sharing, an unqualified original native user record or an unsupported complete image/file resource produces the public delivery observation `unavailable` / `content-unconfirmed`. The original source frontier stays before that page; no skipped-content decision or empty substitute is saved. Worker restart reads the same source and reports the same gap. This observation concerns external publication only and does not revoke ordinary Agent input, replace its Session or resolve an older unknown platform operation. Previously admitted pending deliveries continue through their original lane; inspecting or settling an older effect cannot hide the source-content gap. The older delivery remains independently inspectable.
+For broader sharing, an unqualified original native user record or an unsupported complete image/file resource produces the public delivery observation `unavailable` / `content-unconfirmed`. The original publication owner retains an unresolved event/part decision with its exact versioned retry locator. Only a transaction that durably accounts for all required supported intents and gaps may advance the read frontier; a failed gap write leaves the original cut unchanged. The delivery coverage remains incomplete, never a successful skip or empty substitute. Worker restart reads the same durable gap, and other supported content continues through its original lane. This observation concerns external publication only and does not revoke ordinary Agent input, replace its Session or resolve an older unknown platform operation. Inspecting or settling an older effect cannot hide the source-content gap; the older delivery remains independently inspectable.
 
 A successful read proves what was observed in its stated range. It does not prove that a message was delivered, an input was adopted or a task completed. UI snapshots and observation cursors are not durable publishing checkpoints. External delivery must retain its own operation identity and confirmed platform mapping, and reconcile unknown effects through the original operation.
 
-The source model and protected behavior are defined by [the conversation contract](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口). This page documents implemented reading, recorded resources, observation, catch-up, asynchronous questions and external input admission; connector capabilities are described as their owning implementations land. Interface availability does not establish that every client has supplied all adapters or passed product validation.
+The source model and protected behavior are defined by [the conversation contract](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口). This page defines the unified target together with the original reading, resource, question and external-input contracts. Actual implementation belongs to the [mechanism map](../architecture/conversation.md); interface availability does not establish that every client has supplied all adapters or passed product validation.
 
 ## Named original-record reading points
 
