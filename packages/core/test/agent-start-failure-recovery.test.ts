@@ -2,15 +2,18 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxError } from '../src/errors.js'
-import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
-import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
 import { AgentHookServer } from '../src/hook-server.js'
+import * as SourceCore from '../src/index.js'
+const core: typeof SourceCore = process.env.AGENTMUX_POST_START_ENTRY
+  ? await import(/* @vite-ignore */ process.env.AGENTMUX_POST_START_ENTRY) : SourceCore
+const { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider } = core
+if (process.env.AGENTMUX_POST_START_MUTANT) {
+  expect(Reflect.get(core, 'AGENTMUX_POST_START_MUTANT')).toBe(process.env.AGENTMUX_POST_START_MUTANT)
+}
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 
-let root: string, client: AgentMuxClient, inner: any, store: AgentMuxMemoryAgentSessionStore
+let root: string, client: SourceCore.AgentMuxClient, inner: any, store: SourceCore.AgentMuxMemoryAgentSessionStore
 let events: AgentMuxClientEvent[], old: AgentMuxStoredAgentSession, oldRun: CtxmuxAdapterRun, newRun: CtxmuxAdapterRun
 let raw: string, attach: ReturnType<typeof vi.fn>, input: ReturnType<typeof vi.fn>
 beforeEach(async () => {
@@ -19,7 +22,7 @@ beforeEach(async () => {
     AGENTMUX_MESSAGE_QUEUE_PATH: 'messages.ndjson', CODEX_HOME: 'home' })) vi.stubEnv(key, join(root, path))
   const template = new AgentProviderRegistry().get('codex')
   const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'startup-fixture', label: 'Startup fixture',
-    executable: 'fixture', expectedProcess: 'fixture', hookStrategy: { kind: 'none' },
+    executable: 'fixture', expectedProcess: 'fixture', capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: true, replyCorrelation: 'none' }, hookStrategy: { kind: 'none' },
     readySignal: { kind: 'foreground-process', expectedProcess: 'fixture' } },
     hook: { rules: [], eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' } },
     terminalHandshake: { query: '\x1b[?u', response: '\x1b[?0u' },
@@ -58,13 +61,14 @@ beforeEach(async () => {
   vi.spyOn(Date, 'now').mockReturnValue(1000)
 })
 afterEach(async () => {
-  await client.dispose(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true })
+  await client?.dispose(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true })
 })
 it('publishes the successful durable rollback after the failed binding in one clock tick, then the original Run state', async () => {
   await expect(client.resumeAgent({ agentSessionId: old.agentSessionId, operationId: 'resume', prompt: 'resume original draft' })).rejects.toThrow('missing platform dependency')
   const canonical = (await store.load() as AgentMuxStoredAgentSession[])[0]!
   expect(canonical).toMatchObject({ agentSessionId: old.agentSessionId, run: old.run, nativeHandle: old.nativeHandle,
-    retiredRuns: [newRunRef()], updatedAt: 1001 })
+    retiredRuns: [newRunRef()] })
+  expect(canonical.updatedAt).toBeGreaterThan(old.updatedAt)
   const transitions = events.filter(event => event.type === 'agent-session')
   expect(transitions.map(event => event.session.run.runId)).toEqual(['failed-run', 'original-run'])
   expect(transitions[1]!.session).toEqual(client.agentSession(old.agentSessionId))
@@ -75,8 +79,8 @@ it('publishes the successful durable rollback after the failed binding in one cl
 })
 function newRunRef() { return { runId: newRun.runId } }
 it('does not publish a rollback or original Run state when its real Store CAS fails', async () => {
-  const cas = store.compareAndSwap.bind(store)
-  vi.spyOn(store, 'compareAndSwap').mockImplementation(async (expected, next, signal) => {
+  const cas = store.compareAndSwapMetadata.bind(store)
+  vi.spyOn(store, 'compareAndSwapMetadata').mockImplementation(async (expected, next, signal) => {
     if ((expected as AgentMuxStoredAgentSession | null)?.run?.runId === newRun.runId && (next as AgentMuxStoredAgentSession | null)?.run?.runId === oldRun.runId) throw new Error('rollback Store rejected')
     return cas(expected, next, signal)
   })
@@ -101,7 +105,11 @@ it('exposes generic bounded startup output and real code through public create, 
   expect(failure.message).toContain('exit code 1'); expect(failure.message).toContain('Error: fixture cannot load its runtime')
   expect(failure.message).not.toContain('\x1b'); expect(failure.message).not.toContain('private title')
   expect(failure.message.length).toBeLessThan(4300); expect(input).not.toHaveBeenCalled()
-  expect(attach).toHaveBeenCalledTimes(1); expect((await store.load() as AgentMuxStoredAgentSession[]).map(item => item.agentSessionId)).toEqual(['original'])
+  expect(attach).toHaveBeenCalledTimes(1); expect((await store.load() as AgentMuxStoredAgentSession[]).map(item => item.agentSessionId)).toEqual(['original', 'new-session'])
+  expect(client.agentSession('new-session')).toMatchObject({ run: newRunRef(), creation: { failure: { code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' } } })
+  const states = events.filter(event => event.type === 'process-state' && event.agentSessionId === 'new-session')
+  expect(states.at(-1)).toMatchObject({ state: 'exited', exitCode: 1 })
+  expect(states.slice(1).some(event => event.state === 'running')).toBe(false)
 })
 it('does not invent startup text when an exited Run has no observed output', async () => {
   raw = ''
@@ -130,4 +138,18 @@ it('keeps a failed exit-state observation honest instead of attaching a guessed 
   })
   await expect(client.resumeAgent({ agentSessionId: old.agentSessionId, operationId: 'resume', prompt: 'resume original draft' })).rejects.toThrow('Agent Run exited before its terminal capability query was observed.')
   expect(events.filter(event => event.type === 'agent-session').map(event => event.session.run.runId)).toEqual(['failed-run', 'original-run'])
+})
+
+it('preserves a confirmed fatal exit after recovering an applied commit acknowledgement', async () => {
+  const commit = inner.registry.commitLifecycle.bind(inner.registry)
+  vi.spyOn(inner.registry, 'commitLifecycle').mockImplementation(async (...args: unknown[]) => {
+    await commit(...args)
+    throw new Error('Commit acknowledgement unavailable')
+  })
+  const result = await client.ensureAgentContinuity({ agentSessionId: old.agentSessionId, expectedRun: old.run, operationId: 'resume-after-commit', trigger: 'manual' })
+  expect(result.kind).toBe('pending')
+  expect((await store.readMetadata(old.agentSessionId))?.continuity?.error).toContain('missing platform dependency')
+  expect((await store.readMetadata(old.agentSessionId))?.run).toEqual(old.run)
+  expect(events.filter(event => event.type === 'process-state').at(-1)).toMatchObject({ run: old.run, state: 'exited' })
+  expect(input).not.toHaveBeenCalled()
 })
