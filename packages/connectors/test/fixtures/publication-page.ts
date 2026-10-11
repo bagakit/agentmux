@@ -11,6 +11,8 @@ export function publicationPage(boundary: PublicationBoundary, native: NativeCon
   const units = timeline.events.map(event => ({ event, records: timeline.records.filter(record => event.recordIds.includes(record.id)) }))
   const page: ConversationChangesPage = { hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId, sourceHostId, scope: timeline.scope,
     coverage: timeline.coverage, order: { ...timeline.order, direction: 'newest-first' }, items: [...units].reverse().map(item => ({ kind: 'item', item })),
-    nextCursor: null, budgetBytes: 4 * 1024 * 1024, checkpoint, more: false }
+    nextCursor: null, budgetBytes: 4 * 1024 * 1024, checkpoint, more: false,
+    window: { id: 'outbox-fixture-window', revision: 1, itemCount: units.length, complete: true,
+      view: 'outbox-fixture-view', replay: 'outbox-fixture-replay', checkpoint, outside: { older: null, newer: null } } }
   return { page, units, resolvedText: new Map() }
 }

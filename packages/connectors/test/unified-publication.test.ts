@@ -103,6 +103,7 @@ it('cut-before captured updates retain a durable private-history gap instead of 
 
 it('a late exact same-event contribution preserves already represented native content and the original mapping without creating another message', async () => {
   const f = await fixture(), id = f.session.agentSessionId
+  const reads = vi.spyOn(f.port, 'changes')
   await appendFile(f.transcript, row('canonical-reply', _historyFixtureEpoch(0, 0, 100), [{ type: 'text', text: 'Complete original native reply' }]))
   f.host.refresh()
   await vi.waitFor(() => expect(f.host.store.list(f.binding)[0]?.state).toBe('confirmed'), { timeout: 10_000 })
@@ -120,6 +121,14 @@ it('a late exact same-event contribution preserves already represented native co
   const represented = JSON.stringify(JSON.parse((current.body as { content: string }).content))
   expect(represented).toContain('Complete original native reply')
   expect(represented).toContain('Complete original observation')
+  const windows = await Promise.all(reads.mock.results.filter(result => result.type === 'return').map(result => result.value))
+  const joined = windows.filter(page => page.window.complete).find(page => page.items.some(entry => entry.kind === 'item' && entry.item.records.some(record => record.original.item.id === 'later-observation')))
+  expect(joined).toBeDefined()
+  const unit = joined!.items.find(entry => entry.kind === 'item' && entry.item.records.some(record => record.original.item.id === 'later-observation'))!
+  expect(unit).toMatchObject({ kind: 'item' })
+  if (unit.kind !== 'item') throw Error('Expected the original complete consumer unit')
+  expect(unit.item.records.map(record => record.original.item.id).sort()).toEqual(['canonical-reply', 'later-observation'])
+  expect(reads.mock.calls.some(([input]) => typeof input.view === 'string')).toBe(true)
 }, 20_000)
 
 it('an unread canonical target never hides its captured body; the later native contribution updates the same original platform mapping', async () => {
@@ -146,6 +155,7 @@ it('an unread canonical target never hides its captured body; the later native c
 
 it('a payload-noop canonical coalescence retains its mapping for a later canonical-only update', async () => {
   const f = await fixture(), id = f.session.agentSessionId
+  const reads = vi.spyOn(f.port, 'changes')
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: id, item: captured(id, 'noop-first', _historyFixtureEpoch(0, 0, 200), {
     kind: 'assistant_message', content: 'Original body retained during canonical arrival', conversation: {
       sameEvent: { hostId: 'local', agentSessionId: id, source: { kind: 'native', providerId: 'claude', nativeSessionId: 'original-native', recordId: 'noop-canonical' } }
@@ -162,11 +172,20 @@ it('a payload-noop canonical coalescence retains its mapping for a later canonic
   f.host.refresh()
   await vi.waitFor(() => expect(f.host.store.list(f.binding).length > 1).toBe(true), { timeout: 10_000 })
   await vi.waitFor(() => expect(f.host.store.list(f.binding).at(-1)?.state).toBe('confirmed'), { timeout: 10_000 })
+  await vi.waitFor(() => expect(JSON.stringify(f.remote.records.get(first.mapping!.messageId)!.body)).toContain('Canonical-only changed original body'), { timeout: 10_000 })
   expect(f.posts()).toHaveLength(1)
   expect(f.host.store.list(f.binding).at(-1)?.mapping).toEqual(first.mapping)
   const text = JSON.stringify(f.remote.records.get(first.mapping!.messageId)!.body)
   expect(text).toContain('Original body retained during canonical arrival')
   expect(text).toContain('Canonical-only changed original body')
+  const pages = await Promise.all(reads.mock.results.filter(result => result.type === 'return').map(result => result.value))
+  const windows = pages.filter(page => page.window.complete).flatMap(page => page.items.flatMap(entry => entry.kind === 'item' && entry.item.records.some(record => record.original.item.id === 'noop-canonical') ? [{ window: page.window, unit: entry.item }] : []))
+  const earlier = windows.find(value => !JSON.stringify(value.unit).includes('Canonical-only changed original body'))!
+  const updated = windows.find(value => JSON.stringify(value.unit).includes('Canonical-only changed original body'))!
+  expect(updated.unit.event.id).toBe(earlier.unit.event.id)
+  expect(updated.window.id).toBe(earlier.window.id)
+  expect(updated.window.revision).toBeGreaterThan(earlier.window.revision)
+  expect(updated.unit.records.map(record => record.original.item.id).sort()).toEqual(['noop-canonical', 'noop-first'])
 }, 20_000)
 
 it('removing an earlier same-event relation cannot silently split or duplicate a retained platform part without a replacement fact', async () => {
@@ -392,12 +411,22 @@ it('an unavailable complete text resource keeps its exact gap while adjacent con
   await vi.waitFor(() => expect(f.posts()).toHaveLength(2), { timeout: 10_000 })
   const gap = f.host.store.coverage(f.binding).gaps.find(gap => gap.reason === 'resource-unavailable')!, before = f.host.store.list(f.binding)
   expect(gap).toMatchObject({ part: { selector: { kind: 'native-part', partIndex: 1 } }, anchor: { revision: gap.part!.recordRevision } })
-  const exact = vi.spyOn(f.port, 'inspect')
+  const exact = vi.spyOn(f.port, 'inspect'), originalCut = structuredClone(f.host.store.checkpoint(f.binding, 'local'))
+  const originalBinding = structuredClone(f.binding)
+  // Release the temporary Reader view; recovery must reopen the original durable
+  // publication cut and read the retained gap's exact original version.
+  f.host.close()
+  const resumed = new PublicationHost({ connections: f.connections, bindings: f.bindings, conversation: f.port })
+  cleanup.push(() => resumed.close())
+  expect(resumed.store.checkpoint(f.binding, 'local')).toEqual(originalCut)
+  for (const operation of before) expect(resumed.store.inspect(operation.operationId)).toEqual(operation)
   available = true
-  f.host.refresh(); f.host.refresh()
+  resumed.refresh()
   await vi.waitFor(() => expect(f.host.store.coverage(f.binding).gaps.filter(value => value.reason === 'resource-unavailable' || value.reason === 'version-unavailable')).toHaveLength(0), { timeout: 15_000 })
   await vi.waitFor(() => expect(allOperations(f.host.store, f.binding).every(operation => operation.state === 'confirmed')).toBe(true), { timeout: 20_000 })
   expect(exact.mock.calls.map(([input]) => input.anchor)).toContainEqual(gap.anchor)
+  expect(f.binding).toEqual(originalBinding)
+  for (const operation of before) expect(resumed.store.inspect(operation.operationId)).toEqual(operation)
   const projection = before.find(operation => originalRecordId(operation) === 'deferred-original')!.projectionId
   const versions = allOperations(f.host.store, f.binding).filter(operation => operation.projectionId === projection), latest = new Map(versions.map(operation => [operation.fragment.ordinal, operation]))
   const platform = [...latest.values()].sort((a, b) => a.fragment.ordinal - b.fragment.ordinal).map(operation => {
