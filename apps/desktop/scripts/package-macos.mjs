@@ -1099,8 +1099,8 @@ async function main() {
     initialSource.status === '',
     `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
   )
-  // Emit Core and its workspace dependencies in pnpm's dependency order before compiling Desktop.
-  await run('pnpm', ['--filter', '@agentmux/core...', 'build'], { cwd: repositoryRoot })
+  // Emit the client package consumed by Main and its Core dependencies before compiling Desktop.
+  await run('pnpm', ['--filter', '@agentmux/client-ui...', 'build'], { cwd: repositoryRoot })
   await run('pnpm', ['build'], { cwd: desktopRoot })
   const electronRoot = dirname(require.resolve('electron/package.json'))
   const electronApp = join(electronRoot, 'dist', 'Electron.app')
