@@ -361,6 +361,8 @@ owners; creating or inspecting a binding performs none of those effects.
 
 ## Durable publication
 
+The required integration target is the [Agent Conversation unified timeline and MECE contract](../../docs/specs/conversation-protocol.md#unified-timeline-and-mece). The conversation view and Feishu connector are consumers of the same Core timeline; connector-specific mapping and authorized sharing requirements belong to the [external conversation behavior contract](../../docs/design/behavior/conversation-mode.md#共同对话协议与外部交流入口). The current source reads and delivery mechanisms below do not certify complete compliance with that target.
+
 `PublicationHost` borrows the original `ConnectionHost.database`, `RoomBindingReadPort` and exact Core conversation reads. `createPublicationConversationPort` adapts existing execution clients; it creates no Runtime, transcript reader or message queue. Desktop's original connection composition starts this owner and exposes its `ConnectionPort.delivery`. Configuration and Binding changes reconcile the same owner; source notifications wake durable catch-up rather than serving as the message log.
 
 Each accepted page commits its necessary Outbox effects, explicit skips and source frontier together. Selection includes original assistant speech and typed questions, preserving separate records with equal text. Complete resource-backed text uses the original Core resource reader and verified content digest before exact Unicode fragmentation. Reasoning, tool data and internal metadata are excluded. Confirmed surplus platform fragments receive explicit withdrawal operations when a source revision shortens the speech.

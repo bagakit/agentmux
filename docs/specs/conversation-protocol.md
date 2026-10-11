@@ -2,6 +2,19 @@
 
 Core owns source-qualified conversation semantics. Clients retain presentation, drafts and reading state; Providers retain native interpretation; the original history, input and interaction owners retain their durable facts. Product requirements belong to [the conversation behavior SSOT](../design/behavior/conversation-mode.md); current consumer wiring is described in [the mechanism map](../architecture/conversation.md).
 
+## Unified timeline and MECE
+
+Agent Conversation must provide one clear, unified timeline for an exact conversation and requested scope. Its Core merge module aggregates actual speech and runtime observation signals after Provider interpretation; clients consume the same resulting event identities, ordering, content and provenance. The merge module reuses the original history, input and interaction owners, without creating a second transcript, Reader, Session or Runtime. Desktop conversation views and the Feishu connector are consumers of this contract, not independent owners of conversation reconstruction.
+
+MECE (mutually exclusive, collectively exhaustive) applies to logical conversation events and their content within that scope:
+
+- **No duplication:** one logical event has one timeline identity and one occurrence. Signals authoritatively tied to that event enrich or update it rather than creating another utterance. Its text, process parts, interaction and status belong to that event; signal, revision, render-fragment and delivery-attempt counts are not additional message or execution counts. Distinct original records remain independently traceable.
+- **No omission:** every original input, reply, process, interaction and resource in scope must have an accounted-for place in the timeline or its original event details. Mixed records preserve all content parts and their order. Pagination, folding, reconnects and a missing source cannot silently remove content from another source. Unread ranges, gaps and unsupported or unavailable content remain explicit and reachable for continuation or recovery; a partial read cannot certify complete coverage.
+- **Evidence-based association:** only authoritative identities and explicit source relationships can establish that signals describe the same event. Equal text, nearby timestamps, display names and body hashes do not establish a join. Unassociated runtime snapshots remain explicit observations with their original content and provenance, rather than being promoted into another Agent utterance or discarded as a duplicate.
+- **One semantic order:** preserve original source order and confirmed relationships. Missing time, association or coverage stays unknown; merging does not invent timestamps, causality, authorship, input adoption or operation completion. Presentation and platform mapping retain these semantics.
+
+These are required protocol invariants. The source-record projection and separate source reads documented below do not by themselves prove that the unified merge contract is implemented or verified across consumers. Exact merge DTOs, correlation and ordering contracts, and any additional public API remain design work; this section registers no new API, wire field or CLI command. Consumer obligations belong to [the conversation view](../design/behavior/conversation-mode.md#连续统一的对话列表) and [external conversation integration](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口).
+
 ## Reading and projection
 
 `@agentmux/core/conversation` is browser-safe. `projectConversationRecords` projects an already accepted native history page and/or captured timeline. Each record preserves its original source and item, ordered content parts, recorded author facts and source-qualified identity. Equal text in different records remains distinct. Reading does not infer a human author, input adoption, interaction completion or task success.
