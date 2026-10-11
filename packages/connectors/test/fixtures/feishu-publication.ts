@@ -38,7 +38,7 @@ export async function feishuPublicationHttp(override?: (call: FeishuHttpCall) =>
               records.set(messageId, message); uuids.set(body.uuid, messageId); result = { status: 200, body: { code: 0, data: message } }
             }
           } else if ((call.method === 'PUT' || call.method === 'PATCH') && original) {
-            const updated = { ...original, body: { content: JSON.stringify(native) } }; records.set(id, updated)
+            const updated: Record<string, unknown> = { ...original, body: { content: JSON.stringify(native) } }; records.set(id, updated)
             const { thread_id: _threadId, ...acknowledged } = updated
             result = { status: 200, body: { code: 0, data: acknowledged } }
           } else result = { status: 404, body: { code: 230050 } }
@@ -49,13 +49,15 @@ export async function feishuPublicationHttp(override?: (call: FeishuHttpCall) =>
     } catch { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ code: 230001 })) }
   })
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => resolve()) })
-  const port = (server.address() as { port: number }).port, request = defaultHttpInstance.request.bind(defaultHttpInstance)
+  // The SDK's response interceptor returns data; retain its own HttpInstance contract at this transport boundary.
+  const port = (server.address() as { port: number }).port, request = defaultHttpInstance.request.bind(defaultHttpInstance) as HttpInstance['request']
   const http = Object.create(defaultHttpInstance) as HttpInstance
-  http.request = <T, R = T, D = unknown>(input: HttpRequestOptions<D>): Promise<R> => {
+  http.request = <T, R = T, D = unknown>(input: HttpRequestOptions<D>) => {
     const original = new URL(input.url!)
     if (!['https://open.feishu.cn', 'https://open.larksuite.com'].includes(original.origin)) throw new Error('Unexpected SDK application endpoint')
     origins.push(original.origin)
-    return request<T, R, D>({ ...input, url: `http://127.0.0.1:${port}${original.pathname}${original.search}`, proxy: false, adapter: 'http' })
+    const forwarded = { ...input, url: `http://127.0.0.1:${port}${original.pathname}${original.search}`, proxy: false, adapter: 'http' }
+    return request<T, R, D>(forwarded)
   }
   return { http, calls, origins, records, messageCalls: () => calls.filter(call => call.path.startsWith('/open-apis/im/v1/messages')),
     async close() { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())) } }
