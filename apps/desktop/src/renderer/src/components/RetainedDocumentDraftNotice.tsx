@@ -1,49 +1,76 @@
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { SelectionField } from './SelectionField'
 import type { FileDocument } from '../../../shared/contracts'
 import type { NotesStorageSnapshot } from '@agentmux/core/notebook-store'
 
-/** Alternate buffers are user input, independent of any observed disk revision. */
-export function RetainedDocumentDraftNotice({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
-  const key = documentKey(surface.workspaceId, surface.path)
-  const retainedDrafts = useAppStore(state => state.retainedDocumentDrafts[key])
-  const count = retainedDrafts?.length ?? 0
-  const retainedUnknown = retainedDrafts?.some(draft => draft.noteConversion?.unconfirmedWrite) ?? false
-  const conversion = useAppStore(state => state.documents[key]?.noteConversion)
+/** Observe the original conversion owner even when the auxiliary reader is closed. */
+export function useNoteConversionObservation(surface: FileWorkbenchSurface, active: boolean) {
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId))
-  const { active } = useWorkbenchBrowserPresentation()
-  const [storage, setStorage] = useState<NotesStorageSnapshot | null>(null), [observationIssue, setObservationIssue] = useState<string | null>(null)
-  const [retrying, setRetrying] = useState(false), [draftsOpen, setDraftsOpen] = useState(false), [selected, setSelected] = useState(0)
-  const selectedDraft = retainedDrafts?.[Math.min(selected, Math.max(0, count - 1))]
+  const scope = JSON.stringify([surface.workspaceId, surface.path, workspace?.hostId, workspace?.path])
+  const [snapshot, setSnapshot] = useState<{ scope: string; value: NotesStorageSnapshot } | null>(null)
+  const [failure, setFailure] = useState<{ scope: string; message: string } | null>(null)
+  const [retrying, setRetrying] = useState(false)
+  const epoch = useRef(0)
+  const storage = snapshot?.scope === scope ? snapshot.value : null
+  const observationIssue = failure?.scope === scope ? failure.message : null
   useEffect(() => {
+    const request = ++epoch.current
+    setRetrying(false)
     if (!active || !/\.note\.(?:json|md)$/u.test(surface.path)) return
-    let disposed = false
-    const observe = (value: NotesStorageSnapshot) => { if (!disposed) { setStorage(value); setObservationIssue(null) } }
-    void api.notesStorage.inspect().then(observe).catch(error => { if (!disposed) setObservationIssue('The original Note conversion observation is unavailable. This file remains available; inspect the Notes directory in Settings. ' + String(error)) })
+    const observe = (value: NotesStorageSnapshot) => { if (epoch.current === request) { setSnapshot({ scope, value }); setFailure(null) } }
+    void api.notesStorage.inspect().then(observe).catch(error => { if (epoch.current === request) setFailure({ scope, message: 'The original Note conversion observation is unavailable. This file remains available; inspect the Notes directory in Settings. ' + String(error) }) })
     const release = api.notesStorage.onChange(observe)
-    return () => { disposed = true; release() }
-  }, [active, surface.workspaceId, surface.path])
+    return () => { ++epoch.current; release() }
+  }, [active, scope])
   const issues = storage?.conversionIssues?.filter(issue => issue.resource && issue.resource.hostId === workspace?.hostId && issue.resource.workspaceId === surface.workspaceId && issue.resource.workspacePath === workspace.path && issue.resource.path === surface.path) ?? []
   async function retry() {
-    if (!storage) return
+    if (!storage || retrying) return
+    const request = epoch.current
     setRetrying(true)
-    try { setStorage(await api.notesStorage.change(storage.operation ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: storage.directory })); await useAppStore.getState().refreshNotesStorage(); setObservationIssue(null) }
-    catch (error) { setObservationIssue('Original Note conversion remains unconfirmed; the file and draft are retained. ' + String(error)) }
-    finally { setRetrying(false) }
+    try {
+      const value = await api.notesStorage.change(storage.operation ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: storage.directory })
+      await useAppStore.getState().refreshNotesStorage()
+      if (epoch.current === request) { setSnapshot({ scope, value }); setFailure(null) }
+    } catch (error) {
+      if (epoch.current === request) setFailure({ scope, message: 'Original Note conversion remains unconfirmed; the file and draft are retained. ' + String(error) })
+    } finally { if (epoch.current === request) setRetrying(false) }
   }
+  return { issues, observationIssue, retrying, retry }
+}
+
+/** Alternate buffers are user input, independent of any observed disk revision. */
+export function RetainedDocumentDraftNotice({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
+  const { active } = useWorkbenchBrowserPresentation()
+  const observation = useNoteConversionObservation(surface, active)
+  return <RetainedDocumentDrafts tabId={tabId} surface={surface} active={active} observation={observation} />
+}
+
+export function RetainedDocumentDrafts({ tabId, surface, active, observation, inPanel = false }: {
+  tabId: string; surface: FileWorkbenchSurface; active: boolean
+  observation: ReturnType<typeof useNoteConversionObservation>; inPanel?: boolean
+}) {
+  const key = documentKey(surface.workspaceId, surface.path)
+  const retainedDrafts = useAppStore(state => state.retainedDocumentDrafts[key])
+  const conversion = useAppStore(state => state.documents[key]?.noteConversion)
+  const count = retainedDrafts?.length ?? 0
+  const retainedUnknown = retainedDrafts?.some(draft => draft.noteConversion?.unconfirmedWrite) ?? false
+  const { issues, observationIssue, retrying, retry } = observation
+  const [draftsOpen, setDraftsOpen] = useState(inPanel), [selected, setSelected] = useState(0)
+  const selectedDraft = retainedDrafts?.[Math.min(selected, Math.max(0, count - 1))]
   const useDraft = useAppStore(state => state.useRetainedDocumentDraft)
   if (!count && !conversion && !issues.length && !observationIssue) return null
   return <>{issues.map((issue, index) => <div key={index} className="editor-file-notice" role="status"><span>{issue.message}</span><button type="button" className="small-button" disabled={retrying} onClick={() => void retry()}>Retry original Note conversion</button></div>)}
-  {observationIssue ? <p className="editor-file-notice" role="status">{observationIssue}</p> : null}{count ? <div className="editor-file-notice" role="status">
+  {observationIssue ? <p className="editor-file-notice" role="status">{observationIssue}</p> : null}{count && !inPanel ? <div className="editor-file-notice" role="status">
     <span>{count === 1 ? 'Another draft is kept.' : `${count} other drafts are kept.`} Choosing a draft also keeps your current one. Save is a separate action.</span>
   </div> : null}
   {count ? <details className="note-version-history" open={draftsOpen} onToggle={event => setDraftsOpen(event.currentTarget.open)}>
     <summary>Review kept drafts ({count})</summary>
     {draftsOpen && active && selectedDraft ? <div className="note-version-history__body">
+      {inPanel ? <p>Choosing a draft also keeps your current one. Save is a separate action.</p> : null}
       <SelectionField label="Kept draft" value={String(Math.min(selected, count - 1))} options={retainedDrafts!.map((draft, index) => ({ value: String(index), label: `Draft ${index + 1} · ${draft.content.length.toLocaleString()} characters${draft.noteEditing?.attempt ? ' · original save retained' : ''}` }))} onValueChange={value => setSelected(Number(value))} />
       <KeptDraftContent draft={selectedDraft} />
       <button type="button" className="note-text-button" onClick={() => useDraft(tabId, surface.regionId, selectedDraft)}>Use selected draft; keep current</button>

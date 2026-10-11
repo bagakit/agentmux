@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { WORKSPACE_FILE_MAX_BYTES } from '../../../shared/workspace-file-bytes'
 import { workspaceFileFormat } from '../../../shared/workspace-file-format'
@@ -46,6 +46,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary))
   const setRegionMode = useAppStore(state => state.setEditorRegionMode)
   const previewing = regionMode === 'preview'
+  const retainedNotePreview = useRef<{ key: string; node: ReactNode } | null>(null)
   useEffect(() => {
     if (!visible || released) return
     const read = (): FileBuildSource | null => {
@@ -82,7 +83,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     const bytes = new Uint8Array(Math.min(WORKSPACE_FILE_MAX_BYTES + 1, doc.content.length * 3))
     const result = new TextEncoder().encodeInto(doc.content, bytes)
     return result.written > WORKSPACE_FILE_MAX_BYTES || result.read < doc.content.length
-  }, [visible, released, previewing, doc?.content, format.sourcePreview])
+  }, [visible, released, previewing, doc?.content, format.sourcePreview, note])
 
   if (!format.sourceEditable || (!doc && binary)) {
     return <FilePreviewPane surface={surface} visible={visible && !released} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
@@ -123,7 +124,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
       await current.createBrowser(group.id, undefined, joinWorkspacePath(workspaceRoot, surface.path), undefined, surface.workspaceId, reference.displayWorkspaceId)
     } catch (error) { reportError(error) }
   }
-  const preview = doc && visible && !released && previewing ? overBudget
+  const currentPreview = doc && visible && !released && previewing ? overBudget
     ? <div className="file-preview-state" role="status"><strong>Source exceeds the preview budget</strong><span>Preview is limited to 16 MB of UTF-8 content. The full source and its unsaved draft remain editable.</span></div>
     : note
     ? <NoteFileSurfaceView tabId={tabId} surface={surface} />
@@ -134,8 +135,12 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
         if (!reference) { reportError(new Error('The original File display position is unconfirmed. Its content is retained.')); return }
         void useAppStore.getState().openHttpLink({ workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId, regionId: surface.regionId }, url, 'tab').catch(reportError)
       }} /> : null : null
+  // Keep only the already-created projection; hidden Source input never allocates a preview
+  // budget buffer or mounts a previously over-budget Rich editor.
+  if (note && currentPreview) retainedNotePreview.current = { key, node: currentPreview }
+  const preview = note && !released ? currentPreview ?? (retainedNotePreview.current?.key === key ? retainedNotePreview.current.node : null) : currentPreview
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
-    <EditorPane tabId={tabId} surface={surface} released={released} visible={visible} previewHasNoteAttribution={Boolean(note && preview && !overBudget)}
+    <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
       {...(format.sourcePreview ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
       {...(html ? { extraActions: <>
         <DropdownMenu.Item className="tab-context-menu__item" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onSelect={() => void previewSavedHtml(false)}><ThemeActionRevealIcon size={13} />Preview saved file</DropdownMenu.Item>

@@ -75,7 +75,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   // handles a fresh target arriving for an already-mounted editor (re-clicking a link).
   function consumeRevealTarget(editor: MonacoStandaloneEditor): void {
     const target = useAppStore.getState().documentRevealTargets[key]
-    if (!target || target.noteBlock) return
+    if (!visibleRef.current || !target || target.noteBlock) return
     editor.revealLineInCenter(target.line)
     editor.setPosition({ lineNumber: target.line, column: target.column ?? 1 })
     editor.focus()
@@ -88,17 +88,17 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
       editorRef.current = null
       return
     }
-    if (editorRef.current && revealTarget) consumeRevealTarget(editorRef.current)
+    if (visible && editorRef.current && revealTarget) consumeRevealTarget(editorRef.current)
     // consumeRevealTarget reads the latest target from the store; revealTarget only drives when.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [revealTarget, key, Boolean(document)])
+  }, [visible, revealTarget, key, Boolean(document)])
 
   // Monaco mounts asynchronously. Keep the intent until a live editor can take it, and read
   // current store state at consumption so a late mount cannot replay an obsolete request.
   function consumeCaretFocus(): void {
     const request = useAppStore.getState().regionCaretFocus
     if (!regionCaretFocusTargets(request, surface.regionId)) return
-    if (!visibleRef.current) { clearRegionCaretFocus(request.nonce); return }
+    if (!visibleRef.current) return
     const editor = editorRef.current
     const host = editor?.getContainerDomNode()
     if (!editor || !desktopElementVisible(host ?? null)) return
@@ -107,6 +107,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   }
 
   useEffect(() => {
+    if (!visible) return
     consumeCaretFocus()
     const nonce = regionCaretFocus?.nonce
     if (nonce === undefined || useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
