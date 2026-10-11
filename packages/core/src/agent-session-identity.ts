@@ -25,7 +25,7 @@ export function agentNativeTurnEnd(session: Parameters<typeof nativeTurnEndScope
 }
 
 export function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
-  const { nativeActor: _nativeActor, continuityExecutors: _executors, nativeTurnEnds: _nativeTurnEnds, interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
+  const { nativeActor: _nativeActor, continuityExecutors: _executors, nativeTurnEnds: _nativeTurnEnds, recoveryActivity: _recoveryActivity, interactionOperations: _interactionOperations, hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, futurePromptIntents: _retainedBodies, ...publicSession } = session
   return structuredClone(publicSession)
 }
 

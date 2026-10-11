@@ -155,7 +155,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       acpStrategy: { kind: 'none' },
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
-        providerResume: true, replyCorrelation: 'none',
+        providerResume: true, nativeInterruption: true, replyCorrelation: 'none',
         providerFork: { current: true },
         usage: { kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }
       }
