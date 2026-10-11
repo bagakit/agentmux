@@ -1,5 +1,5 @@
 import type { ConnectionSetupAdapter } from '../../connection-setup-adapter.js'
-import { advanceFeishuSession, FEISHU_QR_HEADERS } from './setup-session.js'
+import { advanceFeishuSession, inspectFeishuApplication, FEISHU_QR_HEADERS } from './setup-session.js'
 
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -29,6 +29,7 @@ export function createFeishuSetup(): ConnectionSetupAdapter {
         return { kind: 'challenge', challenge, privateState }
       } catch { return { kind: 'unknown' } }
     },
-    advance: advanceFeishuSession
+    advance: advanceFeishuSession,
+    applicationInspection: { domains: ['open.feishu.cn'], inspect: inspectFeishuApplication }
   }
 }
