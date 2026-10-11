@@ -16,6 +16,7 @@ import {
   onContentChange,
   onScroll,
   shouldShowJumpToLatest,
+  isNearBottom,
   type ScrollGeometry
 } from '../lib/activity-autoscroll'
 import {
@@ -483,6 +484,8 @@ export function ActivityView({
   const anchorRef = useRef<ReturnType<typeof conversationReadingAnchor>>(null)
   const followRef = useRef(initFollowState())
   const [showJump, setShowJump] = useState(false)
+  // Position is presentation only; a layout move must not grant follow/read intent.
+  const [atLoadedTail, setAtLoadedTail] = useState(true)
   const returnRef = useRef<HTMLButtonElement>(null)
   const earlierRef = useRef<HTMLDivElement>(null)
   const nativeTailRef = useRef<HTMLDivElement>(null)
@@ -531,6 +534,7 @@ export function ActivityView({
     traceAnchorPending.current = false
     if (anchorRef.current) restoreReadingPosition(feedEl, anchorRef.current)
     markProgrammaticReadingScroll(feedEl)
+    syncTailPosition()
   }, [traceDisclosure.expandedTraces, feedEl])
   useEffect(() => {
     edgeRef.current.earlier = false; edgeRef.current.newer = false
@@ -561,16 +565,21 @@ export function ActivityView({
     }
   }, [readingWindow.error, readingWindow.newerOutside, feedEl, conversationReading?.enabled])
   useLayoutEffect(() => {
-    if (!conversationReading?.enabled || !(readingWindow.historical || showJump) || !feedEl) return
-    const content = feedEl.querySelector('.conversation-native-thread')
+    if (!readingEnabled || !feedEl) return
+    const content = logRef.current
     if (!content) return
     let active = true
     const observer = new ResizeObserver(() => {
-      if (active && anchorRef.current) { restoreReadingPosition(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl) }
+      if (!active) return
+      if (conversationReading?.enabled && (readingWindow.historical || !followRef.current.following) && anchorRef.current) {
+        restoreReadingPosition(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl)
+      }
+      syncTailPosition()
     })
     observer.observe(content)
+    observer.observe(feedEl)
     return () => { active = false; observer.disconnect() }
-  }, [feedEl, conversationReading?.enabled, readingWindow.historical, showJump])
+  }, [feedEl, conversationReading?.enabled, readingWindow.historical, readingEnabled])
   useEffect(() => {
     if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
     returnRef.current?.focus({ preventScroll: true })
@@ -682,6 +691,10 @@ export function ActivityView({
     if (!(el instanceof HTMLElement)) return null
     return { scrollTop: el.scrollTop, scrollHeight: readingHeight(el), clientHeight: el.clientHeight }
   }
+  function syncTailPosition(): void {
+    const geometry = feedGeometry()
+    if (geometry) setAtLoadedTail(isNearBottom(geometry))
+  }
 
   function clearEarlierSpace(): void {
     earlierSpaceAllowed.current = false
@@ -704,6 +717,7 @@ export function ActivityView({
     const geometry = feedGeometry()
     if (geometry) followRef.current = onScroll(followRef.current, geometry)
     followRef.current = { ...followRef.current, following: true }
+    syncTailPosition()
     setShowJump(shouldShowJumpToLatest(followRef.current))
   }
 
@@ -776,6 +790,7 @@ export function ActivityView({
         followRef.current = { ...followRef.current, lastScrollTop: el.scrollTop }
         markProgrammaticReadingScroll(el)
       }
+      syncTailPosition()
       setShowJump(shouldShowJumpToLatest(followRef.current))
       if (!programmatic && !layoutClamp && direction) requestReadingEdge(direction, el)
     }
@@ -801,6 +816,7 @@ export function ActivityView({
     })
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
+    syncTailPosition()
     setShowJump(shouldShowJumpToLatest(followRef.current))
   }, [unifiedItems, nativeHistoryPage, sessionId, feedEl, readingWindow.historical, readingEnabled])
 
@@ -1057,7 +1073,7 @@ export function ActivityView({
 
   // A recent source update can lead the committed window for one render. It is
   // independent of the reader's position and must not flash a scroll affordance.
-  const needsReturnToLatest = showJump || readingWindow.historical
+  const needsReturnToLatest = showJump && (!atLoadedTail || readingWindow.currentOutside) || readingWindow.historical
   const latestControl = needsReturnToLatest || readingWindow.held ? (
     <div className="activity-feed__latest-layer" data-conversation-current-entry>
       {readingWindow.held ? <span className="activity-feed__latest-held" role="status">保留阅读位置</span> : null}
