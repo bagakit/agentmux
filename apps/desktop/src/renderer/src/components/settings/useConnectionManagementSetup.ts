@@ -27,7 +27,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const visible = active && opened && reading?.key === key && reading.source === source && reading.id === selection.current && api.connections.call === source ? reading : null
   const view = visible?.value ?? null, operation = view?.operation ?? null
   const configurationEffect = view?.applicationConfiguration?.effect ?? 'enable-messaging'
-  const configurationSelector: ConnectionSetupConfigurationSelector = view?.applicationConfiguration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: view.applicationConfiguration.purpose } : { effect: configurationEffect as 'enable-messaging' | 'use-persistent-connection' }
+  const configurationSelector: ConnectionSetupConfigurationSelector = view?.applicationConfiguration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: view.applicationConfiguration.purpose } : { effect: configurationEffect as 'enable-messaging' | 'use-persistent-connection' | 'add-message-reception' }
   const supported = !!record && visibleCatalog?.value?.support?.connectionRevision === record.revision && visibleCatalog.value.support.capabilities.includes('management-authentication')
   const originals = visibleCatalog?.value?.operations ?? []
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
@@ -57,7 +57,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
       operation.goal.kind === 'agent-conversation' && operation.goal.interaction === 'messages'
   }
   function matches(operation: ConnectionSetupOperation) { return sameApplication(operation) && operation.expectedConnectionRevision === record?.revision }
-  async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean, actionKind?: ConnectionSetupAction['kind']) {
+  async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean, actionKind?: ConnectionSetupAction['kind'], requestedConfiguration?: ConnectionSetupConfigurationSelector) {
     if (!currentSource() || !context.current.opened) return
     const request = ++occurrence.current
     selection.current = id; setDriving(run)
@@ -78,7 +78,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
           const details = await source('connection.setup.inspect', {
             operationId: id,
             applicationInspection: value.applicationInspection?.selected ? { selectedStepId: value.applicationInspection.selected.stepId } : {},
-            applicationConfiguration: { ...(value.applicationConfiguration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: value.applicationConfiguration.purpose } : value.applicationConfiguration ? { effect: value.applicationConfiguration.effect } : actionKind === 'read-event-settings' ? { effect: 'use-persistent-connection' } : actionKind === 'read-bot-settings' ? { effect: 'enable-messaging' } : configurationSelector), ...(value.applicationConfiguration?.selected ? { selectedStepId: value.applicationConfiguration.selected.stepId } : {}) }
+            applicationConfiguration: { ...(requestedConfiguration ?? (value.applicationConfiguration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: value.applicationConfiguration.purpose } : value.applicationConfiguration ? { effect: value.applicationConfiguration.effect } : actionKind === 'read-event-settings' ? { effect: 'use-persistent-connection' } : actionKind === 'read-bot-settings' ? { effect: 'enable-messaging' } : configurationSelector)), ...(value.applicationConfiguration?.selected ? { selectedStepId: value.applicationConfiguration.selected.stepId } : {}) }
           })
           if (!accepts()) return
           validate(details); value = details
@@ -131,27 +131,33 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     submittedActions.current.add(action.actionId)
     void perform(input.operationId, () => source('connection.setup.advance', input), action.kind === 'continue' || action.kind === 'renew', action.kind)
   }
-  async function reviewPermissions() {
-    if (!operation || busy || view?.applicationConfiguration?.effect !== 'add-application-permissions') return
-    const id = operation.operationId, purpose = view.applicationConfiguration.purpose
-    const selector = { effect: 'add-application-permissions' as const, purpose }
+  async function reviewConfiguration(effect: 'add-application-permissions' | 'add-message-reception') {
+    if (!operation || busy) return
+    const id = operation.operationId
+    const selector: ConnectionSetupConfigurationSelector = effect === 'add-application-permissions'
+      ? { effect, purpose: view?.applicationConfiguration?.effect === effect ? view.applicationConfiguration.purpose : 'agent-conversation' } : { effect }
     const accepted = async (work: () => Promise<ConnectionSetupView>, kind?: ConnectionSetupAction['kind']) => {
-      const expected = occurrence.current + 1, result = await perform(id, work, false, kind)
+      const expected = occurrence.current + 1, result = await perform(id, work, false, kind, selector)
       return result && currentSource() && context.current.opened && selection.current === id && occurrence.current === expected ? result : null
     }
     let result = await accepted(() => source('connection.setup.inspect', { operationId: id, applicationInspection: {}, applicationConfiguration: selector }))
-    if (!result || result.applicationConfiguration?.effect !== selector.effect) return
-    const reread = !!result.applicationConfiguration.review || result.applicationConfiguration.selected?.request === 'confirmed'
-    for (const [subject, kind] of [['catalog', 'read-permission-catalog'], ['applied', 'read-application-permissions']] as const) {
-      if (result.applicationConfiguration?.effect !== selector.effect || result.applicationConfiguration.purpose !== purpose) return
-      const recovery = result.applicationInspection?.selected?.subject === (subject === 'catalog' ? 'permission-catalog' : 'application-permissions') && result.applicationInspection.actions.find(a => a.kind === 'recover-application-inspection')
-      const action = recovery || (reread || !result.applicationConfiguration.sources[subject] ? result.applicationInspection?.actions.find(a => a.kind === kind) : null)
-      if (!action) { if (result.applicationConfiguration.sources[subject]) continue; return }
+    if (!result || result.applicationConfiguration?.effect !== effect) return
+    const reread = !!result.applicationConfiguration.review || !!result.applicationConfiguration.selected
+    const subjects = effect === 'add-application-permissions' ? ['permission-catalog', 'application-permissions'] as const : ['event-settings', 'event-catalog'] as const
+    for (const subject of subjects) {
+      const configuration = result.applicationConfiguration
+      if (!configuration || configuration.effect !== effect || configuration.effect !== 'add-application-permissions' && configuration.effect !== 'add-message-reception' || selector.effect === 'add-application-permissions' && (configuration.effect !== selector.effect || configuration.purpose !== selector.purpose)) return
+      const hasSource = Object.values(configuration.sources).some(source => source?.subject === subject)
+      const recovery = result.applicationInspection?.selected?.subject === subject && result.applicationInspection.actions.find(a => a.kind === 'recover-application-inspection')
+      const action = recovery || (reread || !hasSource ? result.applicationInspection?.actions.find(a => a.kind === 'read-' + subject) : null)
+      if (!action) { if (hasSource) continue; return }
       const input = { operationId: id, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) } }
       result = await accepted(() => source('connection.setup.advance', input), action.kind)
       if (!result || result.applicationInspection?.selected?.request !== 'confirmed' || result.applicationInspection.selected.secureStorage !== 'stored') return
     }
   }
+  const reviewPermissions = () => reviewConfiguration('add-application-permissions')
+  const reviewMessageReception = () => reviewConfiguration('add-message-reception')
   function continueOriginal() {
     const action = view?.continuation?.actions.find(action => action.kind === 'continue')
     if (action) { advance(action); return }
@@ -201,7 +207,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, continueOriginal, another }
+  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>

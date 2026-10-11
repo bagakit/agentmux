@@ -29,6 +29,8 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
         eventTransportCapability: async state => (await feishu()).setup.applicationConfiguration!.eventTransportCapability(state),
         usePersistentConnection: async (input, signal) => (await feishu()).setup.applicationConfiguration!.usePersistentConnection(input, signal),
         permissionPlan: async (...input) => (await feishu()).setup.applicationConfiguration!.permissionPlan(...input),
+        messageReceptionPlan: async (...input) => (await feishu()).setup.applicationConfiguration!.messageReceptionPlan(...input),
+        addMessageReception: async (input, signal) => (await feishu()).setup.applicationConfiguration!.addMessageReception(input, signal),
         addApplicationPermissions: async (input, signal) => (await feishu()).setup.applicationConfiguration!.addApplicationPermissions(input, signal),
         enableMessaging: async (input, signal) => (await feishu()).setup.applicationConfiguration!.enableMessaging(input, signal)
       },

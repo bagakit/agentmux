@@ -11,7 +11,7 @@ export type ConnectionSetupInspect = ConnectionSetupInput & { applicationInspect
 export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' } }
 export type ConnectionSetupList = { connectionId: string; cursor?: string; limit?: number }
 /** Local implementation discovery for this exact revision, never platform authority or readiness. */
-export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection' | 'messaging-capability' | 'persistent-event-transport' | 'application-permissions' | 'enrollment-continuation'> }
+export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection' | 'messaging-capability' | 'persistent-event-transport' | 'application-permissions' | 'message-reception' | 'enrollment-continuation'> }
 export type ConnectionSetupListing = { operations: ConnectionSetupOperation[]; next: string | null; support: ConnectionSetupSupport | null }
 export type ConnectionSetupReason = 'adapter-unavailable' | 'secure-storage-unavailable' | 'request-unconfirmed' | 'challenge-unconfirmed'
 export type ConnectionSetupAuthenticationStage = 'waiting' | 'scanned' | 'handoff' | 'account' | 'confirmed' | 'expired' | 'unknown'
@@ -24,16 +24,22 @@ export const CONNECTION_SETUP_READ_ACTIONS = {
   'callback-settings': 'read-callback-settings',
   'bot-settings': 'read-bot-settings',
   'permission-catalog': 'read-permission-catalog',
-  'application-permissions': 'read-application-permissions'
+  'application-permissions': 'read-application-permissions',
+  'event-catalog': 'read-event-catalog'
 } as const
 export type ConnectionSetupReadSubject = keyof typeof CONNECTION_SETUP_READ_ACTIONS
 export type ConnectionSetupReadSummary =
   | { subject: 'application-details'; name: string | null; description: string | null }
   | { subject: 'event-settings'; transport: 'persistent-connection' | 'webhook' | 'function' | 'unknown' }
-  | { subject: 'callback-settings' | 'bot-settings' | 'permission-catalog' | 'application-permissions' }
+  | { subject: 'callback-settings' | 'bot-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog' }
 export type ConnectionSetupInspectionAction = { actionId: string; expectedRevision: number; kind: 'inspect-application' | 'recover-application-inspection' | typeof CONNECTION_SETUP_READ_ACTIONS[ConnectionSetupReadSubject] }
 export type ConnectionSetupScalarEffect = 'enable-messaging' | 'use-persistent-connection'
-export type ConnectionSetupConfigurationEffect = ConnectionSetupScalarEffect | 'add-application-permissions'
+export type ConnectionSetupConfigurationEffect = ConnectionSetupScalarEffect | 'add-application-permissions' | 'add-message-reception'
+export type ConnectionSetupMessageReceptionReview = {
+  reception: 'subscribed' | 'missing' | 'unknown'
+  transport: 'persistent-connection' | 'webhook' | 'function' | 'unknown'
+  reason?: 'catalog-unconfirmed' | 'settings-unconfirmed' | 'event-unavailable' | 'event-ambiguous'
+}
 /** Current explicit purpose, never inferred from a saved application's presentation. */
 export type ConnectionSetupPermissionPurpose = 'agent-conversation' | 'mote-profile-sync'
 /** Stable owner-generated machine identifier; unrelated to presentation labels. */
@@ -46,6 +52,7 @@ export type ConnectionSetupPermissionReview = {
 }
 export type ConnectionSetupConfigurationSelector = { selectedStepId?: string; cursor?: string; limit?: number } & (
   | { effect: ConnectionSetupScalarEffect }
+  | { effect: 'add-message-reception' }
   | { effect: 'add-application-permissions'; purpose: ConnectionSetupPermissionPurpose }
 )
 export function connectionSetupConfigurationSubject(effect: ConnectionSetupScalarEffect): 'bot-settings' | 'event-settings' {
@@ -53,7 +60,7 @@ export function connectionSetupConfigurationSubject(effect: ConnectionSetupScala
 }
 export type ConnectionSetupConfigurationAction = { actionId: string; expectedRevision: number; kind: ConnectionSetupConfigurationEffect | 'recover-configuration-effect' }
 export type ConnectionSetupCapability = 'enabled' | 'disabled' | 'unknown'
-/** One explicit scalar desired-state request, separate from today's capability and secure ACK. */
+/** One explicit finite request, separate from current configuration and its secure ACK. */
 export type ConnectionSetupConfigurationReceipt = {
   stepId: string; input: ConnectionSetupAdvance
   request: 'dispatching' | 'confirmed' | 'unknown'
@@ -61,11 +68,12 @@ export type ConnectionSetupConfigurationReceipt = {
 } & (
   | { effect: ConnectionSetupScalarEffect; sourceStepId: string }
   | { effect: 'add-application-permissions'; purpose: ConnectionSetupPermissionPurpose; sourceStepIds: { catalog: string; applied: string }; scopeNames: string[]; requiresDataRangeConfiguration: boolean | null }
+  | { effect: 'add-message-reception'; sourceStepIds: { catalog: string; settings: string }; transport: 'persistent-connection' }
 )
 export type ConnectionSetupAction = ConnectionSetupAuthenticationAction | ConnectionSetupInspectionAction | ConnectionSetupConfigurationAction
 /** Effect selection belongs to the offered kind, never to the shared decision string. */
 export function connectionSetupDecisionForAction(action: ConnectionSetupAction): ConnectionSetupAdvance['decision']['value'] {
-  const decisions = { continue: 'continue', 'confirm-account': 'confirm', renew: 'renew', 'inspect-application': 'continue', 'recover-application-inspection': 'continue', 'read-application-details': 'continue', 'read-event-settings': 'continue', 'read-callback-settings': 'continue', 'read-bot-settings': 'continue', 'read-permission-catalog': 'continue', 'read-application-permissions': 'continue', 'enable-messaging': 'confirm', 'use-persistent-connection': 'confirm', 'add-application-permissions': 'confirm', 'recover-configuration-effect': 'continue' } as const satisfies Record<ConnectionSetupAction['kind'], ConnectionSetupAdvance['decision']['value']>
+  const decisions = { continue: 'continue', 'confirm-account': 'confirm', renew: 'renew', 'inspect-application': 'continue', 'recover-application-inspection': 'continue', 'read-application-details': 'continue', 'read-event-settings': 'continue', 'read-callback-settings': 'continue', 'read-bot-settings': 'continue', 'read-permission-catalog': 'continue', 'read-application-permissions': 'continue', 'read-event-catalog': 'continue', 'enable-messaging': 'confirm', 'use-persistent-connection': 'confirm', 'add-application-permissions': 'confirm', 'add-message-reception': 'confirm', 'recover-configuration-effect': 'continue' } as const satisfies Record<ConnectionSetupAction['kind'], ConnectionSetupAdvance['decision']['value']>
   return decisions[action.kind]
 }
 export type ConnectionSetupInspectionReceipt = {
@@ -115,6 +123,7 @@ export type ConnectionSetupView = {
   } & (
     | { effect: ConnectionSetupScalarEffect; subject: 'bot-settings' | 'event-settings'; source: ConnectionSetupInspectionReceipt | null }
     | { effect: 'add-application-permissions'; subject: 'application-permissions'; purpose: ConnectionSetupPermissionPurpose; sources: { catalog: ConnectionSetupInspectionReceipt | null; applied: ConnectionSetupInspectionReceipt | null }; review: ConnectionSetupPermissionReview | null }
+    | { effect: 'add-message-reception'; subject: 'event-settings'; sources: { catalog: ConnectionSetupInspectionReceipt | null; settings: ConnectionSetupInspectionReceipt | null }; review: ConnectionSetupMessageReceptionReview | null }
   )
   /** Exact admitted advance result, distinct from today's current continuation. */
   receipt?: ConnectionSetupStepReceipt

@@ -151,13 +151,14 @@ membership, configuration, publication or chat readiness. App eligibility, confi
 publication continuations remain separate. With --application-inspection, setup inspect can
 locally page original safe application observations and select an exact old --inspection-step;
 it never sends HTTP or repairs an ACK. Copy an offered inspect-application,
-read-application-details, read-event-settings, read-callback-settings, read-bot-settings or
-recover-application-inspection action and use decision continue. The four current data subjects
+read-application-details, read-event-settings, read-callback-settings, read-bot-settings,
+read-permission-catalog, read-application-permissions, read-event-catalog or
+recover-application-inspection action and use decision continue. Current data subjects
 retain independent receipts, not a complete configuration snapshot or readiness. New observation requires current
 confirmed stored auth; original actor local recovery needs only the frozen original child/input,
 even after renewal, revision or restart. Old private results stay withheld and an unrecoverable
 old result never blocks a separate eligible new observation. Reported basic-info read permission
-is not actual app data, owning tenant or write authority. Inspect locally reads the explicitly selected scalar effect and its exact original source. Configuration selection always names its effect: use
+is not actual app data, owning tenant or write authority. Inspect locally reads the explicitly selected finite effect and its exact original source. Configuration selection always names its effect: use
 --application-configuration enable-messaging or --application-configuration use-persistent-connection.
 The latter reads only the exact event-settings source and offers one explicit application-wide
 switch to persistent connection. Warn that existing event consumers are affected. Already persistent
@@ -171,11 +172,20 @@ review cannot authorize additions. Confirm only the exact offered add-applicatio
 the Host binds its purpose and native missing IDs without a second caller scope list. Zero missing
 means no request. Acceptance, existing applied configuration, effective grant and publication are
 separate. Unknown permission additions remain original across purpose changes and do not block
-independent messaging or delivery settings. Never write data ranges, subscriptions or publish here.
+independent messaging or delivery settings. Permission addition never writes data ranges, subscriptions or publication.
+For group message reception use --application-configuration add-message-reception. The original
+read-event-settings and read-event-catalog children qualify only the required App message event.
+Confirm its offered add-message-reception action: this adds the event while carrying the last checked
+application-wide persistent delivery mode; it does not secretly call the mode switch. Both event
+writers invalidate older settings; a newer catalog alone cannot refresh them. After an unknown mode
+switch, only fresh persistent settings and the compatible original immutable desired allow a distinct
+explicit addition. The original switch remains unknown, unretried and unACKed. Already subscribed
+means zero write; unknown additions cannot replay through aliases or renewal. Current subscription,
+request acceptance, effective permissions, publication and actual intake remain separate facts.
 recover-configuration-effect uses continue and only repairs its original encrypted ACK. An unknown
 effect cannot be replayed through renewal, a new setup or a known application alias; unresolved
 identifies the original actor-owned request when available. A new current read never signs that
-old ACK. This action does not change menus/modes/events/scopes/ranges or publish. Publication
+old ACK. Local recovery does not change menus, modes, events, scopes, ranges or publication. Publication
 remains unimplemented; this does not qualify live rights or the combined Settings journey.
 
 Configure or bind only within the user's authorized target. Inspect current values before

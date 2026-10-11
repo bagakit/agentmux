@@ -1,10 +1,12 @@
-import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview, ConnectionSetupMessageReceptionReview } from '@agentmux/core/connections'
 
 export type SetupAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; application: Readonly<ConnectionApplication> }>
 export type SetupChallengeReceipt = { kind: 'challenge'; challenge: ConnectionSetupChallenge; privateState: string } | { kind: 'unknown' }
 export type SetupAuthenticationReceipt = { kind: 'progress'; stage: ConnectionSetupAuthenticationStage; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; privateState: string } | { kind: 'unknown' }
 export type SetupReadReceipt = { kind: 'observed'; readResult: ConnectionSetupReadSummary; privateState: string } | { kind: 'unknown' }
 export type SetupPermissionPlan = { review: ConnectionSetupPermissionReview; appScopeIDs: Array<string | number> }
+/** Native intent stays opaque to the generic Host; the adapter alone owns its schema. */
+export type SetupMessageReceptionPlan = { review: ConnectionSetupMessageReceptionReview; privateIntent: string | null }
 export type SetupConfigurationReceipt = { kind: 'accepted'; privateState: string; requiresDataRangeConfiguration?: boolean | null } | { kind: 'unknown' }
 export type SetupInspectionReceipt = { kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }
 export interface ConnectionSetupAdapter {
@@ -28,6 +30,9 @@ export interface ConnectionSetupAdapter {
     eventTransportCapability(originalReadState: string): Promise<ConnectionSetupCapability>
     /** Pure interpretation of two exact original read snapshots; IDs remain native and private. */
     permissionPlan(catalogState: string, appliedState: string, purpose: ConnectionSetupPermissionPurpose): Promise<SetupPermissionPlan>
+    messageReceptionPlan(catalogState: string, settingsState: string): Promise<SetupMessageReceptionPlan>
+    /** One explicit message subscription addition carrying the checked delivery mode. */
+    addMessageReception(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
     /** One finite additive request; no privileges, subscriptions or publication. */
     addApplicationPermissions(input: SetupAdapterInput & { privateState: string; appScopeIDs: Array<string | number>; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
     /** Exactly one event transport scalar request; subscriptions and publication are separate. */

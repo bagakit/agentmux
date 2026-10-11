@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { CONNECTION_SETUP_READ_ACTIONS, connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupPermissionReview } from './connection-setup-contract.js'
+import { CONNECTION_SETUP_READ_ACTIONS, connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupPermissionReview, type ConnectionSetupMessageReceptionReview } from './connection-setup-contract.js'
 import type { ConnectionSetupBegin, ConnectionSetupChallenge, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupMethod, ConnectionSetupOperation, ConnectionSetupParamsMap, ConnectionSetupResultMap, ConnectionSetupView } from './connection-setup-contract.js'
 
 export const CONNECTION_SETUP_RPC_METHODS = { 'connection.setup.begin': 'long', 'connection.setup.advance': 'long', 'connection.setup.inspect': 'long', 'connection.setup.ls': 'long' } as const
@@ -11,7 +11,7 @@ function text(value: unknown): string { if (typeof value !== 'string' || !value.
 function id(value: unknown): string { const v = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v)) fail(); return v }
 function integer(value: unknown, min = 1, max = Number.MAX_SAFE_INTEGER): number { if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) fail(); return value as number }
 function choice<T extends string>(value: unknown, values: readonly T[]): T { if (!values.includes(value as T)) fail(); return value as T }
-const configurationEffect = (value: unknown) => choice(value, ['enable-messaging', 'use-persistent-connection', 'add-application-permissions'] as const)
+const configurationEffect = (value: unknown) => choice(value, ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'add-message-reception'] as const)
 const permissionPurpose = (value: unknown) => choice(value, ['agent-conversation', 'mote-profile-sync'] as const)
 const names = (value: unknown): string[] => { if (!Array.isArray(value)) fail(); const result = (value as unknown[]).map(text); if (new Set(result).size !== result.length) fail(); return result }
 const stage = (value: unknown) => choice(value, ['waiting', 'scanned', 'handoff', 'account', 'confirmed', 'expired', 'unknown'] as const)
@@ -104,12 +104,24 @@ export function parseConnectionSetupPermissionReview(value: unknown): Connection
   if (permissions.some(p => p.state === 'unknown') !== Boolean(reason)) fail()
   return { permissions, ...(reason ? { reason } : {}) }
 }
+export function parseConnectionSetupMessageReceptionReview(value: unknown): ConnectionSetupMessageReceptionReview {
+  const p = object(value, ['reception', 'transport', 'reason'])
+  const reception = choice(p.reception, ['subscribed', 'missing', 'unknown'] as const), transport = choice(p.transport, ['persistent-connection', 'webhook', 'function', 'unknown'] as const)
+  const reason = p.reason === undefined ? undefined : choice(p.reason, ['catalog-unconfirmed', 'settings-unconfirmed', 'event-unavailable', 'event-ambiguous'] as const)
+  if ((reception === 'unknown') !== Boolean(reason)) fail()
+  return { reception, transport, ...(reason ? { reason } : {}) }
+}
 export function parseConnectionSetupConfigurationReceipt(value: unknown): ConnectionSetupConfigurationReceipt {
   const effect = configurationEffect(rpcRecord(value).effect)
   const common = ['effect', 'stepId', 'input', 'request', 'secureStorage']
-  const p = object(value, [...common, ...(effect === 'add-application-permissions' ? ['purpose', 'sourceStepIds', 'scopeNames', 'requiresDataRangeConfiguration'] : ['sourceStepId'])])
+  const p = object(value, [...common, ...(effect === 'add-application-permissions' ? ['purpose', 'sourceStepIds', 'scopeNames', 'requiresDataRangeConfiguration'] : effect === 'add-message-reception' ? ['sourceStepIds', 'transport'] : ['sourceStepId'])])
   const input = parseConnectionSetupParams('connection.setup.advance', p.input), request = requestState(p.request), secureStorage = choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown'] as const), stepId = id(p.stepId)
   if (input.decision.value !== 'confirm' || secureStorage === 'stored' && request !== 'confirmed') fail()
+  if (effect === 'add-message-reception') {
+    const sources = object(p.sourceStepIds, ['catalog', 'settings']), sourceStepIds = { catalog: id(sources.catalog), settings: id(sources.settings) }
+    if (new Set([stepId, sourceStepIds.catalog, sourceStepIds.settings]).size !== 3 || !input.decision.actionId.startsWith('setup-reception:')) fail()
+    return { effect, stepId, input, request, secureStorage, sourceStepIds, transport: choice(p.transport, ['persistent-connection']) }
+  }
   if (effect !== 'add-application-permissions') {
     const sourceStepId = id(p.sourceStepId)
     if (stepId === sourceStepId) fail()
@@ -130,7 +142,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     let support: ConnectionSetupResultMap['connection.setup.ls']['support'] = null
     if (p.support !== null) {
       const s = object(p.support, ['connectionRevision', 'capabilities'])
-      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'enrollment-continuation'] as const
+      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'enrollment-continuation'] as const
       if (!Array.isArray(s.capabilities) || s.capabilities.length > supportedCapabilities.length) fail()
       const capabilities = (s.capabilities as unknown[]).map(value => choice(value, supportedCapabilities))
       if (new Set(capabilities).size !== capabilities.length) fail()
@@ -196,7 +208,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   if (p.applicationConfiguration !== undefined) {
     if (!operation || method === 'connection.setup.begin' || method === 'connection.setup.inspect' && !(input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration) fail()
     const raw = rpcRecord(p.applicationConfiguration), effect = configurationEffect(raw.effect)
-    const c = object(raw, ['effect', 'subject', 'effects', 'next', 'selected', 'capability', 'actions', 'reason', 'unresolved', ...(effect === 'add-application-permissions' ? ['purpose', 'sources', 'review'] : ['source'])])
+    const c = object(raw, ['effect', 'subject', 'effects', 'next', 'selected', 'capability', 'actions', 'reason', 'unresolved', ...(effect === 'add-application-permissions' ? ['purpose', 'sources', 'review'] : effect === 'add-message-reception' ? ['sources', 'review'] : ['source'])])
     const selector = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration : undefined
     if (!Array.isArray(c.effects) || c.effects.length > (selector?.limit ?? 25) || !Array.isArray(c.actions) || c.actions.length > 2 || selector && selector.effect !== effect) fail()
     const effects = (c.effects as unknown[]).map(parseConnectionSetupConfigurationReceipt), selected = c.selected === null ? null : parseConnectionSetupConfigurationReceipt(c.selected)
@@ -212,7 +224,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       if (source.input.operationId !== operation!.operationId || source.subject !== subject || source.request !== 'confirmed' || source.secureStorage !== 'stored') fail()
       return source
     }
-    const actions = (c.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'recover-configuration-effect'] as const) } })
+    const actions = (c.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'add-message-reception', 'recover-configuration-effect'] as const) } })
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
     if (actions.some(a => a.kind !== 'recover-configuration-effect' && (a.kind !== effect || capability !== 'disabled' || a.expectedRevision !== operation!.revision || c.reason !== undefined))) fail()
     if (actions.some(a => a.kind === 'recover-configuration-effect') && (!selected || selected.request !== 'confirmed' || selected.secureStorage === 'stored')) fail()
@@ -226,6 +238,14 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       if (review && (!sources.catalog || !sources.applied || !qualified) || capability !== 'unknown' && (!review || review.reason || !qualified)) fail()
       if (review && capability !== 'unknown' && (review.permissions.some(p => p.state === 'missing') ? 'disabled' : 'enabled') !== capability) fail()
       result.applicationConfiguration = { ...common, effect, subject: 'application-permissions', purpose, sources, review }
+    } else if (effect === 'add-message-reception') {
+      const pair = object(c.sources, ['catalog', 'settings']), sources = { catalog: sourceReceipt(pair.catalog, 'event-catalog'), settings: sourceReceipt(pair.settings, 'event-settings') }
+      const review = c.review === null ? null : parseConnectionSetupMessageReceptionReview(c.review)
+      if (c.subject !== 'event-settings' || sources.catalog && sources.settings && sources.catalog.stepId === sources.settings.stepId) fail()
+      if (review && (!sources.catalog || !sources.settings || !qualified) || capability !== 'unknown' && (!review || review.reason || !qualified)) fail()
+      if (review && capability !== 'unknown' && (review.reception === 'subscribed' ? 'enabled' : review.reception === 'missing' ? 'disabled' : 'unknown') !== capability) fail()
+      if (actions.some(a => a.kind === effect && (!a.actionId.startsWith('setup-reception:') || review?.reception !== 'missing' || review.transport !== 'persistent-connection'))) fail()
+      result.applicationConfiguration = { ...common, effect, subject: 'event-settings', sources, review }
     } else {
       const subject = connectionSetupConfigurationSubject(effect), source = sourceReceipt(c.source, subject)
       if (c.subject !== subject || capability !== 'unknown' && (!source || !qualified)) fail()
