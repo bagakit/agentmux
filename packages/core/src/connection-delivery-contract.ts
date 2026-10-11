@@ -3,8 +3,14 @@ import type { ConnectionApplication } from './connections-contract.js'
 import type { RoomBindingCallContext } from './room-binding-contract.js'
 import type { ConversationContentRef, ConversationSourceRef } from './conversation-timeline.js'
 import type { ConversationVersionedAnchor } from './conversation-changes.js'
+import type { AgentSessionUserMessageAuthor } from './types.js'
 
 export type ConnectionDeliveryEvent = { id: string; revision: string }
+/** Recorded original attribution; application relay is not platform personal-send authority. */
+export type ConnectionDeliveryRelay = {
+  sender: 'application'
+  sources: Array<{ part: ConversationContentRef; author: AgentSessionUserMessageAuthor }>
+}
 /** Durable content accounting, distinct from an unknown platform effect. No original body is copied. */
 export type ConnectionDeliveryGap = {
   gapId: string
@@ -56,6 +62,7 @@ export type ConnectionDelivery = {
   reason?: ConnectionDeliveryReason
   receipt?: ConnectionDeliveryReceipt
   event?: ConnectionDeliveryEvent
+  relay?: ConnectionDeliveryRelay
 }
 /** Current process service window for the requested Binding scope; never platform delivery or Agent health. */
 export type ConnectionDeliveryObservation = {

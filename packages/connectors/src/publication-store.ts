@@ -17,6 +17,7 @@ export type PublicationPayload = PermissionPublicationPayload | {
   text: string
   phase?: 'progress' | 'final'
   questions?: NonNullable<AgentSessionHistoryItem['questionRequest']>['questions']
+  relay?: NonNullable<ConnectionDelivery['relay']>
 }
 export type PublicationTarget = Pick<PublicationBoundary, 'connectionId' | 'application' | 'externalConversationId'>
 export type PublicationState = ConnectionDeliveryState
@@ -52,7 +53,7 @@ const sourceKey = (source: RoomBinding['sourceCheckpoints'][number]['source']) =
 const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
-type RepresentationIntent = { kind: 'representation'; projectionId: string; part: ConversationContentRef; text: string }
+type RepresentationIntent = { kind: 'representation'; projectionId: string } & PublicationContentPlan['pieces'][number]
 type LegacyRepresentationIntent = { kind: 'legacy-representation'; projectionId: string; record: ConversationItemRef; operations: string[]; text: string }
 type RepresentationRow = { ordinal: number; id: string; value: RepresentationIntent | LegacyRepresentationIntent }
 /** Exact UTF-8 text fragments. The adapter declares its supported payload budget before admission. */
@@ -68,6 +69,7 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
   }
   if (text || !texts.length) texts.push(text)
   return texts.map((part, index) => ({ kind: 'speech', text: part,
+    ...(payload.relay ? { relay: payload.relay } : {}),
     ...(payload.phase === undefined ? {} : { phase: payload.phase }),
     ...(index !== texts.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }) }))
 }
@@ -211,7 +213,9 @@ export class PublicationStore {
       if (preserveLegacy.has(conversationRecordId(piece.part.record))) continue
       this.saveDecision(boundary, 'part-' + digest(publicationPartKey(piece.part)), 'current', { kind: 'representation', projectionId, ...piece } satisfies RepresentationIntent)
     }
-    return { ...plan, text: this.representationRows(boundary, projectionId).map(row => row.value.text).filter(Boolean).join('\n\n') }
+    const rows = this.representationRows(boundary, projectionId)
+    const sources = rows.flatMap(row => row.value.kind === 'representation' && row.value.text && row.value.relay ? [row.value.relay] : [])
+    return { ...plan, text: rows.map(row => row.value.text).filter(Boolean).join('\n\n'), ...(sources.length ? { relay: { sender: 'application', sources } } : {}) }
   }
   coverage(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string): ConnectionDeliveryCoverage {
     const pending = "json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'"
@@ -339,7 +343,7 @@ export class PublicationStore {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)
     // An unresolved part never withdraws a prior complete platform representation.
     if (!plan.text && !plan.complete) return
-    const payload: Extract<PublicationPayload, { kind: 'speech' }> = { kind: 'speech', text: plan.text, ...(plan.phase ? { phase: plan.phase } : {}) }
+    const payload: Extract<PublicationPayload, { kind: 'speech' }> = { kind: 'speech', text: plan.text, ...(plan.phase ? { phase: plan.phase } : {}), ...(plan.relay ? { relay: plan.relay } : {}) }
     const revision = digest(payload), parts = plan.text ? fragments(payload, fragmentBytes) : []
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     const previous = new Map(latest.map(o => [o.fragment.ordinal, o])), count = Math.max(parts.length, ...latest.map(o => o.fragment.ordinal + 1))
@@ -354,7 +358,7 @@ export class PublicationStore {
       const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, ...(event ? { event } : {}), sourceRecords: references,
         bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
         reference: unit.event.reference!, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
-        payload: body ?? { kind: 'speech', text: '' }, effect, fragment: { ordinal, count: parts.length }, state: 'pending', ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
+        payload: body ?? { kind: 'speech', text: '' }, ...(plan.relay ? { relay: plan.relay } : {}), effect, fragment: { ordinal, count: parts.length }, state: 'pending', ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
       this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)').run(operationId, projectionId, revision, ordinal, ...scopeKey(boundary), encode(operation), 'pending')
     }
   }

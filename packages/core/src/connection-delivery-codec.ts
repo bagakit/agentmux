@@ -3,6 +3,7 @@ import { rpcRecord } from './rpc-data.js'
 import { parseConversationVersionedAnchor, parseConversationSource } from './conversation-changes.js'
 import type { ConversationItemRef } from './conversation.js'
 import { conversationRecordId } from './conversation-timeline.js'
+import { parseAgentExternalMessageAuthor } from './external-author.js'
 import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDeliveryEvent, ConnectionDeliveryGap, ConnectionOriginRepresentation, ConnectionDeliveryMapping, ConnectionDeliveryMethod, ConnectionDeliveryObservation, ConnectionDeliveryParamsMap, ConnectionDeliveryReceipt, ConnectionDeliveryReceiptReason, ConnectionDeliveryReason, ConnectionDeliveryResultMap, ConnectionDeliveryState } from './connection-delivery-contract.js'
 
 export const CONNECTION_DELIVERY_RPC_METHODS = { 'connection.delivery.inspect': 'long', 'connection.delivery.ls': 'long', 'connection.delivery.retry': 'long' } as const
@@ -45,6 +46,26 @@ function part(value: unknown): import('./conversation-timeline.js').Conversation
   else return fail()
   return { record: record as ConversationItemRef, recordRevision: version(p.recordRevision), selector }
 }
+function relay(value: unknown, target: ConnectionDelivery['reference']): NonNullable<ConnectionDelivery['relay']> {
+  const p = object(value, ['sender', 'sources'])
+  if (target.source.kind === 'interaction' || p.sender !== 'application' || !Array.isArray(p.sources) || !p.sources.length || p.sources.length > 1_000) fail()
+  const sources = (p.sources as unknown[]).map(value => {
+    const source = object(value, ['part', 'author']), original = part(source.part)
+    if (original.record.hostId !== target.hostId || original.record.agentSessionId !== target.agentSessionId || original.record.source.kind !== 'captured' || original.selector.kind !== 'captured-field' || original.selector.field !== 'content') fail()
+    const a = object(source.author, ['kind', 'agentSessionId', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision'])
+    let author: NonNullable<ConnectionDelivery['relay']>['sources'][number]['author']
+    if (a.kind === 'external') { try { author = parseAgentExternalMessageAuthor(a) } catch { return fail() } }
+    else {
+      object(a, a.kind === 'agent' ? ['kind', 'agentSessionId'] : ['kind'])
+      if (a.kind === 'agent') author = { kind: 'agent', agentSessionId: text(a.agentSessionId) }
+      else if (a.kind === 'human' || a.kind === 'unknown') author = { kind: a.kind }
+      else return fail()
+    }
+    return { part: original, author }
+  })
+  if (new Set(sources.map(source => JSON.stringify([conversationRecordId(source.part.record), source.part.selector]))).size !== sources.length) fail()
+  return { sender: 'application', sources }
+}
 export function parseConnectionDeliveryCoverage(value: unknown): ConnectionDeliveryCoverage {
   const p = object(value, ['state', 'gaps', 'nextContent', 'origins'])
   if (!['complete', 'incomplete'].includes(String(p.state)) || !Array.isArray(p.gaps) || p.gaps.length > 100 || !Array.isArray(p.origins) || p.origins.length > 100) fail()
@@ -74,7 +95,7 @@ export function parseConnectionDeliveryReceipt(value: unknown): ConnectionDelive
   return { state: p.state as 'unknown' | 'not-applied', reason: reason(p.reason) as ConnectionDeliveryReceiptReason }
 }
 export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
-  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event'])
+  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event', 'relay'])
   const target = object(p.target, ['connectionId', 'application', 'externalConversationId']), app = object(target.application, ['domain', 'appId']), fragment = object(p.fragment, ['ordinal', 'count'])
   const domain = text(app.domain), ordinal = integer(fragment.ordinal, 0), count = integer(fragment.count, 0)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text(app.appId))) fail()
@@ -87,9 +108,10 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   if (receipt && ['confirmed', 'unknown', 'not-applied'].includes(p.state as string) && (receipt.state !== p.state || receipt.state !== 'confirmed' && receipt.reason !== why)) fail()
   const operationId = text(p.operationId), predecessorOperationId = p.predecessorOperationId === undefined ? undefined : text(p.predecessorOperationId)
   if (predecessorOperationId === operationId) fail()
-  return { operationId, projectionId: text(p.projectionId), sourceRevision: text(p.sourceRevision), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), reference: reference(p.reference),
+  const original = reference(p.reference)
+  return { operationId, projectionId: text(p.projectionId), sourceRevision: text(p.sourceRevision), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), reference: original,
     target: { connectionId: text(target.connectionId), application: { domain, appId: text(app.appId) }, externalConversationId: text(target.externalConversationId) }, effect: p.effect as ConnectionDelivery['effect'], fragment: { ordinal, count }, state: p.state as ConnectionDeliveryState,
-    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }) }
+    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }), ...(p.relay === undefined ? {} : { relay: relay(p.relay, original) }) }
 }
 export function parseConnectionDeliveryObservation(value: unknown): ConnectionDeliveryObservation {
   const p = object(value, ['state', 'reason'])
