@@ -24,7 +24,7 @@ export type ConversationRecordProvenance = {
 export type ConversationContentRef = { record: ConversationItemRef; recordRevision: string; selector: ConversationSelector }
 export type ConversationRelation =
   | { kind: 'same-event'; from: ConversationItemRef; to: ConversationItemRef }
-  | { kind: 'same-invocation'; from: ConversationContentRef; to: ConversationContentRef; invocation: ConversationInvocationRef }
+  | { kind: 'invocation-member'; part: ConversationContentRef; invocation: ConversationInvocationRef }
   | { kind: 'answers'; from: ConversationItemRef; question: ConversationQuestionReference }
   | { kind: 'observes'; from: ConversationItemRef; target: ConversationItemRef | ConversationInvocationRef }
 export type ConversationSourceOrder =
@@ -92,6 +92,12 @@ export function conversationRecordId(reference: { hostId?: string; agentSessionI
   return JSON.stringify(source.kind === 'native'
     ? [reference.hostId ?? null, reference.agentSessionId, 'native', source.providerId, source.nativeSessionId, source.recordId]
     : [reference.hostId ?? null, reference.agentSessionId, 'captured', source.recordId])
+}
+/** Original scoped invocation identity, independent of accepted peers or parent events. */
+export function conversationInvocationId(ref: ConversationInvocationRef): string {
+  return JSON.stringify([ref.hostId, ref.agentSessionId, ref.source.providerId, ref.source.nativeSessionId,
+    typeof ref.subject === 'string' ? ['main'] : ['child', ref.subject.nativeActorId],
+    ref.scope.kind, ref.scope.kind === 'turn' ? ref.scope.nativeTurnId : null, ref.callId])
 }
 const capturedRoles: Record<AgentTimelineItemKind, ConversationEvent['role']> = {
   user_message: 'message', assistant_message: 'message', system_message: 'notice', tool_call: 'process', permission: 'interaction', lifecycle: 'process'
@@ -172,9 +178,19 @@ export function conversationInvocationFacts(record: ConversationSourceRecord): r
   return facts.filter(fact => {
     if (!validSelector(record, fact.selector)) return false
     if (record.original.kind !== 'native' || fact.selector.kind !== 'native-part') return true
+    if (record.order.kind !== 'native-page' || !sameSource(fact.invocation.source, record.order.source)) return false
     const part = record.original.item.contentParts[fact.selector.partIndex]!
     return (part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId === fact.invocation.callId
   })
+}
+
+/** Local original memberships form a set; an unread peer is never required or invented. */
+export function conversationInvocationMembers(record: ConversationSourceRecord): readonly Extract<ConversationRelation, { kind: 'invocation-member' }>[] {
+  if (!record.reference) return []
+  const members = conversationInvocationFacts(record).map(fact => ({ kind: 'invocation-member' as const,
+    part: { record: record.reference!, recordRevision: record.revision, selector: fact.selector },
+    invocation: { hostId: record.reference!.hostId, agentSessionId: record.reference!.agentSessionId, ...fact.invocation } }))
+  return [...new Map(members.map(member => [JSON.stringify(canonical(member)), member])).values()]
 }
 
 /** A canonical reading target is an exact same-source fact, never an event/version claim. */
@@ -277,27 +293,13 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
   const resolved = conversationRecordAnchors(records, new Map([...edges].map(([id, edge]) => [id, edge.target])))
   for (const id of resolved.cyclicRecordIds) { const original = byId.get(id); if (original) gap(original, 'CONVERSATION_RELATION_CYCLE', 'Conflicting event relations retain the original independent record.') }
   const anchor = (record: ConversationSourceRecord): string => resolved.anchors.get(record.id)!
-  const invocations = new Map<string, { record: ConversationSourceRecord; selector: ConversationSelector; invocation: ConversationInvocationRef }[]>()
-  for (const record of records) if (record.reference) for (const fact of conversationInvocationFacts(record)) {
-    if (page && !sameSource(fact.invocation.source, page.source)) continue
-    const invocation = { hostId: record.reference.hostId, agentSessionId, ...fact.invocation }, key = JSON.stringify(canonical(invocation))
-    const group = invocations.get(key) ?? []; group.push({ record, selector: fact.selector, invocation }); invocations.set(key, group)
-  }
-  // A star records the same exact invocation equivalence without quadratic pair expansion.
-  for (const group of invocations.values()) {
-    const a = group[0]!
-    for (const b of group.slice(1)) {
-      if (a.record.id === b.record.id) continue
-      relations.push({ kind: 'same-invocation', from: { record: a.record.reference!, recordRevision: a.record.revision, selector: a.selector },
-        to: { record: b.record.reference!, recordRevision: b.record.revision, selector: b.selector }, invocation: a.invocation })
-    }
-  }
+  for (const record of records) relations.push(...conversationInvocationMembers(record))
   if (page && nativeHost) for (const question of projectConversationQuestions({ agentSessionId, executionHostId: nativeHost, historyPage: page })) for (const value of question.questions) if (value.answer) relations.push({ kind: 'answers',
     from: { hostId: nativeHost, agentSessionId, source: { kind: 'native', ...value.answer.source, recordId: value.answer.recordId } }, question: value.reference })
   const relationsByRecord = new Map<string, Set<ConversationRelation>>()
   for (const relation of relations) {
-    const from = 'record' in relation.from ? relation.from.record : relation.from
-    const targets = relation.kind === 'same-event' ? [relation.to] : relation.kind === 'same-invocation' ? [relation.to.record]
+    const from = relation.kind === 'invocation-member' ? relation.part.record : relation.from
+    const targets = relation.kind === 'same-event' ? [relation.to] : relation.kind === 'invocation-member' ? []
       : relation.kind === 'answers' ? [{ hostId: relation.question.executionHostId!, agentSessionId, source: { kind: 'native' as const, ...relation.question.source, recordId: relation.question.recordId } }]
       : 'recordId' in relation.target.source ? [relation.target as ConversationItemRef] : []
     for (const ref of [from, ...targets]) {
