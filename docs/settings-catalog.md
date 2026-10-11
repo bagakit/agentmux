@@ -85,6 +85,8 @@ Prompt 仍是同一可复用资源库；Goals、快捷回复及状态动作保�
 
 ## Connections
 
+远程管理的目标、拓扑、监控与维护需求由 [Remote 管理 PRD](design/behavior/remote-management.md) 持有。下表只记录当前设置与 CLI 的实际入口，不表示目标拓扑或新增监控已经实现。
+
 | 页面 | 可修改内容与管理动作 | CLI 范围 | 原 owner |
 | --- | --- | --- | --- |
 | Environments | SSH 环境名称、hostname/alias、用户、端口、密钥路径、服务命令和 socket 路径；Runtime ID 为可信连接所得的只读身份。按准确 Host 管理已有 Project folder/worktree，并可显式登记目录、测试连接及检查/升级 Core。 | `settings hosts ls / test / upgrade-check / upgrade / upgrade-inspect`；`settings workspaces register` 登记已有目录。当前没有 Host 配置的 create/update/delete CLI。登记不自动运行 Git、聚焦或启动 Agent。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/hosts.tsx)、[Host/Workspace 字段](../apps/desktop/src/shared/contracts.ts)、[测试与读取](../apps/desktop/src/main/settings-hosts-control.ts)、[目录登记](../apps/desktop/src/main/settings-workspace-add-control.ts)、[升级事务](../apps/desktop/src/main/settings-hosts-upgrade.ts) |
