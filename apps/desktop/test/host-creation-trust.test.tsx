@@ -9,6 +9,8 @@ import { approveHostCreationTrust, readHostCreationTrust } from '../src/main/set
 import { AgentMuxControlServer, AgentMuxCreationAuthority, connectAgentMuxRpc } from '@agentmux/core'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const dom = composerDOM(), cleanups: Array<() => unknown | Promise<unknown>> = []
 const host: SshHostConfig = { id: 'remote', kind: 'ssh', label: 'Build server', hostname: 'remote.invalid', runtimeId: 'target-runtime' }
@@ -16,13 +18,21 @@ const snapshot: HostCreationTrustSnapshot = {
   source: { runtimeId: 'source-runtime', publicKey: 'source-key', fingerprint: 'a'.repeat(64) },
   target: { routeHostId: host.id, authority: { runtimeId: 'target-runtime', publicKey: 'target-key', fingerprint: 'b'.repeat(64) }, sources: [] }
 }
+const trustedSnapshot: HostCreationTrustSnapshot = { ...snapshot, target: { ...snapshot.target, sources: [{
+  sourceRuntimeId: snapshot.source.runtimeId, publicKey: snapshot.source.publicKey, fingerprint: snapshot.source.fingerprint,
+  targetRuntimeId: snapshot.target.authority.runtimeId, registeredAt: _historyFixtureEpoch(0, 0, 1), registeredBy: { kind: 'user', id: 'transport-user' }
+}] } }
+function pendingApproval() {
+  let resolve!: (value: HostCreationTrustSnapshot) => void
+  let reject!: (failure: Error) => void
+  const promise = new Promise<HostCreationTrustSnapshot>((yes, no) => { resolve = yes; reject = no })
+  approve.mockReturnValueOnce(promise)
+  return { resolve, reject }
+}
 let read: ReturnType<typeof vi.spyOn>, approve: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   read = vi.spyOn(api.hosts, 'creationTrust').mockResolvedValue(snapshot)
-  approve = vi.spyOn(api.hosts, 'trustCreationSource').mockResolvedValue({ ...snapshot, target: { ...snapshot.target, sources: [{
-    sourceRuntimeId: snapshot.source.runtimeId, publicKey: snapshot.source.publicKey, fingerprint: snapshot.source.fingerprint,
-    targetRuntimeId: snapshot.target.authority.runtimeId, registeredAt: 1, registeredBy: { kind: 'user', id: 'transport-user' }
-  }] } })
+  approve = vi.spyOn(api.hosts, 'trustCreationSource').mockResolvedValue(trustedSnapshot)
 })
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close() })
 const render = (draft = host, committed: SshHostConfig | undefined = host, active = true) =>
@@ -77,8 +87,90 @@ it('reconciles a lost approval response by reading saved pins without replaying 
   await render(); await dom.click('input[type=checkbox]'); await dom.click('.primary-button')
   expect(dom.container.textContent).toContain('Approval result unconfirmed')
   expect(dom.container.querySelector('.primary-button')).toBeNull()
+  await render(host, host, false); await render()
+  expect(dom.container.textContent).toContain('Approval result unconfirmed')
+  expect(dom.container.textContent).toContain('Response lost')
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(approve).toHaveBeenCalledTimes(1)
+  read.mockRejectedValueOnce(new Error('Safe read unavailable'))
   await dom.click('.small-button')
   expect(read).toHaveBeenCalledTimes(2)
+  expect(dom.container.textContent).toContain('Approval result unconfirmed')
+  expect(dom.container.textContent).toContain('Response lost')
+  expect(dom.container.textContent).toContain('Safe read unavailable')
+  expect(dom.container.querySelector('.primary-button')).toBeNull()
+  read.mockResolvedValue(trustedSnapshot)
+  await dom.click('.small-button')
+  expect(read).toHaveBeenCalledTimes(3)
+  expect(dom.container.textContent).toContain('This source is trusted')
+  expect(dom.container.querySelector('[role=alert]')).toBeNull()
+  expect(approve).toHaveBeenCalledTimes(1)
+})
+it('keeps the same route facts across hidden facets while clearing only the human verification', async () => {
+  await render(); await dom.click('input[type=checkbox]')
+  expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(true)
+  await render(host, host, false)
+  expect(dom.container.textContent).toContain(snapshot.source.fingerprint)
+  expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(false)
+  await render()
+  expect(dom.container.textContent).toContain(snapshot.target.authority.fingerprint)
+  expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(false)
+  expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(true)
+  expect(read).toHaveBeenCalledExactlyOnceWith(host)
+  expect(approve).not.toHaveBeenCalled()
+})
+it.each(['confirmed', 'unconfirmed'] as const)('keeps an in-flight approval and its %s receipt while its original route is hidden', async outcome => {
+  const pending = pendingApproval()
+  await render(); await dom.click('input[type=checkbox]'); await dom.click('.primary-button')
+  await render(host, host, false)
+  expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(false)
+  expect(dom.container.querySelector<HTMLButtonElement>('.small-button')!.disabled).toBe(true)
+  await render()
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(approve).toHaveBeenCalledExactlyOnceWith(host, snapshot)
+  await render(host, host, false)
+  await act(async () => {
+    if (outcome === 'confirmed') pending.resolve(trustedSnapshot)
+    else pending.reject(new Error('Hidden approval reply lost'))
+  })
+  await render()
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(approve).toHaveBeenCalledTimes(1)
+  expect(dom.container.textContent).toContain(outcome === 'confirmed' ? 'This source is trusted' : 'Approval result unconfirmed')
+  expect(dom.container.querySelector<HTMLButtonElement>('.small-button')!.disabled).toBe(false)
+  expect(dom.container.querySelector('.primary-button')).toBeNull()
+})
+it.each(['resolve', 'reject'] as const)('does not apply an old approval %s to a replacement route with the same Host ID', async outcome => {
+  const pending = pendingApproval()
+  await render(); await dom.click('input[type=checkbox]'); await dom.click('.primary-button')
+  const replacementHost = { ...host, hostname: 'replacement.invalid' }
+  const replacement = { ...snapshot, source: { ...snapshot.source, fingerprint: 'c'.repeat(64) } }
+  read.mockResolvedValue(replacement)
+  await render(replacementHost, replacementHost)
+  await act(async () => {
+    if (outcome === 'resolve') pending.resolve(trustedSnapshot)
+    else pending.reject(new Error('Old approval reply lost'))
+  })
+  expect(dom.container.textContent).toContain('c'.repeat(64))
+  expect(dom.container.textContent).not.toContain(snapshot.source.fingerprint)
+  expect(dom.container.textContent).not.toContain('Approval result unconfirmed')
+  expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(true)
+  expect(dom.container.querySelector<HTMLButtonElement>('.small-button')!.disabled).toBe(false)
+  expect(read).toHaveBeenCalledTimes(2)
+  expect(approve).toHaveBeenCalledTimes(1)
+})
+it('fences an old approval even after its exact route is selected again', async () => {
+  const pending = pendingApproval()
+  await render(); await dom.click('input[type=checkbox]'); await dom.click('.primary-button')
+  const replacementHost = { ...host, hostname: 'replacement.invalid' }
+  const fresh = { ...snapshot, source: { ...snapshot.source, fingerprint: 'd'.repeat(64) } }
+  read.mockResolvedValue(fresh)
+  await render(replacementHost, replacementHost); await render()
+  await act(async () => pending.resolve(trustedSnapshot))
+  expect(dom.container.textContent).toContain('d'.repeat(64))
+  expect(dom.container.textContent).not.toContain('This source is trusted')
+  expect(dom.container.querySelector<HTMLInputElement>('input')!.checked).toBe(false)
+  expect(read).toHaveBeenCalledTimes(3)
   expect(approve).toHaveBeenCalledTimes(1)
 })
 it('retains the last trust facts after a read fails and requires a fresh review before approval', async () => {
