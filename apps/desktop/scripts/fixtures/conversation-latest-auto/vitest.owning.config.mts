@@ -33,7 +33,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
   const mutation = process.env.AGENTMUX_LATEST_CONTROL_MUTATION
   if (mutation && file === resolve(root, 'apps/desktop/src/renderer/src/components/ActivityView.tsx')) {
    const replacements: Record<string, [string, string]> = {
-    'transient-visibility': ['const needsReturnToLatest = showJump || readingWindow.historical', 'const needsReturnToLatest = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.newerOutside'],
+    'transient-visibility': ['const needsReturnToLatest = showJump && (!atLoadedTail || readingWindow.currentOutside) || readingWindow.historical', 'const needsReturnToLatest = conversationReading?.opened || showJump || readingWindow.historical || readingWindow.newerOutside'],
     'loaded-return-refresh': ['if (readingWindow.historical || readingWindow.newerOutside || readingWindow.held) {', 'if (conversationReading?.opened || readingWindow.historical || readingWindow.hasEarlierNavigation || readingWindow.newerOutside || readingWindow.held) {'],
     'disable-automatic-latest': ['readingWindow.showLatestAutomatically()', 'void 0 /* Source mutation: no automatic current catch-up */']
    }
