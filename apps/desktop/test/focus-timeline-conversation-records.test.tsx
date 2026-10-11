@@ -412,6 +412,8 @@ it('the actual Focus consumer labels one retained Core observation without count
   await plotRecord('retained-observation')
   expect(overlay().querySelector('.recent-focus__message-caption')?.textContent).toContain('Reply observation')
   expect(overlay().querySelector('.recent-focus__message-body')?.textContent).toContain('Original retained observation, author not declared')
+  expect(overlay().querySelector('[data-conversation-source="native-hook"]')?.textContent).toBe('Hook')
+  expect(overlay().querySelector('[data-conversation-source="native"]')).toBeNull()
   expect(JSON.parse(overlay().querySelector<HTMLElement>('[data-conversation-author]')!.dataset.conversationAuthor!)).toEqual({kind:'unknown'})
   healthy();expect(reads.mock.calls.length).toBeLessThanOrEqual(2)
 })

@@ -46,7 +46,7 @@ it('actual Composer → Unix Hosted SDK → Core Provider reads older native inp
  useAppStore.setState({ agentSteerQueues: { [sid]: [unknown] } })
  await dom.render(<AgentSessionComposer sessionId={sid} />); await open()
  await wait(() => expect(list().querySelectorAll('.composer-mailbox__row').length, list().textContent ?? '').toBeGreaterThan(0))
- await wait(() => expect(list().textContent).toContain('原生记录 · 入口未记录'))
+ await wait(() => expect(list().textContent).toContain('原生对话 · 入口未记录'))
  await search('needle')
  await wait(() => expect(list().textContent).toContain('继续查找原生记录'))
  expect(list().textContent).toContain('No recorded messages')
