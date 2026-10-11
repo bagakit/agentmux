@@ -6,7 +6,7 @@ import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversat
 import { type AgentConversationRecord, type ConversationItemRef } from '@agentmux/core/conversation'
 import { projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
-import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
+import { CapturedConversationMessage, type SubmissionDisclosure } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import { ConversationToolPayload } from '@agentmux/client-ui/components/ConversationToolPayload'
 import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation-trace-disclosure'
@@ -1053,7 +1053,7 @@ export function ActivityView({
     }
   }
 
-  const renderPlaced = ({ entry, key }: PlacedSegment, disclosure?: ConversationProcessProps['disclosure']): JSX.Element => {
+  const renderPlaced = ({ entry, key }: PlacedSegment, disclosure?: ConversationProcessProps['disclosure'], submissionDisclosure?: SubmissionDisclosure): JSX.Element => {
   // Identity is resolved once here; the shared message only renders that verdict.
   const speaker = entry.kind === 'user-message'
       ? speakerOfUserMessage(entry.message)
@@ -1107,6 +1107,7 @@ export function ActivityView({
       ) : entry.record?.role !== 'process' && entry.record?.role !== 'interaction' && speaker ? (
         <CapturedConversationMessage
           item={entry.item}
+          {...(submissionDisclosure ? { submissionDisclosure } : {})}
           {...(entry.record ? { record: entry.record } : {})}
           {...(entry.record?.role === 'observation' ? { replyObservation: { compact: true } } : {})}
           messageActions={<>{entry.record && conversationItemRef(entry.record) && renderRecordActions?.(conversationItemRef(entry.record)!, readingEnabled, executionHostId)}{entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
@@ -1177,13 +1178,14 @@ export function ActivityView({
       <div ref={logRef}>
       <ConversationView
         page={nativeHistoryPage}
+        expandSubmissions={Boolean(readingWindow.error)}
         records={conversationRecords}
         originalRecords={originalConversationRecords}
         coverage={conversationCoverage}
         onLocateRecord={revealLoadedRecord}
-        renderCapturedRecord={(record, disclosure) => {
+        renderCapturedRecord={(record, disclosure, submissionDisclosure) => {
           const segment = placedByRecord.get(record.id) ?? (record.original.kind === 'captured' ? { entry: { kind: 'item' as const, item: record.original.item, record }, key: JSON.stringify(['item', record.rawId]), from: 0, to: 0 } : undefined)
-          return segment ? renderPlaced(segment, disclosure) : null
+          return segment ? renderPlaced(segment, disclosure, submissionDisclosure) : null
         }}
         insertions={[{ key: 'native-reading-tail', role: 'anchor', content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
         traceDisclosure={traceDisclosure}

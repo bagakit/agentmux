@@ -380,6 +380,11 @@
 .conversation-submission { min-width: 0; overflow-wrap: anywhere; }
 .conversation-submission > summary { cursor: pointer; }
 .conversation-submission > summary > span + span::before { content: ' · '; }
+.conversation-submission-summary > span + span::before { content: ' · '; }
+.conversation-submission-summary[data-status='failed'] { color: var(--red-text); }
+.conversation-submission-record { min-width: 0; margin: var(--sp-2) var(--sp-4); color: var(--text-2); }
+.conversation-submission-record__author { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); color: var(--text); }
+.conversation-submission-record__author code { font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .conversation-submission[data-status='failed'] > summary { color: var(--red-text); }
 .conversation-submission .conversation-input-details__facts { margin: var(--sp-2) 0; }
 .conversation-reply-observation__preview {

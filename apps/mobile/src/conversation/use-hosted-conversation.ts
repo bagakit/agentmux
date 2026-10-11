@@ -101,6 +101,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
   const activity = active && selected.activity?.owner === activityOwner &&
     selected.activity.hostId === selected.session?.hostId && selected.activity.runId === selected.session?.run.runId ? selected.activity.observation : null
   return { ...selected, activity, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
+    readError: view.error,
     pageOwner: view.snapshot ? pageOwner.current?.owner ?? null : null, answerContext, reading: view.loading,
     olderWindow: view.historical, capturedHasMore: view.hasMore, newerAvailable: view.newerAvailable || view.held,
     notice: view.error?.message ?? view.observationError?.message ?? answers.error?.message ?? selected.notice,
