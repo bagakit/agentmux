@@ -10,21 +10,31 @@ import { CODEX_NATIVE_TOKEN_ENV, type CodexManagedResume } from './codex-managed
 import { connectCodexNativeActor } from './codex-native-rpc.js'
 
 const PROTOCOL_ID = 'codex-app-server-v2-0.163'
+const BYPASS_PERMISSIONS = '--dangerously-bypass-approvals-and-sandbox'
 const unavailable = () => new AgentMuxError('The exact native actor input service is unconfirmed. The original Agent and ordinary terminal input remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
 
 /** Shared configuration for already qualified create plans. */
 function nativeServerConfig(args: readonly string[]): string[] | null {
   const result: string[] = []
+  let bypass = false, permission = false, custom = false
   const valueFlags = new Set(['-m', '--model', '-p', '--profile', '-s', '--sandbox', '-a', '--ask-for-approval', '-C', '--cd'])
   const shared = new Set(['-c', '--config', '--enable', '--disable'])
   const switches = new Set(['--dangerously-bypass-hook-trust', '--no-alt-screen'])
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
-    if (shared.has(arg)) { const value = args[++i]; if (value === undefined) return null; result.push(arg, value) }
-    else if (valueFlags.has(arg)) { if (args[++i] === undefined) return null }
-    else if (arg.startsWith('--config=') || arg.startsWith('--enable=') || arg.startsWith('--disable=')) result.push(arg)
+    if (arg === BYPASS_PERMISSIONS) {
+      if (bypass) return null
+      bypass = true
+    } else if (shared.has(arg)) { const value = args[++i]; if (value === undefined) return null; result.push(arg, value); custom ||= arg === '-c' || arg === '--config' }
+    else if (valueFlags.has(arg)) {
+      if (args[++i] === undefined) return null
+      permission ||= ['-s', '--sandbox', '-a', '--ask-for-approval'].includes(arg)
+      custom ||= arg === '-p' || arg === '--profile'
+    }
+    else if (arg.startsWith('--config=') || arg.startsWith('--enable=') || arg.startsWith('--disable=')) { result.push(arg); custom ||= arg.startsWith('--config=') }
     else if (!switches.has(arg)) return null
   }
+  if (bypass && (permission || custom)) return null
   return result
 }
 
@@ -40,7 +50,10 @@ function nativeResumePlan(args: readonly string[], prompt?: string): { args: str
   for (let i = 2; i < args.length; i++) {
     if (i === promptIndex) continue
     const arg = args[i]!
-    if (['-s', '--sandbox', '-a', '--ask-for-approval', '-m', '--model', '-C', '--cd'].includes(arg)) {
+    if (arg === BYPASS_PERMISSIONS) {
+      if (resume.sandbox !== undefined || resume.approvalPolicy !== undefined) return null
+      resume.sandbox = 'danger-full-access'; resume.approvalPolicy = 'never'; removed.add(i)
+    } else if (['-s', '--sandbox', '-a', '--ask-for-approval', '-m', '--model', '-C', '--cd'].includes(arg)) {
       const valueIndex = ++i, value = args[valueIndex]
       if (!value || valueIndex === promptIndex) return null
       if (arg === '-s' || arg === '--sandbox') {
