@@ -180,7 +180,7 @@ async function prepared(record: ConnectionRecord, operationId: string) {
   return await forward('connection.setup.advance', action(value, 'confirm-account'))
 }
 async function localView(operationId: string, selectedRead?: string, selectedEffect?: string) {
-  return await forward('connection.setup.inspect', { operationId, applicationInspection: selectedRead ? { selectedStepId: selectedRead } : {}, applicationConfiguration: selectedEffect ? { selectedStepId: selectedEffect } : {} })
+  return await forward('connection.setup.inspect', { operationId, applicationInspection: selectedRead ? { selectedStepId: selectedRead } : {}, applicationConfiguration: selectedEffect ? { effect: 'enable-messaging', selectedStepId: selectedEffect } : { effect: 'enable-messaging' } })
 }
 async function chooseOriginal(record: ConnectionRecord, operationId: string) {
   await enter(record)
