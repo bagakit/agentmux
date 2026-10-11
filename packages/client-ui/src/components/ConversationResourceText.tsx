@@ -11,6 +11,7 @@ import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
+import { ConversationResourceFile } from './ConversationResourceFile.js'
 
 export function ConversationResourceText({ sources, active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
   openWorkspaceFile, readPastedImage, openHttpLink }: {
@@ -46,7 +47,7 @@ export function ConversationResourceText({ sources, active = true, part, partInd
       if (!controller.signal.aborted && latestOwner.current === owner) { setLoaded({ owner, value: complete }); setReading({ owner, loading: false, error: null }) }
     } catch (failure) { if (!controller.signal.aborted && latestOwner.current === owner) setReading({ owner, loading: false, error: failure instanceof Error ? failure.message : 'Complete content could not be read. Retry.' }) }
   }
-  const copyableText = content?.kind === 'text' ? content.text : content?.kind === 'resource' ? content.resourceType === 'image' ? part.reference : content.reference : null
+  const copyableText = content?.kind === 'text' ? content.text : content?.kind === 'resource' ? content.resourceType === 'image' || content.resourceType === 'file' ? part.reference : content.reference : null
   const text = content?.kind === 'text' ? sessionHistoryTextForReading(content) : ''
   const prefix = inputMode && content?.kind === 'text' ? parseAgentMuxMessagePrefix(text) : null
   return <div className="conversation-resource-text">
@@ -69,6 +70,7 @@ export function ConversationResourceText({ sources, active = true, part, partInd
       content?.kind === 'reasoning' ? <ConversationReasoningTrace sources={sources} active={active} copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> :
       content?.kind === 'resource' && content.resourceType === 'image' ? <ConversationResourceImage active={active} part={part} partIndex={partIndex} record={record} readResource={readResource} /> :
+      content?.kind === 'resource' && content.resourceType === 'file' ? <ConversationResourceFile active={active} part={part} partIndex={partIndex} record={record} readResource={readResource} label={content.label} /> :
       content?.kind === 'resource' ? <div className="log-turn__resource"><span>{content.label ?? content.resourceType}</span><code>{content.reference}</code></div> : null}
   </div>
 }

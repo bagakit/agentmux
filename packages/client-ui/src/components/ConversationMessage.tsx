@@ -14,6 +14,7 @@ import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from '
 import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 import { ConversationResourceText } from './ConversationResourceText.js'
+import { ConversationResourceFile } from './ConversationResourceFile.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationAnnotationSelection } from '../lib/conversation-annotation.js'
@@ -474,6 +475,8 @@ export function ConversationMessage({
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
               <ConversationResourceImage active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
+            ) : part.resourceType === 'file' ? (
+              <ConversationResourceFile active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
             ) : <div key={key} className="log-turn__resource">
               <span>{part.label ?? `${part.resourceType} resource`}</span>
               <code>{part.reference}</code>
