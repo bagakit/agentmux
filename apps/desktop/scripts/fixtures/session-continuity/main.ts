@@ -5,18 +5,21 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore } from '@agentmux/core'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import { RuntimeController } from '../../../src/main/runtime-controller'
+import { verifyCapabilityRecovery } from './capability-recovery'
 const [html, privateRoot, phase, preload, evidence, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
+const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
 const executor = (mode: string) => ({ label: 'Private native continuity fixture', providerId: 'codex', command: path.join(privateRoot, 'fake-codex'),
   env: { AGENTMUX_FAKE_READY_MODE: mode, AGENTMUX_FAKE_NATIVE_RECORD: '1',
     AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_LAUNCH_INPUT: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original continuity task: retain decision sentinel continuity-body-7f41 and the independent unsent draft.',
     CODEX_HOME: path.join(privateRoot, 'codex'), AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: path.join(privateRoot, 'codex', 'sessions') }, injectAgentMuxGuide: false })
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private continuity proof' }],
-  executors: { healthy: executor('before'), working: executor('working-until-resume'), idle: executor('before') },
+  executors: { healthy: executor('before'), working: capability ? { ...executor('before'), env: { ...executor('before').env, AGENTMUX_FAKE_OMIT_HANDLE: '1' } } : executor('working-until-resume'), idle: executor('before') },
+  ...(capability ? { continuity: { activeRecovery: 'manual' } } : {}),
   workspaces: [{ id: 'continuity-workspace', hostId: 'local', name: 'Private continuity proof', path: path.join(privateRoot, 'workspace'), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
@@ -59,11 +62,13 @@ ipcMain.handle('native-proof:request', async (_event, operation, ...args) => {
         call.result = structuredClone(value); return value
       }
       case 'resolve': return runtime.resolveSession(args[0], config as any)
-      case 'refresh': return runtime.refresh(args[0], config as any)
+      case 'refresh': return await runtime.refresh(args[0], config as any)
+      case 'stop': return await runtime.stopSession(args[0])
       case 'flush': await win.webContents.session.flushStorageData(); return
       default: throw new Error('Unsupported private boundary: ' + operation)
     }
   } catch (error: any) { call.error = { code: error.code, message: error.message }; throw error }
+  finally { call.finished = true }
 })
 app.whenReady().then(async () => {
   const state = () => win.webContents.executeJavaScript('window.continuityState()')
@@ -75,7 +80,7 @@ app.whenReady().then(async () => {
         const launched = await runtime.launchAgent({ hostId: 'local', executorId: name, workspacePath: config.workspaces[0].path }, config as any)
         const session = await wait(name + ' native identity', async () => {
           const value = (await store.load()).find(one => one.agentSessionId === launched.session.id)
-          return value?.nativeHandle?.kind === 'provider' && value.semanticStatus?.state === (name === 'working' ? 'working' : 'done') ? value : null
+          return capability && name === 'working' ? value : value?.nativeHandle?.kind === 'provider' && value.semanticStatus?.state === (name === 'working' ? 'working' : 'done') ? value : null
         })
         step('native-ready-' + name)
         ids[name] = { sessionId: session.agentSessionId, run: session.run, nativeHandle: session.nativeHandle }
@@ -86,7 +91,8 @@ app.whenReady().then(async () => {
     result.before = (await store.load()).map(one => ({ agentSessionId: one.agentSessionId, run: one.run, nativeHandle: one.nativeHandle, semanticStatus: one.semanticStatus }))
     result.spatialBefore = await spatial.readForLayout()
     if (phase !== 'seed') {
-      const expected = JSON.parse(await fs.readFile(path.join(privateRoot, phase === 'restore' ? 'expected.json' : 'expected-restored.json'), 'utf8'))
+      const expectedFile = capability ? 'capability-expected.json' : phase === 'restore' ? 'expected.json' : 'expected-restored.json'
+      const expected = JSON.parse(await fs.readFile(path.join(privateRoot, expectedFile), 'utf8'))
       assert.deepEqual(result.spatialBefore, expected.spatial, 'Original spatial document must exist before Renderer hydration')
     }
     win = new BrowserWindow({ width: 1320, height: 880, show: false,
@@ -95,7 +101,12 @@ app.whenReady().then(async () => {
     runtime.attach(win.webContents)
     releaseSpatial = spatial.subscribe(value => { if (!win.isDestroyed()) win.webContents.send('agentmux:session-event', { kind: 'native-proof-spatial-state', state: value }) })
     await win.loadFile(html); step('renderer-loaded')
-    await wait('actual App and nonempty workface', async () => await win.webContents.executeJavaScript('window.continuityReady && !window.continuityState().loading && Object.keys(window.continuityState().tabs).length === 2'))
+    await wait('actual App and nonempty workface', async () => await win.webContents.executeJavaScript(`window.continuityReady && !window.continuityState().loading && Object.keys(window.continuityState().tabs).length ${capability ? '>= 1' : '=== 2'}`))
+    if (capability) {
+      await verifyCapabilityRecovery({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config })
+      result.passed = true
+      return
+    }
     if (phase === 'restore') await wait('working same-session native recovery', async () => {
       const value = await state(), session = value.sessions.find((one: any) => one.id === ids.working.sessionId)
       return session?.processState === 'running' && session.control.run.runId !== ids.working.run.runId &&
