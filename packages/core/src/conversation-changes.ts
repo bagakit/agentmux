@@ -7,7 +7,7 @@ import { conversationRecordId, conversationRevision, conversationRecordRole, con
   type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-timeline.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
-import type { JsonReadEntry } from './json-read-fragments.js'
+import { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
 export { parseConversationRef } from './session-history-changes.js'
 export * from './session-history-changes.js'
 
@@ -21,19 +21,56 @@ export type ConversationFrontier = ConversationRef & { scope: ConversationScope;
 )[] }
 export type ConversationCheckpoint = ConversationRef & { sourceHostId: string; frontier: ConversationFrontier }
 export type ConversationVersionedAnchor = { record: ConversationItemRef; revision: string; frontier: ConversationCheckpoint }
-export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; anchor?: ConversationVersionedAnchor }
+export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; anchor?: ConversationVersionedAnchor; view?: string }
 export type ConversationUnit = { event: ConversationEvent; records: readonly ConversationSourceRecord[] }
 export type ConversationUnitEntry = JsonReadEntry<ConversationUnit>
+export type ConversationWindowBoundary = { record: ConversationItemRef; revision: string }
+/** A complete replacement of one backend-owned accepted window, never an append delta. */
+export type ConversationReadWindow = { id: string; revision: number; itemCount: number; complete: boolean;
+  view: string | null; replay: string; checkpoint: ConversationCheckpoint;
+  outside: { older: ConversationWindowBoundary | null; newer: ConversationWindowBoundary | null } }
 export type AgentConversationReadPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; coverage: readonly ConversationSourceCoverage[];
-  order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number }
+  order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number; window: ConversationReadWindow }
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
-export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string }
+export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string; view?: string }
 export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
+export type ConversationWatchInput = ConversationRef & { view?: string }
+export type ConversationViewReleaseInput = ConversationRef & { view: string }
+export type ConversationViewReleaseResult = ConversationRef & { sourceHostId: string; viewId: string; released: boolean }
 export type ConversationWatchOpening = ConversationRef & { sourceHostId: string; scope: ConversationScope; coverage: readonly ConversationSourceCoverage[] }
 export type ConversationObservation = ConversationRef & { sourceHostId: string; source: ConversationSourceRef; kind: 'invalidated' | 'unavailable'; code?: string; message?: string }
 export type ConversationObservationHandle = ConversationWatchOpening & { closed: AbortSignal; dispose(): void }
 /** Cancellation owns this read lease, never the original Agent or its source namespace. */
 export type ConversationReadOptions = { signal?: AbortSignal }
+export type ConversationWindowSnapshot = Omit<AgentConversationReadPage, 'items'> & { units: readonly ConversationUnit[] }
+export type ConversationWindowAssembly = { scopeKey: string; windowId: string; revision: number; itemCount: number;
+  units: readonly ConversationUnit[]; bytes: number; eventIds: ReadonlySet<string>; recordIds: ReadonlySet<string>; fragment?: JsonReadAssembly }
+
+/** Wire assembly only. Semantic accumulation and replacement belong to the backend Reader. */
+export function consumeConversationWindowPage(page: AgentConversationReadPage, pending?: ConversationWindowAssembly):
+  { kind: 'pending'; pending: ConversationWindowAssembly } | { kind: 'complete'; snapshot: ConversationWindowSnapshot } {
+  const scopeKey = JSON.stringify([page.hostId, page.sourceHostId, page.agentSessionId, page.scope])
+  if (pending && (pending.scopeKey !== scopeKey || pending.windowId !== page.window.id || pending.revision !== page.window.revision || pending.itemCount !== page.window.itemCount)) return bad('A window fragment belongs to another original scope or revision.')
+  const units = [...(pending?.units ?? [])]
+  const eventIds = new Set(pending?.eventIds), recordIds = new Set(pending?.recordIds)
+  let fragment = pending?.fragment, length = pending?.bytes ?? 0
+  for (const entry of page.items) {
+    const consumed = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify([scopeKey, page.window.id, page.window.revision]), ...(fragment ? { pending: fragment } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
+    if (consumed.kind === 'pending') { fragment = consumed.pending; continue }
+    const unit = parseConversationUnit(consumed.value, { hostId: page.sourceHostId, agentSessionId: page.agentSessionId }, page.scope)
+    if (entry.kind === 'fragment' && entry.itemId !== unit.event.id || eventIds.has(unit.event.id) || unit.records.some(record => recordIds.has(record.id))) return bad('The replacement window repeats an event or original contribution.')
+    eventIds.add(unit.event.id); for (const record of unit.records) recordIds.add(record.id)
+    fragment = undefined; units.push(unit); length += bytes(unit)
+    if (length > CONVERSATION_MAX_UNIT_BYTES || units.length > page.window.itemCount) return bad('The replacement window exceeds its original bounded inventory.')
+  }
+  if (!page.window.complete) {
+    if (!page.nextCursor) return bad('An incomplete window has no exact continuation.')
+    return { kind: 'pending', pending: { scopeKey, windowId: page.window.id, revision: page.window.revision, itemCount: page.window.itemCount, units, bytes: length, eventIds, recordIds, ...(fragment ? { fragment } : {}) } }
+  }
+  if (fragment || units.length !== page.window.itemCount || !page.window.view) return bad('The replacement window is incomplete.')
+  const { items: _items, ...envelope } = page
+  return { kind: 'complete', snapshot: { ...envelope, units } }
+}
 
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
 const bad = (message = 'Conversation data changed scope, version or shape.', code = 'CONTROL_PROTOCOL_ERROR'): never => { throw new AgentMuxError(message, code) }
@@ -121,21 +158,35 @@ export function parseConversationVersionedAnchor(value: unknown, ref: Conversati
   if (!/^[a-f0-9]{64}$/u.test(revision)) return bad()
   return { record: itemRef(p.record, frontier.frontier, frontier.frontier.scope), revision, frontier }
 }
-function options(value: Record<string, unknown>): { limit?: number; maxBytes?: number; cursor?: string } {
+function options(value: Record<string, unknown>): { limit?: number; maxBytes?: number; cursor?: string; view?: string } {
   return { ...(value.limit === undefined ? {} : { limit: integer(value.limit, 1, 100) }),
     ...(value.maxBytes === undefined ? {} : { maxBytes: integer(value.maxBytes, 4096, CONVERSATION_MAX_READ_BYTES) }),
-    ...(value.cursor === undefined ? {} : { cursor: text(value.cursor, 131_072) }) }
+    ...(value.cursor === undefined ? {} : { cursor: text(value.cursor, 131_072) }),
+    ...(value.view === undefined ? {} : { view: text(value.view, 131_072) }) }
 }
 export function parseConversationTimelineReadInput(value: unknown): ConversationTimelineReadInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor', 'view'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   return { ...ref, ...options(p), ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
   const checkpoint = parseConversationCheckpoint(p.checkpoint, ref)
   return { ...ref, checkpoint, ...options(p) }
+}
+export function parseConversationWatchInput(value: unknown): ConversationWatchInput {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'view'])
+  return { ...parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId }), ...(p.view === undefined ? {} : { view: text(p.view, 131_072) }) }
+}
+export function parseConversationViewReleaseInput(value: unknown): ConversationViewReleaseInput {
+  const input = parseConversationWatchInput(value)
+  return { ...input, view: text(input.view, 131_072) }
+}
+export function parseConversationViewReleaseResult(value: unknown, input: ConversationRef): ConversationViewReleaseResult {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'viewId', 'released'])
+  if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || typeof p.released !== 'boolean') return bad()
+  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: text(p.sourceHostId), viewId: text(p.viewId), released: p.released }
 }
 function coverage(value: unknown, ref: ConversationRef, accepted: ConversationScope): ConversationSourceCoverage[] {
   if (!Array.isArray(value) || value.length !== accepted.sources.length) return bad()
@@ -283,7 +334,7 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
   return { event: { ...event, revision: version }, records }
 }
 function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false): AgentConversationReadPage {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
   if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
   const accepted = scope(p.scope), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, order = rpcRecord(p.order, ['basis', 'crossSource', 'direction'], 'CONTROL_PROTOCOL_ERROR')
   if (order.direction !== 'newest-first' || order.basis !== 'source-and-relations' || !['partial', 'confirmed'].includes(String(order.crossSource))) return bad()
@@ -296,12 +347,24 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
     if (offsetBytes >= totalBytes) return bad()
     return { kind: 'fragment' as const, itemId: text(entry.itemId, 131_072), encoding: 'json-utf8-base64' as const, sha256: revision(entry.sha256), offsetBytes, totalBytes, dataBase64: entry.dataBase64 }
   })
-  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes) }
+  const w = rpcRecord(p.window, ['id', 'revision', 'itemCount', 'complete', 'view', 'replay', 'checkpoint', 'outside'], 'CONTROL_PROTOCOL_ERROR')
+  const checkpoint = parseConversationCheckpoint(w.checkpoint, input)
+  if (typeof w.complete !== 'boolean' || (w.complete ? typeof w.view !== 'string' : w.view !== null) ||
+      checkpoint.sourceHostId !== source.hostId || !same(checkpoint.frontier.scope, accepted)) return bad()
+  const outside = rpcRecord(w.outside, ['older', 'newer']), boundary = (value: unknown): ConversationWindowBoundary | null => {
+    if (value === null) return null
+    const point = rpcRecord(value, ['record', 'revision'])
+    return { record: itemRef(point.record, source, accepted), revision: revision(point.revision) }
+  }
+  const window: ConversationReadWindow = { id: text(w.id), revision: integer(w.revision, 1), itemCount: integer(w.itemCount, 0, 1200),
+    complete: w.complete, view: w.view === null ? null : text(w.view, 131_072), replay: text(w.replay, 131_072), checkpoint,
+    outside: { older: boundary(outside.older), newer: boundary(outside.newer) } }
+  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes), window }
 }
 export function parseConversationReadPage(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage { return basePage(value, input) }
 export function parseConversationChangesPage(value: unknown, input: ConversationChangesInput): ConversationChangesPage {
   const result = basePage(value, input, true), p = rpcRecord(value), checkpoint = parseConversationCheckpoint(p.checkpoint, input)
-  if (input.checkpoint.sourceHostId !== result.sourceHostId || checkpoint.sourceHostId !== result.sourceHostId || !same(result.scope, input.checkpoint.frontier.scope) || !same(result.scope, checkpoint.frontier.scope) || typeof p.more !== 'boolean') return bad()
+  if (input.checkpoint.sourceHostId !== result.sourceHostId || checkpoint.sourceHostId !== result.sourceHostId || !same(result.scope, input.checkpoint.frontier.scope) || !same(result.scope, checkpoint.frontier.scope) || !same(result.window.checkpoint, checkpoint) || typeof p.more !== 'boolean') return bad()
   return { ...result, checkpoint, more: p.more }
 }
 export function parseConversationCheckpointPage(value: unknown, input: ConversationRef): ConversationCheckpointPage {

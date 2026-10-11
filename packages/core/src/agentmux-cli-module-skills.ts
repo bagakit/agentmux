@@ -41,8 +41,10 @@ confirmed and unknown meanings. Original text and copyable parts remain complete
 agent conversation inspect reads newest-first semantic units from the same Core timeline as clients.
 Each unit carries one event and all original source records. Reassemble complete JSON UTF-8 fragments
 before interpreting content; retain its scoped continuation. checkpoint freezes the exact source vector;
-changes upserts original versions and advances cuts only after complete units. watch invalidates
-that reader; Ctrl-C releases this reader, never the Agent. Source gaps retain exact retry scope.
+changes upserts original versions inside the backend view and advances cuts only after a complete
+replacement window. Keep window.view for following reads; assemble window.complete before replacing
+the displayed snapshot. watch invalidates that reader and --view retains its temporary window;
+Ctrl-C or agent conversation release releases only that reader, never the Agent. Source gaps retain exact retry scope.
 Original agent history/resource reads retain their own provenance and cursor. Status prose is not permission or input proof.
 agent conversation landmark ls/apply manage explicit user-named original record references,
 not generated chapters or copied bodies. A saved point is not record availability. Keep its
