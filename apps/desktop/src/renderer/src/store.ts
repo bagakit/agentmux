@@ -5435,14 +5435,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, observation: observeMoteContextOperation(get().moteContextOperations, request) }
     }
     if (request.operation === 'inspect.client') {
-      const discoveryWorkspace = get().config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
-      let topics: ScratchTopicSnapshot[] = []
-      try { if (discoveryWorkspace) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) } catch { /* Missing discovery stays unknown; durable placement is retained. */ }
-      // Directory I/O can outlive a user's navigation. Observe one current Store snapshot
-      // together with the actual DOM; never mix pre-await selection with a new caret.
+      // Observe the displayed generation; directory refresh belongs to its original owner.
       const state = get()
-      const currentWorkspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
-      if (discoveryWorkspace && (currentWorkspace?.hostId !== discoveryWorkspace.hostId || currentWorkspace?.path !== discoveryWorkspace.path)) topics = []
+      const workspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+      const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace) ?? []
       const selection = desktopSelection(state, spatialCatalog(state, topics))
       const presentation = readDesktopPresentation(selection, state.tabs)
       const sessions = sessionPresentationById(state.sessions)
