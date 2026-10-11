@@ -8,6 +8,7 @@ const mutation = process.env.MODAL_MUTATION
 const mutations: Record<string, [string, string]> = {
   'retain-inactive-behavior': ['const active = (!context || context.requestedOpen && context.failure === null) && (!boundary || boundary.ready)', 'const active = true'],
   'detach-nonmodal': ['const inheritedContainer = useModalOverlayContainer(container)', 'const inheritedContainer = container'],
+  'forget-retired-document': ['const behaviorDocument = inheritedBoundary?.document ?? element?.ownerDocument ?? documentLease.current.document', 'const behaviorDocument = inheritedBoundary?.document ?? element?.ownerDocument'],
   'reuse-attempt': ['const id = `amux-modal-${identity}-${attempt.generation}`', 'const id = `amux-modal-${identity}`'],
   'stale-retained-order': ['if (scope && visible && placed) moveModalScopeToFront(scope)', 'if (false) moveModalScopeToFront(scope!)'],
   'suppress-business-close': ['if (close && (latest.current.failure != null || latest.current.id !== attemptId || latest.current.document !== behaviorDocument))', 'if (close)'],
