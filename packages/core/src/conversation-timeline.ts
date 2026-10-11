@@ -111,6 +111,19 @@ export function conversationRecordAuthor(record: ConversationSourceRecord, sessi
   return conversationRecordRole(record) === 'message' && record.original.item.kind === 'assistant_message'
     ? { kind: 'agent', agentSessionId: sessionId } : { kind: 'unknown' }
 }
+/** Exact recorded attribution of one already confirmed event group; never an association or authority test. */
+export function conversationEventAuthor(records: readonly ConversationSourceRecord[], primary: ConversationSourceRecord, sessionId: string): {
+  author: ConversationAuthor; conflictingRecordIds: readonly string[]
+} {
+  const explicit = records.flatMap(record => {
+    if (record.original.kind !== 'captured') return []
+    const author = recordedConversationAuthor(record.original.item)
+    return author.kind === 'unknown' ? [] : [{ record, author }]
+  })
+  const authors = new Map(explicit.map(value => [JSON.stringify(canonical(value.author)), value.author]))
+  if (authors.size > 1) return { author: { kind: 'unknown' }, conflictingRecordIds: explicit.map(value => value.record.id) }
+  return { author: authors.values().next().value ?? conversationRecordAuthor(primary, sessionId), conflictingRecordIds: [] }
+}
 function selectors(record: ConversationSourceRecord): ConversationSelector[] {
   const original = record.original
   return original.kind === 'native' ? original.item.contentParts.map((_, partIndex) => ({ kind: 'native-part', partIndex }))
@@ -300,8 +313,11 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
     const coalesces = group.flatMap(record => record.id !== id && edges.has(record.id) ? [{ fromEventIds: [record.id], relation: edges.get(record.id)!.relation }] : [])
     const body = [primary, ...group.filter(record => record !== primary)]
     const content = body.flatMap(record => selectors(record).map(selector => ({ recordId: record.id, recordRevision: record.revision, selector, placement: record === primary ? 'body' as const : 'detail' as const })))
+    const attribution = conversationEventAuthor(group, primary, agentSessionId)
+    for (const recordId of attribution.conflictingRecordIds) gap(byId.get(recordId)!, 'CONVERSATION_AUTHOR_CONFLICT',
+      'The same event has conflicting recorded authors; original attributions remain readable.', byId.get(recordId)!.reference ?? undefined)
     const event = { id, anchorId: id, reference: byId.get(id)?.reference ?? canonicalReferences.get(id) ?? primary.reference,
-      role: conversationRecordRole(primary), author: conversationRecordAuthor(primary, agentSessionId), recordIds: group.map(record => record.id), content, relations: related,
+      role: conversationRecordRole(primary), author: attribution.author, recordIds: group.map(record => record.id), content, relations: related,
       ...(coalesces.length ? { coalesces } : {}) }
     return { ...event, revision: conversationRevision({ policy: 1, versions: group.map(record => [record.id, record.revision]), event }) }
   })
