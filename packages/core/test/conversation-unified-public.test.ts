@@ -1,0 +1,482 @@
+import { appendFile, rename } from 'node:fs/promises'
+import { join } from 'node:path'
+import { afterEach, expect, it, vi } from 'vitest'
+import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.js'
+import { projectConversationTimeline, consumeJsonReadEntry, parseConversationUnit, type ConversationUnit, type JsonReadAssembly,
+  type ConversationTimelineReadInput, type AgentConversationReadPage } from '../src/conversation.js'
+import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
+import { connectHostedAgentMux } from '../src/hosted-client.js'
+import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
+import { AgentMuxError } from '../src/errors.js'
+import { forwardConversationPage, forwardConversationInput } from '../src/conversation-reader.js'
+import { parseConversationReadPage } from '../src/conversation-changes.js'
+import { conversationRevision, conversationRecordId } from '../src/conversation-timeline.js'
+import { projectConversationReading, conversationItemRef, parseAgentSessionHistoryReadPage } from '../src/conversation.js'
+import { savedQuestionFixture, savedQuestionEvent, savedQuestionReply, savedQuestionId } from './helpers/codex-saved-question.js'
+import { unifiedConversationOriginals } from './helpers/conversation-unified-originals.js'
+import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
+import type { AgentTimelineMutation, AgentMuxEvidence } from '../src/types.js'
+import type { AgentTimelineItem } from '../src/types.js'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
+
+const ref = { hostId: 'local', agentSessionId: 'private-agent' }
+const release: Array<() => Promise<void>> = []
+afterEach(async () => { for (const close of release.splice(0).reverse()) await close(); vi.restoreAllMocks() })
+const row = (id: string, at: number, text = id) => ({ uuid: id, type: 'assistant', sessionId: 'native-main',
+  timestamp: new Date(at).toISOString(), message: { role: 'assistant', content: [{ type: 'text', text }] } })
+const captured = (id: string, at: number, content = id): AgentTimelineItem => ({ id, agentSessionId: ref.agentSessionId,
+  kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Original reply observation', content, createdAt: at, updatedAt: at })
+async function fixture(rows = [row('native', _historyFixtureEpoch(0, 0, 100))]) {
+  const f = await nativeHistoryFixture('claude', jsonl(rows)); release.push(f.close)
+  return f
+}
+async function collect(read: (input: ConversationTimelineReadInput) => Promise<AgentConversationReadPage>, input: ConversationTimelineReadInput = ref) {
+  const units: ConversationUnit[] = [], pages: AgentConversationReadPage[] = []
+  let cursor: string | undefined = input.cursor, pending: JsonReadAssembly | undefined
+  for (let i = 0; i < 200; i++) {
+    const page = await read({ ...input, ...(cursor ? { cursor } : {}) }); pages.push(page)
+    expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(page.budgetBytes)
+    for (const entry of page.items) {
+      const part = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify([ref, page.scope]), ...(pending ? { pending } : {}), maxTotalBytes: 32 * 1024 * 1024 })
+      if (part.kind === 'pending') pending = part.pending
+      else { pending = undefined; units.push(parseConversationUnit(part.value, { hostId: page.sourceHostId, agentSessionId: input.agentSessionId }, page.scope)) }
+    }
+    if (!page.nextCursor) { expect(pending).toBeUndefined(); return { units, pages } }
+    expect(page.nextCursor).not.toBe(cursor); cursor = page.nextCursor
+  }
+  throw new Error('Conversation traversal failed to make bounded progress')
+}
+
+it('actual SDK and public RPC preserve source order with one tail policy, independently of wire page limits', async () => {
+  const f = await fixture([row('older-native', _historyFixtureEpoch(0, 0, 200)), row('n100', _historyFixtureEpoch(0, 0, 100)), row('n1', _historyFixtureEpoch(0, 0, 1))])
+  for (const item of [captured('older-captured', _historyFixtureEpoch(0, 0, 20)), captured('c50', _historyFixtureEpoch(0, 0, 50))]) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item })
+  const native = await f.client.sessionHistoryPage(ref.agentSessionId), timeline = await f.client.sessionTimeline(ref.agentSessionId)
+  const pure = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage: native, timeline })
+  expect(pure.events.map(event => event.reference!.source.recordId)).toEqual(['older-native', 'n100', 'n1', 'older-captured', 'c50'])
+  const expected = pure.events.map(e => e.id)
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
+  for (const limit of [1, 100]) {
+    const result = await collect(input => service.call('agent.conversation.inspect', input) as Promise<AgentConversationReadPage>, { ...ref, limit })
+    expect(result.units.map(unit => unit.event.id).reverse()).toEqual(expected)
+    expect(result.units.flatMap(unit => unit.records.map(record => record.original.item.id)).sort()).toEqual(['c50', 'n1', 'n100', 'older-captured', 'older-native'].sort())
+    expect(result.units.find(unit => unit.records[0]?.original.item.id === 'c50')!.event.role).toBe('observation')
+    expect(result.pages.every(page => page.order.direction === 'newest-first')).toBe(true)
+  }
+  expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('a native source without an accepted ID remains unavailable and never hides captured records or enters a cut', async () => {
+  const f = await fixture(), original = await f.store.readMetadata(ref.agentSessionId)
+  const withoutNative = { ...original! }; delete withoutNative.nativeHandle
+  await f.store.compareAndSwap(original, withoutNative)
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('only-captured', _historyFixtureEpoch(0, 0, 10)) })
+  const result = await collect(input => f.client.readAgentConversation(input))
+  expect(result.units).toHaveLength(1)
+  expect(result.units[0]!.records[0]!.original.item.id).toBe('only-captured')
+  expect(result.pages[0]!.scope.sources).toContainEqual({ kind: 'native-unavailable', providerId: 'claude' })
+  expect(result.pages[0]!.coverage.find(c => c.source.kind === 'native-unavailable')!.current).toBe('unavailable')
+  const cut = await f.client.conversationCheckpoint(ref)
+  expect(cut.checkpoint.frontier.cuts.map(c => c.kind)).toEqual(['captured'])
+  await f.store.compareAndSwap(await f.store.readMetadata(ref.agentSessionId), original!)
+  const changes = await f.client.readConversationChanges({ ...ref, checkpoint: cut.checkpoint })
+  expect(changes.scope).toEqual(cut.scope)
+  expect(changes.checkpoint.frontier.cuts.map(c => c.kind)).toEqual(['captured'])
+})
+
+it('future and foreign captured cuts fail this read instead of advancing from an empty range', async () => {
+  const f = await fixture(), cut = await f.client.conversationCheckpoint(ref)
+  const change = (field: object) => ({ ...cut.checkpoint, frontier: { ...cut.checkpoint.frontier, cuts: cut.checkpoint.frontier.cuts.map(c => c.kind === 'captured' ? { ...c, ...field } : c) } })
+  await expect(f.client.readConversationChanges({ ...ref, checkpoint: change({ sequence: 9000 }) })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  await expect(f.client.readConversationChanges({ ...ref, checkpoint: change({ epoch: 'foreign' }) })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+  expect((await f.client.readConversationChanges({ ...ref, checkpoint: cut.checkpoint })).checkpoint).toEqual(cut.checkpoint)
+})
+
+it('a transient native failure retains its exact source retry position without an empty continuation loop', async () => {
+  const f = await fixture([row('first', _historyFixtureEpoch(0, 0, 100)), row('last', _historyFixtureEpoch(0, 0, 200))])
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('captured', _historyFixtureEpoch(0, 0, 300)) })
+  const retained = join(f.root, 'retained.jsonl'); await rename(f.path, retained)
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
+  const page = await service.call('agent.conversation.inspect', ref)
+  expect(page.items).toHaveLength(1)
+  const gap = page.coverage.find(c => c.source.kind === 'native')!.gaps[0]!
+  expect(gap.continuation).toBeTruthy()
+  expect(page.nextCursor).toBeNull()
+  await rename(retained, f.path)
+  const retry = await collect(input => service.call('agent.conversation.inspect', input), { ...ref, cursor: gap.continuation! })
+  expect(retry.units.map(unit => unit.records[0]!.original.item.id)).toEqual(['last', 'first'])
+  expect(retry.pages.every(page => page.scope.sources.length === 1 && page.scope.sources[0]!.kind === 'native')).toBe(true)
+})
+
+it('complete unit fragments preserve all original Unicode bytes and hold changes cuts until assembly completes', async () => {
+  const f = await fixture(), cut = await f.client.conversationCheckpoint(ref), body = ' original 中🙂\n'.repeat(1200)
+  await appendFile(f.path, jsonl([row('large', _historyFixtureEpoch(0, 0, 300), body)]))
+  const input = { ...ref, checkpoint: cut.checkpoint, maxBytes: 12 * 1024 }
+  const first = await f.client.readConversationChanges(input)
+  expect(first.items[0]?.kind).toBe('fragment'); expect(first.checkpoint).toEqual(cut.checkpoint)
+  const units: ConversationUnit[] = []; let pending: JsonReadAssembly | undefined, page = first
+  for (let i = 0; i < 100; i++) {
+    expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(input.maxBytes)
+    for (const entry of page.items) { const value = consumeJsonReadEntry({ entry, ...(pending ? { pending } : {}), scopeKey: JSON.stringify(cut.checkpoint), maxTotalBytes: 32 * 1024 * 1024 }); if (value.kind === 'pending') pending = value.pending; else { pending = undefined; units.push(parseConversationUnit(value.value, ref, page.scope)) } }
+    if (!page.nextCursor) break
+    page = await f.client.readConversationChanges({ ...input, cursor: page.nextCursor })
+  }
+  expect(pending).toBeUndefined(); expect(units).toHaveLength(1)
+  expect(units[0]!.records[0]!.original).toMatchObject({ kind: 'native', item: { contentParts: [{ kind: 'text', text: body }] } })
+  expect(page.checkpoint).not.toEqual(cut.checkpoint)
+  expect((await f.client.readConversationChanges({ ...ref, checkpoint: page.checkpoint })).items).toEqual([])
+})
+
+it('real HTTP Hosted SDK and routed public RPC serialize every unit and fragment reference in one chosen Host namespace', async () => {
+  const f = await fixture(), body = 'original routed 中🙂\n'.repeat(700)
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('remote-body', _historyFixtureEpoch(0, 0, 500), body) })
+  vi.spyOn(f.client, 'connect').mockRejectedValue(new AgentMuxError('Private Runtime is offline; original reads remain available.', 'CTXMUX_DISCONNECTED'))
+  const hostedOwner = new AgentMuxHostedRuntimeService(f.client, f.storePath, () => ({ runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 2, processId: process.pid, availability: 'connected', ctxmux: null })); release.push(() => hostedOwner.dispose())
+  const server = new AgentMuxControlServer({ socketPath: join(f.root, 'hosted.sock'), hostedRuntime: () => hostedOwner,
+    coreClients: () => [{ hostId: 'local', client: f.client }], http: { host: '127.0.0.1', port: 0, token: 'private-unified-test' } })
+  await server.start(); release.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'http', url: `http://127.0.0.1:${server.httpAddress!.port}/`, token: 'private-unified-test' } }); release.push(() => rpc.dispose())
+  const hosted = await connectHostedAgentMux({ rpc }); release.push(() => hosted.dispose())
+  const remote = { ...ref, hostId: 'retained-remote-route' }
+  const routed = new AgentMuxRpcService({ coreClients: () => [{ hostId: remote.hostId, client: hosted }] }); release.push(() => routed.dispose())
+  const cut = await routed.call('agent.conversation.checkpoint', remote)
+  expect(cut.checkpoint.hostId).toBe(remote.hostId)
+  const output = await collect(input => routed.call('agent.conversation.inspect', input), { ...remote, maxBytes: 12 * 1024 })
+  expect(output.pages.some(page => page.items.some(entry => entry.kind === 'fragment'))).toBe(true)
+  expect(output.units.flatMap(unit => unit.records).map(record => record.reference!.hostId)).toEqual(['local', 'local'])
+  expect(output.pages.every(page => page.hostId === remote.hostId && page.sourceHostId === 'local')).toBe(true)
+  expect(output.units.find(unit => unit.event.role === 'observation')!.records[0]!.original.item).toMatchObject({ content: body })
+  expect(output.units.every(unit => unit.event.reference!.hostId === 'local')).toBe(true)
+  await expect(routed.call('agent.conversation.inspect', { ...ref, hostId: 'unselected-host' })).rejects.toThrow()
+  await expect(rpc.call('agent.conversation.inspect', { ...ref, referenceHostId: 'forged-host' } as never)).rejects.toThrow()
+  const events: unknown[] = [], observer = await hosted.observeConversation(ref, event => events.push(event))
+  await appendFile(f.path, jsonl([row('hosted-new', _historyFixtureEpoch(0, 0, 900))]))
+  await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ ...ref, kind: 'invalidated', source: { kind: 'native', providerId: 'claude', nativeSessionId: 'native-main' } })))
+  await expect(hosted.readAgentConversation(ref, { referenceHostId: 'forged-host' } as never)).rejects.toThrow()
+  await expect(hosted.observeConversation(ref, () => {}, { referenceHostId: 'forged-host' } as never)).rejects.toThrow()
+  const delta = await hosted.readConversationChanges({ ...ref, checkpoint: { ...cut.checkpoint, hostId: 'local' } })
+  expect(delta.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { item: { id: 'hosted-new' } } }] } })
+  observer.dispose(); expect(observer.closed.aborted).toBe(true)
+  expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('captured watch dispatch scopes original commits to its Session and cancellation releases only that reader', async () => {
+  const f = await fixture(), a = vi.fn(), b = vi.fn()
+  const otherId = 'other-retained-session'
+  const otherSession = { ...f.session, agentSessionId: otherId, run: { runId: 'other-retained-run' } }; delete otherSession.nativeHandle
+  await f.store.compareAndSwap(null, otherSession)
+  const one = await f.client.observeConversation(ref, a), two = await f.client.observeConversation({ ...ref, agentSessionId: otherId }, b)
+  const producer = f.client as unknown as { persistAndPublishTimeline(mutation: AgentTimelineMutation, evidence: AgentMuxEvidence): Promise<void> }
+  const publish = (item: AgentTimelineItem) => producer.persistAndPublishTimeline({ type: 'append', agentSessionId: item.agentSessionId, item }, { source: 'native-hook', observedAt: item.updatedAt })
+  await publish(captured('commit-one', _historyFixtureEpoch(0, 1, 0)))
+  expect(a).toHaveBeenCalledOnce(); expect(b).not.toHaveBeenCalled()
+  one.dispose(); a.mockClear()
+  await publish(captured('commit-after-release', _historyFixtureEpoch(0, 1, 1)))
+  expect(a).not.toHaveBeenCalled(); expect(b).not.toHaveBeenCalled()
+  await publish({ ...captured('other-commit', _historyFixtureEpoch(0, 1, 2)), agentSessionId: otherId })
+  expect(b).toHaveBeenCalledOnce(); expect(two.closed.aborted).toBe(false)
+  expect((await f.client.readAgentConversation(ref)).items).not.toHaveLength(0)
+  two.dispose(); expect(two.closed.aborted).toBe(true)
+  expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('the original diagnostic context codec retains typed captured provenance and public content without admitting unknown fields', async () => {
+  const f = await fixture(), item = { ...captured('typed-context', _historyFixtureEpoch(0, 1, 0)), kind: 'user_message' as const, source: 'user' as const, publicContent: 'confirmed' as const,
+    authorHuman: true, conversation: { observes: { ...ref, source: { kind: 'native' as const, providerId: 'claude', nativeSessionId: 'native-main', recordId: 'native' } } } }
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item })
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
+  const result = await service.call('agent.context', ref)
+  const decoded = parseRpcNativeResult('agent.context', result, ref) as typeof result
+  expect(decoded.captured!.items).toContainEqual(item)
+  expect(decoded.captured).not.toHaveProperty('stream')
+  const forged = structuredClone(result); (forged.captured!.items[0] as unknown as Record<string, unknown>).unrecognizedAuthority = 'forged'
+  expect(() => parseRpcNativeResult('agent.context', forged, ref)).toThrow()
+})
+
+it('canonical question and recorded answer stay complete through public units with an honest unresolved request gap', async () => {
+  const f = await savedQuestionFixture([savedQuestionEvent(), savedQuestionReply()], { unifiedCapturedRead: true }); release.push(f.close)
+  const input = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
+  const all = await collect(value => service.call('agent.conversation.inspect', value), input)
+  expect(all.units).toHaveLength(2)
+  const request = all.units.find(unit => unit.event.role === 'interaction')!
+  expect(request.records[0]!.original.item).toMatchObject({ questionRequest: { delivery: 'async', questions: [{ id: savedQuestionId }] } })
+  const answer = all.units.find(unit => unit.records[0]!.original.kind === 'native' && unit.records[0]!.original.item.questionAnswers)!
+  expect(answer.records[0]!.original.item).toMatchObject({ questionAnswers: [{ questionId: savedQuestionId, answer: 'Keep the original work' }] })
+  expect(all.pages.flatMap(page => page.coverage.flatMap(c => c.gaps)).some(gap => gap.code === 'CONVERSATION_QUESTION_TARGET_UNREAD' && gap.record?.source.recordId === answer.records[0]!.original.item.id)).toBe(true)
+  const loaded = projectConversationTimeline({ ...input, executionHostId: 'local', historyPage: await f.client.sessionHistoryPage(input.agentSessionId) })
+  expect(loaded.events.flatMap(event => event.relations).filter(r => r.kind === 'answers')).toHaveLength(2) // one relation exposed at each contributing event
+  const byId = new Map(loaded.records.map(record => [record.id, record]))
+  for (const event of loaded.events) {
+    const unit = { event, records: event.recordIds.map(id => byId.get(id)!) }
+    expect(parseConversationUnit(unit, input, loaded.scope).event).toEqual(event)
+    const forged = structuredClone(unit), relation = forged.event.relations.find(value => value.kind === 'answers')
+    if (!relation || relation.kind !== 'answers') continue
+    relation.question.questionId = 'unrelated-question'
+    const { revision: _, ...changed } = forged.event
+    forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
+    expect(() => parseConversationUnit(forged, input, loaded.scope)).toThrow()
+  }
+})
+
+it('real Claude invocation evidence preserves surrounding speech and exact part identities without promoting same-invocation to same-event', async () => {
+  const original = unifiedConversationOriginals(), source = original.source
+  const f = await nativeHistoryFixture('claude', jsonl([original.claudeTool]), { nativeSessionId: source.nativeSessionId }); release.push(f.close)
+  const item = { ...original.capturedTool, agentSessionId: ref.agentSessionId }
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item })
+  const historyPage = await f.client.sessionHistoryPage(ref.agentSessionId), timeline = await f.client.sessionTimeline(ref.agentSessionId)
+  const projected = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage, timeline })
+  expect(projected.events).toHaveLength(2)
+  expect(projected.events.flatMap(e => e.relations).filter(r => r.kind === 'same-invocation')).toHaveLength(2)
+  const originals = new Map(projected.records.map(record => [record.id, record]))
+  for (const event of projected.events) {
+    const unit = { event, records: event.recordIds.map(id => originals.get(id)!) }
+    expect(parseConversationUnit(unit, ref, projected.scope).event).toEqual(event)
+    const forged = structuredClone(unit), relation = forged.event.relations.find(value => value.kind === 'same-invocation')!
+    if (relation.kind !== 'same-invocation') throw new Error('Original relation must name its invocation')
+    relation.invocation.callId = 'unrelated-invocation'
+    const { revision: _, ...changed } = forged.event
+    forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
+    expect(() => parseConversationUnit(forged, ref, projected.scope)).toThrow()
+  }
+  expect(historyPage.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: 'Original surrounding speech' })
+  const units = await collect(value => f.client.readAgentConversation(value))
+  expect(units.units.flatMap(unit => unit.records).flatMap(record => record.original.kind === 'native' ? record.original.item.contentParts : [])).toEqual(historyPage.items[0]!.contentParts)
+  expect(units.units.map(unit => unit.event.role).sort()).toEqual(['message', 'process'])
+  const foreign = { ...item, conversation: { invocations: item.conversation.invocations.map(fact => ({ ...fact, invocation: { ...fact.invocation, callId: 'other-call' } })) } }
+  expect(projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage, timeline: { ...timeline, items: [foreign] } }).events.flatMap(e => e.relations).filter(r => r.kind === 'same-invocation')).toEqual([])
+})
+
+it('strict observation links retain the original typed target even when an unrelated target has a recomputed event revision', async () => {
+  const f = await fixture(), historyPage = await f.client.sessionHistoryPage(ref.agentSessionId)
+  const target = { ...ref, source: { kind: 'native' as const, ...historyPage.source, recordId: historyPage.items[0]!.id } }
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: { ...captured('observed', _historyFixtureEpoch(0, 0, 500)), conversation: { observes: target } } })
+  const timeline = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage, timeline: await f.client.sessionTimeline(ref.agentSessionId) })
+  const byId = new Map(timeline.records.map(record => [record.id, record]))
+  for (const event of timeline.events) {
+    const unit = { event, records: event.recordIds.map(id => byId.get(id)!) }
+    expect(parseConversationUnit(unit, ref, timeline.scope).event).toEqual(event)
+    const forged = structuredClone(unit), relation = forged.event.relations.find(value => value.kind === 'observes')!
+    if (relation.kind !== 'observes' || !('recordId' in relation.target.source)) throw new Error('Original observation must name its exact source record')
+    relation.target.source.recordId = 'unrelated-record'
+    const { revision: _, ...changed } = forged.event
+    forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
+    expect(() => parseConversationUnit(forged, ref, timeline.scope)).toThrow()
+  }
+})
+
+it('versioned anchors retain exact old captured bytes; malformed scope and changed native versions never substitute current content', async () => {
+  const f = await fixture(), first = captured('versioned', _historyFixtureEpoch(0, 0, 400), 'original version')
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: first })
+  const cut = await f.client.conversationCheckpoint(ref)
+  await f.store.applyTimelineMutation({ type: 'upsert', agentSessionId: ref.agentSessionId, item: { ...first, updatedAt: _historyFixtureEpoch(0, 0, 500), content: 'newer version' } })
+  const anchor = { record: { ...ref, source: { kind: 'captured' as const, recordId: first.id } }, revision: conversationRevision(first), frontier: cut.checkpoint }
+  const result = await collect(value => f.client.readAgentConversation(value), { ...ref, anchor })
+  expect(result.units[0]!.records[0]!.original.item).toMatchObject({ content: 'original version' })
+  await expect(f.client.readAgentConversation({ ...ref, anchor: { ...anchor, record: { ...anchor.record, hostId: 'another-host' } } })).rejects.toThrow()
+  const noVersion = await f.client.readAgentConversation({ ...ref, anchor: { ...anchor, revision: 'a'.repeat(64) } })
+  expect(noVersion.items).toEqual([]); expect(noVersion.nextCursor).toBeNull()
+  expect(noVersion.coverage.flatMap(c => c.gaps)).toContainEqual(expect.objectContaining({ code: 'AGENT_CONVERSATION_VERSION_UNAVAILABLE', record: anchor.record }))
+})
+
+it('strict unit validation rejects changed roles, omitted or reordered content, unknown fields, and forged relations even with a recomputed event revision', async () => {
+  const f = await fixture(), page = await f.client.readAgentConversation(ref), entry = page.items[0]!
+  if (entry.kind !== 'item') throw new Error('Small fixture must remain a complete unit')
+  const rewrite = (change: (value: ConversationUnit) => void) => { const value = structuredClone(entry.item); change(value); const { revision: _, ...event } = value.event
+    value.event.revision = conversationRevision({ policy: 1, versions: value.records.map(record => [record.id, record.revision]), event }); return value }
+  expect(() => parseConversationUnit(rewrite(value => { value.event.role = 'interaction' }), ref, page.scope)).toThrow()
+  expect(() => parseConversationUnit(rewrite(value => {
+    const source = value.records[0]!.reference!.source
+    const reference = { ...ref, source: { ...source, recordId: 'never-reported-canonical' } }
+    value.event.reference = reference; value.event.id = conversationRecordId(reference); value.event.anchorId = value.event.id
+  }), ref, page.scope)).toThrow()
+  expect(() => parseConversationUnit(rewrite(value => { value.event.content = [] }), ref, page.scope)).toThrow()
+  expect(() => parseConversationUnit(rewrite(value => { (value.records[0] as unknown as Record<string, unknown>).unexpected = 'authority' }), ref, page.scope)).toThrow()
+  expect(() => parseConversationUnit(rewrite(value => { value.event.relations = [{ kind: 'same-event', from: value.records[0]!.reference!, to: value.records[0]!.reference! }] }), ref, page.scope)).toThrow()
+  expect(() => parseConversationUnit(rewrite(value => {
+    const source = value.records[0]!.reference!.source
+    value.event.relations = [{ kind: 'same-event', from: { ...ref, source: { ...source, recordId: 'unrelated-from' } }, to: { ...ref, source: { ...source, recordId: 'unrelated-to' } } }]
+  }), ref, page.scope)).toThrow()
+  expect(() => parseConversationUnit(entry.item, { ...ref, hostId: 'foreign' }, page.scope)).toThrow()
+})
+
+it('strict canonical identity retains typed unread chains and original cycle fallback, while unrelated records cannot be coalesced', async () => {
+  const f = await fixture(), page = await f.client.sessionHistoryPage(ref.agentSessionId), source = page.source
+  const target = (recordId: string) => ({ ...ref, source: { kind: 'native' as const, ...source, recordId } })
+  const middle = { ...page.items[0]!, id: 'middle', conversation: { sameEvent: target('unread-canonical') } }
+  const observed = { ...captured('canonical-contribution', _historyFixtureEpoch(0, 0, 500)), conversation: { sameEvent: target('middle') } }
+  const timeline = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage: { ...page, items: [middle] },
+    timeline: { agentSessionId: ref.agentSessionId, revision: 1, items: [observed], stream: { epoch: 'test-epoch', sequence: 1, revision: 1, origin: 'beginning', gaps: [], positions: [{ id: observed.id, firstSequence: 1, sequence: 1, revision: conversationRevision(observed) }] } } })
+  expect(timeline.events).toHaveLength(1)
+  expect(timeline.events[0]!.reference).toEqual(target('unread-canonical'))
+  expect(parseConversationUnit({ event: timeline.events[0]!, records: timeline.records }, ref, timeline.scope).event).toEqual(timeline.events[0])
+  const wrongCoalesce = structuredClone({ event: timeline.events[0]!, records: timeline.records })
+  wrongCoalesce.event.coalesces![0]!.fromEventIds = [wrongCoalesce.records.find(record => record.id !== wrongCoalesce.event.coalesces![0]!.fromEventIds[0])!.id]
+  const { revision: _coalesced, ...coalescedEvent } = wrongCoalesce.event
+  wrongCoalesce.event.revision = conversationRevision({ policy: 1, versions: wrongCoalesce.records.map(record => [record.id, record.revision]), event: coalescedEvent })
+  expect(() => parseConversationUnit(wrongCoalesce, ref, timeline.scope)).toThrow()
+  const cyclic = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage: { ...page, items: [
+    { ...page.items[0]!, id: 'cycle-a', conversation: { sameEvent: target('cycle-b') } },
+    { ...page.items[0]!, id: 'cycle-b', conversation: { sameEvent: target('cycle-a') } }
+  ] } })
+  const byId = new Map(cyclic.records.map(record => [record.id, record]))
+  for (const event of cyclic.events) expect(parseConversationUnit({ event, records: event.recordIds.map(id => byId.get(id)!) }, ref, cyclic.scope).event).toEqual(event)
+  const independent = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage: { ...page, items: [page.items[0]!, { ...page.items[0]!, id: 'independent' }] } })
+  const joined = structuredClone({ event: independent.events[0]!, records: independent.records })
+  joined.event.recordIds = joined.records.map(record => record.id)
+  joined.event.content = joined.records.flatMap((record, n) => record.original.kind === 'native' ? record.original.item.contentParts.map((_, partIndex) => ({ recordId: record.id, recordRevision: record.revision, selector: { kind: 'native-part' as const, partIndex }, placement: n === 0 ? 'body' as const : 'detail' as const })) : [])
+  const { revision: _, ...event } = joined.event
+  joined.event.revision = conversationRevision({ policy: 1, versions: joined.records.map(record => [record.id, record.revision]), event })
+  expect(() => parseConversationUnit(joined, ref, independent.scope)).toThrow()
+})
+
+it('route-scoped checkpoint, anchor and signed continuation cannot move between two selected Hosts with identical source facts', async () => {
+  const f = await fixture(), body = 'Original scoped body 中🙂\n'.repeat(1000)
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('scoped-body', _historyFixtureEpoch(0, 0, 500), body) })
+  const routeA = { ...ref, hostId: 'route-a-' + 'a'.repeat(400) }, routeB = { ...ref, hostId: 'route-b' }
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: routeA.hostId, client: f.client }, { hostId: routeB.hostId, client: f.client }] }); release.push(() => service.dispose())
+  const cut = await service.call('agent.conversation.checkpoint', routeA)
+  expect(cut.checkpoint).toMatchObject({ ...routeA, sourceHostId: 'local', frontier: { ...ref } })
+  await expect(service.call('agent.conversation.changes', { ...routeB, checkpoint: cut.checkpoint })).rejects.toThrow()
+  const original = (await f.store.readCapturedHistory(ref.agentSessionId, { limit: 1 })).records[0]!
+  const anchor = { record: { ...ref, source: { kind: 'captured' as const, recordId: original.item.id } }, revision: original.revision, frontier: cut.checkpoint }
+  await expect(service.call('agent.conversation.inspect', { ...routeB, anchor })).rejects.toThrow()
+  const first = await service.call('agent.conversation.inspect', { ...routeA, maxBytes: 12 * 1024 })
+  expect(first.items[0]?.kind).toBe('fragment'); expect(first.nextCursor).toBeTruthy()
+  expect(Buffer.byteLength(JSON.stringify(first))).toBeLessThanOrEqual(12 * 1024)
+  await expect(service.call('agent.conversation.inspect', { ...routeB, cursor: first.nextCursor! })).rejects.toThrow()
+  const [encoded, signature] = first.nextCursor!.split('.'), cursor = JSON.parse(Buffer.from(encoded!, 'base64url').toString('utf8'))
+  const forged = Buffer.from(JSON.stringify({ ...cursor, routeHostId: routeB.hostId })).toString('base64url') + '.' + signature
+  await expect(service.call('agent.conversation.inspect', { ...routeB, cursor: forged })).rejects.toThrow()
+  const all = await collect(input => service.call('agent.conversation.inspect', input), { ...routeA, maxBytes: 12 * 1024 })
+  expect(all.units.find(unit => unit.event.role === 'observation')!.records[0]!.original.item).toMatchObject({ content: body })
+  expect(all.pages.every(page => Buffer.byteLength(JSON.stringify(page)) <= 12 * 1024)).toBe(true)
+  await expect(service.call('agent.conversation.inspect', { ...routeA, maxBytes: 4096 })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_BUDGET' })
+  expect((await collect(input => service.call('agent.conversation.inspect', input), { ...routeA, maxBytes: 32 * 1024 })).units).toHaveLength(2)
+})
+
+it('the routed codec roundtrips a legal long opaque source cursor without truncation or rewriting', async () => {
+  const f = await fixture(), original = await f.client.readAgentConversation(ref), cursor = 'opaque-original-'.repeat(1800)
+  const source = { ...original, nextCursor: cursor, budgetBytes: 128 * 1024 }, input = { ...ref, hostId: 'remote-route', maxBytes: 128 * 1024 }
+  const forwarded = forwardConversationPage(source, input)
+  expect(forwarded.nextCursor!.length).toBeGreaterThan(32_768)
+  const decoded = parseConversationReadPage(forwarded, input)
+  expect(forwardConversationInput({ ...input, cursor: decoded.nextCursor! }).input.cursor).toBe(cursor)
+  expect(decoded.items).toEqual(source.items)
+})
+
+it('the actual retained source namespace is stable across local and descriptor addressing and matches raw, public and presentation consumers', async () => {
+  const f = await fixture(), sourceHostId = 'original-source-host', routeHostId = 'selected-client-route'
+  const session = await f.store.readMetadata(ref.agentSessionId)
+  await f.store.compareAndSwap(session, { ...session!, hostId: sourceHostId })
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('source-captured', _historyFixtureEpoch(0, 0, 500)) })
+  const direct = await collect(value => f.client.readAgentConversation(value)), named = await collect(value => f.client.readAgentConversation(value), { ...ref, hostId: sourceHostId })
+  expect(direct.units.map(unit => unit.event)).toEqual(named.units.map(unit => unit.event))
+  expect(direct.pages.every(page => page.hostId === 'local' && page.sourceHostId === sourceHostId)).toBe(true)
+  expect(direct.units.every(unit => unit.event.reference!.hostId === sourceHostId)).toBe(true)
+  const historyPage = await f.client.sessionHistoryPage(ref.agentSessionId), timeline = await f.client.sessionTimeline(ref.agentSessionId)
+  expect(historyPage.sourceHostId).toBe(sourceHostId); expect(timeline.sourceHostId).toBe(sourceHostId)
+  const rawInput = { ...ref, source: 'captured' as const }, raw = await f.client.readAgentSessionHistory(rawInput)
+  expect(parseAgentSessionHistoryReadPage(raw, rawInput).sourceHostId).toBe(sourceHostId)
+  const reading = projectConversationReading({ agentSessionId: ref.agentSessionId, routeHostId, historyPage, timeline })
+  expect(reading.timeline.events).toEqual([...direct.units].reverse().map(unit => unit.event))
+  expect(reading.records.every(record => record.executionHostId === routeHostId && conversationItemRef(record)!.hostId === sourceHostId)).toBe(true)
+  const otherRoute = projectConversationReading({ agentSessionId: ref.agentSessionId, routeHostId: 'other-client-route', historyPage, timeline })
+  expect(reading.records.every(record => !otherRoute.records.some(other => other.id === record.id))).toBe(true)
+  expect(reading.timeline.events).toEqual(otherRoute.timeline.events)
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: routeHostId, client: f.client }] }); release.push(() => service.dispose())
+  const publicRead = await collect(value => service.call('agent.conversation.inspect', value), { ...ref, hostId: routeHostId })
+  expect(publicRead.units).toEqual(direct.units)
+  expect(publicRead.pages.every(page => page.hostId === routeHostId && page.sourceHostId === sourceHostId)).toBe(true)
+  const cut = await service.call('agent.conversation.checkpoint', { ...ref, hostId: routeHostId })
+  expect(cut.checkpoint.frontier.hostId).toBe(sourceHostId)
+  expect((await service.call('agent.conversation.changes', { ...ref, hostId: routeHostId, checkpoint: cut.checkpoint })).sourceHostId).toBe(sourceHostId)
+})
+
+it('conflicting original source Hosts retain each exact reference and content without cross-Host same-event or invocation joins', async () => {
+  const f = await fixture(), historyPage = await f.client.sessionHistoryPage(ref.agentSessionId)
+  const nativeRef = { ...ref, hostId: 'source-a', source: { kind: 'native' as const, ...historyPage.source, recordId: 'native' } }
+  const item = { ...captured('foreign-host-observation', _historyFixtureEpoch(0, 0, 500)), conversation: { sameEvent: nativeRef } }
+  const reading = projectConversationReading({ agentSessionId: ref.agentSessionId, routeHostId: 'route', historyPage: { ...historyPage, sourceHostId: 'source-a' },
+    timeline: { agentSessionId: ref.agentSessionId, sourceHostId: 'source-b', revision: 1, items: [item] } })
+  expect(reading.timeline.reference).toBeNull(); expect(reading.timeline.events).toHaveLength(2)
+  expect(reading.timeline.events.map(event => event.reference!.hostId).sort()).toEqual(['source-a', 'source-b'])
+  expect(reading.timeline.events.flatMap(event => event.relations).filter(relation => relation.kind === 'same-event')).toEqual([])
+  expect(reading.timeline.coverage.flatMap(source => source.gaps).filter(gap => gap.code === 'CONVERSATION_SOURCE_HOST_CONFLICT')).toHaveLength(2)
+  expect(reading.records.map(record => record.content).sort()).toEqual(['native', 'foreign-host-observation'].sort())
+  const unknown = projectConversationReading({ agentSessionId: ref.agentSessionId, routeHostId: 'route', timeline: { agentSessionId: ref.agentSessionId, revision: 1, items: [captured('unknown-host', _historyFixtureEpoch(0, 0, 500))] } })
+  expect(unknown.records[0]!.content).toBe('unknown-host'); expect(conversationItemRef(unknown.records[0]!)).toBeNull()
+})
+
+it('one temporarily unavailable changes source retains its exact cut while the other commits and can be resumed without replaying that committed source', async () => {
+  const f = await fixture(), cut = await f.client.conversationCheckpoint(ref)
+  await appendFile(f.path, jsonl([row('native-after-cut', _historyFixtureEpoch(0, 0, 900))]))
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('captured-after-cut', _historyFixtureEpoch(0, 1, 0)) })
+  const provider = f.client.providers.get('claude')
+  vi.spyOn(provider as { readConversationChanges: NonNullable<typeof provider.readConversationChanges> }, 'readConversationChanges').mockRejectedValueOnce(new AgentMuxError('The original Provider read is temporarily unavailable.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
+  const partial = await f.client.readConversationChanges({ ...ref, checkpoint: cut.checkpoint })
+  expect(partial.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { kind: 'captured', item: { id: 'captured-after-cut' } } }] } })
+  const originalNative = cut.checkpoint.frontier.cuts.find(c => c.kind === 'native')!
+  expect(partial.checkpoint.frontier.cuts.find(c => c.kind === 'native')).toEqual(originalNative)
+  expect(partial.coverage.find(c => c.source.kind === 'native')!.current).toBe('unavailable')
+  expect(partial.coverage.find(c => c.source.kind === 'native')!.gaps.every(gap => gap.continuation === undefined)).toBe(true)
+  expect(partial.more).toBe(false)
+  const resumed = await f.client.readConversationChanges({ ...ref, checkpoint: partial.checkpoint })
+  expect(resumed.items).toHaveLength(1)
+  expect(resumed.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { kind: 'native', item: { id: 'native-after-cut' } } }] } })
+  expect(resumed.checkpoint.frontier.cuts.find(c => c.kind === 'captured')).toEqual(partial.checkpoint.frontier.cuts.find(c => c.kind === 'captured'))
+})
+
+it('captured changes are idempotent original event upserts rather than additional utterances', async () => {
+  const f = await fixture(), item = captured('one-original-event', _historyFixtureEpoch(0, 0, 500), 'original captured bytes')
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item })
+  const before = await f.client.readAgentConversation(ref), old = before.items[0]!
+  if (old.kind !== 'item') throw new Error('Small original upsert fixture must be a complete unit')
+  const cut = await f.client.conversationCheckpoint(ref), updated = { ...item, content: 'complete captured bytes', updatedAt: _historyFixtureEpoch(0, 0, 700) }
+  const first = await f.store.applyTimelineMutation({ type: 'upsert', agentSessionId: ref.agentSessionId, item: updated })
+  const repeat = await f.store.applyTimelineMutation({ type: 'upsert', agentSessionId: ref.agentSessionId, item: updated })
+  expect(first.changed).toBe(true); expect(repeat.changed).toBe(false)
+  const changed = await f.client.readConversationChanges({ ...ref, checkpoint: cut.checkpoint })
+  expect(changed.items).toHaveLength(1)
+  const entry = changed.items[0]!; if (entry.kind !== 'item') throw new Error('Small changed event must be a complete unit')
+  expect(entry.item.event.id).toBe(old.item.event.id); expect(entry.item.event.revision).not.toBe(old.item.event.revision)
+  expect(entry.item.records[0]!.original.item).toEqual(updated)
+  expect((await f.client.readConversationChanges({ ...ref, checkpoint: changed.checkpoint })).items).toEqual([])
+})
+
+it.runIf(process.env.AGENTMUX_UNIFIED_COMPILED === '1')('the real compiled CLI consumes unified inspect/checkpoint/changes, exact anchors and discovery instead of the old raw alias', async () => {
+  const f = await fixture(), compiled = await import('../dist/index.js')
+  const original = new compiled.AgentMuxClient({ store: new compiled.AgentMuxFileAgentSessionStore(f.storePath) }); release.push(() => original.dispose())
+  const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(Reflect.get(original, 'kernel'), name))
+  const server = new compiled.AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: original }] })
+  await server.start(); release.push(() => server.stop())
+  const env = objectCliEnvironment(f.root)
+  const read = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--host', 'local', '--session', ref.agentSessionId], env)
+  expect(read.code, read.stderr).toBe(0)
+  const result = JSON.parse(read.stdout)
+  expect(result.operation).toBe('agent.conversation.inspect')
+  expect(result.result).toMatchObject({ ...ref, sourceHostId: 'local', items: [{ kind: 'item', item: { records: [{ original: { item: { id: 'native' } } }] } }] })
+  const checkpoint = await runCompiledObjectCli(['agent', 'conversation', 'checkpoint', '--host', 'local', '--session', ref.agentSessionId], env)
+  expect(checkpoint.code, checkpoint.stderr).toBe(0)
+  const cut = JSON.parse(checkpoint.stdout).result.checkpoint
+  await appendFile(f.path, jsonl([row('compiled-delta', _historyFixtureEpoch(0, 1, 0))]))
+  const changes = await runCompiledObjectCli(['agent', 'conversation', 'changes', '--input', '-'], env, JSON.stringify({ ...ref, checkpoint: cut }))
+  expect(changes.code, changes.stderr).toBe(0)
+  expect(JSON.parse(changes.stdout).result).toMatchObject({ ...ref, items: [{ kind: 'item', item: { records: [{ original: { item: { id: 'compiled-delta' } } }] } }], more: false })
+  const unit = result.result.items[0].item as ConversationUnit
+  const anchor = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--input', '-'], env, JSON.stringify({ ...ref, anchor: { record: unit.records[0]!.reference, revision: unit.records[0]!.revision, frontier: cut } }))
+  expect(anchor.code, anchor.stderr).toBe(0)
+  expect(JSON.parse(anchor.stdout).result.items[0].item.records[0].original.item.id).toBe('native')
+  const sourceAlias = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--host', 'local', '--session', ref.agentSessionId, '--source', 'native'], env)
+  expect(sourceAlias.code).not.toBe(0)
+  const help = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--help'], env)
+  expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('--input FILE|-'); expect(help.stdout).toContain('versioned anchor')
+  const skill = await runCompiledObjectCli(['agent', '--skill'], env)
+  expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('newest-first semantic units'); expect(skill.stdout).toContain('watch invalidates')
+  expect(controls.every(control => !control.mock.calls.length)).toBe(true)
+  expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})

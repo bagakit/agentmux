@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true },
+  "include": ["conversation-unified-public.test.ts", "vitest.conversation-unified.config.mts"]
+}
