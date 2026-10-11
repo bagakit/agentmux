@@ -96,13 +96,14 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
   })
   const ended = await nativeStart({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
   await vi.waitFor(async () => expect((await inner.kernel.status(ended.runId)).state.type).toBe('exited'), { timeout: 5000 })
+  const originalObservedAt = Date.now()
   const original = { kind: 'agent' as const, agentSessionId: 'original-session', providerId, executorId: 'configured-native', hostId: 'local', workspacePath: root,
-    run: { runId: ended.runId }, retiredRuns: [], hookBindingId: 'original-binding', hookToken: 'original-token', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1),
-    nativeHandle: { kind: 'provider' as const, providerId, sessionId: 'native-original', ...(options.originalPath ? { transcriptPath: join(root, 'native.json') } : {}) }, semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: _historyFixtureEpoch(0, 0, 1) } }
+    run: { runId: ended.runId }, retiredRuns: [], hookBindingId: 'original-binding', hookToken: 'original-token', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: originalObservedAt,
+    nativeHandle: { kind: 'provider' as const, providerId, sessionId: 'native-original', ...(options.originalPath ? { transcriptPath: join(root, 'native.json') } : {}) }, semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: originalObservedAt } }
   await store.compareAndSwap(null, original); await inner.registry.load('local')
   const result = options.direct
     ? { kind: 'resumed', session: await client.resumeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: 'automatic-root', prompt: 'Original explicit resume input' }) }
-    : await client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: 'automatic-root', trigger: 'startup', policy: { retryInitialDelayMs: 20, retryMaxDelayMs: 40 } })
+    : await client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: 'automatic-root', trigger: 'startup', policy: { retryInitialDelayMs: 20, retryMaxDelayMs: 40, activeInterruptionFallback: options.postLaunch === true } })
   expect(result.kind).toBe('resumed')
   if (options.failFirst) await vi.waitFor(async () => expect((await store.readMetadata(original.agentSessionId))?.continuityOperations?.['automatic-root']?.supervision).toMatchObject({ attemptCount: 2, process: { state: 'running' } }))
   const current = client.agentSession(original.agentSessionId)
@@ -118,7 +119,8 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
 
 it('persists an exact resumed main context through the original authenticated Hook without replaying native first input', async () => {
   const f = await fixture(), before = await f.rootOf()
-  expect(before.launchInput!.state).toBe('launch-carried'); expect(before.supervision!.contextEvidence).toBeUndefined()
+  expect(before.launchInput).toBeUndefined(); expect(before.recoveryInputs).toEqual({ reminder: '', continuation: '' })
+  expect(before.supervision!.contextEvidence).toBeUndefined()
   expect((await f.post({ hook_event_name: 'SessionStart', source: 'resume', session_id: 'native-original' })).status).toBe(204)
   const root = await f.rootOf()
   expect(root.supervision!.contextEvidence).toMatchObject({ source: 'native-hook', run: f.current.run, nativeTarget: f.original.nativeHandle, hookReceiptId: 'context-receipt' })
@@ -303,7 +305,8 @@ it.each(['provider', 'session', 'path-change', 'path-removal'] as const)('withho
     const root = saved.continuityOperations['automatic-root']
     const target = { ...root.nativeTarget, ...(change === 'provider' ? { providerId: 'another-provider' } :
       change === 'session' ? { sessionId: 'another-native-session' } : { transcriptPath: join(f.root, 'known-original.json') }) }
-    const changed = { ...root, nativeTarget: target }
+    const changed = { ...root, nativeTarget: target,
+      ...(root.interruption ? { interruption: { ...root.interruption, nativeTarget: target } } : {}) }
     return { ...saved, continuity: changed, continuityOperations: { ...saved.continuityOperations, [root.operationId]: changed } }
   })
   expect((await f.post(resumed)).status).toBe(204)
@@ -338,7 +341,8 @@ it('publishes original Hook evidence through Hosted and existing actual inspect 
   expect(inspected.code, inspected.stderr).toBe(0)
   const facts = JSON.parse(inspected.stdout).result.session, root = facts.continuityOperations['automatic-root']
   expect(root.supervision.contextEvidence).toMatchObject({ run: f.current.run, nativeTarget: facts.nativeHandle, hookReceiptId: 'context-receipt' })
-  expect(root.launchInput.state).toBe('launch-carried')
+  expect(root.launchInput).toBeUndefined()
+  expect(root.recoveryInputs).toEqual({ reminder: '', continuation: '' })
   expect((await f.post(cancelled, 'public-cancellation')).status).toBe(204)
   const refreshed = await runCompiledObjectCli(['agent', 'refresh', '--session', f.original.agentSessionId], objectCliEnvironment(f.root))
   expect(refreshed.code, refreshed.stderr).toBe(0)
@@ -420,7 +424,8 @@ it('delivers the original waiting post-launch input once after Hook locator enri
   expect(await f.client.inspectAgentPromptSubmission(before.key)).toMatchObject({ admission: { inputKey: before.key, acknowledged: true } })
   const calls = f.input.mock.calls.length
   expect(calls).toBeGreaterThan(0); expect(submit).toHaveBeenCalledTimes(1)
-  expect(submit.mock.calls[0]![0]).toMatchObject({ operationId: before.key.submissionId, prompt: before.continuation.text, agentMuxNote: before.reminder.text })
+  expect(submit.mock.calls[0]![0]).toMatchObject({ operationId: before.key.submissionId, prompt: '<amux:continue />' })
+  expect(submit.mock.calls[0]![0]).not.toHaveProperty('agentMuxNote')
   await wakeOriginalInput(f)
   await f.inner.continuityInputs.tails.get(f.current.agentSessionId)?.pending
   expect(f.input).toHaveBeenCalledTimes(calls); expect(f.start).toHaveBeenCalledTimes(1)
