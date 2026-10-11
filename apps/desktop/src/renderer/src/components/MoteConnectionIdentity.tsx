@@ -14,8 +14,6 @@ import { clearMoteConnectionSaveIntent, retainMoteConnectionSaveIntent, useAppSt
 import { moteConnectionChoice, moteConnectionTarget } from '../lib/mote-connection-default'
 import { SelectionField } from './SelectionField'
 import { MoteBotSetup } from './MoteBotSetup'
-import { SpaceIconPicker } from './SpaceIconPicker'
-import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { SettingsNavigation } from './SettingsNavigation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import '../styles/mote-connection-identity.css'
@@ -96,7 +94,6 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
   const identityOptions = useRef<HTMLDetailsElement>(null)
   const choose = () => { setChoosing(true); if (identityOptions.current) identityOptions.current.open = true }
   const settings = useContext(SettingsNavigation)
-  const [avatarTarget, setAvatarTarget] = useState<SpaceIconTarget | null>(null), [profileRevision, setProfileRevision] = useState(0)
   useEffect(() => { const token = {}; alive.current = token; void refresh(); return () => { if (alive.current === token) { alive.current = null; readEpoch.current++ } } }, [])
   async function refresh() {
     if (!target) { setIssue('This Mote’s original home is unconfirmed. Its files and discussions are kept; reopen it after refreshing the directory.'); return }
@@ -157,7 +154,7 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
         <div className="mote-connection-dialog__body">
           {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={choose}>Review saved bot</button></section> : null}
           <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
-            createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} profileRevision={profileRevision} onPrepareAvatar={target ? () => setAvatarTarget({ key: target.spaceId, name: moteName, kind: 'mote', avatarTarget: { workspaceId: target.expectedResource.workspaceId, topicId, objectKey: target.spaceId } }) : undefined} />
+            createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} />
           <details ref={identityOptions} className="mote-identity-options"><summary>Identity options</summary>
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}
@@ -181,6 +178,5 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
         {choosing || pending || attempt ? <footer className="mote-connection-dialog__footer">
           <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>
         </footer> : null}
-      <SpaceIconPicker target={avatarTarget} onClose={() => { setAvatarTarget(null); setProfileRevision(value => value + 1) }} />
   </div>
 }
