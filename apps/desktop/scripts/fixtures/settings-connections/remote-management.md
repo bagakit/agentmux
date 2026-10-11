@@ -17,3 +17,5 @@ Runtime 采集仍挂载原 `HostRuntimePanel`，受控 `api.hosts.inspect` 只�
 采集不使用用户配置、Session 或 Run。受控 Host/设备/Runtime 观察不是 SSH 可达、原生身份、真人批准或真实远端恢复证明；Preview 保存不证明 Main 磁盘耐久。采图只提供完整 PNG、实际操作和源码/编译身份；独立 Agent 必须实际打开本轮每张图并评判，采集成功不代表审美通过。
 
 本轮精炼：Remote 独立分组 → Environments，准确 Host 的 Apps & access 展示原配置盘点与来源信任。受控 public DTO 经原面展示 unknown approval；真实输入批准、切原连接与其他 Host 后返回不重放、勾选清零。原维护 unknown / verifying 和 updatedAt 首层可见，Native 六项声明来自原 diagnostics/readAt。附加截图覆盖 3 宽度 Apps & access、原升级及宽/窄能力详情；仅受控 owner DTO，不声称真实 SSH、远端批准、升级或安装。
+
+块面改版场景：宽窗图中读取原配置hostname、user、port override、Runtime binding；另一Host省略user/port时显示SSH config，不猜默认值。移除ReactFlow Background。浅色宽窗用真实鼠标按下、移动、抬起采pan before/mid/after，选择准确原Host后viewport保持。宽窗另外切现有Retro Future浅深主题采图，用户实际主题与配置不变。原6主图、8管理附图外增加3运动帧和2Retro主题图，合计19张；来源仍是受控DTO的原完整Renderer，不代签物理网络观察。

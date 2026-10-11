@@ -208,3 +208,39 @@ it('keeps an unconfirmed original approval across Apps, Connection, other Host a
   expect(approve).toHaveBeenCalledTimes(1)
   expect(onSave).not.toHaveBeenCalled()
 })
+
+
+it('route: the mounted workbench labels the exact configured user, port and binding without borrowing SSH defaults', async () => {
+  const other = config.hosts.find(host => host.id === J)!
+  if (other.kind !== 'ssh') throw new Error('SSH fixture required')
+  const { user: _user, port: _port, runtimeId: _runtimeId, ...inherited } = other
+  config = { ...config, hosts: config.hosts.map(host => host.id === J ? inherited : host) }
+  useAppStore.setState({ config })
+  await show(); await graph(H)
+  const node = dom.container.querySelector(`[data-host-node="${H}"]`)!
+  expect(node.querySelector('[data-route-user]')?.textContent, 'Configured SSH user stays on its exact Host node').toBe('developer')
+  expect(node.querySelector('[data-route-port]')?.textContent).toBe('2222')
+  expect(node.querySelector('[data-route-runtime]')?.textContent).toBe('controlled-bound-runtime')
+  const adjacent = dom.container.querySelector(`[data-host-node="${J}"]`)!
+  expect(adjacent.querySelector('[data-route-user]')?.textContent).toBe('SSH config')
+  expect(adjacent.querySelector('[data-route-port]')?.textContent).toBe('SSH config')
+  expect(adjacent.querySelector('[data-route-runtime]')?.textContent).toBe('Unconfirmed')
+  expect(dom.container.querySelector('[data-host-node="local"] [data-route-port]')?.textContent).toBe('Not applicable')
+  expect(dom.container.querySelector('.react-flow__background')).toBeNull()
+  expect(onSave).not.toHaveBeenCalled()
+})
+
+it('provenance: a node shows the original check time and drops a result for an edited route', async () => {
+  const input = config.hosts.find(host => host.id === H)!
+  const at = _historyFixtureEpoch(1, 0, 0)
+  useAppStore.setState({ hostChecks: { [H]: { state: 'ready', input, observedAt: at } } })
+  await show(); await graph(H)
+  const node = () => dom.container.querySelector(`[data-host-node="${H}"]`)!
+  expect(node().querySelector('time')?.getAttribute('datetime')).toBe(new Date(at).toISOString())
+  expect(node().textContent).toContain('Ready')
+  config = { ...config, hosts: config.hosts.map(host => host.id === H && host.kind === 'ssh' ? { ...host, hostname: 'different-route.invalid' } : host) }
+  useAppStore.setState({ config }); await show()
+  expect(node().querySelector('time')).toBeNull()
+  expect(node().textContent).toContain('Not tested')
+  expect(node().getAttribute('data-check-state')).toBe('idle')
+})

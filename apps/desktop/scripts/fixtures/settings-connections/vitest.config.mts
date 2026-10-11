@@ -12,6 +12,7 @@ const base = 'apps/desktop/src/renderer/src/components/settings/'
 const edits: Record<string, { file: string; before: string; after: string }> = {
   remote: { file: base + 'modules/hosts.tsx', before: "group: 'remote'", after: "group: 'connections'" },
   access: { file: base + 'HostSettingsPane.tsx', before: "data-host-access={id} hidden={selectedId !== id || panel !== 'agents'}", after: "data-host-access={id} hidden={selectedId !== id || panel !== 'connection'}" },
+  route: { file: base + 'HostTopology.tsx', before: "host.user || 'SSH config'", after: "'borrowed-user'" },
   graph: { file: base + 'HostSettingsPane.tsx', before: 'onSelect={selectTopologyHost}', after: 'onSelect={() => {}}' },
   catalog: { file: base + 'modules/devices.tsx', before: "group: 'connections'", after: "group: 'resources'" },
   single: { file: base + 'HostSettingsPane.tsx', before: 'hosts.filter((host) => host.id === selectedId).map', after: 'hosts.filter(() => true).map' },

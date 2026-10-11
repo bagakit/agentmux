@@ -36,6 +36,11 @@ app.whenReady().then(async () => {
       await click(leaf(id, panel))
       await until(`document.querySelector(${JSON.stringify(pane + ' [data-resource-editor]')})?.dataset.resourceEditor===${JSON.stringify(id)}&&document.querySelector(${JSON.stringify(pane + ' [data-resource-editor]')}).dataset.hostView===${JSON.stringify(panel)}`)
     }
+    async function supplemental(width, theme, scenario) {
+      const image=`hosts-${width}-${theme}-${scenario}.png`,png=(await win.webContents.capturePage()).toPNG()
+      fs.writeFileSync(path.join(evidence,image),png)
+      result.supplementalFrames.push({section,width,theme,scenario,image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)}})
+    }
     async function route(section) {
       await read(`window.connectionsProof.select(${JSON.stringify(section)})`)
       await until(`document.querySelector('.settings-page')?.dataset.settingsPage===${JSON.stringify(section)}`)
@@ -67,6 +72,27 @@ app.whenReady().then(async () => {
         assert.equal(focus,'host-02','Actual graph selection retains native keyboard focus at the selected node')
         assert.deepEqual((await business()).filter(value=>/save|host-check/.test(value)),saveCalls.filter(value=>/save|host-check/.test(value)))
         result.interactions.push({kind:'native-topology-exact-host-selection',id:'host-02',focus})
+        assert.equal(await read(`document.querySelectorAll(${JSON.stringify(pane+' .react-flow__background')}).length`),0,'The actual graph has no dot pattern')
+        assert.equal(await read(`document.querySelector(${JSON.stringify(pane+' [data-host-node="host-02"] [data-route-port]')})?.textContent`),'SSH config')
+        if (theme==='light') {
+          const start=await read(`(()=>{const r=document.querySelector(${JSON.stringify(pane+' .remote-topology')}).getBoundingClientRect();for(const offset of [.3,.45,.6]){const x=Math.round(r.left+22),y=Math.round(r.top+r.height*offset),hit=document.elementFromPoint(x,y);if(hit?.classList.contains('react-flow__pane'))return{x,y}}return null})()`)
+          assert.ok(start,'A visible empty canvas point is available for actual panning')
+          const transform=()=>read(`document.querySelector(${JSON.stringify(pane+' .react-flow__viewport')}).style.transform`)
+          const before=await transform()
+          await supplemental(width,theme,'pan-before')
+          win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...start})
+          win.webContents.sendInputEvent({type:'mouseMove',buttons:['left'],x:start.x+36,y:start.y+18})
+          await settle();await supplemental(width,theme,'pan-mid')
+          win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,x:start.x+36,y:start.y+18})
+          await settle();const after=await transform();assert.notEqual(after,before,'Actual canvas drag moves the original viewport')
+          await supplemental(width,theme,'pan-after')
+          await click(`${pane} [data-host-node="host-01"]`)
+          assert.equal(await transform(),after,'Selecting an environment keeps the panned viewport')
+          result.interactions.push({kind:'native-topology-pan-and-select',before,after,hostId:'host-01'})
+          // Continue the original session-navigation case on its accurate initial target.
+          await click(`${pane} [data-host-node="host-02"]`)
+        }
+
       } else assert.equal(await read(`document.querySelectorAll(${JSON.stringify(pane+' [data-host-node]')}).length`),0,'Narrow view releases the actual graph')
       if (width<=900) await choose('host-02','overview')
       await click(`${pane} [data-host-session="host-b-agent"]`)
@@ -227,6 +253,11 @@ app.whenReady().then(async () => {
       const image=`hosts-${width}-${theme}.png`,png=(await win.webContents.capturePage()).toPNG()
       fs.writeFileSync(path.join(evidence,image),png)
       result.frames.push({section,width,theme,image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)},facts})
+      if(width===1480) {
+        await read(`window.connectionsProof.theme(${JSON.stringify(theme)},'retro-future')`)
+        await until("document.documentElement.dataset.theme==='retro-future'")
+        await settle();await supplemental(width,theme,'retro-topology')
+      }
       await click('[aria-label="Close settings"]');await until('!document.querySelector(".settings-page")')
     }
     assert.equal(result.frames.length,6)
