@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import type { RendererTabSwitchTarget, RendererTabSwitchTerminal } from '@agentmux/core/control'
-import { createTabSwitchObservation } from '../src/renderer/src/lib/tab-switch-observation'
+import { createTabSwitchObservation, tabSwitchEventTimestamp } from '../src/renderer/src/lib/tab-switch-observation'
 
 const target: RendererTabSwitchTarget = { presentationId: 'space', displayWorkspaceId: 'workspace', groupId: 'left', tabId: 'tab', regionId: 'region' }
 const ready: RendererTabSwitchTerminal = { sessionId: 'session', runId: 'run', readySinceAt: 1,
@@ -13,10 +13,40 @@ function fixture() {
   return { costs, frames, all, cancel, advance(ms: number) { time += ms }, setTime(value: number) { time = value }, frame() { const [id, cb] = frames.entries().next().value!; frames.delete(id); cb(time) } }
 }
 
+it('uses the original handler start and only the trusted original Window event clock', () => {
+  const view = {} as Window, other = {} as Window
+  expect(tabSwitchEventTimestamp({ isTrusted: true, view, timeStamp: 80 }, view)).toBe(80)
+  expect(tabSwitchEventTimestamp({ isTrusted: false, view, timeStamp: 80 }, view)).toBeNull()
+  expect(tabSwitchEventTimestamp({ isTrusted: true, view: other, timeStamp: 80 }, view)).toBeNull()
+  const f = fixture(); f.advance(20)
+  const id = f.costs.begin(target, 'other', 80, 100)
+  f.costs.selected(target, 'already-selected-handler'); f.advance(5); f.costs.actionEnded(id, 'returned')
+  expect(f.costs.snapshot()[0]).toMatchObject({ eventAtMonoMs: 80, handlerStartMonoMs: 100, inputDelayMs: 20,
+    selectedMs: 20, selectedSource: 'already-selected-handler', elapsedMs: 20, actionEndedMs: 25, actionResult: 'returned' })
+})
+
+it('keeps original action tails after reentry, completion and eviction without moving them to newer targets', () => {
+  const f = fixture(), other = { ...target, tabId: 'nested' }
+  const first = f.costs.begin(target, 'activity', null)
+  f.advance(2); f.costs.selected(target, 'layout-effect')
+  const nested = f.costs.begin(other, 'unknown', null)
+  f.advance(7); f.costs.actionEnded(first, 'threw')
+  f.costs.selected(other, 'layout-effect'); f.costs.selected(other, 'already-selected-handler')
+  f.costs.actionEnded(nested, 'returned'); f.costs.actionEnded(first, 'returned')
+  expect(f.costs.snapshot()).toMatchObject([
+    { id: first, state: 'observed', elapsedMs: 2, actionEndedMs: 9, actionResult: 'threw', selectedSource: 'layout-effect' },
+    { id: nested, actionEndedMs: 7, actionResult: 'returned', selectedSource: 'layout-effect' }
+  ])
+  for (let i = 0; i < 16; i++) f.costs.begin(target, 'unknown', null)
+  const before = f.costs.snapshot(); f.costs.actionEnded(first, 'returned')
+  expect(f.costs.snapshot()).toEqual(before)
+  expect(JSON.stringify(before)).not.toContain('Error')
+})
+
 it('observes an already ready retained Terminal without requiring a new attach or revealed transition', () => {
   const f = fixture(), placement = vi.fn(() => true), read = vi.fn(() => ready)
   const off = f.costs.registerPlacement(target, placement), offTerminal = f.costs.registerTerminal(target, read)
-  f.costs.begin(target, 'terminal', 80); f.advance(3); f.costs.selected(target)
+  f.costs.begin(target, 'terminal', 80); f.advance(3); f.costs.selected(target, 'layout-effect')
   expect(f.costs.snapshot()[0]).toMatchObject({ inputDelayMs: 20, selectedMs: 3, placedMs: 0, terminalMs: 0, inputReadyMs: 0, frameMs: null, state: 'pending', terminal: ready })
   f.advance(7); f.frame(); f.advance(9); f.frame()
   expect(f.costs.snapshot()[0]).toMatchObject({ frameMs: 19, state: 'observed', terminal: { runId: 'run', readySinceAt: 1 } })
@@ -31,7 +61,7 @@ it('observes an already ready retained Terminal without requiring a new attach o
 it('keeps missing placement unknown and separates local display from a later open input gate', () => {
   const f = fixture(); let placed = false, facts = { ...ready, acceptsInput: false, liveReady: false, replaying: true }
   f.costs.registerPlacement(target, () => placed); f.costs.registerTerminal(target, () => facts)
-  f.costs.begin(target, 'terminal', null); f.costs.selected(target)
+  f.costs.begin(target, 'terminal', null); f.costs.selected(target, 'layout-effect')
   expect(f.costs.snapshot()[0]).toMatchObject({ inputDelayMs: null, placedMs: null, frameMs: null, inputReadyMs: null })
   expect(f.frames.size).toBe(0)
   f.advance(15_000); placed = true; f.costs.observe(target); f.frame(); f.frame()
@@ -46,14 +76,14 @@ it('does not cross-complete quick switches, duplicate Groups or a covered retain
   const f = fixture(), other = { ...target, groupId: 'right' }
   f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => ready)
   f.costs.registerPlacement(other, () => false); f.costs.registerTerminal(other, () => ({ ...ready, visible: false }))
-  f.costs.begin(target, 'terminal', 90); f.costs.selected(other)
+  f.costs.begin(target, 'terminal', 90); f.costs.selected(other, 'layout-effect')
   expect(f.costs.snapshot()[0]!.selectedMs).toBeNull()
-  f.costs.selected(target); const stale = [...f.all.values()][0]!
-  f.costs.begin(other, 'terminal', 95); f.costs.selected(other); stale(100); f.costs.observe(target)
+  f.costs.selected(target, 'layout-effect'); const stale = [...f.all.values()][0]!
+  f.costs.begin(other, 'terminal', 95); f.costs.selected(other, 'layout-effect'); stale(100); f.costs.observe(target)
   expect(f.costs.snapshot().map(r => [r.state, r.frameMs, r.placedMs])).toEqual([['superseded', null, 0], ['pending', null, null]])
   expect(f.frames.size).toBe(0)
-  f.costs.begin(target, 'terminal', 99); f.costs.selected(target); f.frame(); const oldSecond = [...f.all.values()].at(-1)!
-  f.costs.begin(target, 'terminal', 99); f.costs.selected(target); oldSecond(101)
+  f.costs.begin(target, 'terminal', 99); f.costs.selected(target, 'layout-effect'); f.frame(); const oldSecond = [...f.all.values()].at(-1)!
+  f.costs.begin(target, 'terminal', 99); f.costs.selected(target, 'layout-effect'); oldSecond(101)
   expect(f.frames.size).toBe(1); f.frame(); f.frame()
   expect(f.costs.snapshot().at(-1)!.state).toBe('observed')
 })
@@ -61,7 +91,7 @@ it('does not cross-complete quick switches, duplicate Groups or a covered retain
 it('keeps Activity and other surfaces explicit and bounds history without reading unrelated owners', () => {
   const f = fixture(), read = vi.fn(() => ready)
   for (let n = 0; n < 100; n++) f.costs.registerTerminal({ ...target, tabId: `unrelated-${n}` }, read)
-  for (let n = 0; n < 50; n++) { f.costs.begin(target, n % 2 ? 'activity' : 'other', -1); f.costs.selected(target) }
+  for (let n = 0; n < 50; n++) { f.costs.begin(target, n % 2 ? 'activity' : 'other', -1); f.costs.selected(target, 'layout-effect') }
   const records = f.costs.snapshot()
   expect(records).toHaveLength(16); expect(records[0]!.id).toBe(35)
   expect(f.costs.omitted()).toBe(34)
@@ -73,7 +103,7 @@ it('keeps Activity and other surfaces explicit and bounds history without readin
 it('cancels departing owners, refuses ambiguous presentation readers, and ignores old callbacks', () => {
   const f = fixture(); f.costs.registerPlacement(target, () => true)
   const off = f.costs.registerTerminal(target, () => ready), duplicate = f.costs.registerTerminal(target, () => ready)
-  f.costs.begin(target, 'terminal', 200_000); f.costs.selected(target)
+  f.costs.begin(target, 'terminal', 200_000); f.costs.selected(target, 'layout-effect')
   expect(f.costs.snapshot()[0]).toMatchObject({ inputDelayMs: null, terminal: null, terminalMs: null })
   duplicate(); f.costs.observe(target); const callback = [...f.all.values()].at(-1)!
   off(); callback(100); expect(f.costs.snapshot()[0]!.frameMs).toBeNull(); expect(f.frames.size).toBe(0)
@@ -85,7 +115,7 @@ it.each(['sessionId', 'runId'] as const)('keeps original facts when %s changes a
   const off = f.costs.registerTerminal(target, () => facts)
   f.costs.begin(target, 'terminal', 90)
   expect(f.costs.snapshot()[0]!.terminal).toEqual(facts)
-  f.costs.selected(target); f.frame(); f.frame()
+  f.costs.selected(target, 'layout-effect'); f.frame(); f.frame()
   const before = f.costs.snapshot()[0]!
   expect(before).toMatchObject({ state: 'pending', pendingStage: 'input-gate', inputReadyMs: null })
   off(); f.advance(1000)
@@ -103,7 +133,7 @@ it('exposes each pending phase and monotonic elapsed without reading owners or a
   f.costs.registerPlacement(target, placement); f.costs.registerTerminal(target, terminal)
   f.costs.begin(target, 'terminal', 90)
   expect(f.costs.snapshot()[0]).toMatchObject({ pendingStage: 'selection', elapsedMs: 0 })
-  f.advance(10); f.costs.selected(target)
+  f.advance(10); f.costs.selected(target, 'layout-effect')
   expect(f.costs.snapshot()[0]).toMatchObject({ pendingStage: 'placement', elapsedMs: 10 })
   placed = true; f.costs.observe(target)
   expect(f.costs.snapshot()[0]!.pendingStage).toBe('terminal')
@@ -123,7 +153,7 @@ it('exposes each pending phase and monotonic elapsed without reading owners or a
 it('supersedes a gate wait after its local frame and freezes it against later observations', () => {
   const f = fixture(); let facts = { ...ready, acceptsInput: false }
   f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => facts)
-  f.costs.begin(target, 'terminal', 90); f.costs.selected(target); f.frame(); f.frame()
+  f.costs.begin(target, 'terminal', 90); f.costs.selected(target, 'layout-effect'); f.frame(); f.frame()
   f.advance(15_000); f.costs.begin({ ...target, tabId: 'next' }, 'unknown', null)
   const previous = f.costs.snapshot()[0]!
   expect(previous).toMatchObject({ state: 'superseded', elapsedMs: 15_000, pendingStage: null, frameMs: 0, inputReadyMs: null })
@@ -135,7 +165,7 @@ it('supersedes a gate wait after its local frame and freezes it against later ob
 it.each(['placement', 'terminal'] as const)('freezes an incomplete observation when its last %s owner departs', kind => {
   const f = fixture(), offPlacement = f.costs.registerPlacement(target, () => true)
   const offTerminal = f.costs.registerTerminal(target, () => ({ ...ready, acceptsInput: false }))
-  f.costs.begin(target, 'terminal', 90); f.costs.selected(target); f.frame(); f.frame(); f.advance(1_000)
+  f.costs.begin(target, 'terminal', 90); f.costs.selected(target, 'layout-effect'); f.frame(); f.frame(); f.advance(1_000)
   const off = kind === 'placement' ? offPlacement : offTerminal
   off(); off()
   const ended = f.costs.snapshot()[0]!
@@ -149,7 +179,7 @@ it.each(['placement', 'terminal'] as const)('removing a duplicate %s owner resum
   const f = fixture(), read = () => ({ ...ready, acceptsInput: false })
   f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, read)
   const duplicate = kind === 'placement' ? f.costs.registerPlacement(target, () => true) : f.costs.registerTerminal(target, () => read())
-  f.costs.begin(target, 'terminal', null); f.costs.selected(target); f.advance(1_000)
+  f.costs.begin(target, 'terminal', null); f.costs.selected(target, 'layout-effect'); f.advance(1_000)
   expect(f.frames.size).toBe(0)
   duplicate()
   expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'frame', elapsedMs: 1_000 })
@@ -160,7 +190,7 @@ it.each(['placement', 'terminal'] as const)('removing a duplicate %s owner resum
 it('observes authoritative readOnly after a frame without inventing input acceptance', () => {
   const f = fixture(), facts = { ...ready, readOnly: true, acceptsInput: false }
   f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => facts)
-  f.costs.begin(target, 'terminal', null); f.costs.selected(target); f.advance(50); f.frame(); f.frame()
+  f.costs.begin(target, 'terminal', null); f.costs.selected(target, 'layout-effect'); f.advance(50); f.frame(); f.frame()
   expect(f.costs.snapshot()[0]).toMatchObject({ state: 'observed', pendingStage: null, elapsedMs: 50, inputReadyMs: null, terminal: facts })
   f.advance(1_000); expect(f.costs.snapshot()[0]!.elapsedMs).toBe(50)
 })
@@ -168,11 +198,11 @@ it('observes authoritative readOnly after a frame without inventing input accept
 it('keeps unknown mode pending and Activity independent from ambiguous Terminal owners', () => {
   const f = fixture(), read = vi.fn(() => ({ ...ready, readOnly: true }))
   f.costs.registerTerminal(target, read); f.costs.registerTerminal(target, () => read())
-  f.costs.begin(target, 'unknown', null); f.costs.selected(target); f.advance(100)
+  f.costs.begin(target, 'unknown', null); f.costs.selected(target, 'layout-effect'); f.advance(100)
   expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'terminal', elapsedMs: 100, terminal: null })
   f.costs.begin(target, 'activity', null)
   expect(f.costs.snapshot()[1]).toMatchObject({ state: 'pending', pendingStage: 'selection' })
-  f.advance(10); f.costs.selected(target); f.advance(100)
+  f.advance(10); f.costs.selected(target, 'layout-effect'); f.advance(100)
   expect(f.costs.snapshot()[1]).toMatchObject({ state: 'observed', pendingStage: null, elapsedMs: 10, terminal: null, inputReadyMs: null })
   expect(read).not.toHaveBeenCalled(); expect(f.frames.size).toBe(0)
 })
@@ -180,7 +210,7 @@ it('keeps unknown mode pending and Activity independent from ambiguous Terminal 
 it('does not settle from an earlier open gate or an ambiguous readOnly reader', () => {
   const f = fixture(); let facts = ready
   f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => facts)
-  f.costs.begin(target, 'terminal', null); f.costs.selected(target)
+  f.costs.begin(target, 'terminal', null); f.costs.selected(target, 'layout-effect')
   facts = { ...ready, acceptsInput: false }; f.frame(); f.frame()
   expect(f.costs.snapshot()[0]).toMatchObject({ state: 'pending', pendingStage: 'input-gate', inputReadyMs: 0 })
   const duplicate = f.costs.registerTerminal(target, () => ({ ...ready, readOnly: true }))
@@ -195,7 +225,7 @@ it('does not settle from an earlier open gate or an ambiguous readOnly reader', 
 it('rejects a changed Run first observed by the second local-frame callback', () => {
   const f = fixture(); let facts = { ...ready, acceptsInput: false }
   f.costs.registerPlacement(target, () => true); f.costs.registerTerminal(target, () => facts)
-  f.costs.begin(target, 'terminal', 90); f.costs.selected(target); f.frame()
+  f.costs.begin(target, 'terminal', 90); f.costs.selected(target, 'layout-effect'); f.frame()
   facts = { ...ready, runId: 'replacement-run' }; f.advance(1000); f.frame()
   expect(f.costs.snapshot()[0]).toMatchObject({ state: 'superseded', frameMs: null, inputReadyMs: null,
     terminal: { runId: 'run', acceptsInput: false } })
@@ -209,7 +239,7 @@ it('measures bounded recorder work without reading unrelated retained terminals'
   for (let n = 0; n < 100; n++) costs.registerTerminal({ ...target, tabId: `unrelated-${n}` }, unrelated)
   const count = 3000, start = performance.now()
   for (let n = 0; n < count; n++) {
-    costs.begin(target, 'terminal', performance.now()); costs.selected(target)
+    costs.begin(target, 'terminal', performance.now()); costs.selected(target, 'layout-effect')
     frames.shift()!(performance.now()); frames.shift()!(performance.now())
   }
   const durationMs = performance.now() - start
