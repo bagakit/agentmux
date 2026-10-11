@@ -327,3 +327,7 @@
 .connector-publication__form select:focus-visible, .connector-publication__form textarea:focus-visible { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
 .connector-publication__form textarea { min-height: 88px; resize: vertical; }
 @container (width < 380px) { .connector-publication__form { grid-template-columns: minmax(0, 1fr); } }
+
+.connector-guided-task { display: grid; gap: var(--sp-4); justify-items: start; padding-block: var(--sp-4); }
+.connector-guided-task strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; }
+.connector-guided-task p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.65; max-width: 62ch; }
