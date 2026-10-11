@@ -2,41 +2,21 @@ import { useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { ConnectionConfigureInput, ConnectionObservation, ConnectionRecord, ConnectionStage } from '@agentmux/core/connections'
+import type { ConnectionConfigureInput, ConnectionRecord } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
+import { ConnectionSetupResult, connectionSummary } from './ConnectionSetupResult'
 
 const LinkIcon = semanticIconComponent('action.open-external')
-const CheckIcon = semanticIconComponent('status.completed')
 const GroupIcon = semanticIconComponent('object.conversations')
-const stageLabels = { authentication: 'Application credentials', transport: 'Live connection', intake: 'Receiving messages', delivery: 'Group delivery' } as const
 const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : domain === 'open.larksuite.com' ? 'Lark' : domain
-const stage = (value: ConnectionStage): string => value.state === 'ready' ? 'Confirmed' : value.state === 'disabled' ? 'Paused' : value.state === 'unavailable' ? 'Needs attention' : 'Not confirmed'
-function checkSummary(observation: ConnectionObservation): string {
-  const labels = (state: ConnectionStage['state']) => (Object.keys(stageLabels) as Array<keyof ConnectionObservation>).filter(key => observation[key].state === state).map(key => stageLabels[key].toLowerCase()).join(', ')
-  return ['Check finished.', labels('unknown') && `Not confirmed: ${labels('unknown')}.`, labels('unavailable') && `Needs attention: ${labels('unavailable')}.`].filter(Boolean).join(' ')
-}
-function connectionSummary(record: ConnectionRecord): string {
-  if (!record.config.enabled) return 'Application paused'
-  const { authentication, transport, intake } = record.observation
-  if (authentication.state === 'unavailable') return 'Could not check this application'
-  if (transport.state === 'ready') return intake.state === 'ready' ? 'Connected · messages received' : 'Connected · receiving not yet confirmed'
-  if (authentication.state === 'ready') return 'Credentials accepted · connection not yet confirmed'
-  return 'Saved · connection not yet confirmed'
-}
-function ConnectionDiagnostics({ record }: { record: ConnectionRecord }) {
-  return <details className="connector-diagnostics"><summary>Connection details</summary>
-    <dl className="connector-identity" aria-label="Saved application identity"><div><dt>Platform</dt><dd>{platform(record.config.application.domain)}</dd></div><div><dt>App ID</dt><dd><code>{record.config.application.appId}</code></dd></div></dl>
-    <dl className="connector-stage-list">{(Object.keys(stageLabels) as Array<keyof ConnectionObservation>).map(key => <div key={key}><dt>{stageLabels[key]}</dt><dd>{key === 'delivery' && record.observation[key].state === 'unknown' && record.observation[key].reason === 'not-started' ? 'View delivery in each Agent’s Shared group details' : <>{stage(record.observation[key])}{record.observation[key].reason && <span className="connector-stage-reason">{record.observation[key].reason}</span>}</>}</dd></div>)}</dl>
-  </details>
-}
 
 export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [listIssue, setListIssue] = useState('')
   const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit'>('loading')
-  const [saveNotice, setSaveNotice] = useState(''), [checking, setChecking] = useState<string | null>(null), [checks, setChecks] = useState<Record<string, { revision: number; text: string }>>({})
+  const [saveNotice, setSaveNotice] = useState('')
   const [selected, setSelected] = useState<ConnectionRecord | null>(null), [label, setLabel] = useState(''), [appId, setAppId] = useState(''), [domain, setDomain] = useState('open.feishu.cn'), [secret, setSecret] = useState(''), [enabled, setEnabled] = useState(true)
   const [saveAbsent, setSaveAbsent] = useState(false)
   const enrollment = useBotEnrollment(active)
@@ -104,20 +84,6 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     } catch (error) { if (epoch === generation.current) setIssue(`The original save is still not confirmed. ${presentError(error)}`) }
     finally { writing.current = false; setBusy(false) }
   }
-  const test = async (record: ConnectionRecord) => {
-    if (writing.current) return
-    writing.current = true; setBusy(true); setChecking(record.config.connectionId)
-    const epoch = generation.current
-    setChecks(current => ({ ...current, [record.config.connectionId]: { revision: record.revision, text: 'Checking the saved application…' } }))
-    try {
-      const updated = await api.connections.call('connection.test', { connectionId: record.config.connectionId })
-      if (epoch === generation.current) {
-        setRecords(current => current.map(item => item.config.connectionId === updated.config.connectionId ? updated : item))
-        setChecks(current => ({ ...current, [updated.config.connectionId]: { revision: updated.revision, text: checkSummary(updated.observation) } }))
-      }
-    } catch (error) { if (epoch === generation.current) setChecks(current => ({ ...current, [record.config.connectionId]: { revision: record.revision, text: `Check result not confirmed. ${presentError(error)}` } })) }
-    finally { writing.current = false; setBusy(false); setChecking(null) }
-  }
   const openConsole = async () => {
     try { await api.ui.openExternal(`https://${domain}/app`) }
     catch (error) { setIssue(presentError(error)) }
@@ -125,7 +91,6 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const existing = () => { if (selected && !pending.current) edit(null); else setView('new') }
   const current = selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
-  const feedback = current && checks[current.config.connectionId]?.revision === current.revision ? checks[current.config.connectionId]!.text : ''
   if (!active) return null
   return <div className="settings-pane-stack connector-onboarding" data-connector-settings>
     {view === 'loading' ? <p className="settings-group-note" role="status">{listIssue ? 'Your bot list could not be loaded.' : 'Reading saved applications…'} <button type="button" className="small-button" onClick={() => void read()}>Refresh</button></p> : null}
@@ -155,14 +120,12 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
         </div>
       </> : current ? <>
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{current.config.label}</h3><p>{platform(current.config.application.domain)} bot application</p></div></header>
-        <ol className="connector-steps" aria-label="Application setup"><li><CheckIcon size={13} />App saved</li><li aria-current="step"><span>2</span>Check connection</li><li><span>3</span>Connect a group</li></ol>
-        <div className="connector-connection-state" role="status"><strong>{connectionSummary(current)}</strong>{saveNotice ? <span>{saveNotice}</span> : null}</div>
-        <div className="connector-editor-actions"><button className="primary-button" disabled={busy} onClick={() => void test(current)}>{checking ? 'Checking…' : 'Check connection'}</button><button className="small-button" disabled={busy} onClick={() => edit(current)}>Edit application</button></div>
-        {feedback ? <p role="status" className="settings-group-note connector-check-feedback">{feedback}</p> : null}
+        {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
+        <ConnectionSetupResult record={current} active={active} />
+        <div className="connector-editor-actions"><button className="small-button" disabled={busy} onClick={() => edit(current)}>Edit application</button></div>
         <details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" onClick={() => void openConsole()}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>
         <div className="connector-next-step"><GroupIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. You choose the audience and what to share there.</p></div></div>
         <ConnectionProfilePanel key={JSON.stringify([current.config.connectionId, current.config.application, current.revision])} record={current} />
-        <ConnectionDiagnostics record={current} />
       </> : null}
     </section> : null}
     {listIssue ? <div className="connector-list-feedback" data-connection-list-issue><p role="status" className="connector-check-feedback">Could not refresh your saved bots. This does not change any bot’s creation or connection result.</p>{view !== 'loading' ? <button type="button" className="small-button" onClick={() => void read()}>Refresh bot list</button> : null}<details className="connector-diagnostics"><summary>List error details</summary><p className="connector-enrollment__technical">{listIssue}</p></details></div> : null}

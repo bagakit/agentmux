@@ -6,6 +6,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionEnrollmentBeginInput, ConnectionEnrollmentCapability, ConnectionEnrollmentDiagnostic, ConnectionEnrollmentOperation, ConnectionRecord } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 import { SelectionField } from '../SelectionField'
+import { ConnectionSetupResult } from './ConnectionSetupResult'
 
 const BotIcon = semanticIconComponent('object.conversations')
 const ExternalIcon = semanticIconComponent('action.open-external')
@@ -157,7 +158,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
     : current ? operation?.challenge ? 'Bot creation is not confirmed' : 'We couldn’t get a setup link'
     : unfinished ? 'Continue your bot setup' : 'Bring your Agent into a group chat'
   const summary = preparing ? 'Requesting a confirmation page. You can leave and return to this request.'
-    : saved ? 'The bot is saved here. Check its connection before choosing a group for your Agent.'
+    : saved ? 'Your bot is saved. Confirm its current connection here, then choose a group from your Agent’s menu.'
     : operation?.authorization === 'pending' ? 'Scan the code, approve the bot’s creation, then return here to check the confirmation.'
     : operation?.authorization === 'denied' ? 'The original result is kept. You can connect a bot you already have.'
     : operation?.authorization === 'expired' ? 'The confirmation has expired. The creation result is unconfirmed; your original setup is kept.'
@@ -197,7 +198,8 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
         <BotConfirmationCode url={operation.challenge.verificationUrl} />
         <div>{operation.challenge.userCode ? <p className="connector-enrollment__public-code">Confirmation code <strong>{operation.challenge.userCode}</strong></p> : null}<button className="connector-enrollment__text-action" data-enrollment-open onClick={() => void openConfirmation()}>Open confirmation page <ExternalIcon size={12} /></button>{operation.challenge.expiresAt !== null ? <p className="settings-group-note">Confirmation valid until {new Date(operation.challenge.expiresAt).toLocaleTimeString()}.</p> : null}</div>
       </div> : null}
-      <div className="connector-enrollment__action">{saved ? <button data-enrollment-saved className="primary-button" onClick={() => onSaved(saved)}>View connection</button>
+      {saved ? <ConnectionSetupResult record={saved} /> : null}
+      <div className="connector-enrollment__action">{saved ? <button data-enrollment-saved className="small-button" onClick={() => onSaved(saved)}>Manage bot</button>
         : canContinue ? <button data-enrollment-advance className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance()}>{busy === selectedId ? 'Checking…' : operation?.authorization === 'pending' ? 'Check confirmation' : operation?.authorization === 'unknown' ? 'Check this creation' : localSaveUnconfirmed ? 'Check connection save' : 'Finish connecting'}</button>
         : existingIsPrimary ? <button data-enrollment-existing className="primary-button" onClick={onExisting}>Connect an existing bot</button>
         : <button data-enrollment-inspect className="primary-button" onClick={() => void enrollment.inspect()}>Check this creation</button>}
@@ -205,7 +207,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
       {!saved && !existingIsPrimary ? <div className="connector-enrollment__alternative"><span>Already created a bot in {issuerLabel}?</span><button data-enrollment-existing className="connector-enrollment__text-action" onClick={onExisting}>Connect an existing bot</button></div> : null}
       {saved ? <div className="connector-next-step"><BotIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. You choose the audience and what to share there.</p></div></div> : null}
       <details className="connector-diagnostics">
-        <summary>Technical details</summary>
+        <summary>{saved ? 'Original setup details' : 'Technical details'}</summary>
         {enrollment.issueDetail ? <p className="connector-enrollment__technical" data-enrollment-error-detail>{enrollment.issueDetail}</p> : null}
         {openIssue ? <p className="connector-enrollment__technical">{openIssue}</p> : null}
         <dl className="connector-identity">
