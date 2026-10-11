@@ -1,5 +1,9 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
+import { SESSION_HISTORY_MAX_PAGE_BYTES } from './session-history.js'
+import { SESSION_HISTORY_IMAGE_MAX_BYTES, unavailable } from './session-history-resource.js'
+import { readRecordedImage } from './session-history-resource-read.js'
+import { readSessionHistoryTextResource } from './session-history-content.js'
 import type { AgentProviderSessionHistoryContext, AgentSessionHistoryContentPart, AgentSessionHistoryItem,
   AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
 import { NativeText, nativeJsonStringify, type NativeHistoryItem, type NativeTextSegment } from './native-history-value.js'
@@ -144,6 +148,29 @@ export async function readNativeContentResource(
   if (reference.agentSessionId !== context.agentSessionId || reference.providerId !== context.source.providerId || reference.nativeSessionId !== context.source.nativeSessionId ||
     reference.ownerPath !== context.transcriptPath || reference.recordId !== input.recordId || reference.turnId !== input.turnId ||
     reference.partIndex !== input.partIndex) return failure('This content reference belongs to another native record or source.')
+  if (input.representation === 'image') {
+    const maxBytes = input.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES
+    // The original parser retains at most one page of metadata. Six is JSON's
+    // worst byte escape expansion. This finite allowance does not promise that
+    // other deferred fields fit; default exact JSON remains separately readable.
+    const envelopeMaxBytes = Math.ceil(maxBytes / 3) * 4 + 6 * SESSION_HISTORY_MAX_PAGE_BYTES
+    if (reference.byteLength > envelopeMaxBytes) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_TOO_LARGE', 'The signed image envelope exceeds this representation’s bounded read budget. Its original JSON remains readable.')
+    let part: AgentSessionHistoryContentPart
+    try {
+      part = await readSessionHistoryTextResource({ kind: 'resource', resourceType: 'text', reference: input.expectedReference,
+        content: { encoding: 'json-utf8', kind: 'resource', byteLength: reference.byteLength, sha256: reference.sha256 } }, input.partIndex, { source: input.source, recordId: input.recordId, ...(input.turnId === undefined ? {} : { turnId: input.turnId }) }, async request => ({
+        ...(context.agentSessionId === undefined ? {} : { agentSessionId: context.agentSessionId }), source: context.source,
+        recordId: input.recordId, partIndex: input.partIndex, ...(input.turnId === undefined ? {} : { turnId: input.turnId }), reference: request.expectedReference,
+        result: await readNativeContentResource(context, request)
+      }), context.signal)
+    } catch (error) {
+      context.signal.throwIfAborted()
+      if (error instanceof AgentMuxError) throw error
+      return unavailable('AGENT_SESSION_HISTORY_RESOURCE_CONTENT_INVALID', 'The original signed part could not be verified as a complete image resource. Its original reference remains available.')
+    }
+    if (part.kind !== 'resource' || part.resourceType !== 'image') return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'This original signed part is not a raster image resource.')
+    return await readRecordedImage(part.reference, maxBytes, context.signal)
+  }
   const offsetBytes = input.offsetBytes ?? 0, maxBytes = input.maxBytes ?? 64 * 1024
   if (!Number.isSafeInteger(offsetBytes) || offsetBytes < 0 || offsetBytes >= reference.byteLength || maxBytes > 128 * 1024)
     return failure('Native content requires a valid offset and a bounded 1–131072 byte read.', 'INVALID_AGENT_SESSION_HISTORY_RESOURCE')

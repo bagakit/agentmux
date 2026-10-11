@@ -3087,7 +3087,9 @@ export class AgentMuxClient {
           // exact record; untrusted old paths never authorize physical IO.
           let cursor: string | undefined
           for (;;) {
-            const page = await read(provider.readSessionHistoryPage!({ ...context, limit: 100, ...(cursor === undefined ? {} : { cursor }) }))
+            const page = provider.readSessionHistoryRecord
+              ? { items: [await read(provider.readSessionHistoryRecord({ ...context, recordId: input.recordId, ...(input.turnId === undefined ? {} : { turnId: input.turnId }) }))], nextCursor: null }
+              : await read(provider.readSessionHistoryPage!({ ...context, limit: 100, ...(cursor === undefined ? {} : { cursor }) }))
             const item = page.items.find(value => value.id === input.recordId && value.turnId === input.turnId)
             if (item) {
               const part = item.contentParts[input.partIndex]

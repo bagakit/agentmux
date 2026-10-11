@@ -1021,7 +1021,9 @@ export type AgentSessionHistoryResourceRequest = {
   expectedReference: string
   /** May only reduce the fixed image budget; text fragments use at most 128 KiB. */
   maxBytes?: number
-  /** Byte position in the exact serialized text part. Images do not accept an offset. */
+  /** Explicit raster bytes for this same original resource, including a signed semantic wrapper. Omit for its recorded representation. */
+  representation?: 'image'
+  /** Byte position in the exact serialized text part. Explicit image representation does not accept an offset. */
   offsetBytes?: number
 }
 export type AgentSessionHistoryResourceReadOptions = AgentSessionHistoryResourceRequest & Pick<AgentSessionHistoryPageOptions,
