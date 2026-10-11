@@ -9,6 +9,8 @@ import type {
   AgentMessageChannel,
   AgentOperationDevice
 } from './types.js'
+import { parseAgentContinuityControlReceipts } from './agent-session-continuity-control.js'
+import type { AgentMuxContinuityControlReceipt } from './agent-session-continuity-control.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { isAgentActivityStatusSource } from './agent-status-freshness.js'
 import { unconfirmedExecutableObservation } from './executable-observation.js'
@@ -143,6 +145,8 @@ export type AgentMuxContinuityCancellation = {
   observedAt: number
 }
 export type AgentMuxContinuitySupervision = {
+  /** Immutable control admissions; current progress is represented by the other fields. */
+  controlOperations?: Record<string, AgentMuxContinuityControlReceipt>
   phase: 'observing' | 'retry-wait' | 'paused' | 'settled' | 'cancelled'
   activeAttemptOperationId: string
   /** Includes the initial admitted native resume. History never resets on explicit continuation. */
@@ -242,6 +246,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
       [supervision.contextEvidence, supervision.cancellation].some(fact => fact && (!fact.run || typeof fact.run.runId !== 'string' || !fact.run.runId ||
         fact.nativeTarget?.kind !== 'provider' || typeof fact.nativeTarget.providerId !== 'string' || !fact.nativeTarget.providerId || typeof fact.nativeTarget.sessionId !== 'string' || !fact.nativeTarget.sessionId ||
         !Number.isSafeInteger(fact.observedAt) || fact.observedAt < 0)))) throw new TypeError('Invalid original recovery supervision.')
+  if (supervision?.controlOperations !== undefined) parseAgentContinuityControlReceipts(supervision.controlOperations, op.agentSessionId, op.operationId)
   if (op.launchInput) {
     const launched = normalizeAgentContinuityLaunchInput(op.launchInput)
     if (launched.key && (launched.key.agentSessionId !== op.agentSessionId || launched.key.expectedRun.runId !== op.newRun?.runId)) throw new TypeError('Continuity launch input changed its exact Run.')

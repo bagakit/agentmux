@@ -147,6 +147,7 @@ import {
   type AgentMuxAgentContinuityInput,
   type AgentMuxAgentContinuityResult
 } from './agent-session-continuity.js'
+import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './agent-session-continuity-control.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { AgentManagedHookInstaller, type AgentManagedHookInspection, type AgentManagedHookPlan } from './managed-hook-installer.js'
 import { defaultAgentMuxControlSocketPath, defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
@@ -4542,6 +4543,111 @@ export class AgentMuxClient {
     return result
   }
 
+  /** Change the original durable intent; never stop its Run or replay its pending input. */
+  async controlAgentContinuity(value: AgentMuxContinuityControlInput,
+    context?: Pick<AgentInputCallContext, 'requestSignal' | 'assertCurrent'> & { caller?: { agentSessionId: string; capability: string } }
+  ): Promise<AgentMuxContinuityControlResult> {
+    const input = parseAgentContinuityControlInput(value)
+    context?.requestSignal?.throwIfAborted()
+    let author: Readonly<AgentCapabilityBinding> | undefined
+    if (context?.caller) {
+      const current = await this.currentStoredAgentSession(context.caller.agentSessionId)
+      this.resolveMessageAuthor(context.caller.capability, context.caller.agentSessionId, current)
+      author = { agentSessionId: current.agentSessionId, workspacePath: current.workspacePath,
+        runId: current.run.runId, capabilityHash: current.capabilityHash ?? '' }
+    }
+    const prior = async (): Promise<AgentMuxContinuityControlResult | null> => {
+      const stored = await this.store.readContinuityControlReceipt(input.agentSessionId, input.operationId)
+      if (!stored) return null
+      if (!sameAgentContinuityControlInput(stored.receipt.request, input)) throw new AgentMuxError(
+        'The original recovery control already has another immutable request.', 'AGENT_CONTINUITY_CONTROL_CONFLICT')
+      if (stored.session) {
+        let current = stored.session
+        try {
+          await this.registry.resolveMetadata(input.agentSessionId, 'local', () => {})
+          current = await this.registry.refresh(input.agentSessionId)
+          this.publishSession(current)
+          this.continuitySupervisor.observe(current)
+        } catch (error) {
+          this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId,
+            code: 'AGENT_CONTINUITY_CONTROL_OBSERVATION_UNCONFIRMED',
+            message: `The original control receipt is retained; its current observation is unconfirmed. ${error instanceof Error ? error.message : String(error)}`,
+            evidence: { source: 'agentmux', run: current.run, observedAt: Date.now() } })
+        }
+        return { receipt: stored.receipt, state: 'active', session: this.projectSession(current) }
+      }
+      const { agentSessionId, hostId, run, source, observedAt } = stored.retirement
+      return { receipt: stored.receipt, state: 'retired', retirement: { agentSessionId, hostId, run, source, observedAt } }
+    }
+    const original = await prior()
+    if (original) return original
+    const canonical = await this.currentStoredAgentSession(input.agentSessionId)
+    if (!sameRun(canonical.run, input.expectedRun)) throw new AgentMuxError('The recovery control requires its exact current Run.', 'STALE_AGENT_SESSION')
+    const lifecycle = input.action === 'continue' ? await this.store.readLifecycleReservation(input.agentSessionId) : null
+    if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, input.expectedRun)) throw new AgentMuxError(
+      'The exact original Run has a pending Stop; its recovery cannot be continued.', 'AGENT_CONTINUITY_SUPERSEDED')
+    await this.registry.resolveMetadata(input.agentSessionId, 'local', () => context?.requestSignal?.throwIfAborted())
+    await this.registry.refresh(input.agentSessionId, input.expectedRun)
+    await context?.assertCurrent?.()
+    context?.requestSignal?.throwIfAborted()
+    let receipt: AgentMuxContinuityControlReceipt | undefined
+    try {
+      // Metadata CAS deliberately does not wait behind an in-flight Start. Its
+      // prepare claim consumes cancellation under the same original Store lock.
+      const session = await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, current => {
+        if (current.hostId !== 'local') throw new AgentMuxError('The original recovery Host changed.', 'AGENT_CONTINUITY_SUPERSEDED')
+        const existing = current.continuityControlReceipts?.[input.operationId] ?? Object.values(current.continuityOperations ?? {})
+          .map(operation => operation.supervision?.controlOperations?.[input.operationId]).find(Boolean)
+        if (existing) {
+          if (!sameAgentContinuityControlInput(existing.request, input)) throw new AgentMuxError(
+            'The original recovery control already has another immutable request.', 'AGENT_CONTINUITY_CONTROL_CONFLICT')
+          receipt = existing; return current
+        }
+        const root = current.continuityOperations?.[input.intentOperationId], supervision = root?.supervision
+        if (!root || !supervision || root.intentOperationId || !root.nativeTarget || !isDeepStrictEqual(root.nativeTarget, current.nativeHandle)) throw new AgentMuxError(
+          'The exact original supervised recovery target is unavailable.', 'AGENT_CONTINUITY_SUPERSEDED')
+        const active = current.continuityOperations?.[supervision.activeAttemptOperationId]
+        if (!active || !(active.newRun ? sameRun(active.newRun, current.run) : sameRun(active.previousRun, current.run))) throw new AgentMuxError(
+          'The active recovery attempt no longer names the exact current Run.', 'AGENT_CONTINUITY_SUPERSEDED')
+        const next = structuredClone(supervision), observedAt = Date.now()
+        let outcome: AgentMuxContinuityControlReceipt['outcome'] = 'unchanged'
+        let reason: AgentMuxContinuityControlReceipt['reason'] = supervision.phase === 'settled' ? 'already-settled'
+          : supervision.phase === 'cancelled' ? 'already-cancelled' : 'already-active'
+        if (input.action === 'cancel' && !['settled', 'cancelled'].includes(supervision.phase)) {
+          next.phase = 'cancelled'; next.reason = 'explicit-control'; next.observedAt = observedAt
+          next.cancellation = { source: 'control', operationId: input.operationId, run: { ...input.expectedRun },
+            nativeTarget: structuredClone(root.nativeTarget), observedAt }
+          delete next.nextAttemptAt
+          outcome = 'cancelled'; reason = 'explicit-cancel'
+        } else if (input.action === 'continue') {
+          if (['settled', 'cancelled'].includes(supervision.phase) || supervision.cancellation) throw new AgentMuxError(
+            'The original recovery intent has already closed; an old control cannot reopen it.', 'AGENT_CONTINUITY_SUPERSEDED')
+          if (supervision.phase === 'paused' && supervision.process?.state !== 'running') {
+            const limit = supervision.attemptLimit + input.additionalAttempts
+            if (!Number.isSafeInteger(limit)) throw new AgentMuxError('The explicit recovery budget exceeds its exact integer range.', 'INVALID_AGENT_CONTINUITY_CONTROL')
+            next.attemptLimit = limit; next.phase = 'observing'; next.reason = 'explicit-control'; next.observedAt = observedAt
+            delete next.nextAttemptAt
+            outcome = 'continued'; reason = 'explicit-continue'
+          }
+        }
+        receipt = { request: input, outcome, reason, activeAttemptOperationId: supervision.activeAttemptOperationId,
+          attemptCount: supervision.attemptCount, attemptLimitBefore: supervision.attemptLimit, attemptLimitAfter: next.attemptLimit,
+          phaseAtCommit: next.phase, observedAt }
+        next.controlOperations = { ...supervision.controlOperations, [input.operationId]: receipt }
+        const updated = { ...root, supervision: next }
+        return { ...current, continuityOperations: { ...current.continuityOperations, [root.operationId]: updated },
+          ...(current.continuity?.operationId === root.operationId ? { continuity: updated } : {}), updatedAt: Math.max(current.updatedAt + 1, observedAt) }
+      }, undefined, author)
+      this.publishSession(session)
+      this.continuitySupervisor.observe(session)
+      return { receipt: structuredClone(receipt!), state: 'active', session: this.projectSession(session) }
+    } catch (error) {
+      const accepted = await prior()
+      if (accepted) return accepted
+      throw error
+    }
+  }
+
   private async serializeAgentContinuity<T>(agentSessionId: string, execute: () => Promise<T>): Promise<T> {
     return await this.continuitySupervisor.serialize(agentSessionId, execute)
   }
@@ -4754,6 +4860,7 @@ export class AgentMuxClient {
         hostId: retirement!.hostId, run: retirement!.run, retiredRuns: [],
         updatedAt: retirement!.observedAt,
         ...(retirement!.activityCommit === undefined ? {} : { activityCommit: structuredClone(retirement!.activityCommit) }),
+        ...(retirement!.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: structuredClone(retirement!.continuityControlReceipts) }),
         ...(reopening?.launchOptions === undefined ? {} : { launchOptions: reopening.launchOptions })
       }
       if (!current.nativeHandle || current.nativeHandle.kind !== 'provider') {
