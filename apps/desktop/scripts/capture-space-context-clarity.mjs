@@ -13,8 +13,9 @@ const root = resolve(import.meta.dirname, '../../..')
 const fixture = resolve(import.meta.dirname, 'fixtures/space-context-clarity')
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const args = process.argv.slice(2), knowledgeOnly = args.includes('--knowledge-only')
-assert.ok(args.filter(value => value.startsWith('--')).every(value => value === '--knowledge-only'))
+const args = process.argv.slice(2), knowledgeOnly = args.includes('--knowledge-only'), detailsOnly = args.includes('--details-only')
+assert.ok(args.filter(value => value.startsWith('--')).every(value => ['--knowledge-only', '--details-only'].includes(value)))
+assert.ok(!(knowledgeOnly && detailsOnly))
 const destinations = args.filter(value => !value.startsWith('--'))
 assert.ok(destinations.length <= 1)
 const products = knowledgeOnly ? allProducts.slice(0, 2) : allProducts
@@ -29,7 +30,7 @@ const guardedHarness = [relative(root, fileURLToPath(import.meta.url)), 'apps/de
   ...fixtures.map(name => relative(root, resolve(fixture, name)))]
 const diskBudget = 1_000_000_000
 const receipt = { schema: 'agentmux.space-context-clarity-capture.v1', passed: false, captureOnly: true,
-  mode: knowledgeOnly ? 'knowledge-only' : 'integrated',
+  mode: detailsOnly ? 'details-only' : knowledgeOnly ? 'knowledge-only' : 'integrated',
   aestheticReview: 'not-performed', guardedProducts: products, sourceBefore: {}, sourceAfter: {}, compiledInputs: {}, outputs: {}, frames: [],
   scope: 'Current production Sidebar, Dock, Topic Navigation, Knowledge, Mote Files, Store and complete CSS. Configured topology and protocol-validated transport observations; logical fixture directories are not actual disk/Git/Runtime evidence. No installed App, native Main/preload, Session recovery or restart claim.',
   storage: { budgetBytes: diskBudget, sourceCopies: 0, dependencyInstalls: 0 } }
@@ -109,7 +110,7 @@ try {
   for (const frame of actual.frames) receipt.frames.push({ ...frame, sha256: hash(await readFile(resolve(evidence, frame.file))) })
   assert.equal(actual.passed, true, JSON.stringify(actual.failure))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.process.exitSignal, null); assert.equal(receipt.process.timedOut, false)
-  assert.equal(receipt.frames.length, knowledgeOnly ? 12 : 18)
+  assert.equal(receipt.frames.length, detailsOnly ? 4 : knowledgeOnly ? 12 : 18)
   for (const url of actual.loaded) if (/\.(js|css)$/.test(new URL(url).pathname)) assert.ok(receipt.outputs[new URL(url).pathname.slice(1)], 'Loaded bundle was not bound')
   assert.ok(actual.loaded.some(url => url.endsWith('.js'))); assert.ok(actual.loaded.some(url => url.endsWith('.css')))
   for (const file of products) receipt.sourceAfter[file] = hash(await readFile(resolve(root, file)))

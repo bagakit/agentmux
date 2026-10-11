@@ -13,6 +13,18 @@ under development. It still mounts the actual Dock/Sidebar and records all
 compiled inputs, but does not qualify the Mote/Folder integration or T-003.
 Run a fresh full integrated round after all five owning inputs are stable.
 
+`--details-only` captures four affected regression frames: normal list/control,
+normal detail, short mixed-status detail and its original list after Close. This
+mode guards all five owning inputs. It qualifies only this affected subset;
+unaffected earlier images and their independent review retain their own receipt.
+Detail checks intersect header/Close/body and actual text lines with the Knowledge
+viewport and every clipping ancestor, with hit testing. They do not scroll a
+detail into view to disguise clipping. Native reader wheel and Close must leave
+the same original result row focused and both diagnostic disclosures open.
+The short mixed reader also submits alpha, keeps its confirmed selected source
+after beta fails, and checks that the entire Last confirmed count/query/scope
+metadata line remains visible beside the real reader, not merely in hidden DOM.
+
 The optional first argument names a new, empty evidence directory. By default,
 each independent round is stored under the ignored local
 `.bagakit/feature-tracker/space-context-clarity/capture-*` directory. Failed
