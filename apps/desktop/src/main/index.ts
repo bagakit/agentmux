@@ -166,6 +166,7 @@ function startPrimaryInstance(): void {
       attemptId: startupAttemptId,
       appVersion: app.getVersion(),
       pid: process.pid,
+      privateSmoke: Boolean(process.env.AGENTMUX_DESKTOP_READY_FILE) && process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1',
       app
     }))
 

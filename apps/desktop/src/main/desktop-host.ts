@@ -1,8 +1,8 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, open } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AgentMuxFileAgentSessionStore, AgentMuxError, connectAgentMuxRpc,
-  connectSshAgentMux, defaultAgentMuxControlSocketPath, probeSocketLiveness,
+  connectSshAgentMux, defaultAgentMuxControlSocketPath, observeRead, probeSocketLiveness,
   type AgentMuxAgentSessionStore,
   type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcCallContext, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
@@ -12,7 +12,7 @@ import type { HostConfig } from '../shared/contracts.js'
 
 export type DesktopRuntimeClient = AgentMuxClient | AgentMuxHostedClient
 export type DesktopRuntimeConnector = (config: HostConfig, store: AgentMuxAgentSessionStore) => Promise<DesktopRuntimeClient>
-const launches = new Map<string, Promise<void>>()
+const launches = new Map<string, Promise<ChildProcess>>()
 const originalCalls = new WeakMap<DesktopRuntimeClient, <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
   context: AgentMuxRpcCallContext) => Promise<AgentMuxRpcResult<M>>>()
 
@@ -29,31 +29,41 @@ async function ensureHost(storePath: string, socketPath: string): Promise<void> 
   if (liveness !== 'dead') return
   let launching = launches.get(socketPath)
   if (!launching) {
+    let child: ChildProcess | undefined
+    const retire = () => { if (launches.get(socketPath) === launching) launches.delete(socketPath) }
     launching = (async () => {
       await mkdir(dirname(storePath), { recursive: true, mode: 0o700 })
       const log = await open(join(dirname(storePath), 'agentmux-host.log'), 'a', 0o600)
       try {
-        const child = spawn(process.execPath, [join(import.meta.dirname, 'agentmux-host.js'), '--store', storePath], {
+        child = spawn(process.execPath, [join(import.meta.dirname, 'agentmux-host.js'), '--store', storePath], {
           detached: true, stdio: ['ignore', log.fd, log.fd],
           env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MOBILE_BUILD_DIRECTORY: join(import.meta.dirname, '../mobile') }
         })
+        child.once('exit', retire)
         await new Promise<void>((resolve, reject) => {
-          child.once('error', reject); child.once('spawn', resolve)
+          child!.on('error', error => {
+            // A failed kill/send can emit error while the original process is alive.
+            // Only failure to spawn has no child identity to retain.
+            if (child!.pid === undefined) { retire(); reject(error) }
+          })
+          child!.once('spawn', resolve)
         })
         child.unref()
-        // A request owns its ordinary RPC deadline. Unknown readiness is never a dead-owner fact.
-        const deadline = Date.now() + 10_000
-        while (Date.now() < deadline) {
-          if (await probeSocketLiveness(socketPath) === 'alive') return
-          if (child.exitCode !== null || child.signalCode !== null) throw new AgentMuxError('The semantic Host exited during startup; its log remains beside the original Store.', 'CONTROL_UNAVAILABLE')
-          await new Promise(resolve => setTimeout(resolve, 25))
-        }
-        throw new AgentMuxError('The semantic Host startup has not been confirmed; original Runs and workbench remain retained.', 'CONTROL_TIMEOUT')
+        return child
       } finally { await log.close() }
-    })().finally(() => { launches.delete(socketPath) })
+    })().catch(error => { if (child?.pid === undefined) retire(); throw error })
     launches.set(socketPath, launching)
   }
-  await launching
+  const child = await launching
+  // Each reader owns this wait, while the launch record belongs to the child until exit.
+  // A slow endpoint cannot turn a later observation into another owner launch.
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    if (await probeSocketLiveness(socketPath) === 'alive') return
+    if (child.exitCode !== null || child.signalCode !== null) throw new AgentMuxError('The semantic Host exited during startup; its log remains beside the original Store.', 'CONTROL_UNAVAILABLE')
+    await new Promise(resolve => setTimeout(resolve, 25))
+  }
+  throw new AgentMuxError('The semantic Host startup has not been confirmed; original Runs and workbench remain retained.', 'CONTROL_TIMEOUT')
 }
 
 /** Product connector: the Desktop never constructs a local semantic Core owner. */
@@ -67,20 +77,23 @@ export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = async (config
   if (!(store instanceof AgentMuxFileAgentSessionStore)) throw new AgentMuxError('The Desktop Host requires the original durable File Store.', 'INVALID_CONTROL_REQUEST')
   const socketPath = defaultAgentMuxControlSocketPath()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
-  const prepare = async () => await ensureHost(store.path, socketPath)
+  const prepare = async (signal?: AbortSignal) => {
+    signal?.throwIfAborted()
+    await observeRead(ensureHost(store.path, socketPath), signal)
+  }
   const port: AgentMuxHostedRpcPort = {
     call: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options?: { signal?: AbortSignal }) => {
-      await prepare(); return await rpc.call(method, params, options)
+      await prepare(options?.signal); return await rpc.call(method, params, options)
     },
     subscribe: async <M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>) => {
-      await prepare(); return await rpc.subscribe(method, params, handlers)
+      await prepare(handlers.signal); return await rpc.subscribe(method, params, handlers)
     }
   }
   // Return the connection projection while handshake/retry proceeds. The durable UI can hydrate
   // when the Host is unavailable; each actual operation still requires a confirmed identity.
   const client = await connectHostedAgentMux({ rpc: port, waitForReady: false, expectedStorePath: store.path })
   originalCalls.set(client, async (method, params, context) => {
-    await prepare()
+    await prepare(context.signal)
     const owner = client.runtimeOwnerIdentity()
     if (!owner || owner.availability !== 'connected') await client.readAgentSessions()
     const confirmed = client.runtimeOwnerIdentity()

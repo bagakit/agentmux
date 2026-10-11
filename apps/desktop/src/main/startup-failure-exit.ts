@@ -32,6 +32,8 @@ export interface StartupFailureExitIo {
   attemptId?: string
   appVersion?: string
   pid?: number
+  /** Private launch smoke reports machine diagnostics and never opens a user modal. */
+  privateSmoke?: boolean
   /** 结束进程。 */
   exit(code: number): void
 }
@@ -70,6 +72,7 @@ export interface StartupFailureHostApis {
   attemptId?: string
   appVersion?: string
   pid?: number
+  privateSmoke?: boolean
   /** `electron` 的 `app`，整个传进来（不摘 `exit`，见上）。 */
   app: { exit(code: number): void }
 }
@@ -92,6 +95,7 @@ export function startupFailureExitIo(host: StartupFailureHostApis): StartupFailu
     ...(host.attemptId ? { attemptId: host.attemptId } : {}),
     ...(host.appVersion ? { appVersion: host.appVersion } : {}),
     ...(host.pid !== undefined ? { pid: host.pid } : {}),
+    ...(host.privateSmoke ? { privateSmoke: true } : {}),
     exit: (code) => host.app.exit(code)
   }
 }
@@ -128,16 +132,25 @@ export async function reportStartupFailureAndExit(
     io.writeDiagnostic(diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError))
   }
   io.writeDiagnostic(error instanceof Error ? error.message : String(error))
-  try {
-    io.showErrorBox(notice.title, notice.body)
-  } catch (dialogError) {
-    // 无头/测试环境里弹不出对话框是正常的，不能因此吞掉真正的失败退出。
-    io.writeDiagnostic(dialogError instanceof Error ? dialogError.message : String(dialogError))
+  if (!io.privateSmoke) {
+    try {
+      io.showErrorBox(notice.title, notice.body)
+    } catch (dialogError) {
+      // 无头/测试环境里弹不出对话框是正常的，不能因此吞掉真正的失败退出。
+      io.writeDiagnostic(dialogError instanceof Error ? dialogError.message : String(dialogError))
+    }
   }
+  let cleanupTimer: ReturnType<typeof setTimeout> | undefined
   try {
-    await io.disposeOwners()
+    const cleanup = io.disposeOwners()
+    if (io.privateSmoke) await Promise.race([cleanup, new Promise<never>((_resolve, reject) => {
+      cleanupTimer = setTimeout(() => reject(new Error('Private launch smoke cleanup is unconfirmed; the original Host and Runs are retained.')), 1_000)
+    })])
+    else await cleanup
   } catch (cleanupError) {
     io.writeDiagnostic(cleanupError instanceof Error ? cleanupError.message : String(cleanupError))
+  } finally {
+    clearTimeout(cleanupTimer)
   }
   io.exit(1)
 }
