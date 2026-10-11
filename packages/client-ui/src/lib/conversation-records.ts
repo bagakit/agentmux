@@ -26,7 +26,7 @@ function describeReading(reading: ReturnType<typeof projectCoreReading>) {
       : record.author ? speakerOfUserMessage({ author: record.author }) : undefined
     return { ...record, sources: presentSources(record), coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
   }
-  return { timeline: reading.timeline, records: reading.records.map(describe), originalRecords: reading.originalRecords.map(describe) }
+  return { timeline: reading.timeline, records: reading.records.map(describe), originalRecords: reading.originalRecords.map(describe), inputs: reading.inputs }
 }
 
 export function projectConversationRecords(input: ConversationProjectionInput): ConversationRecord[] {

@@ -8,7 +8,7 @@ export type AgentSessionControlInput = AgentSessionControl
 export function useSessionUserMessages(control?: AgentSessionControlInput, options?: { enabled?: boolean }) {
   const view = useConversationView(api.conversation, control, (options?.enabled ?? true) && Boolean(control), control ? { identity: control.run.runId } : {})
   const page = view.reading?.historyPage ?? null
-  const messages = useMemo(() => view.reading?.records.flatMap(record => record.input ? [record.input] : []) ?? [], [view.reading])
+  const messages = useMemo(() => view.reading?.inputs ?? [], [view.reading])
   const sourceChanged = [view.error, view.observationError].some(error => ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((error as (Error & { code?: string }) | null)?.code ?? ''))
   const readForReveal = useCallback(async (source: AgentConversationRecordSource) => {
     const settled = await view.settle()

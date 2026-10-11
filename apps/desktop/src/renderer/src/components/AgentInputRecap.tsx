@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentSessionUserMessage } from '@agentmux/core'
+import { retainConversationInputs } from '@agentmux/core/conversation'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
@@ -11,7 +12,6 @@ import { markWindowOverlayDismissal } from './WindowOverlayHost'
 
 type InputReading = Pick<ReturnType<typeof useSessionUserMessages>, 'messages' | 'loading' | 'error' | 'observationError' | 'sourceChanged' | 'windowFrozen' | 'windowIncomplete'>
 function inputReading(reader: ReturnType<typeof useSessionUserMessages>): InputReading {
-  const ordered = reader.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
   const messages = reader.messages.slice(-6)
   return { messages, loading: reader.loading, error: reader.error, observationError: reader.observationError,
     sourceChanged: reader.sourceChanged, windowFrozen: reader.windowFrozen, windowIncomplete: reader.windowIncomplete }
@@ -32,10 +32,8 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
     if (!enabled || !frozen || request.bookmark || paused || reader.loading || !(reader.nativeHistoryPage || reader.error || reader.observationError)) return
     // Keep every already presented input. Only the original in-flight native batch
     // may fill unused slots; later captured requests cannot evict selected text.
-    const ids = new Set(frozen.messages.map(message => message.id)), slots = Math.max(0, 6 - frozen.messages.length)
-    const arrivals = slots ? reader.messages.filter(message => message.source.kind === 'native' && !ids.has(message.id)).slice(-slots) : []
-    const messages = slots ? [...frozen.messages, ...arrivals.slice(-slots)] : frozen.messages
-    if (messages !== frozen.messages) {
+    const messages = retainConversationInputs(frozen.messages, reader.messages.filter(message => message.source.kind === 'native'), 6)
+    if (messages.length !== frozen.messages.length) {
       const container = region.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? region.current?.closest<HTMLElement>('.agent-information-reader__reading')
       if (container) reflow.current = { container, anchor: captureReadingAnchor(container) }
     }

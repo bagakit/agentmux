@@ -26,13 +26,34 @@ export type AgentConversationRecord = {
   original: { kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'captured'; item: AgentTimelineItem }
 }
 
+/** One accepted input event, with its original submission/adoption records.
+ * The primary source remains the exact original reading/resource target. */
+export type ConversationInputEntity = AgentSessionUserMessage & {
+  hostId?: string
+  sourceHostId?: string | null
+  event: ConversationEvent
+  records: readonly ConversationSourceRecord[]
+}
+
+/** Retain a pinned reading selection, admitting only additional exact entities.
+ * Coalescence changes the representative, not the number of displayed inputs.
+ * This selects whole accepted entities; it never merges records or their bodies. */
+export function retainConversationInputs(previous: readonly ConversationInputEntity[], current: readonly ConversationInputEntity[], limit: number): ConversationInputEntity[] {
+  const sameScope = (a: ConversationInputEntity, b: ConversationInputEntity) => a.hostId !== undefined && a.sourceHostId != null &&
+    a.hostId === b.hostId && a.sourceHostId === b.sourceHostId && a.agentSessionId === b.agentSessionId
+  const represented = (next: ConversationInputEntity) => previous.some(prior => prior === next || sameScope(prior, next) &&
+    (prior.id === next.id || next.event.coalesces?.some(edge => edge.fromEventIds.includes(prior.event.id))))
+  const slots = Math.max(0, limit - previous.length)
+  return slots ? [...previous, ...current.filter(next => !represented(next)).slice(-slots)] : [...previous]
+}
+
 // The raw time remains in original; an invalid Date cannot acquire a position.
 function recordedTime(at: number | undefined): { recordedAt?: number } {
   return at !== undefined && Number.isFinite(at) && Math.abs(at) <= 8.64e15 ? { recordedAt: at } : {}
 }
 
 /** Source-record adapter over the one Core timeline. Existing row and input keys remain original. */
-export function projectConversationReading(input: ConversationProjectionInput & { routeHostId?: string }): { timeline: ReturnType<typeof projectConversationTimeline>; records: AgentConversationRecord[]; originalRecords: AgentConversationRecord[] } {
+export function projectConversationReading(input: ConversationProjectionInput & { routeHostId?: string }) {
   const timeline = projectConversationTimeline(input)
   return adaptConversationTimeline(input, timeline)
 }
@@ -101,7 +122,15 @@ function adaptConversationTimeline(input: ConversationProjectionInput & { routeH
       && projectedParts.every((part, index) => part === original.item.contentParts[index]) ? original.item.contentParts : projectedParts
     return adapt(record, contentParts, event)
   })
-  return { timeline, records: projected, originalRecords }
+  const inputEntities: ConversationInputEntity[] = projected.flatMap(record => {
+    const primary = record.input, event = record.event
+    if (!primary || !event) return []
+    return [{ ...primary, id: record.id,
+      author: event.author.kind === 'system' ? { kind: 'unknown' as const } : event.author,
+      ...(record.executionHostId ? { hostId: record.executionHostId } : {}), sourceHostId: record.sourceHostId ?? null,
+      event, records: record.records! }]
+  })
+  return { timeline, records: projected, originalRecords, inputs: inputEntities }
 }
 
 export function projectConversationRecords(input: ConversationProjectionInput & { routeHostId?: string }): AgentConversationRecord[] {
