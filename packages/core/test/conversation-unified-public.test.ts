@@ -125,7 +125,7 @@ it('window assembly rejects duplicate contributions, missing inventory and forei
   expect(original).toMatchObject({ kind: 'complete', snapshot: { window: { id: page.window.id, revision: page.window.revision } } })
 })
 
-it('a watched exact view survives unrelated reads and explicit disposal releases only its temporary window', async () => {
+it('a watched exact view survives unrelated reads, unsubscribe parks it, and explicit release frees only its temporary window', async () => {
   const f = await fixture(), page = await f.client.readAgentConversation(ref)
   const watch = await f.client.observeConversation({ ...ref, view: page.window.view! }, () => {})
   for (let count = 0; count < 24; count++) await f.client.readAgentConversation(ref)
@@ -133,6 +133,8 @@ it('a watched exact view survives unrelated reads and explicit disposal releases
   await expect(observedRead).resolves.toMatchObject({ window: { id: page.window.id } })
   const current = await observedRead
   watch.dispose()
+  await expect(f.client.readAgentConversation({ ...ref, view: current.window.view! })).resolves.toMatchObject({ window: { id: page.window.id } })
+  expect(await f.client.releaseConversationView({ ...ref, view: current.window.view! })).toMatchObject({ viewId: page.window.id, released: true })
   await expect(f.client.readConversationChanges({ ...ref, checkpoint: current.checkpoint, view: current.window.view! })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
   expect(await f.client.releaseConversationView({ ...ref, view: current.window.view! })).toMatchObject({ viewId: page.window.id, released: false })
   const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())

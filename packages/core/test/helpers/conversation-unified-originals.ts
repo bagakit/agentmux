@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import type { AgentTimelineItem, AgentSessionHistoryItem } from '../../src/types.js'
 import { savedQuestionEvent, savedQuestionReply, savedQuestionTool, savedQuestionResult } from './codex-saved-question.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-values.mjs'
@@ -7,7 +8,7 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-v
 /** Original bounded zhQg DTOs plus the maintained canonical Codex machine shapes.
  * Test-only inputs for the public/UI/connector joint read. No source association is inferred. */
 export function unifiedConversationOriginals() {
-  const fixture = JSON.parse(readFileSync(new URL('../../../../apps/desktop/test/fixtures/conversation-source-roles.json', import.meta.url), 'utf8')) as {
+  const fixture = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../../apps/desktop/test/fixtures/conversation-source-roles.json'), 'utf8')) as {
     scope: string; agentSessionId: string; source: { providerId: string; nativeSessionId: string }; native: AgentSessionHistoryItem; captured: AgentTimelineItem
   }
   const invocation = { source: fixture.source, subject: 'main' as const, scope: { kind: 'session' as const }, callId: 'original-protocol-call' }
