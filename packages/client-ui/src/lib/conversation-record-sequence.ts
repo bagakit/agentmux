@@ -20,7 +20,8 @@ export function projectConversationRecordSequence(
   items: readonly AgentSessionHistoryItem[], sourceKey: string,
   previous: ReadonlyMap<string, string> = new Map(), beforeRecordId?: string,
   insertions: readonly ConversationSequenceInsertion[] = [],
-  previousInsertions: ReadonlyMap<string, string> = new Map()
+  previousInsertions: ReadonlyMap<string, string> = new Map(),
+  nativeRoles?: ReadonlyMap<string, import('@agentmux/core/conversation').ConversationEvent['role']>
 ): { rows: ConversationRecordSequenceRow[]; groups: Map<string, string>; insertionGroups: Map<string, string> } {
   const groups = new Map<string, string>()
   const insertionGroups = new Map<string, string>()
@@ -82,7 +83,7 @@ export function projectConversationRecordSequence(
       flush()
       rows.push({ kind: 'boundary' })
     }
-    if (item.kind !== 'activity') {
+    if (nativeRoles ? nativeRoles.get(item.id) !== 'process' : item.kind !== 'activity') {
       flush()
       rows.push({ kind: 'record', item })
     } else {

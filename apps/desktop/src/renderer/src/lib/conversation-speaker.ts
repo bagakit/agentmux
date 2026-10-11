@@ -1,41 +1,16 @@
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
-import { speakerOfExternalAuthor, speakerOfUserMessage, AGENTMUX_SYSTEM_SPEAKER_ID, HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
+import { projectConversationRecords } from '@agentmux/core/conversation'
+import { speakerOfUserMessage, type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
-/**
- * 这一条条目或消息的说话人；不是一句话（机器上报）时返回 null。
- */
-export function speakerOf(
-  itemOrMessage: AgentTimelineItem | AgentSessionUserMessage
-): ConversationSpeaker | null {
-  if ('author' in itemOrMessage && typeof itemOrMessage.author === 'object') {
-    return speakerOfUserMessage(itemOrMessage)
-  }
-  const item = itemOrMessage as AgentTimelineItem
-  if (item.kind === 'system_message' && item.source === 'agentmux') {
-    return { role: 'system', id: AGENTMUX_SYSTEM_SPEAKER_ID }
-  }
-  if (item.authorExternal) return speakerOfExternalAuthor(item.authorExternal)
-  if (item.authorAgentSessionId) {
-    return { role: 'agent', id: item.authorAgentSessionId }
-  }
-  if (item.authorAgentSessionId === undefined && item.authorHuman === true) {
-    return { role: 'human', id: HUMAN_SPEAKER_ID }
-  }
-  if (item.source === 'user' || item.kind === 'user_message') {
-    return { role: 'unknown', id: UNKNOWN_SPEAKER_ID }
-  }
-  if (item.kind === 'assistant_message') {
-    return { role: 'agent', id: item.agentSessionId }
-  }
-  return null
+/** Legacy input callers retain their Core author; captured facts use the same Core timeline. */
+export function speakerOf(item: AgentTimelineItem | AgentSessionUserMessage): ConversationSpeaker | null {
+  if ('author' in item) return speakerOfUserMessage(item)
+  const record = projectConversationRecords({ agentSessionId: item.agentSessionId,
+    timeline: { agentSessionId: item.agentSessionId, revision: 0, items: [item] } })[0]
+  return record && record.role !== 'process' && record.role !== 'interaction' && record.author
+    ? record.author.kind === 'system' ? { role: 'system', id: record.author.providerId ?? 'agentmux' } : speakerOfUserMessage({ author: record.author }) : null
 }
-
-/**
- * 这一条是否属于对话体（turn register）而不是机器上报行。
- */
-export function isConversationTurn(
-  itemOrMessage: AgentTimelineItem | AgentSessionUserMessage
-): boolean {
-  return speakerOf(itemOrMessage) !== null
+export function isConversationTurn(item: AgentTimelineItem | AgentSessionUserMessage): boolean {
+  return speakerOf(item) !== null
 }

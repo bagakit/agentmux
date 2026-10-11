@@ -1,23 +1,25 @@
-import type { AgentConversationRecord, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
-import { projectConversationRecords as projectCoreRecords } from '@agentmux/core/conversation'
+import type { AgentConversationRecord } from '@agentmux/core'
+import type { ConversationProjectionInput } from '@agentmux/core/conversation'
+import { projectConversationReading as projectCoreReading } from '@agentmux/core/conversation'
 import { speakerOfUserMessage, type ConversationSpeaker } from './conversation-speaker.js'
 import { describeConversationInputSource } from './conversation-input-source.js'
 
 export type ConversationRecordSource = AgentConversationRecord['source']
-export type ConversationRecord = AgentConversationRecord & { speaker?: ConversationSpeaker }
+export type ConversationRecord = AgentConversationRecord & { speaker?: ConversationSpeaker; presentationKey?: string; coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage'] }
 
 /** The Core owns source-qualified records; this adapter only supplies client speaker presentation. */
-export function projectConversationRecords(input: {
-  agentSessionId: string
-  executionHostId?: string | undefined
-  historyPage?: AgentSessionHistoryPage | undefined
-  timeline?: AgentTimelineSnapshot | undefined
-}): ConversationRecord[] {
-  return projectCoreRecords(input).map(record => {
+export function projectConversationReading(input: ConversationProjectionInput) {
+  const reading = projectCoreReading({ ...input, executionHostId: undefined, ...(input.executionHostId ? { routeHostId: input.executionHostId } : {}) })
+  const describe = (record: AgentConversationRecord): ConversationRecord => {
     const speaker = record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId ?? 'agentmux' }
       : record.author ? speakerOfUserMessage({ author: record.author }) : undefined
-    return { ...record, ...(speaker ? { speaker } : {}) }
-  })
+    return { ...record, coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
+  }
+  return { timeline: reading.timeline, records: reading.records.map(describe), originalRecords: reading.originalRecords.map(describe) }
+}
+
+export function projectConversationRecords(input: ConversationProjectionInput): ConversationRecord[] {
+  return projectConversationReading(input).records
 }
 
 export function describeConversationRecordSource(record: ConversationRecord): { caption: string; title: string } {

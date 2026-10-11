@@ -119,10 +119,13 @@ function Pending({ state }: { state: ReturnType<typeof useLandmarks> }) {
       {state.conflict ? <button type="button" className="small-button" disabled={state.busy} onClick={() => { void state.refreshAfterConflict() }}>{state.conflict === 'missing' ? 'Review missing point' : 'Refresh after conflict'}</button> : null}
     </div> : null}</>
 }
-function SaveConversationLandmarkInner({ reference, active = true }: { reference: ConversationItemRef; active?: boolean }) {
-  const state = useLandmarks(reference, active, conversationLandmarkRecordKey(reference)), field = useId(), [name, setName] = useState(() => { const input = retainedInput(conversationLandmarkRecordKey(reference)); return input?.change.kind === 'create' ? input.change.point.name : '' }), pointId = useRef<string | null>(null)
+function SaveConversationLandmarkInner({ reference, routeHostId, active = true }: { reference: ConversationItemRef; routeHostId?: string | undefined; active?: boolean }) {
+  const catalog = { hostId: routeHostId ?? reference.hostId, agentSessionId: reference.agentSessionId }
+  const newKey = conversationLandmarkRecordKey(reference, routeHostId), oldKey = conversationLandmarkRecordKey(reference), old = retainedInput(oldKey)
+  const key = retainedInput(newKey) ? newKey : old?.hostId === catalog.hostId && old.agentSessionId === catalog.agentSessionId ? oldKey : newKey
+  const state = useLandmarks(catalog, active, key), field = useId(), [name, setName] = useState(() => { const input = retainedInput(key); return input?.change.kind === 'create' ? input.change.point.name : '' }), pointId = useRef<string | null>(null)
   return <LandmarkPopover title="Name reading point" trigger={<BookmarkIcon size={12}/>} active={active} onOpen={() => { const retained = state.restoreRetained(); if (retained?.change.kind === 'create') { setName(retained.change.point.name); pointId.current = retained.change.point.id } else if (state.beginNewConfirmedIntent()) { setName(''); pointId.current = null } }}>
-    <form onSubmit={event => { event.preventDefault(); if (!name.trim() || state.intent || state.confirmed) return; pointId.current ??= mintObjectId(); void state.apply({ kind: 'create', point: { id: pointId.current, name, reference } }) }}
+    <form onSubmit={event => { event.preventDefault(); if (!name.trim() || state.intent || state.confirmed) return; pointId.current ??= mintObjectId(); void state.apply({ kind: 'create', point: { id: pointId.current, name, reference, ...(routeHostId ? { routeHostId } : {}) } }) }}
       onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
       <label htmlFor={field}>Name</label><input id={field} value={name} onChange={event => setName(event.target.value)} readOnly={state.busy || !!state.intent || !!state.confirmed} autoComplete="off" placeholder="A place to return to"/>
       <p className="conversation-landmark__source">{reference.source.kind === 'native' ? `${reference.source.providerId} · Native record` : 'Captured record'} · <code>{reference.source.recordId}</code></p>
@@ -131,7 +134,7 @@ function SaveConversationLandmarkInner({ reference, active = true }: { reference
     </form>
   </LandmarkPopover>
 }
-export const renderConversationLandmarkAction = (reference: ConversationItemRef, active: boolean) => <SaveConversationLandmark key={JSON.stringify(reference)} reference={reference} active={active}/>
+export const renderConversationLandmarkAction = (reference: ConversationItemRef, active: boolean, routeHostId?: string) => <SaveConversationLandmark key={JSON.stringify([routeHostId,reference])} reference={reference} routeHostId={routeHostId} active={active}/>
 
 function ConversationLandmarkListInner({ reference, reveal, active }: { reference: ConversationRef; reveal: RevealConversationItem; active: boolean }) {
   const state = useLandmarks(reference, active), [edit, setEdit] = useState<{ id: string; name: string } | null>(null), [navigation, setNavigation] = useState<string | null>(null)
@@ -141,7 +144,7 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
   async function openPoint(point: ConversationLandmark) {
     const generation = ++request.current, originalSource = source
     setNavigation(null)
-    const result = await reveal(point.reference)
+    const result = await reveal(point.reference, point.routeHostId ?? reference.hostId)
     if (generation !== request.current || currentSource.current !== originalSource || !active) return
     if (result.kind === 'located') setNavigation(`Located ${point.name}.`)
     else if (result.kind === 'unavailable') setNavigation(result.message)
@@ -166,8 +169,8 @@ function ConversationLandmarkListInner({ reference, reveal, active }: { referenc
   </LandmarkPopover>
 }
 
-export function SaveConversationLandmark(props: { reference: ConversationItemRef; active?: boolean }) {
-  return <SaveConversationLandmarkInner key={JSON.stringify(props.reference)} {...props}/>
+export function SaveConversationLandmark(props: { reference: ConversationItemRef; routeHostId?: string | undefined; active?: boolean }) {
+  return <SaveConversationLandmarkInner key={JSON.stringify([props.routeHostId,props.reference])} {...props}/>
 }
 export function ConversationLandmarkList(props: { reference: ConversationRef; reveal: RevealConversationItem; active: boolean }) {
   return <ConversationLandmarkListInner key={JSON.stringify([props.reference.hostId, props.reference.agentSessionId])} {...props}/>

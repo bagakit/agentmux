@@ -38,7 +38,7 @@ export type ConversationRecordInsertion = ConversationSequenceInsertion & {
 
 /** Source order only. Group identity remembers IDs, never another copy of record content. */
 export function ConversationRecordSequence({
-  items, sourceKey, renderRecord, renderProcess, recordBoundary, insertions = [], nativeSourceKey
+  items, sourceKey, renderRecord, renderProcess, recordBoundary, insertions = [], nativeSourceKey, nativeRoles, locatedNativeId, locatedInsertionKey
 }: {
   items: readonly AgentSessionHistoryItem[]
   sourceKey: string
@@ -47,10 +47,14 @@ export function ConversationRecordSequence({
   recordBoundary?: ConversationRecordBoundary
   insertions?: readonly ConversationRecordInsertion[]
   nativeSourceKey?: string
+  locatedNativeId?: string | undefined
+  locatedInsertionKey?: string | undefined
+  nativeRoles?: ReadonlyMap<string, import('@agentmux/core/conversation').ConversationEvent['role']>
 }) {
   const committed = useRef<{ source: string; groups: Map<string, string>; insertionGroups: Map<string, string>; positions: Omit<ConversationRecordInsertion, 'content'>[] }>({
     source: sourceKey, groups: new Map(), insertionGroups: new Map(), positions: []
   })
+  const insertionNodes = useRef(new Map<string, HTMLDivElement>())
   const groupNodes = useRef(new Map<string, HTMLDivElement>())
   const [, selectionChanged] = useState(0)
   const [disclosure, setDisclosure] = useState<{ source: string; groups: ReadonlyMap<string, boolean>; steps: ReadonlyMap<string, boolean> }>({ source: sourceKey, groups: new Map(), steps: new Map() })
@@ -77,10 +81,10 @@ export function ConversationRecordSequence({
       onStepsPresented: presented => disclose(presented.map(id => choiceKey(kind, id)), false, 'steps', true) }
   }
   let acceptedInsertions = insertions
-  let projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId, insertions, previousInsertions)
+  let projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId, insertions, previousInsertions, nativeRoles)
   // An arriving cross-source input can split an expanded process parent. Defer only
   // its placement metadata while a Range uses that parent; bodies stay at their owner.
-  const document = groupNodes.current.values().next().value?.ownerDocument
+  const document = groupNodes.current.values().next().value?.ownerDocument ?? insertionNodes.current.values().next().value?.ownerDocument
   const selection = document?.defaultView?.getSelection()
   let held = false
   const splitGroups = new Set([...previous].flatMap(([record, group]) => projection.groups.has(record) && projection.groups.get(record) !== group ? [group] : []))
@@ -90,15 +94,23 @@ export function ConversationRecordSequence({
     try { if (selection.getRangeAt(0).intersectsNode(node)) { held = true; break } }
     catch { held = true; break }
   }
+  if (selection && !selection.isCollapsed && selection.rangeCount) {
+    const incoming = new Map(insertions.map(entry => [entry.key, entry]))
+    for (const position of committed.current.positions) {
+      const next = incoming.get(position.key), node = insertionNodes.current.get(position.key)
+      if (!node || next && next.beforeRecordId === position.beforeRecordId && next.role === position.role) continue
+      try { if (selection.getRangeAt(0).intersectsNode(node)) { held = true; break } } catch { held = true; break }
+    }
+  }
   if (held) {
     const incoming = new Map(insertions.map(entry => [entry.key, entry]))
     acceptedInsertions = committed.current.positions.flatMap(position => {
       const entry = incoming.get(position.key)
       if (!entry) return []
       const { beforeRecordId: _, ...rest } = entry
-      return [{ ...rest, ...(position.beforeRecordId === undefined ? {} : { beforeRecordId: position.beforeRecordId }) }]
+      return [{ ...rest, ...(position.role ? { role: position.role } : {}), ...(position.beforeRecordId === undefined ? {} : { beforeRecordId: position.beforeRecordId }) }]
     })
-    projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId, acceptedInsertions, previousInsertions)
+    projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId, acceptedInsertions, previousInsertions, nativeRoles)
   }
   useEffect(() => {
     if (!held || !document) return
@@ -106,6 +118,20 @@ export function ConversationRecordSequence({
     document.addEventListener('selectionchange', update)
     return () => document.removeEventListener('selectionchange', update)
   }, [held, document])
+  const located = useRef('')
+  useEffect(() => {
+    const key = JSON.stringify([sourceKey, locatedNativeId, locatedInsertionKey])
+    if (key === located.current) return
+    const row = projection.rows.find(row => row.kind === 'process' && (row.items.some(item => item.id === locatedNativeId)
+      || row.entries.some(entry => entry.kind === 'insertion' && entry.insertion.key === locatedInsertionKey)))
+    if (!row || row.kind !== 'process') return
+    located.current = key
+    const keys = row.entries.flatMap(entry => entry.kind === 'native' ? [choiceKey('native', entry.item.id)]
+      : (insertionByKey.get(entry.insertion.key)?.recordIds ?? []).map(id => choiceKey('insertion', id)))
+    disclose(keys, true, 'groups')
+    if (locatedNativeId) disclose([choiceKey('native', locatedNativeId)], true, 'steps')
+    if (locatedInsertionKey) disclose((insertionByKey.get(locatedInsertionKey)?.recordIds ?? []).map(id => choiceKey('insertion', id)), true, 'steps')
+  }, [locatedNativeId, locatedInsertionKey, sourceKey, items, insertions])
   const metrics = projectConversationMetrics(items)
   const renderOne = (item: AgentSessionHistoryItem, wrapBody?: (body: ReactNode) => ReactNode, showDiagnostic = true, showMetrics = true) => <Fragment key={item.id}>
     {renderRecord(item, wrapBody)}
@@ -113,7 +139,7 @@ export function ConversationRecordSequence({
     {showDiagnostic && item.metricsDiagnostic ? <p className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null}
   </Fragment>
   useLayoutEffect(() => { committed.current = { source: sourceKey, groups: projection.groups, insertionGroups: projection.insertionGroups,
-    positions: acceptedInsertions.map(({ key, beforeRecordId }) => ({ key, ...(beforeRecordId === undefined ? {} : { beforeRecordId }) })) } })
+    positions: acceptedInsertions.map(({ key, beforeRecordId, role }) => ({ key, ...(role ? { role } : {}), ...(beforeRecordId === undefined ? {} : { beforeRecordId }) })) } })
   useLayoutEffect(() => {
     setDisclosure(previous => {
       if (previous.source !== sourceKey) return { source: sourceKey, groups: new Map(), steps: new Map() }
@@ -125,7 +151,7 @@ export function ConversationRecordSequence({
   const insertionByKey = new Map(acceptedInsertions.map(entry => [entry.key, entry]))
   const renderInserted = (key: string) => {
     const entry = insertionByKey.get(key)!
-    return <Fragment key={JSON.stringify(['insertion', key])}>{typeof entry.content === 'function' ? entry.content(disclosureFor(entry.recordIds ?? [], 'insertion')) : entry.content}</Fragment>
+    return <div key={JSON.stringify(['insertion', key])} data-conversation-sequence-key={key} ref={node => { if (node) insertionNodes.current.set(key, node); else insertionNodes.current.delete(key) }}>{typeof entry.content === 'function' ? entry.content(disclosureFor(entry.recordIds ?? [], 'insertion')) : entry.content}</div>
   }
   return <>{held ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}{projection.rows.map(row =>
     row.kind === 'record' ? renderOne(row.item)

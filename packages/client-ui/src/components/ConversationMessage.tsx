@@ -48,6 +48,8 @@ export type ConversationMessageProps = {
   onCopy?: (text: string) => Promise<boolean>
   messageId?: string
   speaker?: ConversationSpeaker
+  /** Read-only identity/role from the one Core timeline; never grants control. */
+  conversationEvent?: Pick<import('@agentmux/core/conversation').ConversationEvent, 'id' | 'revision' | 'role' | 'author'>
   /** Current conversation identity, supplied by its host; never inferred from a name. */
   conversationSessionId?: string
   /** Location metadata for any original speech, independent of user input semantics. */
@@ -133,7 +135,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   active = true, compact = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationEvent, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -167,9 +169,9 @@ export function ConversationMessage({
   const systemSummary = isSystemContext ? parts.find(part => part.kind === 'text')?.text.slice(0, 240).replace(/\s+/gu, ' ').trim() : undefined
   const isIncoming = speaker?.role === 'human' || speaker?.role === 'external' || isPeerAgent
   const inputMarkdown = isIncoming || recordedIdentity && speaker?.role === 'unknown'
-  const files = useMemo(() => speaker?.role === 'agent' && !isPeerAgent && !compact && messagePhase !== 'progress' && status === 'complete' && openWorkspaceFile
+  const files = useMemo(() => (speaker?.role === 'agent' || conversationEvent?.role === 'observation') && !isPeerAgent && !compact && messagePhase !== 'progress' && status === 'complete' && openWorkspaceFile
     ? conversationFiles(parts, workspaceRoot, homeDir) : [],
-  [speaker?.role, isPeerAgent, compact, messagePhase, status, openWorkspaceFile, content, workspaceRoot, homeDir])
+  [speaker?.role, conversationEvent?.role, isPeerAgent, compact, messagePhase, status, openWorkspaceFile, content, workspaceRoot, homeDir])
   const firstText = parts[0]?.kind === 'text' ? sessionHistoryTextForReading(parts[0]) : undefined
   const prefix = useMemo(() => !hasQuestionAnswers && inputMarkdown && firstText !== undefined ? parseAgentMuxMessagePrefix(firstText) : null,
     [hasQuestionAnswers, inputMarkdown, firstText])
@@ -339,6 +341,10 @@ export function ConversationMessage({
     <div
       className="log-turn"
       data-compact={compact || undefined}
+      data-conversation-event-id={conversationEvent?.id}
+      data-conversation-event-revision={conversationEvent?.revision}
+      data-conversation-role={conversationEvent?.role}
+      data-conversation-author={conversationEvent ? JSON.stringify(conversationEvent.author) : undefined}
       data-message-phase={messagePhase}
       data-recorded-identity={recordedIdentity || undefined}
       data-message-id={messageId || undefined}

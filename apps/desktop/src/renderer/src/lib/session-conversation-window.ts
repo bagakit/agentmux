@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
+import { readCapturedConversationPage, retainCapturedItems } from '@agentmux/client-ui/captured-conversation-page'
 import { api } from './api'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import type { SessionHistoryReference } from '../../../shared/contracts'
@@ -190,7 +191,7 @@ export function restoreConversationAnchor(viewport: HTMLElement, anchor: Reading
 }
 
 function sameSource(a: AgentSessionHistoryPage, b: AgentSessionHistoryPage): boolean {
-  return a.agentSessionId === b.agentSessionId && a.source.providerId === b.source.providerId && a.source.nativeSessionId === b.source.nativeSessionId
+  return a.agentSessionId === b.agentSessionId && a.sourceHostId === b.sourceHostId && a.source.providerId === b.source.providerId && a.source.nativeSessionId === b.source.nativeSessionId
 }
 function recordBytes(item: AgentSessionHistoryPage['items'][number]): number { return JSON.stringify(item).length * 2 }
 function position(page: AgentSessionHistoryPage, cursor: string | null, limit = PAGE_LIMIT): PagePosition {
@@ -242,24 +243,82 @@ function needsTimeCoverage(page: AgentSessionHistoryPage, duration: number): boo
 
 export function useSessionConversationWindow(reading: ConversationReading | undefined, recent: AgentSessionHistoryPage | null,
   beforeCommit: (page: AgentSessionHistoryPage, intent: ConversationReadingIntent, currentOriginal?: AgentSessionHistoryPage, projection?: ConversationWindowProjection) => boolean,
-  contextItems?: AgentSessionHistoryPage['items'], coverageDuration = 24 * 3_600_000) {
+  contextItems?: AgentSessionHistoryPage['items'], coverageDuration = 24 * 3_600_000, currentTimeline?: AgentTimelineSnapshot, beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot) => boolean) {
   const currentContext = useMemo(() => recent && contextItems ? { ...recent, items: contextItems } : recent, [recent, contextItems])
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
   const bindingKey = reading?.nativeSourceFacts ? nativeBindingKey(reading.nativeSourceFacts) : ''
-  const live = useRef({ key, bindingKey, reading, recent, currentContext, beforeCommit, coverageDuration }); live.current = { key, bindingKey, reading, recent, currentContext, beforeCommit, coverageDuration }
+  const live = useRef({ key, bindingKey, reading, recent, currentContext, beforeCommit, coverageDuration, currentTimeline, beforeCapturedCommit }); live.current = { key, bindingKey, reading, recent, currentContext, beforeCommit, coverageDuration, currentTimeline, beforeCapturedCommit }
   const [state, setState] = useState<{ key: string; window: ReadingWindow | null; loading: boolean; error: ReadingIssue | null; held?: boolean }>({ key, window: null, loading: false, error: null })
-  const [captured, setCaptured] = useState<{ key: string; items: AgentTimelineItem[]; error: string | null } | null>(null)
+  type CapturedWindow = { key: string; snapshot: AgentTimelineSnapshot; cursor?: string | null | undefined; revision?: string; error: string | null; loading: boolean; historical: boolean; held?: boolean }
+  const [captured, setCaptured] = useState<CapturedWindow | null>(null)
+  const capturedRef = useRef(captured); capturedRef.current = captured
+  const capturedGeneration = useRef(0)
+  async function readCaptured(earlier: boolean): Promise<void> {
+    const start = live.current
+    if (!start.reading?.enabled) return
+    const previous = capturedRef.current?.key === start.key ? capturedRef.current : null
+    if (earlier && (previous?.loading || previous?.cursor === null)) return
+    const generation = ++capturedGeneration.current
+    const original = previous?.snapshot ?? start.currentTimeline
+    const seed = original && !previous?.historical && start.currentTimeline ? { ...original, items: retainCapturedItems(original.items, start.currentTimeline.items) } : original ?? { agentSessionId: start.reading.reference.agentSessionId, revision: 0, items: [] }
+    const base = earlier ? seed.items : start.currentTimeline?.items ?? seed.items
+    let cursor = earlier ? previous?.cursor ?? undefined : undefined
+    const current = () => live.current.key === start.key && live.current.reading?.enabled === true && capturedGeneration.current === generation
+    const update = (next: CapturedWindow) => { if (current()) { capturedRef.current = next; setCaptured(next) } }
+    update({ key: start.key, snapshot: seed, cursor: previous?.cursor, error: null, loading: true, historical: previous?.historical ?? false })
+    try {
+      let page: Awaited<ReturnType<typeof readCapturedConversationPage>>
+      let incoming: AgentTimelineItem[] = []
+      const known = new Set(base.map(item => item.id))
+      let scanned = 0
+      do {
+        page = await readCapturedConversationPage(({ hostId: _host, agentSessionId: _session, ...input }) => api.sessions.readHistory(start.reading!.reference, input), {
+          hostId: start.reading.reference.hostId, agentSessionId: start.reading.reference.agentSessionId, limit: PAGE_LIMIT, ...(cursor ? { cursor } : {}) }, current)
+        if (!current()) return
+        if (original?.sourceHostId && original.sourceHostId !== page.snapshot.sourceHostId) throw new Error('The original captured source Host changed. Its reading and cursor are retained.')
+        if (earlier && previous?.revision && previous.revision !== page.revision) throw new Error('Captured source changed. The original reading and cursor are retained; read Current to refresh.')
+        incoming = retainCapturedItems(page.snapshot.items, incoming)
+        scanned += page.snapshot.items.length
+        cursor = page.nextCursor ?? undefined
+      } while (earlier && page.nextCursor && !incoming.some(item => !known.has(item.id)) && scanned <= RECORD_COUNT)
+      const currentAhead = start.currentTimeline?.stream && page.snapshot.stream && start.currentTimeline.stream.epoch === page.snapshot.stream.epoch && start.currentTimeline.stream.sequence > page.snapshot.stream.sequence
+      const items = earlier || currentAhead ? retainCapturedItems(incoming.length ? incoming : page.snapshot.items, base) : retainCapturedItems(base, page.snapshot.items)
+      const retained = earlier ? items.slice(0, RECORD_COUNT) : items.slice(-RECORD_COUNT)
+      if (JSON.stringify(retained).length * 2 > PAGE_BYTES) throw new Error(byteError)
+      const snapshot = { ...page.snapshot, items: retained }
+      if (start.beforeCapturedCommit?.(snapshot) === false) throw new Error('The original captured selection or reading anchor is retained. Release the selection and retry this original page.')
+      update({ key: start.key, snapshot, cursor: page.nextCursor, revision: page.revision, error: null, loading: false, historical: earlier })
+    } catch (cause) { update({ key: start.key, snapshot: seed, cursor: previous?.cursor, ...(previous?.revision ? { revision: previous.revision } : {}), error: presentError(cause), loading: false, historical: previous?.historical ?? false }) }
+  }
   useEffect(() => {
-    if (!reading?.enabled || !reading.readCaptured) return
-    let active = true
-    void api.sessions.timeline(reading.reference).then(snapshot => {
-      if (active && live.current.key === key && live.current.reading?.enabled) setCaptured({ key, items: snapshot.items, error: null })
-    }).catch(cause => {
-      if (active && live.current.key === key && live.current.reading?.enabled) setCaptured(previous => ({
-        key, items: previous?.key === key ? previous.items : [], error: presentError(cause) }))
-    })
-    return () => { active = false }
+    if (!reading?.enabled) { capturedGeneration.current++; return }
+    if (reading.readCaptured) void readCaptured(false)
+    return () => { capturedGeneration.current++; const pending = capturedRef.current; if (pending?.key === key && pending.loading) { const next = { ...pending, loading: false }; capturedRef.current = next; setCaptured(next) } }
   }, [key, reading?.enabled, reading?.readCaptured])
+  const [capturedSelection, capturedSelectionChanged] = useState(0)
+  const observedCaptured = useRef<AgentTimelineSnapshot | undefined>(undefined)
+  useLayoutEffect(() => {
+    if (!reading?.enabled || !currentTimeline || currentTimeline.agentSessionId !== reading.reference.agentSessionId) return
+    const previous = capturedRef.current?.key === key ? capturedRef.current : null
+    if (previous?.historical || previous?.loading || observedCaptured.current === currentTimeline && !previous?.held) return
+    const snapshot = { ...currentTimeline, items: retainCapturedItems(previous?.snapshot.items ?? [], currentTimeline.items).slice(-RECORD_COUNT) }
+    if (beforeCapturedCommit?.(snapshot) === false) {
+      if (!previous || previous.held) return
+      const next = { ...previous, held: true, error: 'Selected original captured reading is retained. Release the selection to present newer records.' }
+      capturedRef.current = next; setCaptured(next); return
+    }
+    observedCaptured.current = currentTimeline
+    const next: CapturedWindow = { key, snapshot, cursor: previous?.cursor, ...(previous?.revision ? { revision: previous.revision } : {}),
+      loading: false, historical: false, error: previous?.held ? null : previous?.error ?? null }
+    capturedRef.current = next; setCaptured(next)
+  }, [key, currentTimeline, reading?.enabled, capturedSelection])
+  useEffect(() => {
+    if (!captured?.held) return
+    const update = () => capturedSelectionChanged(value => value + 1)
+    document.addEventListener('selectionchange', update)
+    return () => document.removeEventListener('selectionchange', update)
+  }, [captured?.held])
+  const capturedSnapshot = captured?.key === key ? captured.snapshot : undefined
   const stateRef = useRef(state); stateRef.current = state
   type ReadDirection = 'current' | 'seed' | 'earlier' | 'newer' | 'coverage'
   const generation = useRef(0), pending = useRef(false), retry = useRef<{ direction: ReadDirection; source?: AgentSessionHistorySource }>({ direction: 'seed' })
@@ -515,17 +574,17 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const currentSource = handleSource(reading?.nativeSourceFacts?.nativeHandle)
   const previousSource = Boolean(page && currentSource && !matchesSource(page.source, currentSource))
   useEffect(() => () => { generation.current++; pending.current = false; coverageDemand.current = false }, [])
-  return { page, captured: captured?.key === key ? captured.items : null, capturedError: captured?.key === key ? captured.error : null,
-    historical: Boolean(window && window.parts[0]!.index > 0) || previousSource || Boolean(window && window.bindingKey !== bindingKey) || Boolean(keepContext),
+  return { page, capturedSnapshot, captured: capturedSnapshot?.items ?? null, capturedLoading: captured?.key === key && captured.loading, capturedHasMore: captured?.key !== key || captured?.cursor !== null, readCapturedEarlier: () => void readCaptured(true), capturedError: captured?.key === key ? captured.error : null,
+    historical: Boolean(captured?.key === key && captured.historical) || Boolean(window && window.parts[0]!.index > 0) || previousSource || Boolean(window && window.bindingKey !== bindingKey) || Boolean(keepContext),
     hasEarlierNavigation: Boolean(window?.boundary) || previousSource || Boolean(keepContext),
     previousSource, coverageLoading: state.key === key && state.loading && retry.current.direction === 'coverage', loading: state.key === key && state.loading, error: state.key === key ? state.error?.message ?? null : null,
-    held: state.key === key && state.held === true,
+    held: state.key === key && state.held === true || captured?.key === key && captured.held === true,
     loadingEarlier: state.key === key && state.loading && retry.current.direction === 'earlier',
     historyBoundary: window?.boundary?.confirmed && window.records.has(window.boundary.recordId) ? { beforeRecordId: window.boundary.recordId } : null,
     // Committed gap/withheld state, distinct from a transient recent-vs-rendered mismatch.
-    currentOutside: Boolean(window?.newerOutside),
-    newerOutside, hasNewer: Boolean(window && window.parts[0]!.index > 0), hasMore: Boolean(page?.nextCursor),
-    readEarlier: () => void read('earlier'), readNewer: () => void read('newer'), retry: () => { automaticSeedBlocked.current = false; if (retry.current.direction === 'coverage') coverageDemand.current = true; void read(retry.current.direction, retry.current.source, true) },
-    showLatestAutomatically, showCurrent: () => showCurrent(), showCurrentSource: () => showCurrent(handleSource(live.current.reading?.nativeSourceFacts?.nativeHandle)),
+    currentOutside: Boolean(window?.newerOutside || captured?.key === key && captured.held),
+    newerOutside: newerOutside || captured?.key === key && captured.held === true, hasNewer: Boolean(window && window.parts[0]!.index > 0), hasMore: Boolean(page?.nextCursor),
+    readEarlier: () => { if (page?.nextCursor) void read('earlier'); void readCaptured(true) }, readNewer: () => void read('newer'), retry: () => { automaticSeedBlocked.current = false; if (retry.current.direction === 'coverage') coverageDemand.current = true; void read(retry.current.direction, retry.current.source, true) },
+    showLatestAutomatically, showCurrent: () => { void readCaptured(false); showCurrent() }, showCurrentSource: () => showCurrent(handleSource(live.current.reading?.nativeSourceFacts?.nativeHandle)),
     showPreviousSource: () => showCurrent(handleSource(live.current.reading?.nativeSourceFacts?.nativeConfirmation?.previousNativeHandle)) }
 }

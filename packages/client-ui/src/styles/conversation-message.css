@@ -383,3 +383,7 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+
+/* Source coverage is one quiet, local reading disclosure, including on narrow surfaces. */
+.conversation-coverage { overflow-wrap: anywhere; }
+.conversation-coverage code { white-space: normal; overflow-wrap: anywhere; }
