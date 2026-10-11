@@ -11,11 +11,7 @@ import type { SplitDirection } from '@agentmux/layout'
 import { formatSessionAddress, formatTabAddress } from '../lib/agent-address'
 import { formatPathsForCopy } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
-import {
-  workbenchSplitDirectionIcon,
-  workbenchSplitMenuIcon,
-  workbenchSplitMenuKey
-} from './workbench-split-menu-icons'
+import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
@@ -282,19 +278,11 @@ export function WorkbenchTabContextMenu({
             </ContextMenu.SubTrigger>
             <DocumentOverlayPortal component={ContextMenu.Portal}>
               <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
-                {WORKBENCH_TAB_SPLIT_ACTIONS.map((action) => {
-                  const Icon = workbenchSplitDirectionIcon(action.direction)
-                  return (
-                    <ContextMenu.Item
-                      key={action.direction}
-                      className="tab-context-menu__item"
-                      onSelect={() => onMoveToNewGroup(action.direction)}
-                    >
-                      <Icon size={14} />
-                      <span>New Group {action.direction[0]!.toUpperCase() + action.direction.slice(1)}</span>
-                    </ContextMenu.Item>
-                  )
-                })}
+                <WorkbenchLayoutMenuRows splitLabel="Move tab" entries={WORKBENCH_TAB_SPLIT_ACTIONS.map(action => ({
+                  ...action, kind: 'split' as const,
+                  label: `Move Tab to New Group ${action.direction[0]!.toUpperCase() + action.direction.slice(1)}`,
+                  onSelect: () => onMoveToNewGroup(action.direction)
+                }))} Item={ContextMenu.Item} />
               </ContextMenu.SubContent>
             </DocumentOverlayPortal>
           </ContextMenu.Sub>
@@ -317,19 +305,7 @@ export function WorkbenchTabContextMenu({
               </ContextMenu.SubTrigger>
               <DocumentOverlayPortal component={ContextMenu.Portal}>
                 <ContextMenu.SubContent className="tab-context-menu" collisionPadding={8} sideOffset={4}>
-                  {layoutEntries.map((entry, index) => {
-                    const Icon = workbenchSplitMenuIcon(entry)
-                    return (
-                      <ContextMenu.Item
-                        key={workbenchSplitMenuKey(entry, index)}
-                        className="tab-context-menu__item"
-                        onSelect={entry.onSelect}
-                      >
-                        <Icon size={14} />
-                        <span>{entry.label}</span>
-                      </ContextMenu.Item>
-                    )
-                  })}
+                  <WorkbenchLayoutMenuRows entries={layoutEntries} Item={ContextMenu.Item} />
                 </ContextMenu.SubContent>
               </DocumentOverlayPortal>
             </ContextMenu.Sub>

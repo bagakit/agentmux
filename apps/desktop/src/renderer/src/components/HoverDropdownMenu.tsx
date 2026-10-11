@@ -47,7 +47,9 @@ function useItemPointerHandlers({ disabled, onPointerMove, onPointerLeave, onPoi
       event.preventDefault()
       // The same leave reaches Content already cancelled for Radix focus. A direct exit
       // therefore asks the original disclosure owner to close; crossing rows/gaps does not.
-      if (!(event.relatedTarget && (event.relatedTarget as Node).nodeType && menu.content.current?.contains(event.relatedTarget as Node))) {
+      const target = event.relatedTarget as Node | null
+      const currentMenu = event.currentTarget.closest('[role="menu"]')
+      if (!(target?.nodeType && (menu.content.current?.contains(target) || currentMenu?.contains(target)))) {
         menu.leave(event)
       }
     },
@@ -73,6 +75,60 @@ export const RadioItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typ
 export const CheckboxItem = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.CheckboxItem>>(
   function CheckboxItem(props, ref) {
     return <Menu.CheckboxItem {...props} {...useItemPointerHandlers(props)} ref={ref} />
+  }
+)
+
+const SubContext = createContext<{ change(open: boolean): void } | null>(null)
+
+export function Sub({ open: controlled, onOpenChange, children, ...props }: ComponentPropsWithoutRef<typeof Menu.Sub>) {
+  const [local, setLocal] = useState(false)
+  function change(open: boolean) { setLocal(open); onOpenChange?.(open) }
+  return <SubContext.Provider value={{ change }}>
+    <Menu.Sub {...props} open={controlled ?? local} onOpenChange={change}>{children}</Menu.Sub>
+  </SubContext.Provider>
+}
+
+export const SubTrigger = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.SubTrigger>>(
+  function SubTrigger({ onPointerMove, ...props }, ref) {
+    const menu = useMenu(), sub = useContext(SubContext)
+    const pointer = useItemPointerHandlers(props)
+    return <Menu.SubTrigger {...props} ref={ref}
+      onPointerLeave={event => {
+        pointer.onPointerLeave(event)
+        const target = event.relatedTarget as Node | null
+        if (menu.hover.current && target?.nodeType && menu.content.current?.contains(target)) sub?.change(false)
+      }}
+      onPointerMove={event => {
+        onPointerMove?.(event)
+        if (event.defaultPrevented || props.disabled) return
+        if (menu.hover.current && event.pointerType === 'mouse' && event.buttons === 0) {
+          // Disclose the original Sub without moving the editor caret to its trigger.
+          event.preventDefault()
+          sub?.change(true)
+        }
+      }}
+      onPointerDown={pointer.onPointerDown} />
+  }
+)
+
+export const SubContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<typeof Menu.SubContent>>(
+  function SubContent({ onPointerEnter, onPointerLeave, ...props }, ref) {
+    const menu = useMenu()
+    return <Menu.SubContent {...props} ref={node => {
+      if (node) node.addEventListener('focusScope.autoFocusOnMount', event => {
+        if (menu.hover.current) event.preventDefault()
+      }, { once: true })
+      if (typeof ref === 'function') ref(node)
+      else if (ref) ref.current = node
+    }}
+      onPointerEnter={event => {
+        onPointerEnter?.(event)
+        if (!event.defaultPrevented) menu.enter(event)
+      }}
+      onPointerLeave={event => {
+        onPointerLeave?.(event)
+        if (!event.defaultPrevented) menu.leave(event)
+      }} />
   }
 )
 

@@ -255,6 +255,23 @@
 .tab-context-menu__item[data-highlighted] > svg, .tab-context-menu__item:hover:where(:not([data-disabled])) > svg { color: var(--green); }
 .tab-context-menu__item[data-disabled] { opacity: .35; }
 .tab-context-menu__item kbd { margin-left:auto; color: var(--text-3); font: 10px/1.2 var(--font-mono); }
+/* Compact layout commands retain the original menu item and action owners. */
+.workbench-layout-menu { width: min(270px, calc(100vw - 32px)); min-width: 0; max-width: 100%; padding: var(--sp-2) 0; }
+.workbench-layout-menu .workbench-menu-row[role='group'] { display: grid; grid-template-columns: 65px minmax(0, 1fr); align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-3); }
+.workbench-menu-row__label { display: flex; align-items: center; align-self: start; min-height: 28px; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.3; }
+.workbench-menu-row__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); min-width: 0; }
+.workbench-menu-row__cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); max-width: 100%; }
+.tab-context-menu__item.workbench-menu-row__item { position: relative; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; min-height: 28px; padding: 0; gap: 0; cursor: pointer; }
+.workbench-menu-row__item > svg { flex: none; }
+.workbench-menu-row__item:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -2px; }
+.workbench-menu-row__divider { position: absolute; inset-inline-start: -2px; top: 6px; bottom: 6px; width: 1px; background: var(--line-soft); pointer-events: none; }
+.workbench-layout-menu__hint { box-sizing: content-box; height: 2.6em; overflow-y: auto; padding: var(--sp-1) var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.3; overflow-wrap: anywhere; }
+.region-swap-menu { max-width: min(40ch, calc(100vw - 16px)); max-height: min(var(--radix-context-menu-content-available-height, 100vh), var(--radix-dropdown-menu-content-available-height, 100vh)); }
+.region-swap-menu .tab-context-menu__item > span { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+@media (pointer: coarse) {
+  .workbench-menu-row__label { min-height: 36px; }
+  .tab-context-menu__item.workbench-menu-row__item { flex-basis: 36px; width: 36px; height: 36px; }
+}
 .tab-context-menu__chevron { margin-left:auto; color: var(--text-3); font-size: var(--fs-title); }
 .tab-context-menu__separator { height: 1px; margin:var(--sp-2) var(--sp-3); background: var(--wash-2); }
 /* 菜单里的说明文字（不是可选项）。今天唯一的用法是 Copy 变灰时紧贴其下的那句逃生提示，所以

@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
 import type { SplitDirection } from '@agentmux/layout'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
-import { workbenchSplitDirectionIcon } from './workbench-split-menu-icons'
+import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { StableWorkbenchView } from './StableWorkbenchView'
@@ -961,16 +961,10 @@ function BrowserPaneContent({
     const inSurvey = regionSurface === 'survey'
     const startPageConfig = presentation ? presentation.target.browserStartPage : startPage
     const regionSplitAllowed = regionSurface !== undefined && regionSurface !== 'survey'
-    const regionSplitItems = regionSplitAllowed && onRegionSplit ? <>
-      <DropdownMenu.Label className="browser-menu__label">New region</DropdownMenu.Label>
-      {WORKBENCH_TAB_SPLIT_ACTIONS.map(action => {
-        const Icon = workbenchSplitDirectionIcon(action.direction)
-        return <DropdownMenu.Item key={action.direction} className="browser-menu__item"
-          aria-label={`New region ${action.direction}`} onSelect={() => onRegionSplit(action.direction)}>
-          <Icon size={12} /><span>{action.label}</span>
-        </DropdownMenu.Item>
-      })}
-    </> : null
+    const regionSplitItems = regionSplitAllowed && onRegionSplit ? <WorkbenchLayoutMenuRows
+      entries={WORKBENCH_TAB_SPLIT_ACTIONS.map(action => ({ ...action, kind: 'split' as const,
+        onSelect: () => onRegionSplit(action.direction) }))}
+      Item={DropdownMenu.Item} Group={DropdownMenu.Group} Label={DropdownMenu.Label} /> : null
     const connectionUnavailable = released || restoring || restoreError !== null
     const blocked = connectionUnavailable || screenshot !== null || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
       Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))

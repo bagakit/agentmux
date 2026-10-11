@@ -107,7 +107,8 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           <ThemeObjectHistoryIcon size={14} /><span>Conversation history</span>
         </DropdownMenu.Item>{entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}</> : null}
         {entries.map((entry, index) => <RegionMenuEntryView key={index} entry={entry} index={index}
-          Item={DropdownMenu.Item} Separator={DropdownMenu.Separator} Group={DropdownMenu.Group} Label={DropdownMenu.Label} />)}
+          Item={DropdownMenu.Item} Separator={DropdownMenu.Separator} Group={DropdownMenu.Group} Label={DropdownMenu.Label}
+          Sub={DropdownMenu.Sub} SubTrigger={DropdownMenu.SubTrigger} SubContent={DropdownMenu.SubContent} Portal={DropdownMenu.Portal} />)}
       </DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
   </header>
