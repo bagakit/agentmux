@@ -6,7 +6,10 @@ import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { compileRendererProfileCli } from '../../../packages/core/test/helpers/renderer-profile-cli.js'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -15,25 +18,28 @@ import type { BrowserWindow } from 'electron'
 const fixture = vi.hoisted(() => ({ directory: process.env.AGENTMUX_METRICS_EVIDENCE ?? process.cwd(), handlers: new Map<string, (...args: any[]) => unknown>(),
   ipc: new (class { listeners = new Map<string, Set<Function>>() })(),
   controlOptions: undefined as AgentMuxControlServerOptions | undefined,
+  appMetrics: () => [] as Electron.ProcessMetric[],
   rendererRequest: undefined as undefined | ((request: any) => void), rendererCancel: undefined as undefined | ((request: any) => void) }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => fixture.directory, getAppPath: () => fixture.directory },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() }, app: { getPath: () => fixture.directory, getAppPath: () => fixture.directory, getAppMetrics: () => fixture.appMetrics() },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel),
     on: (channel: string, handler: Function) => { const values = fixture.ipc.listeners.get(channel) ?? new Set(); values.add(handler); fixture.ipc.listeners.set(channel, values) },
+    off: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler),
     removeListener: (channel: string, handler: Function) => fixture.ipc.listeners.get(channel)?.delete(handler) },
-  clipboard: {}, dialog: {}, nativeImage: {}, shell: {} }))
+  clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, safeStorage: { isEncryptionAvailable: () => false } }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class {
     constructor(options: AgentMuxControlServerOptions) { fixture.controlOptions = options }
     async start() {} async stop() {}
   }
 }))
-vi.mock('@agentmux/demand', async original => ({ ...await original(), openDemandStore: () => ({}) }))
+vi.mock('@agentmux/demand', async original => ({ ...await original(), openDemandStore: () => ({ subscribe: () => () => {} }) }))
 vi.mock('../src/main/browser-profile-manager.js', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal.js', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class {
+  setPresentationWindowOwner() {}
   resourceProcessIds() { return [] } resourceOwnerCounts() { return { browserViews: 0, releasedBrowserViews: 0 } } dispose() {}
 } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
@@ -103,6 +109,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   let clock = _reshape_fixtureEpoch(0, 0, 1000)
   const readTable = vi.fn(async () => 'PID PPID RSS %CPU\n100 1 64 2\n101 100 32 1\n300 1 128 3\n777 1 1024 99')
   const appMetrics = () => [{ pid: 300, creationTime: _reshape_fixtureEpoch(0, 0, 1), type: 'Browser', memory: { workingSetSize: 128 }, cpu: { percentCPUUsage: 3 } }] as Electron.ProcessMetric[]
+  fixture.appMetrics = appMetrics
   const sampler = new ProcessResourceSampler(readTable, () => clock, appMetrics)
   const other = new ProcessResourceSampler(readTable, () => clock, appMetrics)
   ;(globalThis as any).__metricsMutantSampler = other
@@ -135,6 +142,20 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
     readonly id = 919
     readonly mainFrame = { framesInSubtree: [{ detached: false, osProcessId: 300 }] }
     destroyed = false; loading = false
+    traceAttached = false
+    readonly debugger = Object.assign(new EventEmitter(), {
+      isAttached: () => this.traceAttached,
+      attach: vi.fn(() => { this.traceAttached = true }),
+      detach: vi.fn(() => { this.traceAttached = false; this.debugger.emit('detach') }),
+      sendCommand: vi.fn(async (method: string) => {
+        if (method === 'Tracing.end') {
+          this.debugger.emit('message', {}, 'Tracing.dataCollected', { value: [{ pid: 300, tid: 1, ph: 'X', ts: 1, dur: 2, name: 'Layout', cat: 'devtools.timeline', args: { original: true } }] })
+          this.debugger.emit('message', {}, 'Tracing.tracingComplete', { dataLossOccurred: false })
+        }
+        return {}
+      })
+    })
+    isDevToolsOpened() { return false }
     isDestroyed() { return this.destroyed }
     isLoadingMainFrame() { return this.loading }
     getOSProcessId() { return 300 }
@@ -156,6 +177,7 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
   useAppStore.setState({ config, agentComposerDrafts: { 'healthy-session': 'preserved input' } })
   cleanup.push(() => { disposeRenderer(); rendererRelease?.(); useAppStore.setState(originalStore, true) })
   const dispose = await registerIpc({ initialConfig: await configStore.get(), window: { setBackgroundColor: vi.fn(), id: 7, isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
+    workbenchWindows: { setNativeOwner: () => () => {} } as never,
     runtime, configStore, progressLoops: { subscribe: () => () => {} } as any,
     scratchTopics: { setNameAudit() {}, normalizeDirectoryIdentities() {} } as any, workspaceFiles: { dispose: async () => {}, read: vi.fn(async () => { throw new Error('Unexpected file read in metrics fixture') }), listFiles: vi.fn(async () => { throw new Error('Unexpected file list in metrics fixture') }), write: vi.fn(async () => { throw new Error('Unexpected file write in metrics fixture') }) } as any })
   cleanup.push(dispose)
@@ -174,6 +196,29 @@ async function registered(options: { rendererFailure?: boolean } = {}) {
 }
 
 describe('registered Main metrics and actual CLI', () => {
+  it('routes public trace CLI through actual production registration without calling the Renderer fallback', async () => {
+    const f = await registered(), root = resolve(import.meta.dirname, '../../..')
+    const directory = join(process.env.PROFILE_UNIT_OUTPUT!, 'registered'); await mkdir(directory, { recursive: true })
+    const frozen = JSON.parse(readFileSync(process.env.AGENTMUX_PERFORMANCE_SOURCES!, 'utf8'))
+    const executable = await compileRendererProfileCli(root, directory, frozen, process.env.AGENTMUX_PERFORMANCE_LOADED)
+    const observation = await f.rpc.call('system.metrics.get', {})
+    const target = { ...observation.observation.window!, pid: 300, creationTime: fixture.appMetrics()[0]!.creationTime }
+    const output = join(directory, 'registered-trace.json'), original = useAppStore.getState()
+    const args = ['--import', process.env.PROFILE_PRE_IMPORT_MODULE!, executable, '--endpoint', 'unix://' + join(f.directory, 'control.sock'), 'system', 'metrics', 'trace', 'capture',
+      ...Object.entries({ '--window-id': target.windowId, '--web-contents-id': target.webContentsId, '--generation': target.generation, '--pid': target.pid, '--creation-time': target.creationTime, '--duration-ms': 1000 }).flatMap(([key, value]) => [key, String(value)]), '--output', output]
+    const child = spawn(process.execPath, args, { env: { ...process.env, PROFILE_PRE_IMPORT: join(directory, 'pre-import.json') }, stdio: ['ignore', 'pipe', 'pipe'] }); children.push(child)
+    let stdout = '', stderr = ''; child.stdout!.on('data', value => { stdout += value }); child.stderr!.on('data', value => { stderr += value })
+    const code = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('close', resolve) })
+    await writeFile(join(directory, 'raw-cli.json'), JSON.stringify({ args, code, stdout, stderr, native: false, actualProductionRegistration: true }, null, 2))
+    expect(code).toBe(0); expect(stderr).toBe('')
+    const capture = JSON.parse(stdout).result.capture, bytes = await readFile(output)
+    expect(capture.status).toBe('completed'); expect(capture.target).toEqual(target)
+    expect(JSON.parse(bytes.toString()).traceEvents).toEqual([{ pid: 300, tid: 1, ph: 'X', ts: 1, dur: 2, name: 'Layout', cat: 'devtools.timeline', args: { original: true } }])
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(capture.sha256); expect((await stat(output)).mode & 0o777).toBe(0o600)
+    expect(f.sender.debugger.sendCommand.mock.calls.map(([method]) => method)).toEqual(['Tracing.start', 'Tracing.end'])
+    expect(f.sender.traceAttached).toBe(false); expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
+    expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+  })
   it('binds an actual registered Renderer failure to its captured window through compiled CLI watch', async () => {
     const f = await registered({ rendererFailure: true })
     const watch = startCli(f.directory, 'watch')
