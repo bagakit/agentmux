@@ -126,6 +126,8 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ### 联邦 Runtime 与远端恢复边界
 
+远程管理的产品范围、连接拓扑、监控与维护入口归 [Remote 管理 PRD](remote-management.md)；本节持有联邦 Runtime 的身份、生命周期、故障隔离与恢复合同，管理页面引用本节，不另定义恢复语义。
+
 通用 Core 与 Desktop 必须能联邦管理本机和远端 Headless AgentMux：连接既有远端服务，复用统一公共 RPC 与系统 SSH stdio。远端持有当地 Agent 语义与 ctxmux Run，无 UI 客户端不依赖 Desktop 才能创建、观察或管理 Agent。研究参考与环境观察不代替真实产品验收。
 
 - AgentMux Runtime 是可被 Desktop 管理的最小远端单元。它可以运行在本机，也可以运行在无 UI 的 Linux 服务中；远端 Runtime 自己权威持有 Provider、AgentSession、Hook、Permission、readiness、semantic resume 以及它所连接的 ctxmux 事实。Desktop 只是客户端和工作面投影，不把这些事实复制成第二份本地真相。

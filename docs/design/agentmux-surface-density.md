@@ -26,6 +26,7 @@
 | Browser 工具、证据、控制权和确认层次 | [Browser 工作面的呈现](presentation/browser-workface.md) |
 | Explorer、编辑、分支、差异和留存提示 | [文件与 Git 的呈现](presentation/files-and-git.md) |
 | Settings、状态栏、Activity、通知和工具密度 | [设置与观测的呈现](presentation/settings-and-observation.md) |
+| Remote 拓扑画布、节点、监控摘要与选中详情 | [Remote 管理拓扑](presentation/settings-and-observation.md#remote-管理拓扑) |
 | 公共控制的原表面与手机闭环状态 | [公共控制与客户端的呈现](presentation/public-control.md) |
 
 ## 更新与保全

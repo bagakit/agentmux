@@ -99,7 +99,7 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共享 Region �
 
 ## 联邦 Runtime 的状态与身份密度
 
-远端管理范围、多 endpoint 失败隔离、显式管理与真实恢复验收只见交互 SSOT[《联邦 Runtime 与远端恢复边界》](../behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。本机与远端复用原工作面和服务窗语言，单 endpoint 失败不升级为整窗空态、loading 或阻断；本节只定义呈现，不另立部署面板、Remote bar、终端 chrome 或第二份行为／RPC 合同。
+远端管理页面与拓扑范围见 [Remote 管理 PRD](../behavior/remote-management.md)，多 endpoint 失败隔离、生命周期与真实恢复验收见交互 SSOT[《联邦 Runtime 与远端恢复边界》](../behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。本机与远端复用原工作面和服务窗语言，单 endpoint 失败不升级为整窗空态、loading 或阻断；本节只定义 Session 工作面的呈现，不另立部署面板、Remote bar、终端 chrome 或第二份行为／RPC 合同。
 
 - 本机与远端 Runtime 共享同一套状态语汇：`live`、`unverified`、`historical/interrupted` 和 `retired` 必须可区分，不能把远端不可达或探测超时压成绿色的运行中，也不能用空白工作面代替未知状态。
 - 远端 endpoint、Host 和可信身份属于低频元信息，放进既有 tooltip、context menu、服务窗或详情面，不新增一条常驻 Remote bar、第二套 Tab chrome 或重复的 Session/Run 标签。布局、Agent 名称和状态仍由原有工作面承担。

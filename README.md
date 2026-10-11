@@ -137,3 +137,5 @@ pnpm test:native
 ## 管理远端 Agent
 
 远端运行独立 Core 的 `agentmux-runtime serve`；Desktop 与 Node client 使用同一公共 JSON-RPC 服务，SSH 连接已有 owner。Agent 语义仍归远端 Core，Run、PTY 和字节历史仍归当地 ctxmux。连接中断保留原 Session 和工作面；连接动作不部署或重启远端服务。接入方式见 [Core 的远程 Runtime 说明](packages/core/README.md#远程-runtime)，恢复约束见 [联邦 Runtime 与远端恢复边界](docs/design/behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。
+
+管理台的产品需求、连接拓扑、监控与维护流程统一见 [Remote 管理 PRD](docs/design/behavior/remote-management.md)；目标设计与当前实现范围在该文中分别说明。
