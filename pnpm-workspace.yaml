@@ -28,3 +28,4 @@ patchedDependencies:
   monaco-editor@0.56.0: patches/monaco-editor@0.56.0.patch
   '@xterm/xterm@6.1.0-beta.303': patches/@xterm__xterm@6.1.0-beta.303.patch
   node-diff3@3.2.1: patches/node-diff3@3.2.1.patch
+  electron-vite@5.0.0: patches/electron-vite@5.0.0.patch

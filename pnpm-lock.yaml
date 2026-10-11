@@ -11,6 +11,7 @@ patchedDependencies:
   '@radix-ui/react-menu@2.1.20': b38917d70564a14d4b518a3a2f1253c8743abeb4d382065963e71534e3f6f9f3
   '@radix-ui/react-roving-focus@1.1.15': 1bb741197a55de7696737b96f40411ebd6c32d428c47a586eb41200a2d936667
   '@xterm/xterm@6.1.0-beta.303': 04bb271a035730f21f9e6c470fdbeeab416f1b6238954510e693c5528e5ef6f2
+  electron-vite@5.0.0: e03eecdf117fdea3d0be85ac4a177f67391822d5bd809444401ed291be86f139
   monaco-editor@0.56.0: a4545a28114bc2073290a846e1a838baf6536b2803e163a42caf15241c206c7d
   node-diff3@3.2.1: 921b08abe21722b700dcb6036f7a33eebf583f414dbb286e8a02541ff17a0d48
 
@@ -243,7 +244,7 @@ importers:
         version: 43.7.7
       electron-vite:
         specifier: ^5.0.0
-        version: 5.0.0(vite@7.3.6(@types/node@24.13.3)(yaml@2.9.0))
+        version: 5.0.0(patch_hash=e03eecdf117fdea3d0be85ac4a177f67391822d5bd809444401ed291be86f139)(vite@7.3.6(@types/node@24.13.3)(yaml@2.9.0))
       happy-dom:
         specifier: ^20.14.0
         version: 20.14.0
@@ -7209,7 +7210,7 @@ snapshots:
 
   electron-to-chromium@1.5.402: {}
 
-  electron-vite@5.0.0(vite@7.3.6(@types/node@24.13.3)(yaml@2.9.0)):
+  electron-vite@5.0.0(patch_hash=e03eecdf117fdea3d0be85ac4a177f67391822d5bd809444401ed291be86f139)(vite@7.3.6(@types/node@24.13.3)(yaml@2.9.0)):
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-arrow-functions': 7.29.7(@babel/core@7.29.7)
