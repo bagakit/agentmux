@@ -9,6 +9,7 @@ import { completionAtCaret, hasExplicitComposerTrigger, matchingComposerSuggesti
 import { composerKeywordAtCaret } from '../lib/composer-keywords.js'
 import { matchComposerShortcut } from '../lib/composer-keyboard.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
+import { composerChoiceReadingProps } from '../lib/composer-choice-reading.js'
 
 export type ComposerCompletionProps = {
   completionConfig?: ComposerInputConfig
@@ -142,9 +143,9 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
     {open ? createPortal(<div ref={panel} className="composer-completion-popover" style={{ position: 'fixed', visibility: 'hidden' }}>
     {suggestions.length ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${range!.kind}`} onKeyDown={suggestionKeyDown}>
       {[...groups].map(([group, items]) => {
-        const options = items.map((item, index) => <button type="button" role="option" aria-selected="false" key={item.id ?? `${group}:${index}:${item.text}`} title={`${item.label ?? item.text}\n${item.description}`}
+        const options = items.map((item, index) => <button type="button" role="option" aria-selected="false" key={item.id ?? `${group}:${index}:${item.text}`} {...composerChoiceReadingProps(`${item.label ?? item.text}\n${item.description}`)}
           onClick={() => choose(item)}>{item.icon ? <span className="composer__suggestion-icon">{item.icon}</span> : null}
-          <span className="composer__suggestion-label">{item.label ?? item.text}</span><small>{item.description}</small></button>)
+          <span className="composer__suggestion-label" data-choice-reading=""><span>{item.label ?? item.text}</span></span><small data-choice-reading=""><span>{item.description}</span></small></button>)
         const label = group || ({ command: 'Commands', skill: 'Skills', reference: 'Agents & files', keyword: 'Prompts' }[range!.kind])
         return <div className="composer__suggestion-group" role="group" aria-label={label} key={group}>{groups.size > 1 ? <h4>{label}<span>{items.length}</span></h4> : null}{options}</div>
       })}

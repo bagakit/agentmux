@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { composerChoiceReadingProps } from '@agentmux/client-ui/composer-choice-reading'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentSkill } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -134,8 +135,8 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
         <DropdownMenu.Label className="composer-menu__hint">Choose a skill to reference</DropdownMenu.Label>
         {loading ? <div className="composer-menu__hint" role="status">Loading skills…</div> : error ? <div className="composer-menu__hint" role="status">{error}</div> : skills.length === 0 ? <div className="composer-menu__hint" role="status">No skills found in this Agent’s skill folders.</div> : <>
           {skills.filter(skill => `${skill.name} ${skill.description} ${skill.source}`.toLocaleLowerCase().includes(query)).map(skill =>
-          <DropdownMenu.Item key={skill.path} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={skill.name} title={`${skill.name}\n${skill.source} · ${skill.description}\n${skill.path}`} onSelect={() => { void runAction(() => onChooseSkill(skill)) }}>
-            <SemanticIcon name={/(^|[\\/])components?([\\/]|$)/i.test(skill.path) ? "object.component" : "object.skill"} size={13} /><span>{skill.name}<small>{skill.source} · {skill.description || skill.path}</small></span>
+          <DropdownMenu.Item key={skill.path} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={skill.name} {...composerChoiceReadingProps(`${skill.name}\n${skill.source} · ${skill.description}\n${skill.path}`)} onSelect={() => { void runAction(() => onChooseSkill(skill)) }}>
+            <SemanticIcon name={/(^|[\\/])components?([\\/]|$)/i.test(skill.path) ? "object.component" : "object.skill"} size={13} /><span><span data-choice-reading=""><span>{skill.name}</span></span><small data-choice-reading=""><span>{skill.source} · {skill.description ? `${skill.description} · ` : ''}{skill.path}</span></small></span>
           </DropdownMenu.Item>)}
           {!skills.some(skill => `${skill.name} ${skill.description} ${skill.source}`.toLocaleLowerCase().includes(query)) ? <div className="composer-menu__hint" role="status">No matching skills.</div> : null}
         </>}
@@ -143,8 +144,8 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     </ComposerChoiceMenu>
     {commands.length ? <ComposerChoiceMenu label="Choose a command" triggerLabel="Commands" icon={<SemanticIcon name="object.subcommand" size={14} />} disabled={disabled}>
       {query => <>
-        {commands.filter(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)).map(command => <DropdownMenu.Item key={command.id ?? command.text} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={command.text} title={`${command.label ?? command.text}\n${command.description}`} onSelect={() => { void runAction(() => onCommand(command.text, command)) }}>
-          <SemanticIcon name="object.subcommand" size={13} /><span>{command.label ?? command.text}<small>{command.description}</small></span>
+        {commands.filter(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)).map(command => <DropdownMenu.Item key={command.id ?? command.text} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={command.text} {...composerChoiceReadingProps(`${command.label ?? command.text}\n${command.description}`)} onSelect={() => { void runAction(() => onCommand(command.text, command)) }}>
+          <SemanticIcon name="object.subcommand" size={13} /><span><span data-choice-reading=""><span>{command.label ?? command.text}</span></span><small data-choice-reading=""><span>{command.description}</span></small></span>
         </DropdownMenu.Item>)}
         {!commands.some(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)) ? <div className="composer-menu__hint" role="status">No matching commands.</div> : null}
       </>}
