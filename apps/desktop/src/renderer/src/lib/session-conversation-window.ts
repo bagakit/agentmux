@@ -56,10 +56,8 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const currentSource = handleSource(reading?.nativeSourceFacts?.nativeHandle)
   const previousSource = Boolean(page && currentSource && !matchesSource(page.source, currentSource))
   const bindingChanged = acceptedBinding.current.key === key && acceptedBinding.current.bindingKey !== bindingKey
-  const lastOperation = useRef<ConversationViewOperation>('latest')
   const navigate = (operation: ConversationViewOperation) => {
     intent.current = operation === 'older' ? 'earlier' : operation === 'newer' ? 'newer' : operation === 'latest' ? 'current' : 'live'
-    lastOperation.current = operation
     if (operation === 'older' && !boundary.current) boundary.current = page?.items[0]?.id ?? null
     if (operation === 'latest') { boundary.current = null; setCoverageError(null) }
     return operation === 'older' ? view.earlier() : operation === 'newer' ? view.newer() : operation === 'changes' ? view.changes() : view.refresh()
@@ -94,14 +92,14 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
   return { page, projection, snapshot: view.snapshot, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
-    readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') }, capturedError: error,
+    readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') }, capturedError: view.sourceError ? null : error,
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,
     previousSource, coverageLoading: view.loading && intent.current === 'coverage', loading: view.loading, error,
     held: view.held, loadingEarlier: view.loading && intent.current === 'earlier',
     historyBoundary: boundary.current && page?.items.some(item => item.id === boundary.current) ? { beforeRecordId: boundary.current } : null,
     currentOutside, newerOutside: currentOutside, hasNewer: view.hasNewer, hasMore: view.hasMore,
     readEarlier: () => { coverageDemand.current = false; void navigate('older') }, readNewer: () => { coverageDemand.current = false; void navigate('newer') },
-    retry: () => { void navigate(lastOperation.current) }, showLatestAutomatically: () => { if (view.held) view.acceptHeld(); else if (!view.historical && view.newerAvailable) void navigate('changes') },
+    retry: () => { void view.retry() }, showLatestAutomatically: () => { if (view.held) view.acceptHeld(); else if (!view.historical && view.newerAvailable) void navigate('changes') },
     showCurrent: () => { coverageDemand.current = false; void navigate('latest') },
     showCurrentSource: () => selectSource(currentSource), showPreviousSource: () => selectSource(handleSource(reading?.nativeSourceFacts?.nativeConfirmation?.previousNativeHandle)) }
 }
