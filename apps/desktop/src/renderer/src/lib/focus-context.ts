@@ -45,6 +45,43 @@ export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusB
   return groups
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
+function sameFocusInputs(previous: Inputs | undefined, input: Inputs): boolean {
+  return Boolean(previous && previous.sessions === input.sessions && previous.timelines === input.timelines && previous.agentNames === input.agentNames && previous.config === input.config && previous.scratchTopicSnapshots === input.scratchTopicSnapshots)
+}
+function focusInputs({ sessions, timelines, agentNames, config, scratchTopicSnapshots }: Inputs): Inputs {
+  return { sessions, timelines, agentNames, config, scratchTopicSnapshots }
+}
+function focusScopeForSession(input: Pick<Inputs, 'config' | 'scratchTopicSnapshots'>, session: SessionSnapshot) {
+  const topics = scratchTopicsForConfig(input.config, input.scratchTopicSnapshots)
+  const workspace = workspaceForSession(input.config, session, topics)
+  const topicId = workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics) : null
+  return { workspace, topicId }
+}
+export function focusNavigationSummary(input: Pick<Inputs, 'sessions' | 'config' | 'scratchTopicSnapshots'>, now = Date.now()) {
+  let working = 0, requests = 0, errors = 0
+  for (const session of input.sessions) {
+    if (session.kind !== 'agent') continue
+    // Results and Idle both contribute zero: counts need no conversation result or recap.
+    const bucket = focusBucketForSession(session, false, now)
+    if (bucket !== 'working' && bucket !== 'attention') continue
+    const { workspace, topicId } = focusScopeForSession(input, session)
+    if (focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace)) === 'pmo') continue
+    if (bucket === 'working') working++
+    else if (session.status.state === 'error') errors++
+    else requests++
+  }
+  return { working, requests, errors }
+}
+export function createFocusNavigationSummarySelector() {
+  let previous: Inputs | undefined
+  let summary = { working: 0, requests: 0, errors: 0 }
+  return (input: Inputs) => {
+    if (sameFocusInputs(previous, input)) return summary
+    summary = focusNavigationSummary(input)
+    previous = focusInputs(input)
+    return summary
+  }
+}
 function activityEntryTime(session: SessionSnapshot): number | undefined {
   const activity = session.kind === 'agent' ? session.semanticStatus : undefined
   if (!activity || !isAgentActivityStatusSource(activity.source)) return undefined
@@ -216,7 +253,7 @@ function createFocusProjectionCache() {
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
   const select = (input: Inputs, active = true): FocusProjection => {
     if (!active) return result
-    if (previous && previous.sessions === input.sessions && previous.timelines === input.timelines && previous.agentNames === input.agentNames && previous.config === input.config && previous.scratchTopicSnapshots === input.scratchTopicSnapshots) return result
+    if (sameFocusInputs(previous, input)) return result
     const rows: FocusContext[] = []
     const laneRows: FocusContext[] = []
     const pmoAttention: string[] = []
@@ -234,8 +271,7 @@ function createFocusProjectionCache() {
         continue
       }
       const sameOwner = old && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
-      const workspace = sameOwner ? old.workspace : workspaceForSession(input.config, session, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots))
-      const topicId = sameOwner ? old.topicId : workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots)) : null
+      const { workspace, topicId } = sameOwner ? old : focusScopeForSession(input, session)
       let group: { key: string; enteredAt: number | null; sequence: number } | null = null
       let model: FocusContext | null = null
       let laneModel: FocusContext | null = null
@@ -271,7 +307,7 @@ function createFocusProjectionCache() {
       return (second.enteredAt ?? -Infinity) - (first.enteredAt ?? -Infinity) || first.sequence - second.sequence
     })
     result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention}
-    previous = {sessions: input.sessions, timelines: input.timelines, agentNames: input.agentNames, config: input.config, scratchTopicSnapshots: input.scratchTopicSnapshots}
+    previous = focusInputs(input)
     return result
   }
   return select
