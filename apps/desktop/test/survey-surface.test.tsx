@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { emptyNotebookState, applyNotebookChange } from '@agentmux/core/notebook-catalog'
 import { changeNotebook, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
@@ -127,14 +128,14 @@ beforeEach(() => {
     surveySidebarWidth: 220, surveySidebarCollapsed: false,
     recallZoneSelection: null, recallSidebarWidth: 220, recallSidebarCollapsed: false, notebookRecoveries: [], recallNotebookId: null, recallNoteId: null, surveyCollectedZones: {}, surveyExplorationNames: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratchWorkspace] }, activeWorkspaceId: workspace.id,
     agentComposerDrafts: { [session.id]: 'Keep my draft' }, sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') },
-    agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
+    agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: _tailFixtureEpoch(0, 0, 1) }] }, pmo: { sessionId: null } },
     projectRailOpen: true, toolsOpen: true, workspaceTool: 'agents', demands: {}, browserAnnotationsByBrowserId: {},
     documents: { [key]: { path: file.path, content: 'Unsaved file', revision: 'disk' } }, dirtyDocuments: { [key]: true },
     error: null, lastError: null, errorDismissed: true, displacedAgentSessionIds: [], retainedSpatialFocus: null, regionCaretFocus: null })
   vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'create').mockImplementation(async (id, url = 'about:blank', _workspaceId, _profileId, mode = 'normal') => ({ ...browser, id, url, mode, profileId: mode === 'private' ? null : browser.profileId }))
   vi.spyOn(api.browser, 'navigate').mockImplementation(async (id, url) => ({ ...browser, id, url, navigationId: `navigation-${id}` }))
-  vi.spyOn(api.browser, 'listProfiles').mockResolvedValue([{ id: 'default', label: 'Default', createdAt: 1, isDefault: true, source: null }])
+  vi.spyOn(api.browser, 'listProfiles').mockResolvedValue([{ id: 'default', label: 'Default', createdAt: _tailFixtureEpoch(0, 0, 1), isDefault: true, source: null }])
   vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
   css = document.createElement('style')
@@ -209,7 +210,7 @@ function knowledgeTransport() {
   const handler: typeof api.topics.call = async <M extends TopicMethod>(method: M, params: TopicParams<M>) => {
     if (method === 'topic.ls') return { topics, unavailable: [] } as unknown as TopicResult<M>
     if (method === 'topic.inspect') return { topic: topics.find(topic => topic.topicId === (params as { topicId: string }).topicId) ?? null, unavailable: [] } as unknown as TopicResult<M>
-    if (method === 'topic.knowledge.write') return { entry: { ...(params as TopicKnowledgeWrite), revision: 'written', updatedAt: 1 }, diskDurability: 'confirmed' } as unknown as TopicResult<M>
+    if (method === 'topic.knowledge.write') return { entry: { ...(params as TopicKnowledgeWrite), revision: 'written', updatedAt: _tailFixtureEpoch(0, 0, 1) }, diskDurability: 'confirmed' } as unknown as TopicResult<M>
     throw new Error(`Unexpected Topic call: ${method}`)
   }
   return vi.spyOn(api.topics, 'call').mockImplementation(handler)
@@ -533,8 +534,8 @@ it('keeps the spatial projection stable for status clocks and unreferenced Sessi
   await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
   const first = observation.survey.at(-1)!, original = slot().querySelector('.retained-workbench-view')!, field = address()
   await fill(field, 'Retain stable directory input'); field.setSelectionRange(3, 12)
-  const statusOnly = { ...session, updatedAt: 5, latestOutputBytes: 120, status: { ...session.status, observedAt: 5 } }
-  const unrelatedChanged = { ...unrelated, updatedAt: 6, hostId: 'another-host', workspacePath: _hygiene_fixturePath("unrelated"), status: { ...unrelated.status, observedAt: 6 } }
+  const statusOnly = { ...session, updatedAt: _tailFixtureEpoch(0, 0, 5), latestOutputBytes: 120, status: { ...session.status, observedAt: _tailFixtureEpoch(0, 0, 5) } }
+  const unrelatedChanged = { ...unrelated, updatedAt: _tailFixtureEpoch(0, 0, 6), hostId: 'another-host', workspacePath: _hygiene_fixturePath("unrelated"), status: { ...unrelated.status, observedAt: _tailFixtureEpoch(0, 0, 6) } }
   await act(async () => useAppStore.setState({ sessions: [statusOnly, unrelatedChanged] }))
   const after = observation.survey.at(-1)!
   expect(after.catalog).toBe(first.catalog); expect(after.projection).toBe(first.projection); expect(after.viewTargets).toBe(first.viewTargets)
@@ -547,7 +548,7 @@ it('keeps the spatial projection stable for status clocks and unreferenced Sessi
   expect(related.catalog!.regions.find(region => region.regionId === agent.regionId)).toMatchObject({ runId: 'changed-run', execution: { hostId: 'changed-host', cwd: _hygiene_fixturePath("changed-resource") } })
   await dom.click('[aria-label="Space: show terminal and file workbench"]')
   const hidden = observation.survey.at(-1)!
-  await act(async () => useAppStore.setState({ sessions: [{ ...changed, updatedAt: 9, workspacePath: _hygiene_fixturePath("hidden-resource") }, unrelatedChanged] }))
+  await act(async () => useAppStore.setState({ sessions: [{ ...changed, updatedAt: _tailFixtureEpoch(0, 0, 9), workspacePath: _hygiene_fixturePath("hidden-resource") }, unrelatedChanged] }))
   expect(observation.survey.at(-1)!.catalog).toBe(hidden.catalog)
   expect(api.browser.create).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
   expect(useAppStore.getState().tabs[mixed.id]!.regions[agent.regionId]).toEqual(agent)
@@ -939,10 +940,10 @@ it('keeps ordinary manual browsers quiet and retains live Agent and unknown cont
   expect(page).not.toBeNull()
   await openItemSubmenu('Item details'); expect(document.querySelector('.survey-item-details-content')!.textContent).toContain('Human control')
   await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
-  const operation = { id: 'regular-operation', browserId: id, operator: { id: session.id, name: 'Live operator' }, startedAt: 1, phase: 'running' as const, summary: 'Working', url: browser.url, steps: [] }
+  const operation = { id: 'regular-operation', browserId: id, operator: { id: session.id, name: 'Live operator' }, startedAt: _tailFixtureEpoch(0, 0, 1), phase: 'running' as const, summary: 'Working', url: browser.url, steps: [] }
   await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...manual, driving: true, activity: { control: 'agent', operation } } }))
   expect(badge().querySelector('svg')).not.toBeNull(); expect(badge().firstElementChild!.getAttribute('aria-label')).toContain('Agent operating'); expect(badge().firstElementChild!.getAttribute('title')).toContain('Live operator')
-  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...manual, activity: { control: 'human', operation: { ...operation, phase: 'completed', finishedAt: 2 } } } }))
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...manual, activity: { control: 'human', operation: { ...operation, phase: 'completed', finishedAt: _tailFixtureEpoch(0, 0, 2) } } } }))
   expect(badge().childElementCount).toBe(0)
   await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'unavailable', id, error: 'Native owner unavailable' }))
   expect(badge().firstElementChild!.getAttribute('title')).toContain('Control unknown')
@@ -967,8 +968,8 @@ it('uses the shared avatar roster for actual operators, deduplicates Sessions an
   const before = useAppStore.getState(), page = slot().querySelector('[data-native-browser-stage]')
   const ids = [browser.id, pageB.browserId, ...extra.map((_, index) => `extra-browser-${index}`)]
   const publish = async (id: string, actor: typeof session, live = true, operationBrowserId = id) => {
-    const operation = { id: `operation-${id}`, browserId: operationBrowserId, operator: { id: actor.id, name: actor.label, providerId: actor.providerId }, startedAt: 1,
-      phase: live ? 'running' as const : 'completed' as const, ...(live ? {} : { finishedAt: 2 }), summary: 'Research', url: browser.url, steps: [] }
+    const operation = { id: `operation-${id}`, browserId: operationBrowserId, operator: { id: actor.id, name: actor.label, providerId: actor.providerId }, startedAt: _tailFixtureEpoch(0, 0, 1),
+      phase: live ? 'running' as const : 'completed' as const, ...(live ? {} : { finishedAt: _tailFixtureEpoch(0, 0, 2) }), summary: 'Research', url: browser.url, steps: [] }
     await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...browser, id, driving: live, activity: { control: live ? 'agent' : 'human', operation } } }))
   }
   await publish(ids[0]!, session); await publish(ids[1]!, session)
@@ -998,7 +999,7 @@ it('uses the shared avatar roster for actual operators, deduplicates Sessions an
 it('keeps Browser control unknown while its native owner is unavailable without retiring the Zone or reusing a completed operator', async () => {
   await renderApp(); await enterSurvey(); await choose()
   const selected = useAppStore.getState().surveyZoneSelection
-  const operation = { id: 'op', browserId: browser.id, operator: { id: session.id, name: 'Live operator' }, startedAt: 1, phase: 'running' as const, summary: 'Working', url: browser.url, steps: [] }
+  const operation = { id: 'op', browserId: browser.id, operator: { id: session.id, name: 'Live operator' }, startedAt: _tailFixtureEpoch(0, 0, 1), phase: 'running' as const, summary: 'Working', url: browser.url, steps: [] }
   const snapshot = { ...browser, driving: true, activity: { control: 'agent' as const, operation } }
   const control = () => dom.container.querySelector<HTMLElement>('[data-survey-zone-id] .survey-item-activity > span')!
   await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: snapshot }))
@@ -1009,7 +1010,7 @@ it('keeps Browser control unknown while its native owner is unavailable without 
   expect(JSON.stringify(projectPersistedWorkbench(useAppStore.getState()))).not.toContain('nativeOwnerUnavailable')
   await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...snapshot, error: 'Native owner destroyed' } }))
   expect(control().title).toContain('Live operator')
-  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...snapshot, activity: { control: 'agent', operation: { ...operation, phase: 'completed', finishedAt: 2 } } } }))
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...snapshot, activity: { control: 'agent', operation: { ...operation, phase: 'completed', finishedAt: _tailFixtureEpoch(0, 0, 2) } } } }))
   expect(control().title).not.toContain('Live operator'); healthy()
 })
 
@@ -1855,6 +1856,60 @@ async function choosePrivateAction(trigger: HTMLElement, label: string) {
   expect(item, `Actual menu action ${label}`).toBeDefined()
   await act(async () => { item!.focus(); item!.click() })
 }
+
+it.each(['saved', 'unknown'] as const)('opens the %s bookmark through the actual Survey projection and file owner without losing its source', async outcome => {
+  const path = 'Same title.webloc'
+  const write = vi.spyOn(api.files, 'write').mockImplementation(async () => {
+    if (outcome === 'unknown') throw new Error('Write receipt unavailable')
+    return { status: 'written', revision: 'bookmark-written' }
+  })
+  const read = vi.spyOn(api.files, 'readBookmark').mockResolvedValue({ url: pageA.url, binary: false })
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  const originalInput = address()
+  await fill(originalInput, 'Unsubmitted original address draft')
+  const original = useAppStore.getState(), selection = original.surveyZoneSelection!
+  const originalBrowser = original.tabs[mixed.id]!.regions[pageA.regionId]
+  await act(async () => selectedRegion().querySelector<HTMLButtonElement>('[aria-label="Save this page as a bookmark"]')!.click())
+  const action = [...selectedRegion().querySelectorAll<HTMLButtonElement>('button')]
+    .find(button => button.textContent === (outcome === 'saved' ? 'Open bookmark' : 'Check bookmark'))!
+  expect(action).toBeDefined()
+  await act(async () => action.click())
+  const current = useAppStore.getState(), selected = current.surveyZoneSelection!.active!
+  expect(read).toHaveBeenCalledExactlyOnceWith(workspace.id, path)
+  expect(write).toHaveBeenCalledTimes(1)
+  expect(current.mainSurface).toBe('survey')
+  expect(current.surveyZoneSelection!.zoneId).toBe(selection.zoneId)
+  expect(selected.tabId).toBe(mixed.id)
+  expect(selected.regionId).not.toBe(pageA.regionId)
+  expect(current.tabs[mixed.id]!.regions[selected.regionId]).toMatchObject({
+    kind: 'browser', url: pageA.url, bookmarkOrigin: { path, binary: false }
+  })
+  expect(current.tabs[mixed.id]!.regions[pageA.regionId]).toBe(originalBrowser)
+  expect(current.workbenchSpaceSelection).toEqual(original.workbenchSpaceSelection)
+  expect(originalInput.isConnected).toBe(true)
+  expect(originalInput.value).toBe('Unsubmitted original address draft')
+  expect(address().value).toBe(pageA.url)
+  expect(selectedRegion().querySelector('[aria-label="View bookmark source"]')).not.toBeNull()
+  healthy()
+})
+
+it('a later Survey selection wins while the actual bookmark file read is pending', async () => {
+  vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'bookmark-written' })
+  let finish!: (value: { url: string; binary: boolean }) => void
+  const read = vi.spyOn(api.files, 'readBookmark').mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  await act(async () => selectedRegion().querySelector<HTMLButtonElement>('[aria-label="Save this page as a bookmark"]')!.click())
+  const action = [...selectedRegion().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open bookmark')!
+  expect(action).toBeDefined(); await act(async () => action.click())
+  expect(read).toHaveBeenCalledTimes(1)
+  await selectRegion(file.regionId)
+  const later = useAppStore.getState().surveyZoneSelection
+  await act(async () => finish({ url: pageA.url, binary: false }))
+  expect(useAppStore.getState().surveyZoneSelection).toBe(later)
+  expect(selectedRegion().querySelector('[data-file-probe]')).not.toBeNull()
+  expect(api.browser.create).not.toHaveBeenCalled()
+  healthy()
+})
 
 it('private Survey creation consumes the actual menu and original creation owner without changing ordinary work', async () => {
   await renderApp(); await enterSurvey()
