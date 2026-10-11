@@ -1,5 +1,5 @@
-// Derive every brand bitmap from a single source. The repository tracks only
-// `apps/desktop/brand/icon-source.png`; the three consumer files under
+// Derive every brand bitmap from a single source:
+// `apps/desktop/brand/icon-source.png`. Consumer files under
 // `apps/desktop/resources/` are regenerated on every run so the AppKit shell
 // icon, the Electron dock icon and the renderer's `BrandIcon` can never drift
 // into three different pictures. The hook is wired to `predev`/`prebuild`;
@@ -22,6 +22,7 @@ const sourceIcon = join(desktopRoot, 'brand', 'icon-source.png')
 const resourcesDir = join(desktopRoot, 'resources')
 const outDockIcon = join(resourcesDir, 'icon.png')
 const outRendererIcon = join(resourcesDir, 'icon-128.png')
+const outBotIcon = join(resourcesDir, 'icon-512.png')
 const outShellIcon = join(resourcesDir, 'icon.icns')
 const iconsetDir = join(repositoryRoot, '.tmp', 'brand-iconset', 'agentmux.iconset')
 
@@ -81,10 +82,11 @@ async function main() {
   // Dock icon is the source itself — same bitmap, no resample, no quality loss.
   await cp(sourceIcon, outDockIcon)
   await resizeTo(128, outRendererIcon)
+  await resizeTo(512, outBotIcon)
   await buildIcns()
   const relSource = relative(desktopRoot, sourceIcon)
   const relResources = relative(desktopRoot, resourcesDir)
-  process.stdout.write(`brand assets derived from ${relSource} -> ${relResources}/{icon.png, icon-128.png, icon.icns}\n`)
+  process.stdout.write(`brand assets derived from ${relSource} -> ${relResources}/{icon.png, icon-128.png, icon-512.png, icon.icns}\n`)
 }
 
 main().catch((error) => {
