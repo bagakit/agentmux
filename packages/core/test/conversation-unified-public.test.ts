@@ -469,7 +469,7 @@ it('real Claude invocation evidence preserves surrounding speech and exact part 
       expect(() => parseConversationUnit(forged, ref, projected.scope), damage).toThrow()
     }
   }
-  expect(historyPage.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: 'Original surrounding speech' })
+  expect(historyPage.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: 'Original surrounding speech', contentEligibility: 'public' })
   const units = await collect(value => f.client.readAgentConversation(value))
   expect(units.units.flatMap(unit => unit.records).flatMap(record => record.original.kind === 'native' ? record.original.item.contentParts : [])).toEqual(historyPage.items[0]!.contentParts)
   expect(units.units.map(unit => unit.event.role).sort()).toEqual(['message', 'process'])
