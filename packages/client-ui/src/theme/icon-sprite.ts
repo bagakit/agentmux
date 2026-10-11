@@ -178,12 +178,16 @@ function attributes(attributes: Readonly<Record<string, string>>): string {
   // Only trusted geometry or validated path data reaches here. Escaping remains explicit for serialization.
   return Object.entries(attributes).map(([key, value]) => ` ${key}="${value.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')}"`).join('')
 }
-/** Native backgrounds project trusted geometry using the theme's existing bounded color contract. */
-export function iconSvgDataUrl(shapes: readonly IconShape[], style: ThemeValue['iconStyle'], color: string): string {
+/** Standalone and native projections share trusted geometry and the existing bounded color contract. */
+export function iconSvgMarkup(shapes: readonly IconShape[], style: ThemeValue['iconStyle'], color: string, background?: string): string {
   const validatedColor = themeColorSchema.parse(color)
+  const backdrop = background === undefined ? '' : `<rect width="24" height="24" fill="${themeColorSchema.parse(background)}" stroke="none"/>`
   const nodes = shapes.map(([tag, attrs]) => `<${tag}${attributes(attrs)}/>`).join('')
-  const svg = `<svg xmlns="${SVG_NS}" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${validatedColor}" stroke-width="${style.strokeWidth}" stroke-linecap="${style.linecap}" stroke-linejoin="${style.linejoin}" color="${validatedColor}">${nodes}</svg>`
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
+  return `<svg xmlns="${SVG_NS}" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="${validatedColor}" stroke-width="${style.strokeWidth}" stroke-linecap="${style.linecap}" stroke-linejoin="${style.linejoin}" color="${validatedColor}">${backdrop}${nodes}</svg>`
+}
+/** Native backgrounds project the same standalone SVG without adding another serializer. */
+export function iconSvgDataUrl(shapes: readonly IconShape[], style: ThemeValue['iconStyle'], color: string): string {
+  return `url("data:image/svg+xml,${encodeURIComponent(iconSvgMarkup(shapes, style, color))}")`
 }
 /** A native mask projects the same geometry, never a separate editable icon mapping. */
 export function iconMaskDataUrl(shapes: readonly IconShape[], style: ThemeValue['iconStyle']): string {
