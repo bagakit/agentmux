@@ -4605,11 +4605,15 @@ export class AgentMuxClient {
           receipt = existing; return current
         }
         const root = current.continuityOperations?.[input.intentOperationId], supervision = root?.supervision
-        if (!root || !supervision || root.intentOperationId || !root.nativeTarget || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle)) throw new AgentMuxError(
+        const waiting = root && supervision?.attemptCount === 0 && !root.newRun && root.kind === 'pending' &&
+          !['manual', 'input'].includes(root.trigger) && sameRun(root.previousRun, current.run)
+        if (!root || !supervision || root.intentOperationId || !waiting &&
+          (!root.nativeTarget || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle))) throw new AgentMuxError(
           'The exact original supervised recovery target is unavailable.', 'AGENT_CONTINUITY_SUPERSEDED')
         const active = current.continuityOperations?.[supervision.activeAttemptOperationId]
-        if (!active || !matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) ||
-          !matchesProviderNativeSessionTarget(active.nativeTarget, current.nativeHandle) ||
+        if (!active || waiting && active.operationId !== root.operationId || !waiting &&
+          (!matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) ||
+          !matchesProviderNativeSessionTarget(active.nativeTarget, current.nativeHandle)) ||
           !(active.newRun ? sameRun(active.newRun, current.run) : sameRun(active.previousRun, current.run))) throw new AgentMuxError(
           'The active recovery attempt no longer names the exact current Run.', 'AGENT_CONTINUITY_SUPERSEDED')
         const next = structuredClone(supervision), observedAt = Date.now()
@@ -4618,7 +4622,7 @@ export class AgentMuxClient {
           : supervision.phase === 'cancelled' ? 'already-cancelled' : 'already-active'
         if (input.action === 'cancel' && !['settled', 'cancelled'].includes(supervision.phase)) {
           next.phase = 'cancelled'; next.reason = 'explicit-control'; next.observedAt = observedAt
-          next.cancellation = { source: 'control', operationId: input.operationId, run: { ...input.expectedRun },
+          if (root.nativeTarget) next.cancellation = { source: 'control', operationId: input.operationId, run: { ...input.expectedRun },
             nativeTarget: structuredClone(root.nativeTarget), observedAt }
           delete next.nextAttemptAt
           outcome = 'cancelled'; reason = 'explicit-cancel'
@@ -4638,11 +4642,21 @@ export class AgentMuxClient {
           phaseAtCommit: next.phase, observedAt }
         next.controlOperations = { ...supervision.controlOperations, [input.operationId]: receipt }
         const updated = { ...root, supervision: next }
+        if (waiting && outcome === 'continued') {
+          updated.nextActionAt = observedAt
+          updated.rechecks = 0
+        }
+        if (next.phase === 'cancelled') delete updated.nextActionAt
         return { ...current, continuityOperations: { ...current.continuityOperations, [root.operationId]: updated },
           ...(current.continuity?.operationId === root.operationId ? { continuity: updated } : {}), updatedAt: Math.max(current.updatedAt + 1, observedAt) }
       }, undefined, author)
       this.publishSession(session)
       this.continuitySupervisor.observe(session)
+      if (receipt?.outcome === 'cancelled') {
+        const root = session.continuityOperations?.[input.intentOperationId]
+        if (root) this.continuitySupervisor.schedule({ agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
+          operationId: root.operationId, trigger: root.trigger }, root)
+      }
       return { receipt: structuredClone(receipt!), state: 'active', session: this.projectSession(session) }
     } catch (error) {
       const accepted = await prior()
@@ -5310,6 +5324,26 @@ export class AgentMuxClient {
     // A different public Core owner may already have frozen or completed this
     // same operation. Read that durable fact before classifying a new input.
     current = await this.store.readMetadata(input.agentSessionId) ?? current
+    const retained = current && this.continuitySupervisor.retainedAutomaticIntent(current, input)
+    if (current && retained) {
+      this.continuitySupervisor.observe(current)
+      let run: AgentMuxRun | null = null
+      let evidence: import('./agent-session-continuity.js').AgentMuxAgentContinuityRunEvidence = { kind: 'run-unknown', observedAt: Date.now(), message: 'Original recovery observation is pending.' }
+      try {
+        const observed = await this.kernel.status(current.run.runId); this.assertAgentRun(current, observed); run = this.projectRun(observed, current)
+        evidence = run.state === 'running' ? { kind: 'run-running', observedAt: run.observedAt }
+          : { kind: 'run-ended', state: run.state as 'exited' | 'interrupted', observedAt: run.observedAt }
+      } catch (error) {
+        if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_RUN_MISMATCH') throw error
+        evidence = { kind: 'run-unknown', observedAt: Date.now(), message: error instanceof Error ? error.message : String(error) }
+      }
+      if (run?.state === 'running') return { kind: 'reattachable', session: this.projectSession(current), previousRun: { ...input.expectedRun }, run,
+        evidence: { kind: 'run-running', observedAt: run.observedAt }, continuity: structuredClone(retained) }
+      const root = current.continuityOperations?.[retained.intentOperationId ?? retained.operationId]
+      return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
+        reason: root?.supervision?.phase === 'cancelled' ? 'intent-cancelled' : 'recovery-supervised', evidence,
+        continuity: structuredClone(retained) }
+    }
     // A restarted observer rejoins the admitted automatic intent rather than recomposing its policy or delay.
     if (current?.continuity && !current.continuityOperations?.[input.operationId] &&
       input.trigger && !['manual', 'input'].includes(input.trigger) &&
@@ -5394,10 +5428,20 @@ export class AgentMuxClient {
       }
       if (result.kind === 'resumed') receipt.newRun = { ...result.run }
       if (result.kind === 'pending' && result.nextActionAt !== undefined) receipt.nextActionAt = result.nextActionAt
+      if (result.kind === 'pending' && current && !receipt.intentOperationId && !receipt.supervision && !['manual', 'input'].includes(receipt.trigger)) {
+        if (current.nativeHandle?.kind === 'provider' && current.nativeHandle.providerId === current.providerId) receipt.nativeTarget = structuredClone(current.nativeHandle)
+        receipt.supervision = { phase: result.nextActionAt === undefined ? 'paused' : 'observing', activeAttemptOperationId: receipt.operationId,
+          attemptCount: 0, attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: result.reason }
+      }
+      if (result.kind === 'reattachable' && receipt.supervision?.attemptCount === 0) {
+        receipt.supervision = { ...receipt.supervision, phase: 'settled', reason: 'original-run-reattached', observedAt: now }
+        delete receipt.supervision.nextAttemptAt
+      }
       if (current) {
         try {
           current = await this.updateExactAgentSession(current.agentSessionId, current.run, value => {
             const latest = value.continuityOperations?.[receipt.operationId]
+            if (latest?.supervision?.phase === 'cancelled' && latest.supervision.attemptCount === 0) return value
             // A competing observer cannot demote the same admitted or bound Start to its local
             // lifecycle-busy result. The durable original operation remains the reconciliation owner.
             if (latest?.supervision && ((latest.kind === 'starting' && result.kind === 'conflict') ||
@@ -5419,6 +5463,12 @@ export class AgentMuxClient {
           this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED',
             message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
         }
+      }
+      const cancelledWaiting = current?.continuityOperations?.[receipt.operationId]
+      if (cancelledWaiting?.supervision?.phase === 'cancelled' && cancelledWaiting.supervision.attemptCount === 0) {
+        return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun }, reason: 'intent-cancelled',
+          evidence: result.evidence.kind === 'provider-native' ? result.evidence.previousRun : { kind: 'run-unknown', observedAt: now, message: 'The original waiting recovery was cancelled.' },
+          continuity: structuredClone(cancelledWaiting) }
       }
       if (current?.continuityOperations?.[receipt.operationId]?.recoveryDelivery) receipt.recoveryDelivery = structuredClone(current.continuityOperations[receipt.operationId]!.recoveryDelivery!)
       if (current?.continuityOperations?.[receipt.operationId]?.launchInput) receipt.launchInput = structuredClone(current.continuityOperations[receipt.operationId]!.launchInput!)
@@ -5453,6 +5503,10 @@ export class AgentMuxClient {
       }
       return record({ kind: 'conflict', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
         currentRun: { ...current.run }, reason: 'session-run-changed', evidence: { kind: 'agent-session-store' } })
+    }
+    if (prior?.supervision?.phase === 'cancelled' && prior.supervision.attemptCount === 0) {
+      return { kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun }, reason: 'intent-cancelled',
+        evidence: { kind: 'run-unknown', observedAt: now, message: 'The original waiting recovery was explicitly cancelled.' }, continuity: structuredClone(prior) }
     }
     let run: AgentMuxRun | null = null
     if (current) {
@@ -5565,6 +5619,9 @@ export class AgentMuxClient {
       }
     }
     if (decision.kind !== 'resume') return record(decision)
+    if (receipt.supervision?.phase === 'settled' && receipt.supervision.attemptCount === 0) throw new AgentMuxError(
+      'The original attachment intent is complete. A new recovery needs its own explicit operation.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
+      { disposition: 'not_applied', confirmedInputBytes: null })
     try { await this.requireHookIngressOwner() }
     catch (error) {
       if (error instanceof AgentMuxError && error.code === 'HOOK_INGRESS_BUSY') return record({ kind: 'conflict', agentSessionId: input.agentSessionId,
@@ -5572,10 +5629,14 @@ export class AgentMuxClient {
       throw error
     }
     receipt.kind = 'starting'; receipt.reason = admission?.kind === 'resume' ? admission.reason : 'explicit-request'; receipt.evidence = evidence
-    if (!receipt.intentOperationId && !['manual', 'input'].includes(receipt.trigger) && !receipt.supervision) receipt.supervision = {
-      phase: 'observing', activeAttemptOperationId: receipt.operationId, attemptCount: 1, attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'start-pending' }
+    if (!receipt.intentOperationId && !['manual', 'input'].includes(receipt.trigger) && (!receipt.supervision || receipt.supervision.attemptCount === 0)) receipt.supervision = {
+      ...receipt.supervision, phase: 'observing', activeAttemptOperationId: receipt.operationId, attemptCount: 1,
+      attemptLimit: receipt.supervision?.attemptLimit ?? Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'start-pending' }
     // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
     current = await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, value => {
+      if (value.continuityOperations?.[receipt.operationId]?.supervision?.phase === 'cancelled') throw new AgentMuxError(
+        'The original waiting recovery was cancelled before its first Start was admitted.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
+        { disposition: 'not_applied', confirmedInputBytes: null })
       const frozen = value.continuityOperations?.[receipt.operationId]?.launchInput
       if (frozen && receipt.launchInput && !isDeepStrictEqual(frozen.input, receipt.launchInput.input)) throw new AgentMuxError(
         'The original recovery input was already frozen with another body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
