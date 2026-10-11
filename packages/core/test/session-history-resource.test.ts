@@ -73,7 +73,7 @@ describe('exact native recorded image through the original public Core owner',()
   await h.save()
   const latest=await h.client.sessionHistoryPage('image-session',{limit:30})
   expect(latest.items.map(i=>i.id)).not.toContain(h.request.recordId)
-  expect(first.items[0]!.contentParts[0]).toEqual({kind:'resource',resourceType:'image',reference:h.image})
+  expect(first.items[0]!.contentParts[0]).toEqual({kind:'resource',resourceType:'image',reference:h.image,contentEligibility:'unconfirmed'})
   const before=(await h.requests()).length
   const resourceReads=[]
   for(const [partIndex,expectedReference] of [[0,h.image],[1,h.data]] as const){

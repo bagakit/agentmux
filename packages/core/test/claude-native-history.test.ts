@@ -83,10 +83,10 @@ it('reads main Claude pages with exact UUIDs and ordered resources, excluding si
   const first = await f.client.sessionHistoryPage('private-agent', { limit: 2 })
   expect(first.source).toEqual({ providerId: 'claude', nativeSessionId: 'native-main' })
   expect(first.items.map((item) => [item.id, item.kind])).toEqual([['tool-result', 'activity'], ['latest', 'user-message']])
-  expect(first.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'before ' },
-    { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,cGlj' },
-    { kind: 'text', text: ' after 中' }])
-  expect(first.items[0]!.contentParts).toEqual([{ kind: 'tool-result', output: 'actual tool output', callId: 'tool-1' }])
+  expect(first.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'before ', contentEligibility: 'unconfirmed' },
+    { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,cGlj', contentEligibility: 'unconfirmed' },
+    { kind: 'text', text: ' after 中', contentEligibility: 'unconfirmed' }])
+  expect(first.items[0]!.contentParts).toEqual([{ kind: 'tool-result', output: 'actual tool output', callId: 'tool-1', contentEligibility: 'public' }])
   const older = await f.client.sessionHistoryPage('private-agent', { limit: 2, cursor: first.nextCursor! })
   expect(older.items.map((item) => item.id)).toEqual(['user-1', 'assistant-1'])
   expect(older.items[0]!.startedAt).toBe(Date.parse(fixtureDay(1) + "T" + fixtureClock(1, 2, 3) + "Z"))
@@ -103,9 +103,9 @@ it('preserves neutral unknown activity and missing time, while keeping mixed too
   ]))
   const page = await f.client.sessionHistoryPage('private-agent')
   expect(page.items.map((item) => item.kind)).toEqual(['activity', 'activity'])
-  expect(page.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: JSON.stringify({ type: 'future-native-event', uuid: 'unknown', sessionId: 'native-main', detail: 'kept', timestamp: 'not-a-date' }) })
+  expect(page.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: JSON.stringify({ type: 'future-native-event', uuid: 'unknown', sessionId: 'native-main', detail: 'kept', timestamp: 'not-a-date' }), contentEligibility: 'unconfirmed' })
   expect(page.items[0]).not.toHaveProperty('startedAt')
-  expect(page.items[1]!.contentParts).toEqual([{ kind: 'tool-call', name: 'read', input: '{"path":"a"}', callId: 'call' }])
+  expect(page.items[1]!.contentParts).toEqual([{ kind: 'tool-call', name: 'read', input: '{"path":"a"}', callId: 'call', contentEligibility: 'public' }])
 })
 
 it('keeps synthetic and compaction summary user records neutral instead of assigning a human speaker', async () => {
@@ -117,8 +117,8 @@ it('keeps synthetic and compaction summary user records neutral instead of assig
   const page = await f.client.sessionHistoryPage('private-agent')
   expect(page.items.map((item) => [item.id, item.kind])).toEqual([['meta', 'activity'], ['summary', 'activity'], ['synthetic', 'activity']])
   expect(page.items.map((item) => item.contentParts)).toEqual([
-    [{ kind: 'text', text: 'generated context' }], [{ kind: 'text', text: 'persisted compaction summary' }],
-    [{ kind: 'text', text: 'generated instruction' }]
+    [{ kind: 'text', text: 'generated context', contentEligibility: 'unconfirmed' }], [{ kind: 'text', text: 'persisted compaction summary', contentEligibility: 'private' }],
+    [{ kind: 'text', text: 'generated instruction', contentEligibility: 'unconfirmed' }]
   ])
 })
 
@@ -128,7 +128,7 @@ it('keeps long UTF8 records complete across range chunks and excludes a partial 
   const f = await fixture(Buffer.concat([Buffer.from(complete + '{"type":"user","text":"'), Buffer.from([0xe4, 0xb8])]))
   const page = await f.client.sessionHistoryPage('private-agent')
   expect(page.items).toHaveLength(1)
-  expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: exact }])
+  expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: exact, contentEligibility: 'public' }])
   expect(await f.bytes()).toEqual(f.before)
 })
 
@@ -178,7 +178,7 @@ it('reads accepted Claude mid-turn prompts as original speech in source order, p
   expect(page.items.map(item => item.kind)).toEqual(['activity', 'assistant-message', 'user-message', 'assistant-message', 'user-message', 'activity'])
   const inputs = page.items.filter(item => item.kind === 'user-message')
   expect(inputs.map(item => item.id)).toEqual(['accepted-1', 'accepted-2'])
-  expect(inputs.map(item => item.contentParts)).toEqual([[{ kind: 'text', text: body }], [{ kind: 'text', text: body }]])
+  expect(inputs.map(item => item.contentParts)).toEqual([[{ kind: 'text', text: body, contentEligibility: 'unconfirmed' }], [{ kind: 'text', text: body, contentEligibility: 'unconfirmed' }]])
   expect(inputs.map(item => item.title)).toEqual(['运行中追加', '运行中追加'])
   expect(inputs.map(item => item.startedAt)).toEqual([Date.parse(fixtureDay(8) + "T" + fixtureClock(9, 5, 46, "815") + "Z"), Date.parse(fixtureDay(8) + "T" + fixtureClock(9, 5, 46, "815") + "Z")])
   expect(inputs.every(item => item.turnId === undefined)).toBe(true)
@@ -200,5 +200,5 @@ it('keeps queue bookkeeping, unknown modes, malformed prompts and generated/chil
   const f = await fixture(jsonl(values)), page = await f.client.sessionHistoryPage('private-agent')
   expect(page.items).toHaveLength(values.length - 1)
   expect(page.items.every(item => item.kind === 'activity')).toBe(true)
-  expect(page.items.map(item => item.contentParts)).toEqual(values.filter(item => !('isSidechain' in item && item.isSidechain)).map(item => [{ kind: 'text', text: JSON.stringify(item) }]))
+  expect(page.items.map(item => item.contentParts)).toEqual(values.filter(item => !('isSidechain' in item && item.isSidechain)).map(item => [{ kind: 'text', text: JSON.stringify(item), contentEligibility: 'isCompactSummary' in item && item.isCompactSummary ? 'private' : 'unconfirmed' }]))
 })

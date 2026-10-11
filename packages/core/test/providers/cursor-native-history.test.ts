@@ -81,8 +81,8 @@ describe('Cursor first-party encoded canonical turns', () => {
       { kind: 'resource', resourceType: 'file', reference: '/native/file.ts' }
     ])
     expect(page.items[2]!.contentParts).toEqual([
-      { kind: 'tool-call', name: 'shell', callId: 'native-call', input: "{\"command\":\"printf native\",\"workingDirectory\":\"/native\"}" },
-      { kind: 'tool-result', name: 'shell', callId: 'native-call', output: '{"stdout":"native result"}', failed: false }
+      { kind: 'tool-call', contentEligibility: 'public', name: 'shell', callId: 'native-call', input: "{\"command\":\"printf native\",\"workingDirectory\":\"/native\"}" },
+      { kind: 'tool-result', contentEligibility: 'public', name: 'shell', callId: 'native-call', output: '{"stdout":"native result"}', failed: false }
     ])
     expect(page.items.map(item => [item.startedAt, item.completedAt])).toEqual([[1000, undefined], [1100, 1200], [1300, undefined], [1500, 1600]])
     expect(await readFile(f.path)).toEqual(before)
@@ -112,8 +112,8 @@ describe('Cursor first-party encoded canonical turns', () => {
     if (mode === 'checkpoint') f.writer.exec('PRAGMA wal_checkpoint(TRUNCATE)')
     const older = await f.read(2, first.nextCursor!), fresh = await f.read()
     expect([...older.items, ...first.items].map(item => item.id)).toEqual(fresh.items.map(item => item.id))
-    expect(first.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer' }])
-    expect(fresh.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer extended' }])
+    expect(first.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer', contentEligibility: 'public' }])
+    expect(fresh.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer extended', contentEligibility: 'public' }])
     expect(fresh.items.at(-1)!.completedAt).toBe(1800)
   })
   it('preserves equal canonical occurrences and crosses a turn boundary without a guessed count', async () => {
@@ -196,8 +196,8 @@ describe('Cursor first-party encoded canonical turns', () => {
     expect(get.mock.calls.some(([sql]) => sql === 'SELECT value FROM meta WHERE key = ?')).toBe(true)
     expect(get.mock.calls.every(([sql]) => sql === 'SELECT value FROM meta WHERE key = ?' || sql === 'PRAGMA locking_mode=EXCLUSIVE')).toBe(true)
     expect((await f.read(2, first.nextCursor!)).items).toEqual((await f.read()).items.slice(0, 2))
-    expect(first.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer' }])
-    expect((await f.read()).items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer extended' }])
+    expect(first.items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer', contentEligibility: 'public' }])
+    expect((await f.read()).items.at(-1)!.contentParts).toEqual([{ kind: 'text', text: 'original answer extended', contentEligibility: 'public' }])
     controller.abort(); const count = changes.length
     f.metadata(fixture.rootId); await new Promise(resolve => setTimeout(resolve, 80))
     expect(changes).toHaveLength(count)
@@ -224,7 +224,7 @@ describe('Cursor first-party encoded canonical turns', () => {
     expect(await client().sessionHistoryPage('private-cursor-session', { env: f.env })).toEqual(page)
     const records = projectConversationRecords({ agentSessionId: 'private-cursor-session', historyPage: page })
     expect(records.map(item => item.kind)).toEqual(['user-message', 'assistant-message', 'activity', 'assistant-message'])
-    expect(records[1]!.contentParts).toEqual([{ kind: 'reasoning', text: 'original thought' }])
+    expect(records[1]!.contentParts).toEqual([{ kind: 'reasoning', text: 'original thought', contentEligibility: 'public' }])
     expect(records[0]!.input?.author).toEqual({ kind: 'unknown' })
     const observing = clients[0]!
     expect(createCursorProvider(defineAgentProvider).observeSessionHistory).toBeTypeOf('function')
@@ -235,7 +235,7 @@ describe('Cursor first-party encoded canonical turns', () => {
     expect(await changed.promise).toMatchObject({ kind: 'invalidated' })
     const refreshed = await observing.sessionHistoryPage('private-cursor-session', { env: f.env })
     expect(projectConversationRecords({ agentSessionId: 'private-cursor-session', historyPage: refreshed }).at(-1)!.contentParts)
-      .toEqual([{ kind: 'text', text: 'original answer extended' }])
+      .toEqual([{ kind: 'text', text: 'original answer extended', contentEligibility: 'public' }])
     const originalGet = NativeSqliteHistoryReader.prototype.get
     let failNextProbe = true
     vi.spyOn(NativeSqliteHistoryReader.prototype, 'get').mockImplementation(async function (this: NativeSqliteHistoryReader, sql, parameters) {
