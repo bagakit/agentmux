@@ -3,17 +3,22 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { createHash } = require('node:crypto')
 const { pathToFileURL } = require('node:url')
-const { app, BrowserWindow, ipcMain } = require('electron')
 const [html, ownerBundle, privateRoot, evidence, phase, asset, cli] = process.argv.slice(2)
-for (const key of ['home','userData','sessionData']) { const p=path.join(privateRoot,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p) }
-const raw = { phase, frames:[], actions:[], nativeEvents:[], windowEvents:[], leaseEvents:[], errors:[], qualified:false,
-  boundary:'Actual mounted App, Settings and TerminalView / native input / isolated product preload and registered Toolkit IPC; Metrics DTO port and original preview Session transport controlled. No official CLI/nativeRun or live-user claim.' }
-const stage = value => {
-  if (phase !== 'agent-cards') return
-  fs.writeFileSync(path.join(evidence,'agent-cards-progress.json'), JSON.stringify({stage:value,at:Date.now(),pid:process.pid})+'\n')
+const stage = (value, facts = {}) => {
+  if (phase !== 'agent-cards' && phase !== 'diagnostic') return
+  const progress = {phase,stage:value,at:Date.now(),pid:process.pid,...facts}
+  fs.appendFileSync(path.join(evidence,phase+'-progress.jsonl'),JSON.stringify(progress)+'\n')
+  fs.writeFileSync(path.join(evidence,phase+'-progress.json'),JSON.stringify(progress)+'\n')
 }
 stage('main-entered')
+const { app, BrowserWindow, ipcMain } = require('electron')
+stage('electron-imported')
+for (const key of ['home','appData','userData','sessionData']) { const p=path.join(privateRoot,key);fs.mkdirSync(p,{recursive:true});app.setPath(key,p) }
+stage('paths-isolated')
+const raw = { phase, frames:[], actions:[], nativeEvents:[], windowEvents:[], leaseEvents:[], errors:[], qualified:false,
+  boundary:'Actual mounted App, Settings and TerminalView / native input / isolated product preload and registered Toolkit IPC; Metrics DTO port and original preview Session transport controlled. No official CLI/nativeRun or live-user claim.' }
 let win, stop=()=>{}, current, snapshot, serial=0, delay=0, toolkit, sampler, runtime, metrics, controlServer, detachRuntime
+let diagnosticTraceMode='native'
 const leases = new Map()
 const customProof=phase==='agent-cards'?JSON.parse(fs.readFileSync(process.env.AGENTMUX_TOOLKIT_AGENT_CARDS_CUSTOM_RESULT,'utf8')):null
 const customSnapshot=customProof?.snapshot
@@ -28,9 +33,11 @@ const performanceCurrent = async () => {
 const facts = async () => ({active:toolkit?(await performanceCurrent()).consumerCount:leases.size,events:raw.leaseEvents.slice()})
 const pause = ms => new Promise(resolve=>setTimeout(resolve,ms))
 app.whenReady().then(async()=>{
+  const { fixtureEpoch: _historyFixtureEpoch } = await import('../../../../../test/fixture-values.mjs')
+
   try {
     stage('app-ready')
-    const {ConfigOwner,ConfigStore,registerToolkitIpc,ToolkitOwner,RuntimeController,localRuntimeConnector,ProcessResourceSampler,createResourceMetricsPort,AgentMuxMemoryAgentSessionStore,AgentMuxControlServer,parseMetricsRendererResult}=await import(pathToFileURL(ownerBundle).href)
+    const {ConfigOwner,ConfigStore,registerToolkitIpc,ToolkitOwner,RuntimeController,localRuntimeConnector,ProcessResourceSampler,createResourceMetricsPort,AgentMuxMemoryAgentSessionStore,AgentMuxControlServer,parseMetricsRendererResult,registerPerformanceCaptureIpc,RendererV8Profiler,RendererTimelineTracer}=await import(pathToFileURL(ownerBundle).href)
     stage('owner-imported')
     const configStore = new ConfigStore(path.join(privateRoot,'userData','config.json'))
     const initialConfigExists = fs.existsSync(configStore.filePath)
@@ -38,7 +45,7 @@ app.whenReady().then(async()=>{
     stage('config-read')
     const owner = new ConfigOwner({read:()=>current,save:next=>configStore.save(next),publish:saved=>{current=saved;win?.webContents.send('proof:config:changed',saved)}})
     ipcMain.handle('proof:setup',async(_event,preview)=>{
-      if(phase==='control'||phase==='placement'||phase==='buttons'||phase==='attribution'||phase==='agent-cards'||phase==='epoch-peak') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
+      if(phase==='control'||phase==='placement'||phase==='buttons'||phase==='attribution'||phase==='agent-cards'||phase==='epoch-peak'||phase==='diagnostic') { assert.equal(initialConfigExists,false,'首次私有Config来源为空');await owner.update(()=>({...preview,
         workspaces:[...preview.workspaces,...current.workspaces.filter(workspace=>!preview.workspaces.some(item=>item.id===workspace.id))],
         appearance:{...preview.appearance,appAppearance:'dark'},toolkit:{...preview.toolkit,performance:{enabled:true,statusBar:'label'},...(customSnapshot?{tools:[customSnapshot.definition]}:{})},
         composerShortcuts:[{id:'original',keyword:'original',label:'Original authored prompt',body:'Original saved body remains exact.'}]})) }
@@ -90,8 +97,41 @@ app.whenReady().then(async()=>{
       stop=async()=>{stopIpc();await toolkit.dispose();await controlServer.stop();metrics.dispose();detachRuntime();await runtime.dispose()}
     }
     win.webContents.on('console-message',(_event,_level,message)=>raw.errors.push(message))
-    win.webContents.on('preload-error',(_event,_p,error)=>raw.errors.push(String(error)))
+    win.webContents.on('preload-error',(_event,preload,error)=>{
+      raw.errors.push(String(error));stage('preload-error',{preload,error:{name:error.name,message:error.message}})
+    })
+    if(phase==='diagnostic') {
+      win.webContents.on('did-start-loading',()=>stage('renderer-loading'))
+      win.webContents.on('dom-ready',()=>stage('renderer-dom-ready'))
+      win.webContents.on('did-finish-load',()=>stage('renderer-finished-load'))
+      win.webContents.on('did-fail-load',(_event,code,description,url,isMainFrame)=>stage('renderer-load-failed',{code,description,url,isMainFrame}))
+      win.webContents.on('render-process-gone',(_event,details)=>stage('renderer-process-gone',details))
+    }
     stage('window-created')
+    if(phase==='diagnostic') {
+      raw.isolation={home:app.getPath('home'),appData:app.getPath('appData'),userData:app.getPath('userData'),sessionData:app.getPath('sessionData')}
+      for(const [key,value]of Object.entries(raw.isolation))assert.equal(value,path.join(privateRoot,key))
+      const target=()=>{const pid=win.webContents.getOSProcessId(),metric=app.getAppMetrics().find(p=>p.pid===pid);return metric?{windowId:win.id,webContentsId:win.webContents.id,generation:0,pid,creationTime:metric.creationTime}:null}
+      const profiler=new RendererV8Profiler(win.webContents,target),tracer=new RendererTimelineTracer(win.webContents,target)
+      const metricsPort=createResourceMetricsPort({sampler:{},currentWindow:()=>target(),
+        profiler:{capture:async input=>{const result=await profiler.capture(input);raw.originalCapture=result;return result},dispose:()=>profiler.dispose()},
+        tracer:{capture:async input=>{
+          if(diagnosticTraceMode==='unknown-visual') {
+            // Explicit controlled DTO for the unknown-state image only; not native trace qualification.
+            raw.traceUnknownVisualControlled=true
+            return {...input,schema:'agentmux.renderer-trace.v1',scope:'chromium-target-related-timeline',status:'unknown',
+              transferMode:'ReportEvents',traceTimeUnit:'microseconds',requestedCategories:['toplevel','devtools.timeline','disabled-by-default-devtools.timeline','blink','blink.user_timing','cc','gpu','viz','input','latencyInfo'],
+              timing:{requestedAt:_historyFixtureEpoch(0, 0, 1),startedAt:_historyFixtureEpoch(0, 0, 2),endAcknowledgedAt:null,completedAt:null,finishedAt:_historyFixtureEpoch(0, 0, 3),startMonotonicMs:1,endMonotonicMs:null,completeMonotonicMs:null},
+              sourceVerified:{before:true,after:false},lifecycle:{startRequested:true,startAcknowledged:true,endRequested:true,endAcknowledged:false,tracingComplete:false,dataLossOccurred:null,detached:'unconfirmed'},
+              bufferUsage:{observations:0,maxFraction:null,fullObserved:false},receivedEvents:0,receivedTraceBytes:18,trace:null,traceBytes:null,sha256:null,issues:[]}
+          }
+          try { return await tracer.capture(input) }
+          catch(error) {raw.lastTraceFailure={name:error.name,code:error.code,message:error.message};throw error}
+        },dispose:()=>tracer.dispose()}})
+      registerPerformanceCaptureIpc(metricsPort,(channel,handler)=>ipcMain.handle(channel,(event,input)=>{assert.equal(event.sender,win.webContents);assert.equal(event.senderFrame,win.webContents.mainFrame);return handler(event,input)}))
+      const previousStop=stop;stop=async()=>{metricsPort.dispose();await previousStop()}
+    }
+    stage('renderer-load-requested')
     await win.loadFile(html);stage('renderer-loaded');win.showInactive();win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     const read=expression=>win.webContents.executeJavaScript(expression)
@@ -146,6 +186,7 @@ app.whenReady().then(async()=>{
       const png=(await win.webContents.capturePage()).toPNG();fs.writeFileSync(path.join(evidence,file),png);raw.frames.push({file,sha256:createHash('sha256').update(png).digest('hex'),description,geometry})
     }
     await until('window.performanceScene?.ready&&!!document.querySelector(".performance-trigger")&&!!document.querySelector(".xterm-helper-textarea")')
+    stage('scene-ready')
     await settle()
     const surface=await read('window.performanceScene.surface()')
     raw.initialSurface=surface
@@ -276,6 +317,72 @@ app.whenReady().then(async()=>{
       await capture('380-light-epoch-peak.png','Actual expanded Work and wait / same Previous peak and owner / narrow light')
       assert.equal(await read('window.performanceScene.writes.length'),originalWrites,'Diagnostic UI sends no terminal input')
       await close();raw.surface=await read('window.performanceScene.surface()');assert.deepEqual(raw.surface,surface)
+    } else if(phase==='diagnostic') {
+      stage('diagnostic-started')
+      raw.qualificationScope='performance-capture-and-scrolling'
+      raw.boundary='Actual App, original Toolkit/overlay/styles, isolated product preload and registered metrics capture delegate with original native profiler. Resource metrics and preview Session transport are controlled; not live-user lag or leak proof.'
+      const pid=win.webContents.getOSProcessId(),processMetric=app.getAppMetrics().find(value=>value.pid===pid)
+      assert.ok(pid>0&&processMetric?.creationTime>0)
+      const target={windowId:win.id,webContentsId:win.webContents.id,generation:0,pid,creationTime:processMetric.creationTime}
+      await read('('+function(target){const snapshot=structuredClone(window.performanceScene.snapshot),o=snapshot.observation,r=o.renderer.data;
+        const originalPid=r.process.pid,originalCreated=r.process.creationTime;o.window={windowId:target.windowId,webContentsId:target.webContentsId,generation:target.generation};r.window={...o.window};r.process={pid:target.pid,creationTime:target.creationTime};
+        o.app.data.processes=o.app.data.processes.map(p=>p.pid===originalPid&&p.creationTime===originalCreated?{...p,pid:target.pid,creationTime:target.creationTime}:p);
+        window.diagnosticSnapshot=snapshot;return window.performanceScene.publish(snapshot)}.toString()+')('+JSON.stringify(target)+')')
+      await click(q('.performance-trigger'))
+      const renderer='[data-performance-role="renderer"]'
+      await click(q(renderer+' > summary'))
+      await capture('normal-expanded.png','Actual App dense process details / original overlay and body')
+      const wheel=async deltaY=>{const p=await point(q('.performance-body')),before=await read('document.querySelector(".performance-body").scrollTop');
+        await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',x:p.x,y:p.y,deltaX:0,deltaY});await settle();
+        const after=await read('document.querySelector(".performance-body").scrollTop');raw.actions.push({type:'native-wheel',before,after,deltaY});return{before,after}}
+      const advance=await wheel(2400);assert.ok(advance.after>advance.before,'Actual wheel must advance the original body')
+      const lastVisible=()=>read('(()=>{const body=document.querySelector(".performance-body"),last=body.querySelector(".performance-sources"),b=body.getBoundingClientRect(),r=last.getBoundingClientRect();return r.bottom<=b.bottom+1&&r.top>=b.top-1})()')
+      assert.equal(await lastVisible(),true,'Last Observation details is readable after native wheel')
+      await capture('overflow-bottom.png','Last Observation details is reachable with native wheel; footer remains usable')
+      await read('window.diagnosticReading={body:document.querySelector(".performance-body"),scroll:document.querySelector(".performance-body").scrollTop,group:document.querySelector("[data-performance-role=renderer]")}')
+      await read('window.performanceScene.publish(structuredClone(window.diagnosticSnapshot))');await settle()
+      assert.equal(await read('window.diagnosticReading.body===document.querySelector(".performance-body")&&window.diagnosticReading.group===document.querySelector("[data-performance-role=renderer]")&&Math.abs(window.diagnosticReading.scroll-window.diagnosticReading.body.scrollTop)<1'),true,'Refresh keeps native scroller, open group and original nonzero reading')
+      await click(q(renderer+' > summary'));await key('Home');await key('PageDown');const keyboard=await read('document.querySelector(".performance-body").scrollTop');await key('End')
+      assert.ok(keyboard>0,'Native PageDown advances the focused detail reader');assert.equal(await lastVisible(),true,'Native End reaches final details')
+      raw.scrolling={nativeWheel:true,nativePageDown:true,nativeEnd:true,lastVisible:true,refreshPreserved:true}
+      stage('diagnostic-scrolling-qualified')
+      await scene(380,'light');await wheel(-3000);await capture('narrow-expanded.png','Actual narrow light App / full actions and bounded process columns')
+      await scene(1480,'dark');await wheel(-3000);await click(q('[data-performance-capture] > summary'))
+      const sample='[data-performance-capture] .performance-capture-actions > button:first-child'
+      await read('document.querySelector('+JSON.stringify(sample)+').scrollIntoView({block:"nearest"})');await settle()
+      const samplePoint=await point(q(sample));win.webContents.debugger.detach()
+      stage('diagnostic-profile-input-requested')
+      win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...samplePoint});win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...samplePoint})
+      await until('document.querySelector(".performance-capture-result .performance-section-heading > span")?.textContent==="completed"')
+      assert.deepEqual(raw.originalCapture.target,target,'GUI request and actual native result bind the same exact process')
+      assert.equal(raw.originalCapture.status,'completed');assert.equal(raw.originalCapture.cleanup.detached,'confirmed')
+      assert.ok(raw.originalCapture.profile?.samples?.length>0,'Original native profiler returns nonempty sample IDs')
+      stage('diagnostic-profile-completed')
+      assert.equal(win.webContents.debugger.isAttached(),false,'Original profiler released the debugger before observer reattachment')
+      win.webContents.debugger.attach('1.3')
+      await capture('native-profile.png','Explicit GUI click through isolated product preload and Main owner / original native weighted samples')
+      await click(q('.performance-module-row'));await read('document.querySelector(".performance-frame-detail").scrollIntoView({block:"nearest"})');await settle()
+      await capture('selected-stack.png','Real module sample selected into original weighted call stack')
+      await scene(380,'light');await capture('narrow-selected-stack.png','Narrow light / real sampled call stack and complete selected frame')
+      await scene(1480,'dark')
+      const trace='[data-performance-capture] > .performance-capture-actions > button:last-child'
+      await click(q(trace))
+      await until('!!document.querySelector("[data-performance-capture] > .performance-state[data-tone=warning]")')
+      assert.equal(raw.lastTraceFailure?.code,'CONTROL_UNAVAILABLE','The original attached debugger refuses only this trace request')
+      assert.equal(win.webContents.debugger.isAttached(),true,'The original observer debugger remains owned after refusal')
+      await read('document.querySelector("[data-performance-capture] > .performance-state[data-tone=warning]").scrollIntoView({block:"nearest"})')
+      await capture('capture-error.png','Actual trace refusal with existing debugger owner; original profile remains available')
+      diagnosticTraceMode='unknown-visual'
+      await click(q(trace))
+      await until('document.querySelector(".performance-capture-result .performance-section-heading > span")?.textContent==="unknown"')
+      assert.equal(await read('!!'+q('[aria-label="Capture result"] [aria-label="Sampled call stacks"]')),false,'Unknown results do not borrow successful attribution')
+      assert.equal(await read('!!'+q('[aria-label="Retained completed JavaScript profile"] [aria-label="Sampled call stacks"]')),true,'Unknown results preserve the original completed profile')
+      await read('document.querySelector(".performance-capture-result").scrollIntoView({block:"start"})')
+      await capture('capture-unknown.png','Controlled original-contract unknown DTO / actual UI reader; not native trace completion or cleanup proof')
+      await scene(380,'light');await capture('narrow-capture-unknown.png','Narrow unknown receipt reader / controlled DTO, not native qualification')
+      assert.deepEqual(await read('window.performanceScene.surface()'),surface,'Diagnostics preserve original nonempty workface, Sessions and draft')
+      raw.captureTarget=target;raw.nativeCaptureCount=1
+      await close()
     } else if(phase==='attribution') {
       raw.qualificationScope='resource-attribution-only'
       raw.boundary='Actual App/Toolkit/isolated sandbox preload with controlled Metrics DTO; bounded keyboard/refresh/scroll captures only. No full control/restart/joined/Native or user Run actions.'
@@ -642,15 +749,19 @@ app.whenReady().then(async()=>{
       }
     }
     raw.nativeEvents=await read('window.performanceScene.events')
-    assert.ok(raw.nativeEvents.some(event=>event.isTrusted&&event.key==='Tab')||phase==='restart'||phase==='joined','原生事件非空正控')
+    if(phase==='diagnostic') {
+      for(const key of ['Home','PageDown','End'])assert.ok(raw.nativeEvents.some(event=>event.isTrusted&&event.key===key),'Diagnostic原生阅读事件非空正控: '+key)
+    } else assert.ok(raw.nativeEvents.some(event=>event.isTrusted&&event.key==='Tab')||phase==='restart'||phase==='joined','原生事件非空正控')
     await read('window.dispatchEvent(new Event("beforeunload"))');await win.webContents.session.flushStorageData()
     raw.qualified=true
-  } catch(error) {raw.failure={name:error.name,message:error.message,stack:error.stack}}
+  } catch(error) {raw.failure={name:error.name,message:error.message,stack:error.stack};stage('failed',{failure:raw.failure})}
   finally {
+    stage('disposing')
     raw.finalLeases=toolkit?(await performanceCurrent()).consumerCount:leases.size
     try{await stop()}catch(error){raw.qualified=false;raw.disposalFailure=String(error)}
     raw.afterDisposalLeases=toolkit?(await performanceCurrent()).consumerCount:leases.size
     fs.writeFileSync(path.join(evidence,phase+'-render.json'),JSON.stringify(raw,null,2)+'\n')
+    stage('disposed',{qualified:raw.qualified,afterDisposalLeases:raw.afterDisposalLeases})
     win?.close();raw.qualified?app.quit():app.exit(1)
   }
 })

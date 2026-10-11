@@ -31,6 +31,7 @@ const observation: MetricsObservation = {
   renderer: available({ process:{pid:2345,creationTime:at-300000},memory:{sampledAt:at,scope:'renderer-v8-isolate',heap:{usedHeapKib:122880,totalHeapKib:196608,physicalHeapKib:180224,heapLimitKib:4194304},unavailable:null}, window: { windowId: 1, webContentsId: 1, generation: 1 }, counts: { monacoEditors: 3, monacoModels: 5, documents: 4, runtimeSubscriptions: 2, terminalViews: 3, terminalAddons: 6, terminalListeners: 9 }, performance: createRendererPerformance(() => 0, () => at).snapshot() })
 }
 export const performanceSnapshot: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'preparation-execution-1', run: { hostId:'local',runId:'preparation-run-8' }, state: 'observing', reason: null, observedAt: at,
+  diagnostics: { captureEnabled: false, failureEvidence: 'none', droppedWrites: 0, lastFailure: null, persistence: 'not-requested', issue: null, cleanupIssue: null },
   startedAt: at - 47000, manual: false, consumerCount: 1, sequence: 1,
   document: {schema:'agentmux.toolkit.result.v1',summary:'All tracked local Run processes',items:[],links:[],notice:'RSS includes shared pages.',agentCards:{fields:['avatar','name','status','provider','workspace'],items:runs.map(run=>({reference:{kind:'run',hostId:run.hostId,runId:run.runId},metrics:[]})),omittedItems:0}},
   observation, trend: Array.from({ length: 48 }, (_, i) => ({ observedAt: at - (47 - i) * 1000,
