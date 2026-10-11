@@ -25,7 +25,8 @@ const cssSources = [
 let app: MoteAppFixture, sheet: HTMLStyleElement, dispose: (() => void) | undefined
 beforeEach(async () => {
   vi.spyOn(api.config, 'get').mockResolvedValue(moteConfig)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  vi.spyOn(api.config, 'save').mockImplementation(async value => value)
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] }); vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
   dispose = await useAppStore.getState().initialize(); await prepareRendererUpdate()
@@ -63,28 +64,28 @@ it('original image colors reach the real Footer, both floating forms, Space iden
   const customRow = app.panel().querySelector<HTMLElement>(`[data-mote-topic-id="${customMoteId}"]`)!
   expect(customRow).not.toBeNull(); expect(customRow.getAttribute('aria-pressed')).toBe('false'); expect(originalImages(customRow)).toHaveLength(1)
   await moteClick(customRow); expect(originalImages(app.entry())[0]!.src).toContain('ORIGINAL')
-  await moteClick(button('Show Mote avatars only')); expect(originalImages(app.panel()).length).toBeGreaterThan(1)
+  await moteClick(button('Show Mote avatars only')); expect(originalImages(app.panel())).toHaveLength(1)
   const author = app.container.querySelector('[data-mote-author]')!; expect(author).not.toBeNull(); expect(originalImages(author)[0]!.src).toContain('ORIGINAL')
-  await moteClick(button('Open Mote Space')); await act(async () => useAppStore.setState({ projectRailOpen: true })); await settleMoteApp()
+  await moteClick(button('Open in Space')); await act(async () => useAppStore.setState({ projectRailOpen: true })); await settleMoteApp()
   const space = [...app.container.querySelectorAll<HTMLElement>('.project-rail [data-space-icon-target]')].find(node => node.dataset.spaceIconTarget === custom.key)!
   expect(space).not.toBeNull(); expect(originalImages(space)[0]!.src).toContain('ORIGINAL')
   expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
 })
 
-it.each(['dark', 'light'])('fallback and manual identity glyphs keep the existing purple through selection, sleep and unknown in %s while face keeps its own palette', async appearance => {
+it.each(['dark', 'light'])('automatic Mote identities use the theme palette in %s while explicit glyphs and faces retain their colors', async appearance => {
   document.documentElement.setAttribute('data-appearance', appearance)
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
   await app.mount(<><span data-type-glyph style={{ color: 'var(--text-3)' }}><MoteIcon /></span><span data-manual-identity><SpaceObjectIcon kind="mote" name="Manual identity" manualIcon="book" /></span><span data-unknown-identity><SpaceObjectIcon kind="mote" name="Retained unknown" manualIcon={null} moteAvailability="restoring" /></span></>)
   const quiet = app.panel().querySelector<HTMLElement>(`[data-mote-topic-id="${quietMoteId}"]`)!
   expect(quiet).not.toBeNull(); const seed = icon(quiet), shape = seed.querySelector('svg')!.outerHTML
-  expect(seed.querySelector('svg')?.getAttribute('fill')).toBe('currentColor'); expect(quiet.dataset.moteStatus).toBe('No Agent yet')
-  expect(getComputedStyle(seed).color).toBe(tokenColor('--purple'))
+  expect(seed.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('object.mote'); expect(quiet.dataset.moteStatus).toBe('No Agent yet')
+  expect(getComputedStyle(seed).color).toBe(tokenColor('--text-2'))
   await moteClick(quiet); expect(icon(app.entry()).querySelector('svg')!.outerHTML).toBe(shape)
-  expect(getComputedStyle(icon(app.entry())).color).toBe(tokenColor('--purple')); expect(app.entry().dataset.moteStatus).toBe('No Agent yet')
+  expect(getComputedStyle(icon(app.entry())).color).toBe(tokenColor('--text-2')); expect(app.entry().dataset.moteStatus).toBe('No Agent yet')
   expect(getComputedStyle(icon(app.container.querySelector('[data-manual-identity]')!)).color).toBe(tokenColor('--purple'))
   const unknown = app.container.querySelector('[data-unknown-identity]')!; expect(unknown.querySelector('[data-mote-expression]')?.getAttribute('data-mote-expression')).toBe('unknown')
-  expect(getComputedStyle(icon(unknown)).color).toBe(tokenColor('--purple'))
+  expect(getComputedStyle(icon(unknown)).color).toBe(tokenColor('--text-2'))
   const ordinary = app.container.querySelector<HTMLElement>('[data-type-glyph]')!
   expect(ordinary.querySelector('[data-space-icon-kind]')).toBeNull(); expect(getComputedStyle(ordinary).color).toBe(tokenColor('--text-3')); expect(getComputedStyle(ordinary).color).not.toBe(getComputedStyle(seed).color)
   await act(async () => useAppStore.getState().setSpaceObjectIcon(primary.key, DEFAULT_MOTE_FACE)); await settleMoteApp()
