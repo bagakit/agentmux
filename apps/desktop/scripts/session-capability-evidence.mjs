@@ -10,7 +10,7 @@ const absolute = (root, file) => path.resolve(root, file)
 const assertions = report => report.testResults.flatMap(suite => suite.assertionResults)
 const executed = report => assertions(report).filter(one => ['passed', 'failed'].includes(one.status))
 
-async function verifySourcePins(root, pins, anchor) {
+export async function verifySourcePins(root, pins, anchor) {
   const entries = Object.entries(pins ?? {})
   assert.ok(entries.length > 0, 'An owner proof has no source inputs.')
   const originalAnchor = entries.find(([file]) => file === anchor || file.endsWith('/' + anchor))?.[0]
@@ -28,7 +28,7 @@ async function verifySourcePins(root, pins, anchor) {
   return entries.length
 }
 
-async function verifyReport(file, green, minimum = 1, expected = {}, totalMode = 'collected') {
+export async function verifyReport(file, green, minimum = 1, expected = {}, totalMode = 'collected') {
   const report = await parse(file), all = assertions(report), ran = executed(report)
   assert.ok(report.testResults.length > 0 && ran.length > 0, 'The original owner report has no executed business cases.')
   assert.ok(report.testResults.every(suite => suite.assertionResults.length > 0 && !suite.message), 'An owner collection/setup error cannot qualify.')
