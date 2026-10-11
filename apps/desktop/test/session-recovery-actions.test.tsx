@@ -1,10 +1,16 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { webcrypto } from 'node:crypto'
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
-vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-private-terminal /> }))
+const terminalObservation = vi.hoisted(() => ({ refresh: vi.fn(async () => {}) }))
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session, readOnly, interactiveResize, onObservationRefresh }: {
+  session: { id: string }; readOnly?: boolean; interactiveResize: boolean; onObservationRefresh?(refresh: (() => Promise<void>) | null): void
+}) => {
+  useEffect(() => { onObservationRefresh?.(terminalObservation.refresh); return () => onObservationRefresh?.(null) }, [onObservationRefresh])
+  return <div data-private-terminal data-session={session.id} data-read-only={String(readOnly)} data-interactive-resize={String(interactiveResize)} />
+} }))
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, agentRegionExecution, rereadAgentRegionExecution } from '../src/renderer/src/store'
@@ -18,6 +24,8 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { AgentLaunchInput, AgentLaunchResult, AgentTimelineSnapshot, ScratchTopicSnapshot } from '../src/shared/contracts'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands.js'
 import { split } from 'shlex'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const dom = composerDOM(), source: RecoverySource = { hostId: 'local', agentSessionId: 'original', workspaceId: 'workspace', tabId: 'original-tab', regionId: 'original-region', displayWorkspaceId: 'workspace', groupId: 'original-group', diagnostic: 'Native identity is not confirmed.' }
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'No Project', hostId: 'local', path: _hygiene_fixturePath("scratch"), kind: 'folder' as const }
@@ -29,6 +37,7 @@ function launched(input: AgentLaunchInput): AgentLaunchResult {
     timeline: { agentSessionId: session.id, revision: 0, items: [] }, projectionFailures: [] }
 }
 beforeEach(async () => {
+  terminalObservation.refresh.mockClear()
   vi.stubGlobal('crypto', webcrypto); localStorage.clear()
   vi.spyOn(api.config, 'get').mockResolvedValue({ ...composerConfig, workspaces: [...composerConfig.workspaces, scratch], executors: { ...composerConfig.executors, claude: { ...composerConfig.executors.codex!, providerId: 'claude', label: 'Claude' } } })
   vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] } as never); vi.spyOn(api.demands, 'list').mockResolvedValue([])
@@ -38,6 +47,7 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'timeline').mockImplementation(async ref => ({ agentSessionId: ref.agentSessionId, revision: 0, items: [] }))
   vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => useAppStore.getState().sessions.find(item => item.id === (control.kind === 'agent' ? control.agentSessionId : control.runId))!)
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ items: [], source: 'unavailable' } as never)
+  vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
   vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launched(input))
   dispose = await useAppStore.getState().initialize()
@@ -61,8 +71,8 @@ function preserved(originalTab: unknown, drafts: unknown) { expect(useAppStore.g
 
 describe('actual SessionPane explicit recovery actions', () => {
   it('opens, selects and cancels without any create or send; native restore missing identity remains explicit', async () => {
-    await mount(); const restore = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Restore original'))!
-    expect(restore.disabled).toBe(true); expect(dom.container.textContent).toContain('Provider was not invoked'); expect(dom.container.textContent).not.toContain('never recorded')
+    await mount(); const restore = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Re-read original'))!
+    expect(restore.disabled).toBe(false); expect(dom.container.textContent).toContain('without restarting the Agent or resending messages'); expect(dom.container.textContent).not.toContain('never recorded')
     const takeoverTrigger = dom.container.querySelector<HTMLButtonElement>('[data-takeover-session-id="original"][data-takeover-region-id="original-region"]')!
     expect(takeoverTrigger).not.toBeNull(); takeoverTrigger.focus()
     await button('Take over'); expect(document.querySelector('.session-takeover')).not.toBeNull()
@@ -120,7 +130,7 @@ describe('actual SessionPane explicit recovery actions', () => {
     const original = useAppStore.getState().sessions[0]!
     useAppStore.setState({ sessions: [{ ...original, status: { ...original.status, continuityReason: 'provider-unavailable' } }, ...useAppStore.getState().sessions.slice(1)] })
     vi.spyOn(api.sessions, 'recover').mockResolvedValue({ kind: 'agent-unavailable', continuity: 'unavailable', reason: 'provider-unavailable' } as never)
-    await mount(); expect([...dom.container.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Restore original')?.querySelector('[data-semantic-icon="action.resume-session"]')).not.toBeNull(); await button('Restore original'); expect(api.sessions.recover).toHaveBeenCalledWith(original.control, _hygiene_fixturePath("repo"), undefined); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+    await mount(); expect([...dom.container.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Restore original')?.querySelector('[data-semantic-icon="action.resume-session"]')).not.toBeNull(); await button('Restore original'); expect(api.sessions.recover).toHaveBeenCalledWith(original.control, _hygiene_fixturePath("repo"), expect.any(String), { trigger: 'manual' }); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
   })
   it('analysis Agent reads first and has no authorization to execute the original work', async () => {
     await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await choose('Original history source', 'native'); await button('Create analysis Agent')
@@ -149,7 +159,7 @@ describe('actual SessionPane explicit recovery actions', () => {
       const option = [...document.querySelector<HTMLSelectElement>('[aria-label="Analysis Mote"]')!.options].find(item => item.text.includes('Review Mote'))!
       await choose('Analysis Mote', option.value); await button('Send analysis')
       expect(submit).not.toHaveBeenCalled(); expect(useAppStore.getState().agentSteerQueues).toEqual({})
-      expect(document.body.textContent).toContain('delivery is unconfirmed')
+      await vi.waitFor(() => expect(document.body.textContent).toContain('no longer in the pending queue'))
       const id = await recoveryOperationId(source, 'analyze'), binding = useAppStore.getState().spatialRequests[id]!
       expect(binding).toMatchObject({ operation: 'agent.message', createAgent: false,
         recovery: { hostId: 'local', agentSessionId: 'original', historySource: 'native' },
@@ -166,13 +176,13 @@ describe('actual SessionPane explicit recovery actions', () => {
     } finally { useAppStore.setState({ enqueueAgentSteer: enqueue }) }
   })
   it('an ACK with an empty local queue remains unknown until Core confirms the exact operation, retaining its recipient across remount', async () => {
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async () => { useAppStore.setState({ agentSteerQueues: {} }); return undefined })
     await mount(); await button('Analyze…'); await choose('Original history source', 'native')
     await act(async () => [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(input => input.parentElement?.textContent?.includes('Chosen Mote'))!.click())
     const option = [...document.querySelector<HTMLSelectElement>('[aria-label="Analysis Mote"]')!.options].find(item => item.text.includes('Review Mote'))!
     await choose('Analysis Mote', option.value); await button('Send analysis')
     expect(submit).toHaveBeenCalledTimes(1); expect(useAppStore.getState().agentSteerQueues).toEqual({})
-    expect(document.body.textContent).toContain('delivery is unconfirmed')
+    expect(document.body.textContent).toContain('no typed receipt')
     await button('Cancel'); await dom.render(null); await mount(); await button('Analyze…')
     expect(document.querySelector<HTMLSelectElement>('[aria-label="Analysis Mote"]')!.value).toBe(option.value)
     expect(document.querySelector<HTMLSelectElement>('[aria-label="Analysis Mote"]')!.disabled).toBe(true)
@@ -185,7 +195,7 @@ describe('actual SessionPane explicit recovery actions', () => {
   it('a Core delivered witness after lost send ACK/remount settles the same message with zero resend', async () => {
     const id = await recoveryOperationId(source, 'analyze'), mote = { topicId: topic.id, tabId: 'mote-tab', regionId: 'mote-region', hostId: 'local', agentSessionId: 'chosen-mote', label: topic.title }
     vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('lost send ACK'))
-    await act(async () => { await analyzeWithRecoveryMote(source, mote, 'captured', () => true) })
+    await act(async () => { await expect(analyzeWithRecoveryMote(source, mote, 'captured', () => true)).rejects.toThrow('lost send ACK') })
     expect(useAppStore.getState().agentSteerQueues['chosen-mote']![0]!.operationId).toBe(id)
     vi.mocked(api.sessions.timeline).mockResolvedValue({ agentSessionId: 'chosen-mote', revision: 1, items: [{ id: `prompt:${id}`, kind: 'user_message', agentSessionId: 'chosen-mote', status: 'complete' }] } as AgentTimelineSnapshot)
     const result = await analyzeWithRecoveryMote(source, mote, 'native', () => true)
@@ -387,4 +397,130 @@ describe('actual unobserved SessionPane original reference', () => {
     await expect(pending).rejects.toThrow('original Session or this selection changed'); noLifecycle()
   })
 
+})
+
+describe('original Session identity recheck', () => {
+  beforeEach(() => {
+    vi.spyOn(api.sessions, 'recover').mockRejectedValue(new Error('Unexpected native resume'))
+    vi.spyOn(api.sessions, 'stop').mockRejectedValue(new Error('Unexpected stop'))
+    vi.spyOn(api.sessions, 'launchTerminal').mockRejectedValue(new Error('Unexpected launch'))
+    vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('Unexpected input'))
+    vi.spyOn(api.sessions, 'write').mockRejectedValue(new Error('Unexpected raw input'))
+  })
+  function noEffects() { noLifecycle(); expect(api.sessions.stop).not.toHaveBeenCalled(); expect(api.sessions.write).not.toHaveBeenCalled() }
+  function original() { return useAppStore.getState().sessions.find(session => session.id === 'original')! }
+  it('rechecks the exact original Session through its actual button with zero lifecycle or input', async () => {
+    const state = useAppStore.getState(), session = original(), queue = { original: [{ operationId: 'original-unknown-input', text: 'Keep the unconfirmed input', status: 'deferred' as const, awaitingExplicitSend: true as const }] }
+    useAppStore.setState({ agentSteerQueues: queue })
+    await mount(); await button('Re-read original')
+    expect(api.sessions.refresh).toHaveBeenCalledExactlyOnceWith(session.control)
+    preserved(state.tabs['original-tab'], state.agentComposerDrafts)
+    expect(useAppStore.getState().agentSteerQueues).toBe(queue); noEffects()
+  })
+  it('identity recheck bypasses a mounted terminal-only observation callback', async () => {
+    const session = original()
+    useAppStore.setState({ sessions: [{ ...session, processState: 'running', status: { ...session.status, state: 'disconnected' } }] })
+    await mount(); expect(dom.container.querySelector('[data-private-terminal]')).not.toBeNull()
+    await button('Re-read original')
+    expect(api.sessions.refresh).toHaveBeenCalledExactlyOnceWith(session.control)
+    expect(terminalObservation.refresh).not.toHaveBeenCalled(); noEffects()
+  })
+  it('confirmed exit remains primary and original output is explicitly read-only during recovery', async () => {
+    const session = original()
+    useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, exitReason: 'crashed', exitCode: 17 } }] })
+    await mount()
+    const stage = dom.container.querySelector('.full-page-loading')!
+    expect(stage.querySelector('h1,h2,h3')?.textContent).toBe('Agent process exited')
+    expect(stage.textContent).toContain('Exit code 17.'); expect(stage.textContent).toContain('Recovery identity is unconfirmed')
+    await button('Read original output')
+    const terminal = dom.container.querySelector('[data-private-terminal]')!
+    expect(terminal).not.toBeNull()
+    expect(terminal.getAttribute('data-session')).toBe('original'); expect(terminal.getAttribute('data-read-only')).toBe('true')
+    expect(terminal.getAttribute('data-interactive-resize')).toBe('false')
+    expect(dom.container.textContent).toContain('Exit code 17.'); expect(dom.container.textContent).toContain('Recovery identity is unconfirmed')
+    await button('Back to recovery'); expect(dom.container.querySelector('[data-private-terminal]')).toBeNull(); noEffects()
+  })
+  it('a failed recheck keeps the original exit, drafts and reachable retry without input replay', async () => {
+    const state = useAppStore.getState(), session = original()
+    useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, exitReason: 'crashed', exitCode: 17 } }] })
+    vi.mocked(api.sessions.refresh).mockRejectedValueOnce(new Error('Original owner metadata is unavailable'))
+    await mount(); await button('Re-read original')
+    expect(dom.container.textContent).toContain('Agent process exited'); expect(dom.container.textContent).toContain('Exit code 17.')
+    expect(dom.container.textContent).toContain('Original owner metadata is unavailable')
+    expect([...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Re-read original')?.disabled).toBe(false)
+    preserved(state.tabs['original-tab'], state.agentComposerDrafts); noEffects()
+  })
+  it('an unconfirmed metadata read keeps recheck until Core confirms the original native identity', async () => {
+    const session = original(), observed = { ...session, status: { state: 'error' as const, source: 'run-process' as const, observedAt: _historyFixtureEpoch(0, 0, 3), exitReason: 'crashed' as const, exitCode: 17 } }
+    vi.mocked(api.sessions.refresh).mockResolvedValueOnce(observed)
+    await mount(); await button('Re-read original')
+    expect(dom.container.textContent).toContain('Recovery identity is unconfirmed')
+    expect(dom.container.textContent).toContain('Exit code 17.')
+    vi.mocked(api.sessions.refresh).mockResolvedValueOnce({ ...observed, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'confirmed-original-native' }, nativeHandlePersistence: 'confirmed' })
+    await button('Re-read original')
+    expect(dom.container.textContent).not.toContain('Recovery identity is unconfirmed')
+    expect(dom.container.textContent).toContain('Restore original'); noEffects()
+  })
+  it('adopts a canonical new Run only from the same original SID and Host without replacing its workface', async () => {
+    const state = useAppStore.getState(), session = original()
+    vi.mocked(api.sessions.refresh).mockResolvedValueOnce({ ...session, processState: 'running', status: { state: 'running', source: 'run-process', observedAt: _historyFixtureEpoch(0, 0, 3) }, control: { ...session.control, run: { runId: 'canonical-new-run' } } })
+    await mount(); await button('Re-read original')
+    expect(original().control.run.runId).toBe('canonical-new-run'); expect(dom.container.textContent).not.toContain('Agent process exited')
+    preserved(state.tabs['original-tab'], state.agentComposerDrafts); noEffects()
+  })
+  it.each(['sid', 'host'] as const)('refuses a foreign %s canonical reply without adopting its facts', async changed => {
+    const state = useAppStore.getState(), session = original()
+    vi.mocked(api.sessions.refresh).mockResolvedValueOnce({ ...session, ...(changed === 'sid' ? { id: 'foreign' } : { hostId: 'foreign' }),
+      control: { ...session.control, ...(changed === 'host' ? { hostId: 'foreign' } : {}), run: { runId: 'foreign-run' } } })
+    await mount(); await button('Re-read original')
+    expect(original()).toBe(session); expect(dom.container.textContent).toContain('another original owner')
+    preserved(state.tabs['original-tab'], state.agentComposerDrafts); noEffects()
+  })
+  it('a late read cannot adopt into a replaced original Region even if another view still shows the Session', async () => {
+    const session = original(), state = useAppStore.getState(); let release!: (value: typeof session) => void
+    vi.mocked(api.sessions.refresh).mockImplementationOnce(async () => await new Promise(resolve => { release = resolve }))
+    const pending = useAppStore.getState().refreshSession('original'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const tab = state.tabs['original-tab']!, replacement = { ...tab.regions['original-region']!, kind: 'agent' as const, phase: 'attached' as const, sessionId: 'replacement' }
+    const other = createWorkbenchTab('other-original-view', { regionId: 'other-original-region', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'original' })
+    useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: { ...tab, regions: { ...tab.regions, 'original-region': replacement } }, [other.id]: other } })
+    release({ ...session, control: { ...session.control, run: { runId: 'late-canonical' } } }); await pending
+    expect(original()).toBe(session); expect(useAppStore.getState().tabs[tab.id]!.regions['original-region']).toBe(replacement); noEffects()
+  })
+  it('closing all original bindings and reopening the same Region and SID does not revive its old pending read', async () => {
+    const session = original(), state = useAppStore.getState(); let release!: (value: typeof session) => void
+    vi.mocked(api.sessions.refresh).mockImplementationOnce(async () => await new Promise(resolve => { release = resolve }))
+    const pending = useAppStore.getState().refreshSession('original'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const remaining = Object.fromEntries(Object.entries(state.tabs).filter(([, tab]) => !Object.values(tab.regions).some(view => 'sessionId' in view && view.sessionId === 'original')))
+    useAppStore.setState({ tabs: remaining }); expect(useAppStore.getState().tabs['original-tab']).toBeUndefined(); useAppStore.setState({ tabs: state.tabs })
+    release({ ...session, control: { ...session.control, run: { runId: 'late-before-close' } } }); await pending
+    expect(original()).toBe(session); noEffects()
+  })
+  it('closing a duplicate view still adopts through another continuously retained original binding', async () => {
+    const session = original(), state = useAppStore.getState(); let release!: (value: typeof session) => void
+    const duplicate = createWorkbenchTab('continuous-original-view', { regionId: 'continuous-original-region', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'original' })
+    useAppStore.setState({ tabs: { ...state.tabs, [duplicate.id]: duplicate } })
+    vi.mocked(api.sessions.refresh).mockImplementationOnce(async () => await new Promise(resolve => { release = resolve }))
+    const pending = useAppStore.getState().refreshSession('original'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const { ['original-tab']: _closed, ...remaining } = useAppStore.getState().tabs
+    useAppStore.setState({ tabs: remaining })
+    release({ ...session, control: { ...session.control, run: { runId: 'retained-canonical-run' } } }); await pending
+    expect(original().control.run.runId).toBe('retained-canonical-run'); expect(useAppStore.getState().tabs['original-tab']).toBeUndefined(); noEffects()
+  })
+  it('ordinary focus and presentation changes keep the same original recheck usable', async () => {
+    const session = original(), state = useAppStore.getState(); let release!: (value: typeof session) => void
+    vi.mocked(api.sessions.refresh).mockImplementationOnce(async () => await new Promise(resolve => { release = resolve }))
+    const pending = useAppStore.getState().refreshSession('original'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    const tab = state.tabs['original-tab']!
+    useAppStore.setState({ agentFocus: 'chosen-mote', tabs: { ...state.tabs, [tab.id]: { ...tab, regions: { ...tab.regions, 'original-region': { ...tab.regions['original-region']! } } } } })
+    release({ ...session, control: { ...session.control, run: { runId: 'fresh-current-run' } } }); await pending
+    expect(original().control.run.runId).toBe('fresh-current-run'); expect(useAppStore.getState().agentFocus).toBe('chosen-mote'); noEffects()
+  })
+  it('a late read cannot resurrect a Session removed by explicit retirement', async () => {
+    const session = original(); let release!: (value: typeof session) => void
+    vi.mocked(api.sessions.refresh).mockImplementationOnce(async () => await new Promise(resolve => { release = resolve }))
+    const pending = useAppStore.getState().refreshSession('original'); await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    useAppStore.setState(state => ({ sessions: state.sessions.filter(item => item.id !== 'original') }))
+    release(session); await pending
+    expect(useAppStore.getState().sessions.some(item => item.id === 'original')).toBe(false); noEffects()
+  })
 })

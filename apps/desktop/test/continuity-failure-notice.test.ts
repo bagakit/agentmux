@@ -34,9 +34,10 @@ describe('continuity failure classes', () => {
   it('scopes a missing resume token to this one Agent', () => {
     const notice = classifyContinuityFailure('unavailable', 'native-handle-unavailable')
 
-    expect(notice?.remedy).toEqual({ kind: 'start-new' })
-    // "Other Agents are unaffected" is the whole reason this class is separate from the one above.
-    expect(notice?.reason).toContain('Other Agents')
+    expect(notice?.remedy).toEqual({ kind: 'refresh' })
+    expect(continuityRefreshEnabled(notice)).toBe(true)
+    expect(continuityRetryEnabled(notice)).toBe(false)
+    expect(notice?.reason).toBe('Recovery identity is not confirmed. The original Session, output and draft are kept.')
   })
 
   it('treats a missing Provider as retryable, because it can come back', () => {
@@ -176,10 +177,9 @@ describe('continuity failure classes', () => {
     // 完全没人守——把某个 unavailable 类的 remedy 改成 'refresh' 能静默绕过整条守卫，而那恰恰是
     // 它声称要禁止的形状（notice 源文件 :141-142 也是这么写的）。实测见过这颗变异。
     //
-    // refresh 对这三类都是错的答案：它的语义是「session 还活着，只是我们手里的 Run 过期了，重读
-    // 快照就能追上」（源文件 :26-33）。而这三类要么这个 Provider 根本不能 resume、要么从来没记下
-    // 凭据、要么 Core 连 retired binding 都没有——没有"当前快照"可读，按下去必然再失败一次。
-    for (const reason of ['provider-resume-unsupported', 'native-handle-unavailable', 'unknown-session'] as const) {
+    // A missing identity has an original-owner observation path. Missing capability/binding
+    // cannot promise native restore; their alternatives stay distinct.
+    for (const reason of ['provider-resume-unsupported', 'unknown-session'] as const) {
       const notice = classifyContinuityFailure('unavailable', reason)
       expect(continuityRetryEnabled(notice), `${reason} 不该给可按的「重试恢复」`).toBe(false)
       expect(continuityRefreshEnabled(notice), `${reason} 不该给可按的「重读」——没有可重读的快照`).toBe(false)
@@ -192,11 +192,12 @@ describe('continuity failure classes', () => {
     // 一句不同的指示。unknown-session 此前是五个原因里唯一一个 remedy 从未被任何 toEqual 钉死的。
     //
     // 判据取自每一类的事实，不是照抄现状：
-    //   - provider-resume-unsupported / native-handle-unavailable：换个时间点也不会变 → start-new
+    //   - provider-resume-unsupported：当前无原生恢复能力 → start-new
+    //   - native-handle-unavailable：只重查原 owner，不暗中恢复 → refresh
     //   - unknown-session：Core 连 retired binding 都没有，同样回不来 → start-new
     //   - provider-unavailable：Session 完好，Provider 装回来就能继续 → retry
     expect(classifyContinuityFailure('unavailable', 'provider-resume-unsupported')?.remedy).toEqual({ kind: 'start-new' })
-    expect(classifyContinuityFailure('unavailable', 'native-handle-unavailable')?.remedy).toEqual({ kind: 'start-new' })
+    expect(classifyContinuityFailure('unavailable', 'native-handle-unavailable')?.remedy).toEqual({ kind: 'refresh' })
     expect(classifyContinuityFailure('unavailable', 'unknown-session')?.remedy).toEqual({ kind: 'start-new' })
     expect(classifyContinuityFailure('unavailable', 'provider-unavailable')?.remedy).toEqual({ kind: 'retry' })
   })
@@ -346,7 +347,7 @@ describe('the store actually carries Core’s reason to the surface', () => {
     )
 
     // 两个出口都必须经那一处产出。
-    expect(source.match(/\.\.\.continuityStatusFields\(recovery\)/g)).toHaveLength(2)
+    expect(source.match(/continuityStatusFields\(recovery\)/g)).toHaveLength(2)
     // 且这些字段只许在那个函数体里被赋值一次——任何出口自己再写一遍就是把 drift 装回去。
     expect(source.match(/continuityConflict: recovery\.reason/g)).toHaveLength(1)
     expect(source.match(/continuityReason: recovery\.reason/g)).toHaveLength(1)
