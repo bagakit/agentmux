@@ -3,7 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { createContext, useContext, useId, type ReactNode } from 'react'
 import { formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
-import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
+import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
@@ -11,6 +11,7 @@ const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
 const ThemeActionReplaceIcon = semanticIconComponent('action.replace')
 const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
+const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 
 
 type RegionCopyAction = {
@@ -22,8 +23,8 @@ export type RegionMenuEntry =
   | { kind: 'action'; action: RegionCopyAction }
   | { kind: 'separator' }
   | { kind: 'connector-group'; group: ConnectorMenuGroup }
-  | { kind: 'split'; entry: WorkbenchSplitMenuEntry }
-  | { kind: 'swap'; entry: RegionSwapMenuEntry }
+  | { kind: 'layout'; entries: readonly WorkbenchSplitMenuEntry[] }
+  | { kind: 'swaps'; entries: readonly RegionSwapMenuEntry[] }
   | { kind: 'promote'; onSelect(): void }
   | { kind: 'window'; onSelect(): void }
 
@@ -89,13 +90,13 @@ function regionMenuEntries(
   ]
   const withSplit: RegionMenuEntry[] = splitMenu.length === 0
     ? addresses
-    : [...addresses, { kind: 'separator' }, ...splitMenu.map((entry) => ({ kind: 'split' as const, entry }))]
+    : [...addresses, { kind: 'separator' }, { kind: 'layout', entries: splitMenu }]
   const withSwap: RegionMenuEntry[] = swapMenu.length === 0
     ? withSplit
     : [
         ...withSplit,
         { kind: 'separator' },
-        ...swapMenu.map((entry) => ({ kind: 'swap' as const, entry }))
+        { kind: 'swaps', entries: swapMenu }
       ]
   if (!promote) return withSwap
   return [...withSwap, { kind: 'separator' }, { kind: 'promote', onSelect: promote }]
@@ -113,13 +114,18 @@ export function useRegionMenuEntries(): readonly RegionMenuEntry[] {
 }
 export const useRegionMenuObservation = () => useContext(RegionMenuContext)
 
-export function RegionMenuEntryView({ entry, index, Item, Separator, Group = ContextMenu.Group, Label = ContextMenu.Label }: {
+export function RegionMenuEntryView({ entry, index, Item, Separator, Group = ContextMenu.Group, Label = ContextMenu.Label,
+  Sub = ContextMenu.Sub, SubTrigger = ContextMenu.SubTrigger, SubContent = ContextMenu.SubContent, Portal = ContextMenu.Portal }: {
   entry: RegionMenuEntry
   index: number
   Item: typeof ContextMenu.Item
   Separator: typeof ContextMenu.Separator
   Group?: typeof ContextMenu.Group
   Label?: typeof ContextMenu.Label
+  Sub?: typeof ContextMenu.Sub
+  SubTrigger?: typeof ContextMenu.SubTrigger
+  SubContent?: typeof ContextMenu.SubContent
+  Portal?: typeof ContextMenu.Portal
 }) {
   const labelId = useId()
   if (entry.kind === 'connector-group') return <Group aria-labelledby={labelId} data-connector-menu-group="">
@@ -136,36 +142,21 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
       />
     )
   }
-  if (entry.kind === 'split') {
-    const key = workbenchSplitMenuKey(entry.entry, index)
-    if (entry.entry.kind === 'separator') {
-      return <Separator key={key} className="tab-context-menu__separator" />
-    }
-    const SplitIcon = workbenchSplitMenuIcon(entry.entry)
-    return (
-      <Item
-        key={key}
-        className="tab-context-menu__item"
-        onSelect={entry.entry.onSelect}
-      >
-        <SplitIcon size={14} />
-        <span>{entry.entry.label}</span>
-      </Item>
-    )
-  }
-  if (entry.kind === 'swap') {
-    return (
-      <Item
-        key={`swap-${entry.entry.targetRegionId}`}
-        className="tab-context-menu__item"
-        title={entry.entry.label}
-        onSelect={entry.entry.onSelect}
-      >
-        <ThemeActionReplaceIcon size={14} />
-        <span>{entry.entry.label}</span>
-      </Item>
-    )
-  }
+  if (entry.kind === 'layout') return <WorkbenchLayoutMenuRows entries={entry.entries} Item={Item} Group={Group} Label={Label} />
+  if (entry.kind === 'swaps') return <Sub>
+    <SubTrigger className="tab-context-menu__item">
+      <ThemeActionReplaceIcon size={14} /><span>Swap Region…</span>
+      <span className="tab-context-menu__chevron"><ThemeNavigationSubmenuIcon size={12} /></span>
+    </SubTrigger>
+    <DocumentOverlayPortal component={Portal}>
+      <SubContent className="tab-context-menu region-swap-menu" collisionPadding={8} sideOffset={4}>
+        {entry.entries.map(target => <Item key={target.targetRegionId} className="tab-context-menu__item"
+          textValue={target.label} title={target.label} onSelect={target.onSelect}>
+          <span>{target.label}</span>
+        </Item>)}
+      </SubContent>
+    </DocumentOverlayPortal>
+  </Sub>
   if (entry.kind === 'window') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionOpenExternalIcon size={14} /><span>Open original Region in window</span></Item>
   if (entry.kind === 'promote') {
     return (

@@ -3,17 +3,13 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxArrangeMode } from '@agentmux/core/control'
 import { workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import type { SplitDirection } from '@agentmux/layout'
-import { workbenchSplitMenuIcon, workbenchSplitMenuKey } from './workbench-split-menu-icons'
+import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 
 const ThemeLayoutColumns2Icon = semanticIconComponent('layout.columns-2')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 
-/**
- * Tab 条上的 Split 下拉。内容与「一格的右键菜单」「Tab 的右键菜单」逐项相同，所以三者都只
- * map `workbenchSplitMenuEntries` 给出的那一份清单——见那个函数的注释（为什么在场与顺序必须
- * 是数据而不是 JSX 里的条件）。这层壳只负责它自己的触发按钮与 Radix 容器。
- */
+/** The original default split and compact menu consume the shared action model. */
 export function PaneSplitMenu({
   disabled = false,
   regionCount,
@@ -64,23 +60,7 @@ export function PaneSplitMenu({
           sideOffset={4}
           collisionPadding={8}
         >
-          {entries.map((entry, index) => {
-            const key = workbenchSplitMenuKey(entry, index)
-            if (entry.kind === 'separator') {
-              return <DropdownMenu.Separator key={key} className="tab-context-menu__separator" />
-            }
-            const Icon = workbenchSplitMenuIcon(entry)
-            return (
-              <DropdownMenu.Item
-                key={key}
-                className="tab-context-menu__item"
-                onSelect={entry.onSelect}
-              >
-                <Icon size={14} />
-                <span>{entry.label}</span>
-              </DropdownMenu.Item>
-            )
-          })}
+          <WorkbenchLayoutMenuRows entries={entries} Item={DropdownMenu.Item} Group={DropdownMenu.Group} Label={DropdownMenu.Label} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
