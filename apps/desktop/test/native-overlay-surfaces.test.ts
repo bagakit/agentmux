@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { EventEmitter } from 'node:events'
 import { NativeOverlaySurfaces } from '../src/main/native-overlay-surfaces'
+import type { NativeOverlayRegion } from '../src/shared/native-overlay'
 
 const fake = vi.hoisted(() => ({ views: [] as any[], load: null as Promise<void> | null, image: null as Promise<void> | null, radiusError: null as Error | null }))
 vi.mock('electron', () => ({ WebContentsView: class {
@@ -56,15 +58,215 @@ function fixture() {
   const visible = vi.fn(() => [{ x: 100, y: 100, width: 600, height: 500 }])
   const pages = new Map([['page', pageView]])
   const nativeOwner = vi.fn((browserId: string) => { const view = pages.get(browserId); return view ? { browserId, bounds: view.getBounds(), view } : undefined })
+  const nativeOwnerForView = vi.fn((view: unknown) => { for (const [id, candidate] of pages) if (candidate === view) return nativeOwner(id) })
   const warning = vi.fn(), pointer = vi.fn()
-  return { owner: new NativeOverlaySurfaces(window as any, { visibleNativeBounds: visible, nativeOwner } as any, warning, pointer), window, contents, visible, nativeOwner, pages, pageView, warning, pointer }
+  return { owner: new NativeOverlaySurfaces(window as any, { visibleNativeBounds: visible, nativeOwner, nativeOwnerForView } as any, warning, pointer), window, contents, visible, nativeOwner, nativeOwnerForView, pages, pageView, warning, pointer }
 }
 function originalPage(bounds: { x: number; y: number; width: number; height: number }) {
   const page = { bounds, getBounds: () => page.bounds, getVisible: () => true,
-    setBounds: vi.fn(), setVisible: vi.fn(), webContents: { close: vi.fn(), focus: vi.fn(), sendInputEvent: vi.fn() } }
+    setBounds: vi.fn(), setVisible: vi.fn(), webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, close: vi.fn(), focus: vi.fn(), sendInputEvent: vi.fn() }) }
   return page
 }
 const float = { id: 'chrome-1', bounds: { x: 120, y: 150, width: 100, height: 80 }, radius: 8 }
+
+const modal = (): NativeOverlayRegion[] => [
+  { id: 'chrome-1', bounds: { x: 0, y: 0, width: 1000, height: 700 }, radius: 0, scrim: 'rgba(0, 0, 0, 0.45)', modal: { id: 'original-confirmation', part: 'scrim' as const } },
+  { ...float, id: 'chrome-2', modal: { id: 'original-confirmation', part: 'content' as const } }
+]
+
+describe('required modal presentation unit', () => {
+  beforeEach(() => { fake.views = []; fake.load = null; fake.image = null; fake.radiusError = null })
+
+  it('prepares both required frames offscreen, guards exact background input, and commits them together', async () => {
+    const f = fixture()
+    let finish!: (image: { isEmpty(): boolean; toPNG(): Buffer }) => void
+    f.contents.capturePage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = f.owner.update(modal())
+    await vi.waitFor(() => expect(f.contents.capturePage).toHaveBeenCalledTimes(1))
+    expect(fake.views).toHaveLength(2)
+    for (const view of fake.views) expect(view.getBounds().x).toBeLessThan(0)
+    const prevent = vi.fn()
+    f.pageView.webContents.emit('before-mouse-event', { preventDefault: prevent }, { type: 'mouseDown', x: 5, y: 5 })
+    f.pageView.webContents.emit('before-input-event', { preventDefault: prevent }, { key: 'a' })
+    expect(prevent).toHaveBeenCalledTimes(2)
+    expect(f.pageView.setVisible).not.toHaveBeenCalled()
+    finish({ isEmpty: () => false, toPNG: () => Buffer.from('prepared-content') })
+    expect(await pending).toEqual({ projected: 2, capturedPixels: 8000 })
+    expect(fake.views.map(view => view.getBounds())).toEqual(modal().map(region => region.bounds))
+    expect(f.window.contentView.children).toEqual([f.pageView, ...fake.views])
+    await f.owner.update([])
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    expect(f.pageView.webContents.listenerCount('before-input-event')).toBe(0)
+    f.owner.dispose()
+  })
+
+  it('reports the original modal id and removes its scrim, content and input guard after content paint fails', async () => {
+    const f = fixture()
+    f.contents.capturePage.mockRejectedValueOnce(new Error('Original content frame failed'))
+    const receipt = await f.owner.update(modal())
+    expect(receipt).toMatchObject({ projected: 0, failures: [{ modalId: 'original-confirmation', message: expect.stringContaining('Original content frame failed') }] })
+    expect(f.warning).toHaveBeenCalledWith(expect.stringContaining('Original content frame failed'), 'original-confirmation')
+    expect(f.window.contentView.children).toEqual([f.pageView])
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    expect(f.pageView.webContents.listenerCount('before-input-event')).toBe(0)
+    expect(f.pageView.setVisible).not.toHaveBeenCalled()
+    expect(await f.owner.refresh()).toEqual({ projected: 0, capturedPixels: 0 })
+    f.owner.dispose()
+  })
+
+  it('does not guard an unrelated native view with identical geometry or a replaced Browser owner', async () => {
+    const f = fixture(), unrelated = originalPage({ ...f.pageView.bounds })
+    f.window.contentView.children.push(unrelated)
+    await f.owner.update(modal())
+    expect(unrelated.webContents.listenerCount('before-mouse-event')).toBe(0)
+    const prevent = vi.fn()
+    f.pages.set('page', unrelated)
+    f.pageView.webContents.emit('before-input-event', { preventDefault: prevent }, { key: 'a' })
+    expect(prevent).not.toHaveBeenCalled()
+    f.owner.dispose()
+  })
+
+  it('keeps an exactly contained Browser usable in the foreground modal', async () => {
+    const f = fixture(), pair = modal()
+    pair[1] = { ...pair[1]!, bounds: { ...f.pageView.bounds }, browserStages: [{ browserId: 'page', bounds: { ...f.pageView.bounds } }] }
+    await f.owner.update(pair)
+    const prevent = vi.fn()
+    f.pageView.webContents.emit('before-mouse-event', { preventDefault: prevent }, { type: 'mouseDown', x: 5, y: 5 })
+    expect(prevent).not.toHaveBeenCalled()
+    expect(f.window.contentView.children.at(-1)).toBe(f.pageView)
+    f.owner.dispose()
+  })
+
+  it('an accessory paint failure does not revoke the required modal pair', async () => {
+    const f = fixture()
+    f.contents.capturePage.mockResolvedValueOnce({ isEmpty: () => false, toPNG: () => Buffer.from('modal-content') })
+    f.contents.capturePage.mockRejectedValueOnce(new Error('Accessory frame failed'))
+    const receipt = await f.owner.update([...modal(), { ...float, id: 'chrome-3' }])
+    expect(receipt).toMatchObject({ projected: 2, warning: expect.stringContaining('Accessory frame failed') })
+    expect(receipt.failures).toBeUndefined()
+    expect(f.window.contentView.children).toEqual([f.pageView, fake.views[0], fake.views[1]])
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(1)
+    f.owner.dispose()
+  })
+
+  it('refuses an incomplete required pair before allocating a scrim or blocking Browser input', async () => {
+    const f = fixture()
+    expect(await f.owner.update(modal().slice(0, 1))).toMatchObject({ projected: 0, failures: [{ modalId: 'original-confirmation', message: expect.stringContaining('complete modal') }] })
+    expect(fake.views).toEqual([])
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    f.owner.dispose()
+  })
+
+  it('accepts a complete pair when only the scrim overlaps a native page', async () => {
+    const f = fixture(), pair = modal()
+    pair[1] = { ...pair[1]!, bounds: { x: 5, y: 10, width: 80, height: 70 } }
+    expect(await f.owner.update(pair)).toEqual({ projected: 1, capturedPixels: 0 })
+    expect(f.contents.capturePage).not.toHaveBeenCalled()
+    f.owner.dispose()
+  })
+
+  it('rejects an over-budget modal as a complete unit and preserves the background page', async () => {
+    const f = fixture(), pair = modal()
+    f.window.getContentBounds = () => ({ width: 2000, height: 1600 })
+    pair[1] = { ...pair[1]!, bounds: { x: 0, y: 0, width: 2000, height: 1500 } }
+    expect(await f.owner.update(pair)).toMatchObject({ projected: 0, failures: [{ modalId: 'original-confirmation', message: expect.stringContaining('budget') }] })
+    expect(fake.views).toEqual([])
+    expect(f.window.contentView.children).toEqual([f.pageView])
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    f.owner.dispose()
+  })
+
+  it('an over-budget accessory does not interrupt a healthy required modal', async () => {
+    const f = fixture()
+    f.window.getContentBounds = () => ({ width: 2000, height: 1600 })
+    const receipt = await f.owner.update([...modal(), { ...float, id: 'chrome-3', bounds: { x: 0, y: 0, width: 2000, height: 1500 } }])
+    expect(receipt).toMatchObject({ projected: 2, warning: expect.stringContaining('budget') })
+    expect(receipt.failures).toBeUndefined()
+    expect(f.contents.capturePage).toHaveBeenCalledTimes(1)
+    f.owner.dispose()
+  })
+
+  it('an invalid later publication cannot cancel the already accepted modal preparation', async () => {
+    const f = fixture()
+    let finish!: (image: { isEmpty(): boolean; toPNG(): Buffer }) => void
+    f.contents.capturePage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = f.owner.update(modal())
+    await vi.waitFor(() => expect(f.contents.capturePage).toHaveBeenCalledTimes(1))
+    await expect(f.owner.update([{ ...float, radius: -1 }])).rejects.toThrow('geometry')
+    finish({ isEmpty: () => false, toPNG: () => Buffer.from('accepted-content') })
+    expect(await pending).toMatchObject({ projected: 2 })
+    expect(f.window.contentView.children).toHaveLength(3)
+    f.owner.dispose()
+  })
+
+  it('a close during content preparation immediately releases input and cannot resurrect either member', async () => {
+    const f = fixture()
+    let finish!: (image: { isEmpty(): boolean; toPNG(): Buffer }) => void
+    f.contents.capturePage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = f.owner.update(modal())
+    await vi.waitFor(() => expect(f.contents.capturePage).toHaveBeenCalledTimes(1))
+    await f.owner.update([])
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    finish({ isEmpty: () => false, toPNG: () => Buffer.from('late-content') })
+    expect(await pending).toMatchObject({ projected: 0 })
+    expect(f.window.contentView.children).toEqual([f.pageView])
+    expect(fake.views).toHaveLength(2)
+    expect(fake.views.every(view => view.destroyed)).toBe(true)
+    f.owner.dispose()
+  })
+
+  it('an asynchronous modal repaint failure removes the whole original group and addresses its recovery', async () => {
+    const f = fixture()
+    await f.owner.update(modal())
+    f.contents.capturePage.mockRejectedValueOnce(new Error('Repaint failed'))
+    fake.views[1].listeners['input-event']({}, { type: 'mouseMove', x: 5, y: 7, button: 'none' })
+    await vi.waitFor(() => expect(f.warning).toHaveBeenCalledWith(expect.stringContaining('could not be repainted'), 'original-confirmation'))
+    expect(f.window.contentView.children).toEqual([f.pageView])
+    expect(f.pageView.webContents.listenerCount('before-input-event')).toBe(0)
+    expect(await f.owner.refresh()).toEqual({ projected: 0, capturedPixels: 0 })
+    f.owner.dispose()
+  })
+
+  it('draws one path over the union of actual Browser intersections, with transparent Chrome around it', async () => {
+    const f = fixture()
+    f.visible.mockReturnValue([{ x: 100, y: 100, width: 600, height: 500 }, { x: 200, y: 200, width: 200, height: 200 }])
+    const pair = modal()
+    pair[0]!.scrim = 'color(srgb 0 0 0 / 0.45)'
+    await f.owner.update(pair)
+    const script = fake.views[0].webContents.executeJavaScript.mock.calls[0][0]
+    expect(script).toContain('M100,100h600v500h-600ZM200,200h200v200h-200Z')
+    expect(script).toContain("path.style.fill=colour")
+    expect(script).not.toContain('document.body.style.backgroundColor=')
+    expect(script).toContain('color(srgb 0 0 0 / 0.45)')
+    f.owner.dispose()
+  })
+
+  it('a higher scrim excludes lower opaque native Chrome including its exact rounded coverage', async () => {
+    const f = fixture()
+    const higher = modal().map((region, index) => ({ ...region, id: `chrome-${index + 3}`, modal: { ...region.modal!, id: 'higher-confirmation' } }))
+    await f.owner.update([...modal(), ...higher])
+    const script = fake.views[2].webContents.executeJavaScript.mock.calls[0][0]
+    expect(script).toContain('<rect x=\\"120\\" y=\\"150\\" width=\\"100\\" height=\\"80\\" rx=\\"8\\" fill=\\"black\\"/>')
+    expect(script).toContain("mask.innerHTML=")
+    expect(script).toContain('M100,100h600v500h-600Z')
+    f.owner.dispose()
+  })
+
+  it('a higher modal still dims and guards an actual page contained in a lower Chrome projection', async () => {
+    const f = fixture(), lower = modal()
+    lower[1] = { ...lower[1]!, bounds: { x: 90, y: 90, width: 620, height: 520 }, browserStages: [{ browserId: 'page', bounds: { ...f.pageView.bounds } }] }
+    const higher = modal().map((region, index) => ({ ...region, id: `chrome-${index + 3}`, modal: { ...region.modal!, id: 'higher-confirmation' } }))
+    await f.owner.update([...lower, ...higher])
+    const script = fake.views[2].webContents.executeJavaScript.mock.calls[0][0]
+    expect(script).toContain('<rect x=\\"100\\" y=\\"100\\" width=\\"600\\" height=\\"500\\" fill=\\"white\\"/>')
+    const prevent = vi.fn()
+    f.pageView.webContents.emit('before-input-event', { preventDefault: prevent }, { key: 'a' })
+    expect(prevent).toHaveBeenCalledTimes(1)
+    expect(f.owner.forwardBrowserInput(f.nativeOwner('page')!, { type: 'escape' })).toBe(true)
+    expect(f.pointer).not.toHaveBeenCalled()
+    f.owner.dispose()
+  })
+})
 
 it('keeps document blur separate from App departure before sibling focus settles', async () => {
   const { owner, window } = fixture()

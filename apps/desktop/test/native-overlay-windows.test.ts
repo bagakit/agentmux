@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { NativeOverlayWindows } from '../src/main/native-overlay-windows'
 import { NATIVE_OVERLAY_FOCUS_CHANNEL } from '../src/shared/native-overlay'
-import { NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_BROWSER_VISIBILITY_CHANNEL } from '../src/shared/contracts'
+import { NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../src/shared/contracts'
 
 const native = vi.hoisted(() => ({ ipc: null as unknown as EventEmitter, surfaces: [] as any[] }))
 vi.mock('electron', async () => {
@@ -29,11 +29,12 @@ const box = { x: 10, y: 20, width: 100, height: 80 }
 const region = { id: 'chrome-1', bounds: box, radius: 4 }
 const view = {}, owner = { browserId: 'original-browser', bounds: box, view }
 let registry: NativeOverlayWindows
-const browsers = { visibleNativeBounds: vi.fn(), nativeOwner: vi.fn(), windowForView: vi.fn() }
+const browsers = { visibleNativeBounds: vi.fn(), nativeOwner: vi.fn(), nativeOwnerForView: vi.fn(), windowForView: vi.fn() }
 beforeEach(() => {
   vi.clearAllMocks(); native.surfaces = []; main.focused = child.focused = false
   browsers.visibleNativeBounds.mockImplementation(host => host === child ? [box] : [])
   browsers.nativeOwner.mockImplementation((_id, host) => host === child ? owner : undefined)
+  browsers.nativeOwnerForView.mockImplementation((source, host) => source === view && host === child ? owner : undefined)
   browsers.windowForView.mockImplementation(source => source === view ? child : main)
   registry = new NativeOverlayWindows(main as never, browsers as never, { windowForDocument(scope) {
     if (scope === undefined) return main as never
@@ -51,9 +52,18 @@ it('publishes exact child geometry and scale while retaining the original Browse
   expect(native.surfaces[0].browsers.visibleNativeBounds()).toEqual([box])
   expect(native.surfaces[0].browsers.nativeOwner(owner.browserId)).toBe(owner)
   expect(browsers.nativeOwner).toHaveBeenLastCalledWith(owner.browserId, child)
+  expect(native.surfaces[0].browsers.nativeOwnerForView(view)).toBe(owner)
+  expect(browsers.nativeOwnerForView).toHaveBeenLastCalledWith(view, child)
   native.surfaces[0].input({ type: 'escape', browserId: owner.browserId, overlayId: region.id })
   expect(main.webContents.send).toHaveBeenLastCalledWith(NATIVE_BROWSER_INPUT_CHANNEL,
     { type: 'escape', browserId: owner.browserId, overlayId: region.id, document: pair })
+})
+
+it('addresses native modal paint failures to the original modal in the exact document', async () => {
+  await registry.update([region], pair)
+  native.surfaces[0].warning('Original modal frame failed', 'original-confirmation')
+  expect(main.webContents.send).toHaveBeenLastCalledWith(NATIVE_OVERLAY_WARNING_CHANNEL,
+    { message: 'Original modal frame failed', modalId: 'original-confirmation', document: pair })
 })
 
 it('refuses a stale native generation before allocating or changing a projection', async () => {

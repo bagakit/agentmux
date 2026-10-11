@@ -36,7 +36,8 @@ it('measures final-only overlap before the first capture and releases motion wit
     { revision: 1, bounds: [{ x: 0, y: 129, width: 300, height: 300 }] })
   stop = overlays.dispose
   expect(publish.mock.calls.at(-1)).toEqual([[{ id: 'chrome-1', bounds: { x: 20, y: 50, width: 120, height: 80 }, radius: 8 }], undefined])
-  expect(geometry).toHaveBeenCalledTimes(1)
+  // One cached collection read plus Floating UI's initial position-only movement observation.
+  expect(geometry).toHaveBeenCalledTimes(2)
   expect(popup.getAttribute('data-native-overlay-motion')).toBe('static')
   expect(child.hasAttribute('data-native-overlay-motion')).toBe(false)
   expect(distant.getAttribute('data-native-overlay-motion')).toBe('static')
@@ -211,15 +212,17 @@ it('movement and close publish current geometry; nested items do not duplicate v
   frame?.()
   expect(publish.mock.calls.at(-1)![0]).toEqual([])
 })
-it('a translucent empty scrim is a colour plane, preserving underlying page pixels', () => {
-  const scrim = node('presentation', { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight })
-  scrim.textContent = ''
-  scrim.setAttribute('data-state', 'open')
-  scrim.style.backgroundColor = 'rgba(0, 0, 0, 0.2)'
+it('does not infer a scrim or modal owner from an empty translucent floating node', () => {
+  const panel = node('presentation', { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight })
+  panel.textContent = ''
+  panel.setAttribute('data-state', 'open')
+  panel.style.backgroundColor = 'rgba(0, 0, 0, 0.2)'
   const publish = vi.fn()
   stop = observeNativeOverlayRegions(document.body, () => 1, publish).dispose
-  expect(publish.mock.calls[0]![0]).toEqual([{ id: 'chrome-1', bounds: { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight }, radius: 8, scrim: 'rgba(0, 0, 0, 0.2)' }])
+  expect(publish.mock.calls[0]![0]).toEqual([])
+  expect(publish.mock.calls[0]![1]).toContain('transparency')
 })
+
 it('full-window content bitmap is refused with visible degradation rather than covering the Browser', () => {
   node('dialog', { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight })
   const publish = vi.fn()
