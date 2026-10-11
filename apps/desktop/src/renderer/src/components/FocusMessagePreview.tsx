@@ -195,7 +195,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
     </dl>{sender ? <p className="recent-focus__sender-work">Current: {sender.stateLabel} · {sender.detail}</p> : null}
       <p className="recent-focus__sender-run">Sender Run not recorded · Execution relationship unknown</p></details> : null}
     {message.coverage ? <ConversationCoverage coverage={message.coverage} record={message} {...(onReveal ? { onLocate: onReveal } : {})} /> : null}
-    <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind} data-conversation-role={message.role}><ConversationMessage active={active} {...(message.event ? { conversationEvent: message.event } : {})} messageId={message.input?.id ?? message.id}
+    <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind} data-conversation-role={message.role}><ConversationMessage sources={message.sources} active={active} {...(message.event ? { conversationEvent: message.event } : {})} messageId={message.input?.id ?? message.id}
       speaker={speaker!} recordedIdentity
       describeSpeaker={describeSpeaker} {...(message.input ? { inputSource: message.input.source } : {})} conversationSessionId={message.agentSessionId}
       {...(conversationItemRef(message) ? { itemRef: conversationItemRef(message)! } : {})}
