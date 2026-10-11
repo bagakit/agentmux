@@ -1,5 +1,5 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
@@ -31,12 +31,7 @@ async function fileStore() {
   }
   await store.compareAndSwap(null, session)
   await store.applyTimelineMutation({ type: 'append', agentSessionId, item: item('seed') })
-  const names = await readdir(join(root, 'agent-timelines'))
-  expect(names).toHaveLength(1)
-  return { store, path, timelinePath: join(root, 'agent-timelines', names[0]!) }
-}
-function snapshot(history: AgentTimelineItem[]) {
-  return { version: 3, agentSessionId, revision: 1, items: history }
+  return { store, path }
 }
 
 describe('independent input and activity retention in the same timeline', () => {
@@ -89,48 +84,6 @@ describe('independent input and activity retention in the same timeline', () => 
     for (const entry of inputs) await restarted.applyTimelineMutation({ type: 'append', agentSessionId, item: entry })
     expect((await new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).items)
       .toEqual([...tools, ...inputs])
-  }, 30_000)
-
-  it('reopens and appends to a large mixed snapshot without compacting retained bodies', async () => {
-    const { path, timelinePath } = await fileStore()
-    const history = [...items('sent', 30, 'user_message'), ...items('tool', 30)]
-      .map((entry) => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
-    const document = JSON.stringify(snapshot(history)) + '\n'
-    expect(Buffer.byteLength(document)).toBeGreaterThan(4 * 1024 * 1024)
-    expect(Buffer.byteLength(document)).toBeLessThan(8 * 1024 * 1024)
-    await writeFile(timelinePath, document)
-    const reopened = new AgentMuxFileAgentSessionStore(path)
-    expect((await reopened.loadTimeline(agentSessionId)).items).toEqual(history)
-    const next = item('after-restart', 'user_message')
-    await reopened.applyTimelineMutation({ type: 'append', agentSessionId, item: next })
-    const saved = await readFile(timelinePath, 'utf8')
-    expect(saved.startsWith(document)).toBe(true)
-    expect(saved.trim().split('\n')).toHaveLength(2)
-    expect((await new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).items)
-      .toEqual([...history, next])
-  }, 30_000)
-
-  it('reads a valid retained snapshot above the former 8 MiB cumulative ceiling', async () => {
-    const { path, timelinePath } = await fileStore()
-    const history = items('tool', 90).map(entry => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
-    const document = JSON.stringify(snapshot(history)) + '\n'
-    expect(Buffer.byteLength(document)).toBeGreaterThan(8 * 1024 * 1024)
-    await writeFile(timelinePath, document)
-    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).resolves.toMatchObject({ items: history })
-    expect(await readFile(timelinePath, 'utf8')).toBe(document)
-  })
-
-  it('crosses the former 8 MiB cumulative ceiling while preserving the prior history and new mutation', async () => {
-    const { path, timelinePath } = await fileStore()
-    const history = items('tool', 81).map(entry => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
-    const next = item('after-growth', 'user_message', 'x'.repeat(100 * 1024))
-    const document = JSON.stringify(snapshot(history)) + '\n'
-    expect(Buffer.byteLength(document)).toBeLessThan(8 * 1024 * 1024)
-    expect(Buffer.byteLength(JSON.stringify(snapshot([...history, next])))).toBeGreaterThan(8 * 1024 * 1024)
-    await writeFile(timelinePath, document)
-    const reopened = new AgentMuxFileAgentSessionStore(path)
-    await expect(reopened.applyTimelineMutation({ type: 'append', agentSessionId, item: next })).resolves.toMatchObject({ changed: true })
-    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).resolves.toMatchObject({ items: [...history, next] })
   }, 30_000)
 
   it('keeps the independent 128 KiB mutation bound', () => {

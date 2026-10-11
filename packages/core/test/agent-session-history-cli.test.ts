@@ -102,7 +102,7 @@ it('pages on the remote semantic Host without transferring an SDK snapshot throu
   const result = await outer.call('agent.history', { hostId: 'remote-original', agentSessionId: f.session.agentSessionId, source: 'captured', limit: 1 })
   expect(forward).toHaveBeenCalledOnce()
   expect(forward.mock.calls[0]!.slice(0, 2)).toEqual(['agent.history', { hostId: 'local', agentSessionId: f.session.agentSessionId, source: 'captured', limit: 1 }])
-  expect(snapshot).toHaveBeenCalledOnce()
+  expect(snapshot).not.toHaveBeenCalled()
   expect(result).toMatchObject({ hostId: 'remote-original', agentSessionId: f.session.agentSessionId, source: 'captured', items: [{ kind: 'item' }] })
   await f.unchanged()
 })

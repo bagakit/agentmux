@@ -40,9 +40,9 @@ it('keeps one captured snapshot append-safe and preserves exact sources and equa
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId, item: f.captured(4, 'newly appended') })
   const second = await f.client.readAgentSessionHistory({ ...input, cursor: first.nextCursor! })
   expect(second.userMessages!.map(message => [message.rawId, message.content])).toEqual([['captured-2', 'same input']])
-  expect(second.revision).toBe(first.revision); expect(load).toHaveBeenCalledOnce()
+  expect(second.revision).toBe(first.revision); expect(load).not.toHaveBeenCalled()
   const fresh = await f.client.readAgentSessionHistory(input)
-  expect(fresh.userMessages![0]!.content).toBe('newly appended'); expect(load).toHaveBeenCalledTimes(2)
+  expect(fresh.userMessages![0]!.content).toBe('newly appended'); expect(load).not.toHaveBeenCalled()
   await recordOwnedFixture('captured-append-cut', f, { input, first, second, fresh })
   await f.noControls()
 })
@@ -95,11 +95,11 @@ it('measures the retained captured first-load cost and avoids full Timeline or u
   const started = performance.now(), first = await f.client.readAgentSessionHistory(input), firstReadMs = performance.now() - started
   const continued = performance.now(), second = await f.client.readAgentSessionHistory({ ...input, cursor: first.nextCursor! }), continuationReadMs = performance.now() - continued
   expect(first.scan).toEqual({ examined: 50, complete: false }); expect(second.scan).toEqual({ examined: 50, complete: false })
-  expect(fullLoad).toHaveBeenCalledOnce(); expect(catalogue).not.toHaveBeenCalled()
+  expect(fullLoad).not.toHaveBeenCalled(); expect(catalogue).not.toHaveBeenCalled()
   if (process.env.AGENTMUX_HISTORY_COST_RECEIPT) await appendFile(process.env.AGENTMUX_HISTORY_COST_RECEIPT, JSON.stringify({
     records: snapshot.items.length, snapshotJsonBytes: Buffer.byteLength(JSON.stringify(snapshot)), firstReadMs, continuationReadMs,
     fullTimelineLoads: fullLoad.mock.calls.length, unrelatedCatalogReads: catalogue.mock.calls.length,
-    meaning: 'First captured read still loads/clones/hashes the original retained Timeline once; continuation reads the same snapshot. Timing is observation, not a performance gate.'
+    meaning: 'Captured reads use bounded indexed original-history pages at the same frozen cut and never load the recent display window. Timing is observation, not a performance gate.'
   }) + '\n')
   await f.noControls()
 })
