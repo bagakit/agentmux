@@ -7,7 +7,7 @@ import { NoteCanvas } from './NoteCanvas'
 const ThemeObjectTreeIcon = semanticIconComponent('object.tree')
 const ThemeLayoutGridIcon = semanticIconComponent('layout.grid')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
-const ThemeFileTextIcon = semanticIconComponent('file.text')
+const ThemeObjectNoteIcon = semanticIconComponent('object.note')
 
 
 export type NotebookDirectoryView = 'tree' | 'cards' | 'graph'
@@ -26,7 +26,7 @@ function sourceLabel(page: NotebookPage) {
 }
 export function NotebookCards({ pages, onOpen, onTalk }: { pages: NotebookPage[]; onOpen(page: NotebookPage): void; onTalk?: NoteTalkHandler | undefined }) {
   return <NotebookDirectoryContextMenu pages={pages} onTalk={onTalk}><div className="recall-note-cards" aria-label="Notebook cards">{pages.map(page => <button key={page.noteId} className="recall-note-card" title={`${page.title}\n${sourceLabel(page)}`} data-note-id={page.noteId} onClick={() => onOpen(page)}>
-    <ThemeFileTextIcon size={18} strokeWidth={1.4} /><strong>{page.title}</strong><span>{sourceLabel(page)}</span><small>{new Date(page.updatedAt).toLocaleDateString()}</small>
+    <ThemeObjectNoteIcon size={18} strokeWidth={1.4} /><strong>{page.title}</strong><span>{sourceLabel(page)}</span><small>{new Date(page.updatedAt).toLocaleDateString()}</small>
   </button>)}</div></NotebookDirectoryContextMenu>
 }
 export function NotebookGraph({ notebookId, pages, onOpen, onTalk, active = true, expandOnFirstView = true }: { notebookId: string; pages: NotebookPage[]; onOpen(page: NotebookPage, blockId?: string): void; onTalk?: NoteTalkHandler | undefined; active?: boolean; expandOnFirstView?: boolean }) {

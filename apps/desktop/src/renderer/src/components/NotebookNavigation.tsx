@@ -14,7 +14,7 @@ const ThemeActionCreateNoteIcon = semanticIconComponent('action.create-note')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
-const ThemeFileTextIcon = semanticIconComponent('file.text')
+const ThemeObjectNoteIcon = semanticIconComponent('object.note')
 const ThemeActionCreateSubnoteIcon = semanticIconComponent('action.create-subnote')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const NotebookIcon = semanticIconComponent('object.notebook')
@@ -44,7 +44,7 @@ export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteI
     <NotebookDirectoryContextMenu pages={rows.map(row => row.page)} onTalk={onTalk}><div className="survey-notebook-pages" aria-label={`${book.name} pages`}>
       {rows.map(({ page, depth, hasChildren, expanded }) => <div key={page.noteId} className="survey-notebook-page-row" style={{ marginLeft: Math.min(depth, 8) * 10 }}>
         {hasChildren ? <button className="notebook-tree-toggle" aria-label={`${expanded ? 'Collapse' : 'Expand'} ${page.title}`} aria-expanded={expanded} onClick={() => setCollapsed(held => { const next = new Set(held); if (next.has(page.noteId)) next.delete(page.noteId); else next.add(page.noteId); return next })}>{expanded ? <ThemeNavigationDownIcon size={11} /> : <ThemeNavigationDisclosureIcon size={11} />}</button> : <span className="notebook-tree-spacer" />}
-        <button data-note-id={page.noteId} className="survey-notebook-page" title={page.title} aria-current={selectedNoteId === page.noteId ? 'page' : undefined} data-selected={selectedNoteId === page.noteId} onClick={() => onOpen(page)}><ThemeFileTextIcon size={12} /><span>{page.title}</span></button>
+        <button data-note-id={page.noteId} className="survey-notebook-page" title={page.title} aria-current={selectedNoteId === page.noteId ? 'page' : undefined} data-selected={selectedNoteId === page.noteId} onClick={() => onOpen(page)}><ThemeObjectNoteIcon size={12} /><span>{page.title}</span></button>
         <button className="notebook-add-child" aria-label={`Add subpage to ${page.title}`} title="Add subpage" onClick={() => onCreateChild(page)}><ThemeActionCreateSubnoteIcon size={12} /></button>
       </div>)}
       {!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}
@@ -83,7 +83,7 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, onTal
     {!navigationVisible || !pages.length ? <button className="notebook-create-page" disabled={pending} onClick={onCreate}><ThemeActionCreateNoteIcon size={15} /><span>New page</span></button> : null}
     {pages.length ? <>{onQuery ? <label className="notebook-find notebook-find--directory"><ThemeActionSearchIcon size={14} /><TextInput aria-label="Search notebook pages" placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
       {view === 'cards' ? <NotebookCards pages={visiblePages} onOpen={onOpen} onTalk={onTalk} /> : view === 'graph' ? <NotebookGraph notebookId={notebook.notebookId} pages={visiblePages} expandOnFirstView={!query.trim() && !archived} onOpen={onOpen} onTalk={onTalk} active={active} /> : <NotebookDirectoryContextMenu pages={visiblePages} onTalk={onTalk}><div className="notebook-page-directory" aria-label={archived ? "Archived pages" : "Saved pages"}>{rows.map(({ page, depth }) => <button key={page.noteId} data-note-id={page.noteId} style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
-        <ThemeFileTextIcon size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span><ThemeActionOpenExternalIcon size={14} />
+        <ThemeObjectNoteIcon size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span><ThemeActionOpenExternalIcon size={14} />
       </button>)}{!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</div></NotebookDirectoryContextMenu>} {view !== 'tree' && !rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>{archived ? 'No archived pages.' : <>Start with a blank page.<br />Notes captured from webpages stay here, too.</>}</p></div>}
   </section>
 }
