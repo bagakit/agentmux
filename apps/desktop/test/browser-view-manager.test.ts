@@ -1053,6 +1053,83 @@ describe('BrowserViewManager', () => {
     manager.close(initial.id)
   })
 
+  it.each(['get', 'set'] as const)('publishes applied dimensions when native paint policy %s synchronization fails', async method => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const original = await manager.create('browser-viewport-paint-failure', 'https://example.com/')
+    const view = fixture.children[0]!
+    manager.setBounds(original.id, { x: 5, y: 6, width: 800, height: 612 })
+    const failure = new Error('Native drawing synchronization unavailable')
+    const operation = method === 'get' ? view.webContents.getBackgroundThrottling : view.webContents.setBackgroundThrottling
+    operation.mockImplementationOnce(() => { throw failure })
+    const requested = { width: 820, height: 1180, screenPosition: 'mobile' as const }
+
+    let observedError: unknown
+    try { manager.setViewport(original.id, requested) } catch (error) { observedError = error }
+    expect(observedError).toBe(failure)
+    expect(view.webContents.deviceEmulation).toMatchObject({ viewSize: { width: 820, height: 1180 } })
+    expect(fixture.sent.at(-1)).toMatchObject({ type: 'updated', browser: {
+      viewport: requested, navigationId: original.navigationId, profileId: original.profileId
+    } })
+    expect(view.visible).toBe(true)
+    expect(view.webContents.backgroundThrottling).toBe(true)
+    expect(fixture.children[0]).toBe(view)
+    expect(manager.setViewport(original.id, 'responsive').viewport).toBe('responsive')
+    manager.close(original.id)
+  })
+
+  it('retains both viewport paint and publication failures without closing the original page', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const original = await manager.create('browser-viewport-paint-publication', 'https://example.com/')
+    const view = fixture.children[0]!
+    manager.setBounds(original.id, { x: 5, y: 6, width: 800, height: 612 })
+    const drawingError = new Error('Native drawing synchronization unavailable')
+    const publicationError = new Error('Renderer observation unavailable')
+    view.webContents.setBackgroundThrottling.mockImplementationOnce(() => { throw drawingError })
+    vi.spyOn(fixture.window.webContents, 'send').mockImplementationOnce(() => { throw publicationError })
+    let observedError: unknown
+    try { manager.setViewport(original.id, 'mobile') } catch (error) { observedError = error }
+    expect(observedError).toBeInstanceOf(AggregateError)
+    expect((observedError as AggregateError).errors).toEqual([drawingError, publicationError])
+    expect(view.webContents.deviceEmulation).toMatchObject({ viewSize: { width: 390, height: 844 } })
+    expect(view.webContents.isDestroyed()).toBe(false)
+    expect(fixture.children[0]).toBe(view)
+    expect(manager.setViewport(original.id, 'responsive').viewport).toBe('responsive')
+    manager.close(original.id)
+  })
+
+  it.each([true, false])('synchronizes viewport changes on the original visible page while preserving policy %s', async policy => {
+    const fixture = fakeWindow()
+    const manager = browserManager(fixture.window)
+    const original = await manager.create('browser-viewport-paint', 'https://example.com/')
+    const view = fixture.children[0]!
+    view.webContents.backgroundThrottling = policy
+    const bounds = { x: 5, y: 6, width: 800, height: 612 }
+    manager.setBounds(original.id, bounds)
+    view.webContents.setBackgroundThrottling.mockClear()
+    const geometry = [...view.boundsHistory]
+    const frames: unknown[] = []
+    view.webContents.setBackgroundThrottling.mockImplementation(value => {
+      expect(value).toBe(policy)
+      frames.push(view.webContents.deviceEmulation)
+    })
+
+    manager.setViewport(original.id, { width: 820, height: 1180, screenPosition: 'mobile' })
+    expect(frames).toEqual([expect.objectContaining({ viewSize: { width: 820, height: 1180 } })])
+    const reset = manager.setViewport(original.id, 'responsive')
+    expect(frames).toEqual([expect.any(Object), null])
+    expect(view.webContents.backgroundThrottling).toBe(policy)
+    expect(view.boundsHistory).toEqual(geometry)
+    expect(reset).toMatchObject({ navigationId: original.navigationId, profileId: original.profileId, viewport: 'responsive' })
+
+    manager.setBounds(original.id, null)
+    manager.setViewport(original.id, 'mobile')
+    expect(frames).toHaveLength(2)
+    manager.setBounds(original.id, bounds)
+    expect(frames).toHaveLength(3)
+    expect(fixture.children[0]).toBe(view)
+    manager.close(original.id)
+  })
+
   it.each([true, false])('synchronizes a loaded visible page at load and show edges, preserving policy %s', async policy => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
