@@ -13,10 +13,18 @@ export type AvatarLayeringSeed = { workspace: WorkspaceRecord; topic: ScratchTop
 
 /** Original isolated filesystem/source owners and original GLB bytes; no avatar renderer or saved receipt is fabricated. */
 export async function createAvatarLayeringSeed(root: string) {
-  const builtinRoot = join(process.cwd(), 'apps/desktop/resources/avatar-series'), userRoot = join(root, 'avatar-series')
+  const repository = process.cwd(), builtinRoot = join(repository, 'apps/desktop/resources/avatar-series'), userRoot = join(root, 'avatar-series')
+  const sourceInputs: Record<string, string> = {}
+  // The original identity owner executes this native producer outside Node's loader.
+  // Bind its binary and actual repository build inputs before ensureMote can spawn it.
+  for (const file of ['apps/desktop/resources/bin/agentmux-workspace-move', 'apps/desktop/native/workspace-move.c',
+    'apps/desktop/native/workspace-file.inc', 'apps/desktop/scripts/build-workspace-move-helper.mjs'])
+    sourceInputs[file] = createHash('sha256').update(await readFile(join(repository, file))).digest('hex')
   await mkdir(userRoot, { recursive: true })
   const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: join(root, 'avatar-workspace'), name: 'Original private Mote', kind: 'folder' }
   const topics = new ScratchTopics(), topic = await topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID)
+  for (const [file, digest] of Object.entries(sourceInputs)) assert.equal(createHash('sha256').update(await readFile(join(repository, file))).digest('hex'), digest,
+    'Original native avatar identity producer and build inputs remain unchanged: ' + file)
   assert.ok(topic.identityDirectoryPath?.startsWith(root), 'The original Mote seed stays in this exact private proof root')
   const target = { workspaceId: workspace.id, topicId: topic.id, objectKey: directoryIdentity(workspace.hostId, topic.identityDirectoryPath!) }
   const store = new ConfigStore(join(root, 'avatar-config.json'))
@@ -31,16 +39,15 @@ export async function createAvatarLayeringSeed(root: string) {
   assert.ok(geometry?.entries.some(entry => entry.definition.kind === 'glb'), 'The original declared geometry source must contain a real GLB')
   const prepared = await Promise.all(geometry.entries.map(entry => control.call('space.mote.avatar.preview', {
     source: { origin: geometry.origin, seriesId: geometry.seriesId, entryId: entry.entryId } })))
-  const sourceInputs: Record<string, string> = {}
   for (const entry of await readdir(builtinRoot, { recursive: true, withFileTypes: true })) if (entry.isFile()) {
     const file = join(entry.parentPath, entry.name)
-    sourceInputs[relative(process.cwd(), file)] = createHash('sha256').update(await readFile(file)).digest('hex')
+    sourceInputs[relative(repository, file)] = createHash('sha256').update(await readFile(file)).digest('hex')
   }
   const seed: AvatarLayeringSeed = { workspace, topic, baseline, catalog, prepared, sourceInputs }
   return { seed, async verifyUnchanged() {
     assert.equal(writes, 0, 'Cancel never publishes a private original avatar/configuration write')
-    for (const [file, digest] of Object.entries(sourceInputs)) assert.equal(createHash('sha256').update(await readFile(file)).digest('hex'), digest,
-      'Original avatar source bytes remain unchanged: ' + file)
+    for (const [file, digest] of Object.entries(sourceInputs)) assert.equal(createHash('sha256').update(await readFile(join(repository, file))).digest('hex'), digest,
+      'Original avatar source and native producer bytes remain unchanged: ' + file)
     assert.deepEqual(await control.call('space.mote.avatar.read', { target }), baseline, 'The original saved avatar identity and revision remain unchanged')
   } }
 }
