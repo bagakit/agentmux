@@ -31,7 +31,7 @@ function parts(content: unknown, message?: Record<string, unknown>): AgentSessio
     return [{ kind: 'text', text: content }]
   }
   if (!Array.isArray(content)) {
-    return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content) }]
+    return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content), contentEligibility: 'unconfirmed' }]
   }
   if (content.length === 0) {
     if (isToolResult && hasToolIdentity) {
@@ -59,7 +59,7 @@ function parts(content: unknown, message?: Record<string, unknown>): AgentSessio
           ...(redacted !== undefined ? { redacted } : {})
         }]
       }
-      return [{ kind: 'text', text: nativeJsonStringify(value) }]
+      return [{ kind: 'text', text: nativeJsonStringify(value), contentEligibility: 'unconfirmed' }]
     }
     if (block?.type === 'toolCall' && typeof block.name === 'string') {
       const rawArgs = block.arguments
@@ -74,7 +74,7 @@ function parts(content: unknown, message?: Record<string, unknown>): AgentSessio
     if (block?.type === 'image' && isNativeText(block.data) && typeof block.mimeType === 'string') {
       return [{ kind: 'resource', resourceType: 'image', reference: nativeTextConcat(`data:${block.mimeType};base64,`, block.data) }]
     }
-    return [{ kind: 'text', text: nativeJsonStringify(value) }]
+    return [{ kind: 'text', text: nativeJsonStringify(value), contentEligibility: 'unconfirmed' }]
   })
 
   if (isToolResult && hasToolIdentity && !converted.some((p) => p.kind === 'tool-result')) {
@@ -92,6 +92,8 @@ function invalid(message: string): never { throw new AgentMuxError(message, 'AGE
 function convert(entry: Record<string, unknown>): AgentSessionHistoryItem {
   const message = entry.type === 'message' ? object(entry.message) : undefined
   const role = message?.role
+  const contentEligibility = entry.type === 'compaction' ? 'private'
+    : role === 'assistant' || role === 'toolResult' ? 'public' : 'unconfirmed'
   const content = message?.content ?? (entry.type === 'custom_message' ? entry.content : entry.summary)
   const blocks = Array.isArray(content) ? content : []
   const hasAssistantText = (isNativeText(content) && content.length > 0) || blocks.some((block) => {
@@ -109,9 +111,9 @@ function convert(entry: Record<string, unknown>): AgentSessionHistoryItem {
   return {
     id: entry.id as string,
     kind,
-    contentParts: content === undefined && role !== 'toolResult'
-      ? [{ kind: 'text', text: nativeJsonStringify(entry) }]
-      : parts(content, message),
+    contentParts: (content === undefined && role !== 'toolResult'
+      ? [{ kind: 'text' as const, text: nativeJsonStringify(entry), contentEligibility: 'unconfirmed' as const }]
+      : parts(content, message)).map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
     ...(kind === 'activity' ? { title: `Pi ${typeof role === 'string' ? role : String(entry.type)}` } : {}),
     ...(Number.isSafeInteger(time) && time >= 0 ? { startedAt: time } : {})
   }

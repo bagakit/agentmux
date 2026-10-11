@@ -777,7 +777,9 @@ export type AgentTerminalPromptReadinessState = {
     }
 )
 
-export type AgentSessionHistoryContentPart =
+/** Provider-owned content purpose, never audience or sending authority. Missing means unconfirmed. */
+export type AgentSessionHistoryContentEligibility = 'public' | 'private' | 'unconfirmed'
+export type AgentSessionHistoryContentPart = (
   | { kind: 'text'; text: string;
       /** Provider-owned reading span in the original text, using UTF-16 indices. Copy keeps text complete. */
       readingRange?: { start: number; end: number } }
@@ -787,6 +789,7 @@ export type AgentSessionHistoryContentPart =
   | { kind: 'reasoning'; text: string; signature?: string; redacted?: boolean }
   | { kind: 'tool-call'; name: string; input: string; callId?: string }
   | { kind: 'tool-result'; output: string; name?: string; callId?: string; failed?: boolean }
+) & { contentEligibility?: AgentSessionHistoryContentEligibility }
 
 export type AgentSessionHistorySource = { providerId: AgentProviderId; nativeSessionId: string }
 

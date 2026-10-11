@@ -163,6 +163,7 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
   const turnId = string(entry.turnId)
   let kind: AgentSessionHistoryItem['kind'] = 'activity'
   let contentParts: AgentSessionHistoryContentPart[] = []
+  let contentEligibility: AgentSessionHistoryContentPart['contentEligibility'] = 'unconfirmed'
   let collaboration: AgentSessionHistoryCollaboration | undefined
 
   if (type === 'userMessage') {
@@ -170,19 +171,23 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
     kind = 'user-message'
     contentParts = item.content.map(userContent)
   } else if (type === 'agentMessage') {
+    contentEligibility = 'public'
     kind = 'assistant-message'
     contentParts = [{ kind: 'text', text: string(item.text) }]
   } else if (type === 'collabAgentToolCall' || type === 'subAgentActivity') {
+    contentEligibility = 'public'
     collaboration = nativeCollaboration(item, source)
     contentParts = [{ kind: 'text', text: JSON.stringify(item, null, 2) }]
   } else if (type === 'reasoning') {
     const text = extractReasoningText(item)
     if (text) {
+      contentEligibility = 'public'
       contentParts = [{ kind: 'reasoning', text }]
     } else {
       contentParts = [{ kind: 'text', text: JSON.stringify(item, null, 2) }]
     }
   } else if (type === 'commandExecution') {
+    contentEligibility = 'public'
     const command = string(item.command)
     contentParts.push({ kind: 'tool-call', name: 'shell', input: command, callId: id })
     const hasOutput = typeof item.aggregatedOutput === 'string'
@@ -198,6 +203,7 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
       contentParts.push({ kind: 'tool-result', output, name: 'shell', callId: id, ...(failed ? { failed: true } : {}) })
     }
   } else if (type === 'fileChange') {
+    contentEligibility = 'public'
     const input = fileChangesInput(item.changes)
     contentParts.push({ kind: 'tool-call', name: 'apply_patch', input, callId: id })
     const isTerminal = item.status === 'completed' || item.status === 'failed' || item.status === 'declined'
@@ -207,6 +213,7 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
       contentParts.push({ kind: 'tool-result', output, name: 'apply_patch', callId: id, ...(failed ? { failed: true } : {}) })
     }
   } else if (type === 'mcpToolCall') {
+    contentEligibility = 'public'
     const server = string(item.server)
     const tool = string(item.tool)
     const toolName = `${server}/${tool}`
@@ -330,6 +337,7 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
       contentParts.push({ kind: 'tool-result', output: 'Tool call failed', name: toolName, callId: id, failed: true })
     }
   } else if (type === 'dynamicToolCall') {
+    contentEligibility = 'public'
     const toolName = string(item.tool)
     contentParts.push({ kind: 'tool-call', name: toolName, input: toolCallInput(item.arguments), callId: id })
     const isTerminal = item.status === 'completed' || item.status === 'failed'
@@ -369,6 +377,7 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
       contentParts.push({ kind: 'tool-result', output: 'Dynamic tool failed', name: toolName, callId: id, failed: true })
     }
   } else if (type === 'webSearch') {
+    contentEligibility = 'public'
     const query = string(item.query)
     contentParts.push({ kind: 'tool-call', name: 'web_search', input: query, callId: id })
     if (item.action !== null && item.action !== undefined || (Array.isArray(item.results) && item.results.length > 0)) {
@@ -378,10 +387,13 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
       }
     }
   } else if (type === 'imageView' && typeof item.path === 'string') {
+    contentEligibility = 'public'
     contentParts.push(resource('image', item.path))
   } else if (type === 'imageGeneration' && typeof item.savedPath === 'string') {
+    contentEligibility = 'public'
     contentParts.push(resource('image', item.savedPath))
   } else if (type === 'plan' && typeof item.text === 'string') {
+    contentEligibility = 'public'
     contentParts.push({ kind: 'text', text: item.text })
   } else {
     // Native activity kinds evolve independently. Preserve their complete readable payload.
@@ -402,7 +414,7 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
   const completedAt = timestamp(entry.completedAtMs)
   const messagePhase = type === 'agentMessage'
     ? knownValue(item.phase, { commentary: 'progress', final_answer: 'final' }) : undefined
-  return { id, turnId, kind, contentParts,
+  return { id, turnId, kind, contentParts: contentParts.map(part => ({ ...part, contentEligibility })),
     ...(messagePhase === undefined ? {} : { messagePhase }),
     ...(collaboration === undefined ? {} : { collaboration }),
     ...(kind === 'activity' ? { title: type } : {}),

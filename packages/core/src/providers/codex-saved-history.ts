@@ -46,7 +46,7 @@ function systemMessage(payload: Record<string, unknown>): { kind: 'system-messag
 
 function contentParts(content: unknown, userInput = false): NativeHistoryContentPart[] {
   if (isNativeText(content)) return [{ kind: 'text', text: content }]
-  if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content) }]
+  if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content), contentEligibility: 'unconfirmed' }]
   return content.map(value => {
     const part = object(value)
     if (['input_text', 'output_text', 'text', 'summary_text'].includes(String(part.type)) && isNativeText(part.text)) {
@@ -61,7 +61,7 @@ function contentParts(content: unknown, userInput = false): NativeHistoryContent
       if (resourceType && isNativeText(reference)) return { kind: 'resource', resourceType, reference,
         ...(typeof part.name === 'string' ? { label: part.name } : {}) }
     }
-    return { kind: 'text', text: nativeJsonStringify(value) }
+    return { kind: 'text', text: nativeJsonStringify(value), contentEligibility: 'unconfirmed' }
   })
 }
 
@@ -86,9 +86,11 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     }
   }
   let kind: NativeHistoryItem['kind'] = 'activity', parts: NativeHistoryContentPart[], title: string | undefined
+  let contentEligibility: AgentSessionHistoryItem['contentParts'][number]['contentEligibility'] = 'unconfirmed'
   if (asyncQuestion) {
+    contentEligibility = 'public'
     kind = 'assistant-message'
-    parts = questionRequest === undefined ? [{ kind: 'text', text: nativeJsonStringify(payload) }]
+    parts = questionRequest === undefined ? [{ kind: 'text', text: nativeJsonStringify(payload), contentEligibility: 'unconfirmed' }]
       : contentParts(Array.isArray(nativeItem.content) ? nativeItem.content.map(value => {
       const part = object(value)
       return part.type === 'Text' ? { ...part, type: 'text' } : value
@@ -98,23 +100,29 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     parts = contentParts(nativeItem.content, true)
   } else if (record.type === 'response_item' && type === 'message') {
     const system = systemMessage(payload)
+    contentEligibility = system || payload.role === 'user' && paginated ? 'private'
+      : payload.role === 'assistant' ? 'public' : 'unconfirmed'
     title = system?.title
     kind = system?.kind ?? (payload.role === 'user' ? (paginated ? 'activity' : 'user-message') : payload.role === 'assistant' ? 'assistant-message' : 'activity')
     if (!system && paginated && payload.role === 'user') title = 'Model context'
     parts = contentParts(payload.content)
   } else if (record.type === 'response_item' && type === 'reasoning') {
-    parts = contentParts(payload.summary).map(part => part.kind === 'text' ? { kind: 'reasoning', text: part.text } : part)
+    contentEligibility = 'public'
+    parts = contentParts(payload.summary).map(part => part.kind === 'text' ? { ...part, kind: 'reasoning' } : part)
   } else if (record.type === 'response_item' && (type === 'function_call' || type === 'custom_tool_call')) {
+    contentEligibility = 'public'
     parts = [{ kind: 'tool-call', name: typeof payload.name === 'string' ? payload.name : 'tool',
       input: text(type === 'function_call' ? payload.arguments : payload.input),
       ...(typeof payload.call_id === 'string' ? { callId: payload.call_id } : {}) }]
   } else if (record.type === 'response_item' && (type === 'function_call_output' || type === 'custom_tool_call_output')) {
+    contentEligibility = 'public'
     parts = [{ kind: 'tool-result', output: text(payload.output), ...(typeof payload.call_id === 'string' ? { callId: payload.call_id } : {}) }]
   } else if (record.type === 'event_msg' && (type === 'user_message' || type === 'agent_message')) {
+    contentEligibility = type === 'user_message' ? 'unconfirmed' : 'public'
     // Native event copies are activity, so the corresponding original response_item is not duplicated as speech.
     parts = [{ kind: 'text', text: text(payload.message) }]
   } else if (record.type === 'event_msg' && type === 'token_count') return null
-  else if (record.type === 'compacted' && isNativeText(payload.message)) parts = [{ kind: 'text', text: payload.message }]
+  else if (record.type === 'compacted' && isNativeText(payload.message)) { parts = [{ kind: 'text', text: payload.message }]; contentEligibility = 'private' }
   else parts = [{ kind: 'text', text: nativeJsonStringify(payload) }]
   // The saved rollout spells the native text part input_text. Reuse the same
   // complete-reply protocol as indexed history without changing original parts.
@@ -133,7 +141,7 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
     ? { source: { providerId: 'codex', nativeSessionId }, semanticItemId: nativeItem.id as string, turnId: payload.turn_id as string, clientCorrelation: nativeItem.client_id } : undefined
   const invocation = nativeConversationProvenance(parts, { providerId: 'codex', nativeSessionId })
   const conversation = input ? { ...invocation, nativeInput: input } : invocation
-  return { id, kind, contentParts: parts,
+  return { id, kind, contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
     ...(conversation ? { conversation } : {}),
     ...metrics(record, payload, nativeSessionId),
     ...(kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'final_answer' ? { messagePhase: 'final' as const }

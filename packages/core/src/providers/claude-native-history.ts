@@ -39,10 +39,10 @@ function formatToolResultOutput(content: unknown): NativeTextValue {
 
 function parts(content: unknown): AgentSessionHistoryContentPart[] {
   if (isNativeText(content)) return [{ kind: 'text', text: content }]
-  if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content) }]
+  if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content), contentEligibility: 'unconfirmed' }]
   return content.flatMap((value): AgentSessionHistoryContentPart[] => {
     const block = object(value)
-    if (!block) return [{ kind: 'text', text: nativeJsonStringify(value) }]
+    if (!block) return [{ kind: 'text', text: nativeJsonStringify(value), contentEligibility: 'unconfirmed' }]
     if (block.type === 'text' && isNativeText(block.text)) return [{ kind: 'text', text: block.text }]
     if (block.type === 'thinking') {
       const text = isNativeText(block.thinking) ? block.thinking : isNativeText(block.text) ? block.text : ''
@@ -57,7 +57,7 @@ function parts(content: unknown): AgentSessionHistoryContentPart[] {
     if (block.type === 'tool_result') {
       const callId = typeof block.tool_use_id === 'string' && block.tool_use_id ? block.tool_use_id : undefined
       const failed = block.is_error === true ? true : undefined
-      return [{ kind: 'tool-result', output: formatToolResultOutput(block.content), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) }]
+      return [{ kind: 'tool-result', contentEligibility: 'public', output: formatToolResultOutput(block.content), ...(callId ? { callId } : {}), ...(failed ? { failed } : {}) }]
     }
     if (block.type === 'image') {
       const source = object(block.source)
@@ -68,7 +68,7 @@ function parts(content: unknown): AgentSessionHistoryContentPart[] {
         return [{ kind: 'resource', resourceType: 'image', reference: source.url }]
       }
     }
-    return [{ kind: 'text', text: nativeJsonStringify(block) }]
+    return [{ kind: 'text', text: nativeJsonStringify(block), contentEligibility: 'unconfirmed' }]
   })
 }
 
@@ -88,6 +88,9 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
     isGenerated ||
     (!queuedInput && record.type !== 'user' && record.type !== 'assistant')
 
+  const isToolResultTurn = Boolean(record.toolUseResult) || (
+    blocks.length > 0 && blocks.every((b) => object(b)?.type === 'tool_result')
+  )
   let kind: AgentSessionHistoryItem['kind']
   if (record.type === 'system' && message && content !== undefined && !isGenerated) {
     kind = 'system-message'
@@ -96,9 +99,6 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   } else if (record.type === 'user' || queuedInput) {
     // Tool result turns in Claude are sent under role 'user', often with tool_use_result on the record
     // or containing only tool_result blocks. These are activities, never human user speech.
-    const isToolResultTurn = Boolean(record.toolUseResult) || (
-      blocks.length > 0 && blocks.every((b) => object(b)?.type === 'tool_result')
-    )
     kind = isToolResultTurn ? 'activity' : 'user-message'
   } else {
     // record.type === 'assistant'
@@ -114,11 +114,15 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   const turnId = typeof record.user_message_uuid === 'string' && record.user_message_uuid.length > 0
     ? record.user_message_uuid
     : undefined
+  const contentEligibility = record.isCompactSummary === true || record.type === 'system' ? 'private'
+    : isGenerated ? 'unconfirmed'
+    : record.type === 'assistant' && message && content !== undefined ? 'public' : 'unconfirmed'
 
   return {
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
-    contentParts: message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text', text: nativeJsonStringify(record) }],
+    contentParts: (message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text' as const, text: nativeJsonStringify(record) }])
+      .map(part => ({ ...part, contentEligibility: contentEligibility === 'private' || isGenerated ? contentEligibility : part.contentEligibility ?? contentEligibility })),
     // Native message.usage covers this response, even when several responses share a turn.
     // Claude does not report one total_tokens value here; preserve that absence.
     ...(record.type === 'assistant' && message?.usage !== undefined ? normalizeSessionHistoryMetrics({
