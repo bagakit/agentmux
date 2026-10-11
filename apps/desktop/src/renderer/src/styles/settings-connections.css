@@ -314,3 +314,16 @@
   .connector-enrollment__action > button,
   .connector-enrollment__text-action { min-height: 36px; }
 }
+
+/* Publication fields use the same stacked labels and control tokens as setup. */
+.connector-publication__form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-6); min-width: 0; }
+.connector-publication__form .settings-field { min-width: 0; display: grid; gap: var(--sp-2); align-content: start; }
+.connector-publication__form .settings-field > span { color: var(--text-2); font-size: var(--fs-body); }
+.connector-publication__form .settings-field > small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.connector-publication__form input:not([type='checkbox']), .connector-publication__form select, .connector-publication__form textarea { min-width: 0; width: 100%; }
+.connector-publication__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.connector-publication__wide { grid-column: 1 / -1; }
+.connector-publication__form select, .connector-publication__form textarea { padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font: var(--fs-body)/1.55 var(--font-sans); outline: none; }
+.connector-publication__form select:focus-visible, .connector-publication__form textarea:focus-visible { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
+.connector-publication__form textarea { min-height: 88px; resize: vertical; }
+@container (width < 380px) { .connector-publication__form { grid-template-columns: minmax(0, 1fr); } }
