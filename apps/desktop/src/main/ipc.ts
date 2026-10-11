@@ -178,6 +178,7 @@ import { createAgentNotifier } from './agent-notifier.js'
 import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
+import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
 import type { NativeOverlayRegion } from '../shared/native-overlay.js'
 import { BrowserOperationFileStore, BrowserOperationJournal, BROWSER_OPERATION_JOURNAL_FILE, browserOperationAlreadyExistsError } from './browser-operation-journal.js'
 import { browserRunResult } from '../shared/browser-run-result.js'
@@ -427,6 +428,17 @@ export async function registerIpc(args: {
   new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads)
+  const ensureBrowser = (id: string, input?: Parameters<BrowserViewManager['restore']>[1]) => browsers.ensure(id, async () => {
+    let saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
+    workspace(config, saved.workspaceId)
+    if (saved.mode !== 'private') {
+      await browserProfiles.initialize()
+      // Profile IO must not revive a Region removed while this consumer was waiting.
+      saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
+      workspace(config, saved.workspaceId)
+    }
+    return saved
+  }, input)
   browsers.setPresentationWindowOwner((document, occurrence) => args.workbenchWindows.presentationWindow(document, occurrence))
   const nativeChrome = new NativeOverlayWindows(args.window, browsers, args.workbenchWindows)
   const releaseNativeWindowOwner = args.workbenchWindows.setNativeOwner({ beforeClosing: async window => {
@@ -1801,8 +1813,18 @@ export async function registerIpc(args: {
   handleWithEvent('browser:listTargets', async (event, workspaceId?: string) => {
     requireTrustedSender('browser:listTargets', event)
     if (workspaceId !== undefined) workspace(config, workspaceId)
-    const targets = [...browsers.targets(), ...externalBridge.list()].filter(row => workspaceId === undefined || row.workspaceId === workspaceId)
-    return { targets: targets.slice(0, 256), ...(targets.length > 256 ? { warning: 'More Browser targets exist than this bounded discovery response can show.' } : {}) }
+    const live = [...browsers.targets(), ...externalBridge.list()]
+    let warning: string | undefined
+    let cold: import('@agentmux/core').AgentMuxBrowserTarget[] = []
+    try {
+      const saved = await spatialState.read()
+      if (saved) cold = coldBrowserTargets(saved.graph, live)
+      else warning = 'Saved Browser ownership is unconfirmed. Existing live targets remain usable; retry discovery.'
+    }
+    catch { warning = 'Saved Browser discovery is unconfirmed. Existing live targets remain usable; retry discovery.' }
+    const targets = [...live, ...cold].filter(row => workspaceId === undefined || row.workspaceId === workspaceId)
+    if (targets.length > 256) warning = 'More Browser targets exist than this bounded discovery response can show.'
+    return { targets: targets.slice(0, 256), ...(warning ? { warning } : {}) }
   })
   handleWithEvent('browser:createExternalPairing', async (event, workspaceId: string) => {
     requireTrustedSender('browser:createExternalPairing', event)
@@ -1824,12 +1846,13 @@ export async function registerIpc(args: {
     if (mode !== 'private') await browserProfiles.initialize()
     return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId, mode, viewport)
   })
-  handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
-  handle('browser:back', async (id: string) => await browsers.back(id))
-  handle('browser:forward', async (id: string) => await browsers.forward(id))
-  handle('browser:reload', async (id: string) => await browsers.reload(id))
+  handle('browser:navigate', async (id: string, url: string) => { await ensureBrowser(id); return await browsers.navigate(id, url) })
+  handle('browser:back', async (id: string) => { await ensureBrowser(id); return await browsers.back(id) })
+  handle('browser:forward', async (id: string) => { await ensureBrowser(id); return await browsers.forward(id) })
+  handle('browser:reload', async (id: string) => { await ensureBrowser(id); return await browsers.reload(id) })
   handleWithEvent('browser:switchProfile', async (event, id: string, profileId: string) => {
     requireTrustedSender('browser:switchProfile', event)
+    await ensureBrowser(id)
     return await browsers.switchProfile(id, profileId)
   })
   handleWithEvent('browser:listProfiles', async (event) => {
@@ -1876,9 +1899,9 @@ export async function registerIpc(args: {
     const actual = requireInputHistoryScope(target, scope)
     return actual.profileId === null ? { scope: actual, entries: [] } : await browserInputHistory.clear(actual)
   })
-  handle('browser:openDevTools', (id: string) => browsers.openDevTools(id))
-  handle('browser:setViewport', (id: string, viewport: BrowserViewport) => browsers.setViewport(id, viewport))
-  handle('browser:captureScreenshot', async (id: string) => await browsers.captureScreenshot(id))
+  handle('browser:openDevTools', async (id: string) => { await ensureBrowser(id); return browsers.openDevTools(id) })
+  handle('browser:setViewport', async (id: string, viewport: BrowserViewport) => { await ensureBrowser(id); return browsers.setViewport(id, viewport) })
+  handle('browser:captureScreenshot', async (id: string) => { await ensureBrowser(id); return await browsers.captureScreenshot(id) })
   /**
    * 跑一段 Agent 写的程序。**授权闸在这里，不在调用方。**
    *
@@ -1917,16 +1940,19 @@ export async function registerIpc(args: {
         workspace(config, externalBridge.require(id).workspaceId)
         return await externalBrowsers.runScript(id, code, operator, operationId)
       }
+      await ensureBrowser(id)
       return await browsers.runScript(id, code, operator, undefined, operationId)
     })
   })
   handleWithEvent('browser:checkOutcomeFields', async (event, id: string, input: import('../shared/browser-outcome-criteria.js').BrowserOutcomeFieldRunInput) => {
     requireTrustedSender('browser:checkOutcomeFields', event)
     if (config.browser.agentAutomation !== true) throw new Error('Browser automation is off. Turn it on in Settings › Browser.')
+    await ensureBrowser(id)
     return await browsers.checkOutcomeFields(id, input)
   })
   handleWithEvent('browser:verifyOutcome', async (event, id: string, operationId: string) => {
     requireTrustedSender('browser:verifyOutcome', event)
+    await ensureBrowser(id)
     return await browsers.verifyOutcome(id, operationId)
   })
   handleWithEvent('browser:listOperationHistory', async (event) => {
@@ -1967,14 +1993,17 @@ export async function registerIpc(args: {
     if (config.browser.agentAutomation !== true) {
       throw Object.assign(new Error('Agent browser automation is off. Turn it on in Settings › Browser.'), { code: 'BROWSER_AUTOMATION_DISABLED' satisfies AgentMuxControlErrorCode })
     }
+    await ensureBrowser(id)
     return await browsers.runReplay(id, plan, operator)
   })
   handleWithEvent('browser:selectElement', async (event, id: string) => {
     requireTrustedSender('browser:selectElement', event)
+    await ensureBrowser(id)
     return await browsers.selectElement(id)
   })
   handleWithEvent('browser:startDemonstration', async (event, id: string) => {
     requireTrustedSender('browser:startDemonstration', event)
+    await ensureBrowser(id)
     return await browsers.startDemonstration(id)
   })
   handleWithEvent('browser:stopDemonstration', async (event, id: string) => {
@@ -1983,35 +2012,49 @@ export async function registerIpc(args: {
   })
   handleWithEvent('browser:getDemonstration', async (event, id: string) => {
     requireTrustedSender('browser:getDemonstration', event)
+    await ensureBrowser(id)
     return await browsers.getDemonstration(id)
   })
   handleWithEvent('browser:getTaskAssets', async (event, id: string) => {
     requireTrustedSender('browser:getTaskAssets', event)
+    await ensureBrowser(id)
     return await browsers.getTaskAssets(id)
   })
   handleWithEvent('browser:controlTask', async (event, request: unknown) => {
     requireTrustedSender('browser:controlTask', event)
-    return await executeBrowserTaskControl(request, browsers, config.browser.agentAutomation === true)
+    return await executeBrowserTaskControl(request, {
+      getTaskAssets: async id => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
+      getOperation: id => browsers.getOperation(id),
+      runControlledTaskBatch: async input => { await ensureBrowser(input.browserId); return await browsers.runControlledTaskBatch(input) },
+      runControlledTaskAsset: async input => { await ensureBrowser(input.browserId); return await browsers.runControlledTaskAsset(input) },
+      stopTaskBatch: (id, batchId) => browsers.stopTaskBatch(id, batchId),
+      stopTaskAsset: (id, runId) => browsers.stopTaskAsset(id, runId)
+    }, config.browser.agentAutomation === true)
   })
   handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
     requireTrustedSender('browser:importTaskAsset', event)
+    await ensureBrowser(id)
     return await browsers.importTaskAsset(id, name)
   })
   handleWithEvent('browser:saveTaskAssetDraft', async (event, id: string, assetId: string, revision: number, content: BrowserTaskContent) => {
     requireTrustedSender('browser:saveTaskAssetDraft', event)
+    await ensureBrowser(id)
     return await browsers.saveTaskAssetDraft(id, assetId, revision, content)
   })
   handleWithEvent('browser:saveTaskAssetVersion', async (event, id: string, assetId: string, revision: number, content: BrowserTaskContent) => {
     requireTrustedSender('browser:saveTaskAssetVersion', event)
+    await ensureBrowser(id)
     return await browsers.saveTaskAssetVersion(id, assetId, revision, content)
   })
   handleWithEvent('browser:locateTaskAssetStep', async (event, id: string, assetId: string, revision: number, stepId: string) => {
     requireTrustedSender('browser:locateTaskAssetStep', event)
+    await ensureBrowser(id)
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
   })
   handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
     requireTrustedSender('browser:runTaskBatch', event)
     if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
+    await ensureBrowser(input.browserId)
     return await browsers.runTaskBatch(input)
   })
   handleWithEvent('browser:stopTaskBatch', async (event, id: string, batchId: string) => {
@@ -2021,6 +2064,7 @@ export async function registerIpc(args: {
   handleWithEvent('browser:runTaskAsset', async (event, input: BrowserTaskAssetRunInput) => {
     requireTrustedSender('browser:runTaskAsset', event)
     if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
+    await ensureBrowser(input.browserId)
     return await browsers.runTaskAsset(input)
   })
   handleWithEvent('browser:stopTaskAsset', async (event, id: string, runId: string) => {
@@ -2089,8 +2133,7 @@ export async function registerIpc(args: {
     input: { workspaceId: unknown; profileId: string | null; mode?: import('@agentmux/core').AgentMuxBrowserMode; viewport: BrowserViewport }
   ) => {
     const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, input.workspaceId)
-    if (input.mode !== 'private' && input.profileId !== null) await browserProfiles.initialize()
-    return await browsers.restore(id, { ...input, workspaceId: verifiedWorkspaceId })
+    return await ensureBrowser(id, { ...input, workspaceId: verifiedWorkspaceId })
   })
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(contents)
