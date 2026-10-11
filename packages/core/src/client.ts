@@ -2285,7 +2285,7 @@ export class AgentMuxClient {
     // is distinct from the execution Host retained in its own durable descriptor.
     const descriptor = input.hostId === 'local' ? await this.historyDescriptor(input.agentSessionId) : undefined
     const page = await readAgentSessionHistory(this, descriptor ? { ...input, hostId: descriptor.hostId } : input,
-      { ...options, resolveSource: id => this.historyDescriptor(id) })
+      { ...options, resolveSource: id => this.historyDescriptor(id), readCapturedHistory: (id, query) => this.store.readCapturedHistory(id, query) })
     return descriptor ? { ...page, hostId: input.hostId } : page
   }
 

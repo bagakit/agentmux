@@ -1,3 +1,4 @@
+export { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -6,7 +7,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { normalizeSessionHistoryMetrics, normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
-import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionUserMessage } from './types.js'
+import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionUserMessage, AgentCapturedTimelineStream } from './types.js'
 
 // Pure wire/data contract. Host readers own crypto, source IO and read leases;
 // Hosted/browser consumers validate the same result without importing those owners.
@@ -33,6 +34,7 @@ export type AgentSessionHistoryReadPage = AgentSessionContextReference & {
   source: 'captured' | 'native'; revision: string; availability: 'available' | 'empty'; order: 'newest-first' | 'chronological-page';
   items: AgentSessionHistoryReadEntry[]; nextCursor: string | null; budgetBytes: number
   nativeSource?: AgentSessionHistorySource
+  capturedStream?: AgentCapturedTimelineStream
   /** Text queries retain original items; user-message queries project only original inputs. */
   kind?: 'user-message' | 'text'
   userMessages?: AgentSessionUserMessage[]
@@ -56,12 +58,23 @@ export function validateSessionHistoryReadInput(input: AgentSessionHistoryReadIn
     fail('History requires exact Host/Session, explicit source, limit 1–100 and a bounded byte budget; user-message/text queries accept a literal string and scanLimit 1–1000.')
   }
 }
+function validateCapturedStream(page: Record<string,unknown>, input: AgentSessionHistoryReadInput): void {
+  if(page.capturedStream===undefined)return
+  const bad=():never=>fail('Captured history coverage is malformed.','CONTROL_PROTOCOL_ERROR')
+  if(input.source!=='captured')return bad()
+  const stream=rpcRecord(page.capturedStream,['epoch','sequence','revision','origin','gaps'],'CONTROL_PROTOCOL_ERROR')
+  if(!text(stream.epoch)||!Number.isSafeInteger(stream.sequence)||(stream.sequence as number)<0||!Number.isSafeInteger(stream.revision)||(stream.revision as number)<0||
+    !['beginning','retained-prefix','unknown'].includes(String(stream.origin))||!Array.isArray(stream.gaps))return bad()
+  for(const value of stream.gaps){const gap=rpcRecord(value,['code','message'],'CONTROL_PROTOCOL_ERROR');if(!text(gap.code)||typeof gap.message!=='string'||!gap.message)return bad()}
+}
+
 /** The public consumer verifies exact reference, source and serialized budget before accepting data. */
 export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {
   if (input.kind === 'text') return parseTextHistoryPage(value, input)
   if (isUserMessageHistoryRead(input)) return parseUserMessageHistoryPage(value, input)
   const bad = (): never => fail('History result is malformed, over budget or belongs to another source.', 'CONTROL_PROTOCOL_ERROR')
-  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'revision', 'availability', 'order', 'items', 'nextCursor', 'budgetBytes', 'nativeSource'], 'CONTROL_PROTOCOL_ERROR')
+  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'revision', 'availability', 'order', 'items', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
+  validateCapturedStream(page, input)
   if (page.hostId !== input.hostId || page.agentSessionId !== input.agentSessionId || page.source !== input.source ||
     typeof page.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(page.revision) ||
     !['available', 'empty'].includes(String(page.availability)) ||
@@ -109,7 +122,8 @@ function sameOriginal(left: unknown, right: unknown): boolean {
 
 function parseTextHistoryPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {
   const bad = (): never => fail('Text history result is malformed or belongs to another query source.', 'CONTROL_PROTOCOL_ERROR')
-  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource'], 'CONTROL_PROTOCOL_ERROR')
+  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
+  validateCapturedStream(page, input)
   const scan = rpcRecord(page.scan, ['examined', 'complete'], 'CONTROL_PROTOCOL_ERROR')
   if (page.hostId !== input.hostId || page.agentSessionId !== input.agentSessionId || page.source !== input.source || page.kind !== 'text' ||
     typeof page.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(page.revision) || page.order !== 'newest-first' ||
@@ -147,7 +161,8 @@ function parseTextHistoryPage(value: unknown, input: AgentSessionHistoryReadInpu
 
 export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {
   const bad = (): never => fail('User-message history result is malformed or belongs to another query source.', 'CONTROL_PROTOCOL_ERROR')
-  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'userMessages', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource'], 'CONTROL_PROTOCOL_ERROR')
+  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'userMessages', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
+  validateCapturedStream(page, input)
   const scan = rpcRecord(page.scan, ['examined', 'complete'], 'CONTROL_PROTOCOL_ERROR')
   if (page.hostId !== input.hostId || page.agentSessionId !== input.agentSessionId || page.source !== input.source || page.kind !== 'user-message' ||
     typeof page.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(page.revision) || page.order !== 'newest-first' || !Array.isArray(page.items) || page.items.length ||

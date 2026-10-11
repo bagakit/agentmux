@@ -5,13 +5,13 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { projectSessionUserMessages, sessionHistoryTextForReading } from './session-user-messages.js'
 import type { AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionHistoryReader, AgentSessionHistoryReadContext } from './session-history-reader.js'
-import type { AgentSessionHistoryDescriptor, AgentSessionHistoryPage, AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistoryContentPart, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource } from './types.js'
+import type { AgentSessionHistoryDescriptor, AgentSessionHistoryPage, AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistoryContentPart, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource, AgentCapturedTimelinePage } from './types.js'
 
 type Reader = Pick<AgentSessionHistoryReader, 'sessionHistorySources' | 'sessionTimeline' | 'sessionHistoryPage'> & Partial<Pick<AgentSessionHistoryReader, 'sessionHistoryResource'>>
 type Position = { page: string | null; index: number }
 type Cursor = Position & { version: 1; readId: string; scope: string }
 type View = { id: string; scope: string; binding: string; revision: string; touchedAt: number;
-  captured?: readonly AgentTimelineItem[]; firstNative?: AgentSessionHistoryPage; nativeSource?: AgentSessionHistorySource; bytes: number }
+  capturedCut?: {epoch:string;throughSequence:number}; firstCaptured?: AgentCapturedTimelinePage; firstNative?: AgentSessionHistoryPage; nativeSource?: AgentSessionHistorySource; bytes: number }
 // Read snapshots only: no author/input/delivery state. An original continuation remains
 // append-safe without repeatedly loading/cloning/hashing the entire captured Timeline.
 // The weak owner and short idle lifetime release these with their actual reader.
@@ -209,12 +209,12 @@ export async function readAgentSessionHistoryQuery(owner: Reader, input: AgentSe
   if (!view) {
     const id = randomUUID()
     if (input.source === 'captured') {
-      const snapshot = await owner.sessionTimeline(input.agentSessionId)
+      if(!options.readCapturedHistory)return fail('Original captured history reader is unavailable.','AGENT_SESSION_HISTORY_CAPTURE_UNCONFIRMED')
+      const firstCaptured=await options.readCapturedHistory(input.agentSessionId,{limit:100})
       signal?.throwIfAborted()
-      if (snapshot.agentSessionId !== input.agentSessionId || snapshot.items.some(item => item.agentSessionId !== input.agentSessionId)) return fail('Captured history belongs to another Agent.', 'CONTROL_PROTOCOL_ERROR')
-      const serialized = JSON.stringify(snapshot)
-      view = { id, scope, binding: bindingOf(descriptor, input.source), revision: digest(serialized), touchedAt: Date.now(),
-        captured: [...snapshot.items].reverse(), bytes: Buffer.byteLength(serialized) }
+      if(firstCaptured.agentSessionId!==input.agentSessionId)return fail('Captured history belongs to another Agent.','CONTROL_PROTOCOL_ERROR')
+      const capturedCut={epoch:firstCaptured.stream.epoch,throughSequence:firstCaptured.stream.sequence}
+      view={id,scope,binding:bindingOf(descriptor,input.source),revision:digest(JSON.stringify(capturedCut)),touchedAt:Date.now(),capturedCut,firstCaptured,bytes:Buffer.byteLength(JSON.stringify(firstCaptured))}
     } else {
       const firstNative = await nativePage(owner, input, null, signal)
       descriptor = await descriptorFor(owner, input, options)
@@ -232,16 +232,24 @@ export async function readAgentSessionHistoryQuery(owner: Reader, input: AgentSe
   const textMode = input.kind === 'text'
   const result: AgentSessionHistoryReadPage = { hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.source,
     kind: textMode ? 'text' : 'user-message', revision: view.revision, availability: 'empty', order: 'newest-first', items: [], ...(textMode ? {} : { userMessages: [] }),
-    scan: { examined: 0, complete: false }, nextCursor: null, budgetBytes, ...(view.nativeSource ? { nativeSource: view.nativeSource } : {}) }
+    scan: { examined: 0, complete: false }, nextCursor: null, budgetBytes, ...(view.nativeSource ? { nativeSource: view.nativeSource } : {}),...(view.firstCaptured?{capturedStream:view.firstCaptured.stream}:{}) }
   const cursor = () => encode({ version: 1, readId: view!.id, scope, ...position })
   const matchCount = () => textMode ? result.items.length : result.userMessages!.length
   let page = view.firstNative && (position.page === null ? view.firstNative : await nativePage(owner, input, position.page, signal))
   if (page && view.nativeSource && !sameSource(page.source, view.nativeSource)) return fail('Native query source changed.')
-  let items: readonly (AgentTimelineItem | AgentSessionHistoryItem)[] = view.captured ?? [...page!.items].reverse()
+  const capturedAt=async(before?:string)=>await options.readCapturedHistory!(input.agentSessionId,{...view!.capturedCut,limit:100,...(before===undefined?{}:{beforeFirstSequence:Number(before)})})
+  let captured=view.firstCaptured&&(position.page===null?view.firstCaptured:await capturedAt(position.page))
+  let items: readonly (AgentTimelineItem | AgentSessionHistoryItem)[]=captured?captured.records.map(r=>r.item):[...page!.items].reverse()
   while (true) {
     signal?.throwIfAborted()
     if (position.index > items.length) return fail('Query cursor exceeds its original page.')
     if (position.index === items.length) {
+      if(captured) {
+        if(captured.nextBeforeFirstSequence===null){result.scan!.complete=true;break}
+        position.page=String(captured.nextBeforeFirstSequence);position.index=0
+        if(result.scan!.examined>=scanLimit||matchCount()>=limit)break
+        captured=await capturedAt(position.page);items=captured.records.map(r=>r.item);continue
+      }
       if (!page || page.nextCursor === null) { result.scan!.complete = true; break }
       if (page.nextCursor === position.page) return fail('The original native query cursor did not advance.', 'CONTROL_PROTOCOL_ERROR')
       position.page = page.nextCursor; position.index = 0
