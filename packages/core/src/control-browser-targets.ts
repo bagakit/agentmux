@@ -25,10 +25,11 @@ export function parseBrowserTargetsResult(value: unknown): { targets: AgentMuxBr
     if (row.cdpMethods !== undefined && (!Array.isArray(row.cdpMethods) || row.cdpMethods.length > 128 || row.cdpMethods.some(item => typeof item !== 'string' || !/^[A-Z][A-Za-z]+\.[A-Za-z]+$/.test(item)))) throw new AgentMuxError('Browser target CDP subset is invalid.', 'CONTROL_PROTOCOL_ERROR')
     const workspaceId = row.source === 'embedded' && row.workspaceId === null ? null : text(row.workspaceId, 200)
     if (row.mode !== undefined && row.mode !== 'normal' && row.mode !== 'private') throw new AgentMuxError('Browser target mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (row.navigationId === undefined && (row.source !== 'embedded' || row.status !== 'unavailable' || row.capabilities.length !== 0 || row.cdpMethods !== undefined)) throw new AgentMuxError('A live Browser target requires its actual navigation identity.', 'CONTROL_PROTOCOL_ERROR')
     return { id, workspaceId, source: row.source as AgentMuxBrowserTarget['source'],
       ...(row.mode === undefined ? {} : { mode: row.mode as 'normal' | 'private' }),
       status: row.status as AgentMuxBrowserTarget['status'], url: text(row.url, 8192, true), title: text(row.title, 512, true),
-      navigationId: text(row.navigationId, 200), capabilities: [...row.capabilities] as string[],
+      ...(row.navigationId === undefined ? {} : { navigationId: text(row.navigationId, 200) }), capabilities: [...row.capabilities] as string[],
       ...(row.cdpMethods === undefined ? {} : { cdpMethods: [...row.cdpMethods as string[]] }),
       ...(row.warning === undefined ? {} : { warning: text(row.warning, 2000) }) }
   })

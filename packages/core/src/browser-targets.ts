@@ -10,7 +10,8 @@ export type AgentMuxBrowserTarget = {
   status: 'ready' | 'disconnected' | 'revoked' | 'closed' | 'unavailable'
   url: string
   title: string
-  navigationId: string
+  /** Absent when an embedded durable description has no native document yet. */
+  navigationId?: string
   capabilities: readonly string[]
   /** Present when the target exposes a bounded CDP subset rather than all engine commands. */
   cdpMethods?: readonly string[]
