@@ -14,6 +14,8 @@ import {
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
+  AgentProviderSessionHistoryRecordContext,
+  AgentSessionHistoryItem as MaterializedHistoryItem,
 } from '../types.js'
 
 function object(value: unknown): Record<string, unknown> | undefined {
@@ -530,54 +532,47 @@ function convertDroidRecord(
   }
 }
 
+async function assertDroidHeader(reader: NativeJsonlHistoryReader, nativeSessionId: string): Promise<void> {
+  const header = await reader.readFirst()
+  if (!header || header.type !== 'session_start' || header.id !== nativeSessionId)
+    throw new AgentMuxError('Droid transcript missing or invalid native session_start header.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+}
+
+function sessionRecord(value: Record<string, unknown>, start: number, nativeSessionId: string): AgentSessionHistoryItem {
+  const streamSessionId = typeof value.session_id === 'string' ? value.session_id : typeof value.sessionId === 'string' ? value.sessionId : undefined
+  if (streamSessionId && streamSessionId !== nativeSessionId || value.type === 'session_start' && typeof value.id === 'string' && value.id !== nativeSessionId)
+    throw new AgentMuxError('Droid transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  return convertDroidRecord(value, start)
+}
+
+/** Exact lookup shares the original page converter, source checks and signed materializer. */
+export async function readDroidSessionHistoryRecord(context: AgentProviderSessionHistoryRecordContext): Promise<MaterializedHistoryItem> {
+  const reader = await NativeJsonlHistoryReader.open({ ...context, limit: 1 })
+  try {
+    await assertDroidHeader(reader, context.source.nativeSessionId)
+    for (let entry = await reader.readPrevious(); entry; entry = await reader.readPrevious()) {
+      const item = sessionRecord(entry.value, entry.start, context.source.nativeSessionId)
+      if (item.id === context.recordId && (context.turnId === undefined || item.turnId === context.turnId)) {
+        await reader.verifyUnchanged()
+        return await reader.materializeItem(item)
+      }
+    }
+    throw new AgentMuxError('The original Droid record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+  } finally { await reader.close() }
+}
+
 export async function readDroidSessionHistoryPage(
   context: AgentProviderSessionHistoryContext
 ): Promise<AgentProviderSessionHistoryPage> {
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
-    const header = await reader.readFirst()
-    if (
-      !header ||
-      header.type !== 'session_start' ||
-      typeof header.id !== 'string' ||
-      header.id !== context.source.nativeSessionId
-    ) {
-      throw new AgentMuxError(
-        'Droid transcript missing or invalid native session_start header.',
-        'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
-      )
-    }
+    await assertDroidHeader(reader, context.source.nativeSessionId)
 
     const items: AgentSessionHistoryItem[] = []
     while (items.length < context.limit) {
       const record = await reader.readPrevious()
       if (!record) break
-      const val = record.value
-
-      const streamSessionId =
-        typeof val.session_id === 'string'
-          ? val.session_id
-          : typeof val.sessionId === 'string'
-            ? val.sessionId
-            : undefined
-      if (streamSessionId && streamSessionId !== context.source.nativeSessionId) {
-        throw new AgentMuxError(
-          'Droid transcript belongs to another native Session.',
-          'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
-        )
-      }
-      if (
-        val.type === 'session_start' &&
-        typeof val.id === 'string' &&
-        val.id !== context.source.nativeSessionId
-      ) {
-        throw new AgentMuxError(
-          'Droid transcript belongs to another native Session.',
-          'AGENT_SESSION_HISTORY_SOURCE_CHANGED'
-        )
-      }
-
-      items.push(convertDroidRecord(val, record.start))
+      items.push(sessionRecord(record.value, record.start, context.source.nativeSessionId))
     }
 
     const nextCursor = await reader.nextCursor()

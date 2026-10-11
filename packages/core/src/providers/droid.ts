@@ -5,7 +5,7 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
-import { readDroidSessionHistoryPage } from './droid-native-history.js'
+import { readDroidSessionHistoryPage, readDroidSessionHistoryRecord } from './droid-native-history.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -127,6 +127,7 @@ export function createDroidProvider(defineAgentProvider: ProviderFactory): Agent
   return defineAgentProvider({
     planManagedHooks: ({ env }) => createDroidManagedHookPlan(env),
     readSessionHistoryPage: readDroidSessionHistoryPage,
+    readSessionHistoryRecord: readDroidSessionHistoryRecord,
     catalog: catalog({
       id: 'droid', label: 'Droid', executable: 'droid', expectedProcess: 'droid',
       promptDelivery: 'positional-argv',

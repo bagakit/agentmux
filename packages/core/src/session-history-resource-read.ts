@@ -2,8 +2,24 @@ import { constants } from 'node:fs'
 import { open, stat } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
-import { imageBytes, unavailable } from './session-history-resource.js'
+import { fileBytes, imageBytes, unavailable } from './session-history-resource.js'
 import type { AgentSessionHistoryResourceReadResult } from './types.js'
+
+/** Only a located original file part supplies this self-contained reference; paths and URLs never grant IO. */
+export async function readRecordedFile(reference: string, maxBytes: number, signal: AbortSignal, label?: string): Promise<AgentSessionHistoryResourceReadResult['result']> {
+  signal.throwIfAborted()
+  if (!reference.startsWith('data:')) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_REFERENCE_UNSUPPORTED', 'This file has no self-contained recorded bytes. No path or network was read; its reference is kept.')
+  const match = /^data:([^;,]+);base64,([A-Za-z0-9+/]*={0,2})$/u.exec(reference)
+  if (!match) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'This recorded file is not canonical base64. Its reference is kept.')
+  const encoded = match[2]!
+  if (encoded.length > Math.ceil(maxBytes / 3) * 4) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_TOO_LARGE', 'The recorded file exceeds this read’s byte budget. Its reference is kept.')
+  let bytes: Uint8Array
+  try { bytes = decodeBase64(encoded) } catch { return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'The recorded file base64 is invalid. Its reference is kept.') }
+  signal.throwIfAborted()
+  const result = fileBytes(bytes, maxBytes, match[1]!, label)
+  if (result.status === 'file' && result.dataBase64 !== encoded) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'The recorded file base64 is not canonical. Its reference is kept.')
+  return result
+}
 
 /** Only the newly located true part supplies reference. No arbitrary caller path reaches this read. */
 export async function readRecordedImage(reference: string, maxBytes: number, signal: AbortSignal): Promise<AgentSessionHistoryResourceReadResult['result']> {
