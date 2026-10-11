@@ -145,6 +145,8 @@ it('continues the original creation through current Host reads, explicit checks 
   await vi.waitFor(() => expect(reads(operation.connectionId).length).toBeGreaterThan(0))
   expect(checks(operation.connectionId)).toEqual([])
   await vi.waitFor(() => expect(sdk.sockets).toHaveLength(1))
+  expect(dom.container.querySelector('[data-bot-enrollment] > details.connector-optional > summary')?.textContent).toBe('Connection status and checks')
+  await click('[data-bot-enrollment] > details.connector-optional > summary')
   await click('[data-connection-check]')
   await vi.waitFor(() => expect(checks(operation.connectionId)).toHaveLength(1))
   await vi.waitFor(() => expect(stages()).toEqual({ authentication: 'ready', transport: 'ready', intake: 'unknown', delivery: 'unknown' }))
@@ -201,6 +203,8 @@ it('keeps the saved creation and usable check when a current lookup or explicit 
   expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
   expect((await services.connections.list()).connections).toHaveLength(1)
   calls = []; failRead = false
+  expect(dom.container.querySelector('[data-bot-enrollment] > details.connector-optional > summary')?.textContent).toBe('Connection status and checks')
+  await click('[data-bot-enrollment] > details.connector-optional > summary')
   await click('[data-connection-check]')
   await vi.waitFor(() => expect(checks(operation.connectionId)).toHaveLength(1))
   await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('[data-connection-check]')?.disabled).toBe(false))
