@@ -10,7 +10,7 @@ it('skips unrelated Store writes and derives only one changed context at both in
   for(const [sessionCount,projectCount] of [[14,54],[112,432]]) {
     let pathReads=0,idReads=0
     const timelineReads:Record<string,number>={}
-    const workspaces=Array.from({length:projectCount!},(_,i)=>new Proxy({id:`project-${i}`,name:`Project ${i}`,hostId:'local',path:`/focus-cost-${i}`,kind:'folder' as const},{get(target,key,receiver){if(key==='path')pathReads++;return Reflect.get(target,key,receiver)}}))
+    const workspaces=Array.from({length:projectCount!},(_,i)=>new Proxy({id:`project-${i}`,name:`Project ${i}`,hostId:'local',path:_hygiene_fixturePath(`focus-cost-${i}`),kind:'folder' as const},{get(target,key,receiver){if(key==='path')pathReads++;return Reflect.get(target,key,receiver)}}))
     const sessions=Array.from({length:sessionCount!},(_,i)=>new Proxy({...base,id:`session-${i}`,hostId:'local',workspacePath:_hygiene_fixturePath("focus-cost-0"),status:{...base.status,state:'working' as const}},{get(target,key,receiver){if(key==='id')idReads++;return Reflect.get(target,key,receiver)}}))
     const timelines:Record<string,AgentTimelineSnapshot>={}
     for(let i=0;i<sessionCount!;i++)timelines[`session-${i}`]=new Proxy({agentSessionId:`session-${i}`,revision:1,items:[]},{get(target,key,receiver){if(key==='items')timelineReads[`session-${i}`]=(timelineReads[`session-${i}`]??0)+1;return Reflect.get(target,key,receiver)}})
@@ -40,7 +40,10 @@ it('keeps PMO requests separate in the same cache and invalidates actual owner c
   const workspace={id:'__scratch__',hostId:'local',name:'Topics',path:_hygiene_fixturePath("focus-topics"),kind:'folder' as const}
   const pmo={...base,id:'pmo',hostId:'local',workspacePath:_hygiene_fixturePath("focus-topics/topic--launcher--leader"),status:{...base.status,state:'waiting' as const}}
   const execution={...base,id:'execution',hostId:'local',workspacePath:_hygiene_fixturePath("focus-topics/topic--launcher--task"),status:{...base.status,state:'working' as const}}
-  const scratchTopicSnapshots={ [workspace.id]: {scope:JSON.stringify([workspace.hostId,workspace.path]),revision:1,reading:false,error:null,topics:[{id:'launcher:task',title:'Task',summary:'',directoryPath:execution.workspacePath,topicPath:execution.workspacePath+'/topic.md',collaborators:[]}] } }
+  const scratchTopicSnapshots={ [workspace.id]: {scope:JSON.stringify([workspace.hostId,workspace.path]),revision:1,reading:false,error:null,topics:[
+    {id:'launcher:leader',kind:'mote' as const,title:'Leader',summary:'',directoryPath:pmo.workspacePath,identityDirectoryPath:pmo.workspacePath,topicPath:pmo.workspacePath+'/topic.md',collaborators:[]},
+    {id:'launcher:task',kind:'topic' as const,title:'Task',summary:'',directoryPath:execution.workspacePath,identityDirectoryPath:execution.workspacePath,topicPath:execution.workspacePath+'/topic.md',collaborators:[]}
+  ] } }
   const select=createFocusProjectionSelector(),input={sessions:[pmo,execution],config:{...config,workspaces:[workspace]},timelines:{},agentNames:{},scratchTopicSnapshots}
   const before=select(input)
   expect(before.contexts.map(row=>row.id)).toEqual(['execution'])
