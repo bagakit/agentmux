@@ -1,11 +1,11 @@
 import { fixturePath as _historyFixturePath } from "../../../../../test/fixture-values.mjs"
 import { useState } from 'react'
-import type { HostRuntimeObservation } from '@agentmux/core'
+import type { HostRuntimeObservation, RemoteCoreUpgradeCheck } from '@agentmux/core'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import type { SessionSnapshot } from '../../../src/shared/contracts'
-import type { HostConfig } from '../../../src/shared/contracts'
+import type { HostConfig, HostCreationTrustSnapshot } from '../../../src/shared/contracts'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import type { SettingsPageId } from '../../../src/renderer/src/components/settings/settings-modules'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
@@ -53,6 +53,26 @@ api.hosts.inspect = async (host: HostConfig) => {
     owner: available(owner), nativeIdentity: available(native), diagnostics: available(diagnostics),
     resources: runtimeCapture.phase === 'partial' ? { state: 'unavailable', readAt: now, code: 'CONTROLLED_RESOURCE_OBSERVATION_UNAVAILABLE',
       message: 'Resource observation is temporarily unavailable. Existing Agent work remains available.' } : available(resources) } satisfies HostRuntimeObservation
+}
+// Explicit controlled owner facts exercise the real access and maintenance consumers.
+api.hosts.creationTrust = async host => {
+  calls.push({ kind: 'controlled-source-trust-read', input: structuredClone(host) })
+  return { source: { runtimeId: 'controlled-source-runtime', publicKey: 'controlled-source-key', fingerprint: 'a'.repeat(64) },
+    target: { routeHostId: host.id, authority: { runtimeId: host.runtimeId ?? 'controlled-target-runtime', publicKey: 'controlled-target-key', fingerprint: 'b'.repeat(64) }, sources: [] } } satisfies HostCreationTrustSnapshot
+}
+api.hosts.trustCreationSource = async host => {
+  calls.push({ kind: 'controlled-source-trust-approval', input: structuredClone(host) })
+  throw new Error('Controlled approval response lost. Review the original target before continuing.')
+}
+api.hosts.upgradeCheck = async host => {
+  calls.push({ kind: 'controlled-upgrade-check', input: structuredClone(host) })
+  const expected = { targetDigest: 'c'.repeat(64), runtimeId: host.kind === 'ssh' ? host.runtimeId ?? 'controlled-target-runtime' : 'controlled-local-runtime',
+    ownerInstanceId: 'controlled-core-instance', processId: 42000, startTicks: '123', candidateDigest: 'd'.repeat(64),
+    nativeInstanceId: 'controlled-native-instance', nativeProcessId: 42001, nativeStartTicks: '456' }
+  return { input: structuredClone(host), eligible: false, reason: 'unverified', detail: 'An original operation is awaiting verification.',
+    candidate: { digest: expected.candidateDigest, sourceCommit: 'e'.repeat(40), protocolVersion: 22 },
+    latestOperation: { input: structuredClone(host), operationId: 'controlled-original-upgrade', expected, status: 'unknown', stage: 'verifying',
+      detail: 'Original operation result is unconfirmed.', updatedAt: Date.now() - 90_000 } } satisfies RemoteCoreUpgradeCheck
 }
 api.deviceManagement.ls = async input => { calls.push({ kind: 'device.ls', input }); return structuredClone(deviceList) }
 api.deviceManagement.link = async input => { calls.push({ kind: 'device.link', input }); return structuredClone(deviceInvitation) }

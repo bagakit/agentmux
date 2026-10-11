@@ -12,6 +12,8 @@ import type { SessionSnapshot } from '../src/shared/contracts'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { connectionsConfig } from '../scripts/fixtures/settings-connections/data'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const dom = composerDOM(), H = 'host-01', J = 'host-02'
 let config = connectionsConfig(composerConfig)
@@ -149,4 +151,60 @@ it('Agent configuration Refresh uses original local detection and exact remote d
   await act(async () => [...editor().querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Refresh')!.click())
   expect(detect).toHaveBeenCalledExactlyOnceWith(J)
   expect(remote).toHaveBeenCalledExactlyOnceWith(J)
+})
+
+
+it('access: source trust belongs to the exact Apps & access facet and retains its owner across navigation', async () => {
+  const trust = vi.spyOn(api.hosts, 'creationTrust').mockRejectedValue(new Error('Controlled trust read unavailable'))
+  await show(); await leaf(H, 'agents')
+  expect(editor().textContent).toContain('Apps & access')
+  const access = dom.container.querySelector<HTMLElement>(`[data-host-access="${H}"]`)!
+  expect(access.hidden, 'Source trust belongs to the Apps & access facet').toBe(false)
+  expect(trust).toHaveBeenCalledExactlyOnceWith(config.hosts.find(host => host.id === H))
+  const original = access.querySelector('.host-creation-trust')
+  await leaf(J, 'connection')
+  expect(access.hidden).toBe(true)
+  await leaf(H, 'agents')
+  expect(access.querySelector('.host-creation-trust')).toBe(original)
+  expect(access.textContent).toContain('Controlled trust read unavailable')
+  await leaf(H, 'connection')
+  expect(access.hidden).toBe(true)
+  expect(dom.container.querySelector('[data-host-access="host-02"]')?.hasAttribute('hidden')).toBe(true)
+})
+
+it('connection action: a typed failed check opens its exact original connection without testing or writing', async () => {
+  const input = config.hosts.find(host => host.id === H)!
+  const check = vi.spyOn(api.hosts, 'check'), trust = vi.spyOn(api.hosts, 'creationTrust')
+  useAppStore.setState({ hostChecks: { [H]: { state: 'error', input, result: { input, outcome: 'check-failed', detail: 'Original reader failure' }, detail: 'Original reader failure', observedAt: _historyFixtureEpoch(0, 1, 0) } } })
+  await show(); await leaf(H, 'overview')
+  expect(editor().textContent).toContain('Original reader failure')
+  await dom.click('.remote-overview__connection-action')
+  expect(editor().dataset.resourceEditor).toBe(H)
+  expect(editor().dataset.hostView).toBe('connection')
+  expect(dom.container.querySelector('[data-host-name]')).not.toBeNull()
+  expect(check).not.toHaveBeenCalled()
+  expect(trust).not.toHaveBeenCalled()
+  expect(onSave).not.toHaveBeenCalled()
+})
+
+
+it('keeps an unconfirmed original approval across Apps, Connection, other Host and inactive Settings without replay', async () => {
+  const input = config.hosts.find(host => host.id === H)!
+  const snapshot = { source: { runtimeId: 'source-runtime', publicKey: 'source-key', fingerprint: 'a'.repeat(64) },
+    target: { routeHostId: H, authority: { runtimeId: 'target-runtime', publicKey: 'target-key', fingerprint: 'b'.repeat(64) }, sources: [] } }
+  const read = vi.spyOn(api.hosts, 'creationTrust').mockResolvedValue(snapshot)
+  const approve = vi.spyOn(api.hosts, 'trustCreationSource').mockRejectedValue(new Error('Original response lost'))
+  await show(); await leaf(H, 'agents')
+  const access = `[data-host-access="${H}"]`
+  await dom.click(`${access} input[type="checkbox"]`)
+  await dom.click(`${access} .primary-button`)
+  expect(approve).toHaveBeenCalledExactlyOnceWith(input, snapshot)
+  expect(dom.container.querySelector(access)?.textContent).toContain('Approval result unconfirmed')
+  await leaf(H, 'connection'); await leaf(J, 'overview'); await show(false); await show(true); await leaf(H, 'agents')
+  expect(dom.container.querySelector(access)?.textContent).toContain('Approval result unconfirmed')
+  expect(dom.container.querySelector(access)?.textContent).toContain('Original response lost')
+  expect(dom.container.querySelector<HTMLInputElement>(`${access} input[type="checkbox"]`)?.checked).toBe(false)
+  expect(read).toHaveBeenCalledTimes(1)
+  expect(approve).toHaveBeenCalledTimes(1)
+  expect(onSave).not.toHaveBeenCalled()
 })

@@ -67,7 +67,9 @@ function deferred<T>() { let resolve!: (value: T) => void; const promise = new P
 describe('Connections settings', () => {
   it('catalog: every navigation projection has the same Connections contributions without authorization guesses', async () => {
     const groups = settingsNavGroups(''), connections = groups.find(group => group.id === 'connections')
-    expect(connections?.items.map(item => item.id), 'Connections group owns environments and devices').toEqual(['hosts', 'devices'])
+    expect(groups.find(group => group.id === 'remote')?.items.map(item => item.id), 'Remote group owns exactly environments').toEqual(['hosts'])
+    expect(connections?.items.map(item => item.id), 'Connections group owns devices').toEqual(['devices'])
+    expect(hostsSettingsModule.title).toBe('Environments')
     expect(groups.find(group => group.id === 'toolkit')?.items.map(item => item.id), 'Mods owns the original conversation Connector').toContain('chat-connections')
     expect(groups.find(group => group.id === 'resources')!.items.some(item => item.id === 'hosts' || item.id === 'devices')).toBe(false)
     expect(visibleSettingsSections('手机').map(item => item.id)).toContain('devices')
@@ -76,6 +78,7 @@ describe('Connections settings', () => {
     expect(devicesSettingsModule.savedSummary()).toBe('Phone connections and device access')
     await dom.render(<Shell section="overview" />)
     expect(dom.container.querySelector('#settings-overview-connections')).not.toBeNull()
+    expect(dom.container.querySelector('#settings-overview-remote')).not.toBeNull()
     expect(dom.container.querySelector('[data-settings-section="devices"]')).not.toBeNull()
     expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()

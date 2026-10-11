@@ -43,11 +43,11 @@ async function finalizeInputs() {
   receipt.sourceUnchanged = true
 }
 async function owning() {
-  const variants = operation === '--remote-owning' ? ['graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
-  const messages = { graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns exactly hosts and devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
+  const variants = operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
+  const messages = { remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
   const modes = [{ label: 'baseline', mutant: 'baseline' }, ...variants.flatMap(kind => [
-    { label: kind + '-mutant', mutant: kind, test: kind + ':' }, { label: kind + '-restored', mutant: 'baseline', test: kind + ':' }
+    { label: kind + '-mutant', mutant: kind, test: (kind === 'remote' ? 'catalog' : kind) + ':' }, { label: kind + '-restored', mutant: 'baseline', test: (kind === 'remote' ? 'catalog' : kind) + ':' }
   ])]
   for (const mode of modes) {
     const directory = resolve(evidence, mode.label); await mkdir(directory)
@@ -79,7 +79,7 @@ async function owning() {
       passedTests: result.numPassedTests, failedTests: result.numFailedTests, mutation: applied,
       failures: failures.map(test => ({ title: test.title, messages: test.failureMessages })) })
   }
-  assert.equal(receipt.runs.length, 7); assert.equal(receipt.runs.filter(run => run.specificAssertionRED).length, 3)
+  assert.equal(receipt.runs.length, 1 + 2 * variants.length); assert.equal(receipt.runs.filter(run => run.specificAssertionRED).length, variants.length)
   if (operation === '--owning') {
     receipt.renderer = []
     for (const target of ['hosts', 'devices']) {
@@ -183,6 +183,13 @@ async function capture() {
       const bytes = await readFile(resolve(evidence, frame.image)); assert.equal(bytes.readUInt32BE(16), frame.pngPixels.width); assert.equal(bytes.readUInt32BE(20), frame.pngPixels.height)
       receipt.images.push({ path: frame.image, bytes: bytes.length, sha256: sha(bytes), width: frame.width, theme: frame.theme, pngPixels: frame.pngPixels })
     }
+    receipt.supplementalImages = []
+    for (const frame of receipt.render.supplementalFrames ?? []) {
+      const bytes = await readFile(resolve(evidence, frame.image))
+      assert.equal(bytes.readUInt32BE(16), frame.pngPixels.width); assert.equal(bytes.readUInt32BE(20), frame.pngPixels.height)
+      receipt.supplementalImages.push({ path: frame.image, bytes: bytes.length, sha256: sha(bytes), width: frame.width, theme: frame.theme, scenario: frame.scenario })
+    }
+    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, 8, 'Nonempty original access, upgrade and capability scenes')
     receipt.cssInputs = [...cssInputs].map(file => relative(root, file)).sort(); receipt.compiled = compiled
     receipt.aestheticReview = 'pending independent actual PNG review'
   } finally {
