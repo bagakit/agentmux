@@ -1392,6 +1392,9 @@ export type AgentHookIngressObservation = {
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity'> & {
+  /** Private original invocation provenance; retained opaque and checked only at its exact root. Never public. */
+  continuityExecutors?: unknown
+
   /** Original response operation index. Retained after the live request settles; never broadcast. */
   interactionOperations?: Record<string, AgentMuxInteractionOperationReceipt>
 

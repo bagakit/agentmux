@@ -23,6 +23,7 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
+import { continuityExecutorEntries } from './agent-continuity-executor.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
 import {
@@ -1614,6 +1615,7 @@ function nativeTurnEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession[
 export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
   const source = record(value, 'Agent Session')
   return { ...normalizeAgentSession(source),
+    ...(source.continuityExecutors === undefined ? {} : { continuityExecutors: structuredClone(source.continuityExecutors) }),
     ...(source.nativeTurnEnds === undefined ? {} : { nativeTurnEnds: nativeTurnEnds(source.nativeTurnEnds) }),
     ...(source.interactionOperations === undefined ? {} : { interactionOperations: Object.fromEntries(Object.entries(record(source.interactionOperations, 'interaction operations')).map(([id, receipt]) => {
       const normalized = normalizeInteractionOperationReceipt(receipt)
@@ -2002,7 +2004,10 @@ function preserveContinuityOperations(previous: AgentMuxStoredAgentSession | und
   const previousRoot = previous.continuityOperations[next.continuity.operationId]
   const continuity = previousRoot?.supervision ? { ...next.continuity, supervision: structuredClone(previousRoot.supervision) } : next.continuity
   return { ...next, continuity, continuityOperations: { ...next.continuityOperations, ...previous.continuityOperations,
-    [continuity.operationId]: continuity } }
+    [continuity.operationId]: continuity },
+    ...(previous.continuityExecutors === undefined ? {} : { continuityExecutors: continuityExecutorEntries(previous.continuityExecutors) && continuityExecutorEntries(next.continuityExecutors)
+      ? { ...continuityExecutorEntries(next.continuityExecutors), ...continuityExecutorEntries(previous.continuityExecutors) }
+      : previous.continuityExecutors }) }
 }
 
 function assertLifecycleCommit(
