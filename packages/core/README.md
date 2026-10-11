@@ -300,6 +300,8 @@ amux space unbind --zone ZONE_ID --space SPACE_ID
 
 `connectHostedAgentMux` 是统一的公共 Runtime SDK；本地服务、SSH 与宿主 HTTP 连接使用同一服务合同。`connectSshAgentMux` 组合系统 SSH 与该 SDK，客户端不会复制 Provider、Session Store 或 Run owner。独立 Core Headless 服务与宿主服务共用同一个语义 owner，宿主额外注入私网、设备及 Desktop 能力。调用的传输授权、durable owner 和当前进程代次分别验证；managed Agent capability 不授予完整 Runtime SDK 权限。
 
+`readAgentSession(完整SID)` 从原耐久 metadata owner 读取一个准确 Session，并保留原 owner 已确认的 started-unconfirmed Run 观察；确知缺席返回 `null`，读取失败保持未知，不 probe、adopt 或启动 Run。Hosted 复用原有限 `runtime.invoke`，只返回这次读取，不更新其会话缓存；连接器已有入站命令继续查询原输入和回执，不另设 metadata CLI。
+
 ```sh
 # 在远端启动语义 Owner；健康 Run 不随该 Owner 退出而终止。
 agentmux-runtime serve
