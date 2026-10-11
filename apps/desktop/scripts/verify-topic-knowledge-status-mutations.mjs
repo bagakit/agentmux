@@ -21,6 +21,9 @@ await verifyRendererSourceMutations({
     { label: 'retained-results-keep-confirmed-query', file,
       before: 'const resultLabel = previousResults ?', after: 'const resultLabel = false ?' },
     { label: 'history-details-keep-original-observation', file,
-      before: 'setHistoryIssues(historyUnavailable)', after: 'setHistoryIssues([])' }
+      before: 'setHistoryIssues(historyUnavailable)', after: 'setHistoryIssues([])' },
+    { label: 'reader-close-restores-focus-after-commit', file,
+      before: 'if (selected || selectedDocument || !detailReturnFocus.current) return',
+      after: 'if (true) return' }
   ]
 })
