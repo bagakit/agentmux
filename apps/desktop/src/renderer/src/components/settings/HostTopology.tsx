@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
-import { Background, BackgroundVariant, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
+import { Handle, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { HostCheckState } from '../../store'
@@ -25,21 +25,29 @@ type TopologyNode = HostNode | EntryNode
 
 const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<HostNode>) {
   const { host, check } = data
+  const checkedAt = check && check.state !== 'idle' && check.state !== 'checking' ? check.observedAt : undefined
   return <>
     <Handle type="target" position={Position.Left} isConnectable={false} />
     <button type="button" className="remote-host-node nodrag nopan" data-host-node={host.id} data-current-host={data.selected}
       data-check-state={check?.state ?? 'idle'} aria-pressed={data.selected} onClick={() => data.onSelect(host.id)}
       title={`${host.label} · ${host.id}`}>
-      <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={15} />{host.kind === 'local' ? 'LOCAL' : 'SSH HOST'}</span>
+      <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={15} />{host.kind === 'local' ? 'LOCAL ROUTE' : 'SSH HOST'}
+        <span className="remote-host-node__selection" aria-hidden="true">{data.selected ? 'Selected' : null}</span></span>
       <strong>{host.label}</strong>
-      <span className="remote-host-node__address">{host.kind === 'local' ? 'Local environment' : host.hostname || 'Address required'}</span>
+      <span className="remote-host-node__address" title={host.kind === 'ssh' ? host.hostname : undefined}>{host.kind === 'local' ? 'Host-local execution' : host.hostname || 'Address required'}</span>
+      <span className="remote-host-node__network" aria-label="Configured connection">
+        <span><small>{host.kind === 'ssh' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.user || 'SSH config' : 'Local route'}</code></span>
+        <span><small>{host.kind === 'ssh' ? 'PORT OVERRIDE' : 'NETWORK PORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.port ?? 'SSH config' : 'Not applicable'}</code></span>
+      </span>
+      <span className="remote-host-node__binding"><span>Runtime</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect environment'}</code></span>
       <span className="remote-host-node__footer"><span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} />
-        <span>{hostCheckLabel(check ?? { state: 'idle' })}</span><span>{data.projectCount} projects · {data.sessionCount} sessions</span></span>
+        <span>{hostCheckLabel(check ?? { state: 'idle' })}</span>{checkedAt !== undefined ? <time dateTime={new Date(checkedAt).toISOString()} title={new Date(checkedAt).toLocaleString()}>{new Date(checkedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time> : null}
+        <span className="remote-host-node__work" title="Registered projects · client Session references">{data.projectCount} projects · {data.sessionCount} sessions</span></span>
     </button>
   </>
 })
 function ManagementEntry({ data }: NodeProps<EntryNode>) {
-  return <div className="remote-entry-node"><TopologyIcon size={22} /><strong>{data.label}</strong><span>Environment connections</span>
+  return <div className="remote-entry-node"><span className="remote-entry-node__label">CONNECTION MANAGER</span><TopologyIcon size={24} /><strong>{data.label}</strong><span>Configured environments</span>
     <Handle type="source" position={Position.Right} isConnectable={false} /></div>
 }
 const nodeTypes = { host: HostTopologyNode, entry: ManagementEntry }
@@ -59,27 +67,26 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
     return [...(start === 0 ? [{ id: 'entry' }] : []), ...items.slice(start, start + 3).map(item => ({ id: `host:${item.host.id}` }))]
   }, [topologyKey])
   const nodes: TopologyNode[] = useMemo(() => [
-    { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 146 }, data: { label: 'AgentMux' }, selectable: false },
+    { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 230 + 28 }, data: { label: 'AgentMux' }, selectable: false },
     ...items.map((item, index): HostNode => ({ id: `host:${item.host.id}`, type: 'host',
-      position: { x: 310, y: index * 146 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
+      position: { x: 310, y: index * 230 + 28 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
   ], [items, selectedId, onSelect])
   const edges = useMemo<Edge[]>(() => items.map(item => ({ id: `route:${item.host.id}`, source: 'entry', target: `host:${item.host.id}`,
-    type: 'smoothstep', label: item.host.kind === 'ssh' ? 'SSH route' : 'Local route', selectable: false })), [routeKey])
-  const fit = useCallback(() => { void instance.current?.fitView({ padding: .2, maxZoom: 1 }) }, [])
+    type: 'smoothstep', label: item.host.kind === 'ssh' ? 'SSH' : 'Local', selectable: false })), [routeKey])
+  const fit = useCallback(() => { void instance.current?.fitView({ padding: .12, maxZoom: 1 }) }, [])
   // A new route/filter can change geometry. Checks, counters and selected state cannot reset the reader's viewport.
   useEffect(() => {
-    const frame = requestAnimationFrame(() => { void instance.current?.fitView({ nodes: firstNodes, padding: .2, minZoom: .55, maxZoom: 1 }) })
+    const frame = requestAnimationFrame(() => { void instance.current?.fitView({ nodes: firstNodes, padding: .12, minZoom: .55, maxZoom: 1 }) })
     return () => cancelAnimationFrame(frame)
   }, [topologyKey])
 
   return <div className="remote-topology" aria-label="Configured environment topology" data-host-topology>
-    <div className="remote-topology__caption"><span>CONNECTION MAP</span><small>Configured routes · not network paths</small></div>
+    <div className="remote-topology__caption"><span>CONNECTION MAP</span><small>Configured routes · check each environment</small></div>
     <ReactFlow<TopologyNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes}
-      onInit={value => { instance.current = value }} fitView fitViewOptions={{ nodes: firstNodes, padding: .2, minZoom: .55, maxZoom: 1 }}
+      onInit={value => { instance.current = value }} fitView fitViewOptions={{ nodes: firstNodes, padding: .12, minZoom: .55, maxZoom: 1 }}
       nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false}
       elementsSelectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.1} maxZoom={1.4}
       defaultEdgeOptions={{ style: { strokeWidth: 1.25 } }} proOptions={{ hideAttribution: true }}>
-      <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
     </ReactFlow>
     {items.length === 0 ? <p className="remote-topology__empty">No environments match this search.</p> : null}
     <div className="remote-topology__controls" aria-label="Topology viewport">
