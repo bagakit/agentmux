@@ -393,6 +393,13 @@ export class NativeJsonlHistoryReader {
       offset: this.forwardPosition, ...await this.prefixFingerprints(this.forwardPosition) })).toString('base64url')
   }
 
+  /** The changes cut of this same physical history snapshot, including when its
+   * history cursor reads older pages. No second file open or inferred cursor conversion. */
+  async historyChangesCursor(): Promise<string> {
+    await this.seekChanges(undefined, true)
+    return await this.changesCursor()
+  }
+
   private async fingerprints(): Promise<{ head: string; tail: string }> {
     const length = Math.min(128, this.cut)
     const hash = (data: Buffer) => createHash('sha256').update(data).digest('hex')
