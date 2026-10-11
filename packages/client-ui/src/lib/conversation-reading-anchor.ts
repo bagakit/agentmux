@@ -1,6 +1,6 @@
 import type { AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
-import { projectConversationRecordSequence } from './conversation-record-sequence'
-import { conversationMessageSourceKey } from './conversation-message-location'
+import { projectConversationRecordSequence } from './conversation-record-sequence.js'
+import { conversationMessageSourceKey } from './conversation-message-location.js'
 
 export type ConversationWindowProjection = { current: AgentSessionHistoryPage | null; recordBoundary?: { beforeRecordId: string } }
 type ReadingAnchor = { kind: 'record' | 'group' | 'segment'; id: string; offset: number }
