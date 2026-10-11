@@ -12,6 +12,8 @@ import type { NoteHistorySelection } from '../../../shared/note-file-editing'
 
 const ReadonlyDiffEditor = lazy(() => import('./ReadonlyDiffEditor').then(module => ({ default: module.ReadonlyDiffEditor })))
 const DisclosureIcon = semanticIconComponent('navigation.disclosure')
+const HistoryIcon = semanticIconComponent('object.history')
+const RefreshIcon = semanticIconComponent('action.refresh')
 type Timeline = { target: NoteHistoryTarget; entries: NoteHistoryEntry[]; hasMore: boolean; reason?: string }
 type Preview = { target: NoteHistoryTarget; entry: NoteHistoryEntry & { content: string; beforeContent: string | null } }
 const statusLabel = { committed: 'Saved', prepared: 'Awaiting confirmation', unconfirmed: 'Unconfirmed', 'not-applied': 'Not applied' }
@@ -147,17 +149,18 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
     <div className="note-version-history__body">
       {issue ? <p className="note-version-history__issue" role="status">{issue}</p> : null}
       <div hidden={selected !== null} inert={selected !== null}>
-      <div className="note-version-history__heading"><h3>Saved versions</h3>
-        <button type="button" className="note-text-button" disabled={!active || loading || working} onClick={() => setRefresh(value => value + 1)}>Refresh history</button></div>
-      <p className="note-version-history__scope">Grouped by activity. Previewing a version does not change your Note.</p>
+      <div className="note-version-history__tools"><span>Editing activities</span>
+        <button type="button" className="note-text-button" aria-label="Refresh history" disabled={!active || loading || working} onClick={() => setRefresh(value => value + 1)}><RefreshIcon size={13} />Refresh</button></div>
       {timeline?.reason ? <p className="note-version-history__issue" role="status">History is partly unconfirmed. {timeline.reason}</p> : null}
       {loading && !timeline ? <p role="status">Reading saved history…</p> : null}
-      {timeline && !timeline.entries.length ? <p>No saved versions in this history window.</p> : null}
-      {timeline ? <><p className="note-version-history__scope">Showing loaded revisions. An activity may continue beyond this window.</p>
+      {timeline && !timeline.entries.length && !timeline.reason ? <div className="note-version-history__empty"><HistoryIcon size={24} /><h3>No saved versions yet</h3><p>Recorded edits will appear here.</p></div> : null}
+      {timeline ? <>
         <div className="note-version-history__activities">{activities.map(([batchId, entries]) => {
           const latest = entries[0]!, canUndo = entries.every(entry => entry.status === 'committed' && entry.operation === 'edit')
           return <details className="note-version-history__activity" key={batchId}>
-            <summary><DisclosureIcon size={12} />{author(latest.actor)}<EventTime at={latest.at} /><span>{entries.length} loaded {entries.length === 1 ? 'revision' : 'revisions'}</span></summary>
+            <summary><DisclosureIcon size={12} /><span className="note-version-history__activity-label"><EventTime at={latest.at} />
+              <span className="note-version-history__activity-meta">{author(latest.actor)}<span>{entries.length} loaded {entries.length === 1 ? 'revision' : 'revisions'}</span></span>
+              {latest.status !== 'committed' ? <small>{statusLabel[latest.status]}</small> : null}</span></summary>
             <div className="note-version-history__revisions">{entries.map(entry => <div className="note-version-history__revision" key={entry.eventId}>
               <span title={entry.eventId}>{operationLabel[entry.operation]} · {statusLabel[entry.status]}<small><EventTime at={entry.at} timeOnly /></small></span>
               <button type="button" className="note-text-button" disabled={!active || working || previewing === entry.eventId} aria-label={`Preview version ${entry.eventId}`} onClick={event => void showVersion(entry, event.currentTarget)}>{previewing === entry.eventId ? 'Reading…' : 'Preview changes'}</button>
@@ -173,11 +176,12 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
           </details>
         })}</div>
         {timeline.hasMore ? <button type="button" className="note-text-button" disabled={!active || loading || working} onClick={() => void older()}>{loading ? 'Reading…' : 'Load older changes'}</button> : null}
+        {timeline.entries.length ? <details className="note-version-history__scope"><summary>About this history</summary><p>Versions are grouped by editing activity. Only loaded revisions are shown. An activity may continue beyond this window. Previewing does not change your Note.</p></details> : null}
       </> : null}
       </div>
       {selected && detailEntry ? <section className="note-version-history__preview" aria-label="Version preview">
         <button ref={backButton} type="button" className="note-text-button" disabled={working} onClick={backToActivities}>Back to activities</button>
-        <div className="note-version-history__heading"><h3>{operationLabel[detailEntry.operation]} · {statusLabel[detailEntry.status]}</h3>{author(detailEntry.actor)}<EventTime at={detailEntry.at} /></div>
+        <div className="note-version-history__heading"><h3>{operationLabel[detailEntry.operation]} · {statusLabel[detailEntry.status]}</h3><div className="note-version-history__activity-meta">{author(detailEntry.actor)}<EventTime at={detailEntry.at} /></div></div>
         {previewing ? <p role="status">Reading saved version…</p> : null}
         {previewIssue ? <p className="note-version-history__issue" role="status">{previewIssue}</p> : null}
         {preview ? <>
