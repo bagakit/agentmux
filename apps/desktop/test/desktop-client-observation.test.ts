@@ -17,6 +17,9 @@ import { inspectDesktopClient, readLoadedPackageIdentity } from '../src/main/cli
 import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { desktopWorkbenchObservationSchema, parseDesktopClientObservation } from '../src/shared/client-observation.js'
+import { api } from '../src/renderer/src/lib/api.js'
+import { customTab, moteTopics, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface.js'
+import { topicSpatialAddress } from '../src/shared/space-addresses.js'
 
 const initial = useAppStore.getState()
 const roots: string[] = []
@@ -37,7 +40,7 @@ function workbench() {
   let tab = createWorkbenchTab('private-tab', { kind: 'agent', regionId: 'missing-agent', workspaceId: 'workspace', sessionId: 'missing', phase: 'attached' })
   tab = addWorkbenchRegion(tab, 'missing-agent', 'right', { kind: 'terminal', regionId: 'launching-terminal', workspaceId: 'workspace', sessionId: 'pending', phase: 'launching' })
   tab = addWorkbenchRegion(tab, 'launching-terminal', 'down', { kind: 'browser', regionId: 'original-browser', workspaceId: 'workspace', browserId: 'browser-id',
-    id: 'browser-id', navigationId: '', profileId: 'default', url: 'about:blank', title: 'Original page', loading: false,
+    id: 'browser-id', mode: 'normal', navigationId: '', profileId: 'default', url: 'about:blank', title: 'Original page', loading: false,
     error: 'Native page has not reopened', canGoBack: false, canGoForward: false,
     viewport: 'responsive', driving: false, appLinkPrompt: null })
   tab = addWorkbenchRegion(tab, 'original-browser', 'right', { kind: 'file', regionId: 'original-file', workspaceId: 'workspace', path: _hygiene_fixturePath("private-file") })
@@ -56,7 +59,10 @@ it('projects every original Region through actual Store and IPC bridge, includin
   const before = useAppStore.getState()
   const changed = vi.fn(); const dispose = useAppStore.subscribe(changed)
   const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
-    sendRequest: input => { void useAppStore.getState().executeControl(input).then(result => bridge.accept({ requestId: input.requestId, ok: true, result })) },
+    sendRequest: input => {
+      if (input.operation !== 'inspect.client') throw new Error('Unexpected observation operation')
+      void useAppStore.getState().executeControl(input).then(result => bridge.accept({ requestId: input.requestId, ok: true, result }))
+    },
     sendCancellation: () => { throw new Error('Unexpected cancellation') } })
   try {
     const result = await inspectDesktopClient(request, { pid: 123, package: packageIdentity, renderer: () => renderer,
@@ -90,7 +96,10 @@ it('reads Recall through the original Store IPC and Main observation without cha
   const before = useAppStore.getState()
   const changed = vi.fn(); const dispose = useAppStore.subscribe(changed)
   const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
-    sendRequest: input => { void useAppStore.getState().executeControl(input).then(result => bridge.accept({ requestId: input.requestId, ok: true, result })) },
+    sendRequest: input => {
+      if (input.operation !== 'inspect.client') throw new Error('Unexpected observation operation')
+      void useAppStore.getState().executeControl(input).then(result => bridge.accept({ requestId: input.requestId, ok: true, result }))
+    },
     sendCancellation: () => { throw new Error('Unexpected cancellation') } })
   try {
     const result = await inspectDesktopClient(request, { pid: 123, package: packageIdentity, renderer: () => renderer,
@@ -108,6 +117,100 @@ it('reads Recall through the original Store IPC and Main observation without cha
     expect(() => parseDesktopClientObservation({ ...observed, workbench: { ...observed.workbench,
       desktop: { ...observed.workbench.desktop, selection: { ...observed.workbench.desktop.selection, surface: 'foreign-surface' } } } })).toThrow()
   } finally { bridge.dispose(); dispose() }
+})
+
+function scratchWorkbench() {
+  seedMoteWorkface()
+  useAppStore.setState({ mainSurface: 'workbench', activeWorkspaceId: scratchWorkspace.id,
+    workbenchSpaceSelection: null, spaceZoneBindings: {}, topicCategories: [],
+    layouts: { [scratchWorkspace.id]: createWorkspaceLayout('original-group', [customTab.id]) } })
+}
+function inspectWorkbench() {
+  const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
+    sendRequest: input => {
+      if (input.operation !== 'inspect.client') throw new Error('Unexpected observation operation')
+      void useAppStore.getState().executeControl(input).then(result => bridge.accept({ requestId: input.requestId, ok: true, result }))
+    },
+    sendCancellation: () => { throw new Error('Unexpected cancellation') } })
+  const result = inspectDesktopClient(request, { pid: 123, package: packageIdentity, renderer: () => renderer,
+    generation: () => 1, runtimes: () => [runtime], execute: input => bridge.execute(input) })
+  return { result, dispose: () => bridge.dispose() }
+}
+
+it.each([false, true])('observes the loaded workface through Main/IPC without waiting for unrelated Scratch I/O, retained read=%s', async reading => {
+  scratchWorkbench()
+  const current = useAppStore.getState()
+  const snapshot = current.scratchTopicSnapshots[scratchWorkspace.id]!
+  useAppStore.setState({ scratchTopicSnapshots: { [scratchWorkspace.id]: { ...snapshot, reading,
+    error: reading ? 'Directory refresh is unavailable' : null } } })
+  let release!: (topics: typeof moteTopics) => void
+  const pending = new Promise<typeof moteTopics>(resolve => { release = resolve })
+  const list = vi.spyOn(api.scratch, 'listTopics').mockReturnValue(pending)
+  const read = vi.spyOn(api.scratch, 'readTopic')
+  const before = useAppStore.getState(), changed = vi.fn(), dispose = useAppStore.subscribe(changed)
+  const inspection = inspectWorkbench()
+  try {
+    expect(list).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+    const result = await inspection.result
+    if (result.operation !== 'inspect.client') throw new Error('wrong operation')
+    const observed = parseDesktopClientObservation(result.observation)
+    const topic = moteTopics.find(topic => topic.id === customTab.topicId)!
+    expect(observed.workbench.desktop.selection.space).toMatchObject({ ...topicSpatialAddress(before.config, topic),
+      workspaceId: scratchWorkspace.id, tabId: customTab.id, regionId: customTab.layout.activeRegionId })
+    expect(observed.workbench.focus).toEqual({ executionSessionId: before.agentFocus.execution.sessionId, pmoSessionId: before.agentFocus.pmo.sessionId })
+    expect(observed.workbench.layouts).toEqual(before.layouts)
+    expect(observed.workbench.tabs.find(tab => tab.id === customTab.id)?.regions[0]).toMatchObject({
+      regionId: customTab.layout.activeRegionId, sessionId: 'custom-agent', processState: 'running',
+      control: before.sessions.find(session => session.id === 'custom-agent')!.control })
+    expect(changed).not.toHaveBeenCalled()
+    expect(useAppStore.getState()).toBe(before)
+    expect(list).not.toHaveBeenCalled()
+    expect(read).not.toHaveBeenCalled()
+  } finally { release(moteTopics); await inspection.result.catch(() => {}); inspection.dispose(); dispose() }
+})
+
+it.each(['host', 'path'] as const)('does not borrow a Scratch snapshot from a different %s while retaining its original workface', async field => {
+  scratchWorkbench()
+  const current = useAppStore.getState()
+  const changedWorkspace = { ...scratchWorkspace, ...(field === 'host' ? { hostId: 'other-host' } : { path: _hygiene_fixturePath('other-topics') }) }
+  useAppStore.setState({ config: { ...current.config!, workspaces: current.config!.workspaces.map(workspace =>
+    workspace.id === scratchWorkspace.id ? changedWorkspace : workspace) } })
+  const list = vi.spyOn(api.scratch, 'listTopics')
+  const before = useAppStore.getState(), inspection = inspectWorkbench()
+  try {
+    const result = await inspection.result
+    if (result.operation !== 'inspect.client') throw new Error('wrong operation')
+    const observed = parseDesktopClientObservation(result.observation)
+    expect(observed.workbench.desktop.selection.space).toMatchObject({ spaceId: null, zoneId: null,
+      workspaceId: scratchWorkspace.id, tabId: customTab.id, regionId: customTab.layout.activeRegionId })
+    expect(observed.workbench.tabs.map(tab => tab.id)).toEqual(Object.keys(before.tabs))
+    expect(observed.workbench.tabs.find(tab => tab.id === customTab.id)?.regions[0]).toMatchObject({ processState: 'running' })
+    expect(useAppStore.getState()).toBe(before)
+    expect(list).not.toHaveBeenCalled()
+  } finally { inspection.dispose() }
+})
+
+it.each(['missing', 'unknown', 'empty'] as const)('retains original Regions and unknown presentation without %s Scratch facts', async facts => {
+  scratchWorkbench()
+  const current = useAppStore.getState()
+  const snapshot = current.scratchTopicSnapshots[scratchWorkspace.id]!
+  useAppStore.setState({ scratchTopicSnapshots: facts === 'missing' ? {} : { [scratchWorkspace.id]: {
+    ...snapshot, topics: facts === 'unknown' ? null : [], reading: facts === 'unknown', error: 'Discovery is unconfirmed' } } })
+  const list = vi.spyOn(api.scratch, 'listTopics')
+  const before = useAppStore.getState(), inspection = inspectWorkbench()
+  try {
+    const result = await inspection.result
+    if (result.operation !== 'inspect.client') throw new Error('wrong operation')
+    const observed = parseDesktopClientObservation(result.observation)
+    expect(observed.workbench.desktop.selection.space).toMatchObject({ spaceId: null, zoneId: null,
+      tabId: customTab.id, regionId: customTab.layout.activeRegionId })
+    expect(observed.workbench.desktop.presentation).toMatchObject({ provenance: 'unknown', state: 'unknown' })
+    expect(observed.workbench.tabs.map(tab => tab.id)).toEqual(Object.keys(before.tabs))
+    expect(observed.workbench.focus.pmoSessionId).toBe(before.agentFocus.pmo.sessionId)
+    expect(useAppStore.getState()).toBe(before)
+    expect(list).not.toHaveBeenCalled()
+  } finally { inspection.dispose() }
 })
 
 it('retains the package metadata captured at startup after the canonical metadata changes', async () => {
