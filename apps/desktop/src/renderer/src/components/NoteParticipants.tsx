@@ -42,7 +42,7 @@ function Participant({ actor, self, detail, compact = false }: NoteParticipant &
   })
   const profile = useAppStore(state => isSelf && actor.kind !== 'agent' ? state.config?.profile : undefined)
   const name = actor.kind === 'agent' ? `Agent · ${agentName ?? actor.id}` : isSelf ? 'You' : actor.kind === 'device' ? `Person on device · ${actor.id}` : `Person · ${actor.id}`
-  return <><ConversationSpeakerAvatar speaker={{ role: actor.kind === 'agent' ? 'agent' : 'human', id: actor.id }} name={name} size={22}
+  return <><ConversationSpeakerAvatar speaker={{ role: actor.kind === 'agent' ? 'agent' : 'human', id: actor.id }} name={name} size={compact ? 18 : 22}
     {...(providerId === undefined ? {} : { providerId })} humanAvatar={profile?.avatar} />
     {!compact ? <span className="note-participants__identity"><strong>{name}</strong><small><code>{actor.kind} · {actor.id}</code></small>{detail ? <small>{detail}</small> : null}</span> : null}</>
 }
@@ -53,11 +53,12 @@ export function NoteParticipantStack({ group, participants, unknown, self, expan
   expanded: boolean; onOpen: () => void; triggerRef: Ref<HTMLButtonElement>
 }) {
   const id = useId()
-  return <button ref={triggerRef} type="button" className="note-participants__trigger" aria-label={`Page ${group.toLowerCase()}`} aria-expanded={expanded} aria-describedby={unknown ? id : undefined} onClick={onOpen}>
+  return <button ref={triggerRef} type="button" className="note-participants__trigger" aria-label={`Page ${group.toLowerCase()}`} aria-expanded={expanded} aria-describedby={unknown ? id : undefined}
+    aria-description={unknown && !participants.length ? unknown : `${participants.length} ${group.toLowerCase()}${unknown ? ' confirmed; some authors are unknown' : ''}`} onClick={onOpen}>
     <span className="note-participants__group">{group}</span>
     {participants.length ? <span className="note-participants__stack">{participants.slice(0, 3).map(participant => <span className="note-participants__avatar" key={notebookFingerprint(participant.actor)}><Participant {...participant} self={self} compact /></span>)}
       {participants.length > 3 ? <span className="note-participants__overflow" aria-label={`${participants.length - 3} more ${group.toLowerCase()}`}>+{participants.length - 3}</span> : null}</span> : null}
-    <span className="note-participants__count">{unknown && !participants.length ? 'Unknown' : participants.length}</span>
+    {unknown && !participants.length ? <span className="note-participants__unknown">Unknown</span> : null}
     {unknown ? <span id={id} className="note-participants__uncertainty">{participants.length ? 'Partial' : null}<span hidden>{unknown}</span></span> : null}
   </button>
 }

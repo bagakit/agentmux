@@ -3,7 +3,8 @@ import { workspaceFileFormat } from '../../../shared/workspace-file-format'
 import { NoteRecoveryDrawer, NoteRecoverySummary, type NoteRecoverySection } from './NoteRecoveryDrawer'
 import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { RetainedDocumentDraftNotice, useNoteConversionObservation } from './RetainedDocumentDraftNotice'
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { NoteViewToolbarContext } from '../lib/note-view-toolbar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
@@ -107,6 +108,8 @@ export function EditorPane({
   const note = workspaceFileFormat(surface.path).sourcePreview === 'note'
   const presentation = useWorkbenchBrowserPresentation()
   const frame = useRef<HTMLElement | null>(null)
+  const [noteToolbar, setNoteToolbar] = useState<{ element: HTMLElement; documentKey: string } | null>(null)
+  const noteToolbarRef = useCallback((element: HTMLDivElement | null) => setNoteToolbar(element ? { element, documentKey: key } : null), [key])
   const observation = useNoteConversionObservation(surface, note && visible && !released && presentation.active)
   const [drawer, setDrawer] = useState<{ key: string; section: NoteRecoverySection } | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -237,6 +240,7 @@ export function EditorPane({
 
   </>
   return (
+    <NoteViewToolbarContext.Provider value={note && previewing && visible && !released && presentation.active && noteToolbar?.documentKey === key ? noteToolbar : null}>
     <Dialog.Root modal={false} open={drawerOpen} onOpenChange={open => { if (!open) { setDrawer(null); setExpanded(false) } }}>
     <section ref={frame}
       className={`editor-pane ${note ? 'note-document-frame' : ''} ${onTogglePreview || extraActions ? 'editor-pane--format' : ''}`}
@@ -245,6 +249,7 @@ export function EditorPane({
       <header className="editor-header">
         <FilePathLabel path={document.path} label={previewing ? noteName : undefined} />
         <div className="editor-header__actions">
+          {note ? <div className="note-view-controls" ref={noteToolbarRef} /> : null}
           {note ? <button type="button" className="small-button" aria-label="Open versions and recovery" aria-expanded={drawerOpen} onClick={event => drawerOpen ? setDrawer(null) : openActivity('versions', event.currentTarget)}>History{keptCount ? ` · ${keptCount} kept` : ''}</button> : null}
           {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionRevealIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
           {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
@@ -296,5 +301,6 @@ export function EditorPane({
       </div>
     </section>
     </Dialog.Root>
+    </NoteViewToolbarContext.Provider>
   )
 }
