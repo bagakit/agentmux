@@ -18,7 +18,7 @@ export function currentPerformanceCaptureTarget(observation: MetricsObservation 
   return { ...window, pid: renderer.process.pid, creationTime: renderer.process.creationTime }
 }
 
-function downloadJSON(value: unknown, name: string) {
+export function downloadPerformanceJSON(value: unknown, name: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value)], { type: 'application/json' }))
   const link = document.createElement('a'); link.href = url; link.download = name; link.click()
   setTimeout(() => URL.revokeObjectURL(url), 0)
@@ -53,9 +53,9 @@ function ProfileView({ analysis }: { analysis: ProfileAnalysis }) {
   </>
 }
 
-function CaptureResult({ capture, sourceChanged, retained = false }: { capture: Capture; sourceChanged: boolean; retained?: boolean }) {
+export function CaptureResult({ capture, sourceChanged, retained = false }: { capture: Capture; sourceChanged: boolean; retained?: boolean }) {
   const result = capture.result
-  const analysis = useMemo(() => capture.kind === 'profile' && capture.result.status === 'completed' && capture.result.profile ? analyseRendererProfile(capture.result.profile) : null, [capture])
+  const analysis = useMemo(() => capture.kind === 'profile' && capture.result.status === 'completed' && capture.result.profile ? analyseRendererProfile(capture.result.profile) : null, [capture.kind, capture.result])
   const material = capture.kind === 'profile' ? capture.result.profile : capture.result.trace
   return <section className="performance-capture-result" aria-label={retained ? "Retained completed JavaScript profile" : "Capture result"}>
     {retained ? <p className="performance-note">Last completed JavaScript profile. The latest capture has its own receipt above.</p> : null}
@@ -66,15 +66,17 @@ function CaptureResult({ capture, sourceChanged, retained = false }: { capture: 
     {analysis?.data ? <ProfileView analysis={analysis.data} /> : analysis?.reason ? <p className="performance-state">{analysis.reason}</p> : null}
     {capture.kind === 'trace' ? <p className="performance-note">{capture.result.receivedEvents} timeline events. Export the original trace to inspect Style, Layout, Paint and compositor work in a trace viewer; categories are requested filters, not proof of coverage.</p> : null}
     <div className="performance-capture-actions">
-      {material ? <button type="button" onClick={() => downloadJSON(material, capture.kind === 'profile' ? 'renderer.cpuprofile' : 'renderer-trace.json')}>Export {capture.kind === 'profile' ? 'profile' : 'trace'}</button> : null}
-      <button type="button" onClick={() => downloadJSON(result, 'renderer-capture-receipt.json')}>Export receipt</button>
+      {material ? <button type="button" onClick={() => downloadPerformanceJSON(material, capture.kind === 'profile' ? 'renderer.cpuprofile' : 'renderer-trace.json')}>Export {capture.kind === 'profile' ? 'profile' : 'trace'}</button> : null}
+      <button type="button" onClick={() => downloadPerformanceJSON(result, 'renderer-capture-receipt.json')}>Export receipt</button>
     </div>
     <details className="performance-disclosure"><summary>Capture receipt</summary><pre className="performance-capture-receipt">{JSON.stringify({ ...result, ...(capture.kind === 'profile' ? { profile: material ? '(export original profile)' : null } : { trace: material ? '(export original trace)' : null }) }, null, 2)}</pre></details>
   </section>
 }
 
 /** No background work: capture starts only from one explicit click on this exact target. */
-export function PerformanceCapture({ observation }: { observation: MetricsObservation | null | undefined }) {
+export function PerformanceCapture({ observation, externalBusy = false, onBusyChange }: {
+  observation: MetricsObservation | null | undefined; externalBusy?: boolean | undefined; onBusyChange?: ((busy: boolean) => void) | undefined
+}) {
   const target = currentPerformanceCaptureTarget(observation), key = JSON.stringify(target)
   const [busy, setBusy] = useState<'profile' | 'trace' | null>(null), [capture, setCapture] = useState<Captured | null>(null)
   const [completedProfile, setCompletedProfile] = useState<Captured | null>(null)
@@ -82,9 +84,9 @@ export function PerformanceCapture({ observation }: { observation: MetricsObserv
   const connected = useRef(true), inFlight = useRef(false)
   useEffect(() => { connected.current = true; return () => { connected.current = false } }, [])
   const run = async (kind: 'profile' | 'trace') => {
-    if (!target || inFlight.current) return
+    if (!target || inFlight.current || externalBusy) return
     const sourceKey = key, input = { target: { ...target }, durationMs: 2000 }
-    inFlight.current = true; setBusy(kind); setError(null)
+    inFlight.current = true; setBusy(kind); setError(null); onBusyChange?.(true)
     try {
       const value: Capture = kind === 'profile'
         ? { kind, result: parseRendererV8ProfileResult(await api.performance.captureProfile(input), input) }
@@ -96,15 +98,15 @@ export function PerformanceCapture({ observation }: { observation: MetricsObserv
       }
     } catch (reason) {
       if (connected.current) setError(reason instanceof Error ? reason.message : String(reason))
-    } finally { inFlight.current = false; if (connected.current) setBusy(null) }
+    } finally { inFlight.current = false; onBusyChange?.(false); if (connected.current) setBusy(null) }
   }
   return <details className="performance-disclosure performance-capture" data-performance-capture>
     <summary>Analyse this window <span>Explicit 2s capture</span></summary>
     <p className="performance-note">Capture while reproducing the lag. V8 samples explain JavaScript; timeline records rendering stages. Neither is a leak verdict.</p>
     {!target ? <p className="performance-state">The current Renderer process instance is unconfirmed. Wait for matching window and process readings.</p> : null}
     <div className="performance-capture-actions">
-      <button type="button" disabled={!target || busy !== null} onClick={() => void run('profile')}>{busy === 'profile' ? 'Sampling…' : 'Sample JavaScript · 2s'}</button>
-      <button type="button" disabled={!target || busy !== null} onClick={() => void run('trace')}>{busy === 'trace' ? 'Tracing…' : 'Capture timeline · 2s'}</button>
+      <button type="button" disabled={!target || busy !== null || externalBusy} onClick={() => void run('profile')}>{busy === 'profile' ? 'Sampling…' : 'Sample JavaScript · 2s'}</button>
+      <button type="button" disabled={!target || busy !== null || externalBusy} onClick={() => void run('trace')}>{busy === 'trace' ? 'Tracing…' : 'Capture timeline · 2s'}</button>
     </div>
     {error ? <p className="performance-state" data-tone="warning">{error}</p> : null}
     {capture && capture !== completedProfile ? <CaptureResult key="latest" capture={capture.value} sourceChanged={capture.key !== key} /> : null}
