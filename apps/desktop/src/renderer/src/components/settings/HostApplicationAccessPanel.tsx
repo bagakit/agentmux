@@ -103,8 +103,9 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
     const result = await api.applications.call('settings.applications.configure', { profileId: captured.id, expectedRevision: captured.revision, profile })
     if (!mounted.current) return
     ++readEpoch.current
-    setConfigurations(current => [...current.filter(item => item.profileId !== result.profileId), result])
-    setSelected(result.profileId); setDraft(current => current === captured ? null : current)
+    const related = result.profile.source.hostId === host.id || result.profile.target.hostId === host.id
+    setConfigurations(current => [...current.filter(item => item.profileId !== result.profileId), ...(related ? [result] : [])])
+    setSelected(related ? result.profileId : null); setDraft(current => current === captured ? null : current)
   }
   async function compare(): Promise<void> {
     if (!configuration) return
@@ -143,7 +144,7 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
   }
 
   return <section className="application-access" data-application-host={host.id} aria-label="Application account synchronization">
-    <header className="application-access__header"><div><strong>Application accounts</strong><p>Bring selected application access to {host.label}.</p></div>
+    <header className="application-access__header"><div><strong>Application accounts</strong><p>Manage application access involving {host.label}.</p></div>
       <button type="button" className="small-button" disabled={!!busy} onClick={() => void perform('Reading applications', read)}>Refresh</button></header>
     {!saved ? <p className="field-hint">Save this environment connection before configuring or synchronizing application access.</p> : null}
     {configurations.length ? <div className="application-access__rules" aria-label="Application rules">{configurations.map(item => <button key={item.profileId}
@@ -156,7 +157,7 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
       {configuration ? <><button type="button" className="small-button" disabled={!saved || !!busy} onClick={() => setDraft(draftOf(configuration))}>Edit rule</button>
         <button type="button" className="small-button" disabled={!!busy} onClick={() => setRemove(configuration)}>Remove rule</button></> : null}</div> : null}
     {draft ? <form className="application-access__editor" aria-label="Application connector rule" onSubmit={event => { event.preventDefault(); void perform('Saving rule', saveDraft) }}>
-      <header><strong>{draft.revision ? 'Edit application rule' : 'Add an application connector'}</strong><p>Use an application access connector on each account. Save commands and scope here; credentials stay with the application.</p></header>
+      <header><strong>{draft.revision ? 'Edit application rule' : 'Add an application connector'}</strong><p>Use an application access connector on each account. Save commands and scope here; credentials stay with the application. Rules appear here while this environment is a source or target.</p></header>
       <details><summary>Connector requirements</summary><p>Each command implements <code>{APPLICATION_ACCESS_SCHEMA}</code>: application identity and scope checks, scoped transfer, target verification and original operation lookup. Use arguments for non-sensitive options; credential material travels through stdin.</p></details>
       <div className="application-access__fields">
         <label><span>Name</span><TextInput required value={draft.label} onChange={event => setDraft({ ...draft, label: event.target.value })} /></label>
@@ -165,7 +166,7 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
         <label className="application-access__full"><span>Scopes <small>one per line</small></span><textarea required rows={3} value={draft.scopesText} onChange={event => setDraft({ ...draft, scopesText: event.target.value })} /></label>
       </div>
       <div className="application-access__endpoints">{(['source', 'target'] as const).map(side => <EndpointEditor key={side} title={side === 'source' ? 'Source' : 'Target'}
-        value={draft[side]} hosts={side === 'target' ? hosts.filter(item => item.id === host.id) : hosts}
+        value={draft[side]} hosts={hosts}
         onChange={value => setDraft(current => current ? { ...current, [side]: value } : current)} />)}</div>
       <div className="application-access__actions"><button className="primary-button" type="submit" disabled={!saved || !!busy}>Save application rule</button>
         <button className="small-button" type="button" disabled={!!busy} onClick={() => setDraft(null)}>Cancel editing</button></div>
