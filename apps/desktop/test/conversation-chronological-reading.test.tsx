@@ -14,9 +14,9 @@ const source = { providerId: 'source-provider', nativeSessionId: 'original-sourc
 const native = (id: string, time: number | undefined, text = id, kind: 'assistant-message' | 'activity' = 'assistant-message') => ({
   id, kind, ...(time === undefined ? {} : { startedAt: time }), contentParts: [{ kind: 'text' as const, text }]
 })
-const captured = (id: string, time: number, content = id, kind: 'user_message' | 'tool_call' = 'user_message'): AgentTimelineItem => ({
+const captured = (id: string, time: number, content = id, kind: 'user_message' | 'assistant_message' | 'tool_call' = 'user_message'): AgentTimelineItem => ({
   id, agentSessionId: sid, kind, source: kind === 'user_message' ? 'user' : 'native-hook', createdAt: time, updatedAt: time,
-  content, title: id, status: 'complete', ...(kind === 'user_message' ? { authorHuman: true } : { toolName: 'Read', toolInput: content })
+  content, title: id, status: 'complete', ...(kind === 'user_message' ? { authorHuman: true } : kind === 'tool_call' ? { toolName: 'Read', toolInput: content } : {})
 })
 let root: Root, host: HTMLDivElement
 let items: AgentTimelineItem[], page: AgentSessionHistoryPage
@@ -30,9 +30,30 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function render() { await act(async () => root.render(<ActivityView sessionId={sid} executionHostId="local" capability="complete-events"
-  items={items} nativeHistoryPage={page} />)) }
+async function render(nativePage: AgentSessionHistoryPage | null = page) { await act(async () => root.render(<ActivityView sessionId={sid} executionHostId="local" capability="complete-events"
+  items={items} nativeHistoryPage={nativePage} />)) }
 function bodies() { return [...host.querySelectorAll('.log-turn__body')].map(node => node.textContent) }
+
+it.each(['codex', 'claude'])('keeps complete captured bodies with null, empty and nonempty %s native pages', async providerId => {
+  items = [captured('original-input', _historyFixtureEpoch(0, 0, 200), 'Original captured request'), captured('original-hook-reply', _historyFixtureEpoch(0, 0, 400), 'Original captured answer', 'assistant_message')]
+  page = { ...page, source: { ...source, providerId }, items: [] }
+  await render(null)
+  expect(bodies()).toEqual(['Original captured request', 'Original captured answer'])
+  await render()
+  expect(bodies(), 'a valid empty source page cannot hide already accepted captured messages').toEqual(['Original captured request', 'Original captured answer'])
+  const answer = host.querySelector<HTMLElement>('[data-message-id="original-hook-reply"] .log-turn__body')!
+  expect(answer).not.toBeNull()
+  const range = document.createRange(); range.selectNodeContents(answer); getSelection()!.addRange(range)
+  page = { ...page, items: [native('later-native-answer', _historyFixtureEpoch(0, 0, 500))] }
+  await render()
+  expect(bodies()).toEqual(expect.arrayContaining(['Original captured request', 'Original captured answer', 'later-native-answer']))
+  expect(host.querySelector('[data-message-id="original-hook-reply"] .log-turn__body')).toBe(answer)
+  expect(getSelection()!.toString()).toBe('Original captured answer')
+  await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+  expect(bodies()).toEqual(['Original captured request', 'Original captured answer', 'later-native-answer'])
+  expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(1)
+  expect(host.querySelectorAll('[data-segment-key]')).toHaveLength(2)
+})
 
 it('interleaves actual native replies and captured inputs by recorded time in the common message DOM', async () => {
   await render()
