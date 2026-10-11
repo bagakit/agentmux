@@ -2,32 +2,14 @@ import {useMemo, type ButtonHTMLAttributes} from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
-import {createFocusProjectionSelector, type FocusContext} from '../lib/focus-context'
+import {createFocusNavigationSummarySelector} from '../lib/focus-context'
 
 const ThemeActionStartIcon = semanticIconComponent('action.start')
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 
 
-export function focusNavigationSummary(contexts: readonly FocusContext[]) {
-  let working = 0, requests = 0, errors = 0
-  for (const context of contexts) {
-    if (context.kind !== 'agent') continue
-    if (context.bucket === 'working') working++
-    else if (context.bucket === 'attention') { if (context.state === 'error') errors++; else requests++ }
-  }
-  return { working, requests, errors }
-}
 export function FocusNavigationButton(props: ButtonHTMLAttributes<HTMLButtonElement>) {
-  const selectSummary = useMemo(() => {
-    const project = createFocusProjectionSelector()
-    let previous: readonly FocusContext[] | undefined
-    let summary = {working: 0, requests: 0, errors: 0}
-    return (state: Parameters<typeof project>[0]) => {
-      const contexts = project(state).contexts
-      if (contexts !== previous) {previous = contexts; summary = focusNavigationSummary(contexts)}
-      return summary
-    }
-  }, [])
+  const selectSummary = useMemo(createFocusNavigationSummarySelector, [])
   const summary = useAppStore(useShallow(selectSummary))
   const attention = summary.requests + summary.errors
   const detail = `${summary.working} working, ${summary.requests} requests, ${summary.errors} failed`
