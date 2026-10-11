@@ -280,7 +280,9 @@ type UserMessageReadState = {
 }
 
 function UserMessageReadNotice({ read, showEarlier = true }: { read: UserMessageReadState | undefined; showEarlier?: boolean }) {
-  if (!read || (!read.error && !read.observationError && !read.windowFrozen && !read.windowIncomplete && !(showEarlier && read.hasMore))) return null
+  if (!read) return null
+  const needsService = Boolean(read.error || read.observationError || read.windowFrozen)
+  if (!needsService && (!showEarlier || !read.windowIncomplete && !read.hasMore)) return null
   return (
     <div className="activity-feed__read-notice" role="status">
       <span>
@@ -962,6 +964,7 @@ export function ActivityView({
       <div className="activity-feed__reading-entry">
         {readingWindow.hasMore || readingWindow.capturedHasMore || readingWindow.automaticReadError ? (
           <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || readingWindow.capturedLoading || !conversationReading.enabled}
+            title={readingWindow.automaticReadError ? undefined : 'Read earlier conversation and process records in the original sequence'}
             data-read-error={readingWindow.automaticReadError ? 'true' : undefined}
             aria-busy={earlierReadPending || readingWindow.capturedLoading || undefined}
             onClick={readingWindow.automaticReadError ? readingWindow.retry : readEarlierRecords}>
