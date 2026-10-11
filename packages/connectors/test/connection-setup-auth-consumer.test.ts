@@ -106,7 +106,7 @@ function authenticationSnapshots(f: Fixture, operationId: string): Record<string
 }
 async function assertSafeDiscovery(f: Fixture, view: ConnectionSetupView) {
   const listed = result<{ operations: unknown[]; next: string | null }>(await f.cli(['ls', '--connection', f.input.connectionId]))
-  expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'enrollment-continuation'] } })
+  expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'enrollment-continuation'] } })
   const tables = f.services.database!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
   expect(tables.length).toBeGreaterThan(0)
   const records = tables.map(table => f.services.database!.prepare('SELECT * FROM "' + String(table.name).replaceAll('"', '""') + '"').all())
