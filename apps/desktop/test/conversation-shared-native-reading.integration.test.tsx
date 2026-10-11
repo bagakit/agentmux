@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
 import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
@@ -23,7 +24,7 @@ const controls: { name: string; spy: ReturnType<typeof vi.spyOn> }[] = []
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => {
@@ -67,14 +68,14 @@ async function fixture() {
   }
   expect(methods.size).toBeGreaterThan(0)
   for (const name of [...methods].sort()) controls.push({ name, spy: vi.spyOn(kernel, name).mockImplementation(() => { throw new Error('No Run control: ' + name) }) })
-  async function page(): Promise<AgentSessionHistoryPage> {
+  async function page(unchangedStore = true): Promise<AgentSessionHistoryPage> {
     const result = await client.sessionHistoryPage(control.agentSessionId)
     expect(result.items.map(item => [item.id, item.kind])).toEqual([[rawId, 'user-message']])
     expect(result.items[0]!.contentParts.map(part => part.kind)).toEqual(['tool-result', 'text'])
-    expect(await readFile(storePath)).toEqual(persisted)
+    if (unchangedStore) expect(await readFile(storePath)).toEqual(persisted)
     return result
   }
-  return { control, client, rawId, workspacePath, writeInput, page }
+  return { control, client, store, rawId, workspacePath, writeInput, page }
 }
 
 async function settledHistory(): Promise<void> {
@@ -183,9 +184,9 @@ describe('shared native presentation preserves the existing reading owner', () =
           capability="complete-events" displayState="done" onContinue={onContinue} />))
         const turns = [...host.querySelectorAll<HTMLElement>('.log-turn')]
         expect(turns.map(turn => turn.querySelector('.log-turn__body p')?.textContent)).toEqual([
-          collision ? 'Earlier captured input' : 'Earlier agent answer', 'Native tail initial', 'Do not leak this future answer'
+          collision ? 'Earlier captured input' : 'Earlier agent answer', 'Do not leak this future answer', 'Native tail initial'
         ])
-        const selected = turns[1]!
+        const selected = turns[2]!
         expect(selected.dataset.speakerRole).toBe('human')
         const button = selected.querySelector<HTMLButtonElement>('.log-turn__continue')!
         expect(button.textContent).toBe('Continue from here')
@@ -193,7 +194,7 @@ describe('shared native presentation preserves the existing reading owner', () =
         console.log('SHARED_READING_CONTINUE_NATIVE_ACTUAL', JSON.stringify({ collision, nativeStableId: messages[0]!.id,
           nativeRawId: f.rawId, timelineIds: timeline.map(item => item.id), prompts: onContinue.mock.calls, errors }))
         expect(onContinue).toHaveBeenCalledExactlyOnceWith(
-          `Continue this conversation from the selected point.\n\n${collision ? 'Input: Earlier captured input' : 'Agent: Earlier agent answer'}\n\nInput: ${messages[0]!.content}`
+          `Continue this conversation from the selected point.\n\nInput: ${messages[0]!.content}`
         )
         expect(errors).toEqual([])
         expect(onContinue.mock.calls[0]![0]).not.toContain('Do not leak this future answer')
@@ -205,3 +206,35 @@ describe('shared native presentation preserves the existing reading owner', () =
   }
 
 })
+
+
+it('the original Desktop window pages retained captured records beyond the recent limit through public Core, including an oversized UTF8 record', async () => {
+  const f = await fixture(), sid = f.control.agentSessionId
+  const original: AgentTimelineItem[] = Array.from({ length: 720 }, (_, index) => ({ id: `captured-original:${index}`, agentSessionId: sid,
+    kind: 'user_message', source: 'user', status: 'complete', title: 'Original captured input', authorHuman: true, publicContent: 'confirmed',
+    content: index === 1 ? `Complete original 中🙂\n${'原文中🙂\n'.repeat(8000)}END original payload` : `Complete original ${index}`,
+    createdAt: index + 1, updatedAt: index + 1 }))
+  for (const item of original) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
+  const snapshot = await f.client.sessionTimeline(sid), native = await f.page(false)
+  expect(snapshot.items.length).toBeLessThan(original.length)
+  vi.spyOn(api.sessions, 'historyPage').mockImplementation(() => f.page(false))
+  const reads = vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, options) => f.client.readAgentSessionHistory({
+    hostId: reference.hostId, agentSessionId: reference.agentSessionId, ...options }))
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control })} items={snapshot.items} timelineSnapshot={snapshot} nativeHistoryPage={native} />))
+  for (let turn = 0; turn < 12 && !host.querySelector('[data-message-id="captured:captured-original:0"]'); turn++) {
+    const earlier = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')
+    expect(earlier).toBeDefined()
+    await act(async () => { earlier!.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
+    await vi.waitFor(() => expect([...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')?.getAttribute('aria-busy')).not.toBe('true'), { timeout: 8000 })
+  }
+  const rows = [...host.querySelectorAll<HTMLElement>('[data-message-id^="captured:captured-original:"]')]
+  expect(rows.map(row => row.dataset.messageId)).toEqual(original.map(item => 'captured:' + item.id))
+  const large = host.querySelector<HTMLElement>('[data-message-id="captured:captured-original:1"]')!
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  await act(async () => large.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
+  expect(createHash('sha256').update(copy.mock.calls.at(-1)?.[0] ?? '').digest('hex')).toBe(createHash('sha256').update(original[1]!.content!).digest('hex'))
+  expect(reads.mock.calls.length).toBeGreaterThan(7)
+  expect(reads.mock.calls.every(([reference, input]) => reference.agentSessionId === sid && input.source === 'captured' && input.limit === 100)).toBe(true)
+  expect(reads.mock.calls.some(([, input]) => !!input.cursor)).toBe(true)
+  expect((await f.store.readMetadata(sid))!.run.runId).toBe(f.control.run.runId)
+}, 60000)

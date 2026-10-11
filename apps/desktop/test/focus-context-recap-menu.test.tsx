@@ -69,7 +69,7 @@ it('shows the existing labelled recap together with a newer concrete tool withou
   const native = vi.spyOn(api.sessions, 'historyPage'), reread = vi.spyOn(api.sessions, 'timeline')
   await mount(); expect(container.querySelectorAll('.focus-context')).toHaveLength(2)
   expect(recapLine().textContent).toBe(responseText)
-  expect(recapLine().getAttribute('title')).toBe('Last assistant message (timeline)')
+  expect(recapLine().getAttribute('title')).toBe('Last reply observation (timeline)')
   expect(row().querySelector('.focus-context__activity')).toBeNull()
   expect(row().getAttribute('aria-label')).toContain('Bash pnpm test --filter scroll-anchor')
   expect(row().dataset.bucket).toBe('working'); expect(native.mock.calls).toEqual([]); expect(reread.mock.calls).toEqual([])
@@ -84,7 +84,7 @@ it('falls back to the recorded request while empty facts keep the existing hones
 it('labels an old reply as an excerpt without making the next request a current result', async () => {
   await update({ status: { ...agent.status, state: 'done' } })
   await act(async () => useAppStore.setState({ timelines: { [firstId]: timeline([message('assistant_message', responseText, 2), message('user_message', '继续检查加载', 4)]) } }))
-  await mount(); expect(row().dataset.bucket).toBe('idle'); expect(row().getAttribute('aria-label')).toContain('Last assistant message (timeline)')
+  await mount(); expect(row().dataset.bucket).toBe('idle'); expect(row().getAttribute('aria-label')).toContain('Last reply observation (timeline)')
   expect(row().querySelector('.focus-context__activity')).toBeNull()
   expect(row().getAttribute('aria-label')).toContain('Prompt · 继续检查加载')
   expect(row().getAttribute('aria-label')).toContain('Prompt · 继续检查加载')
@@ -92,10 +92,10 @@ it('labels an old reply as an excerpt without making the next request a current 
 it('keeps a legitimate retained result excerpt when the process is no longer running', async () => {
   await update({ processState: 'exited', status: { ...agent.status, state: 'done' } })
   await act(async () => useAppStore.setState({ timelines: { [firstId]: timeline(items.slice(0, 2)) } }))
-  await mount(); expect(row().dataset.bucket).toBe('results')
+  await mount(); expect(row().dataset.bucket).toBe('idle')
   expect(recapLine().textContent).toBe(responseText)
   expect(row().querySelector('.focus-context__activity')).toBeNull()
-  expect(row().getAttribute('aria-label')).toContain('Last assistant message (timeline)')
+  expect(row().getAttribute('aria-label')).toContain('Last reply observation (timeline)')
 })
 it('retains the unconfirmed directory service explanation beside a previously observed reply', async () => {
   await act(async () => useAppStore.setState(state => ({
@@ -194,7 +194,7 @@ it('only derives related nonempty bounded conversations at both qualified input 
   for (const [sessionsCount, projectsCount] of [[14, 54], [112, 432]] as const) {
     const reads: Record<string, number> = {}, select = createFocusProjectionSelector(), config = useAppStore.getState().config!
     const sessions = Array.from({ length: sessionsCount }, (_, index) => ({ ...agent, id: `cost-${index}` }))
-    const timelines = Object.fromEntries(sessions.map(session => [session.id, new Proxy({ ...timeline(), agentSessionId: session.id }, { get(target, key, receiver) { if (key === 'items') reads[session.id] = (reads[session.id] ?? 0) + 1; return Reflect.get(target, key, receiver) } })]))
+    const timelines = Object.fromEntries(sessions.map(session => [session.id, new Proxy({ ...timeline(), agentSessionId: session.id, items: timeline().items.map(item=>({...item,agentSessionId:session.id})) }, { get(target, key, receiver) { if (key === 'items') reads[session.id] = (reads[session.id] ?? 0) + 1; return Reflect.get(target, key, receiver) } })]))
     const input = { sessions, timelines, agentNames: {}, scratchTopicSnapshots: {}, config: { ...config, workspaces: Array.from({ length: projectsCount }, (_, index) => ({ id: `project-${index}`, name: `Project ${index}`, hostId: 'local', path: index === 0 ? agent.workspacePath : `/unrelated-${index}`, kind: 'folder' as const })) } }
     const before = select(input); expect(before.contexts).toHaveLength(sessionsCount); expect(before.contexts[0]!.recap?.text).toBe(responseText)
     Object.keys(reads).forEach(key => delete reads[key]); expect(select({ ...input })).toBe(before); expect(reads).toEqual({})

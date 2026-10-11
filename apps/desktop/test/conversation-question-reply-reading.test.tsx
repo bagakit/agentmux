@@ -6,7 +6,6 @@ import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { api } from '../src/renderer/src/lib/api'
@@ -24,7 +23,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it.each([ConversationView, ConversationNativeThread])('shows Provider-projected answers through the actual shared reader while preserving the original input and Copy', async View => {
+it.each([ConversationView])('shows Provider-projected answers through the actual shared reader while preserving the original input and Copy', async View => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), onContinue = vi.fn()
   await act(async () => root.render(<View page={page} sessionId="reader" onContinue={onContinue} />))
   const record = container.querySelector<HTMLElement>('[data-native-record-id="original-reply"]')!
@@ -83,7 +82,7 @@ it.each(['view', 'native-thread'] as const)('keeps original input and a non-bloc
   const { questionAnswers: _answers, ...original } = page.items[0]!
   const noticePage: AgentSessionHistoryPage = { ...page, items: [{ ...original, questionDiagnostic }] }
   await act(async () => root.render(view === 'view' ? <ConversationView page={noticePage} sessionId="reader" />
-    : <ConversationNativeThread page={noticePage} sessionId="reader" />))
+    : <ConversationView page={noticePage} sessionId="reader" />))
   expect(container.querySelector('[role="status"]')?.textContent).toBe(questionDiagnostic.message)
   expect(container.querySelectorAll('[role="status"]')).toHaveLength(1)
   expect(container.querySelector('.log-turn__body')?.textContent).toContain('send_user_message_question_reply')

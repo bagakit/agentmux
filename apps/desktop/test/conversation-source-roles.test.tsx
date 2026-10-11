@@ -14,7 +14,7 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 let root: Root, host: HTMLDivElement
 const sid = original.agentSessionId
-const originalPage = (): AgentSessionHistoryPage => ({ agentSessionId: sid, source: original.source,
+const originalPage = (): AgentSessionHistoryPage => ({ agentSessionId: sid, sourceHostId: 'local', source: original.source,
   items: [structuredClone(original.native) as AgentSessionHistoryPage['items'][number]], nextCursor: null })
 const originalHook = (): AgentTimelineItem => structuredClone(original.captured) as AgentTimelineItem
 const native = (id: string, time: number, kind: 'activity' | 'assistant-message' | 'user-message' = 'activity', turnId?: string): AgentSessionHistoryPage['items'][number] => ({
@@ -26,7 +26,7 @@ const bodies = () => [...host.querySelectorAll('.log-turn__body')].filter(node =
 const click = async (node: HTMLElement | null) => { expect(node).not.toBeNull(); await act(async () => node!.click()) }
 async function render(page: AgentSessionHistoryPage | null = originalPage(), items: AgentTimelineItem[] = [originalHook()], extras: Partial<ComponentProps<typeof ActivityView>> = {}, hidden = false) {
   await act(async () => root.render(<section hidden={hidden}><ActivityView sessionId={sid} executionHostId="local" capability="complete-events"
-    nativeHistoryPage={page} items={items} {...extras} /></section>))
+    nativeHistoryPage={page} items={items} timelineSnapshot={{agentSessionId:sid,sourceHostId:'local',revision:1,items}} {...extras} /></section>))
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -199,4 +199,19 @@ it('splits only on accurate native turns, real speech and the original History b
   expect([...host.querySelectorAll('[data-native-record-ids]')].map(node => JSON.parse(node.getAttribute('data-native-record-ids')!))).toEqual([['a'], ['b'], ['c'], ['d']])
   expect(bodies()).toEqual(['Original native input'])
   expect(host.querySelector('[role="separator"]')!.textContent).toBe('Original History boundary')
+})
+
+it('locates an original captured process record through the existing disclosure instead of reporting a loaded lazy step missing', async()=>{
+  vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){const height=this.closest('[hidden]')?0:40;return {x:0,y:0,top:0,left:0,right:360,bottom:height,width:360,height,toJSON(){}} as DOMRect})
+  let reveal!: Parameters<NonNullable<ComponentProps<typeof ActivityView>['renderReadingTools']>>[1]
+  await render({...originalPage(),items:[native('native-before-step',_historyFixtureEpoch(0, 0, 100))]},[tool('exact-captured-step',_historyFixtureEpoch(0, 0, 200))],{renderReadingTools:(_active,locate)=>{reveal=locate;return null}})
+  expect(host.querySelector('.conversation-record-process .wf-head')?.getAttribute('aria-expanded')).toBe('false')
+  let result:Awaited<ReturnType<typeof reveal>>|undefined
+  let pending!: ReturnType<typeof reveal>
+  await act(async()=>{pending=reveal({hostId:'local',agentSessionId:sid,source:{kind:'captured',recordId:'exact-captured-step'}})})
+  await act(async()=>{result=await pending})
+  expect(result?.kind).toBe('located')
+  expect(host.querySelector('.conversation-record-process .wf-head')?.getAttribute('aria-expanded')).toBe('true')
+  expect(host.querySelector('[data-observation-step-id="exact-captured-step"]')?.getAttribute('aria-expanded')).toBe('true')
+  expect(host.querySelector('.conversation-tool-trace__payload')?.textContent).toContain('Original captured payload exact-captured-step')
 })

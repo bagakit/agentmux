@@ -400,3 +400,38 @@ it('raw capacity and service failures preserve observed replies and healthy cont
   expect(overlay().querySelectorAll('[data-conversation-record-id]')).toHaveLength(list.length); expect(useAppStore.getState().sessions[0]!.processState).toBe('running')
   await act(async () => useAppStore.setState({ agentNames: { unrelated: 'Changed unrelated name' } })); expect(reads.mock.calls).toHaveLength(before + 1); healthy()
 })
+
+it('the actual Focus consumer labels one retained Core observation without counting it as a new reply and keeps its full original preview', async()=>{
+  await writeFile(fixture.path,'')
+  await seedCaptured([captured('retained-observation','assistant_message',{content:'Original retained observation, author not declared'})])
+  await render();await wait(()=>expect(recordCount()).toBe(1))
+  const marker=markers()[0]!
+  expect(marker.dataset.recordKind).toBe('observation')
+  expect(marker.getAttribute('aria-label')).toContain('Reply observation')
+  expect(marker.querySelector('.recent-focus__message-direction')).toBeNull()
+  await plotRecord('retained-observation')
+  expect(overlay().querySelector('.recent-focus__message-caption')?.textContent).toContain('Reply observation')
+  expect(overlay().querySelector('.recent-focus__message-body')?.textContent).toContain('Original retained observation, author not declared')
+  expect(JSON.parse(overlay().querySelector<HTMLElement>('[data-conversation-author]')!.dataset.conversationAuthor!)).toEqual({kind:'unknown'})
+  healthy();expect(reads.mock.calls.length).toBeLessThanOrEqual(2)
+})
+
+it('the original Focus bounded history holder reaches captured records older than its recent snapshot using the original public source cursor',async()=>{
+  await writeFile(fixture.path,'')
+  const all=Array.from({length:720},(_,index)=>captured('focus-retained:'+index,'user_message',{content:'Original Focus retained input '+index,authorHuman:true,createdAt:NOW-HOUR+index}))
+  await seedCaptured(all)
+  const raw=vi.spyOn(api.sessions,'readHistory').mockImplementation((ref,input)=>fixture.client.readAgentSessionHistory({hostId:ref.hostId,agentSessionId:ref.agentSessionId,...input}))
+  await render();await records();await textButton('Read earlier records')
+  for(let turn=0;turn<10&&!overlay().querySelector('[data-record-raw-id="focus-retained:0"]');turn++){
+    await wait(()=>expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Read earlier records')?.disabled).toBe(false))
+    await textButton('Read earlier records')
+    await wait(()=>expect(overlay().textContent).not.toContain('Reading conversation records…'))
+  }
+  const oldest=overlay().querySelector<HTMLElement>('[data-record-raw-id="focus-retained:0"]')!
+  expect(oldest).not.toBeNull();await act(async()=>oldest.click())
+  expect(overlay().querySelector('.recent-focus__message-body')?.textContent).toContain('Original Focus retained input 0')
+  expect(raw.mock.calls.length).toBeGreaterThan(6)
+  expect(raw.mock.calls.every(([ref,input])=>ref.agentSessionId===ID&&input.source==='captured'&&input.limit===100)).toBe(true)
+  expect(Number(host.querySelector<HTMLElement>('.recent-focus')!.dataset.capturedRecordCount)).toBeLessThanOrEqual(240)
+  healthy()
+},60000)

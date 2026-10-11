@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { Window } from 'happy-dom'
-import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentProviderSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
+import type { AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentProvider, AgentProviderSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import { loadAgentSessions } from '../../../packages/core/src/agent-session-store'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
@@ -168,7 +168,8 @@ it('authenticated Mobile keeps captured speech visible beside distinct native re
     expect(record(id), id).not.toBeNull()
     expect(record(id).closest('details:not([open]), [hidden], [inert]'), `${id} is readable without opening another conversation`).toBeNull()
   }
-  expect(view.element.querySelector('.mobile-conversation__captured')?.tagName).toBe('SECTION')
+  expect(view.element.querySelector('.mobile-conversation__captured')).toBeNull()
+  expect(view.element.querySelectorAll('.conversation-native-thread')).toHaveLength(1)
   expect(view.element.querySelectorAll('[data-native-record-id="input-duplicated"]')).toHaveLength(1)
   expect(record('captured:input-duplicated').querySelector('.log-turn__body')!.textContent).toBe(sharedBody)
   expect(record('captured:input-duplicated').dataset.speakerRole).toBe('human')
@@ -560,3 +561,45 @@ it('keeps two authenticated Host owners with the same Session Run and request ID
     expect(first.inner.kernel.input).not.toHaveBeenCalled(); expect(second.inner.kernel.input).not.toHaveBeenCalled()
   } finally { release.resolve() }
 }, 15000)
+
+
+it('authenticated Mobile pages the original captured stream beyond the recent window with complete fragmented UTF8 and no native source', async () => {
+  const f = await authenticatedFixture()
+  const provider = f.core.providers.get('codex') as AgentProvider & Required<Pick<AgentProvider, 'readSessionHistoryPage'>>
+  vi.spyOn(provider, 'readSessionHistoryPage').mockRejectedValue(new Error('Original native source unavailable'))
+  const items: AgentTimelineItem[] = Array.from({ length: 720 }, (_, index) => ({ id: `retained-mobile:${index}`, agentSessionId: sid,
+    kind: 'user_message', source: 'user', status: 'complete', authorHuman: true, publicContent: 'confirmed', title: 'Original retained input',
+    content: index === 1 ? `Complete 原文中🙂\n${'原文中🙂\n'.repeat(8000)}END retained` : `Complete retained ${index}`, createdAt: index + 1, updatedAt: index + 1 }))
+  for (const item of items) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
+  const raw = vi.spyOn(f.core, 'readAgentSessionHistory')
+  const view = await mount(f.surface())
+  await vi.waitFor(() => expect(view.element.textContent).toContain('Complete retained 719'))
+  await paste(view.element, 'Original retained draft')
+  const originalIds = [...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId)
+  const read = f.client.readAgentSessionHistory.bind(f.client)
+  let foreignSource = true
+  vi.spyOn(f.client, 'readAgentSessionHistory').mockImplementation(async input => {
+    const result = await read(input)
+    return foreignSource ? { ...result, sourceHostId: 'foreign-source' } : result
+  })
+  await click(button(view.element, '更早消息')!)
+  await vi.waitFor(() => expect(view.element.textContent).toContain('The original captured source Host changed'))
+  expect([...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId)).toEqual(originalIds)
+  expect(editor(view.element).textContent).toContain('Original retained draft')
+  foreignSource = false
+  for (let attempt = 0; attempt < 12 && !view.element.querySelector('[data-message-id="captured:retained-mobile:0"]'); attempt++) {
+    const earlier = button(view.element, '更早消息')
+    expect(earlier).toBeDefined(); await click(earlier!)
+    await vi.waitFor(() => expect([...view.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '更早消息')?.disabled).not.toBe(true), { timeout: 8000 })
+  }
+  expect([...view.element.querySelectorAll<HTMLElement>('[data-message-id^="captured:retained-mobile:"]')].map(node => node.dataset.messageId)).toEqual(items.map(item => 'captured:' + item.id))
+  const large = view.element.querySelector<HTMLElement>('[data-message-id="captured:retained-mobile:1"]')!
+  const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+  await click(large.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!)
+  expect(createHash('sha256').update(copy.mock.calls.at(-1)?.[0] ?? '').digest('hex')).toBe(createHash('sha256').update(items[1]!.content!).digest('hex'))
+  expect(raw.mock.calls.length).toBeGreaterThan(7)
+  expect(raw.mock.calls.every(([input]) => input.agentSessionId === sid && input.source === 'captured' && input.limit === 100)).toBe(true)
+  expect(f.authenticated.length).toBeGreaterThan(0); expect(f.writes).toHaveLength(0); expect(f.submit).not.toHaveBeenCalled(); expect(f.reply).not.toHaveBeenCalled()
+  expect(editor(view.element).textContent).toContain('Original retained draft')
+  expect(view.element.textContent).toContain('Original native source unavailable')
+}, 20000)

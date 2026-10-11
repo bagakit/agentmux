@@ -20,7 +20,7 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 let root: Root, host: HTMLDivElement, directory: string, store: ConversationLandmarkStore
 const scope = { hostId: 'original-host', agentSessionId: 'original-session' }, actor = { kind: 'user', id: 'original-user' } as const
 const ref = (source = 'source-a'): ConversationItemRef => ({ ...scope, source: { kind: 'native', providerId: 'reading-provider', nativeSessionId: source, recordId: 'original-message' } })
-const page = (): AgentSessionHistoryPage => ({ agentSessionId: scope.agentSessionId, source: { providerId: 'reading-provider', nativeSessionId: 'source-a' }, nextCursor: null, items: [
+const page = (): AgentSessionHistoryPage => ({ agentSessionId: scope.agentSessionId, sourceHostId:scope.hostId, source: { providerId: 'reading-provider', nativeSessionId: 'source-a' }, nextCursor: null, items: [
   { id: 'original-message', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Original body remains selectable.' }] },
   { id: 'answer', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original answer remains readable.' }] },
   { id: 'system', kind: 'system-message', contentParts: [{ kind: 'text', text: 'Recorded original notice.' }] }
@@ -54,7 +54,8 @@ it('names the actual common native record without reading metadata on mount or r
   expect(host.querySelector('[data-native-record-id="original-message"] .log-turn__text p')).toBe(body); expect(range.toString()).toBe('Original body remains selectable.'); expect(document.body.textContent).toContain('Saved. Return from Reading points.')
 })
 it('contributes the same exact action to actual captured Activity records without forging native source', async () => {
-  await render(<ActivityView sessionId={scope.agentSessionId} executionHostId={scope.hostId} items={[{ id: 'captured-answer', agentSessionId: scope.agentSessionId, kind: 'assistant_message', title: 'Original', content: 'Captured original answer.', status: 'complete', source: 'native-hook', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }]} capability="complete-events" renderRecordActions={renderConversationLandmarkAction}/>)
+  const originalItem = { id: 'captured-answer', agentSessionId:scope.agentSessionId,kind:'assistant_message' as const,title:'Original',content:'Captured original answer.',status:'complete' as const,source:'native-hook' as const,createdAt:_historyFixtureEpoch(0, 0, 1),updatedAt:_historyFixtureEpoch(0, 0, 1)}
+  await render(<ActivityView timelineSnapshot={{agentSessionId:scope.agentSessionId,sourceHostId:scope.hostId,revision:1,items:[originalItem]}} sessionId={scope.agentSessionId} executionHostId={scope.hostId} items={[{ id: 'captured-answer', agentSessionId: scope.agentSessionId, kind: 'assistant_message', title: 'Original', content: 'Captured original answer.', status: 'complete', source: 'native-hook', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }]} capability="complete-events" renderRecordActions={renderConversationLandmarkAction}/>)
   await click(named('Name reading point')); await edit('Captured point'); await submit(); await until(savedStatus)
   expect((await store.list(scope)).points[0]?.reference).toEqual({ ...scope, source: { kind: 'captured', recordId: 'captured-answer' } })
 })
@@ -151,7 +152,7 @@ it('rejects another original metadata response at the real renderer adapter', as
 it('passes the complete original reference to navigation and keeps unknown records in the list', async () => {
   await saved(); const reveal = vi.fn(async () => ({ kind: 'unavailable' as const, message: 'Original source temporarily unavailable. Point retained.' }))
   await render(<ConversationLandmarkList reference={scope} reveal={reveal} active/>); await click(named('Reading points')); await until(() => expect(document.querySelector('.conversation-landmark__destination')).not.toBeNull()); await click(document.querySelector<HTMLButtonElement>('.conversation-landmark__destination')!)
-  expect(reveal).toHaveBeenCalledWith(ref()); expect(document.body.textContent).toContain('Original source temporarily unavailable. Point retained.'); expect((await store.list(scope)).points).toHaveLength(1)
+  expect(reveal).toHaveBeenCalledWith(ref(), scope.hostId); expect(document.body.textContent).toContain('Original source temporarily unavailable. Point retained.'); expect((await store.list(scope)).points).toHaveLength(1)
 })
 it('returns to the exact already-loaded record in the original Activity reader without a Run or second reader', async () => {
   await saved(); let local!: Parameters<NonNullable<Parameters<typeof ActivityView>[0]['renderReadingTools']>>[1]
@@ -162,4 +163,21 @@ it('returns to the exact already-loaded record in the original Activity reader w
   const scroll = vi.spyOn(head, 'scrollIntoView').mockImplementation(() => {})
   await click(named('Reading points')); await until(() => expect(document.querySelector('.conversation-landmark__destination')).not.toBeNull()); await click(document.querySelector<HTMLButtonElement>('.conversation-landmark__destination')!); expect(scroll).toHaveBeenCalled(); expect(document.activeElement).toBe(original); expect(reads).not.toHaveBeenCalled()
   expect(await local(ref('another-native-source'))).toMatchObject({ kind: 'unavailable' }); expect(await local({ ...ref(), hostId: 'other-host' })).toMatchObject({ kind: 'unavailable' }); expect((await store.list(scope)).points).toHaveLength(1)
+})
+
+it('separates the original source reference from two route catalogs at the actual shared action and retained-intent boundary',async()=>{
+  const sourceRef={...ref(),hostId:'semantic-owner'},route='route-a'
+  await render(<SaveConversationLandmark reference={sourceRef} routeHostId={route}/>)
+  await click(named('Name reading point'));await edit('Scoped source record');await submit();await until(savedStatus)
+  const catalog=await store.list({hostId:route,agentSessionId:scope.agentSessionId})
+  expect(catalog.points).toHaveLength(1)
+  expect(catalog.points[0]).toMatchObject({reference:sourceRef,routeHostId:route})
+  expect((await store.list({hostId:'route-b',agentSessionId:scope.agentSessionId})).points).toEqual([])
+  const original=vi.mocked(api.landmarks.apply).mock.calls[0]![0]
+  expect(original.hostId).toBe(route)
+  if(original.change.kind!=='create')throw Error('Expected exact original create')
+  expect(original.change.point.reference).toEqual(sourceRef)
+  const {conversationLandmarkIntentKey}=await import('../src/renderer/src/lib/conversation-landmark-intent')
+  const other={...original,hostId:'route-b',change:{...original.change,point:{...original.change.point,routeHostId:'route-b'}}}
+  expect(conversationLandmarkIntentKey(original)).not.toBe(conversationLandmarkIntentKey(other))
 })
