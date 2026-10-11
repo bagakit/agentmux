@@ -383,6 +383,9 @@ const mockApi: AgentMuxDesktopApi = {
     releaseConversationView: async () => { throw new Error('Open Desktop to release the original reading view.') }
   },
   performance: {
+    captureAllocations: async () => { throw new Error('Open Desktop to sample original Renderer allocations.') },
+    captureScene: async () => { throw new Error('Open Desktop to capture the original Renderer scene.') },
+    inspectScene: async () => ({ status: 'absent', scene: null, issue: null }),
     captureProfile: async () => { throw new Error('Open Desktop to sample the original Renderer.') },
     captureTrace: async () => { throw new Error('Open Desktop to trace the original Renderer.') }
   },

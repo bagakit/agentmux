@@ -1606,6 +1606,9 @@ export type ThemeFileExportResult = { status: 'saved'; path: string } | { status
 export type AgentMuxDesktopApi = {
   conversation: import('./conversation-read').ConversationReadApi
   performance: {
+    captureAllocations(input: import('@agentmux/core/control').RendererAllocationsInput): Promise<import('@agentmux/core/control').RendererAllocationsResult>
+    captureScene(input: import('@agentmux/core/control').RendererSceneCaptureInput): Promise<import('@agentmux/core/control').RendererSceneCaptureResult>
+    inspectScene(input: import('@agentmux/core/control').RendererSceneInspectInput): Promise<import('@agentmux/core/control').RendererSceneInspection>
     captureProfile(input: import('@agentmux/core/control').RendererV8ProfileInput): Promise<import('@agentmux/core/control').RendererV8ProfileResult>
     captureTrace(input: import('@agentmux/core/control').RendererTraceInput): Promise<import('@agentmux/core/control').RendererTraceResult>
   }
