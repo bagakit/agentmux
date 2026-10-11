@@ -28,7 +28,7 @@ async function preview(original: AgentTimelineItem, host: string | null = 'local
 }
 it('the real Focus preview consumes Core observation role and complete body, instead of fabricating an Agent reply', async () => {
   const record = await preview(item({}))
-  expect(document.querySelector('.recent-focus__message-caption')?.textContent).toContain('采集到的回复')
+  expect(document.querySelector('.recent-focus__message-caption')?.textContent).toContain('回复快照')
   expect(document.querySelector('[data-conversation-role="observation"]')?.textContent ?? '').toContain('Complete original contribution')
   expect(document.querySelector('.recent-focus__message-caption')?.textContent).not.toContain('Agent reply')
   expect(record.role).toBe('observation'); expect(record.speaker?.role).toBe('unknown')
@@ -58,5 +58,5 @@ it('the actual Core-to-client-ui-to-Focus body consumes every ordered mixed part
     interactive anchor={anchor} onSelect={() => {}} onClose={() => {}} reader={{ selectionOnly: true, messages: records, loading: false, coverage: 'Exact loaded source window', error: null, onMessage() {} }} />)
   expect(document.querySelector('.recent-focus__message-body')?.textContent).toContain('Complete final ordered part')
   expect(document.querySelectorAll('[data-conversation-record-id]')).toHaveLength(2)
-  expect(document.querySelector('[data-conversation-role="observation"][data-conversation-record-id]')?.getAttribute('aria-label')).toContain('采集到的回复')
+  expect(document.querySelector('[data-conversation-role="observation"][data-conversation-record-id]')?.getAttribute('aria-label')).toContain('回复快照')
 })
