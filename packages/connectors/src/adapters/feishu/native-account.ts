@@ -204,11 +204,12 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
       if (state.phase === 'poll') {
         const body = record(await response.json()), data = record(body?.data), step = record(data?.step_info)
         if (body?.code !== 0 || !data || !Number.isSafeInteger(step?.status)) return { kind: 'unknown' }
+        const polling = data.next_step === null || data.next_step === 'qr_login_polling'
         if (data.next_step === null && step!.status === 5) { state.phase = 'expired'; stage = 'expired' }
         else if (data.next_step === 'enter_app') {
           if (step!.status !== 1 || !text(step!.cross_login_uri)) return { kind: 'unknown' }
           state.url = url(step!.cross_login_uri, ['accounts.feishu.cn']).href; state.phase = 'cross-login'
-        } else if (data.next_step === null && [1, 2].includes(Number(step!.status))) stage = step!.status === 2 ? 'scanned' : 'waiting'
+        } else if (polling && [1, 2].includes(Number(step!.status))) stage = step!.status === 2 ? 'scanned' : 'waiting'
         else return { kind: 'unknown' }
       } else if (state.phase === 'cross-login') { state.phase = 'landing'; state.url = LANDING }
       else if (state.phase === 'landing') { state.phase = 'console'; state.url = CONSOLE }
