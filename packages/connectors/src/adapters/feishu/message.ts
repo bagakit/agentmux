@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionApplication } from '@agentmux/core/connections'
 import type { VerifiedIngressEvent } from '../../durable-ingress.js'
@@ -12,7 +13,7 @@ export type FeishuMessageEvent = {
     message: {
       message_id: string; chat_id: string; chat_type: string; message_type?: unknown; content?: unknown
       parent_id?: string
-      mentions?: { id: { open_id?: string } }[]
+      mentions?: { key?: string; name?: string; id: { open_id?: string } }[]
     }
   }
 }
@@ -58,14 +59,60 @@ export function feishuTextBody(content: string): string {
   return value.text
 }
 
+/** Inbound post at-nodes reference mention keys, not the outbound user-id namespace. */
+function postBody(content: string, mentions: FeishuMessageEvent['event']['message']['mentions'], botOpenId: string): { body: string; mentioned: boolean } {
+  const parsed = object(JSON.parse(content))
+  let post = parsed
+  if (!Array.isArray(post.content)) {
+    const locales = Object.keys(parsed)
+    if (locales.length !== 1 || !['zh_cn', 'en_us', 'ja_jp'].includes(locales[0]!)) feishuFailure('FEISHU_CONTENT_INVALID')
+    post = object(parsed[locales[0]!])
+  }
+  if (Object.keys(post).some(key => !['title', 'content', 'content_v2'].includes(key)) || post.title !== undefined && typeof post.title !== 'string' || !Array.isArray(post.content)) feishuFailure('FEISHU_CONTENT_INVALID')
+  if (post.content_v2 !== undefined && !isDeepStrictEqual(post.content_v2, post.content)) feishuFailure('FEISHU_CONTENT_INVALID')
+  const byKey = new Map<string, NonNullable<typeof mentions>[number]>()
+  for (const mention of mentions ?? []) {
+    if (typeof mention.key !== 'string') continue
+    if (byKey.has(mention.key)) feishuFailure('FEISHU_CONTENT_INVALID')
+    byKey.set(mention.key, mention)
+  }
+  let mentioned = false
+  const paragraphs = post.content.map(paragraph => {
+    if (!Array.isArray(paragraph)) feishuFailure('FEISHU_CONTENT_INVALID')
+    return paragraph.map(value => {
+      const node = object(value)
+      const fields = node.tag === 'text' ? ['tag', 'text', 'style', 'un_escape'] : node.tag === 'a' ? ['tag', 'text', 'href', 'style'] : node.tag === 'at' ? ['tag', 'user_id', 'user_name', 'style'] : []
+      if (!fields.length || Object.keys(node).some(key => !fields.includes(key)) || node.style !== undefined && (!Array.isArray(node.style) || node.style.some(style => !['bold', 'underline', 'lineThrough', 'italic'].includes(style)))) feishuFailure('FEISHU_CONTENT_INVALID')
+      if (node.tag === 'text') {
+        if (typeof node.text !== 'string' || node.un_escape !== undefined && node.un_escape !== false) feishuFailure('FEISHU_CONTENT_INVALID')
+        return node.text
+      }
+      if (node.tag === 'a') {
+        if (typeof node.text !== 'string' || typeof node.href !== 'string' || !node.href) feishuFailure('FEISHU_CONTENT_INVALID')
+        return `[${node.text}](${node.href})`
+      }
+      const key = feishuIdentity(node.user_id), target = byKey.get(key)
+      if (node.user_name !== undefined && typeof node.user_name !== 'string' || target?.name !== undefined && typeof target.name !== 'string') feishuFailure('FEISHU_CONTENT_INVALID')
+      if (target?.id.open_id === botOpenId) mentioned = true
+      return '@' + (node.user_name || target?.name || key)
+    }).join('')
+  })
+  return { body: (post.title ? post.title + '\n' : '') + paragraphs.join('\n'), mentioned }
+}
+
 export function projectFeishuMessage(payload: FeishuMessageEvent, application: ConnectionApplication, botOpenId: string): VerifiedIngressEvent {
   const { message, sender } = payload.event
   if (sender.sender_type !== 'user' || message.chat_type !== 'group') feishuFailure('FEISHU_EVENT_OUTSIDE_SCOPE')
-  let body = '', unsupported = message.message_type !== 'text' || typeof message.content !== 'string'
+  let body = '', mentioned = false, unsupported = message.message_type !== 'text' && message.message_type !== 'post' || typeof message.content !== 'string'
   if (!unsupported) {
-    try { body = feishuTextBody(message.content as string) } catch { unsupported = true }
+    try {
+      if (message.message_type === 'post') ({ body, mentioned } = postBody(message.content as string, message.mentions, botOpenId))
+      else {
+        body = feishuTextBody(message.content as string)
+        mentioned = message.mentions?.some(mention => mention.id.open_id === botOpenId) ?? false
+      }
+    } catch { unsupported = true }
   }
-  const mentioned = message.mentions?.some(mention => mention.id.open_id === botOpenId) ?? false
   return {
     eventId: payload.header.event_id, messageId: message.message_id, externalConversationId: message.chat_id,
     actor: { application: { ...application }, idType: 'open_id', userId: feishuIdentity(sender.sender_id?.open_id) },
