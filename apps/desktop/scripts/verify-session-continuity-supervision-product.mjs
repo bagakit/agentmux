@@ -10,7 +10,7 @@ const at = args.indexOf('--owners'), ownerFile = path.resolve(root, at < 0 ? '.t
 const output = path.resolve(args.find((one, index) => !one.startsWith('--') && (at < 0 || index !== at + 1)) ?? path.join(root, '.tmp/session-continuity-supervision/product'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const producers = [new URL(import.meta.url).pathname, path.join(import.meta.dirname, 'session-supervision-evidence.mjs'),
-  path.join(import.meta.dirname, 'session-capability-evidence.mjs')]
+  path.join(import.meta.dirname, 'session-capability-evidence.mjs'), path.join(import.meta.dirname, 'session-supervision-native-evidence.mjs')]
 const pins = async () => Object.fromEntries(await Promise.all(producers.map(async file => [path.relative(root, file), hash(await readFile(file))])))
 const before = await pins(), receipt = { schema: 'agentmux.continuity-supervision-product-qualification.v1', passed: false, captureOnly, before,
   limitations: ['Private Native protocol fixture, not upstream Provider bootstrap or account-network certification.',
