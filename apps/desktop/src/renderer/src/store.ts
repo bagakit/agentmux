@@ -1,4 +1,7 @@
 import { executorEnvironmentRevision } from '../../shared/executor-probe-context'
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult, sameAgentContinuityControlInput } from '@agentmux/core/agent-session-continuity-control'
+import { continuityControlKey, continuityControlRequests, readContinuityControlIntent, terminalContinuityControlRejection, type ContinuityControlIntents } from './lib/continuity-control-intent'
+import { currentContinuitySupervision } from './lib/continuity-supervision'
 import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
 import { parseConversationLandmarkWrite, type ConversationLandmarkWrite } from '@agentmux/core/conversation'
 import { restoredMoteBotRequests, type MoteBotRequest } from './lib/mote-bot-request'
@@ -843,6 +846,7 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   connectorRoomIntents: Record<string, ConnectorRoomIntent>
+  continuityControlIntents: ContinuityControlIntents
   conversationLandmarkIntents: ConversationLandmarkIntents
   connectorServiceIntents: Record<string, ConnectorServiceIntent>
   /** Current policy is an endpoint-scoped observation, never a durable preference or receipt. */
@@ -1389,6 +1393,8 @@ type AppState = {
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
+  controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core').AgentMuxContinuityControlResult>
+  reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentMuxContinuityControlResult>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
@@ -3138,6 +3144,7 @@ type PersistedAppState = {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   connectorRoomIntents?: Record<string, ConnectorRoomIntent>
+  continuityControlIntents?: ContinuityControlIntents
   conversationLandmarkIntents?: ConversationLandmarkIntents
   connectorServiceIntents?: Record<string, ConnectorServiceIntent>
   moteBotRequests?: Record<string, MoteBotRequest>
@@ -3393,6 +3400,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     connectorRoomIntents: state.connectorRoomIntents,
+    continuityControlIntents: state.continuityControlIntents,
     conversationLandmarkIntents: state.conversationLandmarkIntents,
     connectorServiceIntents: state.connectorServiceIntents,
     moteBotRequests: state.moteBotRequests,
@@ -4252,6 +4260,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   goalAgentSelectionDrafts: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
+  continuityControlIntents: {},
   conversationLandmarkIntents: {},
   connectorServiceIntents: {},
   connectorServiceObservation: null,
@@ -10779,6 +10788,62 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async interrupt(sessionId) {
     const session = get().sessions.find((item) => item.id === sessionId)
     if (session) await api.sessions.interrupt(session.control).catch((error) => get().reportError(error))
+  },
+  async controlSessionContinuity(sessionId, intentOperationId, action, additionalAttempts) {
+    const session = get().sessions.find(item => item.id === sessionId)
+    if (session?.kind !== 'agent' || !workbenchViewCloseAllowsSession(get().closingWorkbenchViews, sessionId) ||
+      !hasAttachedSessionView(get().tabs, sessionId)) throw new Error('The original Agent workface is no longer open. No recovery control was sent.')
+    const original = currentContinuitySupervision(session)
+    if (original?.root.operationId !== intentOperationId || original.targetChanged) throw new Error('The original recovery intent changed. Re-read its current facts before choosing a control.')
+    const key = continuityControlKey(session.hostId, sessionId)
+    const scope = continuityControlRequests(get().continuityControlIntents[key], session.hostId, sessionId)
+    if (action === 'continue' && scope.some(item => !item.intent || !item.intent.rejection && item.intent.request.intentOperationId === intentOperationId && item.intent.request.action === 'continue')) {
+      throw new Error('An original continuation control is unconfirmed. Check that same request before adding another budget. Independent cancellation remains available.')
+    }
+    const cancellation = action === 'cancel' ? scope.find(item => item.intent && !item.intent.rejection && item.intent.request.intentOperationId === intentOperationId && item.intent.request.action === 'cancel') : undefined
+    if (cancellation) return await get().reconcileSessionContinuityControl(session.hostId, sessionId, cancellation.operationId)
+    const request = parseAgentContinuityControlInput({ agentSessionId: sessionId, intentOperationId,
+      expectedRun: { ...session.control.run }, operationId: crypto.randomUUID(), action,
+      ...(action === 'continue' ? { additionalAttempts } : {}) })
+    set(state => ({ continuityControlIntents: { ...state.continuityControlIntents, [key]: { ...state.continuityControlIntents[key], [request.operationId]: { hostId: session.hostId, request } } } }))
+    return await get().reconcileSessionContinuityControl(session.hostId, sessionId, request.operationId)
+  },
+  async reconcileSessionContinuityControl(hostId, sessionId, operationId) {
+    const key = continuityControlKey(hostId, sessionId)
+    const read = readContinuityControlIntent(get().continuityControlIntents[key]?.[operationId], hostId, sessionId, operationId)
+    if (!read.intent) throw new Error(read.issue ?? 'No original recovery control is retained.')
+    const original = read.intent, request = structuredClone(original.request)
+    let ownerRejection: ReturnType<typeof terminalContinuityControlRejection>
+    try {
+      // Rehydration can replace the in-memory projection without scheduling a write.
+      // Commit this exact original packet again before dispatch, preserving sibling authorizations.
+      set(state => ({ continuityControlIntents: { ...state.continuityControlIntents,
+        [key]: { ...state.continuityControlIntents[key], [operationId]: original } } }))
+      await flushMessageWorkbench(false)
+      let reply: Awaited<ReturnType<typeof api.sessions.controlContinuity>>
+      try { reply = await api.sessions.controlContinuity(hostId, request) }
+      catch (error) { ownerRejection = terminalContinuityControlRejection(error); throw error }
+      if (reply.hostId !== hostId) throw new Error('Recovery control returned another Host route. The original request remains unconfirmed.')
+      const result = parseAgentContinuityControlResult(reply.result, request)
+      set(state => {
+        const current = readContinuityControlIntent(state.continuityControlIntents[key]?.[operationId], hostId, sessionId, operationId).intent
+        if (!current || !sameAgentContinuityControlInput(current.request, request)) return state
+        const continuityControlIntents = { ...state.continuityControlIntents }, scope = { ...continuityControlIntents[key] }; delete scope[operationId]
+        if (Object.keys(scope).length) continuityControlIntents[key] = scope; else delete continuityControlIntents[key]
+        return { continuityControlIntents }
+      })
+      // The Core receipt settles the control independently of presentation. The original
+      // canonical reader owns View/close/Run adoption and preserves healthy input on read failure.
+      if (result.state === 'active') await get().refreshSession(sessionId).catch(() => {})
+      return result
+    } catch (error) {
+      set(state => {
+        const current = readContinuityControlIntent(state.continuityControlIntents[key]?.[operationId], hostId, sessionId, operationId).intent
+        if (!current || !sameAgentContinuityControlInput(current.request, request)) return state
+        return { continuityControlIntents: { ...state.continuityControlIntents, [key]: { ...state.continuityControlIntents[key], [operationId]: { ...current, issue: presentError(error), ...(ownerRejection ? { rejection: ownerRejection } : {}) } } } }
+      })
+      throw error
+    }
   },
   async refreshSession(sessionId) {
     const before = get()
