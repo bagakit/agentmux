@@ -1421,6 +1421,7 @@ export class RuntimeController {
     const result = await host.client.sessionHistoryResource(control.agentSessionId, {
       source: input.source, recordId: input.recordId, partIndex: input.partIndex, expectedReference: input.expectedReference,
       ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+      ...(input.offsetBytes === undefined ? {} : { offsetBytes: input.offsetBytes }),
       ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
       ...executor
     })
