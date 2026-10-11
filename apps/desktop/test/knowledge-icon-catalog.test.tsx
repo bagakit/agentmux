@@ -16,7 +16,7 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 vi.mock('../src/renderer/src/monaco', () => ({}))
 const dom = composerDOM(), customPath = 'M4 4H20V20H4Z'
 const roleGlyphs = { 'navigation.goals': 'goal-consensus', 'object.goal': 'goal-consensus', 'navigation.survey': 'survey-explore', 'object.survey': 'survey-explore', 'object.note': 'note-page' } as const
-const parts = { 'goal-consensus': 'agreement-line', 'survey-explore': 'survey-reflection', 'note-page': 'note-content' } as const
+const parts = { 'goal-consensus': 'agreement-flag', 'survey-explore': 'survey-reflection', 'note-page': 'note-content' } as const
 let release: () => void
 beforeEach(() => {
   release = mountThemeRuntime(window, { appAppearance: 'light' })
