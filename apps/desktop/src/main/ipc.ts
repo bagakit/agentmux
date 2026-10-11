@@ -1,6 +1,7 @@
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
+import { RendererMemoryInspector } from './renderer-memory.js'
 import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
 import { RendererTimelineTracer } from './renderer-trace.js'
 import { ConversationLandmarkStore } from '@agentmux/core'
@@ -505,8 +506,9 @@ export async function registerIpc(args: {
     return processMetric && processMetric.creationTime > 0 ? { ...window, pid, creationTime: processMetric.creationTime } : null
   }
   const profiler = new RendererV8Profiler(contents, currentRendererCaptureTarget)
+  const memory = new RendererMemoryInspector(contents, currentRendererCaptureTarget)
   const tracer = new RendererTimelineTracer(contents, currentRendererCaptureTarget)
-  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer })
+  const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory })
   const closeMetrics = () => metrics.dispose()
   contents.once('destroyed', closeMetrics)
   const disposeProgressInput = args.runtime.setContinuousProgressInputObserver(async (control, signal) => {

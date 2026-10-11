@@ -1,10 +1,9 @@
 import { hostname } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import {
-  parseMetricsRendererResult, type AgentMuxMetricsPort, type MetricsObservation,
+  AgentMuxError, parseMetricsRendererResult, type AgentMuxMetricsPort, type MetricsObservation,
   type MetricsWindow, type MetricsSource, type MetricsRenderer
 } from '@agentmux/core/control'
-import { AgentMuxError } from '@agentmux/core'
 import type { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import type { ProcessResourceSampler, ResourceSample } from './process-resource-sampler.js'
 
@@ -17,11 +16,16 @@ function source<T>(data: T | null, observedAt: number | null, reason: string | n
 export function createResourceMetricsPort(args: {
   sampler: ProcessResourceSampler; currentWindow(): MetricsWindow | null; now?: () => number
   profiler?: { capture: NonNullable<AgentMuxMetricsPort['captureProfile']>; dispose(): void }
+  memory?: { inspect: NonNullable<AgentMuxMetricsPort['inspectMemory']>; dispose(): void }
   tracer?: { capture: NonNullable<AgentMuxMetricsPort['captureTrace']>; dispose(): void }
 }): AgentMuxMetricsPort & { dispose(): void } {
   const consumers = new Set<() => void>()
   let disposed = false
   return {
+    ...(args.memory ? { inspectMemory: (async (input, signal) => {
+      if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      return args.memory!.inspect(input, signal)
+    }) satisfies NonNullable<AgentMuxMetricsPort['inspectMemory']> } : {}),
     ...(args.tracer ? { captureTrace: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       return args.tracer!.capture(input, signal)
@@ -75,6 +79,7 @@ export function createResourceMetricsPort(args: {
       if (disposed) return
       disposed = true
       args.profiler?.dispose()
+      args.memory?.dispose()
       args.tracer?.dispose()
       for (const close of [...consumers]) close()
     }

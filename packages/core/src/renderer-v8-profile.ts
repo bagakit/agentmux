@@ -47,11 +47,16 @@ export function sameRendererV8ProfileTarget(a: RendererV8ProfileTarget, b: Rende
   return a.windowId === b.windowId && a.webContentsId === b.webContentsId && a.generation === b.generation &&
     a.pid === b.pid && a.creationTime === b.creationTime
 }
+export function parseRendererV8Target(value: unknown, code = 'INVALID_CONTROL_REQUEST'): RendererV8ProfileTarget {
+  const t = fields(value, ['windowId', 'webContentsId', 'generation', 'pid', 'creationTime'], code)
+  if (!positive(t.windowId) || !positive(t.webContentsId) || !count(t.generation) || !positive(t.pid) ||
+    !numeric(t.creationTime) || t.creationTime <= 0) invalid(code)
+  return t as RendererV8ProfileTarget
+}
 export function parseRendererV8ProfileInput(value: unknown, code = 'INVALID_CONTROL_REQUEST'): RendererV8ProfileInput {
   const r = fields(value, ['target', 'durationMs'], code)
-  const t = fields(r.target, ['windowId', 'webContentsId', 'generation', 'pid', 'creationTime'], code)
-  if (!positive(t.windowId) || !positive(t.webContentsId) || !count(t.generation) || !positive(t.pid) ||
-    !numeric(t.creationTime) || t.creationTime <= 0 || !count(r.durationMs) || r.durationMs < 1000 || r.durationMs > 5000) invalid(code)
+  parseRendererV8Target(r.target, code)
+  if (!count(r.durationMs) || r.durationMs < 1000 || r.durationMs > 5000) invalid(code)
   return r as unknown as RendererV8ProfileInput
 }
 

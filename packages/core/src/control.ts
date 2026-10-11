@@ -20,6 +20,7 @@ import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDe
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
 export * from './browser-task-control.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
+import type { RendererMemoryInput, RendererMemoryResult } from './renderer-memory.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
 import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
 export * from './metrics.js'
@@ -245,7 +246,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
-export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client'; conversation?: ConversationConsumerQuery }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
@@ -749,6 +750,7 @@ export type AgentMuxControlResult =
   | { operation: 'metrics.get'; observation: MetricsObservation }
   | { operation: 'metrics.watch' }
   | { operation: 'metrics.profile.capture'; capture: RendererV8ProfileResult }
+  | { operation: 'metrics.memory.inspect'; observation: RendererMemoryResult }
   | { operation: 'metrics.trace.capture'; capture: RendererTraceResult }
   | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
@@ -1010,6 +1012,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'toolkit.watch': 'short',
   'metrics.get': 'short',
   'metrics.watch': 'short',
+  'metrics.memory.inspect': 'short',
   'metrics.profile.capture': 'long',
   'metrics.trace.capture': 'long',
   'inspect.client': 'short',

@@ -475,6 +475,8 @@ system doctor/storage/crash-log/metrics keep source identity, observation time a
 coverage. Use current help to discover exact reader contracts and authorization.
 
 Metrics watch owns a reader; cancellation detaches that reader and never stops an Agent.
+For explicit Renderer heap/backing counters, use system metrics memory inspect --help;
+that original command defines exact target, unknown coverage and debugger ownership boundaries.
 Crash-log reveal is a separate presentation action, not a recovery. Missing diagnostics
 remain unavailable/unknown, not proof that a healthy Run died or that a save succeeded.
 Retain the original failure, operation and recovery path; do not restart or replace original
