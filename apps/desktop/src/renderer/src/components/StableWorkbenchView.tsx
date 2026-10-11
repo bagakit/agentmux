@@ -160,9 +160,11 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     return element
   })
   const [placedHostId, setPlacedHostId] = useState(homeId)
-  const [windowPlacement, setWindowPlacement] = useState<WorkbenchWindowPlacement | null>(null)
+  const [placementRequest, setWindowPlacement] = useState<{ placement: WorkbenchWindowPlacement | null; revision: number }>({ placement: null, revision: 0 })
+  const windowPlacement = placementRequest.placement
+  const placementRevision = useRef(0)
   const [hostDocument, setHostDocument] = useState(host.ownerDocument)
-  const placementWaiters = useRef<Array<{ resolve(): void; reject(error: Error): void }>>([])
+  const placementWaiters = useRef<Array<{ placement: WorkbenchWindowPlacement | null; resolve(): void; reject(error: Error): void }>>([])
   const frozenTarget = useRef<AppWindowTarget | null>(null)
   const originalTarget = useMemo<AppWindowTarget | null>(() => frozenTarget.current ?? (reference && (kind === 'region' ? nativeRegionId : primaryTabId)
     ? kind === 'region' ? { kind: 'region', displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: nativeRegionId! }
@@ -172,7 +174,9 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
     if (!originalTarget) return
     return registerWorkbenchHost({ target: originalTarget, host, place: placement => new Promise<void>((resolve, reject) => {
       frozenTarget.current = placement ? originalTarget : null
-      placementWaiters.current.push({ resolve, reject }); setWindowPlacement(placement)
+      placementWaiters.current.push({ placement, resolve, reject })
+      // An equal desired value still requires its own physical placement commit.
+      setWindowPlacement({ placement, revision: ++placementRevision.current })
     }) })
   }, [originalTarget, host])
   useLayoutEffect(() => () => { for (const waiter of placementWaiters.current.splice(0)) waiter.reject(new Error('Original workface host departed before placement confirmation.')) }, [])
@@ -202,6 +206,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   useLayoutEffect(() => {
     const destinationId = windowPlacement?.destination.id ?? targetId ?? homeId
     const attach = () => {
+      if (placementRequest.revision !== placementRevision.current) return false
       // A Region's exact home is its sibling slot, including while its parent
       // View is being reparented. It need not wait in inert parking for body lookup.
       const siblingHome = kind === 'region' && targetId === null
@@ -243,10 +248,17 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       }
       setHostDocument(host.ownerDocument)
       setPlacedHostId(destinationId)
-      if (placementWaiters.current.length) {
-        const waiters = placementWaiters.current.splice(0)
+      if (placementWaiters.current.length && hostDocument === host.ownerDocument && placedHostId === destinationId) {
         // A committed DOM placement is applied even when its document cannot paint.
-        queueMicrotask(() => { for (const waiter of waiters) waiter.resolve() })
+        queueMicrotask(() => {
+          if (placementRequest.revision !== placementRevision.current || host.parentElement !== destination || host.ownerDocument !== hostDocument) return
+          for (const waiter of placementWaiters.current.splice(0)) {
+            if (waiter.placement?.destination === windowPlacement?.destination &&
+              waiter.placement?.window.windowId === windowPlacement?.window.windowId &&
+              waiter.placement?.window.documentGeneration === windowPlacement?.window.documentGeneration) waiter.resolve()
+            else waiter.reject(new Error('A later placement replaced this original workface placement before confirmation.'))
+          }
+        })
       }
       // Confirm the actual placement before describing it. Pending targets retain
       // the original View; a destination hint alone does not prove it moved.
