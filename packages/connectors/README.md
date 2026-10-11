@@ -728,6 +728,7 @@ Connection revision, application and goal before the native request.
 
 ```sh
 amux connection setup begin --input management-request.json
+amux connection setup advance --input original-action.json
 amux connection setup inspect --operation-id management-confirmation
 amux connection setup ls --connection saved-bot
 ```
@@ -744,25 +745,56 @@ The begin input is:
 ```
 
 The native Feishu leaf issues one raw QR authentication challenge. Its payload,
-flow key and response cookie evidence are encrypted through the original secret
-port; safe durable records and list results contain only the request and secure
-handoff facts. Begin and inspect reveal active confirmation material only to the
-original transport-approved actor. Present that result only on the original
-confirmation surface and redact ordinary logs. Inspect and list perform local
-reads; a changed bot revision withholds the old challenge while preserving its
-original request.
+flow key, cookies, console CSRF and account/enterprise identity are encrypted
+through the original secret port. Safe durable records and list results contain
+only request, authentication-stage and secure-handoff facts. Begin and inspect
+reveal active confirmation material only to the original transport-approved actor.
+Present it only on that confirmation surface and redact ordinary logs. Inspect
+and list perform local reads; a changed bot revision withholds the old challenge
+and account while preserving the original request.
 
 A repeated begin with the same input reads that original result or reconciles its
 original local secure handoff. Unknown native requests are not replayed. Paused
 bots and disabled automatic traffic retain explicit management access. The
 request ACK, secure handoff and active challenge remain separate facts.
 
-This slice provides authentication init and durable lookup. Login confirmation,
-app-management eligibility, configuration and publication require their own
-qualified continuation; no `setup advance` method is registered yet. Lark keeps
-its original device-registration route. Settings continues to use its existing
-creation and saved-connection flow until the combined confirmation journey is
-implemented and visually reviewed.
+Use `continuation.actions` to choose the next original action. Copy its exact
+`actionId` **and its own `expectedRevision`**, including when recovering a lost
+secure-store ACK. The advance input is:
+
+```json
+{
+  "operationId": "management-confirmation",
+  "expectedRevision": 4,
+  "decision": { "actionId": "returned-original-action", "value": "continue" }
+}
+```
+
+`continue` performs at most one claimed HTTP request, including one redirect hop.
+Known waiting/scanned status permits a new observation action. Phone scanning,
+login handoff and the exact account/enterprise confirmation are separate stages.
+For a returned `confirm-account` action, use `value: "confirm"`; only that explicit
+original confirmation marks this management session confirmed. It does not prove
+saved-application management permission or tenant membership.
+
+A repeated advance reads its original receipt or finishes only its original local
+encrypted handoff. It never repeats the claimed native request, including after
+an executing-owner process restart. Explicit `renew` abandons the current
+authentication and requests a new challenge inside the same intent. The old init,
+step receipts and encrypted snapshots remain retained; renewal never creates an
+application. Private cookies are selected anew by a mature CookieJar for each
+qualified HTTPS destination. The supported console encodings are direct literal
+assignments and the observed anonymous, synchronous, zero-argument literal
+initializer. Both are parsed without executing page JavaScript; arbitrary
+programs, missing stable IDs, inert or conflicting responses stay unknown. The
+public console response establishes the initializer syntax only: its empty user
+object does not establish a logged-in account or enterprise.
+
+App-management eligibility, configuration and publication remain unimplemented
+continuations. This reference-native Feishu authentication is not live tenant
+qualification; Lark keeps its original device-registration route. Settings still
+uses its existing creation and saved-connection flow until the combined
+confirmation journey is implemented and visually reviewed.
 
 ## Application enrollment
 
