@@ -76,7 +76,7 @@ it('actual App popover sends its exact target through product preload and regist
   expect(node('[aria-label="Sampled call stacks"]').textContent).toContain('renderWorkspace')
   await click('.performance-module-row')
   expect(node('.performance-frame-detail').textContent).toContain('app://renderer/')
-  await click('.performance-inline-action'); expect(node('.performance-frame-detail').textContent).toContain('(root)')
+  await click('.performance-capture-result .performance-inline-action'); expect(node('.performance-frame-detail').textContent).toContain('(root)')
   expect(node('[aria-label="Capture result"]').textContent).toContain('completed')
 })
 
