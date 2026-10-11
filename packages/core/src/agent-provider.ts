@@ -38,6 +38,8 @@ import type {
   AgentPromptExecutionEvidence,
   AgentProviderSessionStatus,
   AgentNativePromptPredecessor,
+  AgentPrivateNativeActor,
+  AgentNativePromptInputPlan,
   AgentHookReceipt,
   AgentTerminalScreenSnapshot,
   AgentProviderLaunchContext,
@@ -117,6 +119,14 @@ export type AgentProviderPreparedPromptTransport = Readonly<{
 }>
 
 export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionContext & { signal: AbortSignal }
+export type AgentProviderManagedLaunch = { plan: AgentLaunchPlan; nativeActor?: AgentPrivateNativeActor }
+export type AgentProviderNativeInputContext = { processId: number; nativeActor: AgentPrivateNativeActor; workspacePath: string; signal: AbortSignal }
+export type AgentProviderPreparedNativeInput = {
+  plan: AgentNativePromptInputPlan
+  /** Called only after Core persists the original claim and correlation. */
+  send(prompt: string, plan: AgentNativePromptInputPlan): Promise<{ outcome: 'admitted'; turnId: string } | { outcome: 'not-applied'; errorCode: number }>
+  dispose(): void
+}
 export type AgentProviderSessionStatusObservationContext = AgentProviderSessionStatusContext & {
   onStatus(status: AgentProviderSessionStatus): void
   onUnavailable(code: string, message: string): void
@@ -153,6 +163,9 @@ export type AgentProvider = {
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
   buildForkLaunch?(context: AgentProviderForkContext): AgentLaunchPlan
+  /** Original executable has already been probed; this final plan also enters original lifecycle preparation. */
+  prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
+  prepareNativeInput?(context: AgentProviderNativeInputContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string }): Promise<AgentProviderPreparedNativeInput>
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
@@ -204,6 +217,8 @@ export type AgentProviderDefinition = {
     prompt: string | undefined,
     args: readonly string[]
   ) => string[]
+  prepareManagedLaunch?: AgentProvider['prepareManagedLaunch']
+  prepareNativeInput?: AgentProvider['prepareNativeInput']
   planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution }) => AgentPromptInputPlan
   inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
   inspectPromptPreparationWait?: AgentProvider['inspectPromptPreparationWait']
@@ -360,6 +375,8 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     executable: catalog.executable,
     catalog,
     hook: definition.hook,
+    ...(definition.prepareManagedLaunch ? { prepareManagedLaunch: definition.prepareManagedLaunch } : {}),
+    ...(definition.prepareNativeInput ? { prepareNativeInput: definition.prepareNativeInput } : {}),
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),

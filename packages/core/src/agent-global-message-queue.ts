@@ -326,7 +326,7 @@ export class DurableAgentMuxMessageQueue {
     if (record.kind === 'input-intent') {
       const intent = record.intent, key = validateAgentPromptInputKey(intent.key)
       const admissionIntent = validateAgentPromptAdmissionIntent(intent.admissionIntent)
-      if (intent.execution !== 'immediate' || admissionIntent.kind !== 'manual-actor' || admissionIntent.expectedRun.runId !== key.expectedRun.runId) {
+      if (intent.execution !== 'immediate' || admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== key.expectedRun.runId) {
         throw new AgentMuxError('Controlled input must preserve its explicit direct intent.', 'INVALID_AGENT_INPUT_CONTROL')
       }
       finiteTimestamp(record.at, 'Input acceptance time')
@@ -345,7 +345,7 @@ export class DurableAgentMuxMessageQueue {
         if (key.kind !== 'message' || key.messageId !== intent.source.messageId || !message ||
             message.envelope.operationId !== intent.source.originalControlOperationId ||
             message.envelope.recipientSessionId !== key.agentSessionId || message.envelope.recipientRunId !== key.expectedRun.runId ||
-            message.admissionIntent?.kind !== 'manual-actor') throw new AgentMuxError('Original message intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
+            !isDeepStrictEqual(message.admissionIntent, admissionIntent)) throw new AgentMuxError('Original message intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
       } else throw new AgentMuxError('Original input producer is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
       this.db.prepare('INSERT INTO input_intents VALUES (?, ?, ?, ?)').run(agentInputJournalKey(key), key.agentSessionId, record.sequence, record.sequence)
       return
@@ -381,7 +381,7 @@ export class DurableAgentMuxMessageQueue {
     return this.withLock(async () => {
       const key = validateAgentPromptInputKey(intent.key), existing = this.input(key)
       if (existing) {
-        if (!isDeepStrictEqual(existing.intent.source, intent.source)) throw new AgentMuxError('Input identity already names another original content or author.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+        if (!isDeepStrictEqual(existing.intent.source, intent.source) || !isDeepStrictEqual(existing.intent.admissionIntent, intent.admissionIntent) || existing.intent.execution !== intent.execution) throw new AgentMuxError('Input identity already names another original content, author or target intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
         return existing
       }
       if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key))) return null
@@ -586,7 +586,7 @@ export class DurableAgentMuxMessageQueue {
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
       if (record.admissionIntent !== undefined) {
         const intent = validateAgentPromptAdmissionIntent(record.admissionIntent)
-        if (intent.kind !== 'manual-actor' || record.execution !== 'immediate' || envelope.recipientRunId !== intent.expectedRun.runId) throw new AgentMuxError('Message manual intent changed its original Run or execution.', 'MESSAGE_QUEUE_UNAVAILABLE')
+        if (intent.kind === 'exact-condition' || record.execution !== 'immediate' || envelope.recipientRunId !== intent.expectedRun.runId) throw new AgentMuxError('Message manual intent changed its original Run or execution.', 'MESSAGE_QUEUE_UNAVAILABLE')
       }
       if (record.promptCondition !== undefined && record.promptCondition !== null) throw new AgentMuxError('Message initial condition is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       if (record.sourceChannel !== undefined) normalizeMessageChannel(record.sourceChannel)
@@ -700,7 +700,7 @@ export class DurableAgentMuxMessageQueue {
         ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
       await this.appendRecord(record)
       if (newMessage?.inputEnvironment !== undefined && (!newMessage.originalClaimAbsent || await newMessage.originalClaimAbsent())) {
-        if (frozenIntent?.kind !== 'manual-actor' || execution !== 'immediate' || !envelope.recipientSessionId || !envelope.recipientRunId) {
+        if (!frozenIntent || frozenIntent.kind === 'exact-condition' || execution !== 'immediate' || !envelope.recipientSessionId || !envelope.recipientRunId) {
           throw new AgentMuxError('Controlled message requires its explicit original direct intent.', 'INVALID_AGENT_INPUT_CONTROL')
         }
         const key = { kind: 'message' as const, agentSessionId: envelope.recipientSessionId, expectedRun: { runId: envelope.recipientRunId }, messageId }

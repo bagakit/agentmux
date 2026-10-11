@@ -107,7 +107,7 @@ type AgentMuxLifecycleReservationBase = {
 /** Prepared before start; no Run or input is invented for this durable creation seed. */
 export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
   'kind' | 'agentSessionId' | 'providerId' | 'executorId' | 'hostId' | 'workspacePath' | 'hookBindingId' | 'hookToken' |
-  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions'>
+  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor'>
 
 export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
   | { kind: 'create'; preparedCreation?: AgentMuxPreparedCreation; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
@@ -1339,7 +1339,7 @@ function creationFact(value: unknown): NonNullable<AgentMuxAgentSession['creatio
 function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   const p = record(value, 'prepared creation')
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
-    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
+    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
   const creation = creationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
   if (!creation.intentDigest || creation.persistence || creation.failure || creation.agentMuxContext !== 'unknown' ||
     forkedFrom && forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared creation intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
@@ -1348,6 +1348,7 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
     hookBindingId: string(p.hookBindingId, 'hookBindingId'), hookToken: string(p.hookToken, 'hookToken'), capabilityHash: string(p.capabilityHash, 'capabilityHash'),
     createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, ...(forkedFrom ? { forkedFrom } : {}),
     ...(p.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(p.nativeHandle) }),
+    ...(p.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(p.nativeActor) }),
     ...(p.launchOptions === undefined ? {} : { launchOptions: launchOptionSelection(p.launchOptions) }) }
 }
 
@@ -1615,9 +1616,19 @@ function nativeTurnEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession[
     })) }
 }
 
+function normalizePrivateNativeActor(value: unknown): import('./types.js').AgentPrivateNativeActor {
+  const v = record(value, 'private native actor')
+  const launch = record(v.launch, 'original Provider launch')
+  if (Object.keys(v).some(k => !['protocolId', 'actorId', 'lifecycleOperationId', 'token', 'launch'].includes(k)) || typeof v.token !== 'string' || !/^[a-f0-9]{64}$/u.test(v.token) ||
+      Object.keys(launch).some(k => k !== 'command' && k !== 'args') || !Array.isArray(launch.args) || launch.args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new AgentMuxError('Invalid private native actor.', 'INVALID_AGENT_SESSION_STORE')
+  return { protocolId: string(v.protocolId, 'native protocol'), actorId: string(v.actorId, 'native actor'), lifecycleOperationId: string(v.lifecycleOperationId, 'native lifecycle'), token: v.token,
+    launch: { command: string(launch.command, 'original Provider command', MAX_PATH_BYTES), args: [...launch.args] as string[] } }
+}
+
 export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
   const source = record(value, 'Agent Session')
   return { ...normalizeAgentSession(source),
+    ...(source.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(source.nativeActor) }),
     ...(source.continuityExecutors === undefined ? {} : { continuityExecutors: structuredClone(source.continuityExecutors) }),
     ...(source.nativeTurnEnds === undefined ? {} : { nativeTurnEnds: nativeTurnEnds(source.nativeTurnEnds) }),
     ...(source.interactionOperations === undefined ? {} : { interactionOperations: Object.fromEntries(Object.entries(record(source.interactionOperations, 'interaction operations')).map(([id, receipt]) => {

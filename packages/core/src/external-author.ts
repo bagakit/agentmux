@@ -20,6 +20,7 @@ export type AgentExternalMessageAuthor = {
 }
 export type AgentExternalInputIntent = {
   agentSessionId: string; expectedRun: { runId: string }; operationId: string; messageId: string; body: string
+  admissionIntent?: import('./agent-prompt-condition.js').AgentPromptAdmissionIntent
 }
 
 /** Original Host-owned claim/current-authority reader. Never serialized or inferred from a wire author. */

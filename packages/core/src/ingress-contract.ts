@@ -26,6 +26,8 @@ export type ConnectionIngressMessage = {
   input?: {
     hostId: string; agentSessionId: string; expectedRun: { runId: string }
     operationId: string; messageId: string; author: AgentExternalMessageAuthor
+    /** Original first claim only; missing historical intent is unknown and never reconstructed. */
+    admissionIntent?: Exclude<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'exact-condition' }>
   }
 }
 /** Authenticated native action intake. An opaque reference locates an original intent, never authority. */

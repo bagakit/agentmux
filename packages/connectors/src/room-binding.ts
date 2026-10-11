@@ -188,11 +188,11 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         const connection = this.connection(input), current = this.readCurrent(input.bindingId) ?? this.matching('session', input)
         if (current) {
           if (current.state !== 'active') refuse('ROOM_BINDING_PAUSED')
-          if (current.connectionId !== input.connectionId || current.executionHostId !== input.executionHostId || current.agentSessionId !== input.agentSessionId || current.externalConversationId !== input.externalConversationId || !equal(current.scope, input.scope) || current.sourceCheckpoints.some(c => !equal(c.source, input.expectedSource))) refuse('ROOM_BINDING_MAPPING_CONFLICT')
+          if (current.connectionId !== input.connectionId || current.executionHostId !== input.executionHostId || current.agentSessionId !== input.agentSessionId || current.externalConversationId !== input.externalConversationId || !equal(current.scope, input.scope) || !equal(current.inputTarget, input.inputTarget) || current.sourceCheckpoints.some(c => !equal(c.source, input.expectedSource))) refuse('ROOM_BINDING_MAPPING_CONFLICT')
           return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding: current, reused: true })
         }
         this.conflicts(input, input.bindingId)
-        const binding: RoomBinding = { bindingId: input.bindingId, revision: 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
+        const binding: RoomBinding = { bindingId: input.bindingId, revision: 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
         this.writeBinding(binding)
         return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding })
       })
@@ -212,7 +212,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         const connection = this.connection(input), current = this.readCurrent(input.bindingId)
         if (!current || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         this.conflicts(input, input.bindingId)
-        const binding: RoomBinding = { ...current, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
+        const { inputTarget: _previousInputTarget, ...previous } = current
+        const binding: RoomBinding = { ...previous, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
         this.writeBinding(binding)
         return this.finish({ operationId: input.operationId, action: 'relink', state: 'applied', binding })
       })

@@ -236,6 +236,7 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
   'agent.input.stop': { ref: import('./agent-input-wait.js').AgentInputWaitRef; cancelOperationId: string }
   'agent.input.rejoin': { ref: import('./agent-input-wait.js').AgentInputWaitRef }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
+    admissionIntent?: Extract<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'native-conversation' }>;
     execution?: AgentPromptExecution; expectedRun?: import('./types.js').AgentMuxRunRef; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }

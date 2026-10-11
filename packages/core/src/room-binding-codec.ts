@@ -2,6 +2,8 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseNativeConversationCheckpoint } from './session-history-changes.js'
 import { parseConversationCheckpoint } from './conversation-changes.js'
+import { validateAgentDirectedPromptTarget } from './agent-prompt-condition.js'
+import { dequal } from 'dequal'
 import type { ConnectionActor, ConnectionApplication, ConnectionGrant } from './connections-contract.js'
 import type { RoomBinding, RoomBindingAuthority, RoomBindingMethod, RoomBindingOperation, RoomBindingParamsMap, RoomBindingResultMap, RoomBindingScope } from './room-binding-contract.js'
 
@@ -14,6 +16,11 @@ function id(value: unknown): string { const result = text(value); if (!/^[A-Za-z
 function revision(value: unknown): number { if (!Number.isSafeInteger(value) || Number(value) < 1) fail(); return value as number }
 export function parseConnectionApplication(value: unknown): ConnectionApplication { const p = object(value, ['domain', 'appId']), domain = text(p.domain); if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail(); return { domain, appId: id(p.appId) } }
 function source(value: unknown) { const p = object(value, ['providerId', 'nativeSessionId']); return { providerId: text(p.providerId), nativeSessionId: text(p.nativeSessionId) } }
+function inputTarget(value: unknown): import('./room-binding-contract.js').RoomBindingInputTarget {
+  const target = validateAgentDirectedPromptTarget(value)
+  if (target.kind === 'native-conversation' && !Object.hasOwn(value as object, 'expectedTurnId')) return { kind: target.kind, source: target.source }
+  return fail()
+}
 function scope(value: unknown): RoomBindingScope {
   const p = object(value, ['input', 'publication'])
   if ((p.input !== 'mentions-and-replies' && p.input !== 'all-messages') ||
@@ -32,13 +39,13 @@ export function parseConnectionGrant(value: unknown): ConnectionGrant {
   return { grantId: id(p.grantId), revision: revision(p.revision), bindingId: id(p.bindingId), bindingRevision: revision(p.bindingRevision), connectionId: id(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), state: p.state as ConnectionGrant['state'], capabilities: capabilities(p.capabilities) }
 }
 export function parseRoomBinding(value: unknown): RoomBinding {
-  const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'executionHostId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'sourceFrontier', 'authorizedBy'])
+  const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'inputTarget', 'executionHostId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'sourceFrontier', 'authorizedBy'])
   if (p.state !== 'active' && p.state !== 'paused' || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length < 1 || p.sourceCheckpoints.length > 32) fail()
   const t = target(p), checkpoints = (p.sourceCheckpoints as unknown[]).map(parseNativeConversationCheckpoint)
   if (checkpoints.some(c => c.agentSessionId !== t.agentSessionId) || new Set(checkpoints.map(c => JSON.stringify(c.source))).size !== checkpoints.length) fail()
   const frontier = p.sourceFrontier === undefined ? undefined : parseConversationCheckpoint(p.sourceFrontier, { hostId: t.executionHostId, agentSessionId: t.agentSessionId })
   if (frontier && (frontier.frontier.cuts.filter(c => c.kind === 'native').length !== checkpoints.length || checkpoints.some(c => !frontier.frontier.cuts.some(cut => cut.kind === 'native' && JSON.stringify(cut.checkpoint) === JSON.stringify(c))))) fail()
-  return { ...t, bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), sourceCheckpoints: checkpoints, ...(frontier ? { sourceFrontier: frontier } : {}), authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
+  return { ...t, bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), ...(p.inputTarget === undefined ? {} : { inputTarget: inputTarget(p.inputTarget) }), sourceCheckpoints: checkpoints, ...(frontier ? { sourceFrontier: frontier } : {}), authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
 }
 export function parseRoomBindingOperation(value: unknown): RoomBindingOperation {
   const p = object(value, ['operationId', 'action', 'state', 'binding', 'grant', 'reused', 'code'])
@@ -67,8 +74,8 @@ export function parseRoomBindingParams<M extends RoomBindingMethod>(method: M, v
     if (p.state !== 'active' && p.state !== 'revoked') fail()
     return { operationId: id(p.operationId), bindingId: id(p.bindingId), expectedBindingRevision: revision(p.expectedBindingRevision), grantId: id(p.grantId), expectedRevision: p.expectedRevision === null ? null : revision(p.expectedRevision), actor: parseConnectionActor(p.actor), capabilities: capabilities(p.capabilities), state: p.state as ConnectionGrant['state'] } as RoomBindingParamsMap[M]
   }
-  const p = object(value, ['operationId', 'bindingId', 'connectionId', 'expectedConnectionRevision', 'externalConversationId', 'scope', 'expectedSource', 'executionHostId', 'agentSessionId', 'regionAnchor', ...(method === 'connection.binding.relink' ? ['expectedRevision'] : [])])
-  return { ...target(p), operationId: id(p.operationId), bindingId: id(p.bindingId), connectionId: id(p.connectionId), expectedConnectionRevision: revision(p.expectedConnectionRevision), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), expectedSource: source(p.expectedSource), ...(method === 'connection.binding.relink' ? { expectedRevision: revision(p.expectedRevision) } : {}) } as RoomBindingParamsMap[M]
+  const p = object(value, ['operationId', 'bindingId', 'connectionId', 'expectedConnectionRevision', 'externalConversationId', 'scope', 'inputTarget', 'expectedSource', 'executionHostId', 'agentSessionId', 'regionAnchor', ...(method === 'connection.binding.relink' ? ['expectedRevision'] : [])])
+  return { ...target(p), operationId: id(p.operationId), bindingId: id(p.bindingId), connectionId: id(p.connectionId), expectedConnectionRevision: revision(p.expectedConnectionRevision), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), ...(p.inputTarget === undefined ? {} : { inputTarget: inputTarget(p.inputTarget) }), expectedSource: source(p.expectedSource), ...(method === 'connection.binding.relink' ? { expectedRevision: revision(p.expectedRevision) } : {}) } as RoomBindingParamsMap[M]
 }
 export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, value: unknown, input: RoomBindingParamsMap[M]): RoomBindingResultMap[M] {
   if (method === 'connection.binding.ls') {
@@ -92,7 +99,7 @@ export function parseRoomBindingResult<M extends RoomBindingMethod>(method: M, v
     const b = op.binding
     if (b.bindingId !== expected.bindingId && !op.reused || action !== 'bind' && op.reused) fail()
     if (action === 'bind' || action === 'relink') {
-      if (b.connectionId !== expected.connectionId || b.executionHostId !== expected.executionHostId || b.agentSessionId !== expected.agentSessionId || b.externalConversationId !== expected.externalConversationId || JSON.stringify(b.scope) !== JSON.stringify(expected.scope) || b.sourceCheckpoints.some(c => JSON.stringify(c.source) !== JSON.stringify(expected.expectedSource)) || action === 'relink' && b.revision !== expected.expectedRevision + 1) fail()
+      if (b.connectionId !== expected.connectionId || b.executionHostId !== expected.executionHostId || b.agentSessionId !== expected.agentSessionId || b.externalConversationId !== expected.externalConversationId || JSON.stringify(b.scope) !== JSON.stringify(expected.scope) || !dequal(b.inputTarget, expected.inputTarget) || b.sourceCheckpoints.some(c => JSON.stringify(c.source) !== JSON.stringify(expected.expectedSource)) || action === 'relink' && b.revision !== expected.expectedRevision + 1) fail()
     } else if (action === 'pause' && (b.state !== 'paused' || b.revision !== expected.expectedRevision + 1)) fail()
     else if (action === 'grant' && (!op.grant || b.revision !== expected.expectedBindingRevision || op.grant.grantId !== expected.grantId || op.grant.revision !== (expected.expectedRevision ?? 0) + 1 || JSON.stringify(op.grant.actor) !== JSON.stringify(expected.actor) || JSON.stringify(op.grant.capabilities) !== JSON.stringify(expected.capabilities) || op.grant.state !== expected.state)) fail()
   }

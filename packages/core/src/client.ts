@@ -384,7 +384,7 @@ type AgentMuxAgentPromptContent = {
 export type AgentMuxAgentPromptInput = AgentMuxAgentPromptContent & (
   (AgentPromptCondition & { admissionIntent?: never }) |
   { expectedRun: AgentMuxRunRef; afterSubmissionId?: never;
-    admissionIntent: { kind: 'manual-actor' }; execution: 'immediate'; expectedCompletionId?: never;
+    admissionIntent: import('./agent-prompt-condition.js').AgentDirectedPromptTarget; execution: 'immediate'; expectedCompletionId?: never;
     expectedFutureIntent?: never; expectedInputByte?: never; preparationRetry?: never }
 )
 
@@ -408,7 +408,7 @@ export type AgentMuxAgentMessageSubmission = {
   execution?: import('./types.js').AgentPromptExecution
   caller?: { agentSessionId: string; capability: string }
 } & ({ condition: AgentPromptCondition; admissionIntent?: never } |
-  { condition?: never; admissionIntent: { kind: 'manual-actor'; expectedRun: AgentMuxRunRef }; execution: 'immediate' })
+  { condition?: never; admissionIntent: Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>; execution: 'immediate' })
 
 export type AgentMuxAgentMessageInput = AgentMuxAgentMessageSubmission & { agentSessionId: string }
 
@@ -1080,6 +1080,7 @@ export class AgentMuxClient {
       agentInputCursors: this.agentInputCursors,
       screenEvidence: this.screenEvidence,
       requireAgentSession: (agentSessionId) => this.requireAgentSession(agentSessionId),
+      providerArgs: (session, run) => this.providerLaunch(session, run).args,
       assertUncontrolledInput: async key => {
         if (await this.messageQueue.inspectInput({ key })) throw new AgentMuxError(
           'The original controlled input requires its original journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -2244,8 +2245,8 @@ export class AgentMuxClient {
       if (!provider.discoverNativeSession || !run.pid || run.state.type !== 'running') {
         throw new AgentMuxError('This Run has no reliable current conversation witness. Retry observation; raw input remains available.', 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
       }
-      const witness = await provider.discoverNativeSession({ processId: run.pid, command: run.program ?? provider.executable,
-        args: run.args ?? [], env: {}, workspacePath: current.workspacePath, signal: new AbortController().signal })
+      const witness = await provider.discoverNativeSession({ processId: run.pid, command: this.providerLaunch(current, run).command,
+        args: this.providerLaunch(current, run).args, env: {}, workspacePath: current.workspacePath, signal: new AbortController().signal })
       if (!witness || !sameNativeHandle(witness.handle, input.candidateNativeHandle)) {
         throw new AgentMuxError('The displayed native candidate is no longer the current main conversation.', 'AGENT_NATIVE_CONFIRMATION_STALE')
       }
@@ -4155,8 +4156,8 @@ export class AgentMuxClient {
         const sourceRun = await this.requireCurrentAgentRun(source)
         if (sourceRun.state.type === 'running') {
           const witness = sourceRun.pid && provider.discoverNativeSession
-            ? await provider.discoverNativeSession({ processId: sourceRun.pid, command: sourceRun.program ?? provider.executable,
-              args: sourceRun.args ?? [], env: {}, workspacePath: source.workspacePath, signal: new AbortController().signal }) : null
+            ? await provider.discoverNativeSession({ processId: sourceRun.pid, command: this.providerLaunch(source, sourceRun).command,
+              args: this.providerLaunch(source, sourceRun).args, env: {}, workspacePath: source.workspacePath, signal: new AbortController().signal }) : null
           if (!witness || !sameNativeHandle(witness.handle, forkSource.expectedNativeHandle)) {
             throw new AgentMuxError('The fork source has no confirmed current native witness. Refresh or confirm it; its raw input is retained.', 'AGENT_FORK_SOURCE_CHANGED')
           }
@@ -4171,7 +4172,7 @@ export class AgentMuxClient {
         env: input.env ?? {},
         ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
       }
-      const plan = forkSource ? provider.buildForkLaunch!({ ...launchContext, nativeHandle: forkSource.expectedNativeHandle })
+      let plan = forkSource ? provider.buildForkLaunch!({ ...launchContext, nativeHandle: forkSource.expectedNativeHandle })
         : nativeResumeSource ? provider.buildResumeLaunch({ ...launchContext, nativeHandle: nativeResumeSource.nativeHandle })
         : provider.buildLaunch(launchContext)
       const executableContext = { workspacePath: input.workspacePath, env: terminalEnvironment(plan.env) }
@@ -4179,6 +4180,9 @@ export class AgentMuxClient {
       if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command))) {
         throw executorUnavailableError(provider.label, capability)
       }
+      const originalExecutable = plan.command
+      const managedLaunch = await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: forkSource ? 'fork' : nativeResumeSource ? 'resume' : 'create', prompt: launchPrompt })
+      if (managedLaunch) plan = managedLaunch.plan
       // Binding 必须先于 Hook 安装：一个把 hook 投递代码**写进文件**的 Provider（opencode 的 JS
       // 插件）跑在自己进程里，拿不到 AgentMux 注入 PTY 的 `AGENTMUX_HOOK_URL`/`TOKEN`，所以 endpoint
       // 必须在安装那一刻就内联进被写出去的内容。写命令的那九家不受影响——它们的命令在运行时才从
@@ -4202,6 +4206,7 @@ export class AgentMuxClient {
         const preparedAt = Date.now()
         preparedCreation = { kind: 'agent', agentSessionId, providerId: input.providerId, executorId, hostId: 'local',
           workspacePath: input.workspacePath, hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
+          ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
           creation: { createOperationId, intentDigest, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', agentMuxContext: 'unknown', ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -4239,7 +4244,7 @@ export class AgentMuxClient {
         preservePreparedCreation = false
         throw error
       })
-      this.publishExecutableCheckFailure(provider.label, agentSessionId, lifecycleOperationId, plan.command, capability, run)
+      this.publishExecutableCheckFailure(provider.label, agentSessionId, lifecycleOperationId, originalExecutable, capability, run)
       const now = Date.now()
       const session: AgentMuxStoredAgentSession = {
         kind: 'agent',
@@ -4252,6 +4257,7 @@ export class AgentMuxClient {
         retiredRuns: [],
         hookBindingId: hookBinding.bindingId,
         hookToken: hookBinding.endpoint.token,
+        ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}),
         // 只存 hash：raw 凭证已随 env 进了受管进程，Core 这边不再留明文。
         capabilityHash: hashAgentCapability(invocationCapability),
         createdAt: preparedCreation?.createdAt ?? now,
@@ -5072,12 +5078,18 @@ export class AgentMuxClient {
       // reverting to the Provider's more permissive default. buildResumeArgs orders these per provider
       // (codex places them after the positional prompt, claude before) and the positional prompt is a
       // distinct token, so intermixing the option flags stays CLI-valid.
-      const { plan, deferredResumePrompt } = this.buildResumePlan(current, input, prompt)
+      let { plan, deferredResumePrompt } = this.buildResumePlan(current, input, prompt)
       const executableContext = { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) }
       const capability = await this.probeAgent(current.providerId, plan.command, executableContext)
       if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command))) {
         throw executorUnavailableError(provider.label, capability)
       }
+      const originalExecutable = plan.command
+      const managedLaunch = await provider.prepareManagedLaunch?.(plan, lifecycleOperationId, { kind: 'resume', ...(prompt === undefined ? {} : { prompt }) })
+      if (managedLaunch) plan = managedLaunch.plan
+      const withoutPreviousNativeActor = { ...current }
+      delete (withoutPreviousNativeActor as Partial<AgentMuxStoredAgentSession>).nativeActor
+      const nativeSession = { ...withoutPreviousNativeActor, ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}) }
       await this.requireHookIngressOwner()
       await this.hookBindings.get(current.run.runId)?.close()
       this.hookBindings.delete(current.run.runId)
@@ -5104,7 +5116,7 @@ export class AgentMuxClient {
         hookBinding.endpoint
       )
       if (reservation.kind === 'reopen') {
-        const preparedSession: AgentMuxStoredAgentSession = { ...current, kind: 'agent', run: current.run, retiredRuns: [],
+        const preparedSession: AgentMuxStoredAgentSession = { ...nativeSession, kind: 'agent', run: current.run, retiredRuns: [],
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability), updatedAt: Date.now(), nativeHandle: structuredClone(current.nativeHandle) }
         delete preparedSession.nativePromptPredecessor
@@ -5116,7 +5128,7 @@ export class AgentMuxClient {
       // transcript has no native completion/abort. Freeze it before the new writer
       // starts; an unknown observation never prevents healthy native restoration.
       const nativePromptEvidence = provider.readPromptExecutionEvidence
-        ? await provider.readPromptExecutionEvidence({ args: oldRun?.args ?? [], workspacePath: current.workspacePath,
+        ? await provider.readPromptExecutionEvidence({ args: oldRun ? this.providerLaunch(current as AgentMuxAgentSession, oldRun).args : [], workspacePath: current.workspacePath,
           nativeHandle: current.nativeHandle }).catch(error => {
           this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
             code: 'AGENT_NATIVE_SOURCE_UNCONFIRMED',
@@ -5128,7 +5140,7 @@ export class AgentMuxClient {
         hookBinding, lifecycleOperationId, invocationCapability)
       if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {
         if (continuity.launchInput) continuity.launchInput.launchPlan = this.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })
-        reservation = await this.registry.prepareResume(reservation, { ...current, continuity,
+        reservation = await this.registry.prepareResume(reservation, { ...nativeSession, continuity,
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability) })
@@ -5152,10 +5164,10 @@ export class AgentMuxClient {
         }
         throw error
       })
-      this.publishExecutableCheckFailure(provider.label, current.agentSessionId, lifecycleOperationId, plan.command, capability, run)
+      this.publishExecutableCheckFailure(provider.label, current.agentSessionId, lifecycleOperationId, originalExecutable, capability, run)
       const nativeBindingObservedAt = Date.now()
       const next: AgentMuxStoredAgentSession = {
-        ...current,
+        ...nativeSession,
         kind: 'agent',
         ...(retirement ? { reopenedFrom: { run: { ...retirement.run }, source: retirement.source, observedAt: retirement.observedAt } } : {}),
         run: runRef(run.runId),
@@ -5871,7 +5883,7 @@ export class AgentMuxClient {
     const launched = await this.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: input.agentSessionId,
       expectedRun: input.expectedRun, submissionId: input.operationId })
     if (launched?.launch) throw new AgentMuxError('This original input was carried by its native resume launch. Inspect its original launch receipt; it will not replay through the terminal.', 'AGENT_PROMPT_LAUNCH_CARRIED')
-    if (input.admissionIntent?.kind === 'manual-actor') {
+    if (input.admissionIntent !== undefined) {
       this.validateControlledPrompt(input)
       const key = { kind: 'prompt' as const, agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: input.operationId }
       const session = await this.currentStoredAgentSession(input.agentSessionId)
@@ -5880,7 +5892,7 @@ export class AgentMuxClient {
       // A legacy claim has no new gate. Preserve its original read/join contract;
       // absence of a journal row cannot prove that it was never dispatched.
       if (saved || !await this.inspectAgentPromptSubmission(key)) {
-        const intent: AgentInputJournalIntent = { key, admissionIntent: { kind: 'manual-actor', expectedRun: input.expectedRun }, execution: 'immediate',
+        const intent: AgentInputJournalIntent = { key, admissionIntent: validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun }) as AgentInputJournalIntent['admissionIntent'], execution: 'immediate',
           environment: this.inputSavedEnvironment(session), source: { kind: 'prompt', prompt: input.prompt,
             ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
             ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
@@ -5907,10 +5919,11 @@ export class AgentMuxClient {
   }
 
   private validateControlledPrompt(input: AgentMuxAgentPromptInput): void {
-    if (input.admissionIntent?.kind !== 'manual-actor' || Object.keys(input.admissionIntent).some(k => k !== 'kind') ||
+    if (input.admissionIntent === undefined ||
         Object.hasOwn(input, 'afterSubmissionId') || input.execution !== 'immediate' || input.expectedCompletionId !== undefined ||
         input.expectedFutureIntent !== undefined || input.expectedInputByte !== undefined || input.preparationRetry !== undefined) throw new AgentMuxError(
       'Controlled waiting cannot change an exact, automatic or request input intent.', 'INVALID_AGENT_PROMPT')
+    validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun })
     safeId(input.operationId, 'Agent prompt operation id')
     if (typeof input.prompt !== 'string' || !input.prompt.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     assertAgentPromptSize(composeAgentPrompt(input.prompt, input.agentMuxNote).text)
@@ -6077,7 +6090,7 @@ export class AgentMuxClient {
     if (source.kind === 'prompt') {
       const { kind: _producer, ...content } = source
       return { input: { ...content, agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun,
-        operationId: agentPromptInputId(intent.key), admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' } }
+        operationId: agentPromptInputId(intent.key), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate' } }
     }
     const original = await this.messageQueue.readByOperationId(source.originalControlOperationId)
     if (!original) throw new AgentMuxError('Original message input is unknown.', 'AGENT_INPUT_NOT_FOUND')
@@ -6094,20 +6107,20 @@ export class AgentMuxClient {
         if (run.state.type !== 'running') throw new AgentMuxError('The original author Run is not running.', 'AGENT_CAPABILITY_STALE_RUN')
       } }
     }
-    if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context)
+    if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context, intent.admissionIntent)
     return { input: { agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun, operationId: agentPromptInputId(intent.key),
-      prompt: renderAgentMuxMessageEnvelope(envelope), admissionIntent: { kind: 'manual-actor' }, execution: 'immediate',
+      prompt: renderAgentMuxMessageEnvelope(envelope), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate',
       ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
       ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) },
       ...(envelope.sender.kind === 'agent-session' ? { authorAgentSessionId: envelope.sender.agentSessionId } : {}), ...(authority ? { authority } : {}) }
   }
 
   /** Only an executing Host's current author owner can admit external input. Persisted attribution is not a grant. */
-  private async externalMessageAuthority(envelope: AgentMuxMessageEnvelope, context?: AgentInputCallContext): Promise<import('./prompt-submission.js').AgentPromptInputAuthority> {
+  private async externalMessageAuthority(envelope: AgentMuxMessageEnvelope, context?: AgentInputCallContext, admissionIntent?: AgentPromptAdmissionIntent): Promise<import('./prompt-submission.js').AgentPromptInputAuthority> {
     const host = context?.externalAuthor, sender = envelope.sender
     if (sender.kind !== 'external' || !envelope.recipientSessionId || !envelope.recipientRunId || !host || typeof host.assertCurrent !== 'function' || !isDeepStrictEqual(parseAgentExternalMessageAuthor(host.identity), sender)) throw new AgentMuxError('External input requires its exact current Host author owner.', 'EXTERNAL_AUTHOR_REQUIRED')
     const identity = structuredClone(sender), check = host.assertCurrent.bind(host)
-    const intent = { agentSessionId: envelope.recipientSessionId!, expectedRun: { runId: envelope.recipientRunId! }, operationId: envelope.operationId, messageId: envelope.messageId, body: envelope.body }
+    const intent = { agentSessionId: envelope.recipientSessionId!, expectedRun: { runId: envelope.recipientRunId! }, operationId: envelope.operationId, messageId: envelope.messageId, body: envelope.body, ...(admissionIntent === undefined ? {} : { admissionIntent: structuredClone(admissionIntent) }) }
     const assertCurrent = async () => { await check(structuredClone(intent)) }
     await assertCurrent()
     return { externalAuthor: identity, assertCurrent }
@@ -6416,8 +6429,7 @@ export class AgentMuxClient {
     if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') {
       throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_PROMPT')
     }
-    if (input.admissionIntent !== undefined && (input.admissionIntent.kind !== 'manual-actor' ||
-        Object.keys(input.admissionIntent).some(k => k !== 'kind') || Object.hasOwn(input, 'afterSubmissionId') ||
+    if (input.admissionIntent !== undefined && (Object.hasOwn(input, 'afterSubmissionId') ||
         input.execution !== 'immediate' || input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined ||
         input.expectedInputByte !== undefined || input.preparationRetry !== undefined)) {
       throw new AgentMuxError('Manual actor input cannot replace an exact condition or automatic/request intent.', 'INVALID_AGENT_PROMPT')
@@ -6460,7 +6472,7 @@ export class AgentMuxClient {
     const session = this.requireAgentSession(input.agentSessionId)
     const admissionIntent: AgentPromptAdmissionIntent = input.admissionIntent === undefined
       ? { kind: 'exact-condition', condition: validateAgentPromptCondition(input) }
-      : validateAgentPromptAdmissionIntent({ kind: 'manual-actor', expectedRun: input.expectedRun })
+      : validateAgentPromptAdmissionIntent({ ...input.admissionIntent, expectedRun: input.expectedRun })
     const expectedRun = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition.expectedRun : admissionIntent.expectedRun
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
@@ -6492,7 +6504,7 @@ export class AgentMuxClient {
       const strategy = provider.catalog.capabilities.promptExecution?.immediate
       const preparationMs = 40_000
       const deadline = Date.now() + preparationMs
-      transportQualification = admissionIntent.kind !== 'manual-actor' && input.execution === 'immediate' && strategy === 'interrupt-before-input'
+      transportQualification = admissionIntent.kind === 'exact-condition' && input.execution === 'immediate' && strategy === 'interrupt-before-input'
         ? await this.observeAgentInputPreparation(session, preparationMs, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
@@ -6589,7 +6601,7 @@ export class AgentMuxClient {
     const admissionIntent: AgentPromptAdmissionIntent = input.admissionIntent === undefined
       ? { kind: 'exact-condition', condition: validateAgentPromptCondition(input.condition) }
       : validateAgentPromptAdmissionIntent(input.admissionIntent)
-    if (admissionIntent.kind === 'manual-actor' && (Object.hasOwn(input, 'condition') || input.execution !== 'immediate')) throw new AgentMuxError('Manual message input cannot replace a caller condition.', 'INVALID_AGENT_PROMPT')
+    if (admissionIntent.kind !== 'exact-condition' && (Object.hasOwn(input, 'condition') || input.execution !== 'immediate')) throw new AgentMuxError('Manual message input cannot replace a caller condition.', 'INVALID_AGENT_PROMPT')
     const expectedRun = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition.expectedRun : admissionIntent.expectedRun
     if (admissionIntent.kind === 'exact-condition') this.requireConnected()
     const sourceChannel = normalizeMessageChannel(input.sourceChannel ?? 'agent-message')
@@ -6617,23 +6629,23 @@ export class AgentMuxClient {
     } else if (input.caller || envelope.senderSessionId !== null || envelope.senderRunId !== null) {
       throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')
     }
-    if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context)
+    if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context, admissionIntent)
     authority = this.inputCallAuthority(authority, context)
     const recipient = await this.currentStoredAgentSession(input.agentSessionId)
     if (!sameRun(recipient.run, expectedRun)) throw new AgentMuxError('The original message Run changed before saving.', 'STALE_AGENT_SESSION')
     const key = { kind: 'message' as const, agentSessionId: input.agentSessionId, expectedRun, messageId: envelope.messageId }
-    const originalAdmission = admissionIntent.kind === 'manual-actor' ? await this.inspectAgentPromptSubmission(key) : undefined
+    const originalAdmission = admissionIntent.kind !== 'exact-condition' ? await this.inspectAgentPromptSubmission(key) : undefined
     const queued = await this.messageQueue.append({ ...envelope,
       sourceChannel, ...(sourceDevice ? { sourceDevice } : {}),
-      ...(admissionIntent.kind === 'manual-actor' ? { admissionIntent } : {}),
+      ...(admissionIntent.kind !== 'exact-condition' ? { admissionIntent } : {}),
       ...(input.execution === undefined ? {} : { execution: input.execution }) },
-      admissionIntent.kind === 'manual-actor' && !originalAdmission ? { inputEnvironment: this.inputSavedEnvironment(recipient),
+      admissionIntent.kind !== 'exact-condition' && !originalAdmission ? { inputEnvironment: this.inputSavedEnvironment(recipient),
         originalClaimAbsent: async () => !await this.inspectAgentPromptSubmission(key) } : undefined)
     if (admissionIntent.kind === 'exact-condition' && queued.promptCondition &&
         !isDeepStrictEqual(queued.promptCondition, admissionIntent.condition)) throw new AgentMuxError(
       'The caller condition conflicts with the original saved message condition.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     if (queued.input) {
-      if (admissionIntent.kind !== 'manual-actor') throw new AgentMuxError('The caller condition cannot replace the original controlled manual input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      if (admissionIntent.kind === 'exact-condition') throw new AgentMuxError('The caller condition cannot replace the original controlled manual input.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       const original = await this.inputWaitingPrompt(queued.input.intent, input.caller, context)
       return await this.acceptInputWaiting(queued.input.control.ref, original.input, 'message', original.authorAgentSessionId,
         this.inputCallAuthority(original.authority, context), context?.requestSignal)
@@ -6650,8 +6662,8 @@ export class AgentMuxClient {
       operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,
       ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
       ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}) }
-    const submission: AgentMuxAgentPromptInput = originalIntent.kind === 'manual-actor'
-      ? { ...promptInput, expectedRun: originalIntent.expectedRun, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' }
+    const submission: AgentMuxAgentPromptInput = originalIntent.kind !== 'exact-condition'
+      ? { ...promptInput, expectedRun: originalIntent.expectedRun, admissionIntent: (() => { const { expectedRun: _run, ...target } = originalIntent; return target })(), execution: 'immediate' }
       : { ...promptInput, ...originalIntent.condition, execution: input.execution ?? 'default' }
     await this.submitPromptInternal(submission, authorAgentSessionId,
       undefined, undefined, authority, 'message')
@@ -8599,8 +8611,15 @@ export class AgentMuxClient {
     }
   }
 
+  private providerLaunch(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): { command: string; args: readonly string[] } {
+    const current = this.registry.get(session.agentSessionId)
+    const actor = sameRun(current.run, session.run) && sameRun(current.run, { runId: run.runId }) ? current.nativeActor : undefined
+    return actor && actor.lifecycleOperationId === run.lifecycleOperationId ? actor.launch
+      : { command: run.program ?? this.providers.get(session.providerId).executable, args: run.args }
+  }
+
   private providerNativeContext(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): AgentProviderPromptExecutionContext {
-    return { args: run.args, workspacePath: session.workspacePath,
+    return { args: this.providerLaunch(session, run).args, workspacePath: session.workspacePath,
       ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}),
       ...(session.nativePromptPredecessor?.run.runId === session.run.runId &&
@@ -8805,7 +8824,7 @@ export class AgentMuxClient {
       const before = await this.observeHookRun(session.run.runId, signal)
       this.assertAgentRun(session, before)
       if (before.state.type !== 'running' || !before.pid || !provider.discoverNativeSession) throw new Error('Native process witness unavailable.')
-      const witness = await provider.discoverNativeSession({ processId: before.pid, command: before.program ?? provider.executable, args: before.args,
+      const witness = await provider.discoverNativeSession({ processId: before.pid, command: this.providerLaunch(session, before).command, args: this.providerLaunch(session, before).args,
         env: {}, workspacePath: session.workspacePath, signal })
       if (!witness || witness.handle.kind !== 'provider' || witness.handle.providerId !== session.providerId) throw new Error('No unique main native record.')
       await witness.assertCurrent()

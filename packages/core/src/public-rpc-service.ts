@@ -66,7 +66,7 @@ import { resolveAgentSessionId } from './agent-session-id.js'
 import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './agent-role-directory.js'
 import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
-import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
 import { diagnoseAgentMux } from './doctor.js'
@@ -229,7 +229,7 @@ const NATIVE_FIELDS = {
   'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
-  'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel'],
+  'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel', 'admissionIntent'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
   'system.diagnostics.inspect': ['target', 'includeRaw', 'includeRelated', 'budget'],
@@ -1741,8 +1741,11 @@ export class AgentMuxRpcService {
     const observedDevice = this.ports.operationSource?.(context)
     const sourceDevice = observedDevice === undefined ? undefined : normalizeOperationDevice(observedDevice)
     const operationId = rpcString(p.operationId, 'Operation ID'), text = rpcText(p.text, 'Message text')
-    const expectedRun = p.expectedRun === undefined ? undefined : {
+    const addressed = p.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(p.admissionIntent)
+    if (addressed && (addressed.kind !== 'native-conversation' || p.execution !== 'immediate')) throw new AgentMuxError('Explicit native source input requires its original native-conversation intent and immediate execution.', 'INVALID_CONTROL_REQUEST')
+    const expectedRun = p.expectedRun === undefined ? addressed?.expectedRun : {
       runId: rpcString(rpcRecord(p.expectedRun, ['runId']).runId, 'Expected recipient Run ID') }
+    if (addressed && expectedRun?.runId !== addressed.expectedRun.runId) throw new AgentMuxError('The explicit source input Run conflicts with its caller fence.', 'MESSAGE_RECIPIENT_MISMATCH')
     const messageId = p.messageId === undefined ? 'message-' + createHash('sha256').update(operationId).digest('hex') : rpcString(p.messageId, 'Message ID')
     if (p.execution !== undefined && p.execution !== 'default' && p.execution !== 'immediate') throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
     const execution = p.execution ?? 'default'
@@ -1756,7 +1759,7 @@ export class AgentMuxRpcService {
       (p.messageId === undefined ? null : await journal.readByMessageId(messageId)) : null
     if (expectedRun && original) {
       const originalRunId = original.envelope.recipientRunId ?? original.promptCondition?.expectedRun.runId ??
-        (original.admissionIntent?.kind === 'manual-actor' ? original.admissionIntent.expectedRun.runId : undefined)
+        (original.admissionIntent && original.admissionIntent.kind !== 'exact-condition' ? original.admissionIntent.expectedRun.runId : undefined)
       if (!originalRunId) throw new AgentMuxError('The original recipient Run is unconfirmed. Keep this operation, message and body; inspect the original intake before retrying.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
       if (originalRunId !== expectedRun.runId) throw new AgentMuxError('Expected Run does not match this original message. Its identity and body are retained.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
@@ -1804,6 +1807,8 @@ export class AgentMuxRpcService {
     if (expectedRun && !original && durable.run.runId !== expectedRun.runId) throw new AgentMuxError(
       'Expected Run does not match the current retained recipient Run. No new message was saved or submitted.', 'MESSAGE_RECIPIENT_MISMATCH')
     const terminalManual = p.execution === 'immediate'
+    const directIntent = addressed ?? { kind: 'manual-actor' as const, expectedRun: { ...durable.run } }
+    if (original?.admissionIntent && addressed && !isDeepStrictEqual(original.admissionIntent, addressed)) throw new AgentMuxError('The original native target cannot be changed by a retry.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     // A new direct producer saves its exact durable target before requiring a
     // Runtime connection. Catalog selects a contract, never Native readiness.
     const recipient = terminalManual ? durable : await recipientOwner.client.refreshAgentSession(recipientId, durable.run)
@@ -1831,16 +1836,16 @@ export class AgentMuxRpcService {
       // same SDK owner serializes firstsave with Session input admission; a
       // Renderer roundtrip must not append a second producer before that owner.
       const inputReceipt = await recipientOwner.client.submitAgentMessage({ agentSessionId: recipientId,
-        envelope: { ...envelope, messageId, schema: 'agentmux.a2a.v1' }, admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } }, execution: 'immediate',
+        envelope: { ...envelope, messageId, schema: 'agentmux.a2a.v1' }, admissionIntent: directIntent, execution: 'immediate',
         sourceChannel, ...(sourceDevice ? { sourceDevice } : {}), ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }, this.inputCallContext(context))
       const { input: _internal, ...saved } = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel,
-        ...(sourceDevice ? { sourceDevice } : {}) }, queuePath, { admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } } })
+        ...(sourceDevice ? { sourceDevice } : {}) }, queuePath, { admissionIntent: directIntent })
       const currentReceipt = inputReceipt ? await recipientOwner.client.inspectAgentInput({ key: inputReceipt.key },
         caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined) : undefined
       return { ...saved, ...(currentReceipt ? { inputReceipt: currentReceipt } : {}) }
     }
     const queued = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}) }, queuePath,
-      { ...(terminalManual ? { admissionIntent: { kind: 'manual-actor', expectedRun: { ...recipient.run } } as const,
+      { ...(terminalManual ? { admissionIntent: directIntent,
         } : {}) })
     const { input: _internalInput, ...publicQueued } = queued
     if (original && queued.input) return { ...publicQueued, inputReceipt: (await recipientOwner.client.inspectAgentInput({ key: queued.input.intent.key },
@@ -1858,7 +1863,7 @@ export class AgentMuxRpcService {
         if (active.operation !== 'list.active-agents') throw new AgentMuxError('Prompt facts are unavailable.', 'CONTROL_PROTOCOL_ERROR')
         return validateAgentPromptCondition(active.agents.find(agent => agent.agentSessionId === recipientId)?.promptCondition)
       }, queuePath) : undefined
-      if (originalIntent && originalIntent.kind !== 'manual-actor') throw new AgentMuxError('The original direct message intent is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      if (originalIntent && originalIntent.kind === 'exact-condition') throw new AgentMuxError('The original direct message intent is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       const admission = originalIntent ? { admissionIntent: originalIntent } : { condition: promptCondition! }
       let inputReceipt: AgentInputSubmissionReceipt | void
       if (!this.ports.execute) inputReceipt = await recipientOwner.client.submitAgentMessage({

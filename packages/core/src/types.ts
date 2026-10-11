@@ -537,6 +537,8 @@ export type AgentCapabilities = {
   asyncQuestionReply?: 'terminal'
   /** Manual current-terminal submit reports bytes; it does not promise Native steering. */
   promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' }
+  /** Explicit selected-source input; only supported original managed Runs have its private transport. */
+  nativeConversationInput?: { managedRuns: true }
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
    *
@@ -1125,6 +1127,8 @@ export type AgentNativePromptInputPlan = Readonly<{
   sourceId: string
   actorId: string
   threadId: string
+  /** Original Core-issued correlation frozen in the durable claim; not idempotency or adoption. */
+  clientCorrelation?: string
 } & (
   /** Manual input authorizes the actor's atomic idle start or busy append. */
   { operation: 'start-or-steer'; expectedTurnId?: never } |
@@ -1400,6 +1404,8 @@ export type AgentHookIngressObservation = {
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity'> & {
+  /** Private native service credential, frozen with this original lifecycle launch. Never a public capability ACK. */
+  nativeActor?: AgentPrivateNativeActor
   /** Private original invocation provenance; retained opaque and checked only at its exact root. Never public. */
   continuityExecutors?: unknown
 
@@ -1421,6 +1427,10 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
   /** Bounded accepted-observation commit state; never a second history ledger. */
   activityCommit?: AgentActivityCommit
 }
+
+export type AgentPrivateNativeActor = Readonly<{ protocolId: string; actorId: string; lifecycleOperationId: string; token: string;
+  /** Original Provider invocation, distinct from Runtime's bootstrap plan. No bootstrap JSON decoding. */
+  launch: { command: string; args: string[] } }>
 
 /**
  * 一个权限选项的四种答复方向。元组是 SSOT，{@link AgentMuxPermissionOption} 的 `kind` 从它派生，
