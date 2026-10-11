@@ -22,6 +22,55 @@ function node(role: string, bounds = { x: 20, y: 50, width: 120, height: 80 }): 
   return element
 }
 function flushFrame(): void { const pending = frame; frame = undefined; pending?.() }
+it('measures final-only overlap before the first capture and releases motion with actual native demand', () => {
+  const popup = node('menu'), child = document.createElement('span')
+  popup.appendChild(child)
+  const distant = node('tooltip', { x: 500, y: 400, width: 100, height: 40 })
+  const original = popup.getBoundingClientRect
+  const geometry = vi.spyOn(popup, 'getBoundingClientRect').mockImplementation(() => {
+    const rect = original()
+    return popup.hasAttribute('data-native-overlay-motion') ? rect : { ...rect, x: 22, width: 116, height: 76 } as DOMRect
+  })
+  const publish = vi.fn()
+  const overlays = observeNativeOverlayRegions(document.body, () => 1, publish, undefined,
+    { revision: 1, bounds: [{ x: 0, y: 129, width: 300, height: 300 }] })
+  stop = overlays.dispose
+  expect(publish.mock.calls.at(-1)).toEqual([[{ id: 'chrome-1', bounds: { x: 20, y: 50, width: 120, height: 80 }, radius: 8 }], undefined])
+  expect(geometry).toHaveBeenCalledTimes(1)
+  expect(popup.getAttribute('data-native-overlay-motion')).toBe('static')
+  expect(child.hasAttribute('data-native-overlay-motion')).toBe(false)
+  expect(distant.getAttribute('data-native-overlay-motion')).toBe('static')
+  overlays.setNativeDemand({ revision: 2, bounds: [{ x: 600, y: 600, width: 50, height: 50 }] }); flushFrame()
+  expect(publish.mock.calls.at(-1)).toEqual([[], undefined])
+  expect(popup.getAttribute('data-native-overlay-motion')).toBe('static')
+  overlays.setNativeDemand({ revision: 3, bounds: [{ x: 0, y: 0, width: 300, height: 300 }] }); flushFrame()
+  expect(popup.getAttribute('data-native-overlay-motion')).toBe('static')
+  overlays.setNativeDemand({ revision: 4, bounds: [] })
+  expect(popup.hasAttribute('data-native-overlay-motion')).toBe(false)
+  expect(distant.hasAttribute('data-native-overlay-motion')).toBe(false)
+  expect(publish.mock.calls.at(-1)).toEqual([[]])
+  overlays.setNativeDemand({ revision: 5, bounds: [{ x: 0, y: 0, width: 300, height: 300 }] }); flushFrame()
+  overlays.dispose(); stop = undefined
+  expect(popup.hasAttribute('data-native-overlay-motion')).toBe(false)
+})
+it('does not schedule feedback for its motion marker and releases closed or removed original surfaces', async () => {
+  const popup = node('menu'), publish = vi.fn()
+  stop = observeNativeOverlayRegions(document.body, () => 1, publish, undefined,
+    { revision: 1, bounds: [{ x: 0, y: 0, width: 300, height: 300 }] }).dispose
+  await new Promise(resolve => setTimeout(resolve, 0)); flushFrame()
+  expect(window.requestAnimationFrame).not.toHaveBeenCalled()
+  popup.setAttribute('data-state', 'closed')
+  await new Promise(resolve => setTimeout(resolve, 0)); flushFrame()
+  expect(publish.mock.calls.at(-1)).toEqual([[], undefined])
+  expect(popup.hasAttribute('data-native-overlay-motion')).toBe(false)
+  popup.setAttribute('data-state', 'open')
+  await new Promise(resolve => setTimeout(resolve, 0)); flushFrame()
+  expect(popup.getAttribute('data-native-overlay-motion')).toBe('static')
+  popup.remove()
+  await new Promise(resolve => setTimeout(resolve, 0)); flushFrame()
+  expect(publish.mock.calls.at(-1)).toEqual([[], undefined])
+  expect(popup.hasAttribute('data-native-overlay-motion')).toBe(false)
+})
 it.each(['portal', 'popover'])('only the open %s float declares its own real Browser stages and observes their resize', kind => {
   const popup = node('dialog'), stage = document.createElement('div'), hidden = document.createElement('div')
   stage.setAttribute('data-native-browser-stage', 'inside'); hidden.setAttribute('data-native-browser-stage', 'unrelated')
