@@ -35,6 +35,11 @@ function authenticated(input: EnrollmentAdapterInput & { privateState: string })
   if (!saved || !native || native.phase !== 'account' || !native.account || !opaque(native.account.userId) || !opaque(native.account.tenantId) || !opaque(native.csrf) || native.consoleOrigin !== ORIGIN) return preparation('invalid-state')
   return saved
 }
+/** Only this owner interprets its Enrollment wrapper; no foreign Setup binding is stripped. */
+export function enrollmentAccountSession(privateState: string, application: { domain: string; appId: string }): Session['native'] | null {
+  const saved = snapshot(privateState), native = saved?.native
+  return application.domain === DOMAIN && saved?.value.appId === application.appId && native?.phase === 'account' && native.account && opaque(native.account.userId) && opaque(native.account.tenantId) && opaque(native.csrf) && native.consoleOrigin === ORIGIN ? native : null
+}
 function png(value: string): { bytes: Buffer; width: number; height: number } | null {
   // Reuse the original profile PNG boundary; scale follows the actual IHDR, not a fixed icon size.
   if (!/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/u.test(value) || (value.length - 22) % 4 || value.length > Math.ceil(512 * 1024 / 3) * 4 + 22) return null

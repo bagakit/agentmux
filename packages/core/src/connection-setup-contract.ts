@@ -3,14 +3,15 @@ import type { ConnectionEnrollmentCallContext } from './connection-enrollment-co
 
 /** A finite platform-management intent, distinct from application creation and local save. */
 export type ConnectionSetupGoal = { kind: 'agent-conversation'; interaction: 'messages' | 'cards' }
-export type ConnectionSetupBegin = { operationId: string; connectionId: string; expectedConnectionRevision: number; goal: ConnectionSetupGoal }
+export type ConnectionSetupEnrollmentSource = { kind: 'enrollment'; operationId: string; expectedRevision: number }
+export type ConnectionSetupBegin = { operationId: string; connectionId: string; expectedConnectionRevision: number; goal: ConnectionSetupGoal; source?: ConnectionSetupEnrollmentSource }
 export type ConnectionSetupInput = { operationId: string }
 /** Local child selection only. It never requests the platform or repairs a secure ACK. */
 export type ConnectionSetupInspect = ConnectionSetupInput & { applicationInspection?: { selectedStepId?: string; cursor?: string; limit?: number }; applicationConfiguration?: { selectedStepId?: string; cursor?: string; limit?: number } }
 export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' } }
 export type ConnectionSetupList = { connectionId: string; cursor?: string; limit?: number }
 /** Local implementation discovery for this exact revision, never platform authority or readiness. */
-export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection' | 'messaging-capability'> }
+export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection' | 'messaging-capability' | 'enrollment-continuation'> }
 export type ConnectionSetupListing = { operations: ConnectionSetupOperation[]; next: string | null; support: ConnectionSetupSupport | null }
 export type ConnectionSetupReason = 'adapter-unavailable' | 'secure-storage-unavailable' | 'request-unconfirmed' | 'challenge-unconfirmed'
 export type ConnectionSetupAuthenticationStage = 'waiting' | 'scanned' | 'handoff' | 'account' | 'confirmed' | 'expired' | 'unknown'
@@ -57,7 +58,8 @@ export type ConnectionSetupOperation = ConnectionSetupBegin & {
   revision: number
   adapterId: string
   application: ConnectionApplication
-  request: { state: 'not-dispatched' | 'dispatching' | 'confirmed' | 'unknown' | 'refused'; attemptId: string | null }
+  /** With kind=enrollment-handoff this is a local begin receipt, never a QR-init acknowledgement. */
+  request: { kind?: 'enrollment-handoff'; state: 'not-dispatched' | 'dispatching' | 'confirmed' | 'unknown' | 'refused'; attemptId: string | null }
   secureStorage: 'not-started' | 'storing' | 'stored' | 'unknown'
   reason?: ConnectionSetupReason
   authentication?: {

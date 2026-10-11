@@ -23,7 +23,10 @@ import {
   type ConnectionEnrollmentOperationInput,
   type ConnectionEnrollmentPort,
   type ConnectionEnrollmentReceipt,
-  type ConnectionEnrollmentView
+  type ConnectionEnrollmentView,
+  type ConnectionSetupEnrollmentSource,
+  type ConnectionApplication,
+  type ConnectionSetupAccount
 } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type {
@@ -68,6 +71,7 @@ type Snapshot = {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const accountDigest = (account: NonNullable<Snapshot['account']>) =>
   enrollmentDigest({ userId: account.userId, tenantId: account.tenantId })
+export type EnrollmentSetupSnapshot = { privateState: string; account: ConnectionSetupAccount; authAttemptId: string; assertCurrent(): void }
 const issue = (code: string) =>
   new AgentMuxError(
     'Read the same original enrollment and choose its current action; existing connections remain available.',
@@ -569,6 +573,24 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       raw = await secrets.resolve(row.privateRef)
     if (!raw) throw issue('CONNECTION_CREDENTIAL_UNAVAILABLE')
     return this.decodeSnapshot(raw, row)
+  }
+  /** A narrow in-Host source read, not a public raw-state or credential API. */
+  async setupSource(source: ConnectionSetupEnrollmentSource, target: { connectionId: string; adapterId: string; application: ConnectionApplication }, context: ConnectionEnrollmentCallContext): Promise<EnrollmentSetupSnapshot> {
+    const row = this.store.read(source.operationId)
+    await this.authority(row, context)
+    const assertCurrent = () => {
+      this.current()
+      const current = this.store.read(source.operationId), operation = current?.operation, saved = operation?.configured
+      if (!current || !sameEnrollmentActor(current.actor, context.actor)) throw issue('CONTROL_PERMISSION_DENIED')
+      if (!row || current.version !== 2 || operation!.revision !== source.expectedRevision || current.operation.authentication?.attemptId !== row.operation.authentication?.attemptId) throw issue('CONNECTION_REVISION_CONFLICT')
+      if (operation!.configuration !== 'configured' || operation!.credential !== 'stored' || operation!.creation?.create !== 'confirmed' || operation!.authentication?.stage !== 'confirmed' || !saved || saved.operationId !== current.configureOperationId || operation!.connectionId !== target.connectionId || operation!.adapterId !== target.adapterId || operation!.domain !== target.application.domain || operation!.application?.domain !== target.application.domain || operation!.application?.appId !== target.application.appId || saved.connection.config.connectionId !== target.connectionId || saved.connection.config.adapterId !== target.adapterId || saved.connection.config.application.domain !== target.application.domain || saved.connection.config.application.appId !== target.application.appId) throw issue('CONNECTION_SETUP_SOURCE_UNCONFIRMED')
+    }
+    assertCurrent()
+    const snapshot = await this.privateSnapshot(row!)
+    await this.authority(row, context)
+    assertCurrent()
+    if (!snapshot?.account || !row!.confirmedAccountDigest || row!.confirmedAccountDigest !== row!.creationAccountDigest || row!.confirmedAccountDigest !== accountDigest(snapshot.account)) throw issue('CONNECTION_SETUP_SOURCE_UNCONFIRMED')
+    return { privateState: snapshot.privateState, account: snapshot.account, authAttemptId: row!.operation.authentication!.attemptId, assertCurrent }
   }
   private async runStep(
     captured: EnrollmentRow,

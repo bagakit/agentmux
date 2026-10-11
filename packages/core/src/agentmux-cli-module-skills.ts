@@ -128,7 +128,13 @@ configure disables or enables new automatic traffic without rewriting applicatio
 Retain the exact operationId, expectedRevision and service input after an unknown configure reply;
 service inspect reads that receipt, while get reports current policy and cannot acknowledge it.
 Management, original receipts and healthy local Agent input remain available while service is off.
-For an exact saved bot, connection setup begin requests one original management QR challenge.
+For an exact saved bot, connection setup begin requests one original management QR challenge unless
+source is {kind: enrollment, operationId, expectedRevision}. That explicit local handoff reuses only
+the original actor's confirmed saved creation login, with zero HTTP. Its request.kind is
+enrollment-handoff: confirmed acknowledges local storage, never QR-init or management authority.
+The sourced account still requires its own explicit confirm-account and explicit application reads.
+After secure handoff, later source availability does not govern this Setup; retain the same input
+for local ACK recovery. Discovery advertises enrollment-continuation only for its implemented domain.
 Setup inspect is a local read of that actor-owned active challenge; setup ls returns safe summaries
 and local implementation support bound to the current bot revision. Support is not login,
 application authority, grants, publication or connection readiness; a paused bot retains management discovery.

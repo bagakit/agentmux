@@ -96,7 +96,7 @@ export class ConnectionHost implements ConnectionPort {
       if (this.setupHost) return this.setupHost
       const secrets = options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
       try {
-        return this.setupHost = new ConnectionSetupHost(this, typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets : undefined)
+        return this.setupHost = new ConnectionSetupHost(this, typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets : undefined, (source, target, context) => enrollment().setupSource(source, target, context))
       } catch { throw new AgentMuxError('Original management request storage is unavailable. Existing bots and Agents remain available; restore storage and inspect the same request.', 'CONNECTION_SETUP_UNCONFIRMED') }
     }
     this.setup = { begin: (input, context) => setup().begin(input, context), advance: (input, context) => setup().advance(input, context), inspect: (input, context) => setup().inspect(input, context), list: input => setup().list(input) }
