@@ -88,9 +88,9 @@ it('retains saved message times and structured turns through public pages, proje
 
 it('the original changes converter exposes recorded time and turn after a durable cut', async () => {
   const f = await fixture([message('previous', { turn_id: 'previous-turn' })])
-  const checkpoint = await f.client.conversationCheckpoint(f.session.agentSessionId)
+  const checkpoint = await f.client.sessionHistoryCheckpoint(f.session.agentSessionId)
   await appendFile(f.transcriptPath, jsonl([message('appended', { internal_chat_message_metadata_passthrough: { turn_id: 'appended-turn' } }, iso(AT + 2))]))
-  const page = await f.client.readConversationChanges(f.session.agentSessionId, { checkpoint })
+  const page = await f.client.readSessionHistoryChanges(f.session.agentSessionId, { checkpoint })
   expect(page.items).toEqual([expect.objectContaining({ id: 'appended', startedAt: AT + 2, turnId: 'appended-turn' })])
   expect(page.more).toBe(false)
 })
