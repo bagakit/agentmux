@@ -5,6 +5,8 @@ import { useAppStore } from '../src/renderer/src/store'
 const requests: AgentMuxControlMetricsRequest[] = [
   { schemaVersion: 5, requestId: 'renderer-metrics-get', operation: 'metrics.get' },
   { schemaVersion: 5, requestId: 'renderer-metrics-watch', operation: 'metrics.watch' },
+  { schemaVersion: 5, requestId: 'renderer-memory-inspect', operation: 'metrics.memory.inspect',
+    target: { windowId: 1, webContentsId: 2, generation: 3, pid: 4, creationTime: 1000 } },
   { schemaVersion: 5, requestId: 'renderer-profile-capture', operation: 'metrics.profile.capture',
     target: { windowId: 1, webContentsId: 2, generation: 3, pid: 4, creationTime: 1000 }, durationMs: 1000 }
 ]

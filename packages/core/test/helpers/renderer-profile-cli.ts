@@ -3,6 +3,7 @@ import { readFile, writeFile, symlink } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 import { build } from 'esbuild'
+export { build } from 'esbuild'
 
 /** Core's existing esbuild dev dependency compiles only the actual CLI for this unit fixture. */
 export async function compileRendererProfileCli(root: string, directory: string, frozen: Record<string, string>, loaded?: string): Promise<string> {
