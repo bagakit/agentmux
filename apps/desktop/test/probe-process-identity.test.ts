@@ -133,6 +133,38 @@ describe('private probe cleanup identity', () => {
     expect(kill.mock.calls).toEqual([])
   })
 
+  it('reobserves the exact transient exiting PID until a real Zombie without signalling unknown state', async () => {
+    readPs.mockResolvedValueOnce({ stdout: '?Es+\n' }).mockResolvedValueOnce({ stdout: 'Z+\n' })
+    await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).resolves.toBe(false)
+    expect(readPs).toHaveBeenCalledTimes(2); expect(kill.mock.calls).toEqual([])
+  })
+
+  it('requires OS absence after the transient unknown PID disappears from ps', async () => {
+    readPs.mockResolvedValueOnce({ stdout: '?Es+\n' }).mockRejectedValueOnce(missingPs())
+    kill.mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }) })
+    await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).resolves.toBe(false)
+    expect(readPs).toHaveBeenCalledTimes(2); expect(kill.mock.calls).toEqual([[41001, 0]])
+  })
+
+  it('signals only after a new exact PID read verifies its original live identity', async () => {
+    readPs.mockResolvedValueOnce({ stdout: `? node ${root}/worker.mjs\n` }).mockResolvedValueOnce({ stdout: `S node ${root}/worker.mjs\n` })
+    await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).resolves.toBe(true)
+    expect(readPs).toHaveBeenCalledTimes(2); expect(kill.mock.calls).toEqual([[41001, 'SIGTERM']])
+  })
+
+  it('keeps a persistent unknown PID explicit and never signals it after the bounded reobservation', async () => {
+    readPs.mockResolvedValue({ stdout: `? node ${root}/worker.mjs\n` })
+    vi.useFakeTimers()
+    const pending = signalOwnedProbeProcess(41001, root, 'SIGTERM').then(value => ({ value }), error => ({ error }))
+    try {
+      await vi.advanceTimersByTimeAsync(1_100)
+      const outcome = await pending
+      expect(kill.mock.calls, 'unknown process must never be signalled').toEqual([])
+      expect(outcome).toMatchObject({ error: { message: expect.stringContaining('Private process state could not be observed') } })
+      expect(readPs.mock.calls.length).toBeGreaterThan(1)
+    } finally { vi.useRealTimers() }
+  })
+
   it('does not require a command from an already confirmed zombie', async () => {
     readPs.mockResolvedValue({ stdout: 'Z\n' })
     await expect(signalOwnedProbeProcess(41001, root, 'SIGTERM')).resolves.toBe(false)
