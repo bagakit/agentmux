@@ -385,6 +385,26 @@ describe('shared modal presentation ownership', () => {
     expect(closed).toHaveBeenCalledOnce()
   })
 
+  it('returns inline nonmodal focus through its original close callback after the visual ref retires', async () => {
+    const closed = vi.fn((event: Event) => { event.preventDefault(); opener.focus() })
+    function Scene() {
+      const [open, setOpen] = useState(false)
+      return <Modal.Root modal={false} open={open} onOpenChange={setOpen}>
+        <button data-inline-opener="" onClick={() => setOpen(true)}>Open inline drawer</button>
+        <Modal.Content onCloseAutoFocus={closed}><Content name="Inline original" /><button>Drawer action</button></Modal.Content>
+      </Modal.Root>
+    }
+    await update(() => root.render(<Scene />))
+    const opener = mount.querySelector<HTMLButtonElement>('[data-inline-opener]')!
+    await update(() => { opener.focus(); opener.click() })
+    const drawer = mount.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(drawer).not.toBeNull(); expect(drawer.contains(document.activeElement)).toBe(true)
+    await update(() => drawer.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    await update(() => {})
+    expect(mount.querySelector('[role="dialog"]')).toBeNull()
+    expect(closed).toHaveBeenCalledOnce(); expect(document.activeElement).toBe(opener)
+  })
+
   it('uses the original caller busy fact only to present unavailable recovery cancellation', async () => {
     const changed = vi.fn(), operation = vi.fn()
     const scene = (busy: boolean) => <Modal.Root open onOpenChange={changed} recoveryCloseDisabled={busy}><Modal.Portal container={overlays}>
