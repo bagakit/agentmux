@@ -27,7 +27,9 @@ const page = (items: AgentSessionHistoryItem[], cursor = 'next-cut'): Conversati
   return { hostId: boundary.executionHostId, sourceHostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId,
     scope: timeline.scope, coverage: timeline.coverage, order: { ...timeline.order, direction: 'newest-first' },
     items: [...timeline.events].reverse().map(event => ({ kind: 'item', item: { event, records: timeline.records.filter(record => event.recordIds.includes(record.id)) } })),
-    nextCursor: null, budgetBytes: 4 * 1024 * 1024, checkpoint: checkpoint(cursor), more: false }
+    nextCursor: null, budgetBytes: 4 * 1024 * 1024, checkpoint: checkpoint(cursor), more: false,
+    window: { id: 'outbox-fixture-window', revision: 1, itemCount: timeline.events.length, complete: true,
+      view: 'outbox-fixture-view', replay: 'outbox-fixture-replay', checkpoint: checkpoint(cursor), outside: { older: null, newer: null } } }
 }
 function commit(owner: PublicationStore, audience: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean, options: { fragmentBytes?: number } = {}) {
   owner.commitPage(audience, after, value, authorized, { ...options, units: [...value.items].reverse().flatMap(entry => entry.kind === 'item' ? [entry.item] : []), resolvedText: new Map() })

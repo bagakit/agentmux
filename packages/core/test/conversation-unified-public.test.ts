@@ -13,7 +13,7 @@ import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { AgentMuxError } from '../src/errors.js'
 import { forwardConversationPage, forwardConversationInput } from '../src/conversation-reader.js'
-import { parseConversationReadPage } from '../src/conversation-changes.js'
+import { parseConversationReadPage, consumeConversationWindowPage, type ConversationWindowAssembly } from '../src/conversation-changes.js'
 import { conversationRevision, conversationRecordId } from '../src/conversation-timeline.js'
 import { projectConversationReading, conversationItemRef, parseAgentSessionHistoryReadPage } from '../src/conversation.js'
 import { savedQuestionFixture, savedQuestionEvent, savedQuestionReply, savedQuestionId } from './helpers/codex-saved-question.js'
@@ -21,6 +21,8 @@ import { unifiedConversationOriginals } from './helpers/conversation-unified-ori
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import type { AgentTimelineMutation, AgentMuxEvidence } from '../src/types.js'
 import type { AgentTimelineItem } from '../src/types.js'
+import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxClient } from '../src/client.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -36,21 +38,204 @@ async function fixture(rows = [row('native', _historyFixtureEpoch(0, 0, 100))]) 
   return f
 }
 async function collect(read: (input: ConversationTimelineReadInput) => Promise<AgentConversationReadPage>, input: ConversationTimelineReadInput = ref) {
-  const units: ConversationUnit[] = [], pages: AgentConversationReadPage[] = []
-  let cursor: string | undefined = input.cursor, pending: JsonReadAssembly | undefined
+  let units: readonly ConversationUnit[] = []
+  const pages: AgentConversationReadPage[] = []
+  let cursor: string | undefined = input.cursor, pending: ConversationWindowAssembly | undefined
   for (let i = 0; i < 200; i++) {
     const page = await read({ ...input, ...(cursor ? { cursor } : {}) }); pages.push(page)
     expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(page.budgetBytes)
-    for (const entry of page.items) {
-      const part = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify([ref, page.scope]), ...(pending ? { pending } : {}), maxTotalBytes: 32 * 1024 * 1024 })
-      if (part.kind === 'pending') pending = part.pending
-      else { pending = undefined; units.push(parseConversationUnit(part.value, { hostId: page.sourceHostId, agentSessionId: input.agentSessionId }, page.scope)) }
-    }
+    const assembled = consumeConversationWindowPage(page, pending)
+    if (assembled.kind === 'pending') pending = assembled.pending
+    else { pending = undefined; units = assembled.snapshot.units }
     if (!page.nextCursor) { expect(pending).toBeUndefined(); return { units, pages } }
     expect(page.nextCursor).not.toBe(cursor); cursor = page.nextCursor
   }
   throw new Error('Conversation traversal failed to make bounded progress')
 }
+
+it('the backend Reader retains every accepted contribution when an exact event crosses three source batches', async () => {
+  const originalText = 'Complete original native contribution. '.repeat(400)
+  const f = await fixture([row('n1', _historyFixtureEpoch(0, 0, 100), originalText), row('n2', _historyFixtureEpoch(0, 0, 200))])
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: {
+    ...captured('s1', _historyFixtureEpoch(0, 0, 300)), conversation: { sameEvent: { ...ref, source: {
+      kind: 'native', providerId: 'claude', nativeSessionId: 'native-main', recordId: 'n1'
+    } } }
+  } })
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
+  let acceptedEvents: unknown
+  for (const read of [input => f.client.readAgentConversation(input), input => service.call('agent.conversation.inspect', input)] as Array<(input: ConversationTimelineReadInput) => Promise<AgentConversationReadPage>>) {
+    for (const budget of [{ limit: 1 }, { limit: 30 }, { limit: 1, maxBytes: 16 * 1024 }]) {
+      const result = await collect(read, { ...ref, ...budget })
+      const original = result.units.filter(unit => unit.records.some(record => record.original.item.id === 'n1')).at(-1)!
+      expect(original.records.map(record => record.original.item.id).sort()).toEqual(['n1', 's1'])
+      expect(original.records.find(record => record.original.item.id === 'n1')!.original).toMatchObject({ item: { contentParts: [{ kind: 'text', text: originalText }] } })
+      expect(new Set(result.units.map(unit => unit.event.id)).size).toBe(2)
+      const events = result.units.map(unit => unit.event)
+      if (acceptedEvents === undefined) acceptedEvents = events
+      else expect(events).toEqual(acceptedEvents)
+      if (budget.maxBytes) expect(result.pages.some(page => page.items.some(entry => entry.kind === 'fragment'))).toBe(true)
+    }
+  }
+  expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('one backend window replaces late relationships through its original cut and rejects another epoch before comparing revisions', async () => {
+  const f = await fixture(), original = captured('late-submission', _historyFixtureEpoch(0, 0, 300))
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: original })
+  const opened = await collect(input => f.client.readAgentConversation(input)), before = opened.pages.at(-1)!
+  expect(opened.units).toHaveLength(2)
+  await f.store.applyTimelineMutation({ type: 'upsert', agentSessionId: ref.agentSessionId, item: { ...original, updatedAt: _historyFixtureEpoch(0, 0, 400),
+    conversation: { sameEvent: { ...ref, source: { kind: 'native', providerId: 'claude', nativeSessionId: 'native-main', recordId: 'native' } } } } })
+  const changed = await f.client.readConversationChanges({ ...ref, checkpoint: before.window.checkpoint, view: before.window.view! })
+  const assembled = consumeConversationWindowPage(changed)
+  expect(assembled.kind).toBe('complete')
+  if (assembled.kind !== 'complete') throw Error('Expected one bounded complete replacement')
+  expect(assembled.snapshot.units).toHaveLength(1)
+  expect(assembled.snapshot.units[0]!.records.map(record => record.original.item.id).sort()).toEqual(['late-submission', 'native'])
+  expect(changed.window).toMatchObject({ id: before.window.id, revision: before.window.revision + 1, complete: true })
+  const other = await fixture(), foreign = await other.client.conversationCheckpoint(ref)
+  expect(foreign.checkpoint.frontier.scope).not.toEqual(before.scope)
+  await expect(f.client.readConversationChanges({ ...ref, checkpoint: foreign.checkpoint, view: changed.window.view! })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  const stillReadable = await f.client.readConversationChanges({ ...ref, checkpoint: changed.checkpoint, view: changed.window.view! })
+  expect(consumeConversationWindowPage(stillReadable)).toMatchObject({ kind: 'complete', snapshot: { units: [expect.objectContaining({ records: expect.any(Array) })] } })
+  expect(f.controls.every(control => !control.mock.calls.length) && other.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('window assembly rejects duplicate contributions, missing inventory and foreign revisions without replacing the displayed snapshot', async () => {
+  const f = await fixture(), page = await f.client.readAgentConversation(ref)
+  const original = consumeConversationWindowPage(page)
+  expect(original.kind).toBe('complete')
+  expect(() => consumeConversationWindowPage({ ...page, items: [...page.items, ...page.items], window: { ...page.window, itemCount: 2 } })).toThrow()
+  expect(() => consumeConversationWindowPage({ ...page, items: [] })).toThrow()
+  const pending = consumeConversationWindowPage({ ...page, window: { ...page.window, complete: false, view: null }, nextCursor: 'exact-pending-page' })
+  expect(pending.kind).toBe('pending')
+  if (pending.kind !== 'pending') throw Error('Expected wire-only pending assembly')
+  expect(() => consumeConversationWindowPage({ ...page, items: [], window: { ...page.window, revision: page.window.revision + 1 } }, pending.pending)).toThrow()
+  const wrong = structuredClone(page)
+  wrong.window.checkpoint.frontier.scope.sources = [{ kind: 'captured', epoch: 'another-source' }]
+  expect(() => parseConversationReadPage(wrong, ref)).toThrow()
+  const wrongHost = structuredClone(page)
+  wrongHost.window.checkpoint.sourceHostId = 'another-original-host'
+  wrongHost.window.checkpoint.frontier.hostId = 'another-original-host'
+  expect(() => parseConversationReadPage(wrongHost, ref)).toThrow()
+  const cancelled = new AbortController(); cancelled.abort(new Error('Only this consumer was cancelled'))
+  await expect(f.client.readConversationChanges({ ...ref, checkpoint: page.window.checkpoint, view: page.window.view! }, { signal: cancelled.signal })).rejects.toThrow('Only this consumer')
+  const resumed = await f.client.readConversationChanges({ ...ref, checkpoint: page.window.checkpoint, view: page.window.view! })
+  expect(consumeConversationWindowPage(resumed)).toMatchObject({ kind: 'complete' })
+  expect(original).toMatchObject({ kind: 'complete', snapshot: { window: { id: page.window.id, revision: page.window.revision } } })
+})
+
+it('a watched exact view survives unrelated reads and explicit disposal releases only its temporary window', async () => {
+  const f = await fixture(), page = await f.client.readAgentConversation(ref)
+  const watch = await f.client.observeConversation({ ...ref, view: page.window.view! }, () => {})
+  for (let count = 0; count < 24; count++) await f.client.readAgentConversation(ref)
+  const observedRead = f.client.readConversationChanges({ ...ref, checkpoint: page.window.checkpoint, view: page.window.view! })
+  await expect(observedRead).resolves.toMatchObject({ window: { id: page.window.id } })
+  const current = await observedRead
+  watch.dispose()
+  await expect(f.client.readConversationChanges({ ...ref, checkpoint: current.checkpoint, view: current.window.view! })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  expect(await f.client.releaseConversationView({ ...ref, view: current.window.view! })).toMatchObject({ viewId: page.window.id, released: false })
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
+  const another = await service.call('agent.conversation.inspect', ref)
+  const released = await service.call('agent.conversation.release', { ...ref, view: another.window.view! })
+  expect(released).toMatchObject({ viewId: another.window.id, released: true })
+  expect(parseRpcNativeResult('agent.conversation.release', released, { ...ref, view: another.window.view! })).toEqual(released)
+  expect((await f.client.readAgentConversation(ref)).items).toHaveLength(1)
+  expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('a repeated source operation and its route-budget replay return the same frozen replacement revision', async () => {
+  const f = await fixture(), service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
+  const opened = await service.call('agent.conversation.inspect', ref)
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('new-original', _historyFixtureEpoch(0, 0, 400)) })
+  const input = { ...ref, checkpoint: opened.window.checkpoint, view: opened.window.view!, maxBytes: 32 * 1024 }
+  const first = await service.call('agent.conversation.changes', input)
+  const repeat = await service.call('agent.conversation.changes', input)
+  expect(repeat).toEqual(first)
+  const replay = await service.call('agent.conversation.changes', { ...input, cursor: first.window.replay, maxBytes: 16 * 1024 })
+  expect(replay.window).toEqual(first.window)
+  expect(replay.items).toEqual(first.items)
+})
+
+it('the original native page cut prevents an overlapping changes prefix from replacing its newer accepted version', async () => {
+  const f = await fixture(), checkpoint = f.client.sessionHistoryCheckpoint.bind(f.client)
+  vi.spyOn(f.client, 'sessionHistoryCheckpoint').mockImplementationOnce(async (...args) => {
+    const before = await checkpoint(...args)
+    await appendFile(f.path, jsonl([row('overlapping', _historyFixtureEpoch(0, 0, 200), 'intermediate version'), row('overlapping', _historyFixtureEpoch(0, 0, 300), 'accepted newest version')]))
+    return before
+  })
+  const page = await f.client.readAgentConversation({ ...ref, limit: 1 })
+  expect(page.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { item: { contentParts: [{ text: 'accepted newest version' }] } } }] } })
+  const changes = await f.client.readConversationChanges({ ...ref, limit: 1, checkpoint: page.window.checkpoint, view: page.window.view! })
+  expect(changes.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { item: { contentParts: [{ text: 'accepted newest version' }] } } }] } })
+  expect(changes.more).toBe(false)
+  await appendFile(f.path, jsonl([row('overlapping', _historyFixtureEpoch(0, 0, 400), 'later native version')]))
+  const later = await f.client.readConversationChanges({ ...ref, limit: 1, checkpoint: changes.checkpoint, view: changes.window.view! })
+  expect(later.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { item: { contentParts: [{ text: 'later native version' }] } } }] } })
+})
+
+it('the saved canonical Provider shares the same exact page-to-changes cut under a concurrent append', async () => {
+  const f = await savedQuestionFixture([], { unifiedCapturedRead: true }); release.push(f.close)
+  const reference = { hostId: 'local', agentSessionId: f.session.agentSessionId }, checkpoint = f.client.sessionHistoryCheckpoint.bind(f.client)
+  const native = (text: string) => ({ type: 'response_item', payload: { type: 'message', id: 'overlapping', role: 'assistant', content: [{ type: 'output_text', text }] } })
+  vi.spyOn(f.client, 'sessionHistoryCheckpoint').mockImplementationOnce(async (...args) => {
+    const before = await checkpoint(...args)
+    await appendFile(f.transcriptPath, jsonl([native('intermediate version'), native('accepted newest version')]))
+    return before
+  })
+  const page = await f.client.readAgentConversation({ ...reference, limit: 1 })
+  const changes = await f.client.readConversationChanges({ ...reference, limit: 1, checkpoint: page.window.checkpoint, view: page.window.view! })
+  expect(changes.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { item: { contentParts: [{ text: 'accepted newest version' }] } } }] } })
+  expect(changes.more).toBe(false)
+})
+
+it('a Provider without a page cut preserves its original readable window and reports the changes join as unknown', async () => {
+  const f = await fixture(), original = f.client.sessionHistoryPage.bind(f.client)
+  vi.spyOn(f.client, 'sessionHistoryPage').mockImplementation(async (...args) => { const { changesCursor: _unestablished, ...page } = await original(...args); return page })
+  const page = await f.client.readAgentConversation(ref)
+  expect(page.items).toHaveLength(1)
+  expect(page.window.checkpoint.frontier.cuts.every(cut => cut.kind !== 'native')).toBe(true)
+  expect(page.coverage.flatMap(source => source.gaps)).toContainEqual(expect.objectContaining({ code: 'AGENT_CONVERSATION_READ_CUT_UNAVAILABLE' }))
+  const current = await f.client.readConversationChanges({ ...ref, checkpoint: page.window.checkpoint, view: page.window.view! })
+  expect(current.items).toEqual(page.items)
+  expect(current.coverage.find(source => source.source.kind === 'native')?.current).toBe('unsupported')
+  expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it('a bounded source window traverses cumulative history beyond its retained inventory and keeps original page order and evicted anchors', async () => {
+  const rows = Array.from({ length: 1205 }, (_, index) => row('ordered-' + index, _historyFixtureEpoch(0, 2, 0) - index))
+  const f = await fixture(rows), nativePages = vi.spyOn(f.client, 'sessionHistoryPage')
+  const result = await collect(input => f.client.readAgentConversation(input), { ...ref, limit: 100, maxBytes: 1024 * 1024 })
+  expect(result.units).toHaveLength(1200)
+  expect(result.units.map(unit => unit.records[0]!.original.item.id)).toEqual(rows.slice(0, 1200).reverse().map(item => item.uuid))
+  expect(result.pages.every(page => page.window.itemCount <= 1200)).toBe(true)
+  expect(nativePages).toHaveBeenCalledTimes(13)
+  expect(result.pages.length).toBeLessThan(110)
+  const last = result.pages.at(-1)!, outside = last.window.outside.newer!
+  expect(outside.record.source.recordId).toBe('ordered-1200')
+  const original = await f.client.readAgentConversation({ ...ref, anchor: { ...outside, frontier: last.window.checkpoint } })
+  expect(original.items[0]).toMatchObject({ kind: 'item', item: { records: [{ original: { item: { id: 'ordered-1200' } } }] } })
+  const witnesses = result.units.map(unit => unit.records[0]!.order)
+  expect(witnesses.every(order => order.kind === 'native-page' && !!order.pageWitness)).toBe(true)
+  expect(new Set(witnesses.map(order => order.kind === 'native-page' && order.pageWitness)).size).toBe(13)
+}, 30_000)
+
+it('the accepted byte window evicts complete events before projection and keeps the exact displaced original readable', async () => {
+  const f = await fixture([]), store = new AgentMuxMemoryAgentSessionStore()
+  await store.compareAndSwap(null, f.session)
+  const client = new AgentMuxClient({ store }); release.push(() => client.dispose())
+  const body = 'x'.repeat(120 * 1024)
+  for (let index = 0; index < 280; index++) await store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: captured('large-' + index, index, body) })
+  const result = await collect(input => client.readAgentConversation(input), { ...ref, limit: 100, maxBytes: 4 * 1024 * 1024 })
+  const last = result.pages.at(-1)!
+  expect(result.units.length).toBeGreaterThan(200); expect(result.units.length).toBeLessThan(280)
+  expect(Buffer.byteLength(JSON.stringify(result.units))).toBeLessThanOrEqual(32 * 1024 * 1024)
+  expect(last.window.outside.newer).not.toBeNull()
+  const anchor = { ...last.window.outside.newer!, frontier: last.window.checkpoint }
+  const located = await client.readAgentConversation({ ...ref, anchor, maxBytes: 1024 * 1024 })
+  const read = consumeConversationWindowPage(located)
+  expect(read).toMatchObject({ kind: 'complete', snapshot: { units: [{ records: [{ reference: anchor.record, original: { item: { content: body } } }] }] } })
+}, 30_000)
 
 it('actual SDK and public RPC preserve source order with one tail policy, independently of wire page limits', async () => {
   const f = await fixture([row('older-native', _historyFixtureEpoch(0, 0, 200)), row('n100', _historyFixtureEpoch(0, 0, 100)), row('n1', _historyFixtureEpoch(0, 0, 1))])
@@ -207,7 +392,7 @@ it('canonical question and recorded answer stay complete through public units wi
   const f = await savedQuestionFixture([savedQuestionEvent(), reply, second], { unifiedCapturedRead: true }); release.push(f.close)
   const input = { hostId: 'local', agentSessionId: f.session.agentSessionId }
   const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
-  const all = await collect(value => service.call('agent.conversation.inspect', value), input)
+  const all = await collect(value => service.call('agent.conversation.inspect', value), { ...input, limit: 1 })
   expect(all.units).toHaveLength(3)
   const localAnswers = all.units.flatMap(unit => unit.event.relations).filter(relation => relation.kind === 'answers')
   expect(localAnswers.map(relation => relation.from.source.recordId).sort()).toEqual(['original-answer-record', 'second-original-answer-record'])
@@ -535,6 +720,17 @@ it.runIf(process.env.AGENTMUX_UNIFIED_COMPILED === '1')('the real compiled CLI c
   expect(changes.code, changes.stderr).toBe(0)
   expect(JSON.parse(changes.stdout).result).toMatchObject({ ...ref, items: [{ kind: 'item', item: { records: [{ original: { item: { id: 'compiled-delta' } } }] } }], more: false })
   const unit = result.result.items[0].item as ConversationUnit
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: { ...captured('compiled-late-contribution', _historyFixtureEpoch(0, 1, 100)),
+    conversation: { sameEvent: { ...ref, source: { kind: 'native', providerId: 'claude', nativeSessionId: 'native-main', recordId: 'native' } } } } })
+  const continued = await runCompiledObjectCli(['agent', 'conversation', 'changes', '--input', '-'], env,
+    JSON.stringify({ ...ref, checkpoint: result.result.window.checkpoint, view: result.result.window.view }))
+  expect(continued.code, continued.stderr).toBe(0)
+  const accepted = JSON.parse(continued.stdout).result
+  expect(accepted.window.id).toBe(result.result.window.id)
+  expect(accepted.items.find((entry: { item: ConversationUnit }) => entry.item.records.some(record => record.original.item.id === 'native')).item.records.map((record: { original: { item: { id: string } } }) => record.original.item.id).sort()).toEqual(['compiled-late-contribution', 'native'])
+  const disposed = await runCompiledObjectCli(['agent', 'conversation', 'release', '--host', 'local', '--session', ref.agentSessionId, '--view', accepted.window.view], env)
+  expect(disposed.code, disposed.stderr).toBe(0)
+  expect(JSON.parse(disposed.stdout).result).toMatchObject({ viewId: accepted.window.id, released: true })
   const anchor = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--input', '-'], env, JSON.stringify({ ...ref, anchor: { record: unit.records[0]!.reference, revision: unit.records[0]!.revision, frontier: cut } }))
   expect(anchor.code, anchor.stderr).toBe(0)
   expect(JSON.parse(anchor.stdout).result.items[0].item.records[0].original.item.id).toBe('native')

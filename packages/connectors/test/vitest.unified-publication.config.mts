@@ -7,6 +7,7 @@ import original from '../../../vitest.config.ts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_PUBLICATION_MUTANT
 const mutations: Record<string, { path: string; before: string; after: string }> = {
+  'bypass-backend-window': { path: 'packages/connectors/src/publication-host.ts', before: 'limit: 100, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {})', after: 'limit: 100, ...(state.cursor ? { cursor: state.cursor } : {})' },
   'forget-retained-parts': { path: 'packages/connectors/src/publication-store.ts', before: 'this.queueRepresentation(boundary, projectionId, unit, materialized, options.fragmentBytes ?? 4096)', after: 'this.queueRepresentation(boundary, projectionId, unit, plan, options.fragmentBytes ?? 4096)' },
   'forget-retained-relation': { path: 'packages/connectors/src/publication-store.ts', before: 'if (prior.some(row => { const intent = JSON.parse(String(row.decision_json)) as RepresentationIntent; return intent.text && !qualified(intent.projectionId) })) ambiguous.add(record.id)', after: 'if (false) ambiguous.add(record.id)' },
   'replay-unknown-effect': { path: 'packages/connectors/src/publication-store.ts', before: ': { ...retained, state: result.state, reason: result.reason, receipt: result }', after: ": { ...retained, state: result.state === 'unknown' ? 'pending' : result.state, reason: result.reason, receipt: result }" },

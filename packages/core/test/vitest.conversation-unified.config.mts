@@ -7,7 +7,12 @@ const root = resolve(import.meta.dirname, '../../..')
 const changes: Record<string, [string, string, string]> = {
   'invert-tail-clock': ['conversation-timeline.ts', 'at > bt', 'at < bt'],
   'accept-future-captured-cut': ['conversation-reader.ts', ' || cut.sequence > current.stream.sequence', ''],
-  'advance-before-complete-unit': ['conversation-reader.ts', 'frontier: index < units.length ? state.checkpoint! : batch.end!', 'frontier: batch.end!'],
+  'advance-before-complete-unit': ['conversation-reader.ts', 'frontier: complete ? snapshot.checkpoint : state.checkpoint!', 'frontier: snapshot.checkpoint'],
+  'drop-accepted-window-contributions': ['conversation-reader.ts', 'const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))', 'view.rows = []; const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))'],
+  'trust-foreign-window-checkpoint': ['conversation-changes.ts', 'checkpoint.sourceHostId !== source.hostId || !same(checkpoint.frontier.scope, accepted)', '!same(checkpoint.frontier.scope, accepted)'],
+  'repeat-window-original': ['conversation-changes.ts', 'eventIds.has(unit.event.id) || unit.records.some(record => recordIds.has(record.id))', 'false'],
+  'evict-watched-window': ['conversation-reader.ts', 'filter(view => view.observers === 0)', 'filter(() => true)'],
+  'retain-pre-history-cut': ['conversation-reader.ts', 'cursor: page.changesCursor', "cursor: cut?.kind === 'native' ? cut.checkpoint.cursor : page.changesCursor"],
   'trust-route-cursor-fields': ['conversation-reader.ts', 'if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw Error()', 'if (actual.length !== expected.length) throw Error()'],
   'trust-unrelated-relation': ['conversation-changes.ts', 'if (!local && !byId.has(conversationRecordId(to)) || local &&', 'if (local &&'],
   'trust-coalesce-claim': ['conversation-changes.ts', '!same(e.coalesces, expectedCoalesces.length ? expectedCoalesces : undefined)', 'false'],
