@@ -11,7 +11,10 @@ export default defineConfig({ ...shared, cacheDir: '.tmp/agent-bookmarks/vitest'
     const changes:Record<string,[string,string,string]>={
       multiple:['apps/desktop/src/renderer/src/lib/agent-information-preview.ts','...current.filter(item => item.pinned),','...[],'],
       subject:['apps/desktop/src/renderer/src/lib/agent-bookmark-reading.ts','bySubject.get(JSON.stringify([host, sid]))','bySubject.get(JSON.stringify(["neighbor-host", sid]))'],
-      reading:['apps/desktop/src/renderer/src/components/AgentInformationReader.tsx','if (request.bookmark && !protectedNow && changedReading','if (request.bookmark && changedReading']
+      reading:['apps/desktop/src/renderer/src/components/AgentInformationReader.tsx','if (request.bookmark && !protectedNow && changedReading','if (request.bookmark && changedReading'],
+      geometry:['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts','if (commit && changed && bookmark)','if (false && commit && changed && bookmark)'],
+      cancel:['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts','markWindowOverlayDismissal(event); end(false)','markWindowOverlayDismissal(event); end(true)'],
+      preference:['apps/desktop/src/renderer/src/lib/use-agent-bookmark-window.ts','if (commit && changed && bookmark)','if (commit && bookmark)']
     }
     const change=mutation?changes[mutation]:undefined
     if(change&&path===change[0]){if(code.split(change[1]).length!==2)throw Error('One exact bookmark consumer required');served=code.replace(change[1],change[2])}

@@ -76,3 +76,61 @@ it('retains the saved presentation while its original Runtime subject is unavail
   expect(agentBookmarks.get().bookmarks[0]!.key).toBe(saved.key)
   expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
 })
+it('keeps keyboard window geometry within the viewport and writes its settled bounds', async () => {
+  await scene(); await open(); await pin(); const original = panel()
+  vi.spyOn(original, 'getBoundingClientRect').mockImplementation(() => ({ x: 32, y: 72, width: 460, height: 600, top: 72, left: 32, right: 492, bottom: 672, toJSON() {} }))
+  const move = original.querySelector<HTMLButtonElement>('.agent-bookmark__move')!
+  await act(async () => { move.focus(); move.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  expect(agentBookmarks.get().bookmarks[0]!.bounds.x).toBe(48)
+  const resize = original.querySelector<HTMLButtonElement>('.agent-bookmark__resize')!
+  await act(async () => resize.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })))
+  expect(agentBookmarks.get().bookmarks[0]!.bounds.width).toBe(444)
+  await act(async () => original.querySelector<HTMLButtonElement>('.agent-bookmark__reset')!.click())
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toMatchObject({ x: 32, y: 56, width: 460 })
+  expect(original.querySelector('.focus-context-hover__recap')!.textContent).toContain(a.id + ' original reply')
+})
+it('persists completed pointer gestures, cancels unfinished geometry and keeps header controls usable', async () => {
+  await scene(); await open(); await pin(); const original = panel(), saved = agentBookmarks.get().bookmarks[0]!.bounds
+  vi.spyOn(original, 'getBoundingClientRect').mockImplementation(() => {
+    const x = parseFloat(original.style.left), y = parseFloat(original.style.top), width = parseFloat(original.style.width), height = parseFloat(original.style.height)
+    return { x, y, width, height, top: y, left: x, right: x + width, bottom: y + height, toJSON() {} }
+  })
+  const header = original.querySelector<HTMLElement>('header')!
+  const pointer = async (target: HTMLElement, type: string, x: number, y: number) => act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 7, clientX: x, clientY: y })))
+  await pointer(header, 'pointerdown', 100, 100); await pointer(header, 'pointermove', -1000, -1000)
+  expect(original.style.left).toBe('8px'); expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(saved)
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(original.style.left).toBe(saved.x + 'px'); expect(panels()).toContain(original)
+  await pointer(header, 'pointerdown', 100, 100); await pointer(header, 'pointermove', 140, 120); await pointer(header, 'pointerup', 140, 120)
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toMatchObject({ x: saved.x + 40, y: saved.y + 20 })
+  const resize = original.querySelector<HTMLElement>('.agent-bookmark__resize')!
+  await pointer(resize, 'pointerdown', 100, 100); await pointer(resize, 'pointermove', 2000, 2000); await pointer(resize, 'pointerup', 2000, 2000)
+  const settled = agentBookmarks.get().bookmarks[0]!.bounds
+  expect(settled.x + settled.width).toBeLessThanOrEqual(window.innerWidth - 8)
+  expect(settled.y + settled.height).toBeLessThanOrEqual(window.innerHeight - 8)
+  await pointer(resize, 'pointerdown', 100, 100); await pointer(resize, 'pointermove', 110, 110); await pointer(resize, 'pointercancel', 110, 110)
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(settled)
+})
+it('keyboard entry through another alias focuses the same bookmark without replacing its reading', async () => {
+  await scene(); await open(); await pin(); const original = panel()
+  const alias = { ...a, id: 'keyboard-bookmark-alias' }
+  await act(async () => useAppStore.setState({ sessions: [a, alias, b, neighbor] }))
+  await dom.render(<FocusContextRow context={context(alias)} selected={false} onSelect={() => {}} />)
+  await open(alias.id)
+  const row = dom.container.querySelector<HTMLElement>(`[data-session-id="${alias.id}"]`)!
+  await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+  expect(document.activeElement).toBe(original.querySelector('.agent-information-reader__reading'))
+  expect(panels()).toEqual([original]); expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+})
+it('keeps preferred geometry when a fitted heading is clicked without dragging', async () => {
+  await scene(); await open(); await pin(); const original = panel(), saved = agentBookmarks.get().bookmarks[0]!
+  await act(async () => agentBookmarks.setBounds(saved.key, { x: 32, y: 56, width: 1600, height: 1200 }))
+  const preferred = agentBookmarks.get().bookmarks[0]!.bounds
+  vi.spyOn(original, 'getBoundingClientRect').mockImplementation(() => ({ x: 8, y: 8, width: window.innerWidth - 16, height: window.innerHeight - 16, top: 8, left: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8, toJSON() {} }))
+  const header = original.querySelector<HTMLElement>('header')!
+  await act(async () => {
+    header.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 4, clientX: 50, clientY: 50 }))
+    header.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 4, clientX: 50, clientY: 50 }))
+  })
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(preferred)
+})
