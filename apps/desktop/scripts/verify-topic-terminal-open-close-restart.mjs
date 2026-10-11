@@ -47,7 +47,7 @@ try {
   await fs.mkdir(path.join(privateRoot, 'node_modules/@agentmux'), { recursive: true })
   await fs.symlink(path.join(root, 'packages/core'), path.join(privateRoot, 'node_modules/@agentmux/core'))
   await fs.writeFile(path.join(privateRoot, 'producer.cjs'), `for(let n=0;n<1000;n++)process.stdout.write('HISTORY '+String(n).padStart(4,'0')+' local active Run\\n');let tick=0;setInterval(()=>process.stdout.write('LIVE '+(++tick)+'\\n'),100);process.stdin.on('data',data=>process.stdout.write('ACK:'+data.toString().trim()+'\\n'));`)
-  await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
+  await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"', __TERMINAL_WHEEL_UMD_URL__: '"unused"' },
     resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })

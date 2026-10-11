@@ -75,7 +75,8 @@ async function run(label, mutation) {
       const original = await readFile(id, 'utf8'), name = relative(repository, id); consumed[name] = hash(original)
       const changed = transformSource(original, name, mutation, changes)
       if (changed !== original) return changed
-    }, async generateBundle() { for (const file of this.getWatchFiles()) {
+    }, async generateBundle() { for (const watchedPath of this.getWatchFiles()) {
+      const file = resolve(fixture, watchedPath)
       if (file.includes('/node_modules/') && /\.(?:[cm]?js|css|json)$/.test(file)) {
         const name = relative(repository, file), digest = hash(await readFile(file)); dependencies[name] = digest
         if (dependencyInputs.has(name)) assert.equal(digest, dependencyInputs.get(name), 'Every build consumes the same actual installed dependency bytes: ' + name)
