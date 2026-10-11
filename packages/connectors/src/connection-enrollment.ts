@@ -129,12 +129,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
   async list(value: ConnectionEnrollmentListInput) {
     this.current()
     const input = parseConnectionEnrollmentParams('connection.enrollment.ls', value)
-    let available = true
-    try {
-      await this.secure()
-    } catch {
-      available = false
-    }
+    const available = !!this.options.secrets
     const capabilities: ConnectionEnrollmentCapability[] = this.options.connections
       .enrollmentAdapters()
       .flatMap((a) =>
