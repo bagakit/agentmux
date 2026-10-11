@@ -1,5 +1,6 @@
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
+import type { BrowserColdDescriptor } from './browser-cold-descriptor.js'
 import { readScreenshotViewport, screenshotSource, SCREENSHOT_VIEWPORT_SCRIPT } from './browser-screenshot-source.js'
 import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
 import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
@@ -867,6 +868,27 @@ export class BrowserViewManager {
       }
     }
     return [...pids]
+  }
+
+  /** Existing native ownership wins over a cold resource read, including a failed read. */
+  async ensure(id: string, resolveCold: () => Promise<BrowserColdDescriptor>, input?: Partial<BrowserRestoreInput>): Promise<BrowserSnapshot> {
+    const binding = { ...(input?.workspaceId !== undefined ? { workspaceId: input.workspaceId } : {}),
+      ...(input?.mode !== undefined ? { mode: input.mode } : {}) }
+    if (this.entries.has(id) || this.releasedEntries.has(id)) return await this.restore(id, binding)
+    let saved: BrowserColdDescriptor
+    try { saved = await resolveCold() }
+    catch (error) {
+      // Another consumer can acquire the real page while this observation is waiting.
+      if (this.entries.get(id) || this.releasedEntries.get(id)) return await this.restore(id, binding)
+      throw error
+    }
+    if (this.entries.get(id) || this.releasedEntries.get(id)) return await this.restore(id, binding)
+    if (saved.id !== id) throw new Error('Browser recovery returned another identity. The original Region is kept.')
+    this.assertWorkspaceBinding(saved.workspaceId, input?.workspaceId ?? null)
+    if (input?.mode !== undefined && input.mode !== saved.mode) throw new Error('The saved Browser mode does not match this Region.')
+    // create rechecks the original maps and registers synchronously before loadURL. Concurrent
+    // visible and public consumers therefore share one owner without a pending registry.
+    return await this.create(id, saved.url, saved.workspaceId, saved.profileId, saved.mode, saved.viewport)
   }
 
   async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive'): Promise<BrowserSnapshot> {
