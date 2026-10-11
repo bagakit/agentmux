@@ -1,11 +1,11 @@
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { conversationRecordAuthor, conversationRecordId, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
-import type { PublicationImage, ResolvedPublicationPart } from './publication-image.js'
+import type { PublicationImage, PublicationFile, ResolvedPublicationPart } from './publication-resource.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
 export type PublicationContentPlan = {
   text: string
-  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; contentEligibility?: 'public'; relay?: ConnectionDeliveryRelay['sources'][number] }>
+  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; contentEligibility?: 'public'; relay?: ConnectionDeliveryRelay['sources'][number] }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
   gaps: ConnectionDeliveryGap[]
@@ -61,8 +61,9 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       const raw = original.item.contentParts[slot.selector.partIndex]!, body = options.resolved.get(key) ?? raw
       if (narrow && body.kind !== 'text' && !(body.kind === 'resource' && body.content?.kind === 'text')) { excluded.push(part); continue }
       phase ??= original.item.messagePhase
-      if (body.kind === 'image-unavailable') { gap('resource-unavailable'); continue }
+      if ((body.kind === 'image-unavailable' || body.kind === 'file-unavailable')) { gap('resource-unavailable'); continue }
       if (body.kind === 'image') { pieces.push({ part, text: '', image: body.image, contentEligibility: 'public' }); continue }
+      if (body.kind === 'file') { pieces.push({ part, text: '', file: body.file, contentEligibility: 'public' }); continue }
       switch (body.kind) {
         case 'text': value = body.text; break
         case 'reasoning': value = body.redacted ? '[Reasoning redacted by original source]' : body.text; break

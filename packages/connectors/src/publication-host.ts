@@ -4,7 +4,7 @@ import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type Connecti
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
-import { publicationImage, type ImageUploadReceipt, type ResolvedPublicationPart } from './publication-image.js'
+import { publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation } from './publication-store.js'
 
@@ -165,19 +165,35 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
       const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
       if (part.contentEligibility !== 'public' || part.kind !== 'resource') continue
-      if ((part.resourceType === 'image' || part.resourceType === 'text' && part.content?.kind === 'resource') && binding.scope.publication === 'future-shared-conversation' && adapter.images) {
-        result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), { kind: 'image-unavailable' })
-        try {
-          const input = { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id,
-            ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference, maxBytes: adapter.images.maxBytes, representation: 'image' as const }
-          const response = await this.options.conversation.resource(reference, input, signal)
+      const deferred = part.resourceType === 'text' && part.content?.kind === 'resource'
+      if (binding.scope.publication === 'future-shared-conversation' &&
+        ((part.resourceType === 'image' || deferred) && adapter.images || (part.resourceType === 'file' || deferred) && adapter.files)) {
+        const key = publicationPartKey({ record: record.reference!, selector: slot.selector })
+        result.set(key, { kind: part.resourceType === 'file' ? 'file-unavailable' : 'image-unavailable' })
+        const input = { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id,
+          ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference }
+        if ((part.resourceType === 'image' || deferred) && adapter.images) try {
+          const request = { ...input, maxBytes: adapter.images.maxBytes, representation: 'image' as const }
+          const response = await this.options.conversation.resource(reference, request, signal)
           if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign image resource Session')
           const { agentSessionId: _session, ...original } = response
-          const read = parseProviderSessionHistoryResourceReadResult(original, input).result
-          if (read.status !== 'read') continue
-          const image = publicationImage(read)
-          if (adapter.images.accepts(image)) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), { kind: 'image', image })
-        } catch { signal.throwIfAborted() /* This exact image stays a gap; independent text is retained. */ }
+          const read = parseProviderSessionHistoryResourceReadResult(original, request).result
+          if (read.status === 'read') {
+            const image = publicationImage(read)
+            if (adapter.images.accepts(image)) { result.set(key, { kind: 'image', image }); continue }
+          }
+        } catch { signal.throwIfAborted() /* Keep this exact part as a recoverable gap. */ }
+        if ((part.resourceType === 'file' || deferred) && adapter.files) try {
+          const request = { ...input, maxBytes: adapter.files.maxBytes, representation: 'file' as const }
+          const response = await this.options.conversation.resource(reference, request, signal)
+          if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign file resource Session')
+          const { agentSessionId: _session, ...original } = response
+          const read = parseProviderSessionHistoryResourceReadResult(original, request).result
+          if (read.status === 'file') {
+            const file = publicationFile(read)
+            if (adapter.files.accepts(file)) result.set(key, { kind: 'file', file })
+          }
+        } catch { signal.throwIfAborted() /* Independent text is retained. */ }
         continue
       }
       if (part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
@@ -251,7 +267,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
       const frozen = JSON.stringify([original.projectionId, original.sourceRevision])
       const relevant = qualified.has(frozen) ? [] : this.store.pendingNativeRecords(original)
-      if (!qualified.has(frozen) && ['speech', 'image'].includes(original.payload.kind) && original.effect === 'upsert' && (relevant.length || (original.sourceRecords ?? [original.reference]).some(record => record.source.kind === 'native'))) {
+      if (!qualified.has(frozen) && ['speech', 'image', 'file'].includes(original.payload.kind) && original.effect === 'upsert' && (relevant.length || (original.sourceRecords ?? [original.reference]).some(record => record.source.kind === 'native'))) {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
           for (const record of relevant) {
@@ -280,19 +296,21 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (qualification !== 'qualified') return { state: 'unavailable', reason: 'source-unconfirmed' }
         qualified.add(frozen)
       }
-      if (original.payload.kind === 'image' && original.effect === 'upsert' && !original.prepared) {
+      if ((original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && !original.prepared) {
         const last = original.uploads?.at(-1)
-        if (last?.state === 'dispatching') { this.store.settleImageUpload(original.operationId, original.uploads!.length, { state: 'unknown' }); continue }
+        if (last?.state === 'dispatching') { this.store.settleResourceUpload(original.operationId, original.uploads!.length, { state: 'unknown' }); continue }
         if (last?.state !== 'confirmed') {
-          if (!adapter.images || !adapter.images.accepts(original.payload.image)) return { state: 'unavailable', reason: 'adapter-unavailable' }
-          const upload = this.store.claimImageUpload(original.operationId, () => this.authorized(binding))
-          if (!upload || upload.payload.kind !== 'image') return
-          if (signal.aborted || !this.authorized(binding)) { this.store.settleImageUpload(upload.operationId, upload.uploads!.length, { state: 'unknown' }); return }
+          if (original.payload.kind === 'image' ? !adapter.images || !adapter.images.accepts(original.payload.image) : !adapter.files || !adapter.files.accepts(original.payload.file)) return { state: 'unavailable', reason: 'adapter-unavailable' }
+          const upload = this.store.claimResourceUpload(original.operationId, () => this.authorized(binding))
+          if (!upload || (upload.payload.kind !== 'image' && upload.payload.kind !== 'file')) return
+          if (signal.aborted || !this.authorized(binding)) { this.store.settleResourceUpload(upload.operationId, upload.uploads!.length, { state: 'unknown' }); return }
           const uploadSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
-          let effect: Promise<ImageUploadReceipt>
-          try { effect = Promise.resolve(adapter.images.upload(upload.payload.image, upload.target, credential, uploadSignal)) }
-          catch { effect = Promise.reject(new Error('Unconfirmed original image upload.')) }
-          const settle = (receipt: ImageUploadReceipt) => { if (!this.closed) this.store.settleImageUpload(upload.operationId, upload.uploads!.length, receipt) }
+          let effect: Promise<ResourceUploadReceipt>
+          try { effect = Promise.resolve(upload.payload.kind === 'image'
+            ? adapter.images!.upload(upload.payload.image, upload.target, credential, uploadSignal)
+            : adapter.files!.upload(upload.payload.file, upload.target, credential, uploadSignal)) }
+          catch { effect = Promise.reject(new Error('Unconfirmed original resource upload.')) }
+          const settle = (receipt: ResourceUploadReceipt) => { if (!this.closed) this.store.settleResourceUpload(upload.operationId, upload.uploads!.length, receipt) }
           effect.then(receipt => {
             try { settle(receipt) } catch { try { settle({ state: 'unknown' }) } catch { /* Preserve the same unconfirmed upload attempt. */ } }
             this.wake(lane)
