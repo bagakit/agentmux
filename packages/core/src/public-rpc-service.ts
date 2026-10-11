@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { isConnectionSetupMethod, parseConnectionSetupParams } from './connection-setup-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
+import { parseRendererMemoryResult } from './renderer-memory.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { ConversationLandmarkStore } from './conversation-landmark-store.js'
 import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from './conversation-landmarks.js'
@@ -1089,6 +1090,7 @@ export class AgentMuxRpcService {
         }
       }
       result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal, nameContext)
+        : request.operation === 'metrics.memory.inspect' ? { operation: 'metrics.memory.inspect', observation: await this.inspectMemory({ target: request.target }, context.signal) }
         : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
@@ -1657,6 +1659,10 @@ export class AgentMuxRpcService {
     if (operation !== request.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
     const result = parseToolkitResult(request.operation, body)
     assertToolkitResultTarget(request, result); return result
+  }
+  private async inspectMemory(input: import('./renderer-memory.js').RendererMemoryInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.inspectMemory) throw new AgentMuxError('Renderer memory details are unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererMemoryResult(await this.ports.metrics.inspectMemory(input, signal), input)
   }
   private async captureProfile(input: import('./renderer-v8-profile.js').RendererV8ProfileInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.captureProfile) throw new AgentMuxError('Renderer profiling is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')

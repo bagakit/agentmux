@@ -1,5 +1,6 @@
 import { parseAgentContinuityControlInput } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
+import { parseRendererMemoryInput } from './renderer-memory.js'
 import { parseRendererTraceInput } from './renderer-trace.js'
 import { parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { parseMoteConnectionParams } from './mote-connection-codec.js'
@@ -744,6 +745,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   { ...command('system.endpoint', '[--stdio | --inspect]', 'Describe the endpoint, inspect its current owner publication, or relay strict RPC stdio.', { '--stdio': 'boolean', '--inspect': 'boolean' }, f => { if (f.booleans.has('--stdio') && f.booleans.has('--inspect')) throw new AgentMuxError('--stdio and --inspect are mutually exclusive.', 'INVALID_CLI_ARGUMENT'); return { stdio: f.booleans.has('--stdio'), inspect: f.booleans.has('--inspect') } }), local: true },
   empty('system.crash-log.inspect', 'Read retained original crash-log facts.'),
   empty('system.crash-log.reveal', 'Reveal the retained crash-log through the client owner.'),
+  command('system.metrics.memory.inspect', '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS', 'Explicitly read one exact Renderer V8 isolate heap/backing counter snapshot in bytes.',
+    { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value' }, f =>
+      parseRendererMemoryInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }) }) as unknown as Record<string, unknown>,
+    'Use the original metrics window/generation/PID/creationTime, never focus or a guessed PID. Reads Runtime.getHeapUsage once without GC, evaluation or object scanning. Missing experimental embedder/backing fields are null. Backing includes ArrayBuffers and external strings; counters overlap and are not an exclusive RSS breakdown, worker coverage, retained-object proof or a leak diagnosis. Existing DevTools/debugger refuses only this read. Source checks and detach facts remain in completed/failed/unknown receipts; no automatic retries, uploads or retained history.'),
   command('system.metrics.profile.capture', '--window-id W --web-contents-id WC --generation G --pid PID --creation-time MS --duration-ms N [--output FILE]', 'Explicitly capture 1-5 seconds of this exact Renderer main-target V8 profile; no automatic sampling.',
     { '--window-id': 'value', '--web-contents-id': 'value', '--generation': 'value', '--pid': 'value', '--creation-time': 'value', '--duration-ms': 'value', '--output': 'data' }, f =>
       parseRendererV8ProfileInput({ target: numbers(f, { '--window-id': 'windowId', '--web-contents-id': 'webContentsId', '--generation': 'generation', '--pid': 'pid', '--creation-time': 'creationTime' }),

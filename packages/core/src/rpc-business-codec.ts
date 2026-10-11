@@ -1,4 +1,5 @@
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
+import { parseRendererMemoryResult } from './renderer-memory.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -305,6 +306,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
         if (request.operation === 'demand.continuation-action' && (loop.loopId !== request.loopId || loop.lastMutation?.operationId !== request.requestId || loop.lastMutation?.action !== request.action || loop.lastMutation?.expectedRevision !== request.expectedRevision || loop.revision !== request.expectedRevision + 1)) fail()
         if (request.operation === 'demand.start' && request.continuation && (loop.agentSessionId !== request.sessionId || loop.creationOperationId !== request.requestId || loop.taskSource?.kind !== 'goal' || loop.taskSource.alignmentRevision !== request.continuation.alignmentRevision || loop.intervalMs !== request.continuation.intervalMs)) fail()
       }
+      break
+    case 'metrics.memory.inspect':
+      parseRendererMemoryResult(actual.observation, request)
       break
     case 'metrics.profile.capture':
       parseRendererV8ProfileResult(actual.capture, request)

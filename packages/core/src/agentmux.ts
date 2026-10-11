@@ -49,6 +49,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (method === 'file.format' && body.status !== 'formatted' && body.status !== 'unchanged') return true
   if (method === 'system.metrics.profile.capture' && (body.capture as { status: string }).status !== 'completed') return true
   if (method === 'system.metrics.trace.capture' && (body.capture as { status: string }).status !== 'completed') return true
+  if (method === 'system.metrics.memory.inspect' && (body.observation as { status: string }).status !== 'completed') return true
   if (body.outcome === 'partial' || body.outcome === 'unknown' || body.outcome === 'refused') return true
   if (method === 'space.inspect' && Object.hasOwn(body, 'request')) {
     const request = body.request as { known?: boolean; report?: { outcome?: string } | null } | null
