@@ -50,7 +50,7 @@ export const ConversationView = memo(function ConversationView({
 }: Props) {
   const describedRecords = useMemo(() => projectConversationRecords({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page }),
     [page, sessionId, reading.executionHostId])
-  if (page.agentSessionId !== sessionId || page.items.length === 0) return null
+  if (page.agentSessionId !== sessionId || page.items.length === 0 && !insertions?.length) return null
   const descriptions = new Map(describedRecords.map(record => [record.rawId, record]))
   const questions = new Map(projectConversationQuestions({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page, answerContext: questionAnswerContext })
     .map(question => [question.recordId, question]))
