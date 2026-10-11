@@ -170,7 +170,7 @@ it('multi-question editing keeps its original draft and opening a terminal does 
   const send = vi.spyOn(api.sessions, 'replyQuestion'), terminal = vi.fn()
   await render(thread(page, terminal)); await click('Keep original'); await text('My second answer')
   expect(send).not.toHaveBeenCalled(); expect(h.writes).toEqual([])
-  await click('Answer in original terminal')
+  await click('打开原终端')
   expect(terminal).toHaveBeenCalledOnce(); expect(send).not.toHaveBeenCalled(); expect(h.writes).toEqual([])
   const target = { source: page.source, turnId: 'question-turn', recordId: nativeQuestion.id }
   expect(useAppStore.getState().questionReplyDrafts[control.agentSessionId]?.[questionReplyKey(control.agentSessionId, target)])

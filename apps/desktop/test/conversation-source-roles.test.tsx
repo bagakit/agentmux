@@ -45,7 +45,7 @@ it('presents the exact independent original Hook reply as a compact observation 
   const observation = host.querySelector<HTMLElement>(`[data-captured-reply-observation="${hook.id}"]`)!
   expect(observation).not.toBeNull()
   const header = observation.querySelector<HTMLButtonElement>('[aria-expanded]')!
-  expect(header.textContent).toContain('回复观察'); expect(header.getAttribute('aria-expanded')).toBe('false')
+  expect(header.textContent).toContain('采集到的回复'); expect(header.getAttribute('aria-expanded')).toBe('false')
   expect(observation.querySelector('.conversation-reply-observation__preview')!.textContent).toBe(hook.content!.replace(/\s+/gu, ' ').slice(0, 180))
   expect(bodies()).toHaveLength(1)
   expect(host.querySelector('[data-native-record-id]')!.getAttribute('data-native-record-id')).toBe(page.items[0]!.id)

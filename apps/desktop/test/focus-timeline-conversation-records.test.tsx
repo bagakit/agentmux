@@ -407,10 +407,10 @@ it('the actual Focus consumer labels one retained Core observation without count
   await render();await wait(()=>expect(recordCount()).toBe(1))
   const marker=markers()[0]!
   expect(marker.dataset.recordKind).toBe('observation')
-  expect(marker.getAttribute('aria-label')).toContain('Reply observation')
+  expect(marker.getAttribute('aria-label')).toContain('采集到的回复')
   expect(marker.querySelector('.recent-focus__message-direction')).toBeNull()
   await plotRecord('retained-observation')
-  expect(overlay().querySelector('.recent-focus__message-caption')?.textContent).toContain('Reply observation')
+  expect(overlay().querySelector('.recent-focus__message-caption')?.textContent).toContain('采集到的回复')
   expect(overlay().querySelector('.recent-focus__message-body')?.textContent).toContain('Original retained observation, author not declared')
   expect(overlay().querySelector('[data-conversation-source="native-hook"]')?.textContent).toBe('Hook')
   expect(overlay().querySelector('[data-conversation-source="native"]')).toBeNull()

@@ -224,7 +224,7 @@ it('authenticated Hosted preserves ordinary input and the original terminal rout
   expect(f.client.forwardRpc).toBeUndefined()
   await click(button(view.element, 'Keep original'))
   expect([...view.element.querySelectorAll('button')].some(item => item.textContent === 'Submit reply')).toBe(false)
-  await click(button(view.element, 'Answer in original terminal'))
+  await click(button(view.element, '打开原终端'))
   expect(f.openTerminal).toHaveBeenCalledOnce(); expect(f.reply).not.toHaveBeenCalled(); expect(f.writes).toEqual([])
   const originalReply = { agentSessionId: sid, source, recordId: question.id, turnId: question.turnId,
     expectedRun: { runId: RUN_ID }, afterSubmissionId: null, operationId: 'unsupported-original-question',
