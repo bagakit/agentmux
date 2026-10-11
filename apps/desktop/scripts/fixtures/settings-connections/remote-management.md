@@ -18,4 +18,6 @@ Runtime 采集仍挂载原 `HostRuntimePanel`，受控 `api.hosts.inspect` 只�
 
 本轮精炼：Remote 独立分组 → Environments，准确 Host 的 Apps & access 展示原配置盘点与来源信任。受控 public DTO 经原面展示 unknown approval；真实输入批准、切原连接与其他 Host 后返回不重放、勾选清零。原维护 unknown / verifying 和 updatedAt 首层可见，Native 六项声明来自原 diagnostics/readAt。附加截图覆盖 3 宽度 Apps & access、原升级及宽/窄能力详情；仅受控 owner DTO，不声称真实 SSH、远端批准、升级或安装。
 
-块面改版场景：宽窗图中读取原配置hostname、user、port override、Runtime binding；另一Host省略user/port时显示SSH config，不猜默认值。移除ReactFlow Background。浅色宽窗用真实鼠标按下、移动、抬起采pan before/mid/after，选择准确原Host后viewport保持。宽窗另外切现有Retro Future浅深主题采图，用户实际主题与配置不变。原6主图、8管理附图外增加3运动帧和2Retro主题图，合计19张；来源仍是受控DTO的原完整Renderer，不代签物理网络观察。
+块面改版场景：宽窗图中读取原配置hostname、user、port override、Runtime binding；另一Host省略user/port时显示SSH config，不猜默认值。移除ReactFlow Background。浅色宽窗用真实鼠标按下、移动、抬起采pan before/mid/after，选择准确原Host后viewport保持。宽窗另外切现有Retro Future浅深主题采图，用户实际主题与配置不变。原6主图、8管理附图外增加3运动帧和2Retro主题图，构成19张原管理覆盖；来源仍是受控DTO的原完整Renderer，不代签物理网络观察。
+
+应用账户同步新增12张原图：3宽度浅色双端配置、宽窗浅深差异计划、3宽度深色原unknown结果、宽窗浅深验真结果和Retro浅深应用面，总计31张。原生输入编辑固定argv、保存准确目标、比较、显式apply、离开返回与查询同一operationId；确认apply仅一次。只有公共白名单metadata受控，无导出材料或私密输入。真实CLI/connector/stdin/目标验真与服务进程重启由独立领域证据持有，Renderer采图不代签外部应用登录。
