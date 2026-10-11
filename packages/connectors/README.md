@@ -128,7 +128,7 @@ It creates a dedicated group or explicitly selects an existing group, then confi
 sharing separately. Another Region displaying the same Host/Session reads the same
 Binding. Actor approval, member inclusion and platform delivery remain separate
 facts; their behavioral contract is defined in
-[the conversation design](../../docs/design/behavior/conversation-input.md#共同对话协议与外部交流入口).
+[the conversation design](../../docs/design/behavior/conversation-mode.md#共同对话协议与外部交流入口).
 
 Desktop retains only the exact submitted request and operation correlation in its
 existing workbench persistence. Reopening a form reads original Core/Host receipts;
