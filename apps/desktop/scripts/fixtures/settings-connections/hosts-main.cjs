@@ -9,7 +9,7 @@ app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 app.setName('Owned Connections Preview')
 Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] }]))
-const result = { completed: false, section, frames: [], interactions: [],
+const result = { completed: false, section, frames: [], supplementalFrames: [], interactions: [],
   boundary: 'Actual SettingsPanel/modules/Panes, original Preview config-edit/save and Store checks, full production CSS in an owned Renderer. Controlled 24 Hosts and exact original DeviceList; remote observations are explicitly controlled protocol facts; native Electron Renderer input and selection command. No registered Main durability, real SSH, physical compositor qualification, Runtime/Run, user App or installation claim.' }
 let win
 app.whenReady().then(async () => {
@@ -128,6 +128,40 @@ app.whenReady().then(async () => {
       } else if (width===640&&theme==='light'||width===320&&theme==='light') {
         await click(`${pane} .settings-resource-back`)
       }
+      // Original APIs are explicitly controlled above; no real trust or upgrade is changed.
+      await choose(target, 'agents')
+      const access = `${pane} [data-host-access="${target}"]`
+      await until(`document.querySelector(${JSON.stringify(access + ' input[type="checkbox"]')})`)
+      await click(`${access} input[type="checkbox"]`)
+      await click(`${access} .primary-button`)
+      await until(`document.querySelector(${JSON.stringify(access)})?.textContent.includes('Approval result unconfirmed')`)
+      const approvals = await read('window.connectionsProof.calls.filter(c=>c.kind==="controlled-source-trust-approval").length')
+      await choose(target, 'connection')
+      await until(`document.querySelector(${JSON.stringify(pane + ' [data-host-upgrade="' + target + '"]')})?.textContent.includes('Upgrade result unconfirmed')`)
+      assert.equal(await read(`document.querySelector(${JSON.stringify(access)})?.hidden`), true)
+      assert.ok(await read(`document.querySelector(${JSON.stringify(pane + ' [data-upgrade-stage="verifying"]')})?.checkVisibility()`), 'Original typed maintenance stage is visible before technical disclosure')
+      assert.ok(await read(`document.querySelector(${JSON.stringify(pane + ' .host-upgrade__observation time')})?.dateTime`), 'Original receipt has its own update time')
+      if (theme==='light') {
+        await read(`document.querySelector(${JSON.stringify(pane + ' [data-host-upgrade="' + target + '"]')}).scrollIntoView({block:'center'})`)
+        await settle()
+        const image=`hosts-${width}-${theme}-original-upgrade.png`,png=(await win.webContents.capturePage()).toPNG()
+        fs.writeFileSync(path.join(evidence,image),png)
+        result.supplementalFrames.push({section,width,theme,scenario:'original-upgrade',image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)}})
+      }
+      await choose('host-02','overview')
+      await choose(target, 'agents')
+      assert.ok(await read(`document.querySelector(${JSON.stringify(access)})?.textContent.includes('Approval result unconfirmed')`))
+      assert.equal(await read('window.connectionsProof.calls.filter(c=>c.kind==="controlled-source-trust-approval").length'),approvals,'Returning to original access never replays approval')
+      assert.equal(await read(`document.querySelector(${JSON.stringify(access + ' input[type="checkbox"]')})?.checked`),false)
+      if (theme==='dark') {
+        await read(`document.querySelector(${JSON.stringify(access)}).scrollIntoView({block:'center'})`)
+        await settle()
+        const image=`hosts-${width}-${theme}-apps-access.png`,png=(await win.webContents.capturePage()).toPNG()
+        fs.writeFileSync(path.join(evidence,image),png)
+        result.supplementalFrames.push({section,width,theme,scenario:'apps-access',image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)}})
+      }
+      result.interactions.push({kind:'native-apps-access-original-trust-retained',width,theme,hostId:target,approvals,
+        boundary:'Controlled original public trust and maintenance DTOs; no real target grants or service update.'})
       // Exercise the same saved Host panel and its explicit Refresh operation, without replacing the UI.
       await read('window.connectionsProof.runtimeScenario("healthy")')
       await choose(target,'overview')
@@ -149,6 +183,15 @@ app.whenReady().then(async () => {
       assert.equal(identities['Native build / protocol'],'controlled-native-build / 22')
       assert.ok(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__environment')}).textContent.includes('linux · x64 · Node v24.0.0')`))
       assert.ok(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities')}).textContent.includes('Recoverable input')`))
+      assert.equal(await read(`document.querySelectorAll(${JSON.stringify(runtime + ' [data-native-capability]')}).length`),6,'Six original Native declarations are individually consumed')
+      assert.ok(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities time')})?.dateTime`),'Declaration source read time remains explicit')
+      if (theme==='dark' && width!==640) {
+        await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities')}).scrollIntoView({block:'center'})`)
+        await settle()
+        const image=`hosts-${width}-${theme}-native-capabilities.png`,png=(await win.webContents.capturePage()).toPNG()
+        fs.writeFileSync(path.join(evidence,image),png)
+        result.supplementalFrames.push({section,width,theme,scenario:'native-capabilities',image,pngPixels:{width:png.readUInt32BE(16),height:png.readUInt32BE(20)}})
+      }
       await click(`${runtime} .host-runtime__details > summary`)
       const originalSample = await read(`document.querySelector(${JSON.stringify(sample)}).textContent`)
       await read('window.connectionsProof.runtimeScenario("partial")')

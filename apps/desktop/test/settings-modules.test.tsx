@@ -76,12 +76,12 @@ const overviewRow = () => connected('[data-settings-overview] [data-settings-sec
 it('a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(registration.originalIds).toEqual([
-    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'mote', 'space', 'focus', 'goals', 'survey', 'notes', 'toolkit', 'agents', 'prompts', 'hosts', 'devices'
+    'profile', 'appearance', 'notifications', 'continuity', 'browser', 'general', 'keyboard-shortcuts', 'message-tool', 'prompts', 'mote', 'space', 'focus', 'goals', 'survey', 'notes', 'toolkit', 'agents', 'hosts', 'devices', 'chat-connections'
   ])
   const catalog = visibleSettingsSections('')
   expect(catalog.map(module => module.id)).toEqual([
-    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts',
-    'hosts', 'devices', 'toolkit', 'agents', 'prompts', 'fixture-module',
+    'profile', 'appearance', 'notifications', 'continuity', 'browser', 'general', 'keyboard-shortcuts',
+    'message-tool', 'prompts', 'hosts', 'devices', 'toolkit', 'chat-connections', 'agents', 'fixture-module',
     'space', 'focus', 'goals', 'survey', 'notes', 'mote'
   ])
   const navigation = settingsNavGroups('').flatMap(group => group.items)
@@ -227,8 +227,8 @@ it('presents Mods beside Preferences through the actual shell and preserves the 
   const row = connected('[data-settings-target="toolkit"]', nav)
   expect(row.previousElementSibling!.textContent).toBe('Mods')
   const groups = settingsNavGroups('')
-  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
-  expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
+  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Message Tool', 'Remote', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit', 'chat-connections'])
   expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
   await section('Toolkit Library')
   expect(connected('.settings-content__breadcrumb').textContent).toBe('Mods')

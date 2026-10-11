@@ -33,14 +33,14 @@ const open = async (id: string) => {
 }
 
 it('the real catalog and Overview expose Work and peer Mote; keyword discovery points to first-class modules', async () => {
-  expect(settingsNavGroups('').map(group => group.title)).toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  expect(settingsNavGroups('').map(group => group.title)).toEqual(['Preferences', 'Message Tool', 'Remote', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
   expect(settingsNavGroups('').find(group => group.id === 'mote')?.items.map(module => module.id)).toEqual(['mote'])
   expect(settingsNavGroups('').find(group => group.id === 'work')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals', 'survey', 'notes'])
   for (const [query, id] of [['SOUL', 'mote'], ['research', 'survey'], ['notebook', 'notes']])
     expect(visibleSettingsSections(query!).some(module => module.id === id)).toBe(true)
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const groups = [...dom.container.querySelectorAll('[data-settings-overview] h3')].map(node => node.textContent)
-  expect(groups).toEqual(['Preferences', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
+  expect(groups).toEqual(['Preferences', 'Message Tool', 'Remote', 'Connections', 'Mods', 'Resources', 'Work', 'Mote'])
   expect(dom.container.textContent).not.toContain('Workflows')
   expect(dom.container.textContent).not.toContain('Saved configuration')
   expect(dom.container.querySelector('[data-settings-section="notes"]')).not.toBeNull()

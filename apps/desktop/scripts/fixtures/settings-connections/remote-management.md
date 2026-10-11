@@ -15,3 +15,5 @@ node apps/desktop/scripts/verify-settings-connections.mjs --capture hosts
 Runtime 采集仍挂载原 `HostRuntimePanel`，受控 `api.hosts.inspect` 只返回符合公共 `HostRuntimeObservation` 的 DTO；不替换面板、时钟或业务 Store。每个宽度与主题通过原生 Refresh 验证完整 owner、Native、diagnostics、resources 的身份和值，资源来源部分失败时数值和原 producer `observedAt` 保留，恢复后更新。展开原身份详情核对 Host route、Semantic Runtime、Core instance、Native instance 分离；最终浅色图保留具名 partial 原因，深色图显示恢复后资源。Renderer 只引用公共类型；同一三态样本在 Node 侧另用公共 parser 校验。
 
 采集不使用用户配置、Session 或 Run。受控 Host/设备/Runtime 观察不是 SSH 可达、原生身份、真人批准或真实远端恢复证明；Preview 保存不证明 Main 磁盘耐久。采图只提供完整 PNG、实际操作和源码/编译身份；独立 Agent 必须实际打开本轮每张图并评判，采集成功不代表审美通过。
+
+本轮精炼：Remote 独立分组 → Environments，准确 Host 的 Apps & access 展示原配置盘点与来源信任。受控 public DTO 经原面展示 unknown approval；真实输入批准、切原连接与其他 Host 后返回不重放、勾选清零。原维护 unknown / verifying 和 updatedAt 首层可见，Native 六项声明来自原 diagnostics/readAt。附加截图覆盖 3 宽度 Apps & access、原升级及宽/窄能力详情；仅受控 owner DTO，不声称真实 SSH、远端批准、升级或安装。
