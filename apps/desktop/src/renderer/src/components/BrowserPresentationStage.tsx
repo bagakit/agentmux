@@ -162,9 +162,11 @@ export function useBrowserPresentationCapture(browserId: string) {
       if (event.type !== 'capture-revoked') return
       const held = media.current
       if (held?.capture.captureId !== event.captureId && captureRequest.current?.captureId !== event.captureId) return
+      const trackIds = held ? captureTrackIds(held.stream) : null
       retireCapture(event.reason === 'no-visible-presentations' ? null : event.reason === 'source-replaced'
         ? 'Live preview source changed. Retry the preview to reconnect the original page.'
         : `Live preview stopped (${event.reason}). Retry the preview to reconnect it.`)
+      if (held && trackIds) void api.browser.ackPresentationCapture(held.capture.captureId, { outcome: 'stopped', trackIds }).catch(() => {})
     })
     return () => {
       stop(); generation.current += 1; inputChosen.current = null; inputSelection.current = null; inputSelectionLease.current = null; captureFailed.current = false; captureRequest.current = null; pending.current = null
