@@ -9,7 +9,7 @@ import { documentDraft } from '../src/components/InlineComposer.js'
 import { encodeSemanticReference, expandSemanticReferences } from '../src/lib/composer-semantic-reference.js'
 import type { ComposerInsertionHandle } from '../src/lib/composer-insertion.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
-
+import * as Modal from '../src/components/Modal.js'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const platform: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body,
   bindComposerFocus: () => () => {}, renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
@@ -51,6 +51,33 @@ async function key(key: string, init: KeyboardEventInit = {}) {
   if (init.isComposing !== undefined) Object.defineProperty(event, 'isComposing', { value: init.isComposing })
   await act(async () => target.dispatchEvent(event)); return event
 }
+it('keeps real completion selection inside its original modal attachment scope', async () => {
+  function Scene() {
+    const [value, setValue] = useState('/re')
+    return <ClientUiProvider platform={platform}><Modal.Root defaultOpen><Modal.Portal container={document.body}>
+      <Modal.Overlay /><Modal.Content><Modal.Title>Original modal editor</Modal.Title><Modal.Description>Original pending draft</Modal.Description>
+        <ComposerCompletionEditor value={value} onValueChange={setValue} disabled={false} placeholder="Message" aria-label="Modal draft"
+          onKeyDown={() => {}} commands={[{ text: '/review', description: 'Original command' }]} />
+      </Modal.Content>
+    </Modal.Portal></Modal.Root></ClientUiProvider>
+  }
+  await act(async () => root.render(<Scene />))
+  const realEditor = (document.querySelector('.tiptap') as HTMLElement & { editor: Editor }).editor
+  await act(async () => { realEditor.commands.setTextSelection(4); realEditor.commands.focus() })
+  const option = options()[0]!
+  expect(option.closest('[data-overlay-modal-slot]')).not.toBeNull()
+  expect(option.closest('[data-overlay-modal-part="content"]')).toBeNull()
+  await act(async () => option.focus())
+  expect(document.activeElement).toBe(option)
+  await act(async () => option.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  expect(document.activeElement).toBe(document.querySelector('.tiptap'))
+  await act(async () => realEditor.commands.insertContent('v'))
+  const reopenedOption = options()[0]!
+  await act(async () => reopenedOption.click())
+  expect(documentDraft(realEditor.getJSON())).toBe('/review ')
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+})
 it('replaces the configured query at the real caret and preserves following text, prior semantic nodes, Undo and Redo', async () => {
   const selected = { id: 'specific-command', text: '/review', description: 'Original command', insertText: '/review actual' }
   const choose = vi.fn(() => undefined), query = vi.fn()

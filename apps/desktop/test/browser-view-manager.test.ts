@@ -163,7 +163,9 @@ const fakeElectron = vi.hoisted(() => {
     }
 
     setVisible(value: boolean) { this.visible = value }
+    getVisible() { return this.visible }
     setBounds(value: typeof this.bounds) { this.bounds = value; this.boundsHistory.push({ ...value }) }
+    getBounds() { return this.bounds }
   }
 
   const privateSessions = new Map<string, FakeWebContents['session'] & { clearStorageData: ReturnType<typeof vi.fn>; clearCache: ReturnType<typeof vi.fn>; closeAllConnections: ReturnType<typeof vi.fn> }>()
@@ -253,6 +255,7 @@ function fakeWindow() {
     presentationEvents,
     messages,
     window: {
+      getContentBounds: () => ({ x: 0, y: 0, width: 1000, height: 700 }),
       contentView: {
         addChildView(view: InstanceType<typeof fakeElectron.FakeWebContentsView>) {
           // Electron View.addChildView reorders an existing child; it never duplicates it.
@@ -2050,6 +2053,23 @@ describe('BrowserViewManager healthy page during failed candidate cleanup', () =
     expect(record.pendingSwitch).toBeNull()
     manager.close(current.id)
   })
+})
+
+it('native attachment lookup preserves the exact current view and window without reading page titles', async () => {
+  const fixture = fakeWindow(), manager = browserManager(fixture.window)
+  await manager.create('exact-native-owner', 'https://example.org')
+  const view = fixture.children[0]!
+  const title = vi.spyOn(view.webContents, 'getTitle').mockImplementation(() => { throw new Error('A native attachment does not need its title') })
+  expect(manager.nativeOwnerForView(view as never)).toBeUndefined()
+  manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
+  expect(manager.nativeOwnerForView(view as never, fixture.window)).toMatchObject({ browserId: 'exact-native-owner', view })
+  expect(manager.nativeOwnerForView(view as never, fakeWindow().window)).toBeUndefined()
+  expect(manager.nativeOwnerForView({} as never, fixture.window)).toBeUndefined()
+  expect(title).not.toHaveBeenCalled()
+  manager.release('exact-native-owner')
+  expect(manager.nativeOwnerForView(view as never, fixture.window)).toBeUndefined()
+  title.mockRestore()
+  manager.dispose()
 })
 
 it('native chrome demand follows successful physical Browser owner bounds and releases without a second registry', async () => {
