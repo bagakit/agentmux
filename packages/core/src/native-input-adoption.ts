@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import { nativeInputCorrelationKey } from './native-input-correlation.js'
+import { nativeInputCorrelationKey, nativeInputSourceId } from './native-input-correlation.js'
 import type { ConversationRef } from './conversation.js'
 import type { AgentPromptInputKey } from './agent-prompt-condition.js'
 import type { AgentSessionHistoryItem, AgentSessionHistorySource, AgentPromptSubmissionRecord } from './types.js'
@@ -23,11 +23,17 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
     signal?.throwIfAborted()
     if (!record || !claim || !intent || !plan || record.agentSessionId !== ref.agentSessionId || record.run.runId !== key.expectedRun.runId ||
         !isDeepStrictEqual(claim.inputKey, key) || !isDeepStrictEqual(intent.run, key.expectedRun) || !isDeepStrictEqual(intent.plan, plan) ||
-        plan.clientCorrelation !== native.clientCorrelation || intent.admissionIntent?.kind !== 'native-conversation' ||
-        !isDeepStrictEqual(intent.admissionIntent.expectedRun, key.expectedRun) || !isDeepStrictEqual(intent.admissionIntent.source, source) ||
-        plan.threadId !== source.nativeSessionId || plan.expectedTurnId !== intent.admissionIntent.expectedTurnId ||
+        plan.clientCorrelation !== native.clientCorrelation || plan.sourceId !== nativeInputSourceId(source) ||
+        plan.threadId !== source.nativeSessionId ||
         plan.expectedTurnId !== undefined && plan.expectedTurnId !== native.turnId || claim.transport !== 'native' ||
         claim.native.outcome === 'not-applied' || claim.native.outcome === 'admitted' && claim.native.turnId !== native.turnId) return unconfirmed()
+    const target = intent.admissionIntent
+    const addressed = target?.kind === 'native-conversation' && isDeepStrictEqual(target.expectedRun, key.expectedRun) &&
+      isDeepStrictEqual(target.source, source) && plan.expectedTurnId === target.expectedTurnId
+    const defaultMessage = key.kind === 'message' && target?.kind === 'exact-condition' &&
+      isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) && (intent.execution ?? 'default') === 'default' &&
+      plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
+    if (!addressed && !defaultMessage) return unconfirmed()
     return { ...original, conversation: { ...conversation, adoptedInput: { key } } }
   } catch {
     signal?.throwIfAborted()

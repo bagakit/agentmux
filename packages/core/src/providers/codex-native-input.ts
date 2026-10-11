@@ -1,6 +1,7 @@
 import WebSocket from 'ws'
 import { JSONRPCClient, JSONRPCErrorException } from 'json-rpc-2.0'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { nativeInputSourceId } from '../native-input-correlation.js'
 import { fileURLToPath } from 'node:url'
 import { AgentMuxError } from '../errors.js'
 import { runProcess } from '../process-runner.js'
@@ -74,7 +75,7 @@ export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeIn
     client.notify('initialized', {}, undefined)
     const value = await call('thread/read', { threadId: target.nativeSessionId, includeTurns: false })
     if (value?.thread?.id !== target.nativeSessionId || value.thread.canAcceptDirectInput !== true) throw unavailable()
-    const plan = { kind: 'native-rpc' as const, protocolId: PROTOCOL_ID, sourceId: JSON.stringify(['codex', target.nativeSessionId]),
+    const plan = { kind: 'native-rpc' as const, protocolId: PROTOCOL_ID, sourceId: nativeInputSourceId(target),
       actorId: nativeActor.actorId, threadId: target.nativeSessionId,
       ...(target.expectedTurnId === undefined ? { operation: 'start-or-steer' as const } : { operation: 'steer' as const, expectedTurnId: target.expectedTurnId }) }
     return { plan, dispose: () => { signal.removeEventListener('abort', abort); dispose() },
