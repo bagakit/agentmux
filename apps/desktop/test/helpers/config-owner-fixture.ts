@@ -21,7 +21,7 @@ export async function configOwnerFixture(overrides: Partial<AppConfig> = {}) {
   let current = await store.save({ ...structuredClone(DEFAULT_CONFIG), ...overrides })
   const preparation: RuntimePreparation = { hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] }
   const runtime = {
-    prepare: vi.fn(async () => preparation), commit: vi.fn(), discard: vi.fn(async () => {})
+    prepare: vi.fn(async () => preparation), validatePreparation: vi.fn(), commit: vi.fn(), discard: vi.fn(async () => {})
   } as unknown as RuntimeController
   const publish = vi.fn((saved: AppConfig) => { current = saved })
   const save = vi.fn(async (next: AppConfig) => await saveRuntimeConfig({
