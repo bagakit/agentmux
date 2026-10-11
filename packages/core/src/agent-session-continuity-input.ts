@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
+import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { AgentMuxError } from './errors.js'
 import { agentPromptNotApplied } from './agent-prompt-condition.js'
 import type { AgentPromptInputKey } from './agent-prompt-condition.js'
@@ -235,7 +236,7 @@ export class AgentSessionContinuityInputs {
     const session = this.deps.read(id), operation = session.continuityOperations?.[operationId]
     if (!operation?.newRun || !operation.nativeTarget || operation.kind !== 'resumed' || !operation.interruptedWorking || operation.trigger === 'input' ||
       !isDeepStrictEqual(operation.recoveryDelivery?.key, delivery.key) || operation.recoveryDelivery?.phase === 'superseded' || session.run.runId !== delivery.key.expectedRun.runId ||
-      !isDeepStrictEqual(session.nativeHandle, operation.nativeTarget)) throw new AgentMuxError('The original recovery input target changed. Its text and key are kept.', 'CONTINUITY_INPUT_SUPERSEDED')
+      !matchesProviderNativeSessionTarget(operation.nativeTarget, session.nativeHandle)) throw new AgentMuxError('The original recovery input target changed. Its text and key are kept.', 'CONTINUITY_INPUT_SUPERSEDED')
     const observed = session.observedNativeHandle, source = session.nativeSourceObservation
     if (source?.run.runId === session.run.runId && source.state === 'changed' || observed &&
       (observed.kind !== 'provider' || observed.providerId !== operation.nativeTarget.providerId || observed.sessionId !== operation.nativeTarget.sessionId)) {
