@@ -26,11 +26,13 @@
 | 统一事件页、精确锚点、耐久变化 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) → 原 native/captured 端口 → `projectConversationTimeline` |
 | Terminal Replay | 原 Run output／Attachment → terminal viewport；PTY 字节不自动成为对话或作者事实 |
 
-`readAgentConversation`、`conversationCheckpoint`、`readConversationChanges` 与 `observeConversation` 持有统一公共读取合同。读取结果以 `{event, records}` 为语义单元，分片重组完整后才交语义消费者；deferred part 则沿原资源接口读取。窗口 cursor、耐久 source frontier 与通知分别由[协议](../specs/conversation-protocol.md)定义，通知只唤醒权威读取。`sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，原 `agent.history` 继续提供原来源读取。
+`readAgentConversation`、`conversationCheckpoint`、`readConversationChanges` 与 `observeConversation` 持有统一公共读取合同。读取结果以 `{event, records}` 为语义单元，分片重组完整后才交语义消费者；deferred part 则沿原资源接口读取。窗口 cursor、耐久 source frontier 与通知分别由[协议](../specs/conversation-protocol.md)定义，通知只唤醒权威读取。`sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，原 `agent.history` 继续提供原来源读取。原 Store 事务返回准确 stream 与 changed position，经原事件进入 Core 纯 applier／Renderer；快照来源 metadata 原样保留，失配沿原 gap 重取并保留旧窗。
 
 调用关联以每个准确 part 对原 scoped invocation 的 `invocation-member` 归属表达，单成员也保留；`conversationInvocationId` 由 Core 唯一定义。归属及其所在事件版本不依赖同批是否读到另一成员，公共 Reader 不反查全史。相同调用身份不合并父发言，也不表示未读的对端内容已经可读。
 
-其他关系仍只对本次已接受的 records 闭合。公共 Reader 的有界候选集与客户端已接受的阅读窗口可以不同；共用投影函数或读到 cursor 末尾，本身不证明 same-event／answers 等跨批关系已闭合。精确原文、来源覆盖与已闭合关系必须分别解释，不能由接入方另做关联。
+每条原生答案的 typed `questionAnswers` 独立产生 `answers`，目标只持原 source Host、Session、Provider/native source 与完整 opaque question ID，不要求同批读到问题，也不猜问题 record 或 turn。`conversation-questions` 共同限定读卡片的 Host／来源；`conversation-timeline` 的原记录关系函数同时供投影与严格 codec 使用。`answers`／`observes` 只归发起原记录所在事件，不能因读到目标而改变目标事件版本；未读目标仍保准确 gap。多条原答案分别保留，卡片显示选择不代替关系保全。
+
+其他关系仍只对本次已接受的 records 闭合。公共 Reader 的有界候选集与客户端已接受的阅读窗口可以不同；共用投影函数或读到 cursor 末尾，本身不证明 same-event 等跨批关系已闭合。精确原文、来源覆盖与已闭合关系必须分别解释，不能由接入方另做关联。
 
 Core 经 [`SessionHistoryObservationPool`](../../packages/core/src/session-history-observation-pool.ts) 共享准确 native source 的 watch；captured 通知沿原 Session Timeline publisher。取消一个 reader 不终止 Run。来源失败保留已接受的其他记录、准确 Gap 与重试位置，不用最新版本替换失效的原锚点。
 
