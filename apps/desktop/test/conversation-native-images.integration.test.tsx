@@ -93,7 +93,7 @@ async function flush() {
 function pane() { return <SessionPane sessionId={sid} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{ workspaceId: 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }} /> }
 function expectedRequest() {
   const item = page.items[0]!
-  return { source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }), partIndex: 1, expectedReference: reference }
+  return { source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }), partIndex: 1, expectedReference: reference, representation: 'image' as const }
 }
 function assertImage() {
   expect(host.querySelectorAll('.md-conversation-image__thumb'), host.textContent ?? '').toHaveLength(1)
