@@ -4,7 +4,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost } from '@agentmux/core'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
+import { NoteFileWriter } from '../src/main/note-file-writer.js'
+import { NotesStorageOwner } from '../src/main/notes-storage-owner.js'
+import { readBookmark } from '../src/main/bookmark-file.js'
 import { bookmarkFileNameFromTitle, parseWeblocUrl } from '../src/shared/bookmark-file.js'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs.js'
 
 vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
@@ -79,6 +84,12 @@ describe('saveBrowserBookmark 存书签', () => {
     }
     // 写成了要让文件树看到新文件：失效计数器被 bump。
     expect(useAppStore.getState().workspaceFileRevisions.workspace).toBe(1)
+
+    write.mockClear().mockResolvedValue({ status: 'conflict', observedRevision: 'r-existing' })
+    await expect(useAppStore.getState().saveBrowserBookmark('workspace', 'https://example.com/', 'Example'))
+      .rejects.toMatchObject({ status: 'error', message: 'Could not save the bookmark: Example 50.webloc already exists' })
+    expect(write).toHaveBeenCalledTimes(50)
+    expect(useAppStore.getState().workspaceFileRevisions.workspace).toBe(1)
   })
 
   it('about:blank 没地址可存：如实抛，不写文件', async () => {
@@ -86,7 +97,7 @@ describe('saveBrowserBookmark 存书签', () => {
 
     await expect(
       useAppStore.getState().saveBrowserBookmark('workspace', 'about:blank', 'New Tab')
-    ).rejects.toThrow(/no address/i)
+    ).rejects.toMatchObject({ status: 'error', message: 'This page has no address to bookmark yet' })
 
     expect(write).not.toHaveBeenCalled()
   })
@@ -100,6 +111,53 @@ describe('saveBrowserBookmark 存书签', () => {
 
     await expect(
       useAppStore.getState().saveBrowserBookmark('workspace', 'https://example.com/', 'Example')
-    ).rejects.toThrow('permission denied')
+    ).rejects.toMatchObject({ message: 'permission denied', status: 'error', code: 'EACCES', path: 'Example.webloc' })
+  })
+
+  it('retains the original candidate after a transport rejection and never guesses another filename', async () => {
+    const write = vi.spyOn(api.files, 'write').mockRejectedValue(Object.assign(new Error('write receipt lost'), { code: 'TRANSPORT_LOST' }))
+    await expect(useAppStore.getState().saveBrowserBookmark('workspace', 'https://example.invalid/', 'Example'))
+      .rejects.toMatchObject({ message: 'write receipt lost', status: 'unknown', code: 'TRANSPORT_LOST', path: 'Example.webloc' })
+    expect(write).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([false, true])('saves, reads and opens the original standard file through real file owners while preserving its source; lost receipt=%s', async lostReceipt => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-bookmark-owner-'))
+    const workspace = { id: 'workspace', name: 'Project', kind: 'folder' as const, hostId: 'local', path: root }
+    const files = new WorkspaceFiles(() => new LocalExecutionHost(), lostReceipt ? { localWriteFault: 'receipt' } : {})
+    const writer = new NoteFileWriter(files), notes = new NotesStorageOwner({} as never, {} as never, () => {})
+    const original = createWorkbenchTab('original-browser-tab', { regionId: 'original-browser-region', kind: 'browser',
+      workspaceId: workspace.id, browserId: 'original-browser', mode: 'normal', profileId: 'original-profile', navigationId: 'original-navigation',
+      url: 'https://example.invalid/original?a=1&b=2', title: 'Original page', loading: false, canGoBack: true, canGoForward: false,
+      viewport: 'responsive', driving: false, error: null, appLinkPrompt: null })
+    const source = original.regions[original.layout.activeRegionId]!
+    if (source.kind !== 'browser') throw new Error('The original Browser fixture is missing')
+    useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {},
+      workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } },
+      activeWorkspaceId: workspace.id, tabs: { [original.id]: original }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [original.id]) },
+      documents: {}, documentIssues: {}, dirtyDocuments: {}, workspaceFileRevisions: {}, error: null })
+    try {
+      const write = vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => notes.write(workspace, input, actual => writer.write(actual, input)))
+      const request = useAppStore.getState().saveBrowserBookmark(workspace.id, source.url, source.title), path = 'Original page.webloc'
+      if (lostReceipt) await expect(request).rejects.toMatchObject({ status: 'unknown', code: 'INJECTED_WRITE_RECEIPT', path })
+      else expect(await request).toBe(path)
+      expect(write).toHaveBeenCalledTimes(1)
+      const document = await writer.read(workspace, path)
+      expect(document.status).toBe('read')
+      if (document.status !== 'read') throw new Error('The original bookmark bytes are unavailable')
+      expect(parseWeblocUrl(document.document.content)).toBe(source.url)
+      const preview = vi.spyOn(api.files, 'readBookmark').mockImplementation(async (_id, requested) => {
+        const bytes = await files.readBookmarkBytes(workspace, requested)
+        return bytes ? readBookmark('webloc', bytes, async () => { throw new Error('XML bookmarks require no subprocess conversion') }) : { url: null, binary: false }
+      })
+      const create = vi.spyOn(api.browser, 'create').mockImplementation(async (id, url) => ({ ...source, id, url, navigationId: 'opened-navigation' }))
+      await useAppStore.getState().openFile(path, undefined, undefined, workspace.id)
+      expect(preview).toHaveBeenCalledExactlyOnceWith(workspace.id, path)
+      expect(create).toHaveBeenCalledTimes(1)
+      expect(create.mock.calls[0]?.[1]).toBe(source.url)
+      expect(useAppStore.getState().tabs[original.id]).toBe(original)
+      expect(useAppStore.getState().documents[documentKey(workspace.id, path)]).toBeUndefined()
+      expect(write).toHaveBeenCalledTimes(1)
+    } finally { await files.dispose(); await rm(root, { recursive: true, force: true }) }
   })
 })
