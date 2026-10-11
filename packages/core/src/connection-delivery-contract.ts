@@ -1,6 +1,33 @@
 import type { ConversationItemRef } from './conversation.js'
 import type { ConnectionApplication } from './connections-contract.js'
 import type { RoomBindingCallContext } from './room-binding-contract.js'
+import type { ConversationContentRef, ConversationSourceRef } from './conversation-timeline.js'
+import type { ConversationVersionedAnchor } from './conversation-changes.js'
+
+export type ConnectionDeliveryEvent = { id: string; revision: string }
+/** Durable content accounting, distinct from an unknown platform effect. No original body is copied. */
+export type ConnectionDeliveryGap = {
+  gapId: string
+  event?: ConnectionDeliveryEvent
+  part?: ConversationContentRef
+  anchor?: ConversationVersionedAnchor
+  source?: ConversationSourceRef
+  /** Exact source-reported reading target; absence does not authorize guessing one. */
+  record?: ConversationItemRef
+  code?: string
+  reason: 'public-content-unconfirmed' | 'transport-unsupported' | 'resource-unavailable' | 'start-cut-unconfirmed' | 'source-gap' | 'version-unavailable'
+}
+export type ConnectionOriginRepresentation = {
+  event: ConnectionDeliveryEvent
+  part: ConversationContentRef
+  origin: { connectionId: string; externalConversationId: string; externalMessageId: string }
+}
+export type ConnectionDeliveryCoverage = {
+  state: 'complete' | 'incomplete'
+  gaps: ConnectionDeliveryGap[]
+  nextContent: string | null
+  origins: ConnectionOriginRepresentation[]
+}
 
 export type ConnectionDeliveryReference = ConversationItemRef | { hostId: string; agentSessionId: string; source: { kind: 'interaction'; runId: string; requestId: string; requestDigest: string } }
 
@@ -28,6 +55,7 @@ export type ConnectionDelivery = {
   mapping?: ConnectionDeliveryMapping
   reason?: ConnectionDeliveryReason
   receipt?: ConnectionDeliveryReceipt
+  event?: ConnectionDeliveryEvent
 }
 /** Current process service window for the requested Binding scope; never platform delivery or Agent health. */
 export type ConnectionDeliveryObservation = {
@@ -35,7 +63,7 @@ export type ConnectionDeliveryObservation = {
   reason?: 'not-started' | 'source-unconfirmed' | 'source-gap' | 'content-unconfirmed' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'effect-unconfirmed'
 }
 export type ConnectionDeliveryOperationInput = { operationId: string }
-export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; limit?: number }
+export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number }
 export type ConnectionDeliveryParamsMap = {
   'connection.delivery.inspect': ConnectionDeliveryOperationInput
   'connection.delivery.ls': ConnectionDeliveryListInput
@@ -43,7 +71,7 @@ export type ConnectionDeliveryParamsMap = {
 }
 export type ConnectionDeliveryResultMap = {
   'connection.delivery.inspect': { delivery: ConnectionDelivery | null }
-  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation }
+  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation; coverage?: ConnectionDeliveryCoverage }
   'connection.delivery.retry': { delivery: ConnectionDelivery }
 }
 export type ConnectionDeliveryMethod = keyof ConnectionDeliveryParamsMap

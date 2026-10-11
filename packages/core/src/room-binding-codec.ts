@@ -1,6 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseNativeConversationCheckpoint } from './session-history-changes.js'
+import { parseConversationCheckpoint } from './conversation-changes.js'
 import type { ConnectionActor, ConnectionApplication, ConnectionGrant } from './connections-contract.js'
 import type { RoomBinding, RoomBindingAuthority, RoomBindingMethod, RoomBindingOperation, RoomBindingParamsMap, RoomBindingResultMap, RoomBindingScope } from './room-binding-contract.js'
 
@@ -31,11 +32,13 @@ export function parseConnectionGrant(value: unknown): ConnectionGrant {
   return { grantId: id(p.grantId), revision: revision(p.revision), bindingId: id(p.bindingId), bindingRevision: revision(p.bindingRevision), connectionId: id(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), state: p.state as ConnectionGrant['state'], capabilities: capabilities(p.capabilities) }
 }
 export function parseRoomBinding(value: unknown): RoomBinding {
-  const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'executionHostId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'authorizedBy'])
+  const p = object(value, ['bindingId', 'revision', 'state', 'connectionId', 'application', 'externalConversationId', 'scope', 'executionHostId', 'agentSessionId', 'regionAnchor', 'sourceCheckpoints', 'sourceFrontier', 'authorizedBy'])
   if (p.state !== 'active' && p.state !== 'paused' || !Array.isArray(p.sourceCheckpoints) || p.sourceCheckpoints.length < 1 || p.sourceCheckpoints.length > 32) fail()
   const t = target(p), checkpoints = (p.sourceCheckpoints as unknown[]).map(parseNativeConversationCheckpoint)
   if (checkpoints.some(c => c.agentSessionId !== t.agentSessionId) || new Set(checkpoints.map(c => JSON.stringify(c.source))).size !== checkpoints.length) fail()
-  return { ...t, bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), sourceCheckpoints: checkpoints, authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
+  const frontier = p.sourceFrontier === undefined ? undefined : parseConversationCheckpoint(p.sourceFrontier, { hostId: t.executionHostId, agentSessionId: t.agentSessionId })
+  if (frontier && (frontier.frontier.cuts.filter(c => c.kind === 'native').length !== checkpoints.length || checkpoints.some(c => !frontier.frontier.cuts.some(cut => cut.kind === 'native' && JSON.stringify(cut.checkpoint) === JSON.stringify(c))))) fail()
+  return { ...t, bindingId: id(p.bindingId), revision: revision(p.revision), state: p.state as RoomBinding['state'], connectionId: id(p.connectionId), application: parseConnectionApplication(p.application), externalConversationId: text(p.externalConversationId), scope: scope(p.scope), sourceCheckpoints: checkpoints, ...(frontier ? { sourceFrontier: frontier } : {}), authorizedBy: parseRoomBindingAuthority(p.authorizedBy) }
 }
 export function parseRoomBindingOperation(value: unknown): RoomBindingOperation {
   const p = object(value, ['operationId', 'action', 'state', 'binding', 'grant', 'reused', 'code'])

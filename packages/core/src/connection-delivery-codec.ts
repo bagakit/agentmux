@@ -1,7 +1,9 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { parseConversationVersionedAnchor, parseConversationSource } from './conversation-changes.js'
 import type { ConversationItemRef } from './conversation.js'
-import type { ConnectionDelivery, ConnectionDeliveryMapping, ConnectionDeliveryMethod, ConnectionDeliveryObservation, ConnectionDeliveryParamsMap, ConnectionDeliveryReceipt, ConnectionDeliveryReceiptReason, ConnectionDeliveryReason, ConnectionDeliveryResultMap, ConnectionDeliveryState } from './connection-delivery-contract.js'
+import { conversationRecordId } from './conversation-timeline.js'
+import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDeliveryEvent, ConnectionDeliveryGap, ConnectionOriginRepresentation, ConnectionDeliveryMapping, ConnectionDeliveryMethod, ConnectionDeliveryObservation, ConnectionDeliveryParamsMap, ConnectionDeliveryReceipt, ConnectionDeliveryReceiptReason, ConnectionDeliveryReason, ConnectionDeliveryResultMap, ConnectionDeliveryState } from './connection-delivery-contract.js'
 
 export const CONNECTION_DELIVERY_RPC_METHODS = { 'connection.delivery.inspect': 'long', 'connection.delivery.ls': 'long', 'connection.delivery.retry': 'long' } as const
 export const isConnectionDeliveryMethod = (value: unknown): value is ConnectionDeliveryMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_DELIVERY_RPC_METHODS, value)
@@ -28,6 +30,43 @@ function reference(value: unknown): import('./connection-delivery-contract.js').
   if (source.kind !== 'captured' || source.providerId !== undefined || source.nativeSessionId !== undefined) fail()
   return { ...ref, source: { kind: 'captured', recordId } }
 }
+function version(value: unknown): string { const v = text(value); if (!/^[a-f0-9]{64}$/u.test(v)) fail(); return v }
+function event(value: unknown): ConnectionDeliveryEvent {
+  const p = object(value, ['id', 'revision'])
+  if (typeof p.id !== 'string' || !p.id || p.id.length > 131_072) fail()
+  return { id: p.id as string, revision: version(p.revision) }
+}
+function part(value: unknown): import('./conversation-timeline.js').ConversationContentRef {
+  const p = object(value, ['record', 'recordRevision', 'selector']), record = reference(p.record), s = object(p.selector, ['kind', 'field', 'partIndex'])
+  if (record.source.kind === 'interaction') fail()
+  let selector: import('./conversation-timeline.js').ConversationSelector
+  if (s.kind === 'native-part' && s.field === undefined && record.source.kind === 'native') selector = { kind: 'native-part', partIndex: integer(s.partIndex, 0) }
+  else if (s.kind === 'captured-field' && s.partIndex === undefined && record.source.kind === 'captured' && ['content', 'toolInput', 'toolOutput'].includes(String(s.field))) selector = { kind: 'captured-field', field: s.field as 'content' | 'toolInput' | 'toolOutput' }
+  else return fail()
+  return { record: record as ConversationItemRef, recordRevision: version(p.recordRevision), selector }
+}
+export function parseConnectionDeliveryCoverage(value: unknown): ConnectionDeliveryCoverage {
+  const p = object(value, ['state', 'gaps', 'nextContent', 'origins'])
+  if (!['complete', 'incomplete'].includes(String(p.state)) || !Array.isArray(p.gaps) || p.gaps.length > 100 || !Array.isArray(p.origins) || p.origins.length > 100) fail()
+  const gaps: ConnectionDeliveryGap[] = (p.gaps as unknown[]).map(value => {
+    const g = object(value, ['gapId', 'event', 'part', 'anchor', 'reason', 'source', 'record', 'code'])
+    if (!['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'].includes(String(g.reason))) fail()
+    const selected = g.part === undefined ? undefined : part(g.part)
+    const a = g.anchor === undefined ? undefined : object(g.anchor, ['record', 'revision', 'frontier'])
+    const f = a ? object(a.frontier, ['hostId', 'agentSessionId', 'sourceHostId', 'frontier']) : undefined
+    const anchor = a && f ? parseConversationVersionedAnchor(g.anchor, { hostId: text(f.hostId), agentSessionId: text(f.agentSessionId) }) : undefined
+    if (selected && anchor && (conversationRecordId(selected.record) !== conversationRecordId(anchor.record) || selected.recordRevision !== anchor.revision)) fail()
+    const record = g.record === undefined ? undefined : reference(g.record)
+    if (record?.source.kind === 'interaction') fail()
+    return { gapId: text(g.gapId), reason: g.reason as ConnectionDeliveryGap['reason'], ...(g.event === undefined ? {} : { event: event(g.event) }), ...(selected ? { part: selected } : {}), ...(anchor ? { anchor } : {}), ...(g.source === undefined ? {} : { source: parseConversationSource(g.source) }), ...(record ? { record: record as ConversationItemRef } : {}), ...(g.code === undefined ? {} : { code: text(g.code) }) }
+  })
+  const origins: ConnectionOriginRepresentation[] = (p.origins as unknown[]).map(value => {
+    const r = object(value, ['event', 'part', 'origin']), o = object(r.origin, ['connectionId', 'externalConversationId', 'externalMessageId'])
+    return { event: event(r.event), part: part(r.part), origin: { connectionId: text(o.connectionId), externalConversationId: text(o.externalConversationId), externalMessageId: text(o.externalMessageId) } }
+  })
+  if (p.state === 'complete' && gaps.length) fail()
+  return { state: p.state as ConnectionDeliveryCoverage['state'], gaps, origins, nextContent: p.nextContent === null ? null : text(p.nextContent) }
+}
 export function parseConnectionDeliveryReceipt(value: unknown): ConnectionDeliveryReceipt {
   const p = object(value, ['state', 'mapping', 'reason'])
   if (p.state === 'confirmed') { if (p.reason !== undefined) fail(); return { state: 'confirmed', mapping: mapping(p.mapping) } }
@@ -35,7 +74,7 @@ export function parseConnectionDeliveryReceipt(value: unknown): ConnectionDelive
   return { state: p.state as 'unknown' | 'not-applied', reason: reason(p.reason) as ConnectionDeliveryReceiptReason }
 }
 export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
-  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt'])
+  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event'])
   const target = object(p.target, ['connectionId', 'application', 'externalConversationId']), app = object(target.application, ['domain', 'appId']), fragment = object(p.fragment, ['ordinal', 'count'])
   const domain = text(app.domain), ordinal = integer(fragment.ordinal, 0), count = integer(fragment.count, 0)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text(app.appId))) fail()
@@ -50,7 +89,7 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   if (predecessorOperationId === operationId) fail()
   return { operationId, projectionId: text(p.projectionId), sourceRevision: text(p.sourceRevision), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), reference: reference(p.reference),
     target: { connectionId: text(target.connectionId), application: { domain, appId: text(app.appId) }, externalConversationId: text(target.externalConversationId) }, effect: p.effect as ConnectionDelivery['effect'], fragment: { ordinal, count }, state: p.state as ConnectionDeliveryState,
-    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }) }
+    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }) }
 }
 export function parseConnectionDeliveryObservation(value: unknown): ConnectionDeliveryObservation {
   const p = object(value, ['state', 'reason'])
@@ -59,17 +98,19 @@ export function parseConnectionDeliveryObservation(value: unknown): ConnectionDe
 }
 export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod>(method: M, value: unknown): ConnectionDeliveryParamsMap[M] {
   if (method !== 'connection.delivery.ls') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
-  const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'limit'])
+  const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit'])
   const limit = p.limit === undefined ? undefined : integer(p.limit, 1); if (limit !== undefined && limit > 100) fail()
-  return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.after === undefined ? {} : { after: text(p.after) }), ...(limit === undefined ? {} : { limit }) } as ConnectionDeliveryParamsMap[M]
+  return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.after === undefined ? {} : { after: text(p.after) }), ...(p.afterContent === undefined ? {} : { afterContent: text(p.afterContent) }), ...(limit === undefined ? {} : { limit }) } as ConnectionDeliveryParamsMap[M]
 }
 export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod>(method: M, value: unknown, input: ConnectionDeliveryParamsMap[M]): ConnectionDeliveryResultMap[M] {
   if (method === 'connection.delivery.ls') {
-    const p = object(value, ['deliveries', 'next', 'observation']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.ls']
+    const p = object(value, ['deliveries', 'next', 'observation', 'coverage']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.ls']
     if (!Array.isArray(p.deliveries) || p.deliveries.length > (expected.limit ?? 30)) fail()
     const deliveries = (p.deliveries as unknown[]).map(parseConnectionDelivery), next = p.next === null ? null : text(p.next)
     if (new Set(deliveries.map(d => d.operationId)).size !== deliveries.length || deliveries.some(d => d.target.connectionId !== expected.connectionId || d.bindingId !== expected.bindingId || d.bindingRevision !== expected.bindingRevision || d.operationId === expected.after) || next !== null && next !== deliveries.at(-1)?.operationId) fail()
-    return { deliveries, next, ...(p.observation === undefined ? {} : { observation: parseConnectionDeliveryObservation(p.observation) }) } as ConnectionDeliveryResultMap[M]
+    const coverage = p.coverage === undefined ? undefined : parseConnectionDeliveryCoverage(p.coverage)
+    if (coverage?.origins.some(o => o.origin.connectionId !== expected.connectionId)) fail()
+    return { deliveries, next, ...(p.observation === undefined ? {} : { observation: parseConnectionDeliveryObservation(p.observation) }), ...(coverage ? { coverage } : {}) } as ConnectionDeliveryResultMap[M]
   }
   const p = object(value, ['delivery']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.inspect']
   const delivery = p.delivery === null && method === 'connection.delivery.inspect' ? null : parseConnectionDelivery(p.delivery)
