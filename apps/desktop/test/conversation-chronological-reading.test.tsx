@@ -1,3 +1,4 @@
+import { projectConversationRecords } from '@agentmux/core/conversation'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
@@ -25,13 +26,13 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   items = [captured('input-a', _historyFixtureEpoch(0, 0, 200)), captured('input-b', _historyFixtureEpoch(0, 0, 400))]
-  page = { agentSessionId: sid, source, nextCursor: null,
+  page = { agentSessionId: sid, sourceHostId:'local', source, nextCursor: null,
     items: [native('reply-a', _historyFixtureEpoch(0, 0, 100)), native('reply-b', _historyFixtureEpoch(0, 0, 300)), native('reply-c', _historyFixtureEpoch(0, 0, 500))] }
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-async function render(nativePage: AgentSessionHistoryPage | null = page) { await act(async () => root.render(<ActivityView sessionId={sid} executionHostId="local" capability="complete-events"
-  items={items} nativeHistoryPage={nativePage} />)) }
+async function render(nativePage: AgentSessionHistoryPage | null = page, routeHostId = 'local') { await act(async () => root.render(<ActivityView sessionId={sid} executionHostId={routeHostId} capability="complete-events"
+  items={items} timelineSnapshot={{agentSessionId:sid,sourceHostId:'local',revision:1,items}} nativeHistoryPage={nativePage} />)) }
 function bodies() { return [...host.querySelectorAll('.log-turn__body')].map(node => node.textContent) }
 
 it.each(['codex', 'claude'])('keeps complete captured bodies with null, empty and nonempty %s native pages', async providerId => {
@@ -83,7 +84,9 @@ it('retains unknown native times and inserts a new captured record without repla
   const range = document.createRange(); range.selectNodeContents(text); getSelection()!.addRange(range)
   items = [...items, captured('input-c', _historyFixtureEpoch(0, 0, 450))]
   await render()
-  expect(bodies()).toEqual(['unknown', 'input-a', 'reply-b', 'input-b', 'input-c', 'reply-c'])
+  const ordered = projectConversationRecords({ agentSessionId: sid, executionHostId: 'local', historyPage: page, timeline: { agentSessionId: sid, revision: 0, items } })
+  expect(ordered).toHaveLength(6)
+  expect(bodies()).toEqual(ordered.map(record => record.content))
   expect(host.querySelector('[data-native-record-id="reply-b"] .log-turn__body')).toBe(body)
   expect(range.startContainer).toBe(text); expect(text.isConnected).toBe(true); expect(getSelection()!.toString()).toBe('reply-b')
   expect(page.items[0]!.startedAt).toBeUndefined()
@@ -154,4 +157,62 @@ it('review: captured step Range survives a native append that splits the capture
   expect(host.textContent).toContain('selected captured c')
   const finalStep = [...host.querySelectorAll('[data-segment-key]')].find(node => node.getAttribute('data-segment-key') === JSON.stringify(['item', 'step-c']))!
   expect(finalStep.querySelector('.wf-tool-row')?.getAttribute('aria-expanded')).toBe('true')
+})
+
+it.each(['local', 'remote-route'])('holds the selected original captured DOM through a late exact canonical relation and applies it on release with the real question card over %s', async routeHostId => {
+  const original = captured('late-original', _historyFixtureEpoch(0, 0, 200), 'Selected complete original contribution', 'assistant_message')
+  items = [original]
+  await render(null, routeHostId)
+  const body = host.querySelector('[data-message-id="late-original"] .log-turn__body')!
+  const text = body.querySelector('p')!.firstChild!
+  const range = document.createRange(); range.selectNodeContents(text); getSelection()!.addRange(range)
+  const canonical = { ...native('exact-canonical', _historyFixtureEpoch(0, 0, 300), 'Native canonical question body'), turnId: 'exact-turn',
+    questionRequest: { delivery: 'async' as const, questions: [{ id: 'exact-question', prompt: 'Keep the original selected work?', options: [{ id: 'keep', label: 'Keep' }], acceptsText: true }] } }
+  page = { ...page, items: [canonical] }
+  items = [{ ...original, conversation: { sameEvent: { hostId: 'local', agentSessionId: sid,
+    source: { kind: 'native', ...source, recordId: canonical.id } } } }]
+  await render(page, routeHostId)
+  expect(host.querySelector('[data-message-id="late-original"] .log-turn__body')).toBe(body)
+  expect(text.isConnected).toBe(true); expect(getSelection()!.getRangeAt(0)).toBe(range)
+  expect(getSelection()!.toString()).toBe(original.content)
+  expect(host.textContent).toContain('取消选择后更新已确认的消息关系')
+  await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+  expect(host.querySelector('[data-native-record-id="exact-canonical"] .log-turn__body')?.textContent).toContain('Native canonical question body')
+  expect(host.querySelector('[aria-label="Native asynchronous question"] [data-question-id="exact-question"]')).not.toBeNull()
+  const contribution = host.querySelector<HTMLDetailsElement>('[data-original-contribution]')!
+  expect(contribution.dataset.messageSourceKey).toBe(JSON.stringify([sid, 'captured', original.id]))
+  await act(async () => { contribution.querySelector('summary')!.click(); contribution.open = true; contribution.dispatchEvent(new Event('toggle')) })
+  expect(contribution.textContent).toContain(original.content)
+  expect(host.querySelectorAll('[data-native-record-id="exact-canonical"]')).toHaveLength(1)
+})
+
+it('shows exact Core coverage gaps once in the common reading scope without guessing an author or hiding original content', async () => {
+  const missing = { hostId: 'local', agentSessionId: sid, source: { kind: 'native' as const, ...source, recordId: 'unread-canonical' } }
+  items = [{ ...captured('unread-original', _historyFixtureEpoch(0, 0, 100), 'Original readable contribution', 'assistant_message'), conversation: { sameEvent: missing } }]
+  await render(null)
+  expect(host.querySelectorAll('[data-conversation-coverage]')).toHaveLength(1)
+  const gap = host.querySelector('[data-conversation-gap="CONVERSATION_ANCHOR_UNREAD"]')!
+  expect(gap).not.toBeNull(); expect(gap.querySelector('[data-conversation-gap-reference]')?.textContent).toBe(JSON.stringify(missing))
+  expect(bodies()).toContain('Original readable contribution')
+  expect(JSON.parse(host.querySelector('.log-turn')!.getAttribute('data-conversation-author')!)).toEqual({kind:'unknown'})
+  const canonical = { id: 'native-input', kind: 'user-message' as const, contentParts: [{kind:'text' as const,text:'Original native input'}] }
+  page = {...page,items:[canonical]}
+  const sameEvent = { hostId:'local',agentSessionId:sid,source:{kind:'native' as const,...source,recordId:canonical.id} }
+  items = [{...captured('explicit-human',_historyFixtureEpoch(0, 0, 100)),authorHuman:true,conversation:{sameEvent}},
+    {...captured('explicit-agent',_historyFixtureEpoch(0, 0, 200)),authorAgentSessionId:'exact-other-author',conversation:{sameEvent}}]
+  await render()
+  expect(host.querySelectorAll('[data-conversation-coverage]')).toHaveLength(1)
+  expect(host.querySelectorAll('[data-conversation-gap="CONVERSATION_AUTHOR_CONFLICT"]')).toHaveLength(2)
+  expect(bodies()).toContain('Original native input')
+  expect(JSON.parse(host.querySelector('.log-turn')!.getAttribute('data-conversation-author')!)).toEqual({kind:'unknown'})
+})
+
+it('retains a real empty scope coverage surface without manufacturing a message', async () => {
+  items=[];page={...page,items:[]}
+  await act(async()=>root.render(<ActivityView sessionId={sid} executionHostId="local" capability="complete-events" items={items} nativeHistoryPage={page}
+    timelineSnapshot={{agentSessionId:sid,revision:5,items,stream:{epoch:'original-scope',sequence:5,revision:5,origin:'retained-prefix',positions:[],gaps:[{code:'ORIGINAL_PREFIX_UNKNOWN',message:'Original earlier prefix is unknown.'}]}}}/>))
+  expect(host.querySelectorAll('[data-conversation-coverage]')).toHaveLength(1)
+  expect(host.querySelector('[data-conversation-gap="ORIGINAL_PREFIX_UNKNOWN"]')?.textContent).toContain('Original earlier prefix is unknown.')
+  expect(host.querySelectorAll('.log-turn')).toHaveLength(0)
+  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(0)
 })

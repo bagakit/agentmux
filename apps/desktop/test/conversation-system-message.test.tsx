@@ -6,7 +6,6 @@ import type { Root } from 'react-dom/client'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
 import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { projectConversationRecords } from '@agentmux/client-ui/conversation-records'
 import { buildNativeContinuationPrompt } from '@agentmux/client-ui/native-continuation'
@@ -30,7 +29,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
 
-it.each([ConversationView, ConversationNativeThread])('renders Provider system records through the shared conversation consumer', async View => {
+it.each([ConversationView])('renders Provider system records through the shared conversation consumer', async View => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const continueConversation = vi.fn()
   await act(async () => root.render(<View page={page} sessionId="reader" describeSpeaker={describeSpeaker} onContinue={continueConversation} />))
@@ -72,7 +71,7 @@ it('keeps system records in source order without adding them to user input or ch
     `Continue this conversation from the selected point.\n\nRecorded system context: ${body}\n\nInput: ${body}`)
 })
 
-it.each([ConversationView, ConversationNativeThread])('reads and copies complete system resources with the original record identity', async View => {
+it.each([ConversationView])('reads and copies complete system resources with the original record identity', async View => {
   const exact = body.repeat(3000), bytes = Buffer.from(JSON.stringify({ kind: 'text', text: exact }))
   const sha256 = createHash('sha256').update(bytes).digest('hex')
   const record = { source: { providerId: 'fixture-provider', nativeSessionId: 'original-native-session' },

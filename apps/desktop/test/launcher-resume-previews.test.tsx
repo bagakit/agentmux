@@ -56,10 +56,10 @@ it('reads only visible rows with two previews in flight, and preserves real titl
  expect(calls.map(c => c.input.source.nativeHandle.sessionId)).toEqual(['original-0', 'original-1', 'original-2'])
  await act(async () => observer.notify([0, 1, 2])) // remove queued 3 before a slot is available
  await act(async () => calls[1]!.resolve(page(calls[1]!, 'Original one reply')))
- expect(row(1).textContent).toContain('Reply · Original one reply'); expect(row(1).textContent).toContain('Repeated real title')
+ expect(row(1).textContent).toContain('Saved conversation excerpt · Original one reply'); expect(row(1).textContent).toContain('Repeated real title')
  expect(calls).toHaveLength(3); expect(row(2).textContent).toContain('Untitled conversation'); expect(row(20).textContent).toContain('Preview not read yet')
  await act(async () => calls[2]!.resolve(page(calls[2]!, 'Original two reply')))
- expect(row(2).textContent).toContain('Reply · Original two reply')
+ expect(row(2).textContent).toContain('Saved conversation excerpt · Original two reply')
  await act(async () => observer.notify([20]))
  expect(calls.at(-1)!.input.source).toEqual(sources[20]); expect(calls).toHaveLength(4)
  expect(api.sessions.launchAgent).not.toHaveBeenCalled()
@@ -78,6 +78,10 @@ it('rejects another exact source and keeps selected full history independent fro
  expect(document.querySelectorAll('.launcher-resume__message')).toHaveLength(2)
  expect(document.querySelector('.launcher-resume__detail')!.textContent).toContain('Full selected reply')
  expect(document.querySelector('.launcher-resume__detail')!.textContent).not.toContain('Bounded preview reply')
+ expect(document.querySelectorAll('.launcher-resume__message .log-turn__body')).toHaveLength(2)
+ expect(document.querySelector('.launcher-resume__message [data-conversation-event-id]')).toBeNull()
+ expect(document.querySelector('.launcher-resume__message [data-conversation-item-ref]')).toBeNull()
+ expect(document.querySelector('.launcher-resume__message [data-conversation-author]')).toBeNull()
  expect(row(2).getAttribute('aria-selected')).toBe('true')
 })
 it('ignores closed reads and retains the global two-request budget across reopen', async () => {
@@ -106,7 +110,7 @@ it('releases a settled loading entry when adoption temporarily removes the nativ
  expect(calls.filter(c => c.input.source.nativeHandle.sessionId === 'original-1')).toHaveLength(2)
  const reread = calls.at(-1)!
  await act(async () => reread.resolve(page(reread, 'Returned candidate original reply')))
- expect(row(1).textContent).toContain('Reply · Returned candidate original reply')
+ expect(row(1).textContent).toContain('Saved conversation excerpt · Returned candidate original reply')
 })
 it('uses managed Core history and refuses a reply for another managed Session without disabling Resume', async () => {
  const managed = (id: string, n: number) => ({ agentSessionId: id, hostId: 'local', workspacePath: _reshape_fixturePath("repo"), providerId: 'codex' as const,

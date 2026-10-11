@@ -3,7 +3,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
 import { ConversationView } from '../src/components/ConversationView.js'
-import { ConversationNativeThread } from '../src/components/ConversationNativeThread.js'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { metricsPage, responsePage } from './fixtures/conversation-metrics.js'
@@ -21,7 +20,7 @@ async function show(page: AgentSessionHistoryPage, native = false) {
   const props = { page, sessionId: page.agentSessionId,
     renderProcess: (props: ComponentProps<typeof NativeProcessObservation>) => <NativeProcessObservation {...props} compact /> }
   await act(async () => root.render(<ClientUiProvider platform={platform}>
-    {native ? <ConversationNativeThread {...props} /> : <ConversationView {...props} />}
+    <ConversationView {...props} />
   </ClientUiProvider>))
 }
 async function click(element: Element) { await act(async () => (element as HTMLElement).click()) }
@@ -134,7 +133,7 @@ it('retains read raw bodies, expansion and a real Range when metadata updates an
   expect(host.querySelector('.wf-head')?.getAttribute('aria-expanded')).toBe('true')
 })
 
-it('preserves interrupted and failed observations, original Copy, and the standalone NativeThread consumer', async () => {
+it('preserves interrupted and failed observations, original Copy, and the common ConversationView consumer', async () => {
   const page = metricsPage(); page.items = page.items.filter(item => item.id === 'answer' || item.id === 'duration')
   page.items[1] = { ...page.items[1]!, metrics: { scope: 'turn', status: 'interrupted', durationMs: 0 } }
   await show(page, true)
@@ -143,7 +142,7 @@ it('preserves interrupted and failed observations, original Copy, and the standa
   const action = record('answer').querySelector('[aria-label="Copy message"]')!; await click(action)
   expect(copy).toHaveBeenCalledWith('系统版本 26.5.1，架构为 arm64。', expect.any(Function))
   page.items[1] = { ...page.items[1]!, metrics: { scope: 'turn', status: 'failed' } }
-  await show(page, true)
+  await show({ ...page, items: [...page.items] }, true)
   expect(host.textContent).toContain('本轮失败')
   expect(host.textContent).not.toContain('本轮已结束')
 })
