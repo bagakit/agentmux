@@ -21,14 +21,15 @@ export type ConversationFrontier = ConversationRef & { scope: ConversationScope;
 )[] }
 export type ConversationCheckpoint = ConversationRef & { sourceHostId: string; frontier: ConversationFrontier }
 export type ConversationVersionedAnchor = { record: ConversationItemRef; revision: string; frontier: ConversationCheckpoint }
-export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; anchor?: ConversationVersionedAnchor; view?: string }
+export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; anchor?: ConversationVersionedAnchor; view?: string; nativeSource?: { providerId: string; nativeSessionId: string } }
 export type ConversationUnit = { event: ConversationEvent; records: readonly ConversationSourceRecord[] }
 export type ConversationUnitEntry = JsonReadEntry<ConversationUnit>
 export type ConversationWindowBoundary = { record: ConversationItemRef; revision: string }
 /** A complete replacement of one backend-owned accepted window, never an append delta. */
 export type ConversationReadWindow = { id: string; revision: number; itemCount: number; complete: boolean;
-  view: string | null; replay: string; checkpoint: ConversationCheckpoint;
-  outside: { older: ConversationWindowBoundary | null; newer: ConversationWindowBoundary | null } }
+  view: string | null; replay: string; checkpoint: ConversationCheckpoint; anchor?: ConversationVersionedAnchor;
+  outside: { older: ConversationWindowBoundary | null; newer: ConversationWindowBoundary | null };
+  navigation: { older: string | null; newer: string | null } }
 export type AgentConversationReadPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; coverage: readonly ConversationSourceCoverage[];
   order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number; window: ConversationReadWindow }
 export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
@@ -49,7 +50,7 @@ export type ConversationWindowAssembly = { scopeKey: string; windowId: string; r
 /** Wire assembly only. Semantic accumulation and replacement belong to the backend Reader. */
 export function consumeConversationWindowPage(page: AgentConversationReadPage, pending?: ConversationWindowAssembly):
   { kind: 'pending'; pending: ConversationWindowAssembly } | { kind: 'complete'; snapshot: ConversationWindowSnapshot } {
-  const scopeKey = JSON.stringify([page.hostId, page.sourceHostId, page.agentSessionId, page.scope])
+  const scopeKey = JSON.stringify([page.hostId, page.sourceHostId, page.agentSessionId, page.scope, page.window.anchor])
   if (pending && (pending.scopeKey !== scopeKey || pending.windowId !== page.window.id || pending.revision !== page.window.revision || pending.itemCount !== page.window.itemCount)) return bad('A window fragment belongs to another original scope or revision.')
   const units = [...(pending?.units ?? [])]
   const eventIds = new Set(pending?.eventIds), recordIds = new Set(pending?.recordIds)
@@ -68,6 +69,7 @@ export function consumeConversationWindowPage(page: AgentConversationReadPage, p
     return { kind: 'pending', pending: { scopeKey, windowId: page.window.id, revision: page.window.revision, itemCount: page.window.itemCount, units, bytes: length, eventIds, recordIds, ...(fragment ? { fragment } : {}) } }
   }
   if (fragment || units.length !== page.window.itemCount || !page.window.view) return bad('The replacement window is incomplete.')
+  if (page.window.anchor && units.flatMap(unit => unit.records).some(record => !same(record.reference, page.window.anchor!.record) || record.revision !== page.window.anchor!.revision)) return bad('The exact-anchor window contains another original record or version.')
   const { items: _items, ...envelope } = page
   return { kind: 'complete', snapshot: { ...envelope, units } }
 }
@@ -165,9 +167,11 @@ function options(value: Record<string, unknown>): { limit?: number; maxBytes?: n
     ...(value.view === undefined ? {} : { view: text(value.view, 131_072) }) }
 }
 export function parseConversationTimelineReadInput(value: unknown): ConversationTimelineReadInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor', 'view'])
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor', 'view', 'nativeSource'])
   const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
-  return { ...ref, ...options(p), ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
+  const native = p.nativeSource === undefined ? undefined : rpcRecord(p.nativeSource, ['providerId', 'nativeSessionId'])
+  return { ...ref, ...options(p), ...(native ? { nativeSource: { providerId: text(native.providerId), nativeSessionId: text(native.nativeSessionId) } } : {}),
+    ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'])
@@ -337,6 +341,8 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
   const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', 'window', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
   if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
   const accepted = scope(p.scope), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, order = rpcRecord(p.order, ['basis', 'crossSource', 'direction'], 'CONTROL_PROTOCOL_ERROR')
+  if (input.nativeSource && !accepted.sources.some(source => source.kind === 'native' && source.providerId === input.nativeSource!.providerId && source.nativeSessionId === input.nativeSource!.nativeSessionId) ||
+      input.anchor && (input.anchor.frontier.sourceHostId !== source.hostId || !same(input.anchor.frontier.frontier.scope, accepted))) return bad('The read returned another explicitly selected original source.')
   if (order.direction !== 'newest-first' || order.basis !== 'source-and-relations' || !['partial', 'confirmed'].includes(String(order.crossSource))) return bad()
   const items = p.items.map(value => {
     const entry = rpcRecord(value, ['kind', 'item', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
@@ -347,7 +353,7 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
     if (offsetBytes >= totalBytes) return bad()
     return { kind: 'fragment' as const, itemId: text(entry.itemId, 131_072), encoding: 'json-utf8-base64' as const, sha256: revision(entry.sha256), offsetBytes, totalBytes, dataBase64: entry.dataBase64 }
   })
-  const w = rpcRecord(p.window, ['id', 'revision', 'itemCount', 'complete', 'view', 'replay', 'checkpoint', 'outside'], 'CONTROL_PROTOCOL_ERROR')
+  const w = rpcRecord(p.window, ['id', 'revision', 'itemCount', 'complete', 'view', 'replay', 'checkpoint', 'outside', 'navigation', 'anchor'], 'CONTROL_PROTOCOL_ERROR')
   const checkpoint = parseConversationCheckpoint(w.checkpoint, input)
   if (typeof w.complete !== 'boolean' || (w.complete ? typeof w.view !== 'string' : w.view !== null) ||
       checkpoint.sourceHostId !== source.hostId || !same(checkpoint.frontier.scope, accepted)) return bad()
@@ -356,9 +362,16 @@ function basePage(value: unknown, input: ConversationTimelineReadInput, changes 
     const point = rpcRecord(value, ['record', 'revision'])
     return { record: itemRef(point.record, source, accepted), revision: revision(point.revision) }
   }
+  const navigation = rpcRecord(w.navigation, ['older', 'newer'])
+  const navigationCursor = (value: unknown) => value === null ? null : text(value, 131_072)
+  if (!w.complete && (navigation.older !== null || navigation.newer !== null)) return bad()
+  const anchor = w.anchor === undefined ? undefined : parseConversationVersionedAnchor(w.anchor, input)
+  if (input.anchor && !same(anchor, input.anchor) || anchor && (changes || !same(anchor.frontier, checkpoint) || Number(w.itemCount) > 1 ||
+      navigation.older !== null || navigation.newer !== null || outside.older !== null || outside.newer !== null)) return bad('The exact-anchor window changed its original read intent.')
   const window: ConversationReadWindow = { id: text(w.id), revision: integer(w.revision, 1), itemCount: integer(w.itemCount, 0, 1200),
-    complete: w.complete, view: w.view === null ? null : text(w.view, 131_072), replay: text(w.replay, 131_072), checkpoint,
-    outside: { older: boundary(outside.older), newer: boundary(outside.newer) } }
+    ...(anchor ? { anchor } : {}), complete: w.complete, view: w.view === null ? null : text(w.view, 131_072), replay: text(w.replay, 131_072), checkpoint,
+    outside: { older: boundary(outside.older), newer: boundary(outside.newer) },
+    navigation: { older: navigationCursor(navigation.older), newer: navigationCursor(navigation.newer) } }
   return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes), window }
 }
 export function parseConversationReadPage(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage { return basePage(value, input) }

@@ -915,6 +915,9 @@ export type AgentSessionHistoryPage = {
   /** Provider-issued changes boundary of this exact frozen history snapshot.
    * Absent means a history-to-changes join is not established. Never decode or order it. */
   changesCursor?: string
+  /** Provider-issued original page opening position at the same frozen physical cut.
+   * Reuse with the original limit; absence does not establish repeatability of a null-cursor head. */
+  replayCursor?: string
   /** Physical native transcript snapshot bytes, including Provider metadata; not message, turn or token counts.
    * An unfinished append may be excluded. Absent means the Provider does not establish this extent. */
   sourceSizeBytes?: number
@@ -1071,7 +1074,7 @@ export type AgentProviderSessionHistoryObservation =
 export type AgentSessionHistoryObservation = AgentProviderSessionHistoryObservation & { agentSessionId: string }
 
 export type AgentSessionHistoryObservationOptions = Pick<AgentSessionHistoryPageOptions,
-  'commandOverride' | 'args' | 'env'> & { signal?: AbortSignal }
+  'commandOverride' | 'args' | 'env' | 'nativeSource'> & { signal?: AbortSignal }
 
 export type AgentSessionHistoryObservationHandle = {
   source: AgentSessionHistorySource

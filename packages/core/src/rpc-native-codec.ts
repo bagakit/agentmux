@@ -390,7 +390,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           })
         }
         if (p.native !== null) {
-          const page = record(p.native, ['agentSessionId', 'sourceHostId', 'source', 'items', 'nextCursor', 'changesCursor', 'sourceSizeBytes'])
+          const page = record(p.native, ['agentSessionId', 'sourceHostId', 'source', 'items', 'nextCursor', 'changesCursor', 'replayCursor', 'sourceSizeBytes'])
           if (page.agentSessionId !== expected.agentSessionId) fail()
           if (page.sourceHostId !== undefined && page.sourceHostId !== p.sourceHostId) fail()
           const source = record(page.source, ['providerId', 'nativeSessionId']); string(source.providerId); string(source.nativeSessionId)

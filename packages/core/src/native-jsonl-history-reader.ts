@@ -420,6 +420,14 @@ export class NativeJsonlHistoryReader {
     this.tail = actual.tail
   }
 
+  /** Re-read the same original page from its opening position and accepted cut. */
+  async historyReplayCursor(): Promise<string> {
+    await this.verifyUnchanged()
+    const before = Math.min(this.context.cursor ? decodeCursor(this.context.cursor).before : this.cut, this.cut)
+    return Buffer.from(JSON.stringify({ version: 1, ...this.context.source, path: this.context.transcriptPath!,
+      ...this.identity, cut: this.cut, before, head: this.head, tail: this.tail })).toString('base64url')
+  }
+
   async nextCursor(continuation?: string): Promise<string | null> {
     await this.verifyUnchanged()
     if (this.position === 0) return null
