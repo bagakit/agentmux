@@ -50,13 +50,13 @@ export async function verifySupervisionDurability({ runtime, store, spatial, win
 
   const select = async (name: string) => {
     await evaluate(`(()=>{const state=window.continuityState();const tab=Object.values(state.tabs).find(one=>Object.values(one.regions).some(region=>region.sessionId===${JSON.stringify(ids[name].sessionId)}));const button=tab&&document.querySelector('[data-workbench-tab-id="'+tab.id+'"]');if(!button)throw new Error('Original tab control is absent');button.click()})()`)
-    await wait('original ' + name + ' region mounted', async () => evaluate(`!!document.querySelector('[data-workbench-region-id="continuity-${name}"]')`))
+    await wait('original ' + name + ' region mounted', async () => evaluate(`(()=>{const region=document.querySelector('[data-workbench-region-id="continuity-${name}"]');const rect=region?.getBoundingClientRect();return !!rect&&rect.width>0&&rect.height>0})()`))
   }
   const control = async (name: string, action: 'continue' | 'cancel') => {
     await select(name)
     await evaluate(`(()=>{const region=document.querySelector('[data-workbench-region-id="continuity-${name}"]');const button=region.querySelector('.continuity-supervision button[aria-label="View service notice: Recovery paused"]');if(!button)throw new Error('Actual paused recovery notice is absent');button.click()})()`)
     const label = action === 'continue' ? 'Continue recovery' : 'Cancel automatic recovery'
-    await wait('actual recovery action visible', async () => evaluate(`[...document.querySelectorAll('button')].some(one=>one.textContent.trim()===${JSON.stringify(label)}&&!one.disabled)`))
+    await wait('actual recovery action visible', async () => evaluate(`[...document.querySelector('[data-workbench-region-id="continuity-${name}"]').querySelectorAll('.continuity-supervision button')].some(one=>one.textContent.trim()===${JSON.stringify(label)}&&!one.disabled)`))
     if (action === 'continue') await evaluate(`(()=>{const input=document.querySelector('[data-workbench-region-id="continuity-${name}"] input[aria-label="Additional recovery attempts"]');if(!input)throw Error('Original attempt budget unavailable');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'1');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))})()`)
     const original = runtime.controlContinuity.bind(runtime)
     let authored: any
@@ -73,7 +73,7 @@ export async function verifySupervisionDurability({ runtime, store, spatial, win
     }
     let operation: any
     try {
-      await evaluate(`(()=>{const button=[...document.querySelectorAll('button')].find(one=>one.textContent.trim()===${JSON.stringify(label)}&&!one.disabled);if(!button)throw new Error('Original recovery action unavailable');button.click()})()`)
+      await evaluate(`(()=>{const region=document.querySelector('[data-workbench-region-id="continuity-${name}"]');const button=[...region.querySelectorAll('.continuity-supervision button')].find(one=>one.textContent.trim()===${JSON.stringify(label)}&&!one.disabled);if(!button)throw new Error('Original recovery action unavailable');button.click()})()`)
       operation = await wait('GUI control reaches the original durable owner', async () => {
         const current = root(await read(name)), receipts: any[] = Object.values(current.supervision.controlOperations ?? {})
         return receipts.find((one: any) => one.request.action === action)
