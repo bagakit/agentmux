@@ -11,6 +11,7 @@ import { AgentMuxControlServer } from '../../../packages/core/dist/public-rpc-se
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = core
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
+const initialWaitSurface = process.env.AGENTMUX_CONTINUITY_INITIAL_WAIT_SURFACE === '1'
 const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
 const supervision = supervisionSurface || process.env.AGENTMUX_CONTINUITY_SUPERVISION_PROOF === '1'
 const phases = supervisionSurface ? ['seed'] : ['seed', 'restore', 'reconnect']
@@ -24,7 +25,7 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-continuity-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
-const receipt = { schema: supervisionSurface ? 'agentmux.continuity-supervision-surface.v1' : supervision ? 'agentmux.continuity-supervision-product.v1' : capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
+const receipt = { schema: initialWaitSurface ? 'agentmux.initial-continuity-supervision-surface.v1' : supervisionSurface ? 'agentmux.continuity-supervision-surface.v1' : supervision ? 'agentmux.continuity-supervision-product.v1' : capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
   limitations: [supervisionSurface ? 'One private Electron generation exercises production App/Store and RuntimeController/Core controls and frames; this surface receipt does not prove process restart.' : 'Actual private Electron Main and Renderer restart exercise production App/Store and RuntimeController/Core, with a nonempty original spatial workface before hydration.',
     'The native CLI is a repository protocol fixture. It validates the exact resume identity against retained native session metadata and appends to the original conversation record; this is not upstream Provider certification.',
     'Only private Runs are deliberately ended between Electron generations; no user profile, user Agent or user configuration is accessed.',
@@ -33,6 +34,7 @@ const files = async directory => (await Promise.all((await fs.readdir(directory,
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const sourceFiles = [new URL(import.meta.url).pathname, bootstrap, path.join(desktop, 'scripts/probe-process.mjs'),
   ...(capability ? [path.join(desktop, 'scripts/verify-session-capability-recovery-product.mjs')] : []),
+  ...(initialWaitSurface ? [path.join(desktop, 'scripts/verify-initial-continuity-supervision-surface.mjs')] : []),
   ...(supervisionSurface ? [path.join(desktop, 'scripts/verify-session-continuity-supervision-surface.mjs')] : []),
   ...(supervision && !supervisionSurface ? [path.join(desktop, 'scripts/verify-session-continuity-supervision-product.mjs')] : []),
   path.join(desktop, 'test/helpers/local-runtime-connector.ts'), path.join(desktop, 'test/helpers/client-ui-render.tsx'),
@@ -137,7 +139,7 @@ try {
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
     if (supervision) {
-      assert.equal(native.supervision?.kind, supervisionSurface ? 'surface' : 'durability')
+      assert.equal(native.supervision?.kind, initialWaitSurface ? 'initial-wait' : supervisionSurface ? 'surface' : 'durability')
       assert.ok(native.supervision.healthy?.runId && native.supervision.healthy.pid)
       if (phase === 'seed') receipt.originalHealthy = native.supervision.healthy
       else assert.deepEqual(native.supervision.healthy, receipt.originalHealthy)
