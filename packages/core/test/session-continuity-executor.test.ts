@@ -16,7 +16,18 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_CONT
   : { ...Source, ...await import('../src/public-rpc-server.js'), ...await import('../src/hosted-runtime-service.js') }
 if (process.env.AGENTMUX_TEST_CONTINUITY_EXECUTOR_MUTANT) expect(Reflect.get(core, 'AGENTMUX_CONTINUITY_EXECUTOR_MUTANT')).toBe(process.env.AGENTMUX_TEST_CONTINUITY_EXECUTOR_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(async () => {
+  const errors: unknown[] = []
+  try {
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      try { await cleanup() } catch (error) { errors.push(error) }
+    }
+  } finally {
+    try { vi.restoreAllMocks() } catch (error) { errors.push(error) }
+    try { vi.unstubAllEnvs() } catch (error) { errors.push(error) }
+  }
+  if (errors.length) throw new AggregateError(errors, 'Continuity fixture cleanup failed.')
+})
 const rootId = 'original-intent', sentinel = 'sdk-private-value'
 async function recordConsumer(name: string, facts: unknown) {
   const directory = process.env.AGENTMUX_TEST_CONTINUITY_EXECUTOR_EVIDENCE

@@ -16,7 +16,18 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_CONT
   : { ...Source, ...await import('../src/public-rpc-server.js'), ...await import('../src/hosted-runtime-service.js') }
 if (process.env.AGENTMUX_TEST_CONTINUITY_CONTROL_MUTANT) expect(Reflect.get(core, 'AGENTMUX_CONTINUITY_CONTROL_MUTANT')).toBe(process.env.AGENTMUX_TEST_CONTINUITY_CONTROL_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(async () => {
+  const errors: unknown[] = []
+  try {
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      try { await cleanup() } catch (error) { errors.push(error) }
+    }
+  } finally {
+    try { vi.restoreAllMocks() } catch (error) { errors.push(error) }
+    try { vi.unstubAllEnvs() } catch (error) { errors.push(error) }
+  }
+  if (errors.length) throw new AggregateError(errors, 'Continuity fixture cleanup failed.')
+})
 async function fixture(exitMode: 'immediate' | 'deferred' = 'immediate', options: { code?: number; signal?: boolean; alwaysFail?: boolean; delayMs?: number; handshake?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'adr-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)

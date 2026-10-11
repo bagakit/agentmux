@@ -16,7 +16,18 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_CONT
   : { ...Source, ...await import('../src/public-rpc-server.js'), ...await import('../src/hosted-runtime-service.js') }
 if (process.env.AGENTMUX_TEST_CONTINUITY_SUPERVISION_MUTANT) expect(Reflect.get(core, 'AGENTMUX_CONTINUITY_SUPERVISION_MUTANT')).toBe(process.env.AGENTMUX_TEST_CONTINUITY_SUPERVISION_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(async () => {
+  const errors: unknown[] = []
+  try {
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      try { await cleanup() } catch (error) { errors.push(error) }
+    }
+  } finally {
+    try { vi.restoreAllMocks() } catch (error) { errors.push(error) }
+    try { vi.unstubAllEnvs() } catch (error) { errors.push(error) }
+  }
+  if (errors.length) throw new AggregateError(errors, 'Continuity fixture cleanup failed.')
+})
 it('validates exact supervision subjects and signal facts without narrowing real Runtime signal forms', () => {
   const operation: any = { operationId: 'root', agentSessionId: 'original-session', trigger: 'startup', policy: core.DEFAULT_AGENT_CONTINUITY_POLICY,
     previousRun: { runId: 'old-run' }, kind: 'resumed', reason: 'original', admittedAt: _historyFixtureEpoch(0, 0, 1), observedAt: _historyFixtureEpoch(0, 0, 1), rechecks: 0,
