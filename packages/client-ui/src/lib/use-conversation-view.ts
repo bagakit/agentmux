@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, type ConversationWindowAssembly,
+import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, type ConversationWindowAssembly,
   type ConversationWindowSnapshot, type ConversationTimelineReadInput, type ConversationChangesInput,
   type ConversationObservationHandle, type ConversationRef } from '@agentmux/core/conversation'
 import type { AgentMuxClient } from '@agentmux/core'
@@ -115,12 +115,14 @@ export function useConversationView(client: ConversationViewClient | null, refer
       const isCurrent = () => alive() && current.request === requestController && !requestSignal.aborted
       const prior = current.snapshot
       const originalNative = prior?.scope.sources.find(source => source.kind === 'native')
-      const request: ConversationTimelineReadInput = { ...ref, limit: 100,
+      // This consumer assembles a complete bounded frame before committing it.
+      // Use the existing wire budget instead of fragmenting it into CLI-sized pages.
+      const request: ConversationTimelineReadInput = { ...ref, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES,
         ...selection, ...(kind === 'reopen' && originalNative?.kind === 'native' ? { nativeSource: { providerId: originalNative.providerId, nativeSessionId: originalNative.nativeSessionId } } : {}),
         ...(kind === 'resume' && prior?.window.view ? { view: prior.window.view } : {}), ...(kind === 'older' && prior?.window.navigation.older ? { cursor: prior.window.navigation.older } : {}),
         ...(kind === 'newer' && prior?.window.navigation.newer ? { cursor: prior.window.navigation.newer } : {}) }
       const change: ConversationChangesInput | null = kind === 'changes' && prior ? {
-        ...ref, checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100
+        ...ref, checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES
       } : null
       setState(value => ({ ...value, loading: true, error: null }))
       if (kind === 'changes' || kind === 'latest') current.dirty = false
