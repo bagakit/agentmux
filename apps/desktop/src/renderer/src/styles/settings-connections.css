@@ -160,7 +160,7 @@
 .connector-first-bot { margin-top: var(--sp-3); }
 .connector-first-bot > summary { color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; }
 .connector-credentials-source button, .connector-setup-help button { display: inline-flex; align-items: center; gap: var(--sp-2); }
-.connector-setup__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-6); padding: var(--sp-6); background: var(--surface-1); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); }
+.connector-setup__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-6); padding: 0; }
 .connector-setup__fields > .connector-platform, .connector-setup__fields > .connector-identity, .connector-setup__fields > .connector-optional { grid-column: 1 / -1; }
 .connector-setup__fields .settings-field { min-width: 0; display: grid; gap: var(--sp-2); align-content: start; }
 .connector-setup__fields .settings-field > span { color: var(--text-2); font-size: var(--fs-body); }
@@ -219,7 +219,7 @@
 .connector-check-feedback, .connector-issue { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .connector-issue { padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
 @container (width < 480px) {
-  .connector-setup__fields { grid-template-columns: minmax(0, 1fr); padding: var(--sp-5); }
+  .connector-setup__fields { grid-template-columns: minmax(0, 1fr); }
   .connector-stage-list { grid-template-columns: minmax(0, 1fr); }
   .connector-steps { gap: var(--sp-3); }
   .connector-record__action { display: none; }
@@ -231,6 +231,20 @@
 .connector-enrollment__heading { display: grid; gap: var(--sp-3); min-width: 0; }
 .connector-enrollment__summary, .connector-enrollment__diagnosis { max-width: 56ch; margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.65; overflow-wrap: anywhere; }
 .connector-enrollment__diagnosis { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-enrollment__bot-preview { display: flex; align-items: center; gap: var(--sp-4); min-width: 0; padding-block: var(--sp-3); }
+.connector-enrollment__bot-preview > img { flex: none; border-radius: var(--radius); }
+.connector-enrollment__bot-preview > svg { flex: none; color: var(--text-3); }
+.connector-enrollment__bot-preview > div { display: grid; gap: var(--sp-1); min-width: 0; }
+.connector-enrollment__bot-preview strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.connector-enrollment__bot-preview span { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.connector-enrollment__identity-editor { display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: var(--sp-5); max-width: 28rem; padding-block: var(--sp-2); }
+.connector-enrollment__identity-editor > .brand-icon { align-self: center; }
+.connector-enrollment .connector-enrollment__name { min-width: 0; display: grid; gap: var(--sp-2); margin: 0; }
+.connector-enrollment__name > span { color: var(--text-2); font-size: var(--fs-body); }
+.connector-enrollment__name > small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.connector-enrollment__creation, .connector-enrollment__resume { display: grid; gap: var(--sp-3); }
+.connector-enrollment__creation > p, .connector-enrollment__resume > p { max-width: 56ch; margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.65; }
+.connector-enrollment__resume > button { justify-self: start; }
 .connector-enrollment__action { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
 .connector-enrollment__action > button { max-width: 100%; white-space: normal; text-align: left; }
 .connector-enrollment__action .connector-check-feedback { font-size: var(--fs-body); }
