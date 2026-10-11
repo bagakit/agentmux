@@ -7,6 +7,8 @@ import type { SshHostConfig } from '../src/shared/contracts'
 import { HostUpgradePanel } from '../src/renderer/src/components/settings/HostUpgradePanel'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 const dom = composerDOM()
 const host: SshHostConfig = { id: 'build', kind: 'ssh', label: 'Build server', hostname: 'build.invalid',
   runtimeId: 'original-runtime', remoteCommand: _hygiene_fixturePath("opt/original/agentmux"), remoteSocketPath: _hygiene_fixturePath("srv/original/control.sock") }
@@ -69,6 +71,30 @@ it('reconciles a retained unknown operation instead of admitting another upgrade
   expect(checkCall).toHaveBeenCalledTimes(1)
   expect(upgradeCall).not.toHaveBeenCalled()
   expect(dom.container.textContent).toContain('Upgrade complete')
+})
+it('shows the original receipt stage and update time outside technical details without deriving completion or replaying the operation', async () => {
+  const updatedAt = _historyFixtureEpoch(1, 0, 0)
+  checkCall.mockResolvedValue({ ...check, eligible: false, reason: 'unverified', latestOperation: { ...receipt('unknown'), stage: 'starting', updatedAt } })
+  await render()
+  const summary = () => dom.container.querySelector<HTMLElement>('[aria-label="Original update receipt"]')!
+  expect(summary()).not.toBeNull()
+  expect(summary().closest('details')).toBeNull()
+  expect(dom.container.querySelector<HTMLDetailsElement>('.host-upgrade__details')!.open).toBe(false)
+  expect(summary().querySelector('[data-upgrade-stage="starting"]')?.textContent).toBe('Starting the updated Core')
+  expect(summary().querySelector('time')?.dateTime).toBe(new Date(updatedAt).toISOString())
+  expect(dom.container.textContent).toContain('Upgrade result unconfirmed')
+  expect(summary().textContent).not.toContain('%')
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(inspectCall).not.toHaveBeenCalled()
+  inspectCall.mockResolvedValue({ ...receipt('unknown'), stage: 'completed', updatedAt: updatedAt + 7000 })
+  await click()
+  expect(inspectCall).toHaveBeenCalledExactlyOnceWith(host, 'original-operation')
+  expect(summary().querySelector('[data-upgrade-stage="completed"]')?.textContent).toBe('Verification completed')
+  expect(summary().querySelector('time')?.dateTime).toBe(new Date(updatedAt + 7000).toISOString())
+  expect(dom.container.textContent).toContain('Upgrade result unconfirmed')
+  expect(dom.container.textContent).not.toContain('Upgrade complete')
+  expect(upgradeCall).not.toHaveBeenCalled()
+  expect(checkCall).toHaveBeenCalledTimes(1)
 })
 it('retains the admitted operation after a lost response and never retries the deployment', async () => {
   upgradeCall.mockRejectedValue(new Error('Connection lost after admission'))
