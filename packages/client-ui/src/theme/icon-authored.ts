@@ -20,9 +20,9 @@ type AuthoredIconDefinition = {
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
   "goal-consensus": {
-    shapes: [["path",{"d":"M6 5H4a1.5 1.5 0 0 0-1.5 1.5V12L5 10.5h1M18 9h1.5a2 2 0 0 1 2 2v6L19 15h-1"}],["path",{"d":"M9 4h4l3 3v11a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"}],["path",{"d":"M13 4v3h3M10 15h3"}],["path",{"d":"M10 11h3","pathLength":"1","data-semantic-icon-part":"agreement-line"}]],
+    shapes: [["path",{"d":"M4 2h4a2 2 0 0 1 2 2v7l-3-3H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2ZM16 3h4a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-3l-3 2V5a2 2 0 0 1 2-2Z"}],["path",{"d":"M9.5 13h5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 8 20.5v-6A1.5 1.5 0 0 1 9.5 13Z"}],["path",{"d":"M10.5 19h3"}],["path",{"d":"M10.5 16h3","pathLength":"1","data-semantic-icon-part":"agreement-line"}]],
     design: {
-      rest: "两侧相向对话围绕一份折角约定页，表达共同讨论的方向；不是完成勾或普通靶心",
+      rest: "两枚错位的完整对话气泡围绕同一约定页，表达双方共同讨论的方向；不是完成勾或普通靶心",
       motion: {"kind": "once", "animation": "feedback", "description": "仅约定页内一条线短描一次，两侧对话与纸框固定", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航、旧确认和结果验收不触发。"}
     }
   },
