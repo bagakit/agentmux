@@ -19,6 +19,62 @@ type AuthoredIconDefinition = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "layout-split-left": {
+    shapes: [["rect",{"x":"3","y":"4","width":"9","height":"16","fill":"currentColor","opacity":".12","stroke":"none"}],["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["path",{"d":"M12 4v16"}],["path",{"d":"M10 12H5.5m2.5-2.5L5.5 12 8 14.5"}]],
+    design: {
+      rest: "固定分区框与指向新增落点的箭头；兼容原“移到新组”的方向语义",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
+  "layout-split-right": {
+    shapes: [["rect",{"x":"12","y":"4","width":"9","height":"16","fill":"currentColor","opacity":".12","stroke":"none"}],["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["path",{"d":"M12 4v16"}],["path",{"d":"M14 12h4.5m-2.5-2.5 2.5 2.5-2.5 2.5"}]],
+    design: {
+      rest: "固定分区框与指向新增落点的箭头；兼容原“移到新组”的方向语义",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
+  "layout-split-up": {
+    shapes: [["rect",{"x":"3","y":"4","width":"18","height":"8","fill":"currentColor","opacity":".12","stroke":"none"}],["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["path",{"d":"M3 12h18"}],["path",{"d":"M12 10V6m-2.5 2.5L12 6l2.5 2.5"}]],
+    design: {
+      rest: "固定分区框与指向新增落点的箭头；兼容原“移到新组”的方向语义",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
+  "layout-split-down": {
+    shapes: [["rect",{"x":"3","y":"12","width":"18","height":"8","fill":"currentColor","opacity":".12","stroke":"none"}],["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["path",{"d":"M3 12h18"}],["path",{"d":"M12 14v4m-2.5-2.5L12 18l2.5-2.5"}]],
+    design: {
+      rest: "固定分区框与指向新增落点的箭头；兼容原“移到新组”的方向语义",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
+  "layout-columns-3": {
+    shapes: [["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["line",{"x1":"9","y1":"4","x2":"9","y2":"20"}],["line",{"x1":"15","y1":"4","x2":"15","y2":"20"}]],
+    design: {
+      rest: "严格3列×1行；统一外框、笔触和留白",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
+  "layout-grid-4": {
+    shapes: [["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["line",{"x1":"12","y1":"4","x2":"12","y2":"20"}],["line",{"x1":"3","y1":"12","x2":"21","y2":"12"}]],
+    design: {
+      rest: "严格2列×2行；统一外框、笔触和留白",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
+  "layout-grid-9": {
+    shapes: [["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["line",{"x1":"9","y1":"4","x2":"9","y2":"20"}],["line",{"x1":"15","y1":"4","x2":"15","y2":"20"}],["line",{"x1":"3","y1":"9.33333","x2":"21","y2":"9.33333"}],["line",{"x1":"3","y1":"14.6667","x2":"21","y2":"14.6667"}]],
+    design: {
+      rest: "严格3列×3行；统一外框、笔触和留白",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
+  "layout-balance": {
+    shapes: [["rect",{"x":"3","y":"4","width":"8","height":"12","rx":"1.5"}],["rect",{"x":"13","y":"4","width":"8","height":"12","rx":"1.5"}],["path",{"d":"M3 19h18m-18-1v2m18-2v2"}]],
+    design: {
+      rest: "等尺寸分区＋共同基线，表示均分比例，不是增加固定格数",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
+    }
+  },
   "goal-consensus": {
     shapes: [["path",{"d":"M5 3h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 3V5a2 2 0 0 1 2-2Z"}],["path",{"d":"M9 15V6.5"}],["path",{"d":"M9 6.5h8l-2 3 2 3H9Z","fill":"currentColor","stroke":"none","data-semantic-icon-part":"agreement-flag"}]],
     design: {
@@ -195,17 +251,17 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "layout-active-first": {
-    shapes: [["rect",{"x":"3","y":"4","width":"11","height":"16","rx":"1"}],["rect",{"x":"17","y":"4","width":"4","height":"6","rx":"1"}],["rect",{"x":"17","y":"14","width":"4","height":"6","rx":"1"}],["path",{"d":"M11 12H6 M8 10l-2 2 2 2"}]],
+    shapes: [["rect",{"x":"3","y":"4","width":"11","height":"16","rx":"1.5"}],["rect",{"x":"17","y":"4","width":"4","height":"7","rx":"1"}],["rect",{"x":"17","y":"14","width":"4","height":"6","rx":"1"}],["rect",{"x":"6","y":"7","width":"5","height":"10","rx":".5","fill":"currentColor","stroke":"none"}]],
     design: {
-      rest: "一大两小面与内向箭头，表示重排而非项目栏",
-      motion: { kind: "still", animation: "none", description: "当前消费表达对象/记录或入口，未提供持续活动事实；实际面板/选中/布局变化已表达动作结果，保持图标静止减少重复反馈。", trigger: "沿现有对象身份、分类、导航、记录或工具入口；hover/focus沿宿主短反馈" }
+      rest: "突出当前主区与旁侧次区，表示当前优先布局；示意比例而不承诺格数",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
     }
   },
   "layout-six": {
-    shapes: [["rect",{"x":"3","y":"3","width":"4","height":"7","rx":"1"}],["rect",{"x":"10","y":"3","width":"4","height":"7","rx":"1"}],["rect",{"x":"17","y":"3","width":"4","height":"7","rx":"1"}],["rect",{"x":"3","y":"14","width":"4","height":"7","rx":"1"}],["rect",{"x":"10","y":"14","width":"4","height":"7","rx":"1"}],["rect",{"x":"17","y":"14","width":"4","height":"7","rx":"1"}]],
+    shapes: [["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["line",{"x1":"9","y1":"4","x2":"9","y2":"20"}],["line",{"x1":"15","y1":"4","x2":"15","y2":"20"}],["line",{"x1":"3","y1":"12","x2":"21","y2":"12"}]],
     design: {
-      rest: "六个完整格子明确3×2，窄槽不合并或漏格",
-      motion: { kind: "still", animation: "none", description: "当前消费表达对象/记录或入口，未提供持续活动事实；实际面板/选中/布局变化已表达动作结果，保持图标静止减少重复反馈。", trigger: "沿现有对象身份、分类、导航、记录或工具入口；hover/focus沿宿主短反馈" }
+      rest: "严格3列×2行；统一外框、笔触和留白",
+      motion: { kind: "still", animation: "none", description: "方向、格局与比例在小尺寸保持完整静止轮廓；原菜单的 hover、focus 与动作结果提供反馈。", trigger: "按原布局动作显示；图形不表示执行、当前选择或操作回执。" }
     }
   },
   "file-styles": {
