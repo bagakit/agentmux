@@ -2,7 +2,7 @@ import { parse as parseHtml, type DefaultTreeAdapterTypes } from 'parse5'
 import { parse as parseScript, type Node, type Program } from 'acorn'
 import { Cookie, CookieJar, type SerializedCookieJar } from 'tough-cookie'
 import type { ConnectionSetupAccount } from '@agentmux/core/connections'
-import type { SetupAdapterInput, SetupAuthenticationReceipt } from '../../connection-setup-adapter.js'
+import type { SetupAdapterInput, SetupAuthenticationReceipt, SetupInspectionReceipt } from '../../connection-setup-adapter.js'
 
 export const FEISHU_QR_HEADERS = {
   'x-app-id': '12', 'x-api-version': '1.0.28', accept: 'application/json', 'content-type': 'application/json',
@@ -193,5 +193,26 @@ export async function advanceFeishuSession(input: SetupAdapterInput & { privateS
     state.cookieJar = serialize(cookies)
     const challenge = state.phase === 'poll' ? { qrPayload: JSON.stringify({ qrlogin: { token: state.token } }), expiresAt: null, nextPollAt: Date.now() + 1500 } : null
     return { kind: 'progress', stage, challenge, account: stage === 'account' ? state.account! : null, privateState: JSON.stringify(state) }
+  } catch { return { kind: 'unknown' } }
+}
+
+/** One exact console permission read, not an app-data read or a configuration grant. */
+export async function inspectFeishuApplication(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupInspectionReceipt> {
+  if (input.application.domain !== 'open.feishu.cn') return { kind: 'unknown' }
+  try {
+    const { state, cookies } = session(input)
+    if (state.phase !== 'account' || !state.account || !opaque(state.csrf) || state.consoleOrigin !== 'https://open.feishu.cn') return { kind: 'unknown' }
+    const target = new URL('/developers/v1/app_role/permission/' + encodeURIComponent(input.application.appId), state.consoleOrigin)
+    const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
+    const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
+    const bounded = AbortSignal.timeout(20_000)
+    const response = await fetch(target.href, { method: 'POST', redirect: 'manual', headers, body: '{}', signal: signal ? AbortSignal.any([signal, bounded]) : bounded })
+    if (!response.ok || response.redirected || response.url && new URL(response.url).href !== target.href || response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return { kind: 'unknown' }
+    // The same per-response document bound also bounds JSON material retained privately.
+    const body = record(JSON.parse(await page(response))), data = record(body?.data), permissions = record(data?.permission)
+    if (body?.code !== 0 || !Number.isSafeInteger(data?.roleType) || !permissions || !Object.hasOwn(permissions, String(data!.roleType))) return { kind: 'unknown' }
+    const role = record(permissions[String(data!.roleType)]), read = record(role?.readResource), write = record(role?.writeResource)
+    if (!read || !write) return { kind: 'unknown' }
+    return { kind: 'observed', applicationInfoReadPermission: Object.hasOwn(read, 'app.info') || Object.hasOwn(write, 'app.info') ? 'confirmed' : 'unknown', privateState: JSON.stringify(data) }
   } catch { return { kind: 'unknown' } }
 }
