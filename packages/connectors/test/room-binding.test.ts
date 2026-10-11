@@ -7,7 +7,13 @@ import { RoomBindingHost } from '../src/room-binding.js'
 import { config, context, roomBindingFixture } from './fixtures/room-binding.js'
 
 const fixtures: Awaited<ReturnType<typeof roomBindingFixture>>[] = []
-afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) await f.close() })
+afterEach(async () => {
+  const failures: unknown[] = []
+  try {
+    for (const f of fixtures.splice(0)) { try { await f.close() } catch (error) { failures.push(error) } }
+  } finally { try { vi.restoreAllMocks() } catch (error) { failures.push(error) } }
+  if (failures.length) throw new AggregateError(failures, 'Room binding test cleanup failed')
+})
 async function fixture(native = true) { const f = await roomBindingFixture(native); fixtures.push(f); return f }
 const reply = (uuid: string, text: string) => JSON.stringify({ sessionId: 'original-native', uuid, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
 
@@ -39,7 +45,44 @@ describe('original room binding and grants', () => {
     expect(await f.bindings.bind({ ...f.input, operationId: 'replacement' }, context)).toMatchObject({ state: 'refused', code: 'ROOM_BINDING_TARGET_CHANGED' })
     expect(await f.bindings.inspect({ operationId: f.input.operationId })).toMatchObject({ operation: original, current: { revision: 1 } })
   })
-  it('refuses changed spatial revision across asynchronous cut without keeping a SQL transaction open', async () => {
+  it.each([
+    ['bind', 'checkpoint'],
+    ['relink', 'authority']
+  ] as const)('completes %s after an unrelated spatial commit during the original %s await', async (action, barrier) => {
+    const f = await fixture(), original = action === 'relink' ? await f.bindings.bind(f.input, context) : null
+    let release!: () => void, reached = false, authorityChecks = 0
+    const held = new Promise<void>(resolve => { release = resolve })
+    let captured: Awaited<ReturnType<typeof f.checkpoint>> | undefined
+    const checkpoint = async (ref: Parameters<typeof f.checkpoint>[0]) => {
+      captured = await f.checkpoint(ref)
+      if (barrier === 'checkpoint') { reached = true; await held }
+      return captured
+    }
+    const bindings = new RoomBindingHost({ connections: f.connections, spatial: f.spatial, checkpoint })
+    const authority = { ...context, assertCurrent: async () => {
+      if (++authorityChecks === 2 && barrier === 'authority') { reached = true; await held }
+    } }
+    const input = { ...f.input, operationId: 'unrelated-' + action }
+    const work = action === 'bind' ? bindings.bind(input, authority) : bindings.relink({ ...input, expectedRevision: 1, externalConversationId: 'relinked-group' }, authority)
+    try {
+      await vi.waitFor(() => expect(reached).toBe(true))
+      expect((await bindings.inspect({ operationId: input.operationId })).operation?.state).toBe('preparing')
+      f.connections.database.exec('BEGIN IMMEDIATE; COMMIT')
+      const before = (await f.spatial.read())!
+      await f.change(graph => { graph.regions[1]!.agentSessionId = 'unrelated-agent'; graph.tabLayouts.tab!.activeRegionId = 'other-region' })
+      const after = (await f.spatial.read())!
+      expect(after.revision).toBeGreaterThan(before.revision)
+      expect(after.graph.regions.find(region => region.regionId === input.regionAnchor.regionId)).toEqual(before.graph.regions.find(region => region.regionId === input.regionAnchor.regionId))
+    } finally { release(); await work.catch(() => {}) }
+    const operation = await work
+    expect(operation.state).toBe('applied'); if (operation.state !== 'applied' || !captured) throw new Error('Original binding was not completed')
+    expect(operation.binding).toMatchObject({ revision: action === 'bind' ? 1 : 2, agentSessionId: f.input.agentSessionId, authorizedBy: context.actor })
+    expect(operation.binding.sourceCheckpoints).toEqual(captured.checkpoint.frontier.cuts.filter(cut => cut.kind === 'native').map(cut => cut.checkpoint))
+    expect((await bindings.inspect({ operationId: input.operationId })).operation).toEqual(operation)
+    if (original?.state === 'applied') expect(bindings.readExact(f.input.bindingId, 1)).toEqual(original.binding)
+    await f.unchanged()
+  })
+  it('refuses a replaced exact Region occupant across asynchronous cut without keeping a SQL transaction open', async () => {
     const f = await fixture()
     let release!: () => void
     const checkpoint = vi.fn(async (ref: Parameters<typeof f.checkpoint>[0]) => { await new Promise<void>(resolve => { release = resolve }); return await f.checkpoint(ref) })
