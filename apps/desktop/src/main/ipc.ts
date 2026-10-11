@@ -1,3 +1,4 @@
+import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
 import { RendererTimelineTracer } from './renderer-trace.js'
@@ -259,6 +260,7 @@ export async function registerIpc(args: {
   configStore: ConfigStore
   initialConfig: AppConfig
   runtime: RuntimeController
+  applicationAccess: AgentMuxApplicationAccessOwner
   demands?: DemandStore
   progressLoops: ContinuousProgressLoopManager
 
@@ -663,6 +665,13 @@ export async function registerIpc(args: {
     try { return await client.call(method, input, options) }
     finally { await client.dispose() }
   }
+  handleWithEvent('applications:call', async (event, method: unknown, value: unknown) => {
+    requireTrustedSender('applications:call', event)
+    return sessionInputOperationResult(async () => {
+      if (!isApplicationAccessMethod(method)) throw new AgentMuxError('Unsupported application access method.', 'INVALID_APPLICATION_ACCESS')
+      return callUserRpc(method, parseApplicationAccessParams(method,value))
+    })
+  })
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent, trust: requireTrustedSender,
@@ -2180,6 +2189,7 @@ export async function registerIpc(args: {
     notebookStore,
     notebookObservation: notebookObservation.owner,
     goalDelegations,
+    applicationAccess: args.applicationAccess,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),

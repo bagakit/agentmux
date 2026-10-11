@@ -41,6 +41,19 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     if (action === 'create') return { method, params: { id, value } }
     return { method, params: { id, input: value } }
   }
+  if (resource === 'applications') {
+    const method = `settings.applications.${action}`
+    if (action === 'ls' && (args.length === 2 || args.length === 4 && id === '--host' && args[3]?.length)) return { method, params: args.length === 2 ? {} : { hostId: args[3] } }
+    if (action === 'configure' && args.length === 5 && id?.length && args[3] === '--input') {
+      const body = await input(args[4]!); if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Application configuration requires profile and expectedRevision.')
+      if (Object.keys(body as object).some(key => !['profile','expectedRevision'].includes(key))) invalid('Application configuration accepts only profile and expectedRevision.')
+      return { method, params: { ...body as Record<string,unknown>, profileId: id } }
+    }
+    if ((action === 'delete' || action === 'plan') && args.length === 5 && id?.length && args[3] === '--revision' && args[4]?.length) return { method, params: { profileId: id, expectedRevision: args[4] } }
+    if (action === 'apply' && args.length === 7 && id?.length && args[3] === '--plan' && args[4]?.length && args[5] === '--operation-id' && args[6]?.length) return { method, params: { profileId: id, planId: args[4], operationId: args[6] } }
+    if (action === 'operation' && args.length === 3 && id?.length) return { method, params: { operationId: id } }
+    return invalid('Use settings applications --help for exact configuration, plan, apply and original operation query commands.')
+  }
   if (resource === 'hosts') {
     if (action === 'update' && args.length === 5 && id?.length && args[3] === '--input') {
       const body = await input(args[4]!)

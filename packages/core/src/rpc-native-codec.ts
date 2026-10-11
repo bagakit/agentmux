@@ -1,3 +1,4 @@
+import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult } from './application-access.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
@@ -283,6 +284,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.history' ? parseFileHistoryResult(value, parseFileHistoryParams(params)) : method === 'file.restore' ? parseFileRestoreResult(value, parseFileRestoreParams(params)) : method === 'file.undo' ? parseFileUndoResult(value, parseFileUndoParams(params)) : method === 'file.create' ? parseFileCreateResult(value, parseFileCreateParams(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
     if (isMoteConnectionMethod(method)) return parseMoteConnectionResult(method,value,parseMoteConnectionParams(method,params)) as unknown as Record<string,unknown>
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
+    if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
     if (isScheduleMethod(method)) return validateScheduleRpcResult(method, value, parseScheduleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>

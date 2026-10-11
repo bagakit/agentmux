@@ -14,6 +14,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./application-access": {
+      "types": "./dist/application-access.d.ts",
+      "import": "./dist/application-access.js"
+    },
     "./agent-input-mailbox": {
       "types": "./dist/agent-input-mailbox-codec.d.ts",
       "import": "./dist/agent-input-mailbox-codec.js"

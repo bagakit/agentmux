@@ -1,3 +1,4 @@
+import { createDesktopApplicationAccessOwner } from './application-access-owner.js'
 import { WorkbenchWindows } from './workbench-windows.js'
 import { WorkbenchWindowStore } from './workbench-window-store.js'
 import { openDemandStore } from '@agentmux/demand'
@@ -98,6 +99,7 @@ function startPrimaryInstance(): void {
     connectDesktopAgentMuxHost,
     scratchTopics
   )
+  const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(app.getPath('userData'), 'application-access.sqlite'))
   const configStore = new ConfigStore()
   const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const progressLoops = new ContinuousProgressLoopManager(
@@ -135,6 +137,7 @@ function startPrimaryInstance(): void {
         { owner: 'renderer-updates', dispose: () => rendererUpdates?.dispose() },
         { owner: 'workbench-windows', dispose: () => workbenchWindows?.dispose() },
         { owner: 'desktop-ipc', dispose: () => disposeRegisteredIpc?.() },
+        { owner: 'application-access', dispose: () => applicationAccess.dispose() },
         { owner: 'runtime', dispose: () => runtime.dispose() }
       ], 'Desktop owner disposal failed')
     }
@@ -264,7 +267,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
+    disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
       loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
