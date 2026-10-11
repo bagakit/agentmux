@@ -1,0 +1,30 @@
+# UI 弹层的实现归属
+
+行为合同见 [Browser 浮层让位与输入层级](../design/behavior/browser-workface.md#浮层让位与输入层级)，呈现合同见 [共享弹层作用域与层级](../design/presentation/shared-rules.md#弹层作用域与层级)。本页只说明实现如何消费这两处合同；不持有另一份窗口、Session 或业务状态。
+
+## 共享组件与宿主
+
+[`client-ui/Modal`](../../packages/client-ui/src/components/Modal.tsx) 是 Desktop、Mobile 和共享图片阅读器的 Dialog 入口，复用 Radix 的焦点、关闭与无障碍机制。它持有本次展示的身份、作用域、附件 slot 和展示失败状态；调用者继续持有 requested-open、表单、忙碌状态和业务操作。展示 Retry 只换展示身份，不重新提交业务动作。
+
+真实 modal 在准确 document 的窗口 overlay 根建立独立作用域。必需的 scrim 和 content 标记同一展示身份，附件经独立 slot 保持在内容滚动区外。嵌套 modal 回到窗口根，避免困在前一个 modal 的 CSS 层叠上下文。非模态 Dialog 保持原有非模态语义。
+
+Portal 使用稳定的 DOM host。工作面跨 document 移动时，host 随原内容移动，表单和编辑器不因换容器而重建；焦点、关闭和滚动约束则在实际 document 上重新取得并释放。依赖库对多 document 的修正沿 [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) 的 `patchedDependencies` 声明，由 lockfile 绑定补丁内容；原库的作用域、层栈和滚动机制继续负责行为，客户端不复制一套管理器。
+
+[`overlays.css`](../../packages/client-ui/src/styles/overlays.css) 定义全局层级 token 和 modal 内部局部次序，Desktop 与 Mobile 引入同一文件。业务组件只消费角色，不计算“当前在弹窗里所以再加一层”。Desktop 的 [`WindowOverlayHost`](../../apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx) 将已有 Portal 接到共享作用域和实际 `WorkbenchDocument`；内容与焦点使用同一个 document，不能从主窗口全局变量猜测目标。
+
+## Desktop 的原生 Browser 投影
+
+原生 Browser 覆盖 Renderer 的 DOM，单独增加 CSS z-index 无法跨越这条边界。
+
+1. [`native-overlay-regions`](../../apps/desktop/src/renderer/src/lib/native-overlay-regions.ts) 收集实际打开的浮层与准确 Browser 几何。它沿共享作用域排序，将必需节点作为一组验证和预算，附件独立处理；位置观察只订阅有关浮层。原生 popover 的打开序独立保留。
+2. [`useNativeOverlayChrome`](../../apps/desktop/src/renderer/src/hooks/useNativeOverlayChrome.ts) 向 Main 发布当前 document 的描述，并将带展示身份的失败回执送回原组件。迟到回执不能关闭后来的一次展示。
+3. [`NativeOverlaySurfaces`](../../apps/desktop/src/main/native-overlay-surfaces.ts) 通过原 Browser owner 校验目标，准备整组位图和输入投影后提交。遮罩只补 Main 确认的 Browser 像素；已捕获的 Renderer chrome 不再次压暗。准备与展示期间的背景输入隔离也在准确 Browser 对象上处理。
+4. [`NativeOverlayWindows`](../../apps/desktop/src/main/native-overlay-windows.ts) 管理实际原生承载窗口和输入转发。销毁、关闭与失败释放该次展示，不改变 Browser 或 Session 的生命周期。
+
+内部描述和失败回执归 [`shared/native-overlay.ts`](../../apps/desktop/src/shared/native-overlay.ts)。它们是展示协议，不进入 Core 的 Session、Run、权限或恢复事实。
+
+## 防退化验证
+
+[`overlay-architecture.test`](../../apps/desktop/test/overlay-architecture.test.ts) 从实际源码发现消费者，限制原始 Dialog 导入和全局 token 的定义 owner；它是贡献边界检查，不能替代真实绘制或输入验收。共享 Modal 测试覆盖关闭、失败、草稿和焦点生命周期，Renderer 与 Main 测试覆盖收集及整组投影。
+
+[`verify-ui-layering`](../../apps/desktop/scripts/verify-ui-layering.mjs) 在隔离 Electron 中运行实际 Stop 消费链、原生 Browser、附件、窗口形态和失败场景，并对承重实现执行私有变异。图像、候选身份和运行回执留在本机证据目录，独立图审按 [视觉验收规范](../guides/agent-visual-e2e-review.md) 执行。
