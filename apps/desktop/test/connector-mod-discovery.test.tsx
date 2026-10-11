@@ -80,7 +80,7 @@ it('discovers the one generic Connector from Mods, Overview and search and opens
   await act(async () => row.click()); await settled()
   expect(dom.container.querySelector('.settings-content__breadcrumb')?.textContent).toBe('Mods')
   expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Agent Conversation Connector')
-  expect(dom.container.querySelector('.settings-content__header p')?.textContent).toContain('Feishu and Lark are included')
+  expect(dom.container.querySelector('.settings-content__header p')?.textContent).toContain('Feishu or Lark')
   expect(calls.some(call => call.method === 'connection.enrollment.ls')).toBe(true)
   expect(calls.some(call => call.method === 'connection.ls')).toBe(true)
   expect(calls.some(call => call.method === 'connection.service.get')).toBe(true)

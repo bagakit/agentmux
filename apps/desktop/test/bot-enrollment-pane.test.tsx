@@ -40,9 +40,14 @@ async function click(selector: string) {
   await dom.click(selector)
 }
 async function inspectOriginal() {
-  const control = dom.container.querySelector('[data-enrollment-inspect]')
-  if (control?.closest('details:not([open])')) await dom.click('.connector-diagnostics > summary')
-  await click('[data-enrollment-inspect]')
+  await act(async () => {
+    const button = dom.container.querySelector<HTMLButtonElement>('[data-enrollment-inspect]')!
+    expect(button).toBeTruthy()
+    const details = button.closest<HTMLDetailsElement>('details:not([open])')
+    if (details) details.querySelector<HTMLElement>('summary')!.click()
+    expect(button.closest('details:not([open])'), 'Open the current receipt disclosure before reading it').toBeNull()
+    button.click()
+  })
 }
 async function select(operationId: string) {
   if (dom.container.querySelector('[data-enrollment-operation]')) await click('.connector-enrollment > .connector-back')
@@ -171,6 +176,34 @@ it('a late original begin result preserves the manual draft, composing input nod
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe('private-manual-draft')
     expect(await fixture.services.connections.list()).toEqual({ connections: [] })
   } finally { release() }
+})
+
+it('a successful list refresh cannot clear an unconfirmed application save or replay its original write', async () => {
+  await open(); await mount(); await click('[data-enrollment-existing]')
+  await fill('Connection app ID', 'cli_existing_bot')
+  await fill('Connection app secret', 'private-existing-bot-credential')
+  await dom.click('.connector-setup__fields .connector-optional > summary')
+  await click('[aria-label="Connection enabled"]')
+  let loseReply = true
+  vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
+    const result = await originalCall(method, input)
+    if (method === 'connection.configure' && loseReply) { loseReply = false; throw new Error('Controlled original save reply gap') }
+    return result
+  })
+  await click('[data-connection-save]')
+  await vi.waitFor(() => expect(dom.container.querySelector('.connector-issue')?.textContent).toContain('Save result not confirmed'))
+  const writes = () => vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.configure')
+  const original = structuredClone(writes()[0]![1])
+  await dom.render(<ExternalConnectionsSettings active={false} />)
+  await dom.render(<ExternalConnectionsSettings active />)
+  await vi.waitFor(() => expect(vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.ls').length).toBeGreaterThan(1))
+  expect(dom.container.querySelector('.connector-issue')?.textContent).toContain('Save result not confirmed')
+  expect(writes()).toHaveLength(1)
+  expect(writes()[0]![1]).toEqual(original)
+  await click('[data-connection-save]')
+  await vi.waitFor(() => expect(dom.container.querySelector('.connector-connection-state')?.textContent).toContain('Application paused'))
+  expect(writes()).toHaveLength(1)
+  expect(fixture.begin).not.toHaveBeenCalled()
 })
 
 it('unavailable secure creation keeps original setups and the existing-bot path without pretending a platform picker is ready', async () => {

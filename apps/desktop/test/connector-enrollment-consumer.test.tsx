@@ -83,9 +83,14 @@ async function click(selector: string) {
   await act(async () => button!.click())
 }
 async function inspectOriginal() {
-  const button = dom.container.querySelector('[data-enrollment-inspect]')
-  if (button?.closest('details:not([open])')) await click('.connector-enrollment > .connector-diagnostics > summary')
-  await click('[data-enrollment-inspect]')
+  await act(async () => {
+    const button = dom.container.querySelector<HTMLButtonElement>('[data-enrollment-inspect]')!
+    expect(button).toBeTruthy()
+    const details = button.closest<HTMLDetailsElement>('details:not([open])')
+    if (details) details.querySelector<HTMLElement>('summary')!.click()
+    expect(button.closest('details:not([open])'), 'Open the current receipt disclosure before reading it').toBeNull()
+    button.click()
+  })
 }
 async function pending() {
   await click('[data-enrollment-create]')
@@ -96,6 +101,57 @@ async function saved() {
   await vi.waitFor(async () => { await act(async () => {}); expect((await services.connections.list()).connections).toHaveLength(1); expect(dom.container.querySelector('.connector-connection-state')).not.toBeNull() }, { timeout: 6000 })
   return (await services.connections.list()).connections[0]!
 }
+
+it('clears a recovered bot-list error without creating or replacing a bot setup', async () => {
+  const forward = vi.mocked(api.connections.call).getMockImplementation()!
+  let failList = true
+  vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
+    if (method === 'connection.ls' && failList) throw new Error('Controlled bot-list response gap')
+    return forward(method, input)
+  })
+  await dom.render(<MountedSettings />)
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Controlled bot-list response gap'))
+  expect(platformCalls).toEqual([])
+  failList = false
+  const refresh = [...dom.container.querySelectorAll<HTMLButtonElement>('.connector-onboarding button')].find(button => button.textContent === 'Refresh')!
+  expect(refresh).toBeTruthy()
+  await act(async () => refresh.click())
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-create]')).not.toBeNull())
+  expect(dom.container.textContent).not.toContain('Controlled bot-list response gap')
+  expect(platformCalls).toEqual([])
+  const operation = await pending()
+  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation?.operationId).toBe(operation.operationId)
+  expect(platformCalls).toEqual(['begin'])
+})
+
+it('keeps a failed check beside its original creation and the raw error inside closed technical details', async () => {
+  loseBegin = true
+  await mount()
+  const operation = await pending()
+  const forward = vi.mocked(api.connections.call).getMockImplementation()!
+  vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
+    if (method === 'connection.enrollment.advance') throw new Error('Controlled RPC response ended')
+    return forward(method, input)
+  })
+  await click('[data-enrollment-advance]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-feedback]')?.textContent).toContain('Could not check this request'))
+  const pane = dom.container.querySelector<HTMLElement>('[data-bot-enrollment]')!
+  const feedback = pane.querySelector('[data-enrollment-feedback]')!
+  expect(feedback.closest('.connector-enrollment__action')).not.toBeNull()
+  expect(feedback.textContent).not.toContain('Controlled RPC response ended')
+  const raw = pane.querySelector('[data-enrollment-error-detail]')!
+  expect(raw.textContent).toContain('Controlled RPC response ended')
+  expect(raw.closest<HTMLDetailsElement>('details')?.open).toBe(false)
+  expect(pane.dataset.enrollmentOperation).toBe(operation.operationId)
+  expect(pane.querySelectorAll('.primary-button')).toHaveLength(1)
+  expect(platformCalls).toEqual(['begin'])
+  vi.mocked(api.connections.call).mockImplementation(forward)
+  await click('[data-enrollment-advance]')
+  await vi.waitFor(() => expect(pane.querySelector('[data-enrollment-feedback]')?.textContent).toContain('Still no setup link'))
+  expect(pane.querySelector('[data-enrollment-error-detail]')).toBeNull()
+  expect(pane.dataset.enrollmentOperation).toBe(operation.operationId)
+  expect(platformCalls).toEqual(['begin'])
+})
 
 it('mounted original Settings creates through trusted IPC and the default Host, then uses the original SDK receiver', async () => {
   await mount()
@@ -128,7 +184,7 @@ it('the official public-code response reaches the original confirmation UI witho
   expect(url.origin).toBe('https://open.feishu.cn'); expect(url.pathname).toBe('/page/cli')
   expect(url.searchParams.get('user_code')).toBe('BOT-CODE')
   expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull()
-  expect(dom.container.querySelector('.connector-enrollment__heading')?.textContent).toContain('Confirm your bot in Feishu')
+  expect(dom.container.querySelector('.connector-enrollment__heading')?.textContent).toContain('Scan with Feishu to continue')
   expect(dom.container.querySelectorAll('[data-bot-enrollment] .primary-button')).toHaveLength(1)
   expect(platformCalls).toEqual(['begin'])
   expect(JSON.stringify(calls)).not.toContain(privateDevice)
@@ -143,10 +199,10 @@ it.each([
   await mount(); const operation = await pending()
   expect(operation).toMatchObject({ authorization: 'unknown', challenge: null, diagnostic })
   const pane = dom.container.querySelector<HTMLElement>('[data-bot-enrollment]')!
-  expect(pane.querySelector('h3')?.textContent).toBe('Creation result unconfirmed')
+  expect(pane.querySelector('h3')?.textContent).toBe('We couldn’t get a setup link')
   expect(pane.querySelector('[data-enrollment-diagnosis]')?.textContent).toBe(message)
   expect(pane.querySelectorAll('.primary-button')).toHaveLength(1)
-  expect(pane.querySelector('[data-enrollment-advance]')?.textContent).toBe('Check saved progress')
+  expect(pane.querySelector('[data-enrollment-advance]')?.textContent).toBe('Check this creation')
   const details = pane.querySelector<HTMLDetailsElement>('.connector-diagnostics')!
   expect(details.open).toBe(false)
   expect(pane.querySelector('[data-enrollment-inspect]')?.closest('details')).toBe(details)
@@ -183,12 +239,12 @@ it('an unchanged unknown registration explains each check and keeps the existing
   await mount(); const operation = await pending()
   expect(operation.authorization).toBe('unknown')
   expect(dom.container.querySelector('[data-enrollment-code] svg')).toBeNull()
-  expect(dom.container.querySelector('[data-enrollment-advance]')?.textContent).toBe('Check saved progress')
+  expect(dom.container.querySelector('[data-enrollment-advance]')?.textContent).toBe('Check this creation')
   await inspectOriginal()
-  await vi.waitFor(() => expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('No new progress was found'))
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('Still no setup link'))
   await click('[data-enrollment-advance]')
   await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-advance]')?.hasAttribute('disabled')).toBe(false))
-  expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('confirmation link is still unavailable')
+  expect(dom.container.querySelector('[data-bot-enrollment] [role="status"]')?.textContent).toContain('cannot confirm whether the bot was created')
   expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation).toEqual(operation)
   expect(platformCalls).toEqual(['begin'])
   expect((await services.connections.enrollment!.list({})).operations.map(value => value.operationId)).toEqual([operation.operationId])
