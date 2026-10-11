@@ -1,3 +1,5 @@
+import { ConversationSourceLabels } from '@agentmux/client-ui/components/ConversationSourceLabels'
+import type { ConversationSources } from '@agentmux/client-ui/conversation-sources'
 import { conversationItemRef } from '@agentmux/core/conversation'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
 import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
@@ -124,6 +126,7 @@ function buildActivityEntries(sessionId: string, sourceItems: AgentTimelineItem[
 
 function Row({
   item,
+  sources,
   origin,
   showSource,
   workspaceRoot,
@@ -131,6 +134,7 @@ function Row({
   onExpandedChange
 }: {
   item: AgentTimelineItem
+  sources?: ConversationSources | undefined
   origin: number
   showSource: boolean
   /** 用来把仓内绝对路径缩成相对路径，见 activity-step-summary 的 shortenPath。缺席则原样显示。 */
@@ -171,7 +175,7 @@ function Row({
         title: heading,
         status: item.status,
         recordedTime,
-        source: item.source,
+        source: sources ? <ConversationSourceLabels sources={sources.fields[item.toolInput !== undefined ? 'toolInput' : 'content'] ?? sources.main} /> : item.source,
         persistentSource: showSource
       }} className={`log-row log-row--${item.kind}`} icon={<Glyph kind={item.kind} {...(item.toolName ? { toolName: item.toolName } : {})} />}
         {...(expandable ? { expanded: open, onToggle: () => { setOpen(!open); onExpandedChange?.(!open) } } : {})} />
@@ -179,12 +183,12 @@ function Row({
       {open ? <div className="wf-native-process__body">
         {diff ? <DiffBlock diff={diff} /> : null}
         {payload ? diff ? <details><summary>Original tool input</summary><div className="conversation-tool-trace__payload">
-          <ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
+          <ConversationSourceLabels sources={sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content']} /><ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
         </div></details> : <div className="conversation-tool-trace__payload">
-          <ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
+          <ConversationSourceLabels sources={sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content']} /><ConversationToolPayload text={payload} identity={payloadIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool input" />
         </div> : null}
         {output ? <div className="conversation-tool-trace__payload" data-status={item.status}>
-          <ConversationToolPayload text={output} identity={outputIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool output" />
+          <ConversationSourceLabels sources={sources?.fields.toolOutput} /><ConversationToolPayload text={output} identity={outputIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy tool output" />
         </div> : null}
       </div> : null}
     </Fragment>
@@ -1138,7 +1142,7 @@ export function ActivityView({
           {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
         />
       ) : (
-        <Row item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot}
+        <Row sources={entry.record?.sources} item={entry.item} origin={origin} showSource workspaceRoot={workspaceRoot}
           {...(disclosure ? { ...(disclosure.steps.has(entry.item.id) ? { expanded: disclosure.steps.get(entry.item.id)! } : {}), onExpandedChange: expanded => disclosure.onStepExpandedChange(entry.item.id, expanded) } : {})} />
       )}
     </div>
