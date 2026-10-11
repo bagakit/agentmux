@@ -1,3 +1,4 @@
+import { readCapturedConversationPage, retainCapturedItems } from '@agentmux/client-ui/captured-conversation-page'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
@@ -21,26 +22,31 @@ type Projection = {
   notice: string | null
   disconnected: boolean
   olderWindow: boolean
+  capturedHasMore: boolean
   newerAvailable: boolean
   activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null
 }
 const empty = (id: string | null): Projection => ({
   id, session: null, timeline: null, page: null, pageOwner: null, answerContext: null, reading: false, notice: null,
-  disconnected: false, olderWindow: false, newerAvailable: false, activity: null
+  disconnected: false, olderWindow: false, capturedHasMore: true, newerAvailable: false, activity: null
 })
 
 /** Retained readonly SDK projections; no history reconciliation, Run owner or local business queue. */
-export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean) {
+export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean, beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot) => boolean) {
+  const capturedGuard = useRef(beforeCapturedCommit); capturedGuard.current = beforeCapturedCommit
   const [projection, setProjection] = useState<Projection>(() => empty(id))
   const activityOwner = useMemo(() => ({}), [client, id, active])
+  const projectionRef = useRef(projection); projectionRef.current = projection
   const currentPage = useRef(projection.page)
   currentPage.current = projection.id === id ? projection.page : null
+  const capturedOlderRef = useRef<(() => Promise<void>) | null>(null)
+  const timelineRef = useRef(projection.timeline); timelineRef.current = projection.id === id ? projection.timeline : null
   const refreshRef = useRef<((cursor?: string) => Promise<void>) | null>(null)
   const readingWindow = useRef<{ client: AgentMuxHostedClient | null; id: string | null; cursor?: string | undefined }>({ client, id })
   useEffect(() => {
     let live = true
     setProjection(value => value.id === id ? value : empty(id))
-    if (!client || !id || !active) { refreshRef.current = null; return }
+    if (!client || !id || !active) { refreshRef.current = null; capturedOlderRef.current = null; return }
     let reading = false, dirty = false
     let watchEpoch = 0
     let activityEpoch = 0, activityReading = false, activityDirty = false
@@ -128,7 +134,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     let cursor = readingWindow.current.cursor
     let answersReading = false, answersDirty = false, answersRevision = 0
     const sameSource = (left: AgentSessionHistoryPage, right: AgentSessionHistoryPage) =>
-      left.agentSessionId === right.agentSessionId && left.source.providerId === right.source.providerId && left.source.nativeSessionId === right.source.nativeSessionId
+      left.agentSessionId === right.agentSessionId && left.sourceHostId === right.sourceHostId && left.source.providerId === right.source.providerId && left.source.nativeSessionId === right.source.nativeSessionId
     async function refreshAnswers(): Promise<void> {
       if (!live || !cursor) return
       if (answersReading) { answersDirty = true; return }
@@ -143,6 +149,32 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       } catch (error) { if (live && epoch === watchEpoch) patch({ notice: errorMessage(error) }) }
       finally { answersReading = false; if (live && answersDirty) { answersDirty = false; void refreshAnswers() } }
     }
+    let capturedEpoch = 0
+    let capturedCursor: string | null | undefined, capturedRevision: string | undefined, capturedOlder = false, capturedReading = false
+    async function readCapturedOlder(): Promise<void> {
+      if (!live || capturedReading || capturedCursor === null) return
+      capturedReading = true; const epoch = ++capturedEpoch; patch({ reading: true })
+      const original = timelineRef.current, base = original?.items ?? [], known = new Set(base.map(item => item.id))
+      let incoming: AgentTimelineSnapshot['items'] = [], next: string | null | undefined = capturedCursor, scanned = 0
+      try {
+        let page: Awaited<ReturnType<typeof readCapturedConversationPage>>
+        do {
+          page = await readCapturedConversationPage(input => client!.readAgentSessionHistory(input), {
+            hostId: 'local', agentSessionId: id!, limit: 100, ...(next ? { cursor: next } : {}) }, () => live && epoch === capturedEpoch)
+          if (!live || epoch !== capturedEpoch) return
+          if (original?.sourceHostId && original.sourceHostId !== page.snapshot.sourceHostId) throw new Error('The original captured source Host changed. Its reading and cursor are retained.')
+          if (capturedRevision !== undefined && capturedRevision !== page.revision) throw new Error('Captured source changed. Original reading and cursor are retained; refresh Current.')
+          incoming = retainCapturedItems(page.snapshot.items, incoming); scanned += page.snapshot.items.length; next = page.nextCursor
+        } while (next && !incoming.some(item => !known.has(item.id)) && scanned <= 1200)
+        const items = retainCapturedItems(incoming, base).slice(0, 1200)
+        if (JSON.stringify(items).length * 2 > 12 * 1024 * 1024) throw new Error('Captured history exceeds this reading window. Original content/cursor and drafts are retained.')
+        const timeline = { ...page.snapshot, items }; if (capturedGuard.current?.(timeline) === false) throw new Error('Original selected captured reading is retained. Release the selection and retry the same page.'); timelineRef.current = timeline
+        capturedCursor = next; capturedRevision = page.revision; capturedOlder = true
+        patch({ timeline, capturedHasMore: next !== null, olderWindow: true })
+      } catch (error) { if (live) patch({ notice: errorMessage(error) }) }
+      finally { if (epoch === capturedEpoch) { capturedReading = false; if (live) patch({ reading }) } }
+    }
+    capturedOlderRef.current = readCapturedOlder
     let requestedCursor: string | undefined
     const patch = (changes: Partial<Projection>) => {
       if (live) setProjection(value => ({ ...(value.id === id ? value : empty(id)), ...changes }))
@@ -173,8 +205,16 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
         if (!live) return
         if (epoch !== watchEpoch) { dirty = true; requestedCursor = cursor; return }
         if (timeline.status === 'fulfilled') {
-          if (timeline.value.agentSessionId === id) patch({ timeline: timeline.value })
-          else patch({ notice: 'The Host returned another Session’s timeline. The original reading is retained.' })
+          if (timeline.value.agentSessionId !== id) patch({ notice: 'The Host returned another Session’s timeline. The original reading is retained.' })
+          else if (!capturedOlder) {
+            const prior = timelineRef.current
+            const sourceChanged = projectionRef.current.pageOwner && projectionRef.current.pageOwner.client !== client &&
+              !(history.status === 'fulfilled' && (!currentPage.current || sameSource(currentPage.current, history.value)))
+            const value = prior && prior.agentSessionId === id ? { ...timeline.value, items: retainCapturedItems(prior.items, timeline.value.items).slice(-1200) } : timeline.value
+            if (sourceChanged || capturedGuard.current?.(value) === false) patch({ newerAvailable: true,
+              notice: 'Original captured reading is retained. Return Current after releasing the selection to read the newer source.' })
+            else { timelineRef.current = value; patch({ timeline: value }) }
+          }
         } else patch({ notice: errorMessage(timeline.reason) })
         if (history.status === 'fulfilled') {
           if (history.value.agentSessionId === id) {
@@ -185,7 +225,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
             currentPage.current = history.value
             patch({ page: history.value, pageOwner: { client: client!, agentSessionId: id!,
               ...(pageSession ? { hostId: pageSession.hostId, workspacePath: pageSession.workspacePath } : {}) },
-              ...(!cursor ? { answerContext: history.value } : {}), olderWindow: Boolean(cursor), newerAvailable: false })
+              ...(!cursor ? { answerContext: history.value } : {}), olderWindow: Boolean(cursor) || capturedOlder, newerAvailable: false })
             if (cursor) void refreshAnswers()
             // A successfully confirmed native source is the earliest valid point to establish its watch.
             // The initial failed probe never permanently retires this visible reader.
@@ -199,7 +239,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
         if (live && dirty) { dirty = false; void refresh(requestedCursor) }
       }
     }
-    refreshRef.current = async nextCursor => { attemptedSource = null; await refresh(nextCursor) }
+    refreshRef.current = async nextCursor => { attemptedSource = null; if (!nextCursor) { capturedEpoch++; capturedReading = false; capturedCursor = undefined; capturedRevision = undefined; capturedOlder = false; patch({ capturedHasMore: true }) }; await refresh(nextCursor) }
     const unlisten = client.onEvent(event => {
       if (!live) return
       if (event.type === 'connection-state') {
@@ -242,12 +282,14 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
       if (recoveryTimer) clearTimeout(recoveryTimer)
       document.removeEventListener('visibilitychange', foreground)
       unlisten()
-      refreshRef.current = null
+      refreshRef.current = null; capturedOlderRef.current = null
     }
   }, [client, id, active, activityOwner])
   const refresh = useCallback(() => refreshRef.current?.(), [])
   const older = useCallback(() => {
-    if (projection.id === id && projection.page?.nextCursor) return refreshRef.current?.(projection.page.nextCursor)
+    if (projection.id !== id) return
+    const native = projection.page?.nextCursor ? refreshRef.current?.(projection.page.nextCursor) : undefined
+    return Promise.all([native, capturedOlderRef.current?.()])
   }, [projection.id, projection.page, id])
   const selected = projection.id === id ? projection : empty(id)
   const activity = active && !selected.disconnected && selected.activity?.owner === activityOwner &&

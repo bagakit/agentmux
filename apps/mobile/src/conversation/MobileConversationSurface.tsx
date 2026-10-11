@@ -1,3 +1,4 @@
+import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
 import { projectInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
@@ -100,8 +101,8 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
 export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
-  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected')
   const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
+  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected', snapshot => canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following))
   const [jump, setJump] = useState(false)
   useEffect(() => { follow.current = initFollowState(); setJump(false) }, [agentSessionId])
   useLayoutEffect(() => {
@@ -579,14 +580,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     },
     ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? `${session.providerId} Agent`, providerId: session.providerId } } : {})
   }), [client, session, agentSessionId, displayName])
-  const captured = useMemo(() => agentSessionId && reading.timeline
-    ? projectSessionUserMessages({ agentSessionId, timeline: reading.timeline }) : [], [agentSessionId, reading.timeline])
   const mailboxMessages = useMemo(() => agentSessionId ? projectSessionUserMessages({ agentSessionId,
     ...(reading.page && reading.pageOwner?.client === client ? { historyPage: reading.page } : {}), ...(reading.timeline ? { timeline: reading.timeline } : {}) }) : [],
   [agentSessionId, reading.page, reading.pageOwner, reading.timeline, client])
-  const capturedById = useMemo(() => new Map(captured.map(message => [message.id, message])), [captured])
-  const capturedSpeech = useMemo(() => reading.timeline?.items.filter(item => item.agentSessionId === agentSessionId &&
-    (item.kind === 'user_message' || item.kind === 'assistant_message')) ?? [], [agentSessionId, reading.timeline])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
   const readHistoryResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
     if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，原资源引用和草稿保留。')
@@ -684,7 +680,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         follow.current = onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })
         setJump(shouldShowJumpToLatest(follow.current))
       }}>
-        {reading.page?.nextCursor && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
+        {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
         {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
           follow.current = initFollowState(); setJump(false)
           if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
@@ -692,8 +688,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
-        {reading.page && agentSessionId ? <>
-          <ConversationView page={reading.page} questionAnswerContext={reading.answerContext} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+        {agentSessionId ? <>
+          <ConversationView page={reading.page} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
             questionReplyState={target => {
               const state = mobileQuestionReplyState(local, agentSessionId, target), original = state?.original
@@ -711,28 +707,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             } : undefined}
             questionReplyContext={JSON.stringify([session?.hostId, agentSessionId, session?.run.runId, client?.runtimeOwnerIdentity?.()?.runtimeId])}
             {...(onShowTerminal && pageClient === client ? { onOpenQuestionTerminal: onShowTerminal } : {})}
-            {...nativeReadingProps} />
-        </> : !reading.reading && capturedSpeech.length === 0 ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
-        {capturedSpeech.length > 0 ? <section className="mobile-conversation__captured" aria-label="提交与运行记录">
-          {capturedSpeech.map(item => {
-            if (item.kind === 'assistant_message') return <CapturedConversationMessage key={item.id} item={item}
-              conversationSessionId={agentSessionId!} speaker={item.authorExternal ? speakerOfExternalAuthor(item.authorExternal)
-                : item.authorAgentSessionId ? { role: 'agent', id: item.authorAgentSessionId }
-                : item.authorHuman === true ? { role: 'human', id: HUMAN_SPEAKER_ID }
-                : { role: 'agent', id: agentSessionId! }} describeSpeaker={describeSpeaker} {...readingProps} />
-            const message = capturedById.get(`captured:${item.id}`)
-            return message ? <ConversationMessage key={message.id} messageId={message.id}
-              conversationSessionId={agentSessionId!} content={message.contentParts} inputSource={message.source} publicContent={message.publicContent}
-              speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
-              {...(message.deliveryStatus ? { status: message.deliveryStatus } : {})}
-              {...(message.recordedAt !== undefined ? { createdAt: message.recordedAt } : {})} {...readingProps} /> : null
-          })}
-        </section> : null}
+            {...(reading.page ? nativeReadingProps : readingProps)} />
+        </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
       </div>
-      {reading.timeline?.items.filter(item => item.sourceDevice && item.kind === 'system_message').map(item => <details key={item.id} className="mobile-conversation__notice"><summary>设备操作记录</summary><ConversationMessage
-        messageId={item.id} conversationSessionId={agentSessionId!} content={item.content ?? item.title}
-        inputSource={{ kind: 'captured', submissionId: item.id, device: item.sourceDevice! }}
-        speaker={{ role: 'system', id: 'agentmux' }} createdAt={item.createdAt} {...readingProps} /></details>)}
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
