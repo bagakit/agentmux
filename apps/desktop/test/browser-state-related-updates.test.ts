@@ -87,6 +87,21 @@ describe('Browser updated projection preserves unrelated work surfaces', () => {
     expect(reduceBrowserEvent(current, { type: 'updated', browser: { ...updated } })).toBe(current)
   })
 
+  it('preserves every Region reference for equal custom dimensions cloned across IPC', () => {
+    const { state, updated } = fixture('right')
+    const viewport = { width: 412, height: 915, screenPosition: 'mobile' as const }
+    const current = reduceBrowserEvent(state, { type: 'updated', browser: { ...updated, viewport } })
+    const cloned = { ...updated, viewport: structuredClone(viewport) }
+    expect(cloned.viewport).not.toBe(viewport)
+    expect(reduceBrowserEvent(current, { type: 'updated', browser: cloned })).toBe(current)
+    const changed = reduceBrowserEvent(current, { type: 'updated', browser: { ...cloned, viewport: { ...viewport, width: 430 } } })
+    expect(changed).not.toBe(current)
+    expect(changed.tabs.mixed!.regions.primary).toMatchObject({ viewport: { width: 430, height: 915, screenPosition: 'mobile' } })
+    expect(changed.tabs.mixed!.regions['unrelated-mixed']).toBe(current.tabs.mixed!.regions['unrelated-mixed'])
+    expect(changed.tabs['agent-tab']).toBe(current.tabs['agent-tab'])
+    expect(changed.layouts).toBe(current.layouts)
+  })
+
   it('executes the actual definition-excluded Store applyBrowserEvent body with the real reducer', () => {
     // AST extraction isolates this product glue. set is a synchronous double; no Renderer/App/healthy Run is launched.
     const source = readFileSync(new URL('../src/renderer/src/store.ts', import.meta.url), 'utf8')

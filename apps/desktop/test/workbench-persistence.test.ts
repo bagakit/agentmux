@@ -92,7 +92,7 @@ describe('durable Workbench presentation', () => {
     const projected = JSON.parse(JSON.stringify(projectPersistedWorkbench({ tabs: { [tab.id]: tab }, layouts: { workspace: layout } })))
     expect(projected.tabs[tab.id].regions['bookmark-region']).toEqual({
       regionId: 'bookmark-region', kind: 'browser', workspaceId: 'workspace', browserId: 'original-browser',
-      url: 'https://example.invalid/original?a=1&b=2', title: 'Saved link', profileId: 'transient-profile', bookmarkOrigin: { path: 'links/Saved.webloc', binary }
+      url: 'https://example.invalid/original?a=1&b=2', title: 'Saved link', profileId: 'transient-profile', viewport: 'responsive', bookmarkOrigin: { path: 'links/Saved.webloc', binary }
     })
     const restored = restorePersistedWorkbench({ config, sessions: [session('neighbor')], persisted: projected, createTabGroupId: () => 'unwanted-new-group' })
     expect(Object.keys(restored.tabs)).toEqual([tab.id])
@@ -380,6 +380,7 @@ describe('durable Workbench file/browser projection', () => {
       browserId: 'ab-browser',
       url: 'https://secret.example.com/x',
       title: 'Secret',
+      viewport: 'responsive',
       profileId: 'profile-1'
     })
     expect(projectedTab.regions[left]!.kind).toBe('agent')
@@ -390,7 +391,7 @@ describe('durable Workbench file/browser projection', () => {
     expect(persistedBrowser).toHaveProperty('profileId', 'profile-1')
   })
 
-  it('G7b: a browser Region survives the same JSON round trip and comes back hydrated with its url', () => {
+  it.each(['desktop', { width: 430, height: 932, screenPosition: 'mobile' }] as const)('G7b: a browser Region survives the JSON round trip with its URL and viewport %j', (viewport) => {
     // 端到端那一条：project → JSON.stringify/parse → restore。只测 reduce/hydrate 函数本身证明不了
     // 它们**被调用了**——闸门没放行时两个函数都是死代码，单元测试照样绿（这正是本轮真实发生过的事）。
     // 这条从活体 tab 出发、过一遍真的磁盘形态、再读回活体，任何一环断掉都会红。
@@ -410,7 +411,7 @@ describe('durable Workbench file/browser projection', () => {
       loading: true,
       canGoBack: true,
       canGoForward: false,
-      viewport: 'desktop',
+      viewport,
       error: null,
       driving: true,
       appLinkPrompt: null
@@ -435,6 +436,7 @@ describe('durable Workbench file/browser projection', () => {
     expect(browser.browserId).toBe('brt-browser')
     expect(browser.url).toBe('https://example.com/keep-me')
     expect(browser.title).toBe('Keep me')
+    expect(browser.viewport).toEqual(viewport)
     // 瞬时位回到中性默认，等 create 之后的真快照覆盖；绝不能把上一次运行的 driving/loading 带回来，
     // 那会让 UI 一启动就显示「Agent 正在操作」而底下根本没有 WebContentsView。
     expect(browser.navigationId).toBe('')

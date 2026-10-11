@@ -29,4 +29,19 @@ describe('private Browser projection at the actual Workbench persistence boundar
     const current = snapshot('normal'), tab = createWorkbenchTab('normal-tab', { ...current, regionId: 'normal-region', kind: 'browser', workspaceId: 'workspace', browserId: current.id })
     expect(hydratePersistedTab(reducePersistedTab(tab)).regions['normal-region']).toMatchObject({ mode: 'normal', profileId: current.profileId, url: current.url, title: current.title })
   })
+
+  it.each(['normal', 'private'] as const)('retains only viewport presentation settings with the %s projection policy', mode => {
+    const current = { ...snapshot(mode), viewport: { width: 1180, height: 820, screenPosition: 'mobile' as const } }
+    const tab = createWorkbenchTab('viewport-tab', { ...current, regionId: 'viewport-region', kind: 'browser', workspaceId: 'workspace', browserId: current.id })
+    const saved = reducePersistedTab(tab)
+    const restored = hydratePersistedTab(JSON.parse(JSON.stringify(saved)))
+    expect(restored.regions['viewport-region']).toMatchObject({ viewport: current.viewport,
+      url: mode === 'private' ? 'about:blank' : current.url, profileId: mode === 'private' ? null : current.profileId })
+    expect(saved.regions['viewport-region']).not.toHaveProperty('navigationId')
+    const invalid = JSON.parse(JSON.stringify(saved))
+    invalid.regions['viewport-region'].viewport = { width: -1, height: 800, screenPosition: 'mobile' }
+    expect(hydratePersistedTab(invalid).regions['viewport-region']).toMatchObject({ viewport: 'responsive', browserId: current.id })
+    delete invalid.regions['viewport-region'].viewport
+    expect(hydratePersistedTab(invalid).regions['viewport-region']).toMatchObject({ viewport: 'responsive', browserId: current.id })
+  })
 })
