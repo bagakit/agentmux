@@ -971,6 +971,8 @@ export function SessionPane({
   const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore
   const conversationReading = session.kind === 'agent' ? {
     reference: session.control, identity: activitySourceKey, nativeSourceFacts, enabled: visible && !parked && activityShown,
+    consumer: { runId: session.control.run.runId, ...(linkOrigin.regionId ? { regionId: linkOrigin.regionId } : {}),
+      visible, parked, activityShown, viewMode },
     opened: historyOpen || inlineHistory,
     ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
   } : undefined

@@ -17,6 +17,8 @@ export type ConversationReading = {
   returnLabel?: string
   /** Core-confirmed sources; a new binding does not replace an open reading window. */
   nativeSourceFacts?: AgentNativeSourceFacts
+  /** Presentation facts supplied by the existing host; absent facts remain unknown. */
+  consumer?: { runId?: string; regionId?: string; presentationId?: string; visible: boolean; parked?: boolean; activityShown: boolean; viewMode: string }
 }
 export type ConversationReadingIntent = 'current' | 'seed' | 'earlier' | 'newer' | 'coverage' | 'live'
 export { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, type ConversationWindowProjection } from '@agentmux/client-ui/conversation-reading-anchor'
@@ -90,7 +92,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   }
   const error = view.error?.message ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : coverageError)
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
-  return { page, projection, snapshot: view.snapshot, capturedSnapshot: projection?.captured,
+  return { page, projection, snapshot: view.snapshot, inspect: view.inspect, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
     readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') }, capturedError: view.sourceError ? null : error,
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,
