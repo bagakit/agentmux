@@ -833,7 +833,7 @@ type AppState = {
   // 指针点击那一路原生 mousedown 已经把焦点放对了，再夺一次会打断原生行为。不持久化（是一次导航，
   // 不是布局事实）。browser 那格没有消费者——原生 WebContentsView 的聚焦是另一条路；一条无人认领的
   // 意图停在这里是惰性的（下一次投递会覆盖它）。
-  regionCaretFocus: { regionId: string; nonce: number } | null
+  regionCaretFocus: { regionId: string; nonce: number; target?: 'terminal' } | null
   workspaceFileRevisions: Record<string, number>
   noteDirectorySources: Record<string, NoteDirectoryRead | undefined>
   refreshNoteDirectorySources(tabId: string, regionId: string): Promise<NoteDirectoryRead | undefined>
@@ -1142,6 +1142,7 @@ type AppState = {
   // 调用方不显式说明时按最保守的一路走，不夺焦。
   focusRegion(workspaceId: string, tabId: string, regionId: string, cause?: RegionFocusCause, groupId?: string): void
   // 被点名那格的表面消费完 caret 意图后调它清除（只清自己那条 nonce，避免抹掉更晚一次导航投的新意图）。
+  requestRegionCaretFocus(regionId: string): void
   clearRegionCaretFocus(nonce: number): void
   // Explicitly relocate one Session projection (the Region named by regionId) into another
   // workspace's View. This moves DISPLAY identity only — the Agent's cwd is Core's
@@ -6700,6 +6701,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(focusedSessionId ? { agentFocus: focusSessionContext(state, focusedSessionId, undefined,
         { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabId, regionId }) } : {})
     }))
+  },
+  requestRegionCaretFocus(regionId) {
+    set({ regionCaretFocus: { regionId, nonce: ++regionCaretFocusNonce, target: 'terminal' } })
   },
   clearRegionCaretFocus(nonce) {
     // 只清掉自己消费的那一条：若清的瞬间已被更晚一次导航覆盖成新 nonce，别把新意图也抹掉。
