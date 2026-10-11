@@ -47,7 +47,7 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-it('derives one accepted timeline once through the mounted Focus navigation consumer', async () => {
+it('keeps full conversation projection out of mounted Focus navigation counts', async () => {
   const accepted = timeline()
   const other = composerSession('focus-foreign')
   const foreign = { ...timeline('Foreign reply'), agentSessionId: other.id,
@@ -57,8 +57,8 @@ it('derives one accepted timeline once through the mounted Focus navigation cons
   await act(async () => root.render(<FocusNavigationButton aria-label="Focus">Focus</FocusNavigationButton>))
   const button = container.querySelector('button')!
   expect(button.textContent).toContain('Focus')
-  expect(callsFor(session.id)).toEqual([[{ agentSessionId: session.id, timeline: accepted }]])
-  expect(callsFor(other.id)).toEqual([[{ agentSessionId: other.id, timeline: foreign }]])
+  expect(callsFor(session.id)).toHaveLength(0)
+  expect(callsFor(other.id)).toHaveLength(0)
 
   project.mockClear()
   await act(async () => useAppStore.setState({ error: 'An unrelated observation' }))
@@ -69,20 +69,20 @@ it('derives one accepted timeline once through the mounted Focus navigation cons
   const foreignUpdate = { ...other, status: { ...other.status, state: 'starting' as const } }
   await act(async () => useAppStore.setState({ sessions: [session, foreignUpdate] }))
   expect(callsFor(session.id)).toHaveLength(0)
-  expect(callsFor(other.id)).toEqual([[{ agentSessionId: other.id, timeline: foreign }]])
+  expect(callsFor(other.id)).toHaveLength(0)
   expect(button.querySelector('[data-focus-count="working"]')?.textContent).toBe('1')
   project.mockClear()
   await act(async () => useAppStore.setState({ sessions: [{ ...session, status: { ...session.status, state: 'error' } }, foreignUpdate] }))
   expect(container.querySelector('button')).toBe(button)
   expect(button.getAttribute('aria-label')).toContain('1 failed')
-  expect(callsFor(session.id)).toEqual([[{ agentSessionId: session.id, timeline: accepted }]])
+  expect(callsFor(session.id)).toHaveLength(0)
   expect(callsFor(other.id)).toHaveLength(0)
   expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the original draft')
 
   project.mockClear()
   const changed = { ...accepted, revision: 2, items: [{ ...accepted.items[0]!, content: 'New complete reply' }] }
   await act(async () => useAppStore.setState({ timelines: { [session.id]: changed, [other.id]: foreign } }))
-  expect(callsFor(session.id)).toEqual([[{ agentSessionId: session.id, timeline: changed }]])
+  expect(callsFor(session.id)).toHaveLength(0)
   expect(callsFor(other.id)).toHaveLength(0)
 })
 

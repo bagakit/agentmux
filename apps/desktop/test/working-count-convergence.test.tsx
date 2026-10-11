@@ -1,13 +1,15 @@
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import type { AgentDisplayState } from '@agentmux/core'
+import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { summarizeAgentAttention, summarizeProviderActivity } from '../src/renderer/src/lib/agent-attention'
 import { sessionBoardColumn, workingAgentCount } from '../src/renderer/src/lib/project-board'
-import { createFocusProjectionSelector, focusBucketForSession } from '../src/renderer/src/lib/focus-context'
-import { focusNavigationSummary } from '../src/renderer/src/components/FocusNavigationButton'
+import { createFocusProjectionSelector, focusBucketForSession, focusNavigationSummary } from '../src/renderer/src/lib/focus-context'
+import { composerSession } from './helpers/composer-dom-fixture'
+import { moteConfig, moteSessions, moteTopics, scratchWorkspace, ordinaryTopicId } from './fixtures/mote-workface'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 
 // Core owns the state union. Derive the covered cases from its declaration, never a drifting list.
 function displayStates(): AgentDisplayState[] {
@@ -19,8 +21,8 @@ function displayStates(): AgentDisplayState[] {
   expect(states.length).toBeGreaterThan(0)
   return states
 }
-function agent(id: string, state: AgentDisplayState): SessionSnapshot {
-  return { id, kind: 'agent', providerId: 'codex', status: { state, source: 'native-hook', observedAt: 1 }, processState: 'running', workspacePath: _hygiene_fixturePath("repo"), hostId: 'local', label: id } as SessionSnapshot
+function agent(id: string, state: AgentDisplayState) {
+  return { ...composerSession(id), status: { state, source: 'native-hook' as const, observedAt: Date.now() } }
 }
 it('keeps the existing Board, provider and roster rollups consistent for every actual Core state', () => {
   for (const state of displayStates()) {
@@ -34,12 +36,51 @@ it('Focus navigation and Focus grouping share the same work and attention projec
   const sessions = displayStates().map(state => agent(state, state))
   const groups = sessions.map(session => focusBucketForSession(session, false))
   expect(groups.length).toBe(sessions.length)
-  const summarize = (sessions: SessionSnapshot[]) => focusNavigationSummary(createFocusProjectionSelector()({sessions,config:null,timelines:{},agentNames:{}}).contexts)
+  const summarize = (sessions: SessionSnapshot[]) => focusNavigationSummary({sessions, config: null, scratchTopicSnapshots: {}})
   const summary = summarize(sessions)
   expect(summary.working).toBe(groups.filter(bucket => bucket === 'working').length)
   expect(summary.requests + summary.errors).toBe(groups.filter(bucket => bucket === 'attention').length)
   // Process liveness is a separate fact from turn work. Independent expected cases catch shared drift.
   expect(summarize([agent('unknown', 'running'), agent('work', 'working'), agent('start', 'starting'), agent('reply', 'waiting'), agent('failure', 'error')])).toEqual({ working: 2, requests: 1, errors: 1 })
+})
+it('matches complete Focus grouping without reading conversation bodies across execution scopes', () => {
+  const now = Date.now()
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+  try {
+    const activitySession = (id: string, state: 'active' | 'idle', observedAt = now) => {
+      const original = agent(id, 'running'), nativeSessionId = `native-${id}`
+      return { ...original, nativeSessionId, nativeHandle: { kind: 'provider' as const, providerId: original.providerId, sessionId: nativeSessionId },
+        currentActivity: { state, source: 'native-hook' as const, nativeSessionId,
+          nativeTurnId: `turn-${id}`, sourceId: `source-${id}`, sequence: 1,
+          run: original.control.run, hookReceiptId: `hook-${id}`, observedAt } }
+    }
+    const sessions: SessionSnapshot[] = [...moteSessions.map(session => ({ ...session, status: { ...session.status, observedAt: now } })),
+      ...displayStates().map(state => agent(state, state)),
+      { ...agent('unknown-source', 'working'), status: { state: 'working', source: 'run-process', observedAt: now } },
+      activitySession('active-native', 'active'),
+      activitySession('idle-native', 'idle'),
+      activitySession('stale-native', 'active', now - msUntilSemanticStatusStale({ state: 'working', observedAt: now }, now)),
+      { ...agent('retained', 'working'), runUnobserved: true },
+      { ...agent('ended', 'working'), processState: 'exited' },
+      { ...agent('terminal', 'starting'), kind: 'terminal', providerId: null,
+        control: { kind: 'terminal', hostId: 'local', runId: 'original-terminal', run: { runId: 'original-terminal' } } }]
+    const scratchTopicSnapshots = { [scratchWorkspace.id]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, topics: moteTopics, error: null, reading: false } }
+    const config = moteConfig
+    const originalMotes = sessions.slice(0, moteSessions.length)
+    expect(focusNavigationSummary({ sessions: originalMotes, config, scratchTopicSnapshots }, now)).toEqual({ working: 2, requests: 0, errors: 0 })
+    // The canonical Mote stays known; only the custom Mote's unavailable directory is unknown.
+    expect(focusNavigationSummary({ sessions: originalMotes, config, scratchTopicSnapshots: {} }, now)).toEqual({ working: 2, requests: 1, errors: 0 })
+    for (const snapshots of [scratchTopicSnapshots, {}, { ...scratchTopicSnapshots, [scratchWorkspace.id]: { ...scratchTopicSnapshots[scratchWorkspace.id]!, topics: moteTopics.filter(topic => topic.id === ordinaryTopicId) } }]) {
+      const input = { sessions, config, scratchTopicSnapshots: snapshots, timelines: {}, agentNames: {} }
+      const full = createFocusProjectionSelector()(input).contexts
+      const expected = { working: 0, requests: 0, errors: 0 }
+      for (const context of full) {
+        if (context.bucket === 'working') expected.working++
+        else if (context.bucket === 'attention') { if (context.state === 'error') expected.errors++; else expected.requests++ }
+      }
+      expect(focusNavigationSummary(input, now)).toEqual(expected)
+    }
+  } finally { clock.mockRestore() }
 })
 it('the product projection delegates turn work rather than copying a literal status comparison', () => {
   const source = ts.createSourceFile('focus-context.ts', readFileSync(new URL('../src/renderer/src/lib/focus-context.ts', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true)
