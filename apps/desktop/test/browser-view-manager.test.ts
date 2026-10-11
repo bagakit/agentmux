@@ -1773,18 +1773,21 @@ describe('BrowserViewManager', () => {
     await manager.create('browser-selection-race', 'https://example.com/page')
     const view = fixture.children[0]!
     let resolvePreflight!: (value: boolean) => void
+    let preflightStarted!: () => void
+    const preflight = new Promise<void>((resolve) => { preflightStarted = resolve })
     let delayFirstCancel = true
     view.webContents.executeJavaScriptInIsolatedWorldImpl = async (_worldId, scripts) => {
       const script = scripts[0]?.code ?? ''
       if (delayFirstCancel && script.includes('const barrier =')) {
         delayFirstCancel = false
-        return await new Promise<boolean>((resolve) => { resolvePreflight = resolve })
+        return await new Promise<boolean>((resolve) => { resolvePreflight = resolve; preflightStarted() })
       }
       return script.includes('Select an element') ? null : true
     }
     view.webContents.executeJavaScriptInIsolatedWorld.mockClear()
 
     const pending = manager.selectElement('browser-selection-race')
+    await preflight
     await manager.cancelElementSelection('browser-selection-race')
     resolvePreflight(true)
 
