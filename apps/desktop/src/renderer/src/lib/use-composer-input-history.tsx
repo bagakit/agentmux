@@ -43,7 +43,7 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   const native = useSessionUserMessages(control, { enabled })
   const captured = useMemo(() => sid ? projectSessionUserMessages({ agentSessionId: sid, timeline }) : [], [sid, timeline])
   // The original live reader retains input facts independently of its clipped continuous page.
-  const nativeMessages = native.messages.length ? native.messages : EMPTY_MESSAGES
+  const nativeMessages = native.sourceMessages.length ? native.sourceMessages : EMPTY_MESSAGES
   const initialMessages = useMemo(() => [...nativeMessages.filter(message => message.source.kind === 'native'), ...captured], [nativeMessages, captured])
   const history = useAgentInputHistory({ scope, enabled, read, initialMessages })
   useEffect(() => () => action.current?.abort(), [scope, visible, mailboxOpen, history.query])
