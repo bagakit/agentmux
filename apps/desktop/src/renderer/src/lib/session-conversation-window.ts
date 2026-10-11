@@ -515,6 +515,8 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     held: state.key === key && state.held === true,
     loadingEarlier: state.key === key && state.loading && retry.current.direction === 'earlier',
     historyBoundary: window?.boundary?.confirmed && window.records.has(window.boundary.recordId) ? { beforeRecordId: window.boundary.recordId } : null,
+    // Committed gap/withheld state, distinct from a transient recent-vs-rendered mismatch.
+    currentOutside: Boolean(window?.newerOutside),
     newerOutside, hasNewer: Boolean(window && window.parts[0]!.index > 0), hasMore: Boolean(page?.nextCursor),
     readEarlier: () => void read('earlier'), readNewer: () => void read('newer'), retry: () => { automaticSeedBlocked.current = false; if (retry.current.direction === 'coverage') coverageDemand.current = true; void read(retry.current.direction, retry.current.source, true) },
     showLatestAutomatically, showCurrent: () => showCurrent(), showCurrentSource: () => showCurrent(handleSource(live.current.reading?.nativeSourceFacts?.nativeHandle)),
