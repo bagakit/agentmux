@@ -10,7 +10,8 @@ const definitions = {
   T001: { name: 'session-continuity-supervision', schema: 'agentmux.session-continuity-supervision-proof.v1', minimum: 37, mutants: 10 },
   T002: { name: 'session-continuity-control', schema: 'agentmux.session-continuity-control-proof.v1', minimum: 23, mutants: 11 },
   T003: { name: 'resume-context-observation', schema: 'agentmux.resume-context-observation-proof.v1', minimum: 33, mutants: 18 },
-  T006: { name: 'session-continuity-executor', schema: 'agentmux.session-continuity-executor-proof.v1', minimum: 16, mutants: 10 }
+  T006: { name: 'session-continuity-executor', schema: 'agentmux.session-continuity-executor-proof.v1', minimum: 16, mutants: 10 },
+  T007: { name: 'initial-continuity-cancellation', schema: 'agentmux.initial-continuity-cancellation-proof.v1', minimum: 8, mutants: 6 }
 }
 
 /** Consume original owner artifacts; authored passed flags cannot replace raw or loaded evidence. */
@@ -43,15 +44,6 @@ export async function readSupervisionCoreOwner(root, task, receiptFile) {
     }
   }
   return { task, receipt: file, sha256: hash(bytes), sourceInputs, baselineCases: [...cases], loadedCounterexamples: mutations.length }
-}
-
-export async function readSupervisionCoreEvidence(root) {
-  const results = []
-  for (const [task, definition] of Object.entries(definitions)) {
-    const pointer = await parse(path.join(root, 'packages/core/.tmp', definition.name, 'latest.json'))
-    results.push(await readSupervisionCoreOwner(root, task, pointer.receipt))
-  }
-  return results
 }
 
 /** Main wire and full Store/UI producers retain their own loaded-source witness format. */
@@ -133,10 +125,11 @@ export async function readSupervisionSettingsOwner(root, receiptFile) {
 
 /** Receipt paths are locators only. Every task still verifies its original producer and raw evidence. */
 export async function readSessionSupervisionEvidence(root, files) {
-  assert.deepEqual(Object.keys(files).sort(), ['T001', 'T002', 'T003', 'T004', 'T006'])
+  assert.deepEqual(Object.keys(files).sort(), ['T001', 'T002', 'T003', 'T004', 'T006', 'T007'],
+    'Every required original supervision task must provide a receipt locator')
   assert.deepEqual(Object.keys(files.T004).sort(), ['consumer', 'settings', 'wire'])
   const results = []
-  for (const task of ['T001', 'T002', 'T003', 'T006']) results.push(await readSupervisionCoreOwner(root, task, files[task]))
+  for (const task of ['T001', 'T002', 'T003', 'T006', 'T007']) results.push(await readSupervisionCoreOwner(root, task, files[task]))
   results.push(await readSupervisionSettingsOwner(root, files.T004.settings))
   for (const kind of ['wire', 'consumer']) results.push(await readSupervisionConsumerOwner(root, kind, files.T004[kind]))
   return results
@@ -147,6 +140,11 @@ export function verifySupervisionProduct(receipt) {
   assert.equal(receipt.schema, 'agentmux.continuity-supervision-product.v1'); assert.equal(receipt.passed, true)
   assert.deepEqual(receipt.phases.map(one => one.phase), ['seed', 'restore', 'reconnect'])
   assert.equal(new Set(receipt.phases.map(one => one.native.pid)).size, 3)
+  for (const phase of receipt.phases) {
+    assert.equal(phase.exit.originalPid, phase.native.pid, 'The original process receipt must identify the actual App generation')
+    assert.equal(phase.exit.exitConfirmed, true); assert.equal(phase.exit.exitCode, 0); assert.equal(phase.exit.timedOut, false)
+    assert.deepEqual(phase.exit.cleanupErrors, [])
+  }
   const [seed, restore, reconnect] = receipt.phases.map(one => one.native)
   const original = seed.supervision, firstRoot = original.final.workingRoot, cancelledRun = original.cancelled.run
   assert.equal(firstRoot.supervision.attemptCount, 1); assert.equal(firstRoot.supervision.attemptLimit, 2)
