@@ -19,6 +19,7 @@ export function createCrossDocumentGallery(render: (node: ReactNode) => void) {
   let frame: HTMLIFrameElement | null = null, child: Document | null = null, destination: HTMLElement | null = null
   let releases: Array<() => void> = []
   let retained: { editor: HTMLElement; form: HTMLElement; host: HTMLElement; content: HTMLElement; modal: string; identity: object } | null = null
+  const parkedFrameStyle = 'position:fixed;left:24px;top:64px;width:620px;height:580px;border:1px solid #778;background:#171719;z-index:0'
   const doc = (which: string) => which === 'A' ? document : child!
   const form = (name: string) => members.get(name)?.document.querySelector<HTMLElement>(`[data-cross-document-form="${name}"]`)
   const content = (name: string) => form(name)?.closest<HTMLElement>('.confirmation-dialog')
@@ -43,7 +44,8 @@ export function createCrossDocumentGallery(render: (node: ReactNode) => void) {
       editorText: editor?.textContent, frameConnected: frame?.isConnected, frameSameDocument: frame?.contentDocument === child,
       members: Object.fromEntries([...members].map(([name, member]) => [name, { open: member.open, draft: member.draft, cancels: member.cancels, confirms: member.confirms,
         document: member.document === document ? 'A' : member.document === child ? 'B' : 'unknown', scope: member.scope,
-        activeInContent: !!content(name)?.contains(member.document.activeElement), formConnected: form(name)?.isConnected }])),
+        activeInContent: !!content(name)?.contains(member.document.activeElement), formConnected: form(name)?.isConnected,
+        modal: content(name)?.dataset.overlayModalId }])),
       documents: Object.fromEntries(['A', 'B'].map(which => { const owner = doc(which), background = owner.querySelector('[data-cross-document-background]')
         return [which, { liveModals: [...owner.querySelectorAll<HTMLElement>('[data-overlay-modal-part="content"]')].filter(isVisible).map(node => node.dataset.overlayModalId),
           focusGuards: owner.querySelectorAll('[data-radix-focus-guard]').length, pointerEvents: owner.body.style.pointerEvents, scrollLockCount: owner.body.getAttribute('data-scroll-locked'),
@@ -54,7 +56,7 @@ export function createCrossDocumentGallery(render: (node: ReactNode) => void) {
     if (frame) throw new Error('A cross-document fixture must finish before another starts')
     members.clear(); retained = null
     frame = document.createElement('iframe'); frame.id = 'layering-document-frame'; frame.title = 'Isolated original workface document'
-    frame.style.cssText = 'position:fixed;left:24px;top:64px;width:620px;height:580px;border:1px solid #778;background:#171719;z-index:0'
+    frame.style.cssText = parkedFrameStyle
     document.body.append(frame); child = frame.contentDocument!
     child.documentElement.lang = 'en'; child.body.style.margin = '0'
     const styles = [...document.querySelectorAll('link[rel="stylesheet"], style')].map(node => {
@@ -95,7 +97,14 @@ export function createCrossDocumentGallery(render: (node: ReactNode) => void) {
       // treats focus on an outside iframe as leaving its own modal boundary.
       const node = form('moving')!; frame!.style.cssText = 'display:block;width:100%;height:230px;border:1px solid #778;margin-top:12px'
       node.moveBefore(frame!, null)
-      if (frame!.contentDocument !== child) throw new Error('A connected iframe move must retain its original document')
+      if (!frame!.isConnected || frame!.contentDocument !== child) throw new Error('A connected iframe move must retain its original document')
+      return snapshot()
+    },
+    parkFrame() {
+      // The independent document must not be destroyed with A's modal DOM.
+      // moveBefore retains the connected iframe and its original live document.
+      document.body.moveBefore(frame!, null); frame!.style.cssText = parkedFrameStyle
+      if (!frame!.isConnected || frame!.contentDocument !== child) throw new Error('Parking the connected iframe must retain its original document')
       return snapshot()
     },
     async dispose() {
