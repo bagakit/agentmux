@@ -72,7 +72,9 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     const admitted = begin(Object.fromEntries(['operationId', 'connectionId', 'expectedConnectionRevision', 'goal'].map(k => [k, operation[k as keyof ConnectionSetupOperation]])))
     if (JSON.stringify(admitted) !== JSON.stringify(input)) fail()
   }
-  if (challenge && (operation?.request.state !== 'confirmed' || operation.secureStorage !== 'stored')) fail()
+  const challengeRequest = operation?.authentication?.request ?? operation?.request.state
+  const challengeStorage = operation?.authentication?.secureStorage ?? operation?.secureStorage
+  if (challenge && (challengeRequest !== 'confirmed' || challengeStorage !== 'stored')) fail()
   const result: ConnectionSetupView = { operation, challenge, ...(p.reason === undefined ? {} : { reason: choice(p.reason, ['connection-revised', 'challenge-unavailable']) }) }
   if (p.continuation !== undefined) {
     if (!operation || result.reason === 'connection-revised') fail()
