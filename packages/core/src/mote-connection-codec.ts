@@ -8,7 +8,7 @@ import {
   sameMotePreferencesTarget,
   sameMoteConnectionValues
 } from './mote-preferences.js'
-import { parseConnectionEnrollmentOperation } from './connection-enrollment-codec.js'
+import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { parseConnectionProfileOperation } from './connection-profile-codec.js'
 import type {
   MoteConnectionMethod,
@@ -84,8 +84,8 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
     } as MoteConnectionParamsMap[M]
   }
   if (m === 'space.mote.connection.advance' || m === 'space.mote.connection.inspect') {
-    const p = obj(v, ['operationId'])
-    return { operationId: id(p.operationId) } as MoteConnectionParamsMap[M]
+    const p = obj(v, m === 'space.mote.connection.advance' ? ['operationId', 'enrollment'] : ['operationId'])
+    return { operationId: id(p.operationId), ...(m === 'space.mote.connection.advance' && p.enrollment !== undefined ? { enrollment: parseConnectionEnrollmentParams('connection.enrollment.advance', p.enrollment) } : {}) } as MoteConnectionParamsMap[M]
   }
   const p = obj(
     v,

@@ -4,7 +4,7 @@ import type {
   MoteConnectionPreferencesSaveParams,
   MoteConnectionPreferencesSaveResult
 } from './mote-preferences.js'
-import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext } from './connection-enrollment-contract.js'
+import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext, ConnectionEnrollmentAdvanceInput } from './connection-enrollment-contract.js'
 import type { ConnectionProfileOperation } from './connection-profile-contract.js'
 
 /** Exact saved sources. An appearance revision is required only for include-saved. */
@@ -48,11 +48,12 @@ export type MoteConnectionOperation = {
     | null
 }
 export type MoteConnectionOperationInput = { operationId: string }
+export type MoteConnectionAdvanceInput = MoteConnectionOperationInput & { enrollment?: ConnectionEnrollmentAdvanceInput }
 export type MoteConnectionListInput = { target: MotePreferencesTarget; cursor?: string; limit?: number }
 export type MoteConnectionParamsMap = {
   'space.mote.connection.create': MoteConnectionCreate
   'space.mote.connection.sync': MoteConnectionSync
-  'space.mote.connection.advance': MoteConnectionOperationInput
+  'space.mote.connection.advance': MoteConnectionAdvanceInput
   'space.mote.connection.inspect': MoteConnectionOperationInput
   'space.mote.connection.ls': MoteConnectionListInput
 }
@@ -68,7 +69,7 @@ export type MoteConnectionMethod = keyof MoteConnectionParamsMap
 export interface MoteConnectionPort {
   create(input: MoteConnectionCreate, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation>
   sync(input: MoteConnectionSync, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation>
-  advance(input: MoteConnectionOperationInput, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation>
+  advance(input: MoteConnectionAdvanceInput, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation>
   inspect(input: MoteConnectionOperationInput): Promise<{ operation: MoteConnectionOperation | null }>
   list(input: MoteConnectionListInput): Promise<{ operations: MoteConnectionOperation[]; next: string | null }>
 }

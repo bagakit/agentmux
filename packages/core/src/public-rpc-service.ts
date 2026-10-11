@@ -494,7 +494,7 @@ export class AgentMuxRpcService {
         const result = method === 'connection.enrollment.begin' ? await enrollment.begin(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
           : method === 'connection.enrollment.advance' ? await enrollment.advance(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
           : method === 'connection.enrollment.ls' ? await enrollment.list(parseConnectionEnrollmentParams(method, params))
-          : await enrollment.inspect(parseConnectionEnrollmentParams(method, params))
+          : await enrollment.inspect(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       if (isRoomDiscoveryMethod(method)) {

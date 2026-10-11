@@ -82,8 +82,8 @@ export async function createDesktopConnections(options: { directory: string; enc
       },
       enrollment: {
         begin: async (input, context) => (await ensure()).connections.enrollment!.begin(input, context),
-        advance: async (input, context) => { const owner = await ensure(); const result = await owner.connections.enrollment!.advance(input, context); if (result.configuration === 'configured') { owner.receivers?.refresh(); owner.publication?.refresh() }; return result },
-        inspect: async input => (await ensure()).connections.enrollment!.inspect(input),
+        advance: async (input, context) => { const owner = await ensure(); const result = await owner.connections.enrollment!.advance(input, context); if (result.operation?.configuration === 'configured') { owner.receivers?.refresh(); owner.publication?.refresh() }; return result },
+        inspect: async (input, context) => (await ensure()).connections.enrollment!.inspect(input, context),
         list: async input => (await ensure()).connections.enrollment!.list(input)
       },
       rooms: {
