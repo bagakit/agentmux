@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx", "lib": ["ES2022", "DOM", "DOM.Iterable"], "noEmit": true, "allowImportingTsExtensions": true },
+  "include": ["codex-paginated-user.test.ts", "helpers/codex-paginated.ts", "vitest.codex-paginated.config.mts", "../../client-ui/test/codex-paginated-consumer.test.tsx", "../../client-ui/src/assets.d.ts"]
+}
