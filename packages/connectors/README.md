@@ -279,6 +279,15 @@ expand its scope. The same Outbox freezes scope before dispatch, retaining old
 pending and unknown effects. The broader consent choice does not by itself
 qualify native public content, a sender identity, media or complete parity.
 
+After that explicit shared cut, original Core-captured public input is relayed
+with its recorded human, Agent, external or unknown author. The same outbox
+retains each exact content reference and freezes `relay.sender: application`
+with the original target before dispatch. Feishu renders it as a read-only
+amux relay card; ordinary Agent speech keeps its existing format. The original
+delivery SDK and CLI expose those typed source facts without body or credentials.
+This is application relay, not platform personal-send authority. It does not
+qualify missing native user spans or complete full-conversation coverage.
+
 When broader sharing reaches native user content without a qualified public
 boundary, or an image/file the adapter cannot deliver completely, `connection
 delivery ls` reports `unavailable` with reason `content-unconfirmed`. The original
