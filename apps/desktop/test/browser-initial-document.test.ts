@@ -35,7 +35,7 @@ const native = vi.hoisted(() => {
     enableDeviceEmulation = vi.fn()
     getBackgroundThrottling = () => true
     setBackgroundThrottling = vi.fn()
-    executeJavaScriptInIsolatedWorld = vi.fn(async () => ({width:768,height:1024,deviceScaleFactor:1}) as unknown)
+    executeJavaScriptInIsolatedWorld = vi.fn(async (_worldId: number, _scripts: { code: string }[]) => ({width:768,height:1024,deviceScaleFactor:1}) as unknown)
     capturePage = vi.fn(async () => ({isEmpty:()=>false,getSize:()=>({width:1,height:1}),toPNG:()=>Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aCq8AAAAASUVORK5CYII=','base64')}))
     getURL = () => this.url
     getTitle = () => 'Original Browser'
@@ -100,6 +100,7 @@ vi.mock('electron', () => ({ BaseWindow: native.BaseWindow, WebContentsView: nat
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserCdpSession } from '../src/main/browser-cdp-session.js'
+import { SCREENSHOT_VIEWPORT_SCRIPT } from '../src/main/browser-screenshot-source.js'
 import { BrowserOperationJournal, BrowserOperationFileStore } from '../src/main/browser-operation-journal.js'
 import { BrowserDemonstrationCapture } from '../src/main/browser-demonstration-capture.js'
 import { BrowserDemonstrationRecorder } from '../src/main/browser-demonstration-recorder.js'
@@ -120,7 +121,7 @@ function fixture() {
   const demonstrations={get:vi.fn(async()=>null),stop:vi.fn(async()=>null),getPersistenceWarning:()=>undefined} as unknown as BrowserDemonstrationRecorder
   const manager=new BrowserViewManager(window as never,{defaultProfileId:()=> 'original-profile',resolvePartition:id=>'persist:'+id},new BrowserRefLedgerStore(directory),{rememberedSchemes:async()=>({}),rememberScheme:async()=>{},openExternal(){}},journal,undefined,results,demonstrations)
   managers.push(manager)
-  const sendCommand=vi.fn(async(method:string)=>method==='Runtime.evaluate'?{result:{value:{url:views[0]?.webContents.getURL(),body:'Original loaded document'}}}:{})
+  const sendCommand=vi.fn(async(method:string):Promise<unknown>=>method==='Runtime.evaluate'?{result:{value:{url:views[0]?.webContents.getURL(),body:'Original loaded document'}}}:{})
   const session={sendCommand,frames:new Map(),endedReason:null,detach:vi.fn(),observe:()=>()=>{}}
   vi.spyOn(BrowserCdpSession,'attach').mockReturnValue(session as never)
   const entry=()=>Reflect.get(manager,'entries').get('original-browser')
@@ -276,6 +277,87 @@ describe('the original initial Browser document',()=>{
     await expect(f.manager.captureScreenshot('original-browser')).rejects.toThrow('Browser page changed')
     expect(original.getBounds()).toEqual(bounds);expect(replacement.getBounds()).toMatchObject({width:0,height:0})
     expect(original.webContents.capturePage).not.toHaveBeenCalled()
+  })
+  it('captures a public run through its original protocol session without a second Native capture',async()=>{
+    const f=fixture(),png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aCq8AAAAASUVORK5CYII='
+    const created=await f.manager.create('original-browser',url,'workspace',undefined,'normal','tablet')
+    f.sendCommand.mockImplementation(async method=>method==='Page.captureScreenshot'?{data:png}:{})
+    const result=await f.manager.runScript('original-browser','return await captureScreenshot()')
+    expect(result.outcome.kind).toBe('completed')
+    expect(result.result).toMatchObject({browserId:'original-browser',navigationId:created.navigationId,source:{url},image:{mimeType:'image/png',width:1,height:1}})
+    expect(BrowserCdpSession.attach).toHaveBeenCalledOnce()
+    expect(f.sendCommand).toHaveBeenCalledExactlyOnceWith('Page.captureScreenshot',{format:'png',fromSurface:true,captureBeyondViewport:false})
+    expect(f.views[0]!.webContents.capturePage).not.toHaveBeenCalled()
+    expect(f.session.detach).toHaveBeenCalledOnce()
+  })
+  it('keeps the screenshot session bound to its original view while journal preparation awaits a Profile replacement',async()=>{
+    const f=fixture(),held=deferred(),png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aCq8AAAAASUVORK5CYII='
+    await f.manager.create('original-browser',url,'workspace')
+    const original=f.entry().view,start=f.journal.start.bind(f.journal);let preparing=false
+    vi.spyOn(f.journal,'start').mockImplementation(async input=>{const op=await start(input);preparing=true;await held.promise;return op})
+    f.sendCommand.mockImplementation(async method=>method==='Page.captureScreenshot'?{data:png}:{})
+    const pending=f.manager.runScript('original-browser','return await captureScreenshot()')
+    try {
+      await vi.waitFor(()=>expect(preparing).toBe(true))
+      await f.manager.switchProfile('original-browser','replacement-profile')
+      const replacement=f.entry().view,nav=f.entry().navigationId
+      expect(replacement).not.toBe(original);expect(BrowserCdpSession.attach).toHaveBeenCalledExactlyOnceWith(original.webContents)
+      held.resolve();const result=await pending
+      expect(result.outcome).toMatchObject({kind:'script-failed',message:expect.stringContaining('original Browser operation changed')})
+      expect(result.result).toBeUndefined();expect(f.sendCommand).not.toHaveBeenCalled();expect(replacement.webContents.capturePage).not.toHaveBeenCalled()
+      expect(f.entry().view).toBe(replacement);expect(f.entry().navigationId).toBe(nav);expect(replacement.webContents.dead).toBe(false)
+      expect(f.session.detach).toHaveBeenCalledOnce()
+    } finally {held.resolve();await pending}
+  })
+  it('refuses a protocol session belonging to a different view before reading either screenshot source',async()=>{
+    const f=fixture();await f.manager.create('original-browser',url,'workspace')
+    const foreign=new native.View()
+    await expect(f.manager.captureScreenshot('original-browser',{view:foreign as never,sendCommand:f.sendCommand})).rejects.toThrow('Browser page changed')
+    expect(f.sendCommand).not.toHaveBeenCalled();expect(f.views[0]!.webContents.executeJavaScriptInIsolatedWorld.mock.calls.filter(([,scripts]:[number,{code:string}[]])=>scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT))).toHaveLength(0)
+    expect(f.views[0]!.webContents.capturePage).not.toHaveBeenCalled();expect(foreign.webContents.capturePage).not.toHaveBeenCalled()
+  })
+  it.each(['owner','navigation'] as const)('rejects a protocol screenshot before sending when its original %s changes during viewport observation',async changed=>{
+    const f=fixture();await f.manager.create('original-browser',url,'workspace')
+    const original=f.entry().view,nav=f.entry().navigationId
+    original.webContents.executeJavaScriptInIsolatedWorld.mockImplementation(async(_world:number,scripts:{code:string}[])=>{
+      if(scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT)) {
+        if(changed==='owner')f.entry().view=new native.View()
+        else f.entry().navigationId='replacement-navigation'
+      }
+      return{width:768,height:1024,deviceScaleFactor:1}
+    })
+    try {
+      const result=await f.manager.runScript('original-browser','return await captureScreenshot()')
+      expect(result.outcome).toMatchObject({kind:'script-failed',message:expect.stringContaining('Browser page changed')})
+      expect(result.result).toBeUndefined();expect(f.sendCommand).not.toHaveBeenCalled();expect(original.webContents.capturePage).not.toHaveBeenCalled()
+      expect(original.webContents.dead).toBe(false);expect(f.session.detach).toHaveBeenCalledOnce()
+    } finally {f.entry().view=original;f.entry().navigationId=nav}
+  })
+  it.each(['owner','navigation'] as const)('rejects a late protocol image after its original %s changes',async changed=>{
+    const f=fixture(),png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aCq8AAAAASUVORK5CYII='
+    await f.manager.create('original-browser',url,'workspace')
+    let resolve!:(value:unknown)=>void
+    f.sendCommand.mockImplementation(async method=>method==='Page.captureScreenshot'?await new Promise(yes=>{resolve=yes}):{})
+    const pending=f.manager.runScript('original-browser','return await captureScreenshot()'),original=f.entry().view,nav=f.entry().navigationId
+    try {
+      await vi.waitFor(()=>expect(resolve).toBeTypeOf('function'))
+      if(changed==='owner')f.entry().view=new native.View()
+      else f.entry().navigationId='replacement-navigation'
+      resolve({data:png})
+      const result=await pending
+      expect(result.outcome).toMatchObject({kind:'script-failed',message:expect.stringContaining('Browser page changed')})
+      expect(result.result).toBeUndefined();expect(original.webContents.capturePage).not.toHaveBeenCalled()
+      expect(original.webContents.executeJavaScriptInIsolatedWorld.mock.calls.filter(([,scripts]:[number,{code:string}[]])=>scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT))).toHaveLength(1)
+      expect(original.webContents.dead).toBe(false);expect(f.session.detach).toHaveBeenCalledOnce()
+    } finally { f.entry().view=original;f.entry().navigationId=nav }
+  })
+  it('reports invalid protocol PNG bytes without falling back to another screenshot',async()=>{
+    const f=fixture();await f.manager.create('original-browser',url,'workspace')
+    f.sendCommand.mockImplementation(async method=>method==='Page.captureScreenshot'?{data:Buffer.from('invalid-image').toString('base64')}:{})
+    const result=await f.manager.runScript('original-browser','return await captureScreenshot()')
+    expect(result.outcome).toMatchObject({kind:'script-failed',message:expect.stringContaining('PNG')})
+    expect(f.sendCommand).toHaveBeenCalledOnce();expect(f.views[0]!.webContents.capturePage).not.toHaveBeenCalled()
+    expect(f.session.detach).toHaveBeenCalledOnce()
   })
   it('keeps creation immediate and lets the real run read the loaded document after its original native load',async()=>{
     const f=fixture(),load=deferred();native.Contents.beforeLoad=()=>load.promise
