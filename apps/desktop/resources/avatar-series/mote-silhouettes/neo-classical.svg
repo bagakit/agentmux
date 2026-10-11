@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 24 24">
+  <title>Mote — carved volute</title>
+  <defs>
+    <linearGradient id="mote-stone-volume" x1="5" y1="4" x2="20" y2="19" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#d5d8bd"/>
+      <stop offset=".38" stop-color="#a5b49a"/>
+      <stop offset=".74" stop-color="#718e76"/>
+      <stop offset="1" stop-color="#486a57"/>
+    </linearGradient>
+    <linearGradient id="mote-stone-bevel" x1="8" y1="7" x2="14" y2="18" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#355541"/>
+      <stop offset=".45" stop-color="#7f997d"/>
+      <stop offset="1" stop-color="#e1e2c7"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#mote-stone-volume)" stroke="#48624c" stroke-width=".22" fill-rule="evenodd" d="M5 3H12.5C18 3 21.5 6.7 21.5 12.2C21.5 17.7 17.5 21.5 12.5 21.5C7 21.5 2.5 17.5 2.5 12V5.5C2.5 4 3.5 3 5 3ZM8.3 9.2C9.5 6.2 14.5 5.8 16.3 8.7C17.6 10.9 15.7 12.7 13.8 12.1C12.6 11.7 12.3 10.5 12.8 9.8C11.3 10.2 10.4 11.5 10.6 13.2C10.9 15.3 12.6 17.4 14.7 18.5C10.1 18.3 6.9 14.5 8.3 9.2Z"/>
+  <path fill="#dfe1c7" d="M5 3.35H12.35C15.91 3.35 18.53 4.79 19.91 7.42C17.87 5.53 15.25 4.48 12.07 4.48H5.01C4.19 4.48 3.56 4.92 3.25 5.76C3.25 4.26 3.9 3.35 5 3.35Z"/>
+  <path fill="#375c48" opacity=".58" d="M20.36 8.64C21.43 14.53 18.14 19.64 12.5 20.43C8.61 20.97 5.41 19.09 3.72 16.75C5.38 19.73 8.81 21.24 12.48 21.24C17.49 21.24 21.23 17.68 21.23 12.2C21.23 10.91 20.99 9.73 20.36 8.64Z"/>
+  <path d="M8.3 9.2C9.5 6.2 14.5 5.8 16.3 8.7C17.6 10.9 15.7 12.7 13.8 12.1C12.6 11.7 12.3 10.5 12.8 9.8C11.3 10.2 10.4 11.5 10.6 13.2C10.9 15.3 12.6 17.4 14.7 18.5C10.1 18.3 6.9 14.5 8.3 9.2Z" fill="none" stroke="url(#mote-stone-bevel)" stroke-width=".7" stroke-linejoin="round"/>
+  <path d="M4.21 8.11C3.8 12.17 4.66 15.7 7.58 17.76M16.14 5.46C18.18 6.46 19.56 8.51 19.88 10.5" fill="none" stroke="#e4e5ce" stroke-width=".32" stroke-linecap="round" opacity=".8"/>
+</svg>

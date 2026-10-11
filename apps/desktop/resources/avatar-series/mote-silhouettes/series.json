@@ -1,0 +1,102 @@
+{
+  "schema": "agentmux.avatar-series.v1",
+  "title": "Mote art directions",
+  "entries": [
+    {
+      "id": "retro-future",
+      "title": "Retro future",
+      "definition": {
+        "kind": "image",
+        "file": "retro-future.png"
+      }
+    },
+    {
+      "id": "low-poly",
+      "title": "Low poly",
+      "definition": {
+        "kind": "image",
+        "file": "low-poly.png"
+      }
+    },
+    {
+      "id": "dada",
+      "title": "Dada",
+      "definition": {
+        "kind": "image",
+        "file": "dada.png"
+      }
+    },
+    {
+      "id": "polka-dot",
+      "title": "Polka dot",
+      "definition": {
+        "kind": "image",
+        "file": "polka-dot.png"
+      }
+    },
+    {
+      "id": "ukiyo-e",
+      "title": "Ukiyo-e",
+      "definition": {
+        "kind": "image",
+        "file": "ukiyo-e.png"
+      }
+    },
+    {
+      "id": "cyberpunk",
+      "title": "Cyberpunk",
+      "definition": {
+        "kind": "image",
+        "file": "cyberpunk.png"
+      }
+    },
+    {
+      "id": "flat",
+      "title": "Flat",
+      "definition": {
+        "kind": "image",
+        "file": "flat.png"
+      }
+    },
+    {
+      "id": "neo-classical",
+      "title": "Neoclassical",
+      "definition": {
+        "kind": "image",
+        "file": "neo-classical.png"
+      }
+    },
+    {
+      "id": "vaporwave",
+      "title": "Vaporwave",
+      "definition": {
+        "kind": "image",
+        "file": "vaporwave.png"
+      }
+    },
+    {
+      "id": "klei",
+      "title": "Klei",
+      "definition": {
+        "kind": "image",
+        "file": "klei.png"
+      }
+    },
+    {
+      "id": "ink",
+      "title": "Ink",
+      "definition": {
+        "kind": "image",
+        "file": "ink.png"
+      }
+    },
+    {
+      "id": "fallout-four",
+      "title": "Fallout 4",
+      "definition": {
+        "kind": "image",
+        "file": "fallout-four.png"
+      }
+    }
+  ]
+}
