@@ -7,6 +7,7 @@ import { inputCorrelationCore } from './helpers/input-correlation.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { parseAgentSessionHistoryReadPage } from '../src/session-history-read-codec.js'
 import { normalizeAgentTimelineMutation } from '../src/session-timeline.js'
+import { consumeConversationWindowPage } from '../src/conversation-changes.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
@@ -46,12 +47,12 @@ it('the original public input writer records only exact userContent, independent
 
 it('legacy captured content stays unknown even with a known author, and distinct equal native inputs stay unknown', async () => {
   const f = await createHistoryQueryFixture(closes)
-  const captured = await f.client.readAgentConversation({ ...f.reference, source: 'captured', kind: 'user-message' })
+  const captured = await f.client.readAgentSessionHistory({ ...f.reference, source: 'captured', kind: 'user-message' })
   expect(captured.userMessages).toHaveLength(4)
   expect(captured.userMessages!.every(message => message.publicContent === 'unknown' && message.author.kind === 'human')).toBe(true)
   const same = captured.userMessages!.filter(message => message.content === 'same input')
   expect(same).toHaveLength(2); expect(same[0]!.id).not.toBe(same[1]!.id)
-  const native = await f.client.readAgentConversation({ ...f.reference, source: 'native', kind: 'user-message' })
+  const native = await f.client.readAgentSessionHistory({ ...f.reference, source: 'native', kind: 'user-message' })
   expect(native.userMessages).toHaveLength(5)
   expect(native.userMessages!.every(message => message.publicContent === 'unknown' && message.author.kind === 'unknown' && message.source.kind === 'native')).toBe(true)
   await f.noControls()
@@ -75,15 +76,28 @@ it('the Hosted SDK, public RPC and actual compiled CLI preserve the same origina
     expect(JSON.parse(cli.stdout).result.userMessages).toEqual(publicPage.userMessages)
     expect(publicPage.userMessages!.every(message => message.publicContent === (source === 'captured' && message.rawId === 'captured-9' ? 'confirmed' : 'unknown'))).toBe(true)
   }
-  const raw = await f.ownerClient.readAgentConversation({ ...f.reference, source: 'native' })
+  const raw = await f.ownerClient.sessionHistoryPage(f.session.agentSessionId)
   expect(raw.items).toHaveLength(5)
-  expect(raw.items.every(entry => entry.kind !== 'item' || !Object.hasOwn(entry.item, 'publicContent'))).toBe(true)
+  expect(raw.items.every(item => !Object.hasOwn(item, 'publicContent'))).toBe(true)
+  const shared = consumeConversationWindowPage(await f.client.readAgentConversation(f.reference))
+  const publicShared = consumeConversationWindowPage(await rpc.call('agent.conversation.inspect', f.reference))
+  const cli = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(f.reference))
+  expect(cli.code, cli.stderr).toBe(0)
+  const cliShared = consumeConversationWindowPage(JSON.parse(cli.stdout).result)
+  expect(shared.kind).toBe('complete'); expect(publicShared.kind).toBe('complete'); expect(cliShared.kind).toBe('complete')
+  if (shared.kind !== 'complete' || publicShared.kind !== 'complete' || cliShared.kind !== 'complete') throw Error('Expected complete original Reader windows')
+  expect(shared.snapshot.units).not.toHaveLength(0)
+  expect(publicShared.snapshot.units).toEqual(shared.snapshot.units)
+  expect(cliShared.snapshot.units).toEqual(shared.snapshot.units)
+  const originals = shared.snapshot.units.flatMap(unit => unit.records)
+  expect(originals.filter(record => record.original.kind === 'native')).toHaveLength(5)
+  expect(originals.find(record => record.original.item.id === 'captured-9')?.original.item).toMatchObject({ content: 'Exact owned public content', publicContent: 'confirmed' })
   await f.noControls()
 })
 
 it('strict original result and timeline codecs reject coerced or invented public-content facts', async () => {
   const f = await createHistoryQueryFixture(closes), input = { ...f.reference, source: 'native' as const, kind: 'user-message' as const }
-  const page = await f.client.readAgentConversation(input)
+  const page = await f.client.readAgentSessionHistory(input)
   expect(parseAgentSessionHistoryReadPage(page, input)).toEqual(page)
   for (const value of ['confirmed', ['unknown'], null, {}, true]) {
     const forged = structuredClone(page); Object.assign(forged.userMessages![0]!, { publicContent: value })
@@ -102,7 +116,7 @@ it('strict original result and timeline codecs reject coerced or invented public
 it('the actual public RPC and compiled CLI reject a coerced content-boundary response', async () => {
   const f = await createHistoryQueryFixture(closes)
   const input = { ...f.reference, source: 'native' as const, kind: 'user-message' as const }
-  const forged = await f.client.readAgentConversation(input)
+  const forged = await f.client.readAgentSessionHistory(input)
   Object.assign(forged.userMessages![0]!, { publicContent: ['unknown'] })
   vi.spyOn(f.client, 'readAgentSessionHistory').mockResolvedValue(forged)
   const path = join(f.root, 'control.sock')
