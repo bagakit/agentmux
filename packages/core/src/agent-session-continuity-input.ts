@@ -30,9 +30,8 @@ export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperat
   lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest): AgentMuxContinuityLaunchInput | undefined {
   // A later attempt restores context only; omitting fresh input alone would synthesize the old automatic task again.
   if (operation.intentOperationId) return
-  const automatic = operation.trigger !== 'input' && operation.interruptedWorking && catalog.promptDelivery !== 'post-launch-only'
-  const input = fresh ?? (automatic ? { submissionId: 'continuity-' + digest(JSON.stringify([operation.agentSessionId, operation.operationId])),
-    prompt: operation.recoveryInputs?.continuation ?? '', agentMuxNote: recoveryReminder(operation) } : undefined)
+  // Automatic continuation is admitted after the original resume commits, never as launch argv.
+  const input = fresh
   if (!input) return
   const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
   if (!composed.text.trim()) return

@@ -1,4 +1,5 @@
 import { AgentSessionContinuitySupervisor } from './agent-session-continuity-supervisor.js'
+import { inspectAgentSessionInterruption } from './agent-session-interruption.js'
 import { confirmNativeInputAdoption, confirmNativeInputAdoptions } from './native-input-adoption.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead, type AgentInputMailboxPage, type AgentInputMailboxItem } from './agent-input-mailbox.js'
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
@@ -151,7 +152,7 @@ import {
 } from './agent-session-registry.js'
 import {
   decideAgentSessionContinuity,
-  agentContinuityAdmission, normalizeAgentContinuityPolicy, resolveAgentContinuityReminder,
+  agentContinuityAdmission, normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION,
   type AgentMuxContinuityOperation,
   type AgentMuxAgentContinuityInput,
   type AgentMuxAgentContinuityResult
@@ -5215,6 +5216,7 @@ export class AgentMuxClient {
       }
       delete next.observedNativeHandle
       delete next.nativeSourceObservation
+      delete next.recoveryActivity
       delete next.nativePromptPredecessor
       if (nativePromptEvidence) next.nativePromptPredecessor = {
         run: runRef(run.runId), previousRun: { ...current.run },
@@ -5459,7 +5461,7 @@ export class AgentMuxClient {
       nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt } }
     for (const key of ['observedNativeHandle', 'nativeSourceObservation', 'nativePromptPredecessor', 'hookReceipt', 'terminalHandshake',
       'terminalCapability', 'terminalPromptReadiness', 'promptCompletionAdmission', 'terminalPromptSubmission', 'terminalPromptDelivery',
-      'terminalOutputChannel', 'semanticStatus', 'pendingInteraction'] as const) delete next[key]
+      'terminalOutputChannel', 'semanticStatus', 'pendingInteraction', 'recoveryActivity'] as const) delete next[key]
     if (prepared.continuity) {
       next.continuity = { ...structuredClone(prepared.continuity), kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
       const launched = next.continuity.launchInput
@@ -5744,7 +5746,10 @@ export class AgentMuxClient {
         }
         admission = { kind: 'resume', reason: 'supervised-retry', interruptedWorking: false }
       } else admission = agentContinuityAdmission({ session: this.projectSession(current), trigger: receipt.trigger, policy,
-        admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}) })
+        admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}),
+        ...(current.recoveryActivity?.run.runId === current.run.runId && current.recoveryActivity.state !== 'unknown' &&
+          current.nativeHandle?.kind === 'provider' && current.recoveryActivity.nativeSessionId === current.nativeHandle.sessionId
+          ? { lastActivityAt: current.recoveryActivity.observedAt } : {}) })
       if (admission.kind === 'pending') return pending(admission.reason, evidence, admission.nextActionAt)
     }
     const handle = current?.nativeHandle
@@ -5775,9 +5780,13 @@ export class AgentMuxClient {
         receipt.previousInput = { scope: 'typed-prompt', outcome: !oldInput ? 'none' : current && agentPromptNotApplied(current) ? 'not-applied'
           : oldInput.acknowledged ? oldInput.transport === 'native' ? oldInput.native.outcome === 'admitted' ? 'native-admitted' : 'unknown' : 'terminal-confirmed' : 'unknown',
           ...(oldInput?.inputKey ? { key: structuredClone(oldInput.inputKey) } : {}) }
-        receipt.interruptedWorking = admission?.kind === 'resume' && admission.interruptedWorking
-        receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking ? resolveAgentContinuityReminder(policy) : '',
-          continuation: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking && policy.continuationEnabled ? policy.continuationPrompt : '' }
+        // Restore the original conversation independently of any new automatic input.
+        // Freeze old-writer evidence before resume can create an initial-idle predecessor.
+        if (!receipt.interruption && !receipt.intentOperationId) receipt.interruption = await inspectAgentSessionInterruption(current,
+          this.providers.get(current.providerId), policy, [])
+        receipt.interruptedWorking = !receipt.intentOperationId && receipt.interruption?.state === 'interrupted'
+        if (!prior?.recoveryInputs) receipt.recoveryInputs = { reminder: '',
+          continuation: receipt.trigger !== 'input' && receipt.interruptedWorking && policy.continuationEnabled ? DEFAULT_AGENT_CONTINUITY_CONTINUATION : '' }
         const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
           agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)
         if (launchInput) receipt.launchInput = launchInput
@@ -7243,9 +7252,13 @@ export class AgentMuxClient {
         session.nativeHandle?.kind === 'provider' && activity.fact.nativeSessionId === session.nativeHandle.sessionId &&
         !this.endedRuns.has(session.run.runId) &&
         (activity.fact.state !== 'idle' || activity.invalidated || childrenUnconfirmed || !agentHasActiveSubagents(session.run.runId))) {
-      return { ...structuredClone(activity.fact),
-        ...(activity.invalidated || childrenUnconfirmed || activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
-          session.nativeSourceObservation?.state === 'changed' ? { state: 'unknown' as const } : {}) }
+      const fact = structuredClone(activity.fact)
+      if (activity.invalidated || childrenUnconfirmed || activity.admissionId !== session.promptCompletionAdmission?.submissionId ||
+          session.nativeSourceObservation?.state === 'changed') {
+        delete fact.interruption
+        return { ...fact, state: 'unknown' }
+      }
+      return fact
     }
     return undefined
   }
@@ -8271,13 +8284,13 @@ export class AgentMuxClient {
               if (saved.semanticStatus?.nativeTurnId === observation.nativeTurnId &&
                 saved.semanticStatus.state === observation.state &&
                 JSON.stringify(saved.semanticStatus.failure) === JSON.stringify(observation.failure)) return saved
-              // Reading an old working record never renews the native activity clock.
+              // Reading retained records never renews the native activity clock, including idle ends.
               if (observation.initialSnapshot && observation.state === 'working' && (observation.nativeObservedAt === undefined ||
                 observation.nativeObservedAt <= (saved.semanticStatus?.observedAt ?? 0))) return saved
               publishedState = ended ? observeSubagentMainEnd(saved.run.runId, observation.state) : observation.state
               const status = transitionAgentSemanticStatus(saved.semanticStatus, {
                 state: publishedState === 'unknown' ? 'running' : publishedState,
-                source: 'native-transcript', observedAt: observation.initialSnapshot && observation.state === 'working' ? observation.nativeObservedAt! :
+                source: 'native-transcript', observedAt: observation.initialSnapshot ? observation.nativeObservedAt ?? 0 :
                   Math.max(Date.now(), (saved.semanticStatus?.observedAt ?? 0) + 1),
                 nativeTurnId: observation.nativeTurnId,
                 ...(observation.failure ? { failure: structuredClone(observation.failure),
@@ -8878,7 +8891,12 @@ export class AgentMuxClient {
         !['active', 'idle', 'unknown'].includes(event.state) ||
         session.nativeHandle?.kind !== 'provider' || event.nativeSessionId !== session.nativeHandle.sessionId ||
         (event.state !== 'unknown' && !event.nativeTurnId?.trim())) return false
-    const previous = this.nativeCurrentActivities.get(session.agentSessionId)
+    const retained = session.recoveryActivity?.run.runId === session.run.runId && session.nativeHandle?.kind === 'provider' &&
+      session.recoveryActivity.nativeSessionId === session.nativeHandle.sessionId ? session.recoveryActivity : undefined
+    const previous = this.nativeCurrentActivities.get(session.agentSessionId) ?? (retained ? {
+      runId: retained.run.runId, event: retained, admissionId: retained.promptSubmissionId,
+      conflicted: false, invalidated: retained.state === 'unknown'
+    } : undefined)
     if (previous?.runId === session.run.runId) {
       if (previous.conflicted) return false
       if (event.sourceId !== previous.event.sourceId || event.sequence <= previous.event.sequence) return false
@@ -8887,6 +8905,17 @@ export class AgentMuxClient {
           event.nativeTurnId !== previous.event.nativeTurnId)) return false
     } else if (event.state === 'idle') return false
     return true
+  }
+
+  /** Invalidate only a recovery inference. Live PTY, input and the original native identity remain usable. */
+  private async invalidateRecoveryActivity(session: AgentMuxStoredAgentSession, receiptId: string, observedAt: number): Promise<void> {
+    if (!session.recoveryActivity) return
+    await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
+      if (!current.recoveryActivity) return current
+      const { interruption: _oldEnd, ...original } = current.recoveryActivity
+      return { ...current, updatedAt: Math.max(current.updatedAt, observedAt),
+        recoveryActivity: { ...original, state: 'unknown', hookReceiptId: receiptId, observedAt } }
+    })
   }
 
   private async acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void> {
@@ -8938,6 +8967,7 @@ export class AgentMuxClient {
         throw error
       }
       // Persisted source facts precede their diagnostic so clients can present the exact owner.
+      await this.invalidateRecoveryActivity(next, envelope.receiptId, next.nativeSourceObservation!.observedAt)
       this.publishSession(next)
       if (witness.reason === 'native-witness-unavailable' || witness.reason === 'native-main-ambiguous') this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
         code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'Native Hook identity could not be confirmed from this Run. The Run and input remain available; Refresh the native Session observation to retry.',
@@ -8949,6 +8979,7 @@ export class AgentMuxClient {
         !nativeHookHasSubagentSubject(provider.hook, envelope.eventName ?? '', envelope.payload ?? {})) {
       const previous = this.nativeCurrentActivities.get(session.agentSessionId)
       if (previous?.runId === session.run.runId) previous.invalidated = true
+      await this.invalidateRecoveryActivity(session, envelope.receiptId, Date.now())
     }
     const context: AgentProviderHookNormalizationContext = Object.freeze({
       ...(session.nativeHandle ? { nativeHandle: Object.freeze({ ...session.nativeHandle }) } : {}),
@@ -8963,6 +8994,7 @@ export class AgentMuxClient {
     const childrenWereActive = agentHasActiveSubagents(session.run.runId)
     const normalized = witnessTargetMismatch ? normalizeNativeHook(provider.hook, envelope, context) : provider.normalizeHook(envelope, context)
     if (normalized.observationFailure) {
+      await this.invalidateRecoveryActivity(session, envelope.receiptId, normalized.status.observedAt)
       const observation = { run: { ...session.run }, phase: 'binding' as const,
         ...normalized.observationFailure, observedAt: normalized.status.observedAt }
       this.hookIngressObservations.set(session.agentSessionId, observation)
@@ -8992,8 +9024,9 @@ export class AgentMuxClient {
     const activityId = JSON.stringify(['activity-state', 'native-hook', session.run.runId, envelope.receiptId])
     const nativeActivity = normalized.currentActivity
     const previousActivity = this.nativeCurrentActivities.get(session.agentSessionId)
-    if ((nativeActivity || normalized.childActivity) && (agentSubagentActivityUnconfirmed(session.run.runId, previousActivity?.runId === session.run.runId ? previousActivity.event.sourceId : undefined) || nativeActivity && previousActivity?.runId === session.run.runId &&
-        nativeActivity.sourceId !== previousActivity.event.sourceId)) {
+    if ((nativeActivity || normalized.childActivity) && (agentSubagentActivityUnconfirmed(session.run.runId, previousActivity?.runId === session.run.runId ? previousActivity.event.sourceId : undefined) || nativeActivity && (
+        previousActivity?.runId === session.run.runId && nativeActivity.sourceId !== previousActivity.event.sourceId ||
+        session.recoveryActivity?.run.runId === session.run.runId && nativeActivity.sourceId !== session.recoveryActivity.sourceId))) {
       if (previousActivity?.runId === session.run.runId) {
         previousActivity.invalidated = true
         previousActivity.conflicted = true
@@ -9001,6 +9034,7 @@ export class AgentMuxClient {
       this.hookIngressObservations.set(session.agentSessionId, { run: { ...session.run }, phase: 'binding',
         code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE', observedAt: normalized.status.observedAt,
         message: 'Native activity identity or source continuity is unconfirmed for this Run. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh source.' })
+      await this.invalidateRecoveryActivity(session, envelope.receiptId, normalized.status.observedAt)
       this.publishSession(session)
       return
     }
@@ -9194,6 +9228,18 @@ export class AgentMuxClient {
               ? { turnUsage: current.turnUsage }
               : {})
       }
+      if (nativeActivity && this.acceptsNativeCurrentActivity(next, nativeActivity)) {
+        next.recoveryActivity = { ...structuredClone(nativeActivity), run: { ...current.run }, hookReceiptId: receipt.id,
+          observedAt: receipt.observedAt, ...(current.promptCompletionAdmission?.submissionId ? { promptSubmissionId: current.promptCompletionAdmission.submissionId } : {}) }
+      } else if (!nativeActivity && updatesSemanticStatus && !normalized.childActivity && normalized.mainSubject && next.recoveryActivity) {
+        // In-turn tools refresh the original main activity. A new prompt or an old idle end
+        // cannot inherit that turn's interruption; neither fact grants live input eligibility.
+        const ongoing = next.recoveryActivity.state === 'active' && normalized.semanticState === 'working' &&
+          normalized.lifecycleEvent !== 'user-prompt-submit' && normalized.lifecycleEvent !== 'turn-start'
+        const { interruption: _previousEnd, ...original } = next.recoveryActivity
+        next.recoveryActivity = { ...original, state: ongoing ? 'active' : 'unknown', hookReceiptId: receipt.id, observedAt: receipt.observedAt }
+      }
+      if (next.recoveryActivity && next.nativeHandle?.kind === 'provider' && next.recoveryActivity.nativeSessionId !== next.nativeHandle.sessionId) delete next.recoveryActivity
       const continuity = normalized.continuity, nativeTarget = next.nativeHandle
       if (!witnessTargetMismatch && continuity && normalized.mainSubject && normalized.subject?.kind === 'main' &&
         normalized.agentSessionId === current.agentSessionId && normalized.providerId === current.providerId && sameRun(normalized.run, current.run) &&
@@ -9324,7 +9370,8 @@ export class AgentMuxClient {
     if (nativeActivity) {
       // CAS may have admitted a new prompt while this receipt was being saved.
       // Such a claim consumes idle and cannot be crossed by an old turn end.
-      if (this.acceptsNativeCurrentActivity(next, nativeActivity)) {
+      if (next.recoveryActivity?.hookReceiptId === receipt.id && next.recoveryActivity.sourceId === nativeActivity.sourceId &&
+          next.recoveryActivity.sequence === nativeActivity.sequence || this.acceptsNativeCurrentActivity(next, nativeActivity)) {
         this.nativeCurrentActivities.set(next.agentSessionId, { event: structuredClone(nativeActivity), runId: next.run.runId,
           admissionId: next.promptCompletionAdmission?.submissionId,
           ...(nativeActivity.state !== 'unknown' && nativeActivity.nativeTurnId ? { fact: {
