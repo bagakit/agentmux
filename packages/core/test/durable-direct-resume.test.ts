@@ -128,7 +128,9 @@ it('reconciles an applied direct Start with lost ACK after dispose without anoth
   expect((await f.correlation())?.preparedSession?.continuity?.launchInput?.state).toBe('prepared')
   const list = vi.spyOn(f.inner.kernel, 'list').mockResolvedValueOnce([])
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' }); list.mockRestore()
-  await f.client.dispose(); const second = await f.reader(), recovered = await f.resume({}, second)
+  await f.client.dispose(); const second = await f.reader(), recovery = f.resume({}, second)
+  await expect(recovery).resolves.toMatchObject({ agentSessionId: f.previous.agentSessionId, run: { runId: actual.runId } })
+  const recovered = await recovery
   expect(recovered.run.runId).toBe(actual.runId); expect(recovered.nativeHandle).toEqual(f.previous.nativeHandle)
   f.noReplacement(); await f.write(recovered, second)
 })

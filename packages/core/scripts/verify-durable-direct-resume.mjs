@@ -71,7 +71,7 @@ const variants = [
   { name: 'freeze-provider-plan', path: 'packages/core/src/client.ts',
     from: 'this.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })',
     to: "{ program: plan.command, argsDigest: createHash('sha256').update(JSON.stringify(plan.args)).digest('base64url') }",
-    target: 'reconciles an applied direct Start', expected: 'launch arguments are unconfirmed' },
+    target: 'reconciles an applied direct Start', expected: 'promise rejected' },
   { name: 'lose-original-fatal-operation', path: 'packages/core/src/client.ts',
     from: "              if (next.continuity) {\n                const failed = { ...next.continuity, kind: 'unavailable' as const, reason: 'process-exited',",
     to: "              if (false) {\n                const failed = { ...next.continuity, kind: 'unavailable' as const, reason: 'process-exited',",
@@ -146,6 +146,11 @@ try {
     const failed = assertions.filter(test => test.status === 'failed')
     const semanticRed = result.code === 1 && !result.signal && failed.some(test => test.fullName.includes(variant.target) &&
       (test.failureMessages.join('\n') + result.text).includes(variant.expected))
+    if (variant.name === 'freeze-provider-plan') {
+      assert.match(result.text, /AssertionError: promise rejected/)
+      assert.match(result.text, /CONTINUITY_OPERATION_MISMATCH/)
+      assert.match(result.text, /launch arguments are unconfirmed/)
+    }
     receipt.results.push({ name: variant.name, code: result.code, signal: result.signal, passed: tests.numPassedTests,
       failed: tests.numFailedTests, total: assertions.filter(test => test.status !== 'pending').length, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })

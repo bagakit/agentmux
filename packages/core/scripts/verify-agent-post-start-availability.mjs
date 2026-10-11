@@ -36,8 +36,8 @@ const variants = [
     from: "      } catch (error) {\n        if (error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {",
     to: "      } catch (error) {\n        await this.retireUncommittedRun(run.runId); throw error;\n        if (error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {",
     target: 'keeps_committed_create_usable' },
-  { name: 'rollback-committed-resume', from: '(persisted || reopening || continuity?.operationId === input.operationId)) {',
-    to: '(reopening || continuity?.operationId === input.operationId)) {', target: 'keeps_committed_resume_usable' },
+  { name: 'rollback-committed-resume', from: 'if (!(error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED)) {',
+    to: 'if (false) {', target: 'keeps_committed_resume_usable' },
   { name: 'pretend-hook-binding-recovered', from: '            await retained.bindRun(session.run.runId)', to: '            /* Binding was not re-observed. */',
     target: 'after_hook_observation_failure' },
   { name: 'swallow-confirmed-create-exit',
@@ -45,8 +45,8 @@ const variants = [
     to: "        if (false && error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {",
     target: 'exposes generic bounded startup output' },
   { name: 'swallow-confirmed-resume-exit',
-    from: "if (!(error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) &&",
-    to: "if (true &&",
+    from: "if (!(error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED)) {",
+    to: "if (true) {",
     target: 'successful durable rollback' },
   { name: 'swallow-exit-after-commit-recheck', from: '                  await rollbackFailedResume(readError)',
     to: '                  /* The fatal recheck was swallowed. */', target: 'after recovering an applied commit' }
@@ -109,7 +109,7 @@ try {
       passed: tests.numPassedTests, failed: tests.numFailedTests, semanticRed, bundleSha256: sha(await readFile(file)),
       ...(transformed ? { transformedSha256: sha(transformed) } : {}) })
     await writeFile(join(attempt, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 12 && tests.success, 'Candidate did not pass four real-process cases and eight authoritative-exit counterexamples: ' + result.text)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 13 && tests.success, 'Candidate did not pass four real-process cases and nine authoritative-exit counterexamples: ' + result.text)
     else assert.ok(semanticRed, 'Mutation did not produce owning assertion RED: ' + variant.name + '\n' + result.text)
   }
   for (const [path, methods] of [
