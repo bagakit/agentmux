@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const script = relative(root, fileURLToPath(import.meta.url))
 const config = 'packages/core/test/executable-launch-context.config.mts'
-const client = 'packages/core/src/client.ts', probe = 'packages/core/src/executable-probe.ts'
+const client = 'packages/core/src/client.ts', probe = 'packages/core/src/executable-probe.ts', observation = 'packages/core/src/executable-observation.ts'
 const variants = {
   'launch-path': { path: probe, needle: "context.env?.PATH ?? process.env.PATH ?? ''", replacement: "process.env.PATH ?? ''", test: 'configured-path reaches real Native' },
   'launch-workspace': { path: probe, needle: 'resolve(context.workspacePath!, value)', replacement: 'resolve(process.cwd(), value)', test: 'workspace-relative reaches real Native' },
@@ -25,7 +25,28 @@ const variants = {
   'cache-context': { path: 'apps/desktop/src/renderer/src/lib/executor-detection.ts',
     needle: '(input.environmentRevision ?? executorEnvironmentRevision()) !== executorEnvironmentRevision(executor.env)', replacement: 'false', test: 'public CLI checks the saved private PATH' },
   'unknown-is-not-missing': { path: probe, needle: "if (relative || unknown) return { executable, availability: 'check-failed', cause: (relative ?? unknown)! }",
-    replacement: "if (relative || unknown) return { executable, availability: 'missing', cause: (relative ?? unknown)! }", test: 'keeps missing, uncertain workspace, directories and unavailable observations distinct' }
+    replacement: "if (relative || unknown) return { executable, availability: 'missing', cause: (relative ?? unknown)! }", test: 'keeps missing, uncertain workspace, directories and unavailable observations distinct' },
+  'unknown-create-block': { path: client,
+    needle: 'const capability = await this.probeAgent(input.providerId, plan.command, executableContext)\n      if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command)))',
+    replacement: 'const capability = await this.probeAgent(input.providerId, plan.command, executableContext)\n      if (!capability.installed)', test: 'stat observation failure preserves real Native' },
+  'unknown-resume-block': { path: client,
+    needle: 'const capability = await this.probeAgent(current.providerId, plan.command, executableContext)\n      if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command)))',
+    replacement: 'const capability = await this.probeAgent(current.providerId, plan.command, executableContext)\n      if (!capability.installed)', test: 'stat observation failure preserves real Native' },
+  'unknown-continuity-block': { path: 'packages/core/src/agent-session-continuity.ts',
+    needle: "(!facts.capability.installed && !unconfirmedExecutableObservation(facts.capability, facts.launchExecutable ?? ''))",
+    replacement: '!facts.capability.installed', test: 'stat observation failure preserves real Native' },
+  'provider-refusal-bypass': { path: client,
+    needle: 'const capability = await this.probeAgent(input.providerId, plan.command, executableContext)\n      if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command)))',
+    replacement: 'const capability = await this.probeAgent(input.providerId, plan.command, executableContext)\n      if (!capability.installed && capability.providerId !== provider.id)', test: 'does not reinterpret a Provider refusal' },
+  'unknown-command-binding': { path: observation, needle: 'observation?.executable === executable &&', replacement: 'observation &&', test: 'does not reinterpret a Provider refusal' },
+  'unknown-notice-drop': { path: client, needle: 'if (!observation) return\n    // An unscoped diagnostic', replacement: 'if (!observation || observation) return\n    // An unscoped diagnostic', test: 'stat failure reaches the real Hosted Native owner' },
+  'snapshot-erases-observation': { path: 'packages/core/src/agent-provider.ts', needle: '...(observation ? { executableObservation: observation } : {}),', replacement: '', test: 'stat observation failure preserves real Native' },
+  'callback-observation-pairing': { path: client, needle: '[...observations].reverse().find(value => value.executable === observation.executable)',
+    replacement: 'observation', test: 'does not elevate a same-command observation invented outside this probe' },
+  'callback-original-observation': { path: client, needle: 'observations.push(structuredClone(observation))',
+    replacement: 'observations.push(observation)', test: 'does not elevate a same-command observation invented outside this probe' },
+  'callback-wording-gate': { path: client, needle: 'original?.availability === observation.availability ? { executableObservation: original }',
+    replacement: 'original?.availability === observation.availability && isDeepStrictEqual(original, observation) ? { executableObservation: original }', test: 'keeps Provider diagnostic wording independent of real Native execution' }
 }
 const hash = value => createHash('sha256').update(value).digest('hex')
 if (process.argv[2] === '--worker') {
@@ -49,12 +70,15 @@ if (process.argv[2] === '--worker') {
 } else {
   const output = join(root, '.tmp/session-capability-recovery/executable-context')
   await mkdir(output, { recursive: true })
-  const sources = [client, probe, 'packages/core/src/doctor.ts', 'packages/core/src/control.ts', 'packages/core/src/control-codec.ts',
+  const sources = [client, probe, observation, 'packages/core/src/agent-provider.ts', 'packages/core/src/types.ts', 'packages/core/src/agent-session-continuity.ts',
+    'packages/core/src/doctor.ts', 'packages/core/src/control.ts', 'packages/core/src/control-codec.ts',
     'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/shared/contracts.ts',
     'apps/desktop/src/shared/executor-probe-context.ts', 'apps/desktop/src/renderer/src/lib/executor-detection.ts',
     'apps/desktop/src/renderer/src/lib/executors.ts', 'apps/desktop/src/renderer/src/store.ts',
     'packages/core/test/executable-launch-context.test.ts', 'packages/core/test/client-executor-availability.test.ts',
-    'packages/core/test/doctor-unverifiable-vs-missing.test.ts', 'apps/desktop/test/executable-context-control.test.ts', config, script]
+    'packages/core/test/doctor-unverifiable-vs-missing.test.ts', 'packages/core/test/helpers/executable-native-fixture.ts',
+    'apps/desktop/test/executable-context-control.test.ts', 'apps/desktop/test/executable-observation-service.test.ts',
+    'docs/design/behavior/agent-capabilities-and-messaging.md', config, script]
   const bind = async () => Object.fromEntries(await Promise.all(sources.map(async path => [path, hash(await readFile(join(root, path)))])))
   const before = await bind(), runs = [], mutations = []
   async function run(name, args) {
@@ -73,7 +97,7 @@ if (process.argv[2] === '--worker') {
       '--reporter', 'default', '--reporter', 'json', '--outputFile', join(output, 'current.json')])
     assert.equal(baseline.code, 0, baseline.text)
     const green = JSON.parse(await readFile(join(output, 'current.json'), 'utf8'))
-    assert(green.numPassedTests >= 19 && green.numFailedTests === 0, 'Nonempty exact current consumers are required')
+    assert(green.numPassedTests >= 26 && green.numFailedTests === 0, 'Nonempty exact current consumers are required')
     for (const [name, spec] of Object.entries(variants)) {
       await writeFile(join(output, name + '.loaded.jsonl'), '')
       const red = await run(name, [script, '--worker', name, output])
@@ -90,6 +114,12 @@ if (process.argv[2] === '--worker') {
         assert.match(failures, /promise rejected.*configured.*instead of resolving/i)
         assert.match(red.text, /Caused by: AgentMuxError:.*Configured executable "context-runner" was not found/)
         assert.match(red.text, /code: 'AGENT_NOT_FOUND'/)
+      } else if (name === 'provider-refusal-bypass' || name === 'unknown-command-binding') {
+        // Vitest JSON labels a rejected-promise assertion as Error. Its default
+        // report must show the actual unauthorized Agent Session it returned.
+        assert.match(failures, /promise resolved.*instead of rejecting/)
+        assert.match(red.text, /AssertionError: promise resolved/)
+        assert.match(red.text, /"kind": "agent"/)
       } else assert.match(failures, /AssertionError|Configured executable.*pre-plan-command|Could not verify/)
       assert.doesNotMatch(red.text, /Session persistence unavailable|Failed to resolve entry|Failed to load|No space left|Private Native readiness unavailable|Test timed out/)
       mutations.push({ name, loaded: loaded[0], failures: failed.map(test => ({ fullName: test.fullName, failureMessages: test.failureMessages })) })
