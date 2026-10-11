@@ -26,7 +26,8 @@ it('renders real source-scoped resource facts, keeps partial failures and never 
   expect(dom.container.textContent).toContain('4 retained in total')
   expect(dom.container.textContent).toContain('Some observations unavailable')
   expect(dom.container.textContent).toContain('Capabilities not observed')
-  expect(dom.container.textContent).not.toContain('Recoverable input')
+  expect(dom.container.querySelectorAll('[data-native-capability]')).toHaveLength(6)
+  expect([...dom.container.querySelectorAll('[data-native-capability] strong')].map(row => row.textContent)).toEqual(Array(6).fill('Unconfirmed'))
   expect(dom.container.textContent).toContain('Not provided by Runtime')
   const partial = observation(); partial.resources = { state: 'unavailable', code: 'RESOURCE_UNAVAILABLE', message: 'Original resources could not be read.', readAt: _historyFixtureEpoch(0, 9, 0) }
   inspect.mockResolvedValue(partial)
@@ -34,6 +35,36 @@ it('renders real source-scoped resource facts, keeps partial failures and never 
   expect(dom.container.textContent).toContain('1 KiB')
   expect(dom.container.textContent).toContain('Original resources could not be read. Last confirmed')
   expect(dom.container.textContent).toContain('Resource sample')
+})
+it('presents each original Native declaration with its own diagnostic read time and marks retained evidence after a source failure', async () => {
+  const first = observation()
+  first.diagnostics = { state: 'available', readAt: _historyFixtureEpoch(0, 3, 141), value: { nodeVersion: 'v22', platform: 'darwin', arch: 'arm64', supported: true,
+    ctxmux: { state: { configuredDirectory: _historyFixturePath("configured"), servingDirectory: _historyFixturePath("serving") }, serving: { buildIdentity: 'build', protocolVersion: 16, instanceId: 'original-native', sourceCommit: null },
+      bundled: { version: '1.0.0', sourceCommit: 'commit', artifactPlatform: 'darwin-arm64' }, ready: true,
+      capabilities: { transport: 'local-unix', orderedOutputBytes: true, boundedReplay: true, recoverableInput: true, resize: true, interrupt: true, completeStop: true } } } }
+  const inspect = vi.spyOn(api.hosts, 'inspect').mockResolvedValue(first)
+  await dom.render(<HostRuntimePanel host={host} committed={host} active />)
+  const capability = () => dom.container.querySelector<HTMLElement>('[aria-label="Native capability declarations"]')!
+  expect(capability().dataset.diagnosticEvidence).toBe('current')
+  expect(capability().textContent).toContain('Source · Native diagnostics')
+  expect(capability().querySelector('time')?.dateTime).toBe(new Date(_historyFixtureEpoch(0, 3, 141)).toISOString())
+  expect([...capability().querySelectorAll('[data-native-capability]')].map(row => row.textContent?.trim())).toEqual([
+    'Ordered outputDeclared', 'Bounded replayDeclared', 'Recoverable inputDeclared', 'ResizeDeclared', 'InterruptDeclared', 'Complete stopDeclared'
+  ])
+  expect(capability().textContent).toContain('Access to an individual Run is checked separately.')
+  const partial = observation(); partial.diagnostics = { state: 'unavailable', readAt: _historyFixtureEpoch(0, 9, 900), code: 'DIAGNOSTICS_UNAVAILABLE', message: 'Original diagnostics could not be read.' }
+  inspect.mockResolvedValue(partial)
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect(capability().dataset.diagnosticEvidence).toBe('retained')
+  expect(capability().querySelector('time')?.dateTime).toBe(new Date(_historyFixtureEpoch(0, 3, 141)).toISOString())
+  expect([...capability().querySelectorAll('[data-native-capability] strong')].map(row => row.textContent)).toEqual(Array(6).fill('Last confirmed'))
+  expect(capability().textContent).not.toContain('Current observation')
+  expect(dom.container.textContent).toContain('Original diagnostics could not be read.')
+  expect(dom.container.textContent).not.toContain('Unsupported')
+  inspect.mockRejectedValue(new Error('This observation transport failed.'))
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+  expect(capability().dataset.diagnosticEvidence).toBe('retained')
+  expect(capability().querySelector('time')?.dateTime).toBe(new Date(_historyFixtureEpoch(0, 3, 141)).toISOString())
 })
 it('reads only the active saved route, cancels on Host changes, and ignores a late old response', async () => {
   let release!: (value: HostRuntimeObservation) => void
