@@ -7,12 +7,8 @@
 
 .activity-feed { height: 100%; overflow: auto; padding:0 0 var(--sp-6); background: radial-gradient(80% 24% at 50% 0, color-mix(in oklab, var(--blue) 7%, transparent), transparent 72%), var(--surface-0); }
 .activity-feed__empty { padding-top:70px; color: var(--text-3); font-size: var(--fs-meta); text-align: center; }
-.activity-feed__read-notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); border-bottom: 1px solid var(--line-soft); }
+.activity-feed__read-notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-3) var(--sp-6) var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); border-bottom: 1px solid var(--line-soft); }
 .activity-feed__read-notice > span { display: inline-flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; overflow-wrap: anywhere; }
-/* Empty reads use the shared floating Find control; reserve its existing slot
-   so it cannot intercept the original source Retry target. */
-.activity-feed-frame:has(.reading-find__floating-trigger) .activity-feed__read-notice:first-child { padding-inline-end: calc(var(--sp-8) + var(--sp-4)); }
-@media (pointer: coarse) { .activity-feed-frame:has(.reading-find__floating-trigger) .activity-feed__read-notice:first-child { padding-inline-end: calc(var(--sp-8) * 2); } }
 /* The ruler is an honest temporal axis: ticks sit at their real elapsed fraction, so a burst of
    machine steps clusters and a long think opens a gap. It reads the shape of the run at a glance. */
 .activity-ruler {
@@ -297,6 +293,12 @@
 .activity-feed__history-divider::before, .activity-feed__history-divider::after { content: ''; height: 1px; flex: 1; background: var(--line-soft); }
 
 .activity-feed-frame { position: relative; height: 100%; min-height: 0; }
+.activity-feed__reading-header { display: contents; }
+.activity-feed__reading-header:not([data-has-ruler]) { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); }
+.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading { grid-column: 1; min-width: 0; padding: var(--sp-6) var(--sp-4); }
+.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__reading { grid-column: 1; min-width: 0; }
+.activity-feed__reading-header:not([data-has-ruler]) > .reading-find__floating-trigger { position: static; grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: var(--sp-1); }
+
 /* A reading signal, not placeholder messages or an Agent execution indicator.
    The continuous opacity cadence belongs only to an actual empty pending read. */
 .activity-feed__empty-reading { display: flex; align-items: center; gap: var(--sp-6); padding: var(--sp-7) var(--sp-6); color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-sans); }
