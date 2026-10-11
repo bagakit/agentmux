@@ -1306,6 +1306,38 @@ export class CtxmuxRunAdapter {
     }
   }
 
+  /** Observe only this Run's lifecycle from its known tail; output never enters a Core queue. */
+  async observeLifecycle(run: CtxmuxAdapterRun, changed: (error?: AgentMuxError) => void): Promise<() => Promise<void>> {
+    let attachment: Attachment
+    try { attachment = await this.openAttachment(run.runId, run.latestOutputBytes, 'raw') }
+    catch (error) { throw translateCtxmuxError(error) }
+    let closed = false
+    const close = async () => {
+      if (closed) return
+      closed = true
+      // Ended streams have no live view to acknowledge. Closing only this observer never stops a Run.
+      if (attachment.snapshot.run.state.type !== 'running') { attachment.close(); return }
+      try { await attachment.detach() } catch { attachment.close() }
+    }
+    if (attachment.snapshot.run.state.type !== 'running') { changed(); await close(); return close }
+    void (async () => {
+      let failure: AgentMuxError | undefined, ended = false
+      try {
+        for await (const event of attachment.events()) {
+          if (closed) return
+          if (event.type === 'exited' || event.type === 'interrupted') { ended = true; return }
+        }
+      } catch (error) { failure = translateCtxmuxError(error) }
+      finally {
+        if (!closed) {
+          changed(failure ?? (ended ? undefined : new AgentMuxError('Original lifecycle observation ended without a terminal fact.', 'CTXMUX_LIFECYCLE_OBSERVATION_UNCONFIRMED')))
+          await close()
+        }
+      }
+    })()
+    return close
+  }
+
   private async openAttachment(runId: string, afterByte: number, view: AgentMuxRunAttachmentView): Promise<Attachment> {
     const client = this.requireClient()
     return view === 'terminal' ? await client.attachTerminal(runId, afterByte) : await client.attach(runId, afterByte)
