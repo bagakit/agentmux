@@ -174,6 +174,8 @@ Performance 是首个内置工具，按钮与浮窗统一层级、间距、数�
 ## 资源面板密度
 CPU/Memory 面板复用 Activity 行的紧凑列表语言：一行一个 Agent，首行身份，次行项目与状态，指标靠右；默认折叠，展开后不重复冗余标题。
 
+Performance 首层提供紧凑、可见的“采集现场”动作；采集中的文字说明短时串行采样，原资源读数仍可阅读。结果首层只放完整／部分／未知状态、本机保存事实和导出入口，来源与各阶段详情按需展开。长身份和原因可换行，面板内滚动可达，窄窗不溢出或遮住关闭动作；CPU 火焰图与分配栈复用原分析区，不在首屏铺开原始 JSON。采集、保存与证据边界唯一见[Performance 行为](../behavior/settings-and-observation.md#toolkit-与官方-performance-工具)。
+
 ## 全局通知与底部状态入口
 
 - 跨会话 Agent 汇总只在[Focus 入口](focus-context.md#中断恢复与导航)出现；运行数与待处理数沿该处原紧凑预算，类别及明细按需读取，不另设底部三组展开按钮。共享图标居中，hover、键盘焦点和展开态清楚，不能露出浏览器默认按钮的灰底、边框或 padding。聚合、请求顺序与准确 Session 定位归[跨会话注意力 owner](../behavior/settings-and-observation.md#跨会话注意力与系统通知)。
