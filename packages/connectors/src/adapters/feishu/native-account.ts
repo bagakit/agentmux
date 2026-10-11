@@ -74,8 +74,10 @@ export function readNativeAccountState(snapshot: unknown): { state: NativeAccoun
 /** Authentication initialization only; it never creates or selects an application. */
 export async function beginFeishuNativeAccount(signal?: AbortSignal): Promise<NativeAccountChallenge> {
   try {
+    // Bound this observation only; the durable caller keeps the original unknown intent.
+    const bounded = AbortSignal.timeout(20_000)
     const response = await fetch(INIT, {
-      method: 'POST', redirect: 'manual', ...(signal ? { signal } : {}), headers: FEISHU_QR_HEADERS,
+      method: 'POST', redirect: 'manual', signal: signal ? AbortSignal.any([signal, bounded]) : bounded, headers: FEISHU_QR_HEADERS,
       body: JSON.stringify({ biz_type: null, redirect_uri: LANDING })
     })
     if (!response.ok || response.status >= 300) return { kind: 'unknown' }
