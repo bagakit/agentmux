@@ -1,3 +1,4 @@
+import { fixtureEpoch as _lateFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -37,8 +38,8 @@ function session(providerId = 'codex'): AgentMuxAgentSession {
     run: { runId: 'run-1' },
     retiredRuns: [],
 
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: _lateFixtureEpoch(0, 0, 1),
+    updatedAt: _lateFixtureEpoch(0, 0, 1),
     nativeHandle: { kind: 'provider', providerId, sessionId: 'native-1' }
   }
 }
@@ -56,7 +57,7 @@ function run(state: AgentMuxRun['state'] = 'running'): AgentMuxRun {
     state,
     cols: 80,
     rows: 24,
-    observedAt: 10,
+    observedAt: _lateFixtureEpoch(0, 0, 10),
     latestOutputBytes: 12,
     acceptedInputBytes: 0,
     ...(state === 'exited' ? { exitCode: 0 } : {}),
@@ -71,7 +72,7 @@ function facts(overrides: Partial<Parameters<typeof decideAgentSessionContinuity
     agentSessionId: current.agentSessionId,
     hostId: current.hostId,
     expectedRun: current.run,
-    observedAt: 10,
+    observedAt: _lateFixtureEpoch(0, 0, 10),
     session: current,
     retirement: null,
     run: run(),
@@ -92,7 +93,7 @@ describe('Agent Session continuity decision', () => {
       kind: 'reattachable',
       previousRun: { runId: 'run-1' },
       run: { runId: 'run-1', state: 'running' },
-      evidence: { kind: 'run-running', observedAt: 10 }
+      evidence: { kind: 'run-running', observedAt: _lateFixtureEpoch(0, 0, 10) }
     })
   })
 
@@ -129,7 +130,7 @@ describe('Agent Session continuity decision', () => {
         hostId: 'local',
         run: { runId: 'run-1' },
         source: 'user',
-        observedAt: 20
+        observedAt: _lateFixtureEpoch(0, 0, 20)
       },
       run: null,
       catalog: null,
@@ -138,7 +139,7 @@ describe('Agent Session continuity decision', () => {
       kind: 'retired',
       agentSessionId: 'agent-1',
       previousRun: { runId: 'run-1' },
-      evidence: { kind: 'user-retired', observedAt: 20 }
+      evidence: { kind: 'user-retired', observedAt: _lateFixtureEpoch(0, 0, 20) }
     })
     expect(decideAgentSessionContinuity(facts({
       session: null,
@@ -153,21 +154,21 @@ describe('Agent Session continuity decision', () => {
         hostId: 'local',
         run: { runId: 'run-1' },
         source: 'user' as const,
-        observedAt: 20
+        observedAt: _lateFixtureEpoch(0, 0, 20)
       },
       {
         agentSessionId: 'agent-1',
         hostId: 'another-host',
         run: { runId: 'run-1' },
         source: 'user' as const,
-        observedAt: 20
+        observedAt: _lateFixtureEpoch(0, 0, 20)
       },
       {
         agentSessionId: 'agent-1',
         hostId: 'local',
         run: { runId: 'another-run' },
         source: 'user' as const,
-        observedAt: 20
+        observedAt: _lateFixtureEpoch(0, 0, 20)
       }
     ]) {
       expect(decideAgentSessionContinuity(facts({
@@ -323,8 +324,8 @@ function continuityStoredSession(workspacePath: string): AgentMuxStoredAgentSess
     hookBindingId: 'binding-continuity'.padEnd(43, 'A'),
     hookToken: 'token-continuity'.padEnd(43, 'B'),
 
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: _lateFixtureEpoch(0, 0, 1),
+    updatedAt: _lateFixtureEpoch(0, 0, 1),
     nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' }
   }
 }
@@ -482,18 +483,21 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
   })
   async function working(harness: ContinuityHarness) {
     const registry = (harness.client as any).registry
-    await registry.update('agent-1', { runId: 'run-1' }, (value: AgentMuxStoredAgentSession) => ({ ...value, updatedAt: _historyFixtureEpoch(0, 0, 10),
-      semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 10) } }))
+    await registry.update('agent-1', { runId: 'run-1' }, (value: AgentMuxStoredAgentSession) => {
+      const observedAt = Math.max(value.updatedAt + 1, Date.now())
+      return { ...value, updatedAt: observedAt, semanticStatus: { state: 'working', source: 'native-hook', observedAt } }
+    })
   }
   const original = { agentSessionId: 'agent-1', expectedRun: { runId: 'run-1' }, operationId: 'continuity-original', trigger: 'startup' as const }
-  it('automatically restores interrupted working without an idle completion or timestamp', async () => {
+  it('automatically restores recent working without inventing native interruption', async () => {
     const harness = await continuityHarness(); await working(harness)
     const probe = vi.spyOn(harness.client, 'probeAgent')
     const result = await harness.client.ensureAgentContinuity(original)
     expect(result).toMatchObject({ kind: 'resumed', session: { agentSessionId: 'agent-1', nativeHandle: { sessionId: 'native-1' } },
-      continuity: { reason: 'interrupted-working', policy: DEFAULT_AGENT_CONTINUITY_POLICY, previousRun: { runId: 'run-1' }, newRun: { runId: 'spawned-run-1' } } })
-    expect(result.continuity?.recoveryInputs?.reminder.length).toBeGreaterThan(0)
-    expect(result.continuity?.recoveryInputs?.continuation.length).toBeGreaterThan(0)
+      continuity: { reason: 'recent-activity', policy: DEFAULT_AGENT_CONTINUITY_POLICY, previousRun: { runId: 'run-1' }, newRun: { runId: 'spawned-run-1' } } })
+    expect(result.continuity?.recoveryInputs).toEqual({ reminder: '', continuation: '' })
+    expect(result.continuity?.interruption).toMatchObject({ support: 'provider', state: 'unknown' })
+    expect(result.continuity?.launchInput).toBeUndefined(); expect(result.continuity?.recoveryDelivery).toBeUndefined()
     expect(probe).toHaveBeenCalledTimes(1); expect(harness.spawnCount()).toBe(1)
     const stored = await harness.store.readMetadata('agent-1')
     expect(stored?.continuityOperations?.[original.operationId]?.newRun).toEqual({ runId: 'spawned-run-1' })
@@ -828,8 +832,8 @@ function promptStoredSession(): AgentMuxStoredAgentSession {
     hookBindingId: 'binding-prompt',
     hookToken: 'token-prompt',
 
-    createdAt: 100,
-    updatedAt: 100,
+    createdAt: _lateFixtureEpoch(0, 0, 100),
+    updatedAt: _lateFixtureEpoch(0, 0, 100),
     terminalPromptReadiness: {
       source: 'native-stop',
       id: 'readiness-1',
@@ -943,6 +947,13 @@ async function promptClient(options: {
   observeCalls: () => number
   casWrites: () => number
 }> {
+  // Each prompt receipt belongs to this private journal, including fake-clock retries.
+  const directory = await mkdtemp(join(tmpdir(), 'amx-continuity-prompt-'))
+  continuityDirectories.push(directory)
+  for (const key of Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_'))) vi.stubEnv(key, undefined)
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'state'))
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
   const store = new CountingMemoryAgentSessionStore()
   await store.compareAndSwap(null, options.stored ?? promptStoredSession())
   const client = new AgentMuxClient({ store })
@@ -1127,7 +1138,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
       reason: 'screen-evidence-gap',
       submissionId: 'earlier-submission',
       run: { runId: 'prompt-run' },
-      observedAt: 90
+      observedAt: _lateFixtureEpoch(0, 0, 90)
     }
     const { client, store, inputs } = await promptClient({
       stored: { ...promptStoredSession(), terminalPromptDelivery: degraded },

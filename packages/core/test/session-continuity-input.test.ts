@@ -5,7 +5,8 @@ import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { AgentMuxError } from '../src/errors.js'
 import { composeAgentPrompt } from '../src/agent-outbound-message.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
-import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+import { createHash } from 'node:crypto'
+import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityOperation } from '../src/agent-session-continuity.js'
 
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -55,14 +56,40 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; na
   const screen = vi.spyOn(inner.screenEvidence, 'wait')
   if (options.renderObservationUnavailable) screen.mockRejectedValue(new AgentMuxError('Private screen observation unavailable', 'AGENT_PROMPT_RENDER_TIMEOUT'))
   else screen.mockResolvedValue(1)
-  await inner.registry.update('recipient', { runId: 'run-recipient' }, (session: AgentMuxStoredAgentSession) => ({ ...session,
-    semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) } }))
+  await inner.registry.update('recipient', { runId: 'run-recipient' }, (session: AgentMuxStoredAgentSession) => {
+    const observedAt = Math.max(session.updatedAt + 1, Date.now())
+    return { ...session, updatedAt: observedAt, semanticStatus: { state: 'working', source: 'native-hook', observedAt } }
+  })
   const original = { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'original-continuity', trigger: options.trigger ?? 'startup',
     policy: { reminderMode: options.reminder === false ? 'off' as const : 'default-plus-custom' as const, reminderAppend: 'Retain the original constraints.',
       continuationEnabled: options.continuation !== false, continuationPrompt: 'Continue the original task exactly.' } }
   const result = await h.client.ensureAgentContinuity(original)
   expect(result.kind).toBe('resumed')
   const operation = () => h.client.agentSession('recipient').continuityOperations!['original-continuity']!
+  // Explicitly retained pre-marker packet: this is stored history, not a new
+  // automatic recovery policy generating editable reminder/continuation content.
+  // Preserve its original operation/key/body/parts and let today's owner consume it.
+  if (original.trigger !== 'input' && (options.reminder !== false || options.continuation !== false)) {
+    await inner.registry.update('recipient', { runId: 'recovered-run' }, (current: AgentMuxStoredAgentSession) => {
+      const next = structuredClone(current), old = next.continuityOperations!['original-continuity']!
+      const sha = (text: string) => createHash('sha256').update(text).digest('base64url')
+      const key = { kind: 'prompt' as const, agentSessionId: old.agentSessionId, expectedRun: { ...old.newRun! },
+        submissionId: 'continuity-' + sha(JSON.stringify([old.agentSessionId, old.operationId, old.newRun])) }
+      const savedReminder = options.reminder === false ? '' : DEFAULT_AGENT_CONTINUITY_REMINDER + '\n\nRetain the original constraints.'
+      const reminder = savedReminder ? `Session recovery context:\nAgent Session: recipient\nPrevious Run: run-recipient\nRecovery operation: original-continuity\nProvider native Session: ${providerId}/native-original\nInterrupted activity: working.\nRecovery evidence: run-ended\nPrevious typed input: none. Unknown earlier input is not replayed.\n\n${savedReminder}` : ''
+      const continuation = options.continuation === false ? '' : 'Continue the original task exactly.'
+      const part = (text: string) => ({ selected: Boolean(text), status: text ? 'waiting' as const : 'not-selected' as const, text, digest: sha(text) })
+      const retained: AgentMuxContinuityOperation = { ...old, interruptedWorking: true, recoveryInputs: { reminder: savedReminder, continuation },
+        recoveryDelivery: { context: { agentSessionId: old.agentSessionId, previousRun: { ...old.previousRun }, newRun: { ...old.newRun! },
+          nativeTarget: structuredClone(old.nativeTarget!), interruptedWorking: true, runEvidence: structuredClone(old.evidence), previousInput: { scope: 'typed-prompt', outcome: 'none' } },
+          key, initialInputByte: 0, phase: 'waiting', reason: 'retained-historical-input', observedAt: Date.now(), reminder: part(reminder), continuation: part(continuation) } }
+      delete retained.interruption // This packet predates native interruption observations.
+      next.continuityOperations![old.operationId] = retained
+      if (next.continuity?.operationId === old.operationId) next.continuity = structuredClone(retained)
+      return next
+    })
+    inner.continuityInputs.restore(inner.registry.list())
+  }
   const wake = async () => { inner.continuityInputs.track(inner.registry.get('recipient')); await Promise.resolve() }
   return { ...h, inner, provider, original, operation, wake, setReady: (value: boolean) => { ready = value },
     delivery: () => operation().recoveryDelivery!, input: inner.kernel.input,
@@ -81,7 +108,7 @@ async function anotherOwner(h: Awaited<ReturnType<typeof fixture>>) {
   return { client, inner, provider }
 }
 
-describe('original continuity combined input consumer', () => {
+describe('retained historical continuity combined input consumer', () => {
   it.each(['claude', 'gemini'] as const)('retains the public first-prompt owner without optional native probes (%s)', async providerId => {
     const h = await fixture({ providerId })
     try {
