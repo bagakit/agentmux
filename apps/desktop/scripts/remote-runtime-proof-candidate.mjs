@@ -28,36 +28,52 @@ export function capturePostcssInputs(record) {
 export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) {
   const { assertWorkspaceDistBuiltFromCurrentSource } = await import(pathToFileURL(path.join(root, 'vitest.dist-freshness.ts')).href)
   await assertWorkspaceDistBuiltFromCurrentSource(root)
-  const sourcePackage = path.join(root, 'packages/core'), core = path.join(privateRoot, 'core-candidate')
-  const demandSource = path.join(root, 'packages/demand'), demand = path.join(privateRoot, 'demand-candidate')
-  const packageFiles = async () => [path.join(sourcePackage, 'package.json'), ...await files(path.join(sourcePackage, 'dist')),
-    ...await files(path.join(sourcePackage, 'bin')), ...await files(path.join(sourcePackage, 'vendor/ctxmux', `${process.platform}-${process.arch}`)),
-    path.join(demandSource, 'package.json'), ...await files(path.join(demandSource, 'dist'))]
+  const workspace = new Map(), pending = ['@agentmux/core']
+  while (pending.length) {
+    const name = pending.shift()
+    if (workspace.has(name)) continue
+    const source = path.join(root, 'packages', name.slice('@agentmux/'.length))
+    const manifest = JSON.parse(await fs.readFile(path.join(source, 'package.json'), 'utf8'))
+    assert.equal(manifest.name, name, 'The copied workspace dependency must have its declared identity')
+    workspace.set(name, { source, directory: path.join(privateRoot, `${name.slice('@agentmux/'.length)}-candidate`), manifest })
+    for (const [dependency, version] of Object.entries(manifest.dependencies ?? {})) {
+      if (version.startsWith('workspace:')) pending.push(dependency)
+    }
+  }
+  const core = workspace.get('@agentmux/core').directory
+  const packageFiles = async () => (await Promise.all([...workspace].map(async ([name, item]) => [
+    path.join(item.source, 'package.json'), ...await files(path.join(item.source, 'dist')),
+    ...(name === '@agentmux/core' ? [...await files(path.join(item.source, 'bin')),
+      ...await files(path.join(item.source, 'vendor/ctxmux', `${process.platform}-${process.arch}`))] : [])
+  ]))).flat()
   const identify = async () => Object.fromEntries(await Promise.all((await packageFiles()).map(async file => [path.relative(root, file), digest(await fs.readFile(file))])))
   const before = await identify()
-  await fs.mkdir(core); await fs.mkdir(demand)
-  for (const directory of ['dist', 'bin', `vendor/ctxmux/${process.platform}-${process.arch}`]) {
-    await fs.cp(path.join(sourcePackage, directory), path.join(core, directory), { recursive: true })
-  }
-  await fs.copyFile(path.join(sourcePackage, 'package.json'), path.join(core, 'package.json'))
-  await fs.cp(path.join(demandSource, 'dist'), path.join(demand, 'dist'), { recursive: true })
-  await fs.copyFile(path.join(demandSource, 'package.json'), path.join(demand, 'package.json'))
-  await fs.mkdir(path.join(core, 'node_modules/@agentmux'), { recursive: true })
-  await fs.symlink(demand, path.join(core, 'node_modules/@agentmux/demand'))
   const dependencies = {}
-  for (const entry of await fs.readdir(path.join(sourcePackage, 'node_modules'), { withFileTypes: true })) {
-    if (entry.name === '@agentmux') continue
-    const source = await fs.realpath(path.join(sourcePackage, 'node_modules', entry.name))
-    dependencies[entry.name] = source
-    await fs.symlink(source, path.join(core, 'node_modules', entry.name))
+  for (const [name, item] of workspace) {
+    await fs.mkdir(item.directory)
+    for (const directory of ['dist', ...(name === '@agentmux/core' ? ['bin', `vendor/ctxmux/${process.platform}-${process.arch}`] : [])]) {
+      await fs.cp(path.join(item.source, directory), path.join(item.directory, directory), { recursive: true })
+    }
+    await fs.copyFile(path.join(item.source, 'package.json'), path.join(item.directory, 'package.json'))
+    await fs.mkdir(path.join(item.directory, 'node_modules/@agentmux'), { recursive: true })
+    for (const dependency of Object.keys(item.manifest.dependencies ?? {})) {
+      if (workspace.has(dependency)) {
+        await fs.symlink(workspace.get(dependency).directory, path.join(item.directory, 'node_modules', dependency))
+      }
+    }
+    let entries = []
+    try { entries = await fs.readdir(path.join(item.source, 'node_modules'), { withFileTypes: true }) }
+    catch (error) { if (error.code !== 'ENOENT') throw error }
+    for (const entry of entries) {
+      if (entry.name === '@agentmux') continue
+      const source = await fs.realpath(path.join(item.source, 'node_modules', entry.name))
+      dependencies[`${name}/${entry.name}`] = source
+      await fs.symlink(source, path.join(item.directory, 'node_modules', entry.name))
+    }
   }
-  await fs.symlink(await fs.realpath(path.join(demandSource, 'node_modules')), path.join(demand, 'node_modules'))
   assert.deepEqual(await identify(), before, 'The package changed while its private candidate was being copied')
   proof.coreCandidate = { sourcePackageHashes: before, dependencies, copiedPlatform: `${process.platform}-${process.arch}` }
-  const manifests = {
-    '@agentmux/core': { directory: core, manifest: JSON.parse(await fs.readFile(path.join(core, 'package.json'), 'utf8')) },
-    '@agentmux/demand': { directory: demand, manifest: JSON.parse(await fs.readFile(path.join(demand, 'package.json'), 'utf8')) }
-  }
+  const manifests = Object.fromEntries(workspace)
   const consumed = new Map()
   const record = async (id, code, consumedVia) => {
     const file = id.split('?')[0]
@@ -65,7 +81,7 @@ export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) 
       !(file.startsWith(path.join(root, 'apps/desktop/')) || file.startsWith(path.join(root, 'apps/host/')) ||
         file.startsWith(path.join(root, 'packages/layout/')) ||
         file.startsWith(path.join(root, 'packages/client-ui/')) ||
-        file.startsWith(core + '/') || file.startsWith(demand + '/'))) return
+        [...workspace.values()].some(item => file.startsWith(item.directory + '/')))) return
     const sourceSHA256 = digest(await fs.readFile(file))
     const previous = consumed.get(file)
     if (previous) assert.equal(previous.sourceSHA256, sourceSHA256, 'A consumed module changed between the two candidate builds')
@@ -89,7 +105,7 @@ export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) 
       // Match the production ESM Host entry next to the Main bundle. Its lifetime is
       // independent of either ordinary Electron generation that consumes it.
       await fs.writeFile(path.join(privateRoot, 'package.json'), JSON.stringify({ private: true, type: 'module' }) + '\n')
-      await build({ configFile: false, root: path.join(root, 'apps/host'), logLevel: 'error', plugins: [capture],
+      await build({ configFile: false, root: path.join(root, 'apps/host'), logLevel: 'error', plugins: [capture], ssr: { noExternal: true },
         build: { ssr: path.join(root, 'apps/host/src/index.ts'), target: 'node22',
           outDir: path.join(privateRoot, 'main'), emptyOutDir: false,
           rollupOptions: { external: id => id === '@agentmux/core' || id.startsWith('@agentmux/core/'),
@@ -123,7 +139,7 @@ export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) 
         ? `private/${path.relative(privateRoot, file)}` : path.relative(root, file), fact]))
     },
     async identity() {
-      return Object.fromEntries(await Promise.all([path.join(privateRoot, 'package.json'), ...await files(core), ...await files(demand)]
+      return Object.fromEntries(await Promise.all([path.join(privateRoot, 'package.json'), ...(await Promise.all([...workspace.values()].map(item => files(item.directory)))).flat()]
         .filter(file => !file.split(path.sep).includes('node_modules')).map(async file => [path.relative(privateRoot, file), digest(await fs.readFile(file))])))
     }
   }

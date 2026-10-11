@@ -17,7 +17,10 @@ const receipt = { schema: 'agentmux.remote-runtime-restart.v1', passed: false, t
   limitations: ['Actual private Headless CLI owner, public Runtime RPC, original Provider Session and official ctxmux Run across owner and two ordinary Electron process restarts.',
     'Only Desktop SSH transport selection is replaced by private Unix. This does not qualify SSH/Farm or a real Agent Provider.',
     'The repository Codex CLI fixture provides a real process/native identity. No remote Session, lifecycle fact or byte channel is simulated.'] }
-const env = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
+const systemEnvironment = ['PATH', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE',
+  'USER', 'LOGNAME', '__CF_USER_TEXT_ENCODING', 'SystemRoot', 'WINDIR']
+const env = { ...Object.fromEntries(systemEnvironment.filter(name => process.env[name] !== undefined).map(name => [name, process.env[name]])),
+  HOME: path.join(privateRoot, 'home'),
   AGENTMUX_RUNTIME_DIRECTORY: remoteDirectory, AGENTMUX_STATE_DIRECTORY: remoteState,
   AGENTMUX_AGENT_SESSION_STORE: path.join(remoteState, 'sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: path.join(remoteState, 'messages.ndjson') }
 let server, client, currentOwner
@@ -44,7 +47,7 @@ const startOwner = async () => {
 }
 await fs.mkdir(evidence, { recursive: true })
 try {
-  await fs.mkdir(remoteDirectory, { mode: 0o700 }); await fs.mkdir(remoteState, { mode: 0o700 })
+  await fs.mkdir(remoteDirectory, { mode: 0o700 }); await fs.mkdir(remoteState, { mode: 0o700 }); await fs.mkdir(env.HOME, { mode: 0o700 })
   await fs.mkdir(path.join(privateRoot, 'workspace')); await fs.mkdir(path.join(privateRoot, 'codex'))
   const command = path.join(privateRoot, 'fake-codex-cli.mjs')
   await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), command); await fs.chmod(command, 0o755)
@@ -58,7 +61,8 @@ try {
   } catch (error) { await rpc.dispose(); throw error }
   const session = await client.createAgent({ providerId: 'codex', executorId: 'codex', workspacePath: path.join(privateRoot, 'workspace'),
     commandOverride: command, createOperationId: 'private-native-recovery-create', injectAgentMuxGuide: false,
-    env: { CODEX_HOME: path.join(privateRoot, 'codex'), AGENTMUX_FAKE_READY_MODE: 'before' } })
+    env: { CODEX_HOME: path.join(privateRoot, 'codex'), AGENTMUX_FAKE_READY_MODE: 'before',
+      AGENTMUX_FAKE_NATIVE_RECORD: '1', AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: path.join(privateRoot, 'codex', 'sessions') } })
   const original = await client.reattachAgent(session.agentSessionId, 0, 'terminal')
   const native = await wait(() => client.agentSession(session.agentSessionId), value => Boolean(value.nativeHandle) && value.semanticStatus?.state === 'done')
   const splitRun = await client.createTerminal({ createOperationId: 'private-native-split-terminal', workspacePath: path.join(privateRoot, 'workspace'),

@@ -3,20 +3,31 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
+import { homedir } from 'node:os'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
-import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
-import { RuntimeController } from '../../../src/main/runtime-controller'
-import { connectDesktopAgentMuxHost } from '../../../src/main/desktop-host'
-import { runRemoteTerminalReadingProof } from '../../remote-terminal-reading-proof.mjs'
 
 const [html, privateRoot, phase, preload, evidence, nodeExecutable, recoveryInputPath] = process.argv.slice(2)
 const recoveryInput = recoveryInputPath ? JSON.parse(readFileSync(recoveryInputPath, 'utf8')) : null
-app.setPath('userData', path.join(privateRoot, 'user-data'))
-app.setPath('sessionData', path.join(privateRoot, 'session-data'))
+const privatePaths = {
+  home: path.join(privateRoot, 'home'), appData: path.join(privateRoot, 'app-data'),
+  userData: path.join(privateRoot, 'user-data'), sessionData: path.join(privateRoot, 'session-data')
+}
+for (const [name, directory] of Object.entries(privatePaths)) {
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 })
+  app.setPath(name as keyof typeof privatePaths, directory)
+  assert.equal(app.getPath(name as keyof typeof privatePaths), directory)
+}
+assert.equal(homedir(), privatePaths.home, 'The private Node Host must not inherit the user home')
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
+// Production modules may capture Electron paths at import time. Load them only
+// after all four application directories belong to this exact private proof.
+const { AgentMuxFileAgentSessionStore } = await import('@agentmux/core')
+const { AgentMuxSpatialStateStore } = await import('@agentmux/core/spatial-state')
+const { RuntimeController } = await import('../../../src/main/runtime-controller')
+const { connectDesktopAgentMuxHost } = await import('../../../src/main/desktop-host')
+const { runRemoteTerminalReadingProof } = await import('../../remote-terminal-reading-proof.mjs')
 const local = { id: 'local', kind: 'local' as const, label: 'Private local Runtime' }
 const remote = { id: 'controlled-remote', kind: 'ssh' as const, label: 'Build host', hostname: 'unreachable.invalid',
   remoteCommand: _hygiene_fixturePath("opt/agentmux/bin/agentmux-rpc"), remoteSocketPath: _hygiene_fixturePath("run/user/1000/agentmux/public.sock"), runtimeId: 'fixture-bound-runtime' }
@@ -42,7 +53,11 @@ const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial-st
 let disposeSpatial: (() => void) | undefined
 let localHealth: any
 const calls: { operation: string; args: unknown[] }[] = []
-const result: Record<string, any> = { passed: false, phase, pid: process.pid, controlledRemoteObservation: warning, userAppRunTouched: false }
+const result: Record<string, any> = { passed: false, phase, pid: process.pid, controlledRemoteObservation: warning, userAppRunTouched: false,
+  privateApplicationPaths: Object.fromEntries(Object.keys(privatePaths).map(name => [name, app.getPath(name as keyof typeof privatePaths)])),
+  privateOwnerPaths: { agentSessionStore: store.path, spatialState: path.join(privateRoot, 'spatial-state.json'),
+    runtime: process.env.AGENTMUX_RUNTIME_DIRECTORY, state: process.env.AGENTMUX_STATE_DIRECTORY,
+    nodeHome: homedir(), notes: 'not-instantiated', motes: 'not-instantiated', applicationAccess: 'not-instantiated' } }
 const stage = async (step: string) => fs.writeFile(path.join(evidence, `${phase}-progress.json`), JSON.stringify({ step, pid: process.pid, snapshotCalls, at: Date.now() }))
 if (recoveryInput) { delete result.controlledRemoteObservation; result.remoteTransport = recoveryInput.remoteEndpoint.transport }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -68,6 +83,12 @@ ipcMain.handle('remote-proof:request', async (_event, operation, ...args) => {
     case 'spatial-commit': return spatial.commit(args[0])
     case 'launch': return runtime.launchAgent({ hostId: 'local', executorId: 'codex', workspacePath: config.workspaces[0].path }, localConfig as any)
     case 'snapshot': snapshotCalls++; return recoveryInput ? runtime.snapshot(runtimeConfig) : { ...await runtime.snapshot(runtimeConfig as any), runtimeEndpointWarnings: [warning] }
+    case 'providers': return runtime.providerCatalog(args[0])
+    case 'history-sources': return runtime.sessionHistorySources(args[0])
+    case 'timeline': return runtime.sessionTimeline(args[0])
+    case 'observe-storage': return runtime.observeStorage(args[0])
+    case 'input-occupation': return runtime.notifyInputOccupation(args[0])
+    case 'inspect-input': return runtime.inspectInput(args[0], args[1])
     case 'attach': return runtime.attachSession(win.webContents.id, args[0], args[1], runtimeConfig as any)
     case 'replay': return runtime.readSessionReplay(win.webContents.id, args[0], args[1])
     case 'detach': return runtime.detachSession(win.webContents.id, args[0])
@@ -214,16 +235,15 @@ app.whenReady().then(async () => {
         await readerAssertion('window.remoteAttachmentNotices().some(notice => notice.unavailable && notice.recoveryAvailable)',
           'The original reader failure must have its Region service window and available observation recovery')
         result.readerRecoveryActions = []
-        for (const [regionId, multiple] of [[recoveryInput.identity.regionId, true], [recoveryInput.splitTerminal.regionId, false]] as const) {
+        for (const regionId of [recoveryInput.identity.regionId, recoveryInput.splitTerminal.regionId]) {
           await win.webContents.executeJavaScript(`window.remoteOpenAttachmentNotice(${JSON.stringify(regionId)}); true`)
           await readerAssertion(`window.remoteAttachmentNotices().some(notice => notice.regionId === ${JSON.stringify(regionId)} && notice.unavailable && notice.recoveryPainted && notice.recoveryAvailable)`,
-            multiple ? 'The original multi-notice reader recovery action must be fully visible and reachable'
-              : 'The original single-notice reader recovery action must be fully visible and reachable')
+            'Each original Region reader recovery action must be fully visible and reachable')
           const notice = (await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')).find(item => item.regionId === regionId)
-          assert.equal(multiple ? notice.noticeCount > 1 : notice.noticeCount === 1, true,
-            'Both original multi-notice and single-notice recovery surfaces must be exercised')
           result.readerRecoveryActions.push(notice)
-          if (!multiple) await capture(`${phase}-reader-single-notice.png`)
+          assert.ok(notice.noticeCount > 0 && notice.steps.includes('Observing this Region’s output'),
+            'Each original Region retains its reader failure alongside independent connection notices')
+          await capture(`${phase}-reader-${regionId}.png`)
         }
         await win.webContents.executeJavaScript(`window.remoteOpenAttachmentNotice(${JSON.stringify(recoveryInput.identity.regionId)}); true`)
         await readerAssertion('window.remoteAttachmentNotices().some(notice => notice.unavailable && notice.recoveryPainted && notice.recoveryAvailable)',
@@ -254,8 +274,14 @@ app.whenReady().then(async () => {
       if (result.offlineTerminalBefore) await delay(recoveryInput.terminalReading.offlineOutputDelayMs ?? 1500)
       result.restartedOwner = await win.webContents.executeJavaScript('window.remoteProof.request("owner-restart")')
       await stage('owner-restored-await-canonical-cut')
-      await until('window.remoteState().warnings.length === 0 && window.remoteState().session.status.state !== "disconnected" && window.remoteState().queue[0]?.error?.includes("unconfirmed after reconnect")')
+      const originalPending = result.offline.queue[0]
+      await until(`(() => { const state = window.remoteState(); return state.warnings.length === 0 &&
+        state.session?.id === ${JSON.stringify(recoveryInput.identity.sessionId)} &&
+        state.session.control.run.runId === ${JSON.stringify(recoveryInput.identity.run.runId)} && state.session.status.state !== 'disconnected' &&
+        state.queue.some(entry => entry.operationId === ${JSON.stringify(originalPending.operationId)} &&
+          entry.runId === ${JSON.stringify(originalPending.runId)} && entry.status === 'deferred'); })()`)
       result.restored = await state()
+      assert.deepEqual(result.restored.queue, result.offline.queue, 'Reconnection retains the complete original unknown operation without rewriting its reason')
       await readerAssertion('window.remoteAttachmentNotices().length > 0 && window.remoteAttachmentNotices().every(notice => notice.regionPresent && !notice.unavailable)',
         'Validated original reader restoration must settle its own Region service window')
       result.restoredAttachmentNotices = await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')
@@ -323,12 +349,25 @@ app.whenReady().then(async () => {
     await until('document.querySelector("button[data-settings-target=hosts]")')
     await win.webContents.executeJavaScript('document.querySelector("button[data-settings-target=hosts]").click(); true')
     await until('document.querySelector(".settings-page")?.dataset.settingsPage === "hosts"')
-    await until('document.querySelectorAll(".host-settings-card").length === 2')
+    await until('document.querySelector(".remote-management")?.dataset.remoteWide !== undefined')
+    if (await win.webContents.executeJavaScript('document.querySelector(".remote-management").dataset.remoteMode === "topology"')) {
+      await win.webContents.executeJavaScript('document.querySelector("button[aria-label=List]").click(); true')
+    }
+    await until(`document.querySelectorAll('[data-host-disclosure]').length === ${config.hosts.length}`)
+    const connectionHostId = recoveryInput?.identity.hostId ?? remote.id
+    const branchSelector = `[data-host-disclosure=${JSON.stringify(connectionHostId)}]`
+    await win.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(branchSelector + ' summary')}).click(); true`)
+    await until(`document.querySelector(${JSON.stringify(branchSelector)})?.open`)
+    await win.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(branchSelector + ' [data-host-panel="connection"]')}).click(); true`)
+    await until(`document.querySelector('.host-settings-card')?.dataset.resourceEditor === ${JSON.stringify(connectionHostId)} &&
+      document.querySelector('.host-settings-card')?.dataset.hostView === 'connection'`)
     await win.webContents.executeJavaScript('document.querySelector(".host-edit-disclosure").open = true; true')
     await until(`[...document.querySelectorAll(".host-edit-grid input")].some(input => input.value === ${JSON.stringify(recoveryInput?.identity.runtimeId ?? 'fixture-bound-runtime')} && input.readOnly && input.getClientRects().length)`)
+    result.settingsConnection = { hostId: connectionHostId, runtimeId: recoveryInput?.identity.runtimeId ?? remote.runtimeId,
+      configuredEnvironmentCount: config.hosts.length, bindingReadOnly: true }
     await capture(`${phase}-hosts.png`)
     await win.webContents.executeJavaScript("document.querySelector('button[aria-label=\"Close settings\"]').click(); true")
-    await until('!document.querySelector(".settings-page") && window.remoteLiveReady()')
+    await until('document.querySelector(".settings-page")?.hidden === true && window.remoteLiveReady()')
     const inputProbe = recoveryInput?.inputProbe ?? { kind: 'fixture-marker', text: 'z', marker: 'codex-composer-rendered:' }
     assert.ok(['fixture-marker', 'accepted-input-output'].includes(inputProbe.kind))
     assert.ok(typeof inputProbe.text === 'string' && inputProbe.text.length > 0)
@@ -372,6 +411,17 @@ app.whenReady().then(async () => {
   } catch (error: any) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
     if (win && !win.isDestroyed()) result.observationAtFailure = await state().catch(() => null)
+    const observe = async (read: () => unknown) => {
+      try { return { value: await read() } }
+      catch (error: any) { return { error: { name: error.name, code: error.code, message: error.message } } }
+    }
+    result.runtimeObservationAtFailure = {
+      snapshot: await observe(() => runtime.snapshot(runtimeConfig as any)),
+      hosts: await Promise.all(runtime.rpcClients().map(async ({ hostId, client }) => ({ hostId,
+        owner: 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : null,
+        projection: await observe(() => client.runtimeProjection()) }))),
+      spatial: await observe(() => spatial.read())
+    }
   } finally {
     await stage('dispose')
     disposeSpatial?.()
