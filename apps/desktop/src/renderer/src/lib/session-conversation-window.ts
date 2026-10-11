@@ -44,7 +44,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     ...(reading ? { identity: reading.identity } : {}),
     beforeCommit: (snapshot, operation) => {
       const next = projectConversationWindow(snapshot), page = next.historyPage
-      const currentIntent = operation === 'changes' ? 'live' : intent.current
+      const currentIntent = operation === 'changes' || operation === 'reopen' ? 'live' : intent.current
       if (page && !beforeCommit(page, currentIntent, displayed.current ?? undefined, { current: displayed.current,
         ...(boundary.current ? { recordBoundary: { beforeRecordId: boundary.current } } : {}) })) return false
       if (beforeCapturedCommit?.(next.captured) === false) return false
@@ -92,6 +92,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   }
   const error = view.error?.message ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : coverageError)
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
+  const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
   return { page, projection, snapshot: view.snapshot, inspect: view.inspect, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
     readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') }, capturedError: view.sourceError ? null : error,
@@ -101,7 +102,13 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     historyBoundary: boundary.current && page?.items.some(item => item.id === boundary.current) ? { beforeRecordId: boundary.current } : null,
     currentOutside, newerOutside: currentOutside, hasNewer: view.hasNewer, hasMore: view.hasMore,
     readEarlier: () => { coverageDemand.current = false; void navigate('older') }, readNewer: () => { coverageDemand.current = false; void navigate('newer') },
-    retry: () => { void view.retry() }, showLatestAutomatically: () => { if (view.held) view.acceptHeld(); else if (!view.historical && view.newerAvailable) void navigate('changes') },
+    retryLabel: expiredHistorical ? 'Read current records' : 'Retry',
+    retry: () => {
+      if (expiredHistorical) {
+        const original = view.snapshot?.scope.sources.find(source => source.kind === 'native')
+        selectSource(original?.kind === 'native' ? { providerId: original.providerId, nativeSessionId: original.nativeSessionId } : undefined)
+      } else void view.retry()
+    }, showLatestAutomatically: () => { if (view.held) view.acceptHeld(); else if (!view.historical && view.newerAvailable) void navigate('changes') },
     showCurrent: () => { coverageDemand.current = false; void navigate('latest') },
     showCurrentSource: () => selectSource(currentSource), showPreviousSource: () => selectSource(handleSource(reading?.nativeSourceFacts?.nativeConfirmation?.previousNativeHandle)) }
 }

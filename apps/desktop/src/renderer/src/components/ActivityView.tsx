@@ -980,7 +980,7 @@ export function ActivityView({
     {readingNotice}
     {readingWindow.capturedError ? <div role="status" className="activity-feed__read-notice">Captured history read unavailable: {readingWindow.capturedError}. Existing records are kept.</div> : null}
     {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
-      <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>Retry</button></div> : null}
+      <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</button></div> : null}
     {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading} read={userMessageRead ? { ...userMessageRead,
       onReadEarlier: conversationReading ? readEarlierRecords : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>

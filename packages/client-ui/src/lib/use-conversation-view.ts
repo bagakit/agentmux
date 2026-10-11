@@ -5,7 +5,7 @@ import { consumeConversationWindowPage, projectConversationWindow, conversationS
 import type { AgentMuxClient } from '@agentmux/core'
 
 export type ConversationViewClient = Pick<AgentMuxClient, 'readAgentConversation' | 'readConversationChanges' | 'observeConversation' | 'releaseConversationView'>
-export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes' | 'resume'
+export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes' | 'resume' | 'reopen'
 type Operation = ConversationViewOperation
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor'>
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; error: Error | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
@@ -62,7 +62,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
     const reconnect = () => {
       if (!alive() || current.retryTimer) return
       // Retry only this live consumer's observation, through its accepted view.
-      // Expired views keep their originals and require an explicit new read.
+      // Transport recovery reuses the accepted view. Only a precise expired
+      // current view may rebuild the same original source below.
       current.retryTimer = setTimeout(() => { current.retryTimer = null; void read('resume') }, current.retryDelay)
       current.retryDelay = Math.min(current.retryDelay * 2, 5000)
     }
@@ -113,8 +114,10 @@ export function useConversationView(client: ConversationViewClient | null, refer
       signal.addEventListener('abort', abortRead, { once: true })
       const isCurrent = () => alive() && current.request === requestController && !requestSignal.aborted
       const prior = current.snapshot
+      const originalNative = prior?.scope.sources.find(source => source.kind === 'native')
       const request: ConversationTimelineReadInput = { ...ref, limit: 100,
-        ...selection, ...(kind === 'resume' && prior?.window.view ? { view: prior.window.view } : {}), ...(kind === 'older' && prior?.window.navigation.older ? { cursor: prior.window.navigation.older } : {}),
+        ...selection, ...(kind === 'reopen' && originalNative?.kind === 'native' ? { nativeSource: { providerId: originalNative.providerId, nativeSessionId: originalNative.nativeSessionId } } : {}),
+        ...(kind === 'resume' && prior?.window.view ? { view: prior.window.view } : {}), ...(kind === 'older' && prior?.window.navigation.older ? { cursor: prior.window.navigation.older } : {}),
         ...(kind === 'newer' && prior?.window.navigation.newer ? { cursor: prior.window.navigation.newer } : {}) }
       const change: ConversationChangesInput | null = kind === 'changes' && prior ? {
         ...ref, checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100
@@ -123,6 +126,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       if (kind === 'changes' || kind === 'latest') current.dirty = false
       const pending = (async () => {
         let complete: ConversationWindowSnapshot | null = null
+        let reopenExpired = false
         try {
           let assembly: ConversationWindowAssembly | undefined, cursor: string | undefined
           let more = false
@@ -140,10 +144,14 @@ export function useConversationView(client: ConversationViewClient | null, refer
           if (prior && kind !== 'latest') {
             // Exact Host, source epoch and view identity precede revision arithmetic.
             if (complete.hostId !== prior.hostId || complete.sourceHostId !== prior.sourceHostId || complete.agentSessionId !== prior.agentSessionId ||
-              complete.window.id !== prior.window.id || complete.scope.sources.length !== prior.scope.sources.length ||
+              (kind !== 'reopen' && complete.window.id !== prior.window.id) || complete.scope.sources.length !== prior.scope.sources.length ||
               complete.scope.sources.some(source => !prior.scope.sources.some(original => conversationSourceKey(source) === conversationSourceKey(original))))
               throw Object.assign(new Error('The original conversation scope changed. Its displayed frame and position are retained.'), { code: 'CONTROL_PROTOCOL_ERROR' })
-            if (complete.window.revision < prior.window.revision) throw Object.assign(new Error('This response predates the accepted conversation frame. Its displayed originals are retained.'), { code: 'CONTROL_PROTOCOL_ERROR' })
+            if (kind !== 'reopen' && complete.window.revision < prior.window.revision) throw Object.assign(new Error('This response predates the accepted conversation frame. Its displayed originals are retained.'), { code: 'CONTROL_PROTOCOL_ERROR' })
+          }
+          if (kind === 'reopen') {
+            const failure = sourceReadError(complete)
+            if (failure) throw failure
           }
           try { await bind(complete, isCurrent) }
           catch (error) { if (isCurrent()) { setState(value => ({ ...value, observationError: errorOf(error) })); reconnect() } }
@@ -164,9 +172,17 @@ export function useConversationView(client: ConversationViewClient | null, refer
             sourceError, historical: current.historical, newerAvailable: kind === 'latest' || kind === 'changes' && !more && !current.held && !current.historical ? false : value.newerAvailable }))
           if (more) current.dirty = true
         } catch (error) { if (isCurrent()) {
+          if (complete && complete.window.id !== current.snapshot?.window.id) release(complete)
           retryOperation.current = { client, key, kind, selection }
           setState(value => ({ ...value, error: errorOf(error) }))
           const code = (error as { code?: string })?.code
+          // A parked current view is a disposable reader, not a durable source.
+          // Rebuild it once from the original source; the normal commit guard
+          // still owns reading position, selection and the displayed frame.
+          if (code === 'AGENT_CONVERSATION_VIEW_EXPIRED' && !current.historical) {
+            retryOperation.current = { client, key, kind: 'reopen', selection: {} }
+            reopenExpired = kind === 'resume'
+          }
           if (kind === 'resume' && ['CONTROL_UNAVAILABLE', 'CONTROL_TIMEOUT'].includes(code ?? '')) reconnect()
         } }
         finally {
@@ -174,7 +190,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
           if (!isCurrent()) { if (complete && complete.window.id !== current.snapshot?.window.id) release(complete); return }
           current.inFlight = null
           setState(value => ({ ...value, loading: false }))
-          if (current.dirty) schedule()
+          if (reopenExpired) void read('reopen')
+          else if (current.dirty) schedule()
         }
       })()
       current.inFlight = pending
