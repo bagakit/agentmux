@@ -14,9 +14,10 @@ afterEach(async () => { for (const root of directories.splice(0)) await rm(root,
 
 // Synthetic artifacts exercise the reader's refusal boundary only. Native owner
 // qualification always reads the original producer, loaded module and raw report.
-async function artifacts() {
+async function artifacts(task: 'T003' | 'T006' = 'T003') {
   const root = await mkdtemp(path.join(tmpdir(), 'supervision-evidence-')); directories.push(root)
-  const gate = 'packages/core/scripts/verify-resume-context-observation.mjs', owner = 'packages/core/src/client.ts'
+  const gate = 'packages/core/scripts/verify-' + (task === 'T003' ? 'resume-context-observation' : 'session-continuity-executor') + '.mjs', owner = 'packages/core/src/client.ts'
+  const count = task === 'T003' ? 33 : 16, mutations = task === 'T003' ? 18 : 10
   const put = async (file: string, body: any) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true })
     await writeFile(path.join(root, file), typeof body === 'string' ? body : JSON.stringify(body))
@@ -26,19 +27,19 @@ async function artifacts() {
     status: failed ? 'failed' : 'passed', failureMessages: failed ? ['AssertionError: expected original input to remain unchanged'] : [] })
   const reports: Record<string, any> = {}, modules: Record<string, string> = {}
   const result = async (name: string, failed = false) => {
-    const assertions = Array.from({ length: 33 }, (_, index) => row(index, failed && index === 0))
-    reports[name] = { success: !failed, numTotalTests: 33, numPassedTests: failed ? 32 : 33, numFailedTests: failed ? 1 : 0,
+    const assertions = Array.from({ length: count }, (_, index) => row(index, failed && index === 0))
+    reports[name] = { success: !failed, numTotalTests: count, numPassedTests: failed ? count - 1 : count, numFailedTests: failed ? 1 : 0,
       testResults: [{ message: '', assertionResults: assertions }] }
     modules[name] = 'export const fixture = ' + JSON.stringify(name)
     await put('proof/' + name + '.json', reports[name]); await put('proof/package/dist/' + name + '.mjs', modules[name])
-    return { name, code: failed ? 1 : 0, signal: null, total: 33, passed: failed ? 32 : 33, failed: failed ? 1 : 0,
+    return { name, code: failed ? 1 : 0, signal: null, total: count, passed: failed ? count - 1 : count, failed: failed ? 1 : 0,
       semanticRed: failed, bundleSha256: hash(modules[name]), failures: failed ? [{ name: assertions[0].fullName, messages: assertions[0].failureMessages }] : [] }
   }
-  const receipt = { schema: 'agentmux.resume-context-observation-proof.v1', passed: true, sourceStable: true,
+  const receipt = { schema: task === 'T003' ? 'agentmux.resume-context-observation-proof.v1' : 'agentmux.session-continuity-executor-proof.v1', passed: true, sourceStable: true,
     inputs: { [gate]: hash('original gate fixture'), [owner]: hash('original owner fixture') },
-    results: [await result('candidate'), ...await Promise.all(Array.from({ length: 18 }, (_, index) => result('mutant-' + index, true)))] }
+    results: [await result('candidate'), ...await Promise.all(Array.from({ length: mutations }, (_, index) => result('mutant-' + index, true)))] }
   const save = () => put('proof/receipt.json', receipt); await save()
-  return { root, receipt, reports, put, save, read: () => readSupervisionCoreOwner(root, 'T003', 'proof/receipt.json') }
+  return { root, receipt, reports, put, save, read: () => readSupervisionCoreOwner(root, task, 'proof/receipt.json') }
 }
 
 it('reads only source-bound raw counts and distinct loaded counterexamples from the new owner contract', async () => {
@@ -54,6 +55,11 @@ it('cannot substitute an archived task receipt or passed flag for the current su
 it('refuses joined qualification when the required initial-cancellation owner is absent', async () => {
   await expect(readSessionSupervisionEvidence(_historyFixturePath("unused"), { T001: 'a', T002: 'b', T003: 'c', T004: {}, T006: 'd' }))
     .rejects.toThrow('Every required original supervision task')
+})
+
+it('requires the original executor Native and public consumer files beyond their summary labels', async () => {
+  const f = await artifacts('T006')
+  await expect(f.read()).rejects.toThrow('Original executor consumer evidence is missing')
 })
 
 it('rejects missing source pins and changed current owner bytes', async () => {
