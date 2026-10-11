@@ -1,3 +1,5 @@
+import type { RendererAllocationsInput, RendererAllocationsResult } from './renderer-allocations.js'
+import type { RendererSceneCaptureInput, RendererSceneCaptureResult, RendererSceneInspectInput, RendererSceneInspection } from './renderer-performance-scene.js'
 import type { DemandContentReference } from '@agentmux/demand'
 import type { GitOpenParams, GitOpenResult } from './public-rpc-git.js'
 export type { DemandContentReference } from '@agentmux/demand'
@@ -246,7 +248,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
-export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.scene.capture' } & RendererSceneCaptureInput) | ({ operation: 'metrics.scene.inspect' } & RendererSceneInspectInput) | ({ operation: 'metrics.allocations.capture' } & RendererAllocationsInput) | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client'; conversation?: ConversationConsumerQuery }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
@@ -749,6 +751,9 @@ export type AgentMuxControlResult =
   | ToolkitResult
   | { operation: 'metrics.get'; observation: MetricsObservation }
   | { operation: 'metrics.watch' }
+  | { operation: 'metrics.allocations.capture'; capture: RendererAllocationsResult }
+  | { operation: 'metrics.scene.capture'; capture: RendererSceneCaptureResult }
+  | { operation: 'metrics.scene.inspect'; inspection: RendererSceneInspection }
   | { operation: 'metrics.profile.capture'; capture: RendererV8ProfileResult }
   | { operation: 'metrics.memory.inspect'; observation: RendererMemoryResult }
   | { operation: 'metrics.trace.capture'; capture: RendererTraceResult }
@@ -1013,6 +1018,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'metrics.get': 'short',
   'metrics.watch': 'short',
   'metrics.memory.inspect': 'short',
+  'metrics.allocations.capture': 'long',
+  'metrics.scene.capture': 'long',
+  'metrics.scene.inspect': 'long',
   'metrics.profile.capture': 'long',
   'metrics.trace.capture': 'long',
   'inspect.client': 'short',

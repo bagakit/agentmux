@@ -1,3 +1,5 @@
+import { parseRendererAllocationsInput, parseRendererAllocationsResult } from './renderer-allocations.js'
+import { parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryInput, parseRendererMemoryResult } from './renderer-memory.js'
 import { parseRendererTraceInput, parseRendererTraceResult } from './renderer-trace.js'
@@ -304,6 +306,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const edited = text(source.text, 'Edited message', code)
     if (!edited.trim() || edited.includes('\0')) throw new AgentMuxError('Edited message is invalid.', code)
     return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code), text: edited }
+  }
+  if (source.operation === 'metrics.allocations.capture' || source.operation === 'metrics.scene.capture' || source.operation === 'metrics.scene.inspect') {
+    const keys = source.operation === 'metrics.scene.inspect' ? ['captureId'] : source.operation === 'metrics.scene.capture' ? ['target'] : ['target', 'durationMs']
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', ...keys], 'INVALID_CONTROL_REQUEST')
+    const body = Object.fromEntries(keys.filter(k => source[k] !== undefined).map(k => [k, source[k]]))
+    const input = source.operation === 'metrics.allocations.capture' ? parseRendererAllocationsInput(body) : source.operation === 'metrics.scene.capture' ? parseRendererSceneCaptureInput(body) : parseRendererSceneInspectInput(body)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, ...input } as AgentMuxControlMetricsRequest
   }
   if (source.operation === 'metrics.trace.capture') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs'], 'INVALID_CONTROL_REQUEST')
@@ -1177,6 +1186,18 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const message = result.message === null ? null : parsePendingMessage(result.message)
     if (message && message.pendingId !== pendingId) throw new AgentMuxError('Pending message send result belongs to another input.', code)
     return { ...base, operation, result: { agentSessionId, pendingId, disposition: result.disposition, message } }
+  }
+  if (operation === 'metrics.allocations.capture') {
+    settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { capture: parseRendererAllocationsResult(result.capture) } }
+  }
+  if (operation === 'metrics.scene.capture') {
+    settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { capture: parseRendererSceneCaptureResult(result.capture) } }
+  }
+  if (operation === 'metrics.scene.inspect') {
+    settingsFields(result, ['inspection'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { inspection: parseRendererSceneInspection(result.inspection) } }
   }
   if (operation === 'metrics.trace.capture') {
     settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')

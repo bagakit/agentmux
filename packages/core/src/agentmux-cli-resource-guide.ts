@@ -188,6 +188,21 @@ Function names, URLs and local paths may be present: no automatic watch/Toolkit 
 or error-log export. Busy DevTools/debuggers preserve their original owner and refuse only this
 profile. A lost reply is unknown and is never automatically recaptured; no retained handles,
 restart history, worker/native/compositor CPU coverage or optimization claim.
+system metrics allocations capture uses the same exact five-field target and 1000-5000ms interval.
+Fixed HeapProfiler sampling requests 32768-byte intervals, depth128 and excludes collected-by-major/minor-GC objects.
+Original heapprofile stacks and sample sizes describe sampled window allocations still alive at stop, not
+all traffic, old objects, retaining paths, native/worker memory or a leak. No GC, snapshot or object-body reads.
+system metrics scene capture requests CPU, allocations and timeline serially for 2 seconds each, with
+before/after original resources/memory and actual loaded versions. A 20-second observation budget and
+8MiB/profile, 3MiB/resource point read and 32MiB/scene limits do not bound native peak memory. One App owner rejects concurrent scenes;
+only one local latest scene is retained. Partial/failed/unknown stage receipts and successful originals survive.
+Before-replace save failure preserves old bytes; after-replace/fsync failure is unknown, never rolled back or
+recaptured. system metrics scene inspect --capture-id ID only reads that exact latest original; replaced IDs
+are explicit mismatch. Available reads are observed bytes, not reconstructed past fsync acknowledgements.
+--output creates only a new local file, never replaces a file/symlink, and failed output never repeats sampling.
+system diagnostics inspect --domain performance.scene --host-id local --capture-id ID provides safe phase
+summary/reference only; large frames/trace/profile material stays in scene inspect, even with include-raw.
+No fake logId/authority, automatic capture/upload, App lifecycle, navigation, focus or input is introduced.
 system metrics trace capture uses the same exact five-field target and 1000-5000ms interval
 for a Chromium target-related timeline. Original ReportEvents objects and order are preserved;
 the 8 MiB limit bounds RPC result transport, not native buffers, event production or peak memory.
