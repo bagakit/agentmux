@@ -17,6 +17,7 @@ import { HostUpgradePanel } from './HostUpgradePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
 import { HostTopology } from './HostTopology'
 import { HostRuntimePanel } from './HostRuntimePanel'
+import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
 import '../../styles/remote-management.css'
 
@@ -283,7 +284,6 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                 <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { useAppStore.getState().selectSession(id); onClose?.() }} />
                 <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
               </div> : null}
-              {panel === 'agents' ? <HostExecutorsSummary config={config} host={host} active={active && (wide || view === 'editor')} /> : null}
               {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
                 <details className="host-check-details">
                   <summary>Test details <ThemeNavigationDownIcon size={13} /></summary>
@@ -303,6 +303,15 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             </section>
           )
         })}
+          {maintenanceHosts.map(id => {
+            const draft = hosts.find(host => host.id === id)
+            if (!draft) return null
+            return <div key={`applications-${id}`} hidden={selectedId !== id || panel !== 'agents'} inert={selectedId !== id || panel !== 'agents'}>
+              <HostApplicationAccessPanel host={draft} committed={config.hosts.find(host => host.id === id)} hosts={config.hosts}
+                active={active && selectedId === id && panel === 'agents' && (wide || view === 'editor')} />
+              <HostExecutorsSummary config={config} host={draft} active={active && selectedId === id && panel === 'agents' && (wide || view === 'editor')} />
+            </div>
+          })}
           {maintenanceHosts.map(id => {
             const draft = hosts.find(host => host.id === id)
             const committed = config.hosts.find(host => host.id === id)

@@ -1627,6 +1627,10 @@ export type AgentMuxDesktopApi = {
     save(config: AppConfig, expected: AppConfig): Promise<AppConfig>
     onChange(listener: (config: AppConfig) => void): () => void
   }
+  applications: {
+    call<M extends import('@agentmux/core').ApplicationAccessMethod>(method: M,
+      params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<import('@agentmux/core').ApplicationAccessResultMap[M]>
+  }
   hosts: {
     inspect(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostRuntimeObservation>
     check(host: HostConfig): Promise<HostCheckResult>
@@ -2066,7 +2070,11 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'applications'> & {
+  applications: {
+    call<M extends import('@agentmux/core').ApplicationAccessMethod>(method: M,
+      params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<SessionInputOperationResult<import('@agentmux/core').ApplicationAccessResultMap[M]>>
+  }
   hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect'> & {
     inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>
   }

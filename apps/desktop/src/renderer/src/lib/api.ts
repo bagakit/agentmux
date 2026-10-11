@@ -451,6 +451,9 @@ const mockApi: AgentMuxDesktopApi = {
     upgrade: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
     upgradeInspect: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') }
   },
+  applications: {
+    call: async () => { throw new Error('Application access requires the original desktop service and configured application connectors. This preview cannot read or transfer authorization.') }
+  },
   connections: {
     call: async () => { throw new Error('External connection administration requires the executing Desktop Host.') },
     storeCredential: async () => { throw new Error('Secure credential storage requires the executing Desktop Host.') },
@@ -1496,6 +1499,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
+    applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     hosts: { ...preload.hosts, inspect: async (host, context) => {
       const signal = context?.signal
       signal?.throwIfAborted()
