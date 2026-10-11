@@ -16,11 +16,11 @@
 | 草稿、阅读位置、选区、展开、可见性与 caret 意图 | 原客户端 owner；不是第二份对话事实 |
 | 外部受众、内容表示、待投意图及平台回执 | 原 connector Binding／Publication Store；不拥有原生或 captured 记录 |
 
-[`projectConversationReading`](../../packages/core/src/conversation.ts) 把同一个 Core timeline 适配为共同消息行及可访问的 originals；`projectConversationRecords` 复用这个 facade。UI 的 [`conversation-records`](../../packages/client-ui/src/lib/conversation-records.ts) 添加 speaker、来源标签及 coverage 的呈现。缺少原 source Host 时仍保留正文，不从当前焦点补一个引用。原 source namespace 与 client route 的区别见[协议](../specs/conversation-protocol.md#unified-reading-and-changes)。
+公共 Reader 的完整窗口经 [`projectConversationWindow`](../../packages/core/src/conversation.ts) 适配为共同消息行及可访问的 originals；适配保留已接受的事件、角色和原顺序，不重新关联原记录。`projectConversationReading`／`projectConversationRecords` 仍提供纯投影能力。UI 的 [`conversation-records`](../../packages/client-ui/src/lib/conversation-records.ts) 添加 speaker、来源标签及 coverage 的呈现。缺少原 source Host 时仍保留正文，不从当前焦点补一个引用。原 source namespace 与 client route 的区别见[协议](../specs/conversation-protocol.md#unified-reading-and-changes)。
 
 ## 三种来源怎样读取
 
-Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。Core 原 Reader 持有有界接受窗口与跨批贡献；下文列出的 Desktop、Mobile raw 读窗仍是独立的消费路径，不能以公共 Reader 的接线代签客户端切换。
+Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。Core 原 Reader 持有有界接受窗口与跨批贡献，Desktop、Mobile 和 Focus 消费该 Reader 的完整窗口。
 
 | 来源／需求 | 原读取 owner |
 | --- | --- |
@@ -29,13 +29,13 @@ Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，�
 | 统一事件页、精确锚点、耐久变化 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) → 原 native/captured 端口 → `projectConversationTimeline` |
 | Terminal Replay | 原 Run output／Attachment → terminal viewport；PTY 字节不自动成为对话或作者事实 |
 
-`readAgentConversation`、`conversationCheckpoint`、`readConversationChanges` 与 `observeConversation` 持有统一公共读取合同。原 Reader 的临时 view 保留已接受原记录、版本、页邻接与切点；`consumeConversationWindowPage` 仅校验和重组完整替换窗口，客户端不做跨批语义合并。准确 watch 保持相关 view，最后一个绑定观察的 `dispose` 或显式 `releaseConversationView` 释放该临时资源；deferred part 仍沿原资源接口读取。窗口 cursor、耐久 source frontier 与通知分别由[协议](../specs/conversation-protocol.md)定义，通知只唤醒权威读取。`sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，原 `agent.history` 继续提供原来源读取。Claude／Codex 保存历史页由同一 [`NativeJsonlHistoryReader`](../../packages/core/src/native-jsonl-history-reader.ts) 给出准确页快照的 `changesCursor`，避免另一次 checkpoint 和页读取之间的同 ID 版本竞态。原 Store 事务仍返回准确 stream 与 changed position，经既有事件进入原 raw applier／Renderer；该路径的处理不由新 view 合同替代。
+`readAgentConversation`、`conversationCheckpoint`、`readConversationChanges` 与 `observeConversation` 持有统一公共读取合同。原 Reader 的临时 view 保留已接受原记录、版本、页邻接与切点；`consumeConversationWindowPage` 仅校验和重组完整替换窗口，客户端不做跨批语义合并。准确 watch 保持相关 view，绑定观察的 `dispose` 只解除 pin，原 frame 在既有有界暂存区停放；显式 `releaseConversationView` 或 Client dispose 才释放该临时资源；deferred part 仍沿原资源接口读取。窗口 cursor、耐久 source frontier 与通知分别由[协议](../specs/conversation-protocol.md)定义，通知只唤醒权威读取。`sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，原 `agent.history` 继续提供原来源读取。Claude／Codex 保存历史页由同一 [`NativeJsonlHistoryReader`](../../packages/core/src/native-jsonl-history-reader.ts) 给出准确页快照的 `changesCursor` 和原页位置 `replayCursor`，避免另一次 checkpoint 和页读取之间的同 ID 版本竞态。原 Store 事务仍返回准确 stream 与 changed position，经既有事件进入原 raw applier／Renderer；该路径的处理不由新 view 合同替代。
 
 调用关联以每个准确 part 对原 scoped invocation 的 `invocation-member` 归属表达，单成员也保留；`conversationInvocationId` 由 Core 唯一定义。归属及其所在事件版本不依赖同批是否读到另一成员，公共 Reader 不反查全史。相同调用身份不合并父发言，也不表示未读的对端内容已经可读。
 
 每条原生答案的 typed `questionAnswers` 独立产生 `answers`，目标只持原 source Host、Session、Provider/native source 与完整 opaque question ID，不要求同批读到问题，也不猜问题 record 或 turn。`conversation-questions` 共同限定读卡片的 Host／来源；`conversation-timeline` 的原记录关系函数同时供投影与严格 codec 使用。`answers`／`observes` 只归发起原记录所在事件，不能因读到目标而改变目标事件版本；未读目标仍保准确 gap。多条原答案分别保留，卡片显示选择不代替关系保全。
 
-其他关系只对原 Reader 当前已接受的 records 闭合。后续 source page 或 changes 加入同一 view 后，纯投影重新形成完整窗口，晚到的准确 same-event 贡献保留先前原文并更新一个事件。暂未读取或已离开有界窗的关系目标仍有准确 gap；保留边界可沿原 versioned anchor 回读。当前 GUI 原 raw 读窗的较早／较新页、邻近锚点及 previous-source 导航能力仍由原客户端路径提供，不能在公共消费切换前删除。精确原文、来源覆盖与已闭合关系分别解释，接入方不另做关联。
+其他关系只对原 Reader 当前已接受的 records 闭合。后续 source page 或 changes 加入同一 view 后，纯投影重新形成完整窗口，晚到的准确 same-event 贡献保留先前原文并更新一个事件。暂未读取或已离开有界窗的关系目标仍有准确 gap；保留边界可沿原 versioned anchor 回读。较早／较新页沿 Core 签发的原页邻接位置读取；previous-source 意图只选择 Session 保留的准确原生绑定。客户端保存 DOM 锚点、选区和已接受 frame，不解码 Provider cursor 或重新拼接贡献。原 `window.anchor` 表明精确单记录 inspect，与可前后翻页的历史窗分开；park/resume 保留该原版本，后到通知不令它自动跟随，显式返回当前历史重新打开正常窗口。自动预读较早页而首页仍在窗口中时，`navigation.newer` 为空，实时尾部仍继续接入；实际逐出首页才保留历史位置，沿 newer 返回后从原 cut 补齐变化。精确原文、来源覆盖与已闭合关系分别解释。
 
 Core 经 [`SessionHistoryObservationPool`](../../packages/core/src/session-history-observation-pool.ts) 共享准确 native source 的 watch；captured 通知沿原 Session Timeline publisher。取消一个 reader 不终止 Run。来源失败保留已接受的其他记录、准确 Gap 与重试位置，不用最新版本替换失效的原锚点。
 
@@ -45,18 +45,20 @@ Core 经 [`SessionHistoryObservationPool`](../../packages/core/src/session-histo
 flowchart LR
   Provider[Provider 原生记录] --> Core[Core 原来源与纯 timeline]
   Captured[原 Session Store captured 流] --> Core
-  Core --> Window[Desktop 近期事实与阅读窗口]
-  Core --> Mobile[Mobile Hosted 阅读状态]
   Core --> Public[统一公共 Reader]
+  Public --> Window[Desktop IPC 与 Focus 阅读状态]
+  Public --> Mobile[Mobile Hosted 阅读状态]
   Window --> Shared[client-ui 共同消息与过程]
   Mobile --> Shared
   Public --> Publication[原 Binding 与 Publication Outbox]
   Publication --> Adapter[平台适配器]
 ```
 
-[`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 以实际阅读需求启用 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts)；近期 native 页和 captured 事实经同一 Core facade 投影。原生观察先于首读建立，隐藏消费者释放需求，原正文和服务窗仍保留。客户端按 Host／Session／Run 共享相关近期读取，不按所有 Session 放大热路径工作。
+[`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 以实际阅读需求启用 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts)。共同 [`useConversationView`](../../packages/client-ui/src/lib/use-conversation-view.ts) 经 Desktop 的 [`conversation-read-api`](../../apps/desktop/src/renderer/src/lib/conversation-read-api.ts)、preload 与 Main [`conversation-read-ipc`](../../apps/desktop/src/main/conversation-read-ipc.ts) 调用原公共服务。IPC 只持 sender trust、取消与观察资源；完整窗口严格校验后才交呈现。首读的同页 changes cut 关闭 read→watch 间隙；短暂通知合并只唤醒变化读取。隐藏时取消观察而保留原 frame，重新可见按原 view 恢复；卸载或身份切换显式释放。观察断开在仍相关的消费者内重开原 view，不更换来源或重放输入。
 
-[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持原页、阅读锚点、返回位置与选区；native 继续原 cursor，captured 较早页沿原 bounded reader 补读。窗口只持阅读状态，事件关联和顺序仍由 Core 决定。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。
+[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持阅读锚点、返回位置与选区，沿同一 view 的 `navigation.older`／`navigation.newer` 补充相邻范围。时间范围读取、Current／Previous source 仍是明确阅读意图。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。选中的原节点或 pin 需要保留时，客户端持前一个完整 accepted frame，解除保护后接受新 frame，不裁出 records 再重投影。
+
+[`RecentFocusTimeline`](../../apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx) 仅为已选择的 Context 挂载共同 view；已读 Context 的完整 frame 在原呈现预算内保留，未选中的观察停放且不读。淘汰以完整 frame 为单位，当前和 pin 的原内容保留；Core 暂存已过期时明确显示错误，不能把旧 frame 当可继续的 cursor。Context 目录、已记录工作区间与时间尺仍由原 Focus owner 提供，不成为对话关联来源。
 
 [`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 与 [`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx) 消费共同 records／originals；[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、完整 Copy、Question、reasoning、tool 与 resource。captured 输入保原输入身份，回复和系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 薄适配。原生与 captured 过程使用共同 [`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 和 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)。
 
@@ -68,7 +70,7 @@ flowchart LR
 
 ## Mobile、样式与宿主差异
 
-[`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 读取准确 Hosted Session 的 native 页与 captured 流，独立保留读失败及较早范围；[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 交同一 `ConversationView` 和 Core facade。Mobile 保留自己的窗口、连接、草稿及未确认操作，不照搬 Desktop 的窗口 Hook，也不另做语义 merge。保留页的资源继续使用其原 client／Session／Host，连接或 Session 改变后不接受旧结果。
+[`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 将准确 Hosted Session 交给同一 `useConversationView`；[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 以完整窗口驱动 `ConversationView`。Mobile 的连接、草稿、未确认操作与活动状态保留原 owner；历史窗口中存在 Question 时才挂载同来源的当前答案读取需求。保留页的资源继续使用其原 client／Session／Host，连接或 Session 改变后不接受旧结果。
 
 共享样式归 [`client-ui/styles`](../../packages/client-ui/src/styles/index.css)，两端按宿主入口导入。Mobile 的触控尺寸、外层容器和本端覆盖归 [`conversation.css`](../../apps/mobile/src/conversation/conversation.css)；共同组件的存在不代签两端视觉、性能或交互验收。
 
