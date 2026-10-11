@@ -135,7 +135,7 @@ it('a watched exact view survives unrelated reads, unsubscribe parks it, and exp
   watch.dispose()
   await expect(f.client.readAgentConversation({ ...ref, view: current.window.view! })).resolves.toMatchObject({ window: { id: page.window.id } })
   expect(await f.client.releaseConversationView({ ...ref, view: current.window.view! })).toMatchObject({ viewId: page.window.id, released: true })
-  await expect(f.client.readConversationChanges({ ...ref, checkpoint: current.checkpoint, view: current.window.view! })).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  await expect(f.client.readConversationChanges({ ...ref, checkpoint: current.checkpoint, view: current.window.view! })).rejects.toMatchObject({ code: 'AGENT_CONVERSATION_VIEW_EXPIRED' })
   expect(await f.client.releaseConversationView({ ...ref, view: current.window.view! })).toMatchObject({ viewId: page.window.id, released: false })
   const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
   const another = await service.call('agent.conversation.inspect', ref)
