@@ -942,9 +942,16 @@ export function ActivityView({
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
   const readPending = readingEnabled && Boolean(readingWindow.loading || userMessageRead?.loading)
-  const emptyReadStatus = readPending && !readingWindow.loadingEarlier && ruler.items.length === 0 ? (
-    <div className="activity-feed__empty-reading" role="status" aria-live="polite">
-      <SemanticIcon name="status.loading" animation="spin" size={12} />Reading records…
+  const emptyReadFailed = Boolean(readingWindow.error || !readingWindow.historical && userMessageRead?.error)
+  const emptyReadStatus = !hasUserMessages && !hasNativeRecords && !hasItems && ruler.items.length === 0 &&
+    !readingWindow.loadingEarlier && (readPending || emptyReadFailed) ? (
+    <div className="activity-feed__empty-reading" data-read-state={emptyReadFailed ? 'interrupted' : 'pending'}
+      role="status" aria-live="polite" aria-busy={!emptyReadFailed || undefined}>
+      <div className="activity-feed__reading-signal" aria-hidden="true"><span /><span /><span /></div>
+      <div className="activity-feed__reading-caption">
+        <strong>{emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'}</strong>
+        <span>{emptyReadFailed ? 'Retry the source above to continue reading.' : 'Messages and activity'}</span>
+      </div>
     </div>
   ) : null
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
