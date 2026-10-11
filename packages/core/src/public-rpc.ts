@@ -220,7 +220,7 @@ type NativeParams = MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvat
   'agent.conversation.checkpoint': import('./conversation.js').ConversationRef
   'agent.conversation.changes': import('./conversation-changes.js').ConversationChangesInput
   'agent.conversation.watch': import('./conversation.js').ConversationRef
-  'agent.conversation.inspect': import('./session-history-reader.js').AgentSessionHistoryReadInput
+  'agent.conversation.inspect': import('./conversation-changes.js').ConversationTimelineReadInput
   'agent.conversation.landmark.ls': import('./conversation-landmarks.js').ConversationLandmarkQuery
   'agent.conversation.landmark.apply': import('./conversation-landmarks.js').ConversationLandmarkWrite
   'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadInput
@@ -400,6 +400,6 @@ export function isAgentMuxRpcMethod(value: unknown): value is AgentMuxRpcMethod 
 }
 export function isAgentMuxRpcStream(method: AgentMuxRpcMethod, params: Record<string, unknown>): method is AgentMuxRpcStreamMethod {
   return method === 'agent.conversation.watch' || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' ||
-    method === 'agent.output' || method === 'runtime.events' || method === 'runtime.history-watch' ||
+    method === 'agent.output' || method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch'
 }

@@ -38,8 +38,12 @@ agent output reads ordered original bytes; closing the reader does not stop the 
 Typed agent history --kind user-message reads expose publicContent independently of recorded
 authors. A content boundary grants no sharing authorization; read the leaf help for its exact
 confirmed and unknown meanings. Original text and copyable parts remain complete.
-agent conversation operations read source-qualified records, while original history/resource
-reads retain their own provenance and cursor. Status prose is not permission or input proof.
+agent conversation inspect reads newest-first semantic units from the same Core timeline as clients.
+Each unit carries one event and all original source records. Reassemble complete JSON UTF-8 fragments
+before interpreting content; retain its scoped continuation. checkpoint freezes the exact source vector;
+changes upserts original versions and advances cuts only after complete units. watch invalidates
+that reader; Ctrl-C releases this reader, never the Agent. Source gaps retain exact retry scope.
+Original agent history/resource reads retain their own provenance and cursor. Status prose is not permission or input proof.
 agent conversation landmark ls/apply manage explicit user-named original record references,
 not generated chapters or copied bodies. A saved point is not record availability. Keep its
 full source and the original operation after an unknown save; ls --operation-id inspects that

@@ -1,5 +1,6 @@
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
-import { parseConversationCheckpoint, parseConversationChangesPage } from './conversation-changes.js'
+import { parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
+import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage } from './session-history-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
 import { dequal } from 'dequal'
 import { parseControlEndpointState } from './control-endpoint-state.js'
@@ -192,7 +193,7 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [value, ...args.slice(1)]
       }
     }
-    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory' || method === 'conversationCheckpoint' || method === 'readConversationChanges') {
+    if (method === 'sessionHistoryPage' || method === 'sessionHistoryResource' || method === 'readAgentSessionHistory' || method === 'sessionHistoryCheckpoint' || method === 'readSessionHistoryChanges' || method === 'conversationCheckpoint' || method === 'readConversationChanges' || method === 'readAgentConversation') {
       const input = args[1] as Parameters<AgentMuxHostedClient['sessionHistoryPage']>[1]
       if (input && isAbortSignal(input.signal)) {
         const { signal: cancellation, ...value } = input
@@ -210,15 +211,23 @@ export async function connectHostedAgentMux(options: {
         throw new AgentMuxError('Invalid recorded resource reply.', 'CONTROL_PROTOCOL_ERROR')
       return parseSessionHistoryResourceReadResult(decoded, wireArgs[0], request)
     }
-    if (method === 'conversationCheckpoint') {
-      const checkpoint = parseConversationCheckpoint(decoded)
+    if (method === 'sessionHistoryCheckpoint') {
+      const checkpoint = parseNativeConversationCheckpoint(decoded)
       if (checkpoint.agentSessionId !== wireArgs[0]) throw new AgentMuxError('Checkpoint belongs to another original Session.', 'CONTROL_PROTOCOL_ERROR')
       return checkpoint
     }
-    if (method === 'readConversationChanges') {
-      const request = wireArgs[1] as Parameters<AgentMuxHostedClient['readConversationChanges']>[1]
-      return parseConversationChangesPage(decoded, { hostId: 'local', agentSessionId: wireArgs[0] as string, checkpoint: request.checkpoint,
+    if (method === 'readSessionHistoryChanges') {
+      const request = wireArgs[1] as NonNullable<Parameters<AgentMuxHostedClient['readSessionHistoryChanges']>[1]>
+      return parseNativeConversationChangesPage(decoded, { hostId: 'local', agentSessionId: wireArgs[0] as string, checkpoint: request.checkpoint,
         ...(request.limit === undefined ? {} : { limit: request.limit }) })
+    }
+    if (method === 'readAgentConversation' || method === 'conversationCheckpoint' || method === 'readConversationChanges') {
+      const input = wireArgs[0] as Parameters<AgentMuxHostedClient['readAgentConversation']>[0]
+      const readOptions = wireArgs[1] as import('./conversation-changes.js').ConversationReadOptions | undefined
+      const expected = input
+      return method === 'readAgentConversation' ? parseConversationReadPage(decoded, expected)
+        : method === 'conversationCheckpoint' ? parseConversationCheckpointPage(decoded, expected)
+        : parseConversationChangesPage(decoded, { ...expected, checkpoint: (input as import('./conversation-changes.js').ConversationChangesInput).checkpoint })
     }
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     return decoded
@@ -656,6 +665,42 @@ export async function connectHostedAgentMux(options: {
           terminal: initial.terminal, resizeRevision: initial.resizeRevision },
           close: async () => { outputs.delete(output); await output.close() } }
       } catch (error) { outputs.delete(output); await output.close().catch(() => {}); throw error }
+    },
+    observeConversation: async (input: ConversationRef, listener: (value: import('./conversation-changes.js').ConversationObservation) => void,
+      readOptions: import('./conversation-changes.js').ConversationReadOptions = {}) => {
+      await connectControl(); readOptions.signal?.throwIfAborted()
+      const expected = input, closed = new AbortController()
+      const cancellation = observationSignal(readOptions.signal), transfer = new AgentMuxHostedTransferReader()
+      let watch: AgentMuxHostedSubscription | undefined, opening: import('./conversation-changes.js').ConversationWatchOpening | undefined, stopped = false
+      const dispose = () => {
+        if (stopped) return; stopped = true; cancellation?.removeEventListener('abort', dispose)
+        if (watch) { publicReaders.delete(watch); void watch.dispose().catch(() => {}) }
+        closed.abort(new AgentMuxError('This conversation reader was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
+      }
+      const notify = (value: import('./conversation-changes.js').ConversationObservation) => { try { listener(value) } catch { /* Read callbacks cannot control the Host. */ } }
+      cancellation?.addEventListener('abort', dispose, { once: true })
+      try {
+        const { signal: _signal, ...plainOptions } = readOptions
+        watch = await rpc.subscribe('runtime.conversation-watch', { consumerId, fence: fence(), reference: input, options: plainOptions }, {
+          signal: cancellation,
+          onInitial: value => { opening = parseConversationWatchOpening(value.opening, expected) },
+          onEvent: value => {
+            if (stopped || !opening) return
+            if (value.type === 'error') throw new AgentMuxError(value.error.message, value.error.code)
+            if (value.type === 'snapshot') {
+              const received = transfer.accept(value.data) as AgentMuxHostedStreamValue | undefined
+              if (received?.kind === 'conversation') notify(parseConversationObservation(received.observation, opening))
+            }
+          },
+          onEnd: error => {
+            if (opening && !stopped) for (const source of opening.scope.sources) notify({ ...expected, sourceHostId: opening.sourceHostId, source, kind: 'unavailable', code: 'AGENT_CONVERSATION_OBSERVATION_UNAVAILABLE', message: error instanceof Error ? error.message : 'This observation ended; retain its frontier and resume authoritative changes.' })
+            dispose()
+          }
+        })
+        if (stopped || disposed || !opening) { await watch.dispose(); throw new AgentMuxError('Conversation opening was released.', 'CONTROL_CANCELLED') }
+        publicReaders.add(watch)
+        return { ...opening, closed: closed.signal, dispose }
+      } catch (error) { dispose(); throw error }
     },
     observeSessionHistory: async (agentSessionId: string, listener: (value: AgentSessionHistoryObservation) => void,
       historyOptions: AgentSessionHistoryObservationOptions = {}) => {

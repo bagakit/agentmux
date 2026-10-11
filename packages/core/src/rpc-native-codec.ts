@@ -378,23 +378,24 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           const timeline = record(p.captured, ['agentSessionId', 'revision', 'items'])
           if (timeline.agentSessionId !== expected.agentSessionId) fail(); count(timeline.revision)
           array(timeline.items, value => {
-            const item = record(value, ['id', 'agentSessionId', 'kind', 'status', 'source', 'createdAt', 'updatedAt', 'title', 'authorAgentSessionId', 'authorHuman', 'authorExternal', 'sourceDevice', 'sourceChannel', 'content', 'toolName', 'toolInput', 'toolOutput', 'eventName', 'activityState'])
+            const item = record(value) // The original normalizer below is the sole exhaustive captured-item contract.
             if (item.agentSessionId !== expected.agentSessionId) fail()
             const mutation = normalizeAgentTimelineMutation({ type: 'append', agentSessionId: expected.agentSessionId, item })
             if (mutation.type !== 'append' || !isDeepStrictEqual(mutation.item, item)) fail()
           })
         }
         if (p.native !== null) {
-          const page = record(p.native, ['agentSessionId', 'source', 'items', 'nextCursor', 'sourceSizeBytes'])
+          const page = record(p.native, ['agentSessionId', 'sourceHostId', 'source', 'items', 'nextCursor', 'sourceSizeBytes'])
           if (page.agentSessionId !== expected.agentSessionId) fail()
+          if (page.sourceHostId !== undefined && page.sourceHostId !== p.sourceHostId) fail()
           const source = record(page.source, ['providerId', 'nativeSessionId']); string(source.providerId); string(source.nativeSessionId)
           if (descriptor.history !== undefined && record(descriptor.history).providerId !== source.providerId) fail()
           const handle = descriptor.history === undefined ? undefined : record(descriptor.history).nativeHandle
           if (handle !== undefined && record(handle).kind === 'provider' && (record(handle).sessionId !== source.nativeSessionId || record(handle).providerId !== source.providerId)) fail()
           const normalized = normalizeSessionHistoryPage(source as { providerId: string; nativeSessionId: string }, page, expected.limit ?? 30)
-          const { agentSessionId: _sid, ...body } = page
+          const { agentSessionId: _sid, sourceHostId, ...body } = page
           if (!isDeepStrictEqual(sessionHistoryWithoutMetrics(normalized), sessionHistoryWithoutMetrics({ ...body, items: body.items as unknown[] }))) fail()
-          nativePage = { agentSessionId: page.agentSessionId, ...normalized }
+          nativePage = { agentSessionId: page.agentSessionId, ...(sourceHostId === undefined ? {} : { sourceHostId }), ...normalized }
           if (page.sourceSizeBytes !== undefined) count(page.sourceSizeBytes)
         }
         array(p.unavailable, value => { const issue = record(value, ['source', 'code', 'message', 'recovery']); member(issue.source, ['captured', 'native', 'session', 'status', 'runtime']); string(issue.code); text(issue.message); text(issue.recovery) })
@@ -440,7 +441,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.conversation.watch': return parseConversationWatchOpening(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.landmark.ls': return parseConversationLandmarkPage(value, parseConversationLandmarkQuery(input))
       case 'agent.conversation.landmark.apply': return parseConversationLandmarkWritePage(value, parseConversationLandmarkWrite(input))
-      case 'agent.conversation.inspect': return parseConversationReadPage(value, input as AgentSessionHistoryReadInput)
+      case 'agent.conversation.inspect': return parseConversationReadPage(value, input as import('./conversation-changes.js').ConversationTimelineReadInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.continuity.control': {
         const result = parseAgentContinuityControlResult(value, parseAgentContinuityControlInput(input))

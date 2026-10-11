@@ -19,7 +19,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
-  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
+  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'readDispatch', 'listDispatches'
 ])
@@ -256,8 +256,12 @@ export class AgentMuxHostedRuntimeService {
       const { signal: _wireSignal, ...prompt } = invocation.args[0]
       invocation.args[0] = { ...prompt, ...(prompt.admissionIntent?.kind !== 'manual-actor' && context.signal ? { signal: context.signal } : {}) }
     }
+    if (invocation.method === 'readAgentConversation' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges') {
+      if (invocation.args.length > 2) throw new AgentMuxError('Conversation reading accepts one original request and cancellation options.', 'INVALID_CONTROL_REQUEST')
+      record(invocation.args[1] ?? {}, []) // A wire caller cannot supply a source Host alias.
+    }
     if (context.signal && invocation.method === 'replySessionQuestion') invocation.args[0] = { ...invocation.args[0], signal: context.signal }
-    if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
+    if (context.signal && (invocation.method === 'sessionHistoryPage' || invocation.method === 'sessionHistoryResource' || invocation.method === 'sessionHistoryCheckpoint' || invocation.method === 'readSessionHistoryChanges' || invocation.method === 'conversationCheckpoint' || invocation.method === 'readConversationChanges' || invocation.method === 'readAgentConversation')) invocation.args[1] = { ...invocation.args[1], signal: context.signal }
     if (context.signal && invocation.method === 'readAgentSessionHistory') invocation.args[1] = { signal: context.signal }
     if (context.signal && (invocation.method === 'readNativeAgentHistory' || invocation.method === 'readHostNativeAgentHistory' ||
       invocation.method === 'readNativeAgentHistoryResource' || invocation.method === 'readHostNativeAgentHistoryResource')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
@@ -437,9 +441,9 @@ export class AgentMuxHostedRuntimeService {
     const original = this.observationConsumer(id)
     original.pending++
     try {
-    if (method === 'runtime.history-watch') {
-      if (typeof p.agentSessionId !== 'string') throw new AgentMuxError('History watch requires exact Session identity.', 'INVALID_CONTROL_REQUEST')
-      let stopped = false, observer: Awaited<ReturnType<AgentMuxClient['observeSessionHistory']>> | undefined
+    if (method === 'runtime.history-watch' || method === 'runtime.conversation-watch') {
+      if (method === 'runtime.history-watch' && typeof p.agentSessionId !== 'string') throw new AgentMuxError('History watch requires exact Session identity.', 'INVALID_CONTROL_REQUEST')
+      let stopped = false, observer: Awaited<ReturnType<AgentMuxClient['observeSessionHistory']>> | Awaited<ReturnType<AgentMuxClient['observeConversation']>> | undefined
       let consumer!: Reader
       let observerReleased = false
       const releaseObserver = (value: NonNullable<typeof observer>) => {
@@ -455,10 +459,16 @@ export class AgentMuxHostedRuntimeService {
         if (!ended) { try { void Promise.resolve(emit({ type: 'end', data: { reason: 'consumer-released' } })).catch(() => {}) } catch { /* One observer callback cannot retain another lease. */ } }
       }
       consumer = reader(emit, {}, stop)
-      const opening = this.client.observeSessionHistory(p.agentSessionId, observation => {
-        if (stopped || this.consumers.get(id) !== original) return
-        try { consumer.enqueue(hostedTransfer({ kind: 'history', observation }, randomUUID())) } catch (error) { consumer.fail(error) }
-      }, { ...record(decodeHostedValue(p.options ?? {})), ...(context.signal ? { signal: context.signal } : {}) })
+      const watchOptions = { ...record(decodeHostedValue(p.options ?? {}), method === 'runtime.conversation-watch' ? [] : undefined), ...(context.signal ? { signal: context.signal } : {}) }
+      const opening = method === 'runtime.conversation-watch'
+        ? this.client.observeConversation(p.reference as import('./conversation.js').ConversationRef, observation => {
+          if (stopped || this.consumers.get(id) !== original) return
+          try { consumer.enqueue(hostedTransfer({ kind: 'conversation', observation }, randomUUID())) } catch (error) { consumer.fail(error) }
+        }, watchOptions)
+        : this.client.observeSessionHistory(p.agentSessionId as string, observation => {
+          if (stopped || this.consumers.get(id) !== original) return
+          try { consumer.enqueue(hostedTransfer({ kind: 'history', observation }, randomUUID())) } catch (error) { consumer.fail(error) }
+        }, watchOptions)
       // The Provider/Core may still finish acquiring after this reader is cancelled.
       // Its exact late handle is released once without retaining Consumer.pending.
       const trackedOpening = opening.then(value => {
@@ -472,7 +482,7 @@ export class AgentMuxHostedRuntimeService {
         releaseObserver(observer); throw new AgentMuxError('History consumer closed while its native observer was acquired.', 'CONTROL_CANCELLED')
       }
       original.histories.add(stop)
-      return { initial: { owner, source: observer.source }, start: () => consumer.start(), dispose: async () => stop() }
+      return { initial: method === 'runtime.conversation-watch' ? { owner, opening: { hostId: (observer as import('./conversation-changes.js').ConversationObservationHandle).hostId, agentSessionId: (observer as import('./conversation-changes.js').ConversationObservationHandle).agentSessionId, sourceHostId: (observer as import('./conversation-changes.js').ConversationObservationHandle).sourceHostId, scope: (observer as import('./conversation-changes.js').ConversationObservationHandle).scope, coverage: (observer as import('./conversation-changes.js').ConversationObservationHandle).coverage } } : { owner, source: (observer as import('./types.js').AgentSessionHistoryObservationHandle).source }, start: () => consumer.start(), dispose: async () => stop() }
     }
     if (method !== 'runtime.attachment-watch' && method !== 'runtime.replay-watch') throw new AgentMuxError('Unknown hosted subscription.', 'RPC_METHOD_NOT_FOUND')
     await observe(this.client.connectRuntime(), context.signal)

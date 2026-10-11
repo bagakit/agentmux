@@ -13,7 +13,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource', 'configureHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession', 'confirmAgentNativeSession',
-  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
+  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
@@ -63,6 +63,7 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   observeAgentOutput(...args: Parameters<AgentMuxClient['observeAgentOutput']>): Promise<AgentMuxHostedOutputObservation>
   observeSessionHistory(id: string, listener: (observation: AgentSessionHistoryObservation) => void,
     options: Parameters<AgentMuxClient['observeSessionHistory']>[2]): Promise<AgentSessionHistoryObservationHandle>
+  observeConversation(...args: Parameters<AgentMuxClient['observeConversation']>): ReturnType<AgentMuxClient['observeConversation']>
 }
 
 export type AgentMuxRuntimeOwnerIdentity = {
@@ -99,6 +100,7 @@ export type AgentMuxHostedStreamValue =
   // A Native restored transition carries the current owner facts on the same ordered stream.
   | { kind: 'event'; event: AgentMuxClientEvent; owner?: AgentMuxRuntimeOwnerIdentity }
   | { kind: 'history'; observation: AgentSessionHistoryObservation }
+  | { kind: 'conversation'; observation: import('./conversation-changes.js').ConversationObservation }
 export type AgentMuxHostedStreamEvent =
   | { type: 'snapshot'; data: AgentMuxHostedTransferChunk }
   | { type: 'end'; data: unknown }
@@ -113,6 +115,7 @@ export type AgentMuxHostedRuntimeParameterMap = {
   'runtime.invoke': { consumerId: string; fence: AgentMuxRuntimeFence; invocation: AgentMuxHostedInvocation }
   'runtime.release-consumer': { consumerId: string; fence: AgentMuxRuntimeFence }
   'runtime.events': { consumerId: string; fence: AgentMuxRuntimeFence }
+  'runtime.conversation-watch': { consumerId: string; fence: AgentMuxRuntimeFence; reference: import('./conversation.js').ConversationRef; options?: Omit<import('./conversation-changes.js').ConversationReadOptions, 'signal'> }
   'runtime.history-watch': { consumerId: string; fence: AgentMuxRuntimeFence; agentSessionId: string;
     options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'> }
   'runtime.attachment-watch': { consumerId: string; fence: AgentMuxRuntimeFence; target: AgentMuxHostedAttachmentTarget;
@@ -127,14 +130,16 @@ export type AgentMuxHostedRuntimeResultMap = {
   'runtime.invoke': { value: unknown }
   'runtime.release-consumer': { released: boolean }
   'runtime.events': never
+  'runtime.conversation-watch': never
   'runtime.history-watch': never
   'runtime.attachment-watch': never
   'runtime.replay-watch': never
 }
 export type AgentMuxHostedRuntimeMethod = keyof AgentMuxHostedRuntimeParameterMap
-export type AgentMuxHostedStreamMethod = 'runtime.events' | 'runtime.history-watch' | 'runtime.attachment-watch' | 'runtime.replay-watch'
+export type AgentMuxHostedStreamMethod = 'runtime.events' | 'runtime.conversation-watch' | 'runtime.history-watch' | 'runtime.attachment-watch' | 'runtime.replay-watch'
 export type AgentMuxHostedStreamInitialMap = {
   'runtime.events': { owner: AgentMuxRuntimeOwnerIdentity; transferId: string }
+  'runtime.conversation-watch': { owner: AgentMuxRuntimeOwnerIdentity; opening: import('./conversation-changes.js').ConversationWatchOpening }
   'runtime.history-watch': { owner: AgentMuxRuntimeOwnerIdentity; source: AgentSessionHistoryObservationHandle['source'] }
   'runtime.attachment-watch': { owner: AgentMuxRuntimeOwnerIdentity; transferId: string }
   'runtime.replay-watch': { owner: AgentMuxRuntimeOwnerIdentity; transferId: string }
@@ -143,13 +148,14 @@ export type AgentMuxHostedStreamInitial<M extends AgentMuxHostedStreamMethod> = 
 export const AGENTMUX_HOSTED_RPC_METHODS = {
   'runtime.owner.identity': 'short', 'runtime.owner.shutdown': 'short',
   'runtime.bootstrap': 'short', 'runtime.invoke': 'long', 'runtime.release-consumer': 'long',
-  'runtime.events': 'long', 'runtime.history-watch': 'long', 'runtime.attachment-watch': 'long', 'runtime.replay-watch': 'long'
+  'runtime.events': 'long', 'runtime.conversation-watch': 'long', 'runtime.history-watch': 'long', 'runtime.attachment-watch': 'long', 'runtime.replay-watch': 'long'
 } as const satisfies Record<AgentMuxHostedRuntimeMethod, 'short' | 'long'>
 
 export const AGENTMUX_HOSTED_RPC_FIELDS = {
   'runtime.owner.identity': ['expectedRuntimeId'], 'runtime.owner.shutdown': ['fence'],
   'runtime.bootstrap': ['consumerId', 'fence'], 'runtime.invoke': ['consumerId', 'fence', 'invocation'],
   'runtime.release-consumer': ['consumerId', 'fence'], 'runtime.events': ['consumerId', 'fence'],
+  'runtime.conversation-watch': ['consumerId', 'fence', 'reference', 'options'],
   'runtime.history-watch': ['consumerId', 'fence', 'agentSessionId', 'options'],
   'runtime.attachment-watch': ['consumerId', 'fence', 'target', 'afterByte', 'view', 'refresh', 'operationId'],
   'runtime.replay-watch': ['consumerId', 'fence', 'target', 'afterByte', 'view']

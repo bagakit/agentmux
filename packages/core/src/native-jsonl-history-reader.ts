@@ -1,4 +1,4 @@
-import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './conversation-changes.js'
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './session-history-changes.js'
 import { constants } from 'node:fs'
 import { open, stat, type FileHandle } from 'node:fs/promises'
 import { createHash } from 'node:crypto'

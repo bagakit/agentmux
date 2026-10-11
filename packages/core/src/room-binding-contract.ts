@@ -1,4 +1,4 @@
-import type { ConversationCheckpoint } from './conversation-changes.js'
+import type { NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConnectionApplication, ConnectionGrant } from './connections-contract.js'
 import type { AgentSessionHistorySource } from './types.js'
 
@@ -19,7 +19,7 @@ export type RoomBinding = RoomBindingTarget & {
   externalConversationId: string
   scope: RoomBindingScope
   /** Only original native sources are eligible in this scope. No captured or wall-clock substitute. */
-  sourceCheckpoints: ConversationCheckpoint[]
+  sourceCheckpoints: NativeConversationCheckpoint[]
   authorizedBy: RoomBindingAuthority
 }
 export type RoomBindingBindInput = RoomBindingTarget & {

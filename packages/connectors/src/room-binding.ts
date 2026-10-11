@@ -1,5 +1,5 @@
 import { AgentMuxError } from '@agentmux/core'
-import { parseConversationCheckpointPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
+import { parseNativeConversationCheckpointPage, type NativeConversationCheckpoint, type NativeConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
 import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
 import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
@@ -9,7 +9,7 @@ export type RoomBindingHostOptions = {
   connections: ConnectionHost
   spatial: { read(): Promise<AgentMuxSpatialState | null> }
   /** Borrow the original Core client for the exact Host, never a new Runtime or focused occupant. */
-  checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
+  checkpoint(reference: ConversationRef): Promise<NativeConversationCheckpointPage>
 }
 type Action = RoomBindingOperation['action']
 type Input = RoomBindingBindInput | RoomBindingRelinkInput | RoomBindingPauseInput | RoomBindingGrantInput
@@ -158,10 +158,10 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     if (!target) refuse('ROOM_BINDING_TARGET_CHANGED')
     return target.revision
   }
-  private async cut(input: RoomBindingBindInput): Promise<ConversationCheckpoint[]> {
+  private async cut(input: RoomBindingBindInput): Promise<NativeConversationCheckpoint[]> {
     const ref = { hostId: input.executionHostId, agentSessionId: input.agentSessionId }
-    let page: ConversationCheckpointPage
-    try { page = parseConversationCheckpointPage(await this.options.checkpoint(ref), ref) }
+    let page: NativeConversationCheckpointPage
+    try { page = parseNativeConversationCheckpointPage(await this.options.checkpoint(ref), ref) }
     catch { return refuse('ROOM_BINDING_SOURCE_UNAVAILABLE') }
     if (!equal(page.checkpoint.source, input.expectedSource)) refuse('ROOM_BINDING_SOURCE_CHANGED')
     return [page.checkpoint]

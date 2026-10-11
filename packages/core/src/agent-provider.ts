@@ -1,4 +1,4 @@
-import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './conversation-changes.js'
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './session-history-changes.js'
 import type { AgentPromptPreparationWaitReason } from './prompt-preparation.js'
 import { AgentMuxError } from './errors.js'
 import {

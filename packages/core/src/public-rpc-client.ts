@@ -147,15 +147,18 @@ function resultBody(method: AgentMuxRpcMethod, value: unknown, params: unknown, 
 }
 function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: Record<string, unknown>, credentials?: AgentMuxRpcCredentials): unknown {
   const p = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
-  if (method === 'runtime.events' || method === 'runtime.history-watch' ||
+  if (method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch') {
-    rpcRecord(p, method === 'runtime.history-watch' ? ['owner', 'source'] : ['owner', 'transferId'], 'CONTROL_PROTOCOL_ERROR')
+    rpcRecord(p, method === 'runtime.conversation-watch' ? ['owner', 'opening'] : method === 'runtime.history-watch' ? ['owner', 'source'] : ['owner', 'transferId'], 'CONTROL_PROTOCOL_ERROR')
     const owner = parseHostedRuntimeOwnerIdentity(p.owner)
     const fence = rpcRecord(params.fence, ['runtimeId', 'ownerInstanceId'], 'CONTROL_PROTOCOL_ERROR')
     if (owner.runtimeId !== fence.runtimeId || owner.ownerInstanceId !== fence.ownerInstanceId) {
       throw new AgentMuxError('Runtime observation belongs to another semantic owner.', 'CONTROL_PROTOCOL_ERROR')
     }
-    if (method === 'runtime.history-watch') {
+    if (method === 'runtime.conversation-watch') {
+      const reference = rpcRecord(params.reference), options = rpcRecord(params.options ?? {})
+      parseConversationWatchOpening(p.opening, { hostId: String(options.referenceHostId ?? reference.hostId), agentSessionId: String(reference.agentSessionId) })
+    } else if (method === 'runtime.history-watch') {
       const source = rpcRecord(p.source, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
       if (typeof source.providerId !== 'string' || !source.providerId || typeof source.nativeSessionId !== 'string' || !source.nativeSessionId) {
         throw new AgentMuxError('History opening lacks its original native source.', 'CONTROL_PROTOCOL_ERROR')
@@ -219,7 +222,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
     return event
   }
   rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR')
-  if ((method === 'runtime.events' || method === 'runtime.history-watch' ||
+  if ((method === 'runtime.events' || method === 'runtime.conversation-watch' || method === 'runtime.history-watch' ||
     method === 'runtime.attachment-watch' || method === 'runtime.replay-watch') && event.type === 'snapshot') {
     return { ...event, data: parseHostedTransferChunk(event.data) }
   }

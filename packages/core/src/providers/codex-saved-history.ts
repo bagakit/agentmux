@@ -1,5 +1,5 @@
 import { nativeConversationProvenance } from '../conversation-provenance.js'
-import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../conversation-changes.js'
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../session-history-changes.js'
 import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
 import { NativeJsonlHistoryReader, readNativeConversationChanges, NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES } from '../native-jsonl-history-reader.js'

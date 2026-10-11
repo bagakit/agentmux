@@ -1,5 +1,5 @@
 import { nativeConversationProvenance } from '../conversation-provenance.js'
-import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../conversation-changes.js'
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../session-history-changes.js'
 // Native record/role interpretation follows Paseo's convertClaudeHistoryEntry / normalizeHistoryBlocks.
 // Source: Paseo 3c6e4e39 (Apache-2.0, Copyright (c) 2025-present Mohamed Boudra). Modified for bounded, read-only pages,
 // exact ordered content/resources, neutral unknown activities and native UUID identity.
