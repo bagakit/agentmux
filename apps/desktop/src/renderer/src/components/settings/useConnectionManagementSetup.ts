@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupBegin, ConnectionSetupInspect, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
+import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
 import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 
@@ -9,7 +9,7 @@ type Submission = { key: string; source: Source; input: ConnectionSetupBegin }
 type Catalog = { key: string; source: Source; value: ConnectionSetupListing | null; issue: string }
 type Reading = { key: string; source: Source; id: string; value: ConnectionSetupView | null; issue: string; absent: boolean; pending: boolean; actionKind?: ConnectionSetupAction['kind'] | undefined; configurationIssue?: string }
 const scope = (record: ConnectionRecord | null) => record ? JSON.stringify([record.config.connectionId, record.config.adapterId, record.config.application, record.revision]) : ''
-const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: operation.operationId, connectionId: operation.connectionId, expectedConnectionRevision: operation.expectedConnectionRevision, goal: operation.goal })
+const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => ({ operationId: operation.operationId, connectionId: operation.connectionId, expectedConnectionRevision: operation.expectedConnectionRevision, goal: operation.goal, ...(operation.source ? { source: operation.source } : {}) })
 
 /** The mounted Settings task retains safe submissions; private readings and timers are disposable. */
 export function useConnectionManagementSetup(record: ConnectionRecord | null, active: boolean, opened: boolean) {
@@ -20,6 +20,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const context = useRef({ key, source, active, opened }), mounted = useRef(false)
   const occurrence = useRef(0), listOccurrence = useRef(0), selection = useRef<string | null>(null)
   const submittedActions = useRef(new Set<string>()), draft = useRef<Submission | null>(null)
+  const requestedHandoff = useRef<Submission | null>(null)
   context.current = { key, source, active, opened }
   const currentSource = () => mounted.current && context.current.active && context.current.key === key && context.current.source === source && api.connections.call === source
   const visibleCatalog = catalog?.key === key && catalog.source === source ? catalog : null
@@ -107,6 +108,13 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     submittedActions.current.clear()
     void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId, applicationInspection: {}, applicationConfiguration: {} }), true)
   }
+  function handoff(enrollment: ConnectionSetupEnrollmentSource) {
+    if (!record || !currentSource() || !visibleCatalog?.value?.support?.capabilities.includes('enrollment-continuation')) return
+    const original = submissions.find(item => item.key === key && item.source === source && JSON.stringify(item.input.source) === JSON.stringify(enrollment))
+    const submission = original ?? { key, source, input: { operationId: crypto.randomUUID(), connectionId: record.config.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' }, source: enrollment } as ConnectionSetupBegin }
+    if (!original) setSubmissions(previous => [...previous, submission])
+    requestedHandoff.current = submission
+  }
   function inspectOriginal(selectors: Omit<ConnectionSetupInspect, 'operationId'> = {}, originalOperationId?: string) {
     const id = originalOperationId ?? visible?.id
     if (id) void perform(id, () => source('connection.setup.inspect', {
@@ -134,12 +142,21 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; occurrence.current++; listOccurrence.current++ } }, [])
   useEffect(() => {
     occurrence.current++; listOccurrence.current++; selection.current = null; draft.current = null
+    if (!active || requestedHandoff.current?.key !== key || requestedHandoff.current?.source !== source) requestedHandoff.current = null
     setReading(null); setDriving(false); setListing(false); setFresh(false); submittedActions.current.clear()
     if (active && record) void list()
   }, [key, source, active])
   useEffect(() => {
     occurrence.current++; selection.current = null; setReading(null); setDriving(false); setFresh(false); submittedActions.current.clear()
+    if (!opened) requestedHandoff.current = null
   }, [opened])
+  useEffect(() => {
+    const submission = requestedHandoff.current
+    if (!active || !opened || !submission || submission.key !== key || submission.source !== source) return
+    requestedHandoff.current = null
+    setFresh(false); submittedActions.current.clear()
+    void perform(submission.input.operationId, () => source('connection.setup.begin', submission.input), false)
+  }, [active, opened, key, source])
 
   useEffect(() => {
     if (!active || !opened || !driving || busy || !operation || !matches(operation) || view?.reason || visible?.issue) return
@@ -160,7 +177,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, choose, inspect, inspectOriginal, advance, continueOriginal, another }
+  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>
