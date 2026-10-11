@@ -28,10 +28,10 @@ it('the production Desktop copying block supplies Main hashing imports inside a 
   // Execute every direct dependency copying statement unchanged, rather than manually
   // requesting hashes from the materializer. Removing the production call removes its output.
   const copyDependencies = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath',
-    'repositoryRoot', 'desktopRoot', 'coreRoot', functions.join('\n') +
+    'repositoryRoot', 'desktopRoot', 'coreRoot', 'connectorsRoot', functions.join('\n') +
     '\nreturn async function(appResources) {\n' + copyingStatements.map(statement => statement.getText(source)).join('\n') + '\n}')(
     readFile, mkdir, cp, readdir, join, dirname, lstat, realpath,
-    repositoryRoot, join(repositoryRoot, 'apps/desktop'), join(repositoryRoot, 'packages/core')) as (appResources: string) => Promise<void>
+    repositoryRoot, join(repositoryRoot, 'apps/desktop'), join(repositoryRoot, 'packages/core'), join(repositoryRoot, 'packages/connectors')) as (appResources: string) => Promise<void>
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-main-hashing-'))
   try {
     const appResources = join(temporary, 'AgentMux.app/Contents/Resources/app')

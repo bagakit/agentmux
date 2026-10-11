@@ -50,7 +50,7 @@ console.log(JSON.stringify({passed:true,cases:['original-valid-schema','unsuppor
 `)
 
 function revokedConfig() {
-  const anchor = /externalizeDepsPlugin\(\{ exclude: \[([\s\S]*?)\] \}\)/g
+  const anchor = /externalizeDepsPlugin\(\{ exclude: \[([\s\S]*?)\](?:, include: \[[^\]]*\])? \}\)/g
   const matches = [...configSource.matchAll(anchor)]
   assert.equal(matches.length, 1, 'The original Main dependency choice is unique and nonempty')
   let changed = matches[0][0]
