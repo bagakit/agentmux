@@ -16,6 +16,8 @@ import { MoteAvatarWriter } from '../../src/main/mote-avatar-writer.js'
 import { MoteAvatarControl } from '../../src/main/mote-avatar-control.js'
 import type { MoteAvatarSeriesOwner } from '../../src/main/mote-avatar-series.js'
 import type { AppConfig } from '../../src/shared/contracts.js'
+import type { SpaceIconChoice } from '../../src/shared/space-object-appearance.js'
+import type { MoteAvatarImage } from '../../src/shared/mote-avatars.js'
 import { directoryIdentity, homeZoneId } from '../../src/shared/space-addresses.js'
 import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics.js'
 import { controlledNativeImage, imageInput } from './mote-identity-image.js'
@@ -32,6 +34,8 @@ export async function moteConnectionOwner(
     afterFileWrite?(): Promise<void>
     authenticationUnknown?: boolean
     profileUnknown?: boolean
+    avatarChoice?: SpaceIconChoice | null
+    renderAvatar?(svg: string): Promise<MoteAvatarImage>
   } = {}
 ) {
   const workspace = {
@@ -118,7 +122,7 @@ export async function moteConnectionOwner(
     }
   })
   const config = {
-    appearance: { spaceObjectIcons: Object.fromEntries(motes.map((m) => [m.spaceId, m.avatar])) },
+    appearance: { spaceObjectIcons: Object.fromEntries(motes.map((m) => [m.spaceId, Object.hasOwn(options, 'avatarChoice') ? options.avatarChoice : m.avatar])) },
     workspaces: [workspace]
   } as AppConfig
   const configOwner = new ConfigOwner({
@@ -136,6 +140,8 @@ export async function moteConnectionOwner(
   const writer = new MoteAvatarWriter(configOwner, sources, {
     directory: (t) => topics.avatarTargetDirectory(workspace, t.topicId, t.objectKey),
     read: (t, ref) => topics.readAvatar(workspace, t.topicId, ref, t.objectKey),
+    render: options.renderAvatar ?? (async () => { throw new Error('This fixture did not provide a native SVG raster boundary') }),
+    prefersDark: () => true,
     save: async () => {
       throw new Error('No avatar edits')
     },
@@ -297,6 +303,7 @@ export async function moteConnectionOwner(
     publicFiles,
     topics,
     avatars,
+    config,
     source,
     sourcePorts,
     parent,
