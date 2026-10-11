@@ -1,3 +1,4 @@
+import { createFeishuSetup } from './setup.js'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { Client, WSClient, EventDispatcher, AppType, LoggerLevel, defaultHttpInstance, DefaultCache, type HttpInstance, type HttpRequestOptions, type Logger } from '@larksuiteoapi/node-sdk'
 import { parseConnectionConfig, type ConnectionConfig, type ConnectionObservation } from '@agentmux/core/connections'
@@ -28,6 +29,7 @@ const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: mute
 export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly adapterId = 'feishu'
   readonly profile = createFeishuProfile((config, credential, call, signal) => this.withClient(config, credential, call, signal))
+  readonly setup = createFeishuSetup()
   readonly enrollment = createFeishuEnrollment()
   readonly publication = new FeishuPublicationAdapter(this)
   readonly ingress = this

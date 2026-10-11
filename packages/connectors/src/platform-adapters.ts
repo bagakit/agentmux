@@ -2,7 +2,7 @@ import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionAdapter } from './connection-host.js'
 import { FeishuPublicationAdapter } from './adapters/feishu/publication.js'
 
-/** Built-in leaves stay unloaded until the original Host tests or starts an enabled connection. */
+/** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
 export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] {
   let loading: Promise<import('./adapters/feishu/index.js').FeishuAdapter> | undefined
   const feishu = () => loading ??= import('./adapters/feishu/index.js').then(({ FeishuAdapter }) => new FeishuAdapter()).catch(() => {
@@ -17,6 +17,10 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       upload: async (config, request, credential, signal) => (await feishu()).profile.upload(config, request, credential, signal),
       patch: async (config, request, credential, signal) => (await feishu()).profile.patch(config, request, credential, signal),
       get: async (config, revision, credential, signal) => (await feishu()).profile.get(config, revision, credential, signal)
+    },
+    setup: {
+      domains: ['open.feishu.cn'],
+      begin: async (input, signal) => (await feishu()).setup.begin(input, signal)
     },
     enrollment: {
       domains: [{ domain: 'open.feishu.cn', label: 'Feishu' }, { domain: 'open.larksuite.com', label: 'Lark' }],

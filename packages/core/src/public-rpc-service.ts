@@ -1,3 +1,4 @@
+import { isConnectionSetupMethod, parseConnectionSetupParams } from './connection-setup-codec.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { ConversationLandmarkStore } from './conversation-landmark-store.js'
@@ -457,6 +458,15 @@ export class AgentMuxRpcService {
         const result = method === 'connection.service.get' ? await service.get()
           : method === 'connection.service.configure' ? await service.configure(parseConnectionServiceParams(method, params))
           : await service.inspect(parseConnectionServiceParams(method, params))
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
+      if (isConnectionSetupMethod(method)) {
+        const setup = owner.setup
+        if (!setup) throw new AgentMuxError('Platform management confirmation is unavailable on this Host. Existing connections and Agents remain available.', 'CONTROL_UNAVAILABLE')
+        const callContext = { ...administration, ...(context.signal ? { signal: context.signal } : {}) }
+        const result = method === 'connection.setup.begin' ? await setup.begin(parseConnectionSetupParams(method, params), callContext)
+          : method === 'connection.setup.ls' ? await setup.list(parseConnectionSetupParams(method, params))
+          : await setup.inspect(parseConnectionSetupParams(method, params), callContext)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       if (isConnectionProfileMethod(method)) {
