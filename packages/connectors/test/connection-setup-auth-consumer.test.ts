@@ -96,6 +96,14 @@ async function toAccount(f: Fixture, view: ConnectionSetupView): Promise<Connect
 function privateRows(database: DatabaseSync) {
   return database.prepare('SELECT operation_id,ciphertext FROM connection_credential ORDER BY operation_id').all().map(row => ({ operationId: String(row.operation_id), bytes: Buffer.from(row.ciphertext as Uint8Array) }))
 }
+function authenticationSnapshots(f: Fixture, operationId: string): Record<string, unknown>[] {
+  return privateRows(f.services.database!).flatMap(row => {
+    try {
+      const envelope = JSON.parse(f.encryption.decryptString(row.bytes))
+      return envelope?.operationId === operationId && typeof envelope.privateState === 'string' ? [JSON.parse(envelope.privateState) as Record<string, unknown>] : []
+    } catch { return [] }
+  })
+}
 async function assertSafeDiscovery(f: Fixture, view: ConnectionSetupView) {
   const listed = result<{ operations: unknown[]; next: string | null }>(await f.cli(['ls', '--connection', f.input.connectionId]))
   expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability'] } })
@@ -168,6 +176,83 @@ it('compiled CLI and SDK consume one claimed HTTP per original action, then conf
   expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
   expect(await f.sdk.call('connection.service.get', {})).toEqual(off.service)
   await assertSafeDiscovery(f, view)
+}, 45_000)
+
+it('original v1 init and v2 authentication snapshots retain the exact saved application across owner reopen', async () => {
+  const f = await fixture(), fetch = vi.fn(nativeRoute({ scanned: true })); vi.stubGlobal('fetch', fetch)
+  let view = result(await f.cli(['begin', '--input', '-'], f.input))
+  const scope = { operationId: f.input.operationId, connectionId: f.input.connectionId, attemptId: view.operation!.request.attemptId, application: f.config.application }
+  const initial = authenticationSnapshots(f, f.input.operationId)
+  expect(initial).toHaveLength(1)
+  expect(initial[0]).toMatchObject({ ...scope, version: 1, flowKey: FLOW, token: TOKEN, setCookies: expect.any(Array) })
+  expect(Object.keys(initial[0]!).sort()).toEqual(['version', 'operationId', 'connectionId', 'attemptId', 'application', 'flowKey', 'token', 'setCookies'].sort())
+  const original = privateRows(f.services.database!), input = advanceInput(view)
+  await f.close(); await f.reopen()
+  expect((await inspect(f)).continuation).toEqual(view.continuation)
+  expect(fetch).toHaveBeenCalledTimes(1)
+  view = await f.sdk.call('connection.setup.advance', input)
+  expect(view.continuation).toMatchObject({ stage: 'scanned', account: null })
+  const progressed = authenticationSnapshots(f, f.input.operationId)
+  expect(progressed).toHaveLength(2)
+  expect(progressed.map(snapshot => snapshot.version).sort()).toEqual([1, 2])
+  expect(progressed.find(snapshot => snapshot.version === 1)).toEqual(initial[0])
+  expect(progressed.find(snapshot => snapshot.version === 2)).toMatchObject({ ...scope, version: 2, flowKey: FLOW, token: TOKEN, phase: 'poll', hops: 0, cookieJar: { cookies: expect.any(Array) } })
+  await f.close(); await f.reopen()
+  expect((await inspect(f)).continuation).toEqual(view.continuation)
+  expect((await f.sdk.call('connection.setup.advance', input)).receipt).toEqual(view.receipt)
+  expect(fetch).toHaveBeenCalledTimes(2)
+  view = await toAccount(f, view)
+  const completed = authenticationSnapshots(f, f.input.operationId)
+  expect(completed.length).toBeGreaterThan(progressed.length)
+  for (const snapshot of completed) expect(snapshot).toMatchObject(scope)
+  expect(completed.find(snapshot => snapshot.phase === 'account')).toMatchObject({ version: 2, phase: 'account', account: { userId: USER, tenantId: TENANT }, csrf: CSRF, consoleOrigin: 'https://open.feishu.cn' })
+  for (const old of original) expect(privateRows(f.services.database!).find(row => row.operationId === old.operationId)?.bytes).toEqual(old.bytes)
+  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+  expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
+}, 45_000)
+
+it.each([1, 2] as const)('the Setup wrapper refuses foreign bindings in a v%s native snapshot before any HTTP request', async version => {
+  const f = await fixture(), route = nativeRoute({ scanned: true }), fetch = vi.fn(route); vi.stubGlobal('fetch', fetch)
+  const originalResolve = DesktopConnectorSecrets.prototype.resolve
+  const changes = [
+    { operationId: 'foreign-management-intent' },
+    { connectionId: 'foreign-saved-connection' },
+    { attemptId: 'foreign-authentication-attempt' },
+    { application: { ...f.config.application, appId: 'cli_foreign_saved_application' } },
+    { application: { ...f.config.application, domain: 'open.larkoffice.com' } }
+  ]
+  for (const [index, changed] of changes.entries()) {
+    const operationId = `foreign-native-v${version}-${index}`
+    let view = await f.sdk.call('connection.setup.begin', { ...f.input, operationId })
+    if (version === 2) view = await advance(f, view)
+    const snapshots = authenticationSnapshots(f, operationId)
+    expect(snapshots.length).toBeGreaterThan(0)
+    expect(snapshots.find(snapshot => snapshot.version === version)).toBeDefined()
+    const original = privateRows(f.services.database!), calls = fetch.mock.calls.length, input = advanceInput(view)
+    let substituted = 0
+    const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function(this: DesktopConnectorSecrets, ref) {
+      const value = await originalResolve.call(this, ref)
+      if (value === null) return null
+      let envelope: { operationId?: string; privateState?: string }
+      try { envelope = JSON.parse(value) } catch { return value }
+      if (envelope.operationId !== operationId || typeof envelope.privateState !== 'string') return value
+      const native = JSON.parse(envelope.privateState)
+      expect(native.version).toBe(version)
+      substituted++
+      return JSON.stringify({ ...envelope, privateState: JSON.stringify({ ...native, ...changed }) })
+    })
+    try {
+      const refused = result(await f.cli(['advance', '--input', '-'], input))
+      expect(substituted).toBeGreaterThan(0)
+      expect(refused.continuation).toMatchObject({ stage: 'unknown', account: null })
+      expect(refused.receipt).toMatchObject({ actionId: input.decision.actionId, state: 'unknown' })
+      expect(refused.operation).toMatchObject({ operationId, connectionId: f.input.connectionId, application: f.config.application, expectedConnectionRevision: f.saved.connection.revision })
+      expect((await f.sdk.call('connection.setup.advance', input)).receipt).toEqual(refused.receipt)
+      expect(fetch).toHaveBeenCalledTimes(calls)
+    } finally { fault.mockRestore() }
+    for (const old of original) expect(privateRows(f.services.database!).find(row => row.operationId === old.operationId)?.bytes).toEqual(old.bytes)
+  }
+  expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
 it('CookieJar selects domain, host, path and expiry cookies anew for each allowed origin and never forwards flow or CSRF headers', async () => {
