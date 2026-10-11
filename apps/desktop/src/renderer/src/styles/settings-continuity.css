@@ -1,20 +1,15 @@
 .continuity-settings { min-width: 0; }
-.continuity-scope, .continuity-hint, .continuity-delivery-preview p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.continuity-scope, .continuity-hint { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
 .continuity-setting-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-5); padding: var(--sp-3) 0; }
-.continuity-setting-row label, .continuity-text-field { display: grid; min-width: 0; gap: var(--sp-1); }
+.continuity-setting-row label { display: grid; min-width: 0; gap: var(--sp-1); }
 .continuity-settings strong { color: var(--text); font-size: var(--fs-body); font-weight: 500; }
-.continuity-setting-row small, .continuity-text-field small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.continuity-setting-row small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .continuity-settings .continuity-field-facts { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
 .continuity-setting-row select { max-width: 100%; flex: none; min-height: 30px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-meta); }
 .continuity-number { display: flex; flex: none; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .continuity-number input, .continuity-count { width: 100px; min-width: 0; font: inherit; font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
 .continuity-count { flex: none; }
-.continuity-text-field { margin-top: var(--sp-3); }
-.continuity-text-field textarea { width: 100%; min-height: 100px; resize: vertical; font: inherit; font-size: var(--fs-body); line-height: 1.6; }
 .continuity-preview { margin-top: var(--sp-4); border-top: 1px solid var(--line); padding-top: var(--sp-3); }
-.continuity-preview summary { color: var(--text-2); cursor: pointer; font-size: var(--fs-meta); }
 .continuity-preview pre { margin: var(--sp-3) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: var(--fs-meta); line-height: 1.65; color: var(--text-2); }
-.continuity-delivery-preview { display: grid; gap: var(--sp-2); padding-block: var(--sp-2); }
-.continuity-delivery-preview h3 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
-.continuity-setting-row select:focus-visible, .continuity-preview summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.continuity-setting-row select:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 @media (max-width: 620px) { .continuity-setting-row { align-items: flex-start; flex-direction: column; gap: var(--sp-2); } .continuity-setting-row select { width: 100%; } .continuity-number { width: 100%; } .continuity-number input { flex: 1; width: 0; } }

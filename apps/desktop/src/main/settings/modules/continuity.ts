@@ -1,6 +1,6 @@
 import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core'
 import type { AppConfig } from '../../../shared/contracts.js'
-import { booleanSetting, enumSetting, invalid, textSetting, type ScalarSetting } from '../scalar-setting.js'
+import { booleanSetting, enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
 
 const defaults = DEFAULT_AGENT_CONTINUITY_POLICY
 function numberSetting(key: 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 'recheckIntervalMs' | 'recheckMaxAttempts' | 'retryInitialDelayMs' | 'retryMaxDelayMs' | 'retryMaxAttempts'): ScalarSetting {
@@ -38,17 +38,13 @@ export const continuitySettings = [
   numberSetting('confirmedIdleWindowMs'),
   booleanSetting('continuity.resumeAfterExit', defaults.resumeAfterExit,
     config => normalizeAgentContinuityPolicy(config.continuity).resumeAfterExit, write('resumeAfterExit')),
+  booleanSetting('continuity.activeInterruptionFallback', defaults.activeInterruptionFallback,
+    config => normalizeAgentContinuityPolicy(config.continuity).activeInterruptionFallback, write('activeInterruptionFallback')),
   numberSetting('recheckIntervalMs'),
   numberSetting('recheckMaxAttempts'),
   numberSetting('retryInitialDelayMs'),
   numberSetting('retryMaxDelayMs'),
   numberSetting('retryMaxAttempts'),
-  enumSetting('continuity.reminderMode', ['off', 'default', 'default-plus-custom'], defaults.reminderMode,
-    config => normalizeAgentContinuityPolicy(config.continuity).reminderMode, write('reminderMode')),
-  textSetting('continuity.reminderAppend', config => normalizeAgentContinuityPolicy(config.continuity).reminderAppend,
-    write('reminderAppend'), () => true, defaults.reminderAppend),
   booleanSetting('continuity.continuationEnabled', defaults.continuationEnabled,
-    config => normalizeAgentContinuityPolicy(config.continuity).continuationEnabled, write('continuationEnabled')),
-  textSetting('continuity.continuationPrompt', config => normalizeAgentContinuityPolicy(config.continuity).continuationPrompt,
-    write('continuationPrompt'), () => true, defaults.continuationPrompt)
+    config => normalizeAgentContinuityPolicy(config.continuity).continuationEnabled, write('continuationEnabled'))
 ] satisfies readonly ScalarSetting[]
