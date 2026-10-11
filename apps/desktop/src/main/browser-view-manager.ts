@@ -12,6 +12,7 @@ import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, 
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
+  BROWSER_PNG_MAX_BASE64_CHARS,
   type BrowserAnnotationMarker,
   type BrowserBounds,
   type BrowserElementRect,
@@ -41,7 +42,7 @@ import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { BrowserCdpSession } from './browser-cdp-session.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess, registerBrowserWebAuthnAccess } from './browser-webauthn-access.js'
-import { browserPngFromNativeImage } from './browser-image.js'
+import { browserPngFromBytes, browserPngFromNativeImage } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
 import { safeBrowserUrl, startBrowserOperationStep, summarizeBrowserValue } from './browser-operation-step.js'
@@ -55,7 +56,7 @@ import {
 } from './browser-app-link.js'
 import { runBrowserScript } from './browser-script-runner.js'
 import { buildReplayScript } from './browser-replay-compiler.js'
-import { captureBrowserPageSnapshot } from './browser-page-snapshot.js'
+import { captureBrowserPageSnapshot, type BrowserCdpSender } from './browser-page-snapshot.js'
 import { verifyBrowserSemanticTarget } from './browser-semantic-target.js'
 import type { BrowserOperationJournal } from './browser-operation-journal.js'
 import { BrowserStepEvidenceStore, pageStepEvidence, recordBrowserStepEvidence, screenshotStepEvidence } from './browser-step-evidence.js'
@@ -1283,32 +1284,45 @@ export class BrowserViewManager {
     return this.snapshot(entry)
   }
 
-  async captureScreenshot(id: string): Promise<BrowserScreenshotCapture> {
+  async captureScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender }): Promise<BrowserScreenshotCapture> {
     const entry = this.require(id)
     const view = entry.view
+    if (transport && transport.view !== view) throw new Error('Browser page changed before the screenshot was captured')
     await this.waitForInitialDocument(entry, view)
     const navigationId = entry.navigationId
+    const requireCurrent = () => {
+      if (!this.owns(entry, view) || view.webContents.isDestroyed() || entry.navigationId !== navigationId) {
+        throw new Error('Browser page changed while the screenshot was being captured')
+      }
+    }
+    requireCurrent()
     const url = view.webContents.getURL(), title = view.webContents.getTitle()
     const readViewport = () => readScreenshotViewport(() => view.webContents.executeJavaScriptInIsolatedWorld(BROWSER_SELECTION_WORLD_ID, [{ code: SCREENSHOT_VIEWPORT_SCRIPT }]))
     const before = await readViewport()
-    if (!this.owns(entry, view) || view.webContents.isDestroyed() || entry.navigationId !== navigationId) {
-      throw new Error('Browser page changed while the screenshot was being captured')
+    requireCurrent()
+    let image: BrowserScreenshotCapture['image']
+    if (transport) {
+      // Reuse this operation's original session. CDP waits for a presented frame;
+      // the GUI's Native capture remains available without attaching a debugger.
+      const captured = await transport.sendCommand('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false })
+      requireCurrent()
+      const data = (captured as { data?: unknown } | null)?.data
+      if (typeof data !== 'string' || data.length === 0 || data.length > BROWSER_PNG_MAX_BASE64_CHARS) throw new Error('Browser screenshot must contain bounded base64 PNG data')
+      const bytes = Buffer.from(data, 'base64')
+      if (bytes.toString('base64') !== data) throw new Error('Browser screenshot must contain canonical base64 PNG data')
+      image = browserPngFromBytes(bytes)
+    } else {
+      const captured = await view.webContents.capturePage()
+      requireCurrent()
+      image = browserPngFromNativeImage(captured)
     }
-    const image = await view.webContents.capturePage()
     const after = await readViewport()
-    if (
-      this.entries.get(id) !== entry ||
-      entry.view !== view ||
-      view.webContents.isDestroyed() ||
-      entry.navigationId !== navigationId
-    ) {
-      throw new Error('Browser page changed while the screenshot was being captured')
-    }
+    requireCurrent()
     return {
       browserId: id,
       navigationId,
       source: screenshotSource(url, title, before, after),
-      image: browserPngFromNativeImage(image)
+      image
     }
   }
 
@@ -1354,9 +1368,10 @@ export class BrowserViewManager {
     // 所以这个 flag 的复位不能只挂在成功之后——attach 在 try 外面抛一次，flag 就永久卡住，
     // 此后每次 run 都报"另一个操作正在运行"，而 `activeRun` 是空的、连能停的东西都没有，
     // 只有销毁重建这个 view 才能恢复。失败自己是可恢复的，别把它变成不可恢复的。
+    const runView = entry.view
     let session: BrowserCdpSession
     try {
-      session = BrowserCdpSession.attach(entry.view.webContents)
+      session = BrowserCdpSession.attach(runView.webContents)
     } catch (error) {
       entry.runInFlight = false
       throw error
@@ -1462,7 +1477,7 @@ export class BrowserViewManager {
       if (!Number.isFinite(remainingMillis) || remainingMillis <= 0) throw new Error('Task execution budget reached before script dispatch. Existing progress remains; the step was not replayed.')
       const run = await runBrowserScript({ code, signal: stopController.signal,
         timeoutMs: remainingMillis,
-        onPageCall: this.pageCallHandler(entry, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis),
+        onPageCall: this.pageCallHandler(entry, runView, session, notes, operation, privateTaskParameters, stopController.signal, taskPage, deadlineMillis),
         ...(this.resultArtifacts ? { captureResultArtifact: async (sourcePath: string) => {
           if (!this.owns(entry, feedbackView) || entry.activeRun?.operationId !== operation.id || stopController.signal.aborted) throw new Error('The original Browser operation changed before retaining its result.')
           const context: BrowserResultContext = { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId }
@@ -2189,6 +2204,7 @@ export class BrowserViewManager {
    */
   private pageCallHandler(
     entry: BrowserEntry,
+    observingView: WebContentsView,
     session: BrowserCdpSession,
     notes: string[],
     operation: BrowserOperation,
@@ -2200,7 +2216,6 @@ export class BrowserViewManager {
     let activeStep: BrowserOperationStep | null = null
     const waitingSteps = new Set<number>()
     let beforeWaiting: { phase: BrowserOperation['phase']; summary: string } | null = null
-    const observingView = entry.view
     const requireCurrentDocumentOperation = () => {
       if (!this.owns(entry, observingView) || observingView.webContents.isDestroyed() || entry.activeRun?.operationId !== operation.id) throw new Error('The original Browser operation changed before document dispatch.')
       signal?.throwIfAborted()
@@ -2267,7 +2282,7 @@ export class BrowserViewManager {
         beforeAction()
         await runBrowserTaskNavigation(() => this.startNavigation(entry, url))
       },
-      captureScreenshot: async () => await this.captureScreenshot(entry.id),
+      captureScreenshot: async () => await this.captureScreenshot(entry.id, { view: observingView, sendCommand: session.sendCommand }),
       readLedger: async () => await this.refLedgers.read(entry.id),
       writeLedger: async (ledger) => {
         // Controlled parameterized task scripts return no refs. Do not retain page-derived echoes of their private values.
