@@ -12,7 +12,7 @@ import { markWindowOverlayDismissal } from './WindowOverlayHost'
 type InputReading = Pick<ReturnType<typeof useSessionUserMessages>, 'messages' | 'loading' | 'error' | 'observationError' | 'sourceChanged' | 'windowFrozen' | 'windowIncomplete'>
 function inputReading(reader: ReturnType<typeof useSessionUserMessages>): InputReading {
   const ordered = reader.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
-  const messages = (ordered ? [...reader.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : reader.messages).slice(-6)
+  const messages = reader.messages.slice(-6)
   return { messages, loading: reader.loading, error: reader.error, observationError: reader.observationError,
     sourceChanged: reader.sourceChanged, windowFrozen: reader.windowFrozen, windowIncomplete: reader.windowIncomplete }
 }
@@ -66,7 +66,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
   const snapshot = frozen ?? (enabled ? current : held.current ?? current)
   const ordered = snapshot.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
   // Missing times retain the public source order; they cannot establish a cross-source chronology.
-  const messages = (ordered ? [...snapshot.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : snapshot.messages).slice(-6)
+  const messages = snapshot.messages.slice(-6)
   const notice = !request.control || snapshot.error || snapshot.observationError ? 'Recent message reading unavailable'
     : snapshot.sourceChanged ? 'Message source changed' : snapshot.windowFrozen ? 'Reading window paused'
       : snapshot.windowIncomplete ? 'Reading window incomplete' : null

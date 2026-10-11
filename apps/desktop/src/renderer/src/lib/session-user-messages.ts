@@ -1,7 +1,7 @@
-import { useEffect, useCallback, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
+import { useEffect, useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentSessionHistoryObservationHandle, AgentSessionHistorySource } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import type { AgentConversationRecordSource } from '@agentmux/core/conversation'
+import { projectConversationRecords, type AgentConversationRecordSource } from '@agentmux/core/conversation'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
@@ -501,6 +501,9 @@ export function useSessionUserMessages(
   const nativeContextItems = active ? entry?.items ?? committed?.nativeContextItems ?? []
     : committed?.nativeContextItems ?? []
 
+  const projectedMessages = useMemo(() => active && control ? projectConversationRecords({ agentSessionId: control.agentSessionId, executionHostId: control.hostId,
+    historyPage: entry ? messageFactPage(entry) ?? undefined : undefined, timeline }).flatMap(record => record.input ? [record.input] : []) : [],
+    [active, control?.agentSessionId, control?.hostId, entry?.historyPage, entry?.items, entry?.nextCursor, timeline])
   let messages: AgentSessionUserMessage[] = []
 
   if (!isAgent || !control || !sessionKey) {
@@ -510,11 +513,7 @@ export function useSessionUserMessages(
     // If historyPage or timeline is present, project it directly.
     // If timeline already exists before subscription, project real captured fact immediately without falling back to [].
     if (entry?.historyPage || timeline) {
-      messages = projectSessionUserMessages({
-        agentSessionId: control.agentSessionId,
-        historyPage: entry ? messageFactPage(entry) ?? undefined : undefined,
-        timeline
-      })
+      messages = projectedMessages
     } else if (entry?.loading && committedSnapshotRef.current.key === sessionKey) {
       // Return pending revalidation: retain committed snapshot for this sessionKey until new source arrives
       messages = committedSnapshotRef.current.messages
