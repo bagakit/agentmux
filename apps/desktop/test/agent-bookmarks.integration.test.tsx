@@ -134,3 +134,13 @@ it('keeps preferred geometry when a fitted heading is clicked without dragging',
   })
   expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(preferred)
 })
+it('raises the same bookmark tree when keyboard focus enters from another window', async () => {
+  await scene(); await open(); await pin(); const original = panel()
+  await open(b.id); await pin(b.id)
+  expect(agentBookmarks.get().bookmarks.at(-1)!.agentSessionId).toBe(b.control.agentSessionId)
+  const target = original.querySelector<HTMLButtonElement>('.agent-information-reader__close')!
+  await act(async () => target.focus())
+  expect(document.activeElement).toBe(target); expect(panel()).toBe(original)
+  expect(agentBookmarks.get().bookmarks.at(-1)!.agentSessionId).toBe(a.control.agentSessionId)
+  expect(panels()).toHaveLength(2)
+})
