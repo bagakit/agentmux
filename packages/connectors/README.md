@@ -716,6 +716,52 @@ SDK callbacks, Core history, Mailbox, Settings and compiled public CLI receipts.
 These controlled ports prove the product call chain and exact bytes; they do not
 certify live credentials, platform permissions or delivery to a real group.
 
+## Saved-application management confirmation
+
+`ConnectionHost.setup` owns finite management-authentication intents in the original
+Connection database. The [Core contract](../core/src/connection-setup-contract.ts)
+and [strict codec](../core/src/connection-setup-codec.ts) expose the same result to
+SDK and CLI consumers. Begin binds the original actor, operation ID, saved
+Connection revision, application and goal before the native request.
+
+```sh
+amux connection setup begin --input management-request.json
+amux connection setup inspect --operation-id management-confirmation
+amux connection setup ls --connection saved-bot
+```
+
+The begin input is:
+
+```json
+{
+  "operationId": "management-confirmation",
+  "connectionId": "saved-bot",
+  "expectedConnectionRevision": 1,
+  "goal": { "kind": "agent-conversation", "interaction": "messages" }
+}
+```
+
+The native Feishu leaf issues one raw QR authentication challenge. Its payload,
+flow key and response cookie evidence are encrypted through the original secret
+port; safe durable records and list results contain only the request and secure
+handoff facts. Begin and inspect reveal active confirmation material only to the
+original transport-approved actor. Present that result only on the original
+confirmation surface and redact ordinary logs. Inspect and list perform local
+reads; a changed bot revision withholds the old challenge while preserving its
+original request.
+
+A repeated begin with the same input reads that original result or reconciles its
+original local secure handoff. Unknown native requests are not replayed. Paused
+bots and disabled automatic traffic retain explicit management access. The
+request ACK, secure handoff and active challenge remain separate facts.
+
+This slice provides authentication init and durable lookup. Login confirmation,
+app-management eligibility, configuration and publication require their own
+qualified continuation; no `setup advance` method is registered yet. Lark keeps
+its original device-registration route. Settings continues to use its existing
+creation and saved-connection flow until the combined confirmation journey is
+implemented and visually reviewed.
+
 ## Application enrollment
 
 Desktop Settings → Mods → Agent Conversation Connector consumes this same public
