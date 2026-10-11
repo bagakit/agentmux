@@ -110,3 +110,26 @@ it('an exact version read never accepts another version or replays an unknown or
   expect(f.native).toHaveLength(count)
   await expect(f.sdk.call('connection.setup.advance', { ...input, versionId: 'unrelated-list-head' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
 }, 30_000)
+
+it('the actual SDK rejects a self-consistent response for a different version than its original advance input', async () => {
+  const f = await fixture()
+  const offered = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: { versionId: VERSION } })
+  const input: ConnectionSetupAdvance = { ...action(offered, 'read-publication-version'), versionId: VERSION }
+  const original = f.services.connections.setup!.advance.bind(f.services.connections.setup!)
+  const corrupt = vi.spyOn(f.services.connections.setup!, 'advance').mockImplementation(async (input, context) => {
+    const result = structuredClone(await original(input, context)), inspection = result.applicationInspection!, selected = inspection.selected!
+    const replace = (receipt: typeof selected) => { receipt.versionId = 'other-version'; receipt.input.versionId = 'other-version' }
+    replace(selected)
+    for (const observation of inspection.observations) if (observation.stepId === selected.stepId) replace(observation)
+    inspection.readResult = { subject: 'publication-version', versionId: 'other-version', status: 'draft' }
+    return result
+  })
+  await expect(f.sdk.call('connection.setup.advance', input)).rejects.toMatchObject({ code: 'INVALID_CONNECTION_SETUP_DATA' })
+  corrupt.mockRestore()
+  const count = f.native.length
+  const result = await f.sdk.call('connection.setup.advance', input)
+  expect(result.applicationInspection!.readResult).toMatchObject({ subject: 'publication-version', versionId: VERSION })
+  expect(f.native).toHaveLength(count)
+  const historical = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: { selectedStepId: result.receipt!.stepId, versionId: 'other-version' } })
+  expect(historical.applicationInspection!.readResult).toMatchObject({ versionId: VERSION })
+}, 30_000)
