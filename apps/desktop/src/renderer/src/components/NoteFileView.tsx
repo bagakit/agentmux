@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { NoteViewToolbarContext } from '../lib/note-view-toolbar'
+import { documentKey } from '../lib/workbench-tabs'
 import type { FileDocument } from '../../../shared/contracts'
 import { serializeNoteDocument, type NoteBlockTarget } from '../../../shared/note-document'
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
@@ -40,6 +43,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
 }) {
   const catalog = useNotebookLibrary(state => state.state)
   const presentation = useWorkbenchBrowserPresentation()
+  const toolbar = useContext(NoteViewToolbarContext)
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [canvasBlock, setCanvasBlock] = useState<(NoteBlockTarget & { sourceIdentity: string }) | null>(null)
   const read = useMemo(() => parseNoteFile(document), [document])
@@ -148,12 +152,12 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       {...(read.note.title === undefined ? {} : { sourceTitle: read.note.title })} {...(dirty === undefined ? {} : { sourceDirty: dirty })} {...(onCheckOriginal ? { onCheckOriginal } : {})} /> : null}
     {!registered ? <header className="notebook-page-heading"><h1>{identityIcon} {read.note.title ?? 'Untitled note'}</h1><p className="note-scope">Original file · {document.path}</p></header> : null}
     {resource && catalog?.pages[read.note.noteId] && !sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <p className="note-knowledge-notice" role="status">This file has a different recorded Note location. Editing stays available; recover its Notebook history or inspect the original resource.</p> : null}
-    {registered ? <div className="note-view-toolbar" aria-label="Note view selection">
+    {resource && registered && toolbar && toolbar.documentKey === documentKey(resource.workspaceId, document.path) ? createPortal(<>
       {identityIcon}
       <SurfaceModeSwitch value={canvasOpen ? 'graph' : 'note'} onChange={view => setCanvasOpen(view === 'graph')} active={presentation.active} ariaLabel="Note presentation"
         options={[{ value: 'note', label: 'Note', ariaLabel: 'Note view' }, { value: 'graph', label: 'Graph', ariaLabel: 'Graph view' }]} />
-      {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
-    </div> : null}
+    </>, toolbar.element) : null}
+    {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
     {canvasOpen ? <div className="note-association-canvas"><NoteCanvas scope={{ kind: 'note', noteId: read.note.noteId }} active={presentation.active} onOpen={openCanvasPage} /></div> : null}
     <div hidden={canvasOpen} inert={canvasOpen} className="note-original-editor">
     <WorkbenchPresentationContext.Provider value={canvasOpen ? { ...presentation, active: false } : presentation}>
