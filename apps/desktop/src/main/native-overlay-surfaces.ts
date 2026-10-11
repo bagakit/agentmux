@@ -1,4 +1,4 @@
-import { WebContentsView, type BrowserWindow } from 'electron'
+import { WebContentsView, type BrowserWindow, type NativeImage } from 'electron'
 import type { BrowserBounds } from '../shared/contracts.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { boundsOverlap, NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT, type NativeBrowserInput, type NativeOverlayReceipt, type NativeOverlayRegion } from '../shared/native-overlay.js'
@@ -15,11 +15,19 @@ interface Projection {
   ready: Promise<void>
   region: NativeOverlayRegion
   revision: number
-  framePending: boolean
+  framePixels?: Buffer
   paintStage: string
   interactive: boolean
   throttlingSynchronized: boolean
   pressedButtons: Set<'leftbuttondown' | 'middlebuttondown' | 'rightbuttondown'>
+}
+
+interface SourceFrame {
+  image: NativeImage
+  subscription: object
+  width: number
+  height: number
+  zoom: number
 }
 
 async function boundedChromePaint(work: Promise<void>, budget = 1500): Promise<void> {
@@ -37,9 +45,19 @@ export class NativeOverlaySurfaces {
   private disposed = false
   private requested: NativeOverlayRegion[] = []
   private generation = 0
+  private preparedGeneration = 0
+  private frameSubscription: object | undefined
+  private pendingFrame: SourceFrame | undefined
+  private frameRunning = false
+  private readonly visibilityChanged = (): void => { this.synchronizeFrames() }
   private readonly inputGuards = new Map<WebContentsView, () => void>()
   constructor(private readonly window: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner' | 'nativeOwnerForView'>, private readonly onWarning: (warning: string, modalId?: string) => void,
-    private readonly onBrowserInput: (input: NativeBrowserInput) => void) {}
+    private readonly onBrowserInput: (input: NativeBrowserInput) => void) {
+    window.on('hide', this.visibilityChanged)
+    window.on('show', this.visibilityChanged)
+    window.on('minimize', this.visibilityChanged)
+    window.on('restore', this.visibilityChanged)
+  }
 
   forwardBrowserInput(owner: NativeBrowserOwner, input: NativeBrowserPageInput): boolean {
     if (!this.requested.length || this.disposed || this.window.webContents.isDestroyed() || this.browsers.nativeOwner(owner.browserId)?.view !== owner.view) return false
@@ -80,6 +98,7 @@ export class NativeOverlaySurfaces {
     if (!Array.isArray(input) || input.length > NATIVE_OVERLAY_LIMIT && !input.some(region => region.modal)) throw new Error('Invalid native chrome region budget')
     if (!input.length) {
       ++this.generation
+      this.stopFrames()
       this.requested = []
       this.synchronizeInputGuards()
       for (const [id, projection] of this.projections) this.remove(id, projection)
@@ -114,6 +133,7 @@ export class NativeOverlaySurfaces {
     }
     // Invalid geometry cannot cancel a previously accepted foreground preparation.
     const generation = ++this.generation
+    this.stopFrames()
     this.requested = input.map(region => ({ ...region, bounds: { ...region.bounds } }))
     const units: NativeOverlayRegion[][] = []
     const modals = new Map<string, NativeOverlayRegion[]>()
@@ -163,7 +183,7 @@ export class NativeOverlaySurfaces {
             view.setBounds(region.bounds)
             view.setVisible(true)
             // Cold Renderer startup has its own bounded preparation phase.
-            projection = { view, region, ready: boundedChromePaint(view.webContents.loadURL(CHROME_DOCUMENT), 5000), revision: 0, framePending: false, paintStage: 'Chrome document', interactive: false, throttlingSynchronized: false, pressedButtons: new Set() }
+            projection = { view, region, ready: boundedChromePaint(view.webContents.loadURL(CHROME_DOCUMENT), 5000), revision: 0, paintStage: 'Chrome document', interactive: false, throttlingSynchronized: false, pressedButtons: new Set() }
             this.projections.set(region.id, projection)
             const owner = projection
             view.webContents.on('input-event', (_event, input) => this.forward(owner, input))
@@ -197,6 +217,10 @@ export class NativeOverlaySurfaces {
         else for (const projection of prepared) this.remove(projection.region.id, projection)
       }
     }
+    if (generation === this.generation) {
+      this.preparedGeneration = generation
+      this.synchronizeFrames()
+    }
     return { projected: this.projections.size, capturedPixels, ...(warnings.length ? { warning: warnings[0] } : {}), ...(failures.length ? { failures } : {}) }
   }
 
@@ -208,6 +232,11 @@ export class NativeOverlaySurfaces {
 
   dispose(): void {
     this.disposed = true
+    this.stopFrames()
+    this.window.off('hide', this.visibilityChanged)
+    this.window.off('show', this.visibilityChanged)
+    this.window.off('minimize', this.visibilityChanged)
+    this.window.off('restore', this.visibilityChanged)
     this.requested = []
     this.synchronizeInputGuards()
     ++this.generation
@@ -228,11 +257,12 @@ export class NativeOverlaySurfaces {
         this.window.contentView.children.includes(projection.view))
   }
 
-  private async paint(projection: Projection, deferCommit = false): Promise<void> {
+  private async paint(projection: Projection, deferCommit = false, sourceCurrent?: () => boolean): Promise<void> {
     const revision = ++projection.revision
+    if (!sourceCurrent) delete projection.framePixels
     projection.paintStage = 'Chrome document'
     await projection.ready
-    if (!this.current(projection) || revision !== projection.revision) return
+    if (!this.current(projection) || revision !== projection.revision || sourceCurrent && !sourceCurrent()) return
     if (!this.window.contentView.children.includes(projection.view)) {
       projection.paintStage = 'Chrome attachment'
       // Initialize the drawable without covering or intercepting the original workface.
@@ -283,7 +313,7 @@ export class NativeOverlaySurfaces {
     // This is the original Chrome only: WebContents.capturePage excludes its native Browser siblings.
     projection.paintStage = 'Original Chrome frame'
     const image = await this.window.webContents.capturePage(projection.region.bounds)
-    if (!this.current(projection) || revision !== projection.revision) return
+    if (!this.current(projection) || revision !== projection.revision || sourceCurrent && !sourceCurrent()) return
     if (image.isEmpty()) throw new Error('Empty native Chrome frame')
     const png = image.toPNG()
     if (png.length > 8 * 1024 * 1024) throw new Error('Native Chrome frame exceeds byte budget')
@@ -293,13 +323,27 @@ export class NativeOverlaySurfaces {
     await projection.view.webContents.executeJavaScript(`(async () => {
       const root = document.documentElement, revision = ${JSON.stringify(String(revision))};
       root.dataset.chromeRevision = revision;
+      delete root.chromeCandidate;
       const image = new Image(); image.alt = ''; image.setAttribute('aria-hidden', 'true');
       image.src = ${JSON.stringify(`data:image/png;base64,${png.toString('base64')}`)};
       await image.decode();
       if (root.dataset.chromeRevision !== revision) return;
+      if (${Boolean(sourceCurrent)}) { root.chromeCandidate = image; return; }
       document.querySelector('svg').style.display = 'none';
       document.querySelector('img').replaceWith(image);
     })()`)
+    if (sourceCurrent) {
+      // A stopped/hidden/replaced source can finish decoding later. It cannot install
+      // itself: the original Main owner must still authorize this exact frame.
+      if (!this.current(projection) || revision !== projection.revision || !sourceCurrent?.()) return
+      await projection.view.webContents.executeJavaScript(`(() => {
+        const root = document.documentElement;
+        if (root.dataset.chromeRevision !== ${JSON.stringify(String(revision))} || !root.chromeCandidate) return;
+        document.querySelector('svg').style.display = 'none';
+        document.querySelector('img').replaceWith(root.chromeCandidate);
+        delete root.chromeCandidate;
+      })()`)
+    }
     if (!deferCommit) this.finishLoadedPaint(projection, revision)
   }
 
@@ -419,26 +463,99 @@ export class NativeOverlaySurfaces {
       this.window.webContents.focus()
       this.window.webContents.sendInputEvent({ type: event.type, keyCode: arrows[key] ?? key, modifiers })
     } else return
-    // Related native hover/focus styles can change without a DOM mutation. One frame per projection,
-    // driven only by actual input, never a window/session polling loop.
-    if (!projection.framePending) {
-      projection.framePending = true
-      setTimeout(() => {
-        projection.framePending = false
-        if (this.current(projection) && projection.interactive) {
-          const generation = this.generation
-          const revision = projection.revision + 1
-          void boundedChromePaint(this.paint(projection)).catch(() => {
-            if (!this.current(projection) || generation !== this.generation || revision !== projection.revision) return
-            const message = 'Native floating content could not be repainted. The Browser remains available; close and reopen the floating panel.'
-            const modalId = projection.region.modal?.id
-            if (modalId) this.removeModal(modalId)
-            else this.remove(projection.region.id, projection)
-            this.onWarning(message, modalId)
-          })
-        }
-      }, 32)
+  }
+
+  private frameTargets(): Projection[] {
+    if (this.disposed || this.window.isDestroyed() || this.window.webContents.isDestroyed() ||
+      !this.window.isVisible() || this.window.isMinimized() || this.preparedGeneration !== this.generation) return []
+    // Accepted update/visibilityChanged owns Browser demand. Source frames only
+    // consume its current projections, without enumerating unrelated Browsers.
+    return [...this.projections.values()].filter(projection => this.current(projection) && projection.interactive &&
+      projection.region.scrim === undefined && projection.view.getVisible() && this.window.contentView.children.includes(projection.view))
+  }
+
+  private synchronizeFrames(): void {
+    if (!this.frameTargets().length) { this.stopFrames(); return }
+    if (this.frameSubscription) return
+    const subscription = {}
+    this.frameSubscription = subscription
+    try {
+      // Electron 43 returns full-source pixel images even for onlyDirty=true. Keep one
+      // subscription for this exact Renderer, and compare only its actual projections.
+      // Start after the atomic preparation: a fresh capturer also observes paints made
+      // between capturePage and commit, without reusing an earlier subscription's cache.
+      this.window.webContents.beginFrameSubscription(false, image => {
+        if (this.frameSubscription !== subscription || !this.frameTargets().length) return
+        const { width, height } = this.window.getContentBounds()
+        this.pendingFrame = { image, subscription, width, height, zoom: this.window.webContents.getZoomFactor() }
+        void this.drainFrames()
+      })
+    } catch {
+      this.stopFrames()
+      for (const projection of this.frameTargets()) this.frameFailed(projection)
     }
+  }
+
+  private stopFrames(): void {
+    if (!this.frameSubscription) return
+    this.frameSubscription = undefined
+    this.pendingFrame = undefined
+    if (this.window.isDestroyed() || this.window.webContents.isDestroyed()) return
+    try { this.window.webContents.endFrameSubscription() } catch {
+      this.onWarning('The native Chrome frame subscription could not be released. The Browser and original work remain available; reopen the floating control to refresh its owner.')
+    }
+  }
+
+  private frameCurrent(frame: SourceFrame): boolean {
+    if (this.frameSubscription !== frame.subscription || !this.frameTargets().length) return false
+    const bounds = this.window.getContentBounds()
+    return bounds.width === frame.width && bounds.height === frame.height && this.window.webContents.getZoomFactor() === frame.zoom
+  }
+
+  private async drainFrames(): Promise<void> {
+    if (this.frameRunning) return
+    this.frameRunning = true
+    try {
+      while (this.pendingFrame) {
+        const frame = this.pendingFrame
+        this.pendingFrame = undefined
+        if (!this.frameCurrent(frame)) continue
+        for (const projection of this.frameTargets()) {
+          if (!this.frameCurrent(frame)) break
+          let revision = projection.revision
+          try {
+            if (frame.image.isEmpty()) throw new Error('Empty original Renderer frame')
+            const size = frame.image.getSize(), bounds = projection.region.bounds
+            // Region bounds are already zoomed window DIP. NativeImage is the SDK's
+            // source pixel plane, so its size ratio supplies DPR exactly once.
+            const x = Math.round(bounds.x * size.width / frame.width), y = Math.round(bounds.y * size.height / frame.height)
+            const right = Math.min(size.width, Math.round((bounds.x + bounds.width) * size.width / frame.width))
+            const bottom = Math.min(size.height, Math.round((bounds.y + bounds.height) * size.height / frame.height))
+            const image = frame.image.crop({ x, y, width: right - x, height: bottom - y })
+            const pixels = image.toBitmap()
+            if (projection.framePixels?.equals(pixels)) continue
+            // The SDK image only detects relevant pixel changes. capturePage keeps
+            // the source's exact PNG color description; unchanged subscriber pixels
+            // skip capture, including callbacks caused by that readback itself.
+            const painting = this.paint(projection, false, () => this.frameCurrent(frame))
+            revision = projection.revision
+            await boundedChromePaint(painting)
+            if (this.frameCurrent(frame) && this.current(projection) && revision === projection.revision) projection.framePixels = pixels
+          } catch {
+            if (this.frameCurrent(frame) && this.current(projection) && revision === projection.revision) this.frameFailed(projection)
+          }
+        }
+      }
+    } finally { this.frameRunning = false }
+  }
+
+  private frameFailed(projection: Projection): void {
+    const message = 'Native floating content could not be repainted. The Browser remains available; close and reopen the floating panel.'
+    const modalId = projection.region.modal?.id
+    if (modalId) this.removeModal(modalId)
+    else this.remove(projection.region.id, projection)
+    this.onWarning(message, modalId)
+    if (!this.frameTargets().length) this.stopFrames()
   }
 
   private current(projection: Projection): boolean {
