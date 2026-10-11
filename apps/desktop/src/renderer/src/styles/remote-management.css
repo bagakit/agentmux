@@ -23,7 +23,7 @@
 .remote-management .settings-resource-editor__header > div > small { display: block; margin-top: var(--sp-1); }
 .remote-management .host-card__icon { align-self: flex-start; margin-top: 5px; }
 .remote-management .settings-resource-editor__header .check-pill { font-size: 10px; }
-.remote-detail-tabs { display: flex; align-items: center; gap: var(--sp-4); overflow-x: auto; margin: var(--sp-2) 0 var(--sp-6); border-bottom: 1px solid var(--line-soft); }
+.remote-detail-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin: var(--sp-2) 0 var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .remote-detail-tabs button { flex: none; min-height: 34px; padding: var(--sp-2) 0; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; }
 .remote-detail-tabs button[aria-current='page'] { color: var(--text); border-bottom-color: var(--green); font-weight: 550; }
 .remote-overview { display: grid; gap: var(--sp-6); }
@@ -90,9 +90,11 @@ button.remote-work__row:focus-visible { outline: 1px solid var(--focus-line); ou
   .remote-management__toolbar > .small-button { margin-left: auto; }
   .remote-overview__facts dd { flex-wrap: wrap; font-size: 22px; }
   .remote-overview__facts dd small { font-size: 10px; }
-  .remote-detail-tabs { gap: var(--sp-4); }
+  .remote-detail-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--sp-4); }
 }
 
 .remote-overview__check-details { grid-column: 1 / -1; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
 .remote-overview__check-details summary { width: fit-content; padding-block: var(--sp-1); cursor: pointer; }
 .remote-overview__check-details p { margin: var(--sp-2) 0 0; line-height: 1.6; overflow-wrap: anywhere; user-select: text; }
+
+.remote-overview__connection-action { grid-column: 1 / -1; justify-self: start; }
