@@ -3,7 +3,7 @@ import { rpcRecord } from './rpc-data.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { normalizeAgentTimelineItem } from './session-timeline.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
-import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationFacts, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces,
+import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces,
   type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-timeline.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
@@ -227,7 +227,7 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
     const part = rpcRecord(value, ['record', 'recordRevision', 'selector'], 'CONTROL_PROTOCOL_ERROR')
     const record = itemRef(part.record, ref), version = revision(part.recordRevision), selected = selector(part.selector)
     const local = byId.get(conversationRecordId(record))
-    if (local && (local.revision !== version || !content.some(slot => slot.recordId === local.id && same(slot.selector, selected)))) return bad()
+    if (local && (local.revision !== version || !accounted.has(JSON.stringify([local.id, selected])))) return bad()
     return { record, recordRevision: version, selector: selected }
   }
   const relations = e.relations.map(value => {
@@ -238,13 +238,11 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
       if (!local && !byId.has(conversationRecordId(to)) || local && !same(conversationSameEventTarget(local, nativeSource?.kind === 'native' ? nativeSource : undefined), to)) return bad()
       return { kind: 'same-event' as const, from, to }
     }
-    if (r.kind === 'same-invocation') {
-      rpcRecord(value, ['kind', 'from', 'to', 'invocation'], 'CONTROL_PROTOCOL_ERROR')
-      const from = partRef(r.from), to = partRef(r.to), original = invocation(r.invocation)
-      const local = [from, to].filter(part => byId.has(conversationRecordId(part.record)))
-      if (!local.length || local.some(part => !conversationInvocationFacts(byId.get(conversationRecordId(part.record))!).some(fact =>
-        same(fact.selector, part.selector) && same({ hostId: ref.hostId, agentSessionId: ref.agentSessionId, ...fact.invocation }, original)))) return bad()
-      return { kind: 'same-invocation' as const, from, to, invocation: original }
+    if (r.kind === 'invocation-member') {
+      rpcRecord(value, ['kind', 'part', 'invocation'], 'CONTROL_PROTOCOL_ERROR')
+      const part = partRef(r.part), original = invocation(r.invocation)
+      if (!byId.has(conversationRecordId(part.record))) return bad()
+      return { kind: 'invocation-member' as const, part, invocation: original }
     }
     if (r.kind === 'answers') {
       rpcRecord(value, ['kind', 'from', 'question'], 'CONTROL_PROTOCOL_ERROR')
@@ -269,6 +267,8 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
     }
     return bad()
   })
+  if (!same(relations.filter(relation => relation.kind === 'invocation-member'), records.flatMap(record => conversationInvocationMembers(record))))
+    return bad('Conversation invocation membership does not match its original content facts.')
   const expectedContent = [primary, ...records.filter(record => record !== primary)].flatMap(record => {
     const original = record.original
     const selected = original.kind === 'native' ? original.item.contentParts.map((_, partIndex) => ({ kind: 'native-part' as const, partIndex }))

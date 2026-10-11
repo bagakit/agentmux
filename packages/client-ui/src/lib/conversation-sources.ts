@@ -1,5 +1,5 @@
 import type { AgentMuxEvidenceSource } from '@agentmux/core'
-import { conversationRecordId, type ConversationContentRef, type ConversationEvent, type ConversationInvocationRef, type ConversationSelector, type ConversationSourceRecord, type ConversationTimeline } from '@agentmux/core/conversation'
+import { conversationInvocationId, conversationRecordId, type ConversationContentRef, type ConversationEvent, type ConversationSelector, type ConversationSourceRecord, type ConversationTimeline } from '@agentmux/core/conversation'
 
 export const NATIVE_CONVERSATION_SOURCE = '原生对话'
 export const COLLECTED_REPLY_TITLE = '采集到的回复'
@@ -12,8 +12,6 @@ export type ConversationSources = { main: ConversationSourceDisplay; parts: read
 type Slot = ConversationEvent['content'][number]
 const selectorKey = (selector: ConversationSelector) => selector.kind === 'native-part' ? ['native-part', selector.partIndex] : ['captured-field', selector.field]
 const contentKey = (ref: ConversationContentRef) => JSON.stringify([conversationRecordId(ref.record), ref.recordRevision, selectorKey(ref.selector)])
-const invocationKey = (ref: ConversationInvocationRef) => JSON.stringify([ref.hostId, ref.agentSessionId, ref.source.providerId, ref.source.nativeSessionId,
-  typeof ref.subject === 'string' ? ['main'] : ['child', ref.subject.nativeActorId], ref.scope.kind, ref.scope.kind === 'turn' ? ref.scope.nativeTurnId : null, ref.callId])
 function display(records: readonly ConversationSourceRecord[], unread = false): ConversationSourceDisplay {
   const labels = new Map<string, { id: string; label: string; details: string[] }>()
   for (const record of records) {
@@ -45,9 +43,9 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
         targets.add(to); targetRelations.set(from, targets)
       }
     }
-    if (relation.kind !== 'same-invocation') continue
-    const key = invocationKey(relation.invocation), group = invocationParts.get(key) ?? new Map<string, ConversationContentRef>()
-    for (const part of [relation.from, relation.to]) group.set(contentKey(part), part)
+    if (relation.kind !== 'invocation-member') continue
+    const key = conversationInvocationId(relation.invocation), group = invocationParts.get(key) ?? new Map<string, ConversationContentRef>()
+    group.set(contentKey(relation.part), relation.part)
     invocationParts.set(key, group)
   }
   const related = new Map<string, ConversationSourceDisplay[]>()
