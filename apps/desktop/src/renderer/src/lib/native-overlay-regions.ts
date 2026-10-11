@@ -24,6 +24,7 @@ export function observeNativeOverlayRegions(
   let hoveredStage: Element | undefined
   let hoveredFloat: Element | undefined
   const topLayers = new Set<Element>()
+  const staticSurfaces = new Set<Element>()
   const topLayerSources = new WeakMap<Element, Element>()
   const win = body.ownerDocument.defaultView!
   // Adoption changes ownerDocument while preserving the node's original JS realm.
@@ -32,6 +33,12 @@ export function observeNativeOverlayRegions(
   const html = (value: Element): value is HTMLElement => value.namespaceURI === body.namespaceURI
   const resize = new win.ResizeObserver(() => schedule('resize'))
   const portals = (): Element[] => Array.from(body.children).filter(node => node.id !== 'root' && !node.hasAttribute('data-workbench-document-root'))
+  const releaseMotion = (keep: Set<Element> = new Set()): void => {
+    for (const node of staticSurfaces) if (!keep.has(node)) {
+      node.removeAttribute('data-native-overlay-motion')
+      staticSurfaces.delete(node)
+    }
+  }
   const collect = (): void => {
     frame = 0
     if (disposed || nativeDemand?.bounds.length === 0) return
@@ -66,10 +73,12 @@ export function observeNativeOverlayRegions(
     const candidates = unique.filter(node => {
       const style = styleOf(node)
       if (style.display === 'none' || style.visibility === 'hidden' || node.getAttribute('data-state') === 'closed') return false
-      const rect = rectOf(node)
       // A transparent full-window wrapper is not a float's painted surface. Its children are.
-      return !(rect.width >= win.innerWidth && rect.height >= win.innerHeight &&
-        style.backgroundColor === 'rgba(0, 0, 0, 0)' && unique.some(child => child !== node && node.contains(child)))
+      if (style.backgroundColor === 'rgba(0, 0, 0, 0)' && unique.some(child => child !== node && node.contains(child))) {
+        const rect = rectOf(node)
+        return rect.width < win.innerWidth || rect.height < win.innerHeight
+      }
+      return true
     })
     const nativeOwner = (node: Element): Element | null => {
       const owner = node.closest('[popover]')
@@ -82,10 +91,21 @@ export function observeNativeOverlayRegions(
       .sort((left, right) => (nativeOrder.get(nativeOwner(left)!) ?? 0) - (nativeOrder.get(nativeOwner(right)!) ?? 0))
     const regions: NativeOverlayRegion[] = []
     const activeFloats: Element[] = []
+    const staticFloats = new Set<Element>()
     const stages: Element[] = []
     let pixels = 0
     let warning: string | undefined
     for (const node of floats) {
+      // A scaled entry can initially miss a Browser that its final box overlaps.
+      // Stabilize mounted floats before capture geometry whenever this Window has native content.
+      if (nativeDemand) {
+        staticFloats.add(node)
+        if (!staticSurfaces.has(node)) {
+          node.setAttribute('data-native-overlay-motion', 'static')
+          staticSurfaces.add(node)
+          styles.delete(node); rects.delete(node)
+        }
+      }
       const style = styleOf(node)
       if (style.display === 'none' || style.visibility === 'hidden' || node.getAttribute('data-state') === 'closed') continue
       const rect = rectOf(node)
@@ -125,6 +145,7 @@ export function observeNativeOverlayRegions(
       regions.push({ id, bounds, radius: (Number.parseFloat(style.borderTopLeftRadius) || 0) * zoomFactor(),
         ...(emptyScrim ? { scrim: style.backgroundColor } : {}), ...(browserStages.length ? { browserStages } : {}) })
     }
+    releaseMotion(staticFloats)
     const observed = [...activeFloats, ...stages]
     if (geometry.length !== observed.length || geometry.some((node, index) => node !== observed[index])) {
       resize.disconnect()
@@ -223,6 +244,7 @@ export function observeNativeOverlayRegions(
     if (disposed) return
     nativeDemand = visibility
     if (visibility.bounds.length === 0) {
+      releaseMotion()
       win.cancelAnimationFrame(frame); frame = 0
       observer.disconnect(); resize.disconnect(); geometry = []; watched = []
       clearHover(); publish([]); schedule('demand')
@@ -285,6 +307,7 @@ export function observeNativeOverlayRegions(
     }
   }, dispose() {
     disposed = true
+    releaseMotion()
     hoveredStage = undefined
     hoveredFloat = undefined
     win.cancelAnimationFrame(frame)
