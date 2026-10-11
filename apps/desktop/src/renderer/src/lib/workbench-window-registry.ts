@@ -10,6 +10,7 @@ export type WorkbenchHost = {
 }
 const hosts = new Map<string, WorkbenchHost>()
 const placements = new Map<string, WorkbenchWindowPlacement>()
+const placementRequests = new Map<string, object>()
 const listeners = new Set<() => void>()
 const documents = new Map<Document, WorkbenchWindowDocument>()
 const nativeVisibility = new Map<Document, boolean>()
@@ -34,11 +35,18 @@ export function workbenchWindowPlacement(target: AppWindowTarget | null): Workbe
 export async function placeWorkbenchWindow(target: AppWindowTarget, placement: WorkbenchWindowPlacement | null): Promise<void> {
   const entry = originalWorkbenchHost(target)
   if (!entry) throw new Error('The original workface host is not yet available. Its original Session and saved layout remain.')
-  const key = workbenchTargetKey(target), previous = placements.get(key)
+  const key = workbenchTargetKey(target), previous = placements.get(key), request = {}
+  placementRequests.set(key, request)
   if (placement) placements.set(key, placement); else placements.delete(key)
   changed()
   try { await entry.place(placement) }
-  catch (error) { if (previous) placements.set(key, previous); else placements.delete(key); changed(); throw error }
+  catch (error) {
+    if (placementRequests.get(key) === request) {
+      if (previous) placements.set(key, previous); else placements.delete(key)
+      changed()
+    }
+    throw error
+  } finally { if (placementRequests.get(key) === request) placementRequests.delete(key) }
 }
 export function registerWorkbenchDocument(doc: Document, identity: WorkbenchWindowDocument): () => void {
   documents.set(doc, identity)
