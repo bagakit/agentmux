@@ -140,6 +140,17 @@
 .browser-menu__item[data-disabled] { opacity: .3; cursor: default; }
 .browser-menu__indicator { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--green); }
 .browser-menu__item small { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.browser-viewport-menu { min-width: min(270px, calc(100vw - 16px)); max-height: min(560px, var(--radix-dropdown-menu-content-available-height, calc(100vh - 16px))); }
+.browser-viewport-menu .browser-menu__item > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-viewport-menu small { white-space: nowrap; }
+.browser-viewport-size-dialog { width: min(360px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; background: var(--surface-2); }
+.browser-viewport-size-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: end; gap: var(--sp-4); }
+.browser-viewport-size-fields label { min-width: 0; display: grid; gap: var(--sp-2); }
+.browser-viewport-size-fields input { min-width: 0; width: 100%; }
+.browser-viewport-size-fields > span { padding-bottom: var(--sp-3); color: var(--text-3); }
+.browser-viewport-layout { display: flex; flex-wrap: wrap; gap: var(--sp-5); border: 0; margin: var(--sp-5) 0 0; padding: 0; }
+.browser-viewport-layout legend { margin-bottom: var(--sp-2); color: var(--text-3); }
+.browser-viewport-layout label { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .browser-body { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .browser-presentation { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .browser-stage { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; background: var(--surface-0); }
