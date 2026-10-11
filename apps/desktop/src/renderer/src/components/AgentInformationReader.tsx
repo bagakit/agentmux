@@ -308,7 +308,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   return createPortal(<WorkbenchDocumentContext.Provider value={{ document, window: workbenchDocumentIdentity(document) }}><DesktopClientUiProvider document={document}><div ref={panel} id={request.id} className="focus-context-hover agent-information-reader" role="region"
     data-state="open" data-pinned={request.pinned || undefined} data-bookmark-key={request.bookmark?.key} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden', zIndex: `calc(var(--layer-popover) + ${agentInformationPreview.getAll().findIndex(item => item.token === request.token)})` }}
     onPointerDownCapture={() => { if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }}
-    onPointerEnter={cancelDeparture} onPointerLeave={leave} onFocus={cancelDeparture} onBlur={event => {
+    onPointerEnter={cancelDeparture} onPointerLeave={leave} onFocus={() => { cancelDeparture(); if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }} onBlur={event => {
       if (event.relatedTarget && (event.relatedTarget as Node).nodeType && (panel.current?.contains(event.relatedTarget as Node) || event.relatedTarget === request.anchor)) return
       leave()
     }}>
