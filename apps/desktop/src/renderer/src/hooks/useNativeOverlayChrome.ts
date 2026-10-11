@@ -5,6 +5,7 @@ import { rendererPerformance } from '../lib/renderer-performance'
 import { observeNativeOverlayRegions } from '../lib/native-overlay-regions'
 import { guardNativeOverlayBlur, sameNativeOverlayDocument } from '../../../shared/native-overlay'
 import type { WorkbenchWindowDocument } from '../../../shared/workbench-windows'
+import { MODAL_PRESENTATION_FAILURE_EVENT } from '@agentmux/client-ui/components/Modal'
 
 /** The only window consumer. Coalesce portal changes while a native frame is in flight. */
 export function useNativeOverlayChrome(doc: Document = document, scope?: WorkbenchWindowDocument): string | undefined {
@@ -15,6 +16,11 @@ export function useNativeOverlayChrome(doc: Document = document, scope?: Workben
     let disposed = false
     let draining = false
     let pending: { regions: NativeOverlayRegion[]; warning?: string } | undefined
+    const failModal = (modalId: string, message: string): void => {
+      if (disposed || !doc.defaultView) return
+      const node = doc.getElementById(modalId)
+      if (node?.getAttribute('data-overlay-modal-scope') === modalId) node.dispatchEvent(new doc.defaultView.CustomEvent(MODAL_PRESENTATION_FAILURE_EVENT, { detail: { message } }))
+    }
     const drain = async (): Promise<void> => {
       if (draining || disposed) return
       draining = true
@@ -24,14 +30,24 @@ export function useNativeOverlayChrome(doc: Document = document, scope?: Workben
           pending = undefined
           try {
             const receipt = await (scope ? api.ui.publishNativeOverlays(next.regions, scope) : api.ui.publishNativeOverlays(next.regions))
-            if (!disposed) setWarning(next.warning ?? receipt.warning)
+            if (!disposed) {
+              setWarning(next.warning ?? receipt.warning)
+              for (const failure of receipt.failures ?? []) if (next.regions.some(region => region.modal?.id === failure.modalId)) failModal(failure.modalId, failure.message)
+            }
           } catch {
-            if (!disposed) setWarning('Native floating content could not be updated. The Browser remains available; close and reopen the floating panel.')
+            if (!disposed) {
+              const message = 'Native floating content could not be updated. The Browser remains available; retry displaying the original dialog.'
+              setWarning(message)
+              for (const modalId of new Set(next.regions.flatMap(region => region.modal ? [region.modal.id] : []))) failModal(modalId, message)
+            }
           }
         }
       } finally { draining = false }
     }
-    const unsubscribe = api.ui.onNativeOverlayWarning(setWarning, scope)
+    const unsubscribe = api.ui.onNativeOverlayWarning((message, modalId) => {
+      setWarning(message)
+      if (modalId) failModal(modalId, message)
+    }, scope)
     let zoomFactor = scope ? Number.NaN : api.ui.getZoomFactor()
     const overlays = observeNativeOverlayRegions(doc.body, () => zoomFactor, (regions, notice) => {
       pending = { regions, ...(notice ? { warning: notice } : {}) }

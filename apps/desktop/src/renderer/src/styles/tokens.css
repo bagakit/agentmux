@@ -2,6 +2,7 @@
  * Region focus width is also read by native Browser bounds; keep its semantic name stable.
  * Surface sheets consume these tokens in index.css cascade order. */
 @import '@agentmux/client-ui/styles/palette.css';
+@import '@agentmux/client-ui/styles/overlays.css';
 
 /* Optional utility adapter. These names are consumable by Tailwind v4 or another
  * utility layer, but the values remain owned by the semantic tokens below. Keep
@@ -59,11 +60,6 @@
   --sp-page-wide: 120px;
   /* Desktop selection, functional materials and window overlay bands. */
   --tab-select-bar: color-mix(in srgb, var(--text) 60%, var(--surface-1));
-  --layer-window-chrome: 20;
-  --layer-tooltip: 140;
-  --layer-popover: 180;
-  --layer-service: 240;
-  --layer-dialog: 320;
   --material-control-surface: color-mix(in srgb, var(--surface-1) 92%, transparent);
   --material-control-line: color-mix(in srgb, var(--text) 12%, var(--line-soft));
   --material-control-glint: color-mix(in srgb, var(--text) 8%, transparent);

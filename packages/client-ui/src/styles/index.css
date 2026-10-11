@@ -1,4 +1,5 @@
 /* Client supplies its own theme tokens, font and shell. These rules own conversation surfaces. */
+@import './overlays.css';
 @import '../input/input.css';
 @import './theme-transition.css';
 @import './native-controls.css';

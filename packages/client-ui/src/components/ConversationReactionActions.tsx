@@ -4,6 +4,7 @@ import { cloneElement, useId, useLayoutEffect, useRef, useState, type ReactEleme
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { useClientUiPlatform } from '../platform.js'
+import { useModalOverlayContainer } from './Modal.js'
 
 const glyphs = { check: 'action.confirm', play: 'action.start', 'message-circle': 'object.conversation' } as const
 
@@ -24,6 +25,7 @@ function ReactionChoice({ children, hint }: {
   hint: ReactNode
 }) {
   const platform = useClientUiPlatform(), id = useId()
+  const overlayContainer = useModalOverlayContainer(platform.overlayContainer())
   const anchor = useRef<HTMLSpanElement>(null), panel = useRef<HTMLSpanElement>(null)
   const [hovered, setHovered] = useState(false), [focused, setFocused] = useState(false)
   const open = hovered || focused
@@ -59,14 +61,14 @@ function ReactionChoice({ children, hint }: {
     }
     const stop = autoUpdate(reference, surface, () => { void update() })
     return () => { current = false; visibility.disconnect(); stop() }
-  }, [open])
+  }, [open, overlayContainer])
   return <span ref={anchor} className="conversation-reactions__choice"
     onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
     onFocusCapture={() => setFocused(true)} onBlurCapture={event => {
       if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false)
     }} onKeyDownCapture={event => { if (event.key === 'Escape') { setHovered(false); setFocused(false) } }}>
     {cloneElement(children, { 'aria-describedby': open ? id : undefined })}
-    {open ? createPortal(<span ref={panel} id={id} className="conversation-reactions__hint" role="tooltip" style={{ visibility: 'hidden' }}>{hint}</span>, platform.overlayContainer()) : null}
+    {open && overlayContainer ? createPortal(<span ref={panel} id={id} className="conversation-reactions__hint" role="tooltip" style={{ visibility: 'hidden' }}>{hint}</span>, overlayContainer) : null}
   </span>
 }
 

@@ -12,7 +12,7 @@ export interface NativeBrowserVisibility {
   zoomFactor?: number
   document?: WorkbenchWindowDocument
 }
-export type NativeOverlayWarning = { message: string; document?: WorkbenchWindowDocument }
+export type NativeOverlayWarning = { message: string; modalId?: string; document?: WorkbenchWindowDocument }
 
 export function sameNativeOverlayDocument(a?: WorkbenchWindowDocument, b?: WorkbenchWindowDocument): boolean {
   return a === undefined && b === undefined || a !== undefined && b !== undefined &&
@@ -36,6 +36,8 @@ export interface NativeOverlayRegion {
   radius: number
   /** An empty modal scrim is a colour plane, never a screenshot of the covered Browser. */
   scrim?: string
+  /** Only the required scrim/content pair shares failure; accessories remain independent. */
+  modal?: { id: string; part: 'scrim' | 'content' }
   /** Original BrowserPane stages physically contained by this open float. Main verifies owners. */
   browserStages?: { browserId: string; bounds: BrowserBounds }[]
 }
@@ -44,6 +46,7 @@ export interface NativeOverlayReceipt {
   projected: number
   capturedPixels: number
   warning?: string
+  failures?: { modalId: string; message: string }[]
 }
 
 /** Native page notices for its original DOM float; never duplicate page clicks, text or focus. */

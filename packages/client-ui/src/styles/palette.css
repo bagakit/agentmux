@@ -19,7 +19,7 @@
   --red-wash: color-mix(in srgb, var(--red) 12%, transparent);
   --amber-wash: color-mix(in srgb, var(--amber) 12%, transparent);
   --mask-opaque: #000;
-  --overlay-surface: color-mix(in srgb, var(--surface-2) 96%, transparent);
+  --overlay-surface: var(--surface-2);
   --overlay-line: color-mix(in srgb, var(--line) 88%, transparent);
   --focus-ring: 0 0 0 2px color-mix(in srgb, var(--focus-line) 18%, transparent);
 }

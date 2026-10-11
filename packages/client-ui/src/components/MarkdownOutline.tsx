@@ -1,4 +1,4 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from './Modal.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { useMemo, useRef, useState } from 'react'
 import { markdownHeadingText, type MarkdownHeading } from '../lib/agent-markdown.js'

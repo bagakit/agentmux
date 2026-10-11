@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from './Modal.js'
 import type { PastedImage } from '../lib/pasted-images.js'
 import { useClientUiPlatform } from '../platform.js'
 import { ConversationImageGallery } from './ConversationImageGallery.js'

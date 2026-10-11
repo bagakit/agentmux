@@ -386,7 +386,7 @@ const api: AgentMuxPreloadApi = {
     nativeOverlayFocus: document => document ? ipcRenderer.sendSync(NATIVE_OVERLAY_FOCUS_CHANNEL, document) === true : ipcRenderer.sendSync(NATIVE_OVERLAY_FOCUS_CHANNEL) === true,
     onNativeOverlayWarning(listener, document) {
       const wrapped = (_event: Electron.IpcRendererEvent, warning: import('../shared/native-overlay').NativeOverlayWarning): void => {
-        if (sameNativeOverlayDocument(warning.document, document)) listener(warning.message)
+        if (sameNativeOverlayDocument(warning.document, document)) listener(warning.message, warning.modalId)
       }
       ipcRenderer.on(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
