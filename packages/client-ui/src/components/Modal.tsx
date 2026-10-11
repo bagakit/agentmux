@@ -108,7 +108,9 @@ export function ModalPortal({ container, children, ...props }: ComponentProps<ty
   }
   useLayoutEffect(() => {
     if (!host) return
-    if (!mounted || !windowContainer) { host.remove(); return }
+    // A detached retained host has no placement receipt, even if it reopens into
+    // the same container. The next attachment must reactivate its behavior lease.
+    if (!mounted || !windowContainer) { host.remove(); setPlacement(null); return }
     if (host.parentNode !== windowContainer) moveModalHost(host, windowContainer)
     setPlacement(previous => previous?.host === host && previous.container === windowContainer && previous.document === ownerDocument ? previous : { host, container: windowContainer, document: ownerDocument })
   }, [host, mounted, windowContainer, ownerDocument])
