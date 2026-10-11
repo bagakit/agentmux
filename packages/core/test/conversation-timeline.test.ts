@@ -200,3 +200,37 @@ it('bundles and executes the actual browser-safe entry with nonempty records and
   const runtime = runInNewContext(bundle.outputFiles[0]!.text + '; Timeline', { TextEncoder })
   expect(runtime.projectConversationTimeline({ agentSessionId: sid, timeline: snapshot([captured('original', 'assistant_message', { content: 'Browser body' })]) }).events[0].role).toBe('observation')
 })
+
+it('retains exact explicit authors across same-event contributions and accounts for conflicting attribution without changing role', () => {
+  const native = page([{ id: 'canonical-user', kind: 'user-message', startedAt: _historyFixtureEpoch(0, 0, 1), contentParts: [{ kind: 'text', text: 'Original native input' }] }])
+  const external = { kind: 'external' as const, connectionId: 'connection', actor: { application: { domain: 'private-domain', appId: 'app' }, idType: 'opaque-id', userId: 'actor' }, externalConversationId: 'room', externalMessageId: 'message', bindingId: 'binding', bindingRevision: 1, grantId: 'grant', grantRevision: 1 }
+  const authors = [
+    { fields: { authorHuman: true }, expected: { kind: 'human' } },
+    { fields: { authorAgentSessionId: 'original-agent' }, expected: { kind: 'agent', agentSessionId: 'original-agent' } },
+    { fields: { authorExternal: external }, expected: external }
+  ]
+  const input = (fields: Partial<AgentTimelineItem>, id = 'original-capture') => captured(id, 'user_message', { content: 'Exact captured input', ...fields, conversation: { sameEvent: ref('canonical-user') } })
+  const project = (items: AgentTimelineItem[], history = native) => projectConversationTimeline({ agentSessionId: sid, executionHostId: 'local', historyPage: history, timeline: snapshot(normalizeAgentTimeline(sid, items)) })
+  for (const { fields, expected } of authors) {
+    const result = project([input(fields)])
+    expect(result.events).toHaveLength(1)
+    expect(result.events[0]).toMatchObject({ reference: ref('canonical-user'), role: 'message', author: expected })
+    expect(result.records.map(record => record.original.item)).toEqual([native.items[0], input(fields)])
+    expect(result.coverage.flatMap(value => value.gaps)).toEqual([])
+  }
+  const agreed = project([input({ authorHuman: true }), input({ authorHuman: true }, 'same-author')])
+  expect(agreed.events[0]?.author).toEqual({ kind: 'human' })
+  expect(agreed.coverage.flatMap(value => value.gaps)).toEqual([])
+  const conflict = project([input({ authorHuman: true }), input({ authorAgentSessionId: 'original-agent' }, 'conflicting-author')])
+  expect(conflict.events).toHaveLength(1)
+  expect(conflict.events[0]).toMatchObject({ role: 'message', author: { kind: 'unknown' } })
+  expect(conflict.records).toHaveLength(3)
+  expect(conflict.coverage.find(value => value.source.kind === 'captured')).toMatchObject({ current: 'partial', gaps: [
+    { code: 'CONVERSATION_AUTHOR_CONFLICT', record: { hostId: 'local', agentSessionId: sid, source: { kind: 'captured', recordId: 'original-capture' } } },
+    { code: 'CONVERSATION_AUTHOR_CONFLICT', record: { hostId: 'local', agentSessionId: sid, source: { kind: 'captured', recordId: 'conflicting-author' } } }
+  ] })
+  // Attribution cannot change the canonical protocol role or create public-content/interaction authority.
+  const process = project([input({ authorHuman: true })], page([{ ...native.items[0]!, kind: 'activity' }]))
+  expect(process.events[0]).toMatchObject({ role: 'process', author: { kind: 'human' } })
+  expect(process.records[1]?.original.item).not.toHaveProperty('publicContent')
+})
