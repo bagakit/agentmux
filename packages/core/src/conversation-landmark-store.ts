@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { durableWriteFile } from './durable-write.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
-import { parseConversationLandmark, parseConversationLandmarkOperation, parseConversationLandmarkQuery, parseConversationLandmarkWrite, sameLandmarkScope,
+import { parseConversationLandmark, parseConversationLandmarkOperation, parseConversationLandmarkQuery, parseConversationLandmarkWrite, sameLandmarkScope, conversationLandmarkScope,
   type ConversationLandmark, type ConversationLandmarkActor, type ConversationLandmarkOperation, type ConversationLandmarkPage, type ConversationLandmarkQuery, type ConversationLandmarkWrite } from './conversation-landmarks.js'
 
 type Document = { schemaVersion: 1; revision: number; points: Record<string, ConversationLandmark>; operations: Record<string, ConversationLandmarkOperation> }
@@ -37,7 +37,7 @@ export class ConversationLandmarkStore {
   private page(document: Document, query: ConversationLandmarkQuery): ConversationLandmarkPage {
     const operation = query.operationId === undefined ? undefined : Object.hasOwn(document.operations, query.operationId) ? document.operations[query.operationId] : undefined
     return { hostId: query.hostId, agentSessionId: query.agentSessionId, revision: document.revision,
-      points: Object.values(document.points).filter(point => sameLandmarkScope(point.reference, query)),
+      points: Object.values(document.points).filter(point => sameLandmarkScope(conversationLandmarkScope(point), query)),
       recordedOperation: operation && sameLandmarkScope(operation.input, query) ? operation : null }
   }
   async list(input: ConversationLandmarkQuery): Promise<ConversationLandmarkPage> { return this.page(await this.read(), parseConversationLandmarkQuery(input)) }
@@ -67,7 +67,7 @@ export class ConversationLandmarkStore {
         Object.defineProperty(next.points, change.point.id, { value: change.point, enumerable: true, writable: true, configurable: true })
       } else {
         const point = Object.hasOwn(next.points, change.id) ? next.points[change.id] : undefined
-        if (!point || !sameLandmarkScope(point.reference, original)) return fail('The requested point is not in this exact conversation.', 'CONVERSATION_LANDMARK_NOT_FOUND')
+        if (!point || !sameLandmarkScope(conversationLandmarkScope(point), original)) return fail('The requested point is not in this exact conversation.', 'CONVERSATION_LANDMARK_NOT_FOUND')
         if (change.kind === 'rename') point.name = change.name
         else delete next.points[change.id]
       }
