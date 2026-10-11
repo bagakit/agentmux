@@ -305,6 +305,8 @@ export class BrowserViewManager {
     })
   }
   private readonly entries = new Map<string, BrowserEntry>()
+  /** Lookup index only; nativeOwner still verifies the current authoritative entry and attachment. */
+  private readonly browserIdsByView = new WeakMap<WebContentsView, string>()
   private readonly viewWindows = new WeakMap<WebContentsView, BrowserWindow>()
   private presentationWindow: ((document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location']) => BrowserWindow) | undefined
   setPresentationWindowOwner(resolve: (document: WorkbenchWindowDocument | undefined, occurrence: BrowserPresentationOccurrence['location']) => BrowserWindow): void { this.presentationWindow = resolve }
@@ -860,8 +862,9 @@ export class BrowserViewManager {
 
   /** Resolve an actual attachment without interpreting its geometry, title or page DOM. */
   nativeOwnerForView(view: WebContentsView, window?: BrowserWindow): NativeBrowserOwner | undefined {
-    for (const entry of this.entries.values()) if (entry.view === view) return this.nativeOwner(entry.id, window)
-    return undefined
+    const browserId = this.browserIdsByView.get(view)
+    const owner = browserId === undefined ? undefined : this.nativeOwner(browserId, window)
+    return owner?.view === view ? owner : undefined
   }
 
   /** Actual OS owners, including out-of-process frames; a shared PID is reported only once. */
@@ -2881,6 +2884,7 @@ export class BrowserViewManager {
   }
 
   private attach(entry: BrowserEntry, view: WebContentsView): void {
+    this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
     if (entry.storage.mode === 'private') {
       const storage = entry.storage
