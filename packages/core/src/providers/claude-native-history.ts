@@ -83,7 +83,7 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   const blocks = Array.isArray(content) ? content : []
 
   // Generated records remain neutral even when they carry a prompt-shaped attachment.
-  const isGenerated = record.isCompactSummary === true || record.isSynthetic === true || record.isMeta === true
+  const isGenerated = record.isCompactSummary === true || record.isSynthetic === true || record.isMeta === true || record.isApiErrorMessage === true
   const isNeutralActivity = (!message && !queuedInput) || content === undefined ||
     isGenerated ||
     (!queuedInput && record.type !== 'user' && record.type !== 'assistant')
