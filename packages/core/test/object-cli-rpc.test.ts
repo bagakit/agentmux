@@ -40,6 +40,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       'connection.profile.sync': JSON.stringify({ operationId: 'profile-original', connectionId: 'profile-connection', expectedConnectionRevision: 1, desired: { name: 'Desired name' } }),
       'connection.enrollment.begin': JSON.stringify({ operationId: 'enroll-original', connectionId: 'connection-new', adapterId: 'sample', domain: 'chat.example', label: 'Team' }),
       'connection.setup.begin': JSON.stringify({ operationId: 'setup-original', connectionId: 'setup-connection', expectedConnectionRevision: 1, goal: { kind: 'agent-conversation', interaction: 'cards' } }),
+      'connection.setup.advance': JSON.stringify({ operationId: 'setup-original', expectedRevision: 4, decision: { actionId: 'setup-original-action', value: 'continue' } }),
       'connection.service.configure': JSON.stringify({ operationId: 'service-original', expectedRevision: 0, service: { enabled: false } }),
       'connection.configure': JSON.stringify({ operationId: 'connection-save', expectedRevision: null, connection: { connectionId: 'connection-a', adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, label: 'Team', enabled: true, credentialRef: 'credential-a' } }),
       'agent.native.history': JSON.stringify({ hostId: 'local', executorId: 'private', source: nativeSource }),
@@ -89,12 +90,13 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       goal: { kind: 'agent-conversation', interaction: 'cards' } }
     const paramsByMethod: Record<string, object> = {
       'connection.setup.begin': input,
+      'connection.setup.advance': { operationId: input.operationId, expectedRevision: 4, decision: { actionId: 'setup-original-action', value: 'continue' } },
       'connection.setup.inspect': { operationId: input.operationId },
       'connection.setup.ls': { connectionId: input.connectionId }
     }
     for (const entry of entries) {
       expect(paramsByMethod).toHaveProperty(entry.method)
-      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], JSON.stringify(input))
+      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], JSON.stringify(paramsByMethod[entry.method]))
       expect(result.code, entry.method + ': ' + result.stderr).toBe(1)
       expect(JSON.parse(result.stderr)).toMatchObject({ ok: false, operation: entry.method, error: { code: 'CLI_ROUTE_PROBE' } })
     }
