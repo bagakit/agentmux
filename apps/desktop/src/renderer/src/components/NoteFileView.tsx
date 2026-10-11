@@ -4,6 +4,7 @@ import { serializeNoteDocument, type NoteBlockTarget } from '../../../shared/not
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { NotebookPageDetails } from './NotebookPageDetails'
+import { noteSavedEditors } from './NoteParticipants'
 import type { NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
 import { sameNoteResource, useNotebookLibrary } from '../lib/notebook-library'
 import { NoteBlockEditor, type NoteEditorHandle } from './NoteBlockEditor'
@@ -42,6 +43,8 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const [canvasOpen, setCanvasOpen] = useState(false)
   const [canvasBlock, setCanvasBlock] = useState<(NoteBlockTarget & { sourceIdentity: string }) | null>(null)
   const read = useMemo(() => parseNoteFile(document), [document])
+  const savedEditors = useMemo(() => noteSavedEditors(document, read.status === 'valid' ? read.note.noteId : '', resource),
+    [document.noteProvenance, document.path, document.revision, read.status === 'valid' ? read.note.noteId : null, resource?.hostId, resource?.workspaceId, resource?.workspacePath, resource?.path])
   const sourceIdentity = JSON.stringify([resource?.hostId, resource?.workspaceId, resource?.workspacePath, document.path, read.status === 'valid' ? read.note.noteId : null])
   const [issue, setIssue] = useState<string | null>(null)
   const [restoreIssue, setRestoreIssue] = useState<string | null>(null)
@@ -141,7 +144,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active && !canvasOpen} />
   return <div className="note-file-view">
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
-    {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!}
+    {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!} savedEditors={savedEditors}
       {...(read.note.title === undefined ? {} : { sourceTitle: read.note.title })} {...(dirty === undefined ? {} : { sourceDirty: dirty })} {...(onCheckOriginal ? { onCheckOriginal } : {})} /> : null}
     {!registered ? <header className="notebook-page-heading"><h1>{identityIcon} {read.note.title ?? 'Untitled note'}</h1><p className="note-scope">Original file · {document.path}</p></header> : null}
     {resource && catalog?.pages[read.note.noteId] && !sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <p className="note-knowledge-notice" role="status">This file has a different recorded Note location. Editing stays available; recover its Notebook history or inspect the original resource.</p> : null}

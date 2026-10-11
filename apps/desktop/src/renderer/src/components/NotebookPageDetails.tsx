@@ -15,6 +15,7 @@ import { NotebookOperationIssue, useNotebookOperation } from './NotebookOperatio
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { api } from '../lib/api'
+import { NoteParticipantList, NoteParticipantStack, type NoteSavedEditors } from './NoteParticipants'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionMoveToFolderIcon = semanticIconComponent('action.move-to-folder')
@@ -26,13 +27,18 @@ const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
 const ThemeActionSaveIcon = semanticIconComponent('action.save')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectBookmarkIcon = semanticIconComponent('object.bookmark')
-const ThemeObjectTeamIcon = semanticIconComponent('object.team')
 
 
-export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, onCheckOriginal }: {
+function FollowerSince({ at }: { at: number }) {
+  const date = new Date(at)
+  return Number.isFinite(date.getTime()) ? <time dateTime={date.toISOString()} title={date.toLocaleString()}>Following since {date.toLocaleDateString()}</time> : <span>Time unavailable</span>
+}
+
+export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, savedEditors, onCheckOriginal }: {
   page: NotebookPage
   sourceTitle?: string
   sourceDirty?: boolean
+  savedEditors?: NoteSavedEditors
   onCheckOriginal?: () => void
 }) {
   const visible = useWorkbenchPresentationActive()
@@ -45,11 +51,12 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, on
     config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []).spaces.map(space => [space.spaceId, space.name])), [config, snapshots])
   const originalTitle = sourceTitle ?? page.title
   const operation = useNotebookOperation(), [title, setTitle] = useState(originalTitle), [editing, setEditing] = useState(false)
-  const [panel, setPanel] = useState<'move' | 'sources' | 'history' | 'followers' | null>(null)
-  const optionsTrigger = useRef<HTMLButtonElement>(null), followersTrigger = useRef<HTMLButtonElement>(null)
+  const [panel, setPanel] = useState<'move' | 'sources' | 'history' | 'followers' | 'editors' | null>(null)
+  const optionsTrigger = useRef<HTMLButtonElement>(null), followersTrigger = useRef<HTMLButtonElement>(null), editorsTrigger = useRef<HTMLButtonElement>(null)
+  const participantPanel = useRef<HTMLElement>(null)
+  useEffect(() => { if (visible && (panel === 'editors' || panel === 'followers')) participantPanel.current?.focus({ preventScroll: true }) }, [panel, visible])
   const followOperation = useNotebookOperation()
   const [self, setSelf] = useState<NotebookActor | null>(null), [actorIssue, setActorIssue] = useState<string | null>(null)
-  const agentNames = useAppStore(state => state.agentNames)
   const followers = page.followers ?? []
   const following = self !== null && followers.some(f => f.actor.kind === self.kind && f.actor.id === self.id)
   async function refreshActor() {
@@ -103,19 +110,12 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, on
   }
   function closePanel() {
     setPanel(null)
-    if (visible) (panel === 'followers' ? followersTrigger : optionsTrigger).current?.focus({ preventScroll: true })
+    if (visible) (panel === 'followers' ? followersTrigger : panel === 'editors' ? editorsTrigger : optionsTrigger).current?.focus({ preventScroll: true })
   }
   const panelHeading = (title: string) => <div className="notebook-page-panel-heading"><h3>{title}</h3><button type="button" className="note-text-button" aria-label={`Close ${title.toLowerCase()}`} onClick={closePanel}>Close</button></div>
   return <header className="notebook-page-heading" aria-label="Page details">
     <div className="notebook-page-topline"><button className="notebook-breadcrumb" title={book?.name ?? page.notebookId} onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); state.setMainSurface('recall') }}><span>{book?.name ?? page.notebookId}</span><ThemeNavigationDisclosureIcon size={12} /></button>
     <div className="notebook-page-actions">
-      <button type="button" className="note-text-button notebook-follow-action" aria-label={following ? 'Unfollow page' : 'Follow page'} aria-pressed={self === null ? undefined : following}
-        disabled={followOperation.busy || Boolean(followOperation.issue)} onClick={() => void followOperation.run({ kind: following ? 'unfollow' : 'follow', noteId: page.noteId })}>
-        <ThemeObjectBookmarkIcon size={13} /><span>{following ? 'Following' : 'Follow'}</span>
-      </button>
-      <button ref={followersTrigger} type="button" className="note-text-button" aria-label="Page followers" aria-expanded={panel === 'followers'} onClick={() => setPanel(panel === 'followers' ? null : 'followers')}>
-        <ThemeObjectTeamIcon size={13} /><span>Followers{followers.length ? ` · ${followers.length}` : ''}</span>
-      </button>
       <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button ref={optionsTrigger} type="button" className="note-text-button" aria-label="Page options" title="Page options"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger>
         <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
           <Menu.Group aria-label="Page organization"><Menu.Item className="tab-context-menu__item" aria-label="Move page" onSelect={() => openPanel('move')}><ThemeActionMoveToFolderIcon size={14} /><span>Move page</span></Menu.Item></Menu.Group>
@@ -137,6 +137,15 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, on
     <TextInput className="notebook-page-title" aria-label="Page title" title={title} value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
       onFocus={() => setEditing(true)} onChange={event => setTitle(event.target.value)} onBlur={() => { setEditing(false); if (cancelTitle.current) { cancelTitle.current = false; return } void rename() }}
       onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') { cancelTitle.current = true; setTitle(originalTitle); event.currentTarget.blur() } }} />
+    <div className="note-participants" aria-label="Note participants">
+      <NoteParticipantStack group="Editors" participants={savedEditors?.editors ?? []} unknown={savedEditors?.unknown ?? (savedEditors ? undefined : 'Saved block authors are not confirmed for this file and revision.')} self={self}
+        triggerRef={editorsTrigger} expanded={panel === 'editors'} onOpen={() => setPanel(panel === 'editors' ? null : 'editors')} />
+      <NoteParticipantStack group="Followers" participants={followers} self={self} triggerRef={followersTrigger} expanded={panel === 'followers'} onOpen={() => setPanel(panel === 'followers' ? null : 'followers')} />
+      <button type="button" className="note-text-button notebook-follow-action" aria-label={following ? 'Unfollow page' : 'Follow page'} aria-pressed={self === null ? undefined : following}
+        disabled={followOperation.busy || Boolean(followOperation.issue)} onClick={() => void followOperation.run({ kind: following ? 'unfollow' : 'follow', noteId: page.noteId })}>
+        <ThemeObjectBookmarkIcon size={13} /><span>{following ? 'Following' : 'Follow'}</span>
+      </button>
+    </div>
     {sourceTitle !== undefined && sourceTitle !== page.title ? <div className="notebook-change-issue" role="status">
       {sourceDirty ? <>Draft title differs from the page list. Page list title: {page.title}. This draft is not saved yet.</>
         : <>Saved file title differs from the page list. Page list title: {page.title}.</>}
@@ -147,15 +156,17 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, on
     </div> : null}
     <NotebookOperationIssue operation={operation} />
     <NotebookOperationIssue operation={followOperation} />
-    {panel === 'followers' ? <section className="notebook-page-panel notebook-followers" aria-label="Note followers">
+    {panel === 'editors' ? <section className="notebook-page-panel note-participants__panel" ref={participantPanel} aria-label="Note editors" tabIndex={-1} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePanel() } }}>
+      {panelHeading('Editors')}
+      <p>Creators and most recent editors of the saved blocks. This is not a complete edit history or a list of people currently viewing this page.</p>
+      {sourceDirty ? <p>This draft is not saved yet. Editors shown here belong to the saved version.</p> : null}
+      {savedEditors?.unknown || !savedEditors ? <p role="status">{savedEditors?.unknown ?? 'Saved block authors are not confirmed for this file and revision.'}</p> : null}
+      <NoteParticipantList participants={(savedEditors?.editors ?? []).map(editor => ({ actor: editor.actor, detail: `Created ${editor.createdBlocks} · Last edited ${editor.lastEditedBlocks}` }))} self={self} />
+      {onCheckOriginal ? <button type="button" className="note-text-button" onClick={onCheckOriginal}>Check saved authors</button> : null}
+    </section> : null}
+    {panel === 'followers' ? <section className="notebook-page-panel notebook-followers note-participants__panel" ref={participantPanel} aria-label="Note followers" tabIndex={-1} onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePanel() } }}>
       {panelHeading('Followers')}
-      {followers.length ? <ul>{followers.map(follower => {
-        const actor = follower.actor, isSelf = self !== null && actor.kind === self.kind && actor.id === self.id
-        return <li key={notebookFingerprint(actor)}><span title={`${actor.kind} · ${actor.id}`}>
-          <strong>{isSelf ? 'You' : actor.kind === 'agent' ? `Agent · ${agentNames[actor.id] ?? actor.id}` : actor.kind === 'device' ? `Device · ${actor.id}` : actor.id}</strong>
-          {actor.kind === 'agent' && agentNames[actor.id] ? <small>{actor.id}</small> : null}
-        </span><time dateTime={new Date(follower.followedAt).toISOString()} title={new Date(follower.followedAt).toLocaleString()}>Since {new Date(follower.followedAt).toLocaleDateString()}</time></li>
-      })}</ul> : <p>No one is following this page yet.</p>}
+      {followers.length ? <NoteParticipantList participants={followers.map(follower => ({ actor: follower.actor, detail: <FollowerSince at={follower.followedAt} /> }))} self={self} /> : <p>No one is following this page yet.</p>}
       <p>Following is saved until you unfollow. It does not indicate who is viewing this page.</p>
       {self === null ? <div className="notebook-change-issue" role="status">Your follow state is unknown. {actorIssue ?? 'Confirming your identity.'}
         <div className="notebook-follow-recovery"><button type="button" className="note-text-button" onClick={() => void refreshActor()}>Refresh identity</button>
