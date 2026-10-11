@@ -64,13 +64,14 @@
   --icon-feedback-trace: semantic-icon-trace-once;
   --icon-feedback-content: semantic-icon-content-once;
   --icon-feedback-probe: semantic-icon-probe-once;
+  --icon-feedback-flag: semantic-icon-flag-once;
 }
 [data-semantic-icon-part="demonstration-pen"] { animation: var(--icon-feedback-pen, none) .8s ease-in-out; transform-origin: 13px 19px; }
 [data-semantic-icon-part="feedback-mark"] { animation: var(--icon-feedback-mark, none) .64s ease-out; transform-box: fill-box; transform-origin: center; }
 [data-semantic-icon-part="feedback-forward"] { animation: var(--icon-feedback-forward, none) .72s ease-in-out; }
 [data-semantic-icon-part="feedback-down"] { animation: var(--icon-feedback-down, none) .72s ease-in-out; }
 [data-semantic-icon-part="feedback-trace"] { animation: var(--icon-feedback-trace, none) .8s ease-out; }
-[data-semantic-icon-part="agreement-line"],
+[data-semantic-icon-part="agreement-flag"] { animation: var(--icon-feedback-flag, none) .8s ease-out; transform-box: view-box; transform-origin: 9px 9.5px; }
 [data-semantic-icon-part="note-content"] { animation: var(--icon-feedback-content, none) .8s ease-out; }
 [data-semantic-icon-part="survey-reflection"] { animation: var(--icon-feedback-probe, none) .8s ease-in-out; }
 /* Only registered sand parts receive these instance selectors; custom drawings stay whole. */
@@ -144,8 +145,9 @@
 @keyframes semantic-icon-down-once { 0%, 100% { stroke-dasharray: 1; stroke-dashoffset: 0; } 30% { stroke-dasharray: 1; stroke-dashoffset: .64; } }
 @keyframes semantic-icon-trace-once { 0%, 100% { stroke-dasharray: 1; stroke-dashoffset: 0; } 30% { stroke-dasharray: 1; stroke-dashoffset: .18; } }
 @keyframes semantic-icon-content-once { from { stroke-dasharray: 1; stroke-dashoffset: 1; } to { stroke-dasharray: 1; stroke-dashoffset: 0; } }
+@keyframes semantic-icon-flag-once { from { transform: scaleX(.35); } 65% { transform: scaleX(1.04); } to { transform: scaleX(1); } }
 @keyframes semantic-icon-probe-once { 0%, 100% { transform: none; } 38% { transform: translate(.6px, -.4px); } 68% { transform: translate(-.2px, .2px); } }
 @keyframes semantic-icon-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; --icon-feedback-content: none; --icon-feedback-probe: none; animation: none; will-change: auto; }
+  .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; --icon-feedback-content: none; --icon-feedback-probe: none; --icon-feedback-flag: none; animation: none; will-change: auto; }
 }
