@@ -942,9 +942,10 @@ export function ActivityView({
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
   const readPending = readingEnabled && Boolean(readingWindow.loading || userMessageRead?.loading)
-  const emptyReadFailed = Boolean(readingWindow.error || !readingWindow.historical && userMessageRead?.error)
+  const earlierReadPending = readingWindow.loadingEarlier || readingWindow.coverageLoading
+  const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError || !readingWindow.historical && userMessageRead?.error)
   const emptyReadStatus = !hasUserMessages && !hasNativeRecords && !hasItems && ruler.items.length === 0 &&
-    !readingWindow.loadingEarlier && (readPending || emptyReadFailed) ? (
+    !earlierReadPending && (readPending || emptyReadFailed) ? (
     <div className="activity-feed__empty-reading" data-read-state={emptyReadFailed ? 'interrupted' : 'pending'}
       role="status" aria-live="polite" aria-busy={!emptyReadFailed || undefined}>
       <div className="activity-feed__reading-signal" aria-hidden="true"><span /><span /><span /></div>
@@ -955,15 +956,20 @@ export function ActivityView({
     </div>
   ) : null
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
-  const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.capturedHasMore || readingWindow.hasNewer ||
+  const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.capturedHasMore || readingWindow.automaticReadError || readingWindow.hasNewer ||
     conversationReading.opened && conversationReading.onClose || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
     <div ref={earlierRef} className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
       <div className="activity-feed__reading-entry">
-        {readingWindow.hasMore || readingWindow.capturedHasMore ? (
+        {readingWindow.hasMore || readingWindow.capturedHasMore || readingWindow.automaticReadError ? (
           <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || readingWindow.capturedLoading || !conversationReading.enabled}
-            aria-busy={readingWindow.loadingEarlier || readingWindow.capturedLoading || undefined} onClick={readEarlierRecords}>
-            {readingWindow.loadingEarlier ? <SemanticIcon name="status.loading" animation="spin" size={12} /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
-            <span {...(readingWindow.loadingEarlier ? { role: 'status', 'aria-live': 'polite' as const } : {})}>{readingWindow.loadingEarlier ? 'Loading earlier…' : 'Earlier'}</span>
+            data-read-error={readingWindow.automaticReadError ? 'true' : undefined}
+            aria-busy={earlierReadPending || readingWindow.capturedLoading || undefined}
+            onClick={readingWindow.automaticReadError ? readingWindow.retry : readEarlierRecords}>
+            {earlierReadPending ? <SemanticIcon name="status.loading" animation="spin" size={12} /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
+            {readingWindow.automaticReadError ? <span className="activity-feed__reading-failure" role="status" aria-live="polite">
+              <span>{earlierReadPending ? 'Loading earlier…' : 'Retry loading earlier'}</span>
+              <span>{readingWindow.automaticReadError.message || 'The original read failed.'}</span>
+            </span> : <span {...(earlierReadPending ? { role: 'status', 'aria-live': 'polite' as const } : {})}>{earlierReadPending ? 'Loading earlier…' : 'Earlier'}</span>}
           </button>
         ) : null}
         {readingWindow.hasNewer ? <button type="button" className="activity-feed__reading-action"
@@ -1195,7 +1201,7 @@ export function ActivityView({
         selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
         band={band}
         {...(conversationReading ? { reading: { hasMore: readingWindow.hasMore } } : {})}
-        pending={readPending && !readingWindow.loadingEarlier}
+        pending={readPending && !earlierReadPending}
         recentFraction={ruler.recentFraction}
         activity={activity.segments}
         controls={close => <><ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
@@ -1217,7 +1223,7 @@ export function ActivityView({
       <div ref={logRef}>
       <ConversationView
         page={nativeHistoryPage}
-        expandSubmissions={Boolean(readingWindow.error)}
+        expandSubmissions={Boolean(readingWindow.error || readingWindow.automaticReadError)}
         records={conversationRecords}
         originalRecords={originalConversationRecords}
         coverage={conversationCoverage}

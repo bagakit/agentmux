@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentTimelineSnapshot } from '@agentmux/core'
 import { useConversationView, type ConversationViewOperation } from '@agentmux/client-ui/use-conversation-view'
 import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
@@ -36,7 +36,6 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const displayed = useRef<AgentSessionHistoryPage | null>(null)
   const boundary = useRef<string | null>(null)
   const intent = useRef<ConversationReadingIntent>('seed')
-  const [coverageError, setCoverageError] = useState<string | null>(null)
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
   const bindingKey = reading?.nativeSourceFacts ? nativeBindingKey(reading.nativeSourceFacts) : ''
   const acceptedBinding = useRef({ key, bindingKey })
@@ -61,10 +60,10 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const navigate = (operation: ConversationViewOperation) => {
     intent.current = operation === 'older' ? 'earlier' : operation === 'newer' ? 'newer' : operation === 'latest' ? 'current' : 'live'
     if (operation === 'older' && !boundary.current) boundary.current = page?.items[0]?.id ?? null
-    if (operation === 'latest') { boundary.current = null; setCoverageError(null) }
+    if (operation === 'latest') boundary.current = null
     return operation === 'older' ? view.earlier() : operation === 'newer' ? view.newer() : operation === 'changes' ? view.changes() : view.refresh()
   }
-  useEffect(() => { boundary.current = null; intent.current = 'seed'; setCoverageError(null) }, [key])
+  useEffect(() => { boundary.current = null; intent.current = 'seed' }, [key])
   useEffect(() => {
     if (!view.held || !reading?.enabled) return
     const changed = () => view.acceptHeld()
@@ -74,7 +73,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   // A time-range selection admits bounded complete Core pages. No raw records or
   // Provider positions are accumulated by this presentation.
   const coverageDemand = useRef(false)
-  useEffect(() => { coverageDemand.current = true; setCoverageError(null) }, [key, coverageDuration])
+  useEffect(() => { coverageDemand.current = true }, [key, coverageDuration])
   useEffect(() => {
     if (view.error) { coverageDemand.current = false; return }
     if (!coverageDemand.current || !reading?.enabled || view.loading || view.held || !page || !view.hasMore || bindingChanged) return
@@ -82,23 +81,24 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     if (coverageDuration !== Infinity && (!times.length || Math.max(...times) - Math.min(...times) >= coverageDuration)) { coverageDemand.current = false; return }
     const count = view.snapshot?.units.reduce((total, unit) => total + unit.records.length, 0) ?? 0
     if (count >= 1200 || view.snapshot?.window.outside.newer) {
-      coverageDemand.current = false; setCoverageError('The selected time range exceeds this bounded reading window. Scroll earlier to continue.'); return
+      coverageDemand.current = false; return
     }
     intent.current = 'coverage'; void view.earlier()
   }, [page, view.loading, view.held, view.hasMore, view.error, reading?.enabled, bindingChanged, coverageDuration])
   const selectSource = (source?: AgentSessionHistorySource) => {
-    intent.current = 'current'; boundary.current = null; coverageDemand.current = false; setCoverageError(null)
+    intent.current = 'current'; boundary.current = null; coverageDemand.current = false
     if (source) void view.selectSource(source); else void view.refresh()
   }
-  const error = view.error?.message ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : coverageError)
+  const automaticReadError = intent.current === 'coverage' && view.errorOperation === 'older' ? view.error : null
+  const error = (automaticReadError ? null : view.error?.message) ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : null)
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
   const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
   return { page, projection, snapshot: view.snapshot, inspect: view.inspect, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
     readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') },
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,
-    previousSource, coverageLoading: view.loading && intent.current === 'coverage', loading: view.loading, error,
-    held: view.held, loadingEarlier: view.loading && intent.current === 'earlier',
+    previousSource, coverageLoading: view.loading && view.operation === 'older' && intent.current === 'coverage', loading: view.loading, error, automaticReadError,
+    held: view.held, loadingEarlier: view.loading && view.operation === 'older' && intent.current === 'earlier',
     historyBoundary: boundary.current && page?.items.some(item => item.id === boundary.current) ? { beforeRecordId: boundary.current } : null,
     currentOutside, newerOutside: currentOutside, hasNewer: view.hasNewer, hasMore: view.hasMore,
     readEarlier: () => { coverageDemand.current = false; void navigate('older') }, readNewer: () => { coverageDemand.current = false; void navigate('newer') },

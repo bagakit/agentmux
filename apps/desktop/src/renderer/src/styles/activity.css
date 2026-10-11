@@ -9,6 +9,10 @@
 .activity-feed__empty { padding-top:70px; color: var(--text-3); font-size: var(--fs-meta); text-align: center; }
 .activity-feed__read-notice { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); border-bottom: 1px solid var(--line-soft); }
 .activity-feed__read-notice > span { display: inline-flex; align-items: center; gap: var(--sp-2); flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* Empty reads use the shared floating Find control; reserve its existing slot
+   so it cannot intercept the original source Retry target. */
+.activity-feed-frame:has(.reading-find__floating-trigger) .activity-feed__read-notice:first-child { padding-inline-end: calc(var(--sp-8) + var(--sp-4)); }
+@media (pointer: coarse) { .activity-feed-frame:has(.reading-find__floating-trigger) .activity-feed__read-notice:first-child { padding-inline-end: calc(var(--sp-8) * 2); } }
 /* The ruler is an honest temporal axis: ticks sit at their real elapsed fraction, so a burst of
    machine steps clusters and a long think opens a gap. It reads the shape of the run at a glance. */
 .activity-ruler {
@@ -282,6 +286,9 @@
 .activity-feed__reading-action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 .activity-feed__reading-action:disabled { cursor: default; opacity: .5; }
 .activity-feed__reading-action[aria-busy="true"] { opacity: 1; color: var(--text-2); }
+.activity-feed__reading-action[data-read-error='true'] { max-width: 100%; white-space: normal; text-align: left; color: var(--text-2); }
+.activity-feed__reading-failure { display: grid; gap: var(--sp-1); min-width: 0; }
+.activity-feed__reading-failure > span:last-child { color: var(--text-3); overflow-wrap: anywhere; }
 .activity-feed__reading-status { color: var(--text-2); animation: activity-reading-arrive var(--dur-fast) var(--ease-enter) both; }
 .activity-feed__reading-status > svg { flex: none; color: var(--blue); }
 @keyframes activity-reading-arrive { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: translateY(0); } }
