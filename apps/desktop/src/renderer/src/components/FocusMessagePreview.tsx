@@ -1,3 +1,4 @@
+import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentSessionHistoryResourceRequest } from '@agentmux/core'
@@ -71,7 +72,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
   const branch = sender?.workspace?.branch ?? hierarchy?.worktrees.find(item => item.hostId === sender?.hostId && item.path === sender.workspacePath)?.branch
   const project = lane?.projectWorkspaceId ? lane.labels[0] : sender?.workspace?.name
   const targetName = recipient?.name ?? recipientName ?? message?.agentSessionId ?? 'Context'
-  const roleName = message?.role === 'interaction' ? 'Recorded interaction' : message?.role === 'observation' ? 'Reply observation' : system ? 'System message' : speaker?.role === 'external' ? 'External message' : speaker?.role === 'human' ? 'Human message' : agent ? reply ? 'Agent reply' : 'Agent input' : 'Prompt · Sender not recorded'
+  const roleName = message?.role === 'interaction' ? 'Recorded interaction' : message?.role === 'observation' ? COLLECTED_REPLY_TITLE : system ? 'System message' : speaker?.role === 'external' ? 'External message' : speaker?.role === 'human' ? 'Human message' : agent ? reply ? 'Agent reply' : 'Agent input' : 'Prompt · Sender not recorded'
   const executionHostId = message?.executionHostId, agentSessionId = message?.agentSessionId
   const readHistoryResource = useCallback(async (input: AgentSessionHistoryResourceRequest) => {
     if (!executionHostId || !agentSessionId) throw new Error('The original conversation Host is unknown. Its recorded text remains readable; reopen its original source to read this resource.')
@@ -173,7 +174,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
       <div className="recent-focus__input-list" aria-label="Available conversation records">{reader.messages.map(item => {
         const itemSpeaker = item.speaker!
         const itemIdentity = describeSpeaker(itemSpeaker)
-        const authorLabel = item.role === 'interaction' ? 'Recorded interaction' : item.role === 'observation' ? 'Reply observation' : itemSpeaker.role === 'external' ? `External message from ${itemIdentity.name}` : itemSpeaker.role === 'system' ? `System message from ${itemSpeaker.id}` : itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `${item.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} from ${itemIdentity.name} · Sender ${itemSpeaker.id}` : 'Input, sender not recorded'
+        const authorLabel = item.role === 'interaction' ? 'Recorded interaction' : item.role === 'observation' ? COLLECTED_REPLY_TITLE : itemSpeaker.role === 'external' ? `External message from ${itemIdentity.name}` : itemSpeaker.role === 'system' ? `System message from ${itemSpeaker.id}` : itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `${item.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} from ${itemIdentity.name} · Sender ${itemSpeaker.id}` : 'Input, sender not recorded'
         const excerpt = item.content || (item.kind === 'system-message' ? 'System message with resources' : 'Input with resources')
         return <button type="button" key={item.id} data-input-message-id={item.input?.id} data-input-source={item.input?.source.kind} data-conversation-record-id={item.id} data-conversation-role={item.role} data-record-kind={item.kind} data-record-source={item.source.kind} data-record-raw-id={item.rawId} data-conversation-item-ref={conversationItemRef(item) ? JSON.stringify(conversationItemRef(item)) : undefined} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${excerpt}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
           <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} mote={itemIdentity.mote} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{excerpt}</span><small title={describeConversationRecordSource(item).title}>{describeConversationRecordSource(item).caption} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
@@ -182,7 +183,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
       {!reader.loading && reader.messages.length === 0 ? <p>No conversation records read in this view. Coverage may be incomplete.</p> : null}
     </div> : null}
     {message ? !interactive ? <>
-      <p className="recent-focus__message-caption">{message.role === 'observation' ? 'Reply observation in ' : system ? 'System record in ' : reply ? 'Reply in ' : <><ThemeConversationOutgoingIcon size={11} role="img" aria-hidden="false" aria-label="To" /> </>}{targetName}</p>
+      <p className="recent-focus__message-caption">{message.role === 'observation' ? `${COLLECTED_REPLY_TITLE} · ` : system ? 'System record in ' : reply ? 'Reply in ' : <><ThemeConversationOutgoingIcon size={11} role="img" aria-hidden="false" aria-label="To" /> </>}{targetName}</p>
       <p className="recent-focus__message-excerpt">{message.content.trim() || (resources.length ? resources.join(' · ') : system ? 'System message has no recorded text' : 'Input has no recorded text')}</p>
       <footer className="recent-focus__message-meta"><span title={describeConversationRecordSource(message).title}>{describeConversationRecordSource(message).caption}</span><time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? time.dateClock(message.recordedAt) : 'Record time unknown'}</time></footer>
       <span className="recent-focus__message-hint">Click or press Enter to keep reading</span>
@@ -208,7 +209,7 @@ export function FocusMessagePreview({ active = true, autoFocus = true, message, 
       {...(message.original.kind === 'native' && message.original.item.messagePhase ? { messagePhase: message.original.item.messagePhase } : {})}
       {...(message.original.kind === 'captured' ? { status: message.original.item.status } : completedNativeReply(message.original.item) ? { status: 'complete' } : {})}
       {...(message.executionHostId ? { executionHostId: message.executionHostId } : {})}
-      name={described!.name} {...(message.role === 'observation' ? { recordTitle: 'Reply observation' } : {})} content={message.contentParts}
+      name={described!.name} {...(message.role === 'observation' ? { recordTitle: COLLECTED_REPLY_TITLE } : {})} content={message.contentParts}
       {...(message.original.kind === 'native' && message.original.item.questionAnswers ? { questionAnswers: message.original.item.questionAnswers } : {})}
       {...(message.original.kind === 'native' && message.original.item.questionDiagnostic ? { questionDiagnostic: message.original.item.questionDiagnostic } : {})}
       timeFormatter={time.clock}

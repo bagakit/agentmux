@@ -53,9 +53,10 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, attempt, draf
     : recordedCount ? `${recordedCount} of ${request.questions.length} answers recorded · Others unconfirmed` : 'Answer not recorded in this window'
   return <section className="agent-interaction agent-interaction--async" aria-label="Native asynchronous question"
     data-question-state={answered ? 'answered' : phase === 'idle' || phase === 'rejected' || phase === 'confirmed' ? 'unknown' : phase}>
-    <div className="agent-question__header"><span><SemanticIcon name="status.unknown" size={14} aria-hidden="true" />Question</span>
+    <div className="agent-question__header"><span><SemanticIcon name="status.unknown" size={14} aria-hidden="true" />已记录的问题</span>
       <span className="agent-question__state" role="status" aria-live="polite">{answered ? <SemanticIcon name="action.confirm" size={12} aria-hidden="true" /> : null}{state}</span>
     </div>
+    {!answered && onDraftChange ? <p className="agent-question__draft">答案草稿（尚未提交）</p> : null}
     {request.questions.map(question => {
       const original = recordedAnswers.get(question.id)
       const hasAnswer = recordedAnswers.has(question.id)
@@ -77,7 +78,7 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, attempt, draf
               <summary>Write your own answer</summary>{editor}
             </details> : editor}
           </>}
-        {copyAnswer?.trim() ? <ContentCopyButton text={copyAnswer} identity={question.id} label={`Copy answer: ${question.prompt}`} /> : null}
+        {copyAnswer?.trim() ? <ContentCopyButton text={copyAnswer} identity={question.id} actionLabel="复制答案" label={`Copy answer: ${question.prompt}`} /> : null}
       </fieldset>
     })}
     {attempt?.phase === 'unknown' && <details className="agent-question__write"><summary>Original reply awaiting confirmation</summary>
@@ -88,9 +89,9 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, attempt, draf
     {draftNotice ? <p className="agent-interaction__error" role="status">{draftNotice}</p> : null}
     {attempt?.diagnostic ? renderNotice ? renderNotice(attempt.diagnostic) : <p className="agent-interaction__error" role="status">{attempt.diagnostic.message}</p> : null}
     {!answered || attempt?.phase === 'unknown' ? <div className="agent-question__footer">
-      <span>{terminalReply && terminalCurrent !== true ? 'This is a retained question. Its current native source or Run has not been matched. View the original Session; opening it does not resend the preserved reply.' : phase === 'unknown' ? 'The original reply may already be entered. Check the original terminal before answering; opening it does not resend.' : terminalAnswer ? 'Keep your answers here. Copy each answer, then answer in the original terminal.' : 'Answer route undeclared · Drafts and the original Session remain available.'}</span>
+      <span>{terminalReply && terminalCurrent !== true ? 'This is a retained question. Its current native source or Run has not been matched. View the original Session; opening it does not resend the preserved reply.' : phase === 'unknown' ? 'The original reply may already be entered. Check the original terminal before answering; opening it does not resend.' : terminalAnswer ? '这里只整理答案；复制后到原终端粘贴并确认。' : 'Answer route undeclared · Drafts and the original Session remain available.'}</span>
       {onOpenTerminal ? <button className={terminalReply ? 'is-primary' : undefined} type="button" onClick={onOpenTerminal}>
-        <SemanticIcon name="object.terminal" size={12} aria-hidden="true" />{terminalAnswer && !answered ? 'Answer in original terminal' : 'View original terminal'}
+        <SemanticIcon name="object.terminal" size={12} aria-hidden="true" />打开原终端
       </button> : null}
     </div> : null}
   </section>

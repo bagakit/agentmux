@@ -100,6 +100,7 @@
 .agent-question__field legend { max-width: 100%; padding: 0; font-size: var(--fs-body); font-weight: 550; line-height: 1.45; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-interaction--async .agent-interaction__options { margin-top: 7px; gap: 4px; }
 .agent-interaction--async .agent-interaction__options button { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; align-items: start; min-height: 30px; padding: 6px 8px; white-space: normal; overflow-wrap: anywhere; }
+.agent-interaction--async .agent-interaction__options small { grid-column: 2; min-width: 0; }
 .agent-question__choice-mark { display: grid; place-items: center; width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); }
 .agent-interaction--async button[aria-pressed='true'] { background: var(--surface-3); }
 .agent-interaction--async button[aria-pressed='true'] .agent-question__choice-mark { color: var(--bg); background: var(--green); box-shadow: none; }

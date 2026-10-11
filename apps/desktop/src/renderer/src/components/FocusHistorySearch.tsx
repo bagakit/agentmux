@@ -1,3 +1,4 @@
+import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
 import { Fragment, memo, useCallback, useMemo } from 'react'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentTimelineItem } from '@agentmux/core'
@@ -46,7 +47,7 @@ const Hit = memo(function Hit({ hit, query, open, onExpand, active }: { active: 
  const excerpt = text.slice(start, start + 320)
  const readResource = useCallback((input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource({ hostId: hit.reference.hostId, agentSessionId: hit.reference.agentSessionId }, input), [hit.reference.hostId, hit.reference.agentSessionId])
  const nativeRecord = useMemo(() => hit.nativeSource ? { source: hit.nativeSource, recordId: item.id, ...('turnId' in item && item.turnId ? { turnId: item.turnId } : {}) } : undefined, [hit])
- const body = (content: string | readonly AgentSessionHistoryContentPart[]) => <ConversationMessage sources={record?.sources} {...(record?.event ? { conversationEvent: record.event } : {})} active={active} compact recordedIdentity {...(record?.speaker ? { speaker: record.speaker } : {})} {...(record?.input ? { inputSource: record.input.source } : {})} content={content} recordTitle={record?.role === 'observation' ? '回复观察' : item.kind} messageId={item.id} conversationSessionId={hit.reference.agentSessionId} executionHostId={hit.reference.hostId} {...(nativeRecord ? { nativeResourceRecord: nativeRecord } : {})} readHistoryResource={readResource} />
+ const body = (content: string | readonly AgentSessionHistoryContentPart[]) => <ConversationMessage sources={record?.sources} {...(record?.event ? { conversationEvent: record.event } : {})} active={active} compact recordedIdentity {...(record?.speaker ? { speaker: record.speaker } : {})} {...(record?.input ? { inputSource: record.input.source } : {})} content={content} recordTitle={record?.role === 'observation' ? COLLECTED_REPLY_TITLE : item.kind} messageId={item.id} conversationSessionId={hit.reference.agentSessionId} executionHostId={hit.reference.hostId} {...(nativeRecord ? { nativeResourceRecord: nativeRecord } : {})} readHistoryResource={readResource} />
  return <details className="focus-history-hit" open={open} onToggle={event => onExpand(focusHistoryHitKey(hit), event.currentTarget.open)}>
   <summary>
    <span className="focus-history-hit__identity"><strong>{currentName || hit.reference.agentSessionId}</strong><small>{currentName ? 'Current name · ' : ''}{hostName}</small></span>

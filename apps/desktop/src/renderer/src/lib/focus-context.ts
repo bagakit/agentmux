@@ -1,3 +1,4 @@
+import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { projectConversationRecords } from '@agentmux/core/conversation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
@@ -134,7 +135,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
         ? 'Run interrupted · Cause unknown' : 'Process exited · Cause unknown'
   } else if (result && (bucket === 'results' || bucket === 'idle' && state === 'running')) {
     const response = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
-    detail = state === 'running' ? `${result.role === 'observation' ? 'Reply observation' : 'Response'} · ${response}` : response
+    detail = state === 'running' ? `${result.role === 'observation' ? COLLECTED_REPLY_TITLE : 'Response'} · ${response}` : response
     detailIsMessage = true
     detailKind = 'message'
   }
@@ -142,7 +143,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
     const activity = sessionRecentActivity(session, items, session.workspacePath)
     if (activity !== state) detail = activity
     else if (session.kind === 'agent' && latestRecord?.content) {
-      const label = latestRecord.role === 'observation' ? 'Reply observation' : latestRecord.author?.kind === 'agent' ? 'Response' : 'Prompt'
+      const label = latestRecord.role === 'observation' ? COLLECTED_REPLY_TITLE : latestRecord.author?.kind === 'agent' ? 'Response' : 'Prompt'
       detail = `${label} · ${clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140)}`
       detailIsMessage = true
       detailKind = 'message'
