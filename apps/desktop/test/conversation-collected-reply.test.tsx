@@ -26,7 +26,8 @@ it('explains an independent Hook collection in ordinary language and preserves i
   await render(hook(), true)
   const row = host.querySelector('[data-captured-reply-observation]')!
   expect(row.textContent).toContain('采集到的回复')
-  expect(row.textContent).toContain('由 Hook 采集的回复内容。')
+  expect(row.querySelector('[data-conversation-source-role]')?.getAttribute('title')).toContain('由 Hook 采集的回复内容。')
+  expect(row.querySelector('.log-row__title, .conversation-reply-observation__notice')).toBeNull()
   expect(row.textContent).not.toContain('回复观察')
   await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copyText).toHaveBeenCalledTimes(1)
@@ -35,16 +36,16 @@ it('explains an independent Hook collection in ordinary language and preserves i
 })
 it.each([true, false])('uses only Core recorded target coverage when the observed native target is read=%s', async read => {
   await render(hook({ observes: ref }), read)
-  const notice = host.querySelector('.conversation-reply-observation__notice')!
-  expect(notice.textContent).toContain('由 Hook 采集的回复内容。')
+  const notice = host.querySelector('[data-conversation-source-role]')!.getAttribute('title')!
+  expect(notice).toContain('由 Hook 采集的回复内容。')
   if (read) {
-    expect(notice.textContent).not.toContain('尚未读到')
-    expect(notice.textContent).not.toContain('尚未确认')
-  } else expect(notice.textContent).toContain('对应的原始记录尚未读到。')
+    expect(notice).not.toContain('尚未读到')
+    expect(notice).not.toContain('尚未确认')
+  } else expect(notice).toContain('对应的原始记录尚未读到。')
   expect(host.textContent).toContain('Complete Hook reply')
 })
 it('a sole directly readable Hook collection does not invent an unconfirmed native counterpart', async () => {
   await render(hook(), false, false)
-  expect(host.querySelector('.conversation-reply-observation__notice')?.textContent).toBe('由 Hook 采集的回复内容。')
+  expect(host.querySelector('[data-conversation-source-role]')?.getAttribute('title')).toBe('由 Hook 采集的回复内容。')
   expect(host.textContent).toContain('Complete Hook reply')
 })
