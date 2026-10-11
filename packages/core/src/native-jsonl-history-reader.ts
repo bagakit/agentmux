@@ -425,19 +425,21 @@ export class NativeJsonlHistoryReader {
   async close(): Promise<void> { await this.file.close() }
 }
 
+export const NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES = 64 * 1024
+
 /** Physical append iteration is shared; the original Provider alone interprets each row. */
 export async function readNativeConversationChanges(reader: NativeJsonlHistoryReader, context: ProviderConversationChangesContext,
-  convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null): Promise<ProviderConversationChangesPage> {
+  convert: (row: Record<string, unknown>, start: number) => NativeHistoryItem | null | Promise<NativeHistoryItem | null>): Promise<ProviderConversationChangesPage> {
   await reader.seekChanges(context.after, context.tail === true)
   const items: AgentSessionHistoryItem[] = []
   let bytes = 0
   if (!context.tail) for (let scanned = 0; scanned < context.limit; scanned++) {
     const entry = await reader.readNext()
     if (!entry) break
-    const original = convert(entry.value, entry.start)
+    const original = await convert(entry.value, entry.start)
     if (!original) continue
     const item = await reader.materializeItem(original), size = Buffer.byteLength(JSON.stringify(item))
-    if (bytes + size > SESSION_HISTORY_MAX_PAGE_BYTES - 64 * 1024) {
+    if (bytes + size > SESSION_HISTORY_MAX_PAGE_BYTES - NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES) {
       if (!items.length) throw new AgentMuxError('The original change cannot fit its materialized page.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
       reader.repeatNext(); break
     }

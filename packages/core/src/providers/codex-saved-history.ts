@@ -1,10 +1,10 @@
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../conversation-changes.js'
 import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
-import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
+import { NativeJsonlHistoryReader, readNativeConversationChanges, NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES } from '../native-jsonl-history-reader.js'
 import { normalizeSessionHistoryMetrics, SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { isNativeText, nativeJsonStringify, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
-import { codexQuestionAnswers } from './codex-question.js'
+import { codexQuestionAnswers, codexQuestionRequest } from './codex-question.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryRecordContext, AgentSessionHistoryItem } from '../types.js'
 
@@ -56,11 +56,33 @@ function contentParts(content: unknown): NativeHistoryContentPart[] {
   })
 }
 
-function item(record: Record<string, unknown>, start: number, nativeSessionId: string): NativeHistoryItem | null {
+function item(record: Record<string, unknown>, start: number, nativeSessionId: string, projectQuestion = true): NativeHistoryItem | null {
   const payload = object(record.payload), type = payload.type
   if (record.type === 'session_meta' || record.type === 'turn_context') return null
+  const nativeItem = object(payload.item)
+  // Async questions have their own canonical AgentMessage event rather than a
+  // response_item message. Ordinary completed items remain independent activity;
+  // their response_item copies must not become duplicate speech.
+  const asyncQuestion = record.type === 'event_msg' && type === 'item_completed' &&
+    payload.thread_id === nativeSessionId && typeof payload.turn_id === 'string' && payload.turn_id.length > 0 &&
+    nativeItem.type === 'AgentMessage' && nativeItem.delivery === 'async'
+  let questionRequest: AgentSessionHistoryItem['questionRequest']
+  let questionDiagnostic: AgentSessionHistoryItem['questionDiagnostic']
+  if (asyncQuestion && projectQuestion) {
+    try { questionRequest = codexQuestionRequest(nativeItem) } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'INVALID_AGENT_SESSION_HISTORY_PAGE') throw error
+      questionDiagnostic = { code: error.code, message: error.message }
+    }
+  }
   let kind: NativeHistoryItem['kind'] = 'activity', parts: NativeHistoryContentPart[], title: string | undefined
-  if (record.type === 'response_item' && type === 'message') {
+  if (asyncQuestion) {
+    kind = 'assistant-message'
+    parts = questionRequest === undefined ? [{ kind: 'text', text: nativeJsonStringify(payload) }]
+      : contentParts(Array.isArray(nativeItem.content) ? nativeItem.content.map(value => {
+      const part = object(value)
+      return part.type === 'Text' ? { ...part, type: 'text' } : value
+    }) : nativeItem.content)
+  } else if (record.type === 'response_item' && type === 'message') {
     const system = systemMessage(payload)
     title = system?.title
     kind = system?.kind ?? (payload.role === 'user' ? 'user-message' : payload.role === 'assistant' ? 'assistant-message' : 'activity')
@@ -93,17 +115,22 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   const turnId = directTurnId && messageTurnId && directTurnId !== messageTurnId ? undefined : directTurnId ?? messageTurnId
   return { id, kind, contentParts: parts,
     ...metrics(record, payload, nativeSessionId),
-    ...(kind === 'assistant-message' && payload.phase === 'final_answer' ? { messagePhase: 'final' as const }
-      : kind === 'assistant-message' && payload.phase === 'commentary' ? { messagePhase: 'progress' as const } : {}),
+    ...(kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'final_answer' ? { messagePhase: 'final' as const }
+      : kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'commentary' ? { messagePhase: 'progress' as const } : {}),
+    ...(questionRequest === undefined ? {} : { questionRequest }),
+    ...(questionDiagnostic === undefined ? {} : { questionDiagnostic }),
     ...(questionAnswers === undefined ? {} : { questionAnswers }),
     ...(turnId === undefined ? {} : { turnId }),
     ...(Number.isSafeInteger(timestamp) && timestamp >= 0 ? { startedAt: timestamp } : {}),
     ...(title ? { title } : kind === 'activity' ? { title: String(type ?? record.type) } : {}) }
 }
 
-/** Optional answer details cannot make the original saved history exceed its existing read budget. */
+const requestBudgetDiagnostic = { code: 'CODEX_QUESTION_REQUEST_DETAILS_UNAVAILABLE',
+  message: 'Structured question details did not fit this page. The original body is kept; read a smaller history page or the original record for complete question details.' }
+
+/** Optional question/answer details cannot make original content exceed its existing read budget. */
 function fitQuestionAnswerProjection(context: AgentProviderSessionHistoryContext, items: AgentSessionHistoryItem[], nextCursor: string | null): AgentSessionHistoryItem[] {
-  if (!items.some(item => item.questionAnswers !== undefined)) return items
+  if (!items.some(item => item.questionAnswers !== undefined || item.questionRequest !== undefined)) return items
   const projected = [...items]
   // Match the Provider page envelope checked by normalizeSessionHistoryPage.
   let pageBytes = Buffer.byteLength(JSON.stringify({ source: context.source, items, nextCursor }))
@@ -111,10 +138,11 @@ function fitQuestionAnswerProjection(context: AgentProviderSessionHistoryContext
   const diagnostic = { code: 'CODEX_QUESTION_ANSWER_DETAILS_UNAVAILABLE',
     message: 'Answer details did not fit this history page’s existing byte budget. The original reply remains complete and readable/copyable.' }
   const candidates = items.flatMap((item, index) => {
-    if (item.questionAnswers === undefined) return []
-    const { questionAnswers: _answers, ...original } = item
+    if (item.questionAnswers === undefined && item.questionRequest === undefined) return []
+    const { questionAnswers: _answers, questionRequest: _request, ...original } = item
     const originalBytes = Buffer.byteLength(JSON.stringify(original))
-    return [{ index, original, originalBytes, savedBytes: Buffer.byteLength(JSON.stringify(item)) - originalBytes }]
+    return [{ index, original, originalBytes, diagnostic: item.questionRequest ? requestBudgetDiagnostic : diagnostic,
+      savedBytes: Buffer.byteLength(JSON.stringify(item)) - originalBytes }]
   }).sort((a, b) => b.savedBytes - a.savedBytes)
   const withdrawn: typeof candidates = []
   // First preserve as many answers as fit; diagnostics cannot displace another answer.
@@ -126,16 +154,32 @@ function fitQuestionAnswerProjection(context: AgentProviderSessionHistoryContext
   }
   const unreported: string[] = []
   for (const candidate of withdrawn) {
-    const value = { ...candidate.original, questionDiagnostic: diagnostic }
+    const value = { ...candidate.original, questionDiagnostic: candidate.diagnostic }
     const addedBytes = Buffer.byteLength(JSON.stringify(value)) - candidate.originalBytes
     if (pageBytes + addedBytes <= SESSION_HISTORY_MAX_PAGE_BYTES) {
       projected[candidate.index] = value
       pageBytes += addedBytes
     } else unreported.push(candidate.original.id)
   }
-  if (unreported.length) console.warn('Codex history answer details and their diagnostic did not fit the existing page budget. Original reply content is preserved.',
+  if (unreported.length) console.warn('Codex history question/answer details and their diagnostic did not fit the existing page budget. Original content is preserved.',
     { source: context.source, recordIds: unreported })
   return projected
+}
+
+/** One stable per-record decision keeps page, exact resource and changes parts identical. */
+async function materializeSavedItem(reader: NativeJsonlHistoryReader, context: AgentProviderSessionHistoryContext,
+  record: Record<string, unknown>, start: number, converted: NativeHistoryItem): Promise<AgentSessionHistoryItem> {
+  const value = await reader.materializeItem(converted)
+  if (!value.questionRequest) return value
+  // Reuse the original changes envelope reserve; optional details must also fit
+  // when this exact record is consumed through durable catch-up.
+  const maximum = SESSION_HISTORY_MAX_PAGE_BYTES - NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES
+  const bytes = (item: AgentSessionHistoryItem) => Buffer.byteLength(JSON.stringify({ source: context.source, items: [item], nextCursor: null }))
+  if (bytes(value) <= maximum) return value
+  const original = await reader.materializeItem(item(record, start, context.source.nativeSessionId, false)!)
+  const diagnosed = { ...original, questionDiagnostic: { code: requestBudgetDiagnostic.code,
+    message: 'Structured question details exceed this record’s reading budget. The complete original native record remains readable and copyable.' } }
+  return bytes(diagnosed) <= maximum ? diagnosed : original
 }
 
 async function open(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
@@ -165,15 +209,15 @@ async function open(context: AgentProviderSessionHistoryContext): Promise<Native
 export async function readCodexSavedSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {
   const reader = await open(context)
   try {
-    const items: NativeHistoryItem[] = []
+    const items: Array<{ record: Record<string, unknown>; start: number; converted: NativeHistoryItem }> = []
     while (items.length < context.limit) {
       const entry = await reader.readPrevious()
       if (!entry) break
       const converted = item(entry.value, entry.start, context.source.nativeSessionId)
-      if (converted) items.push(converted)
+      if (converted) items.push({ record: entry.value, start: entry.start, converted })
     }
     const nextCursor = await reader.nextCursor()
-    const materialized = await Promise.all(items.reverse().map(value => reader.materializeItem(value)))
+    const materialized = await Promise.all(items.reverse().map(value => materializeSavedItem(reader, context, value.record, value.start, value.converted)))
     return { source: context.source, items: fitQuestionAnswerProjection(context, materialized, nextCursor),
       nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
   } finally { await reader.close() }
@@ -186,7 +230,7 @@ export async function readCodexSavedSessionHistoryRecord(context: AgentProviderS
       const converted = item(entry.value, entry.start, context.source.nativeSessionId)
       if (converted?.id === context.recordId && (context.turnId === undefined || converted.turnId === context.turnId)) {
         await reader.verifyUnchanged()
-        return fitQuestionAnswerProjection({ ...context, limit: 1 }, [await reader.materializeItem(converted)], null)[0]!
+        return fitQuestionAnswerProjection({ ...context, limit: 1 }, [await materializeSavedItem(reader, { ...context, limit: 1 }, entry.value, entry.start, converted)], null)[0]!
       }
     }
     throw new AgentMuxError('The original saved Codex record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
@@ -196,6 +240,9 @@ export async function readCodexSavedSessionHistoryRecord(context: AgentProviderS
 /** Resume the same saved rollout and original record converter after a durable cut. */
 export async function readCodexSavedConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
   const reader = await open(context)
-  try { return await readNativeConversationChanges(reader, context, (record, start) => item(record, start, context.source.nativeSessionId)) }
+  try { return await readNativeConversationChanges(reader, context, async (record, start) => {
+    const converted = item(record, start, context.source.nativeSessionId)
+    return converted ? await materializeSavedItem(reader, context, record, start, converted) : null
+  }) }
   finally { await reader.close() }
 }
