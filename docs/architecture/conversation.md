@@ -1,89 +1,94 @@
 # 对话模式的机制与接线
 
-本文说明当前源码怎样把原生记录、Core 捕获记录和客户端阅读面接起来。必须满足的结果归[对话行为 SSOT](../design/behavior/conversation-mode.md)，视觉归[对话呈现 SSOT](../design/presentation/conversation-mode.md)，字段与读取合同归[公共协议](../specs/conversation-protocol.md)；这里的接线说明不代表构建、安装或运行验收已通过。
-
-[连续统一的对话列表](../design/behavior/conversation-mode.md#连续统一的对话列表)是接线的产品约束：不同来源经薄适配进入共同消息、过程与载荷组件，分页和观察只更新所属阅读窗口。来源分隔与标签是列表中的呈现，不构成另一套消息实现。下文分别说明实际消费者与尚未闭合的能力，不能用共享组件的存在代替完整列表体验已经成立的证明。
+本文说明当前源码的 owner 与调用链。行为归[对话行为 SSOT](../design/behavior/conversation-mode.md)，呈现归[对话呈现 SSOT](../design/presentation/conversation-mode.md)，字段、关系、分页与覆盖合同归[公共协议](../specs/conversation-protocol.md)；本页不持有任务、构建、安装或运行验收状态。
 
 ## 记录、身份与唯一 owner
 
-| 事实 | 当前 owner 与源码入口 |
+| 事实 | owner 与源码入口 |
 | --- | --- |
-| 原生对话、内容 parts、回合、问题与用量的原生含义 | Provider；[`AgentProvider`](../../packages/core/src/agent-provider.ts) 的 history/record/changes 能力，公共形状为 [`AgentSessionHistoryItem` / `AgentSessionHistoryContentPart`](../../packages/core/src/types.ts) |
-| AgentSession、native handle、captured Timeline、输入和交互回执 | Core；[`AgentMuxClient`](../../packages/core/src/client.ts)、[`AgentSessionStore`](../../packages/core/src/agent-session-store.ts) |
-| 通用 Run、PTY ordered bytes 与 Replay | ctxmux；Core 经 [`CtxmuxRunAdapter`](../../packages/core/src/ctxmux-run-adapter.ts) 消费，字节到画面见[Terminal Runtime](terminal-runtime.md) |
-| 消息和过程的共同呈现 | `client-ui`；[`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx)、[`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx)、[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) |
-| 用户命名阅读点及原操作回执 | Core；[`ConversationLandmarkStore`](../../packages/core/src/conversation-landmark-store.ts) 保存纯 [`ConversationLandmark`](../../packages/core/src/conversation-landmarks.ts) 元数据，正文与可达性仍归原记录 owner |
-| 草稿、阅读窗口、DOM 选区、展开、可见性和导航 | 各客户端；宿主通过 props 与 [`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) 注入能力 |
+| 原生记录、parts、回合、问题与原生延续位置 | Provider；[`AgentProvider`](../../packages/core/src/agent-provider.ts)、[`AgentSessionHistoryItem`](../../packages/core/src/types.ts) |
+| Session、原生绑定、输入／交互回执与 captured 原记录 | Core；[`AgentMuxClient`](../../packages/core/src/client.ts)、[`AgentSessionStore`](../../packages/core/src/agent-session-store.ts) |
+| captured 流、提交序号及旧版本 | 原 Session Store 的 [`captured-history`](../../packages/core/src/captured-history.ts)；[`captured-history-import`](../../packages/core/src/captured-history-import.ts) 在原 writer／事务内接管旧记录，保留原始文件 |
+| 记录到事件、角色、作者、顺序、关系与内容归属 | Core 的纯 [`projectConversationTimeline`](../../packages/core/src/conversation-timeline.ts)；浏览器和 Node 消费同一实现 |
+| 通用 Run、PTY ordered bytes、Replay 与 Gap | ctxmux；Core 经 [`CtxmuxRunAdapter`](../../packages/core/src/ctxmux-run-adapter.ts) 消费，见[Terminal Runtime](terminal-runtime.md) |
+| 消息、过程、Question、来源和载荷的共同呈现 | [`client-ui`](../../packages/client-ui/src/components/ConversationView.tsx)；宿主注入 [`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) 能力 |
+| 草稿、阅读窗口、选区、展开、可见性与 caret 意图 | 原客户端 owner；不是第二份对话事实 |
+| 外部受众、内容表示、待投意图及平台回执 | 原 connector Binding／Publication Store；不拥有原生或 captured 记录 |
 
-[`projectConversationRecords`](../../packages/core/src/conversation.ts) 是对已接受页和 Timeline 的纯投影，没有 Reader、缓存或新的对话生命周期。native 记录身份由 Host、AgentSession、Provider、nativeSessionId、recordId 限定；captured 使用同一 Host／AgentSession 下的 captured recordId。相同正文或同裸 ID 不关联两种来源。`conversationItemRef` 仅在调用方提供执行 Host 时返回完整引用；缺 Host 不补当前焦点，也不隐藏正文。UI 的 [`conversation-records`](../../packages/client-ui/src/lib/conversation-records.ts) adapter 只添加 speaker 呈现。
+[`projectConversationReading`](../../packages/core/src/conversation.ts) 把同一个 Core timeline 适配为共同消息行及可访问的 originals；`projectConversationRecords` 复用这个 facade。UI 的 [`conversation-records`](../../packages/client-ui/src/lib/conversation-records.ts) 添加 speaker、来源标签及 coverage 的呈现。缺少原 source Host 时仍保留正文，不从当前焦点补一个引用。原 source namespace 与 client route 的区别见[协议](../specs/conversation-protocol.md#unified-reading-and-changes)。
 
 ## 三种来源怎样读取
 
-| 来源 | 读取路径 | 观察范围 |
-| --- | --- | --- |
-| Provider 原生记录 | `AgentMuxClient.sessionHistoryPage` → `nativeHistoryBinding` → Provider.readSessionHistoryPage | 已确认 native source 的有界页；页内保持来源顺序，opaque cursor 继续更早范围 |
-| Core captured 记录 | `AgentMuxClient.sessionTimeline` → Session Store | Core 捕获的输入、回答或工作事件；投递确认与原生采用分别解释 |
-| Terminal Replay | 原 Run 的 output／Attachment → terminal viewport | PTY 原字节与缺口；不转换成完整原生对话或作者事实 |
+| 来源／需求 | 原读取 owner |
+| --- | --- |
+| Provider 原生页、精确记录及资源 | `sessionHistoryPage`／Provider history 能力；精确回读保持原 Provider source 和签名资源引用 |
+| captured 近期快照、完整分页及旧版本 | `sessionTimeline`／`readAgentSessionHistory` → 原 Session Store；近期快照不代签全量历史 |
+| 统一事件页、精确锚点、耐久变化 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) → 原 native/captured 端口 → `projectConversationTimeline` |
+| Terminal Replay | 原 Run output／Attachment → terminal viewport；PTY 字节不自动成为对话或作者事实 |
 
-前两条还可通过 [`readAgentSessionHistory`](../../packages/core/src/session-history-reader.ts) 得到同一有界读信封；`AgentMuxClient.readAgentConversation` 直接委托这个 owner。信封内的完整记录才进入语义投影；记录分片与 deferred content-part 的区别见[资源协议](../specs/conversation-protocol.md#recorded-resources-and-content-fragments)。
+`readAgentConversation`、`conversationCheckpoint`、`readConversationChanges` 与 `observeConversation` 持有统一公共读取合同。读取结果以 `{event, records}` 为语义单元，分片重组完整后才交语义消费者；deferred part 则沿原资源接口读取。窗口 cursor、耐久 source frontier 与通知分别由[协议](../specs/conversation-protocol.md)定义，通知只唤醒权威读取。`sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，原 `agent.history` 继续提供原来源读取。
 
-读取页面、观察变化和耐久补读各有用途：[`observeSessionHistory`](../../packages/core/src/client.ts) 经 [`SessionHistoryObservationPool`](../../packages/core/src/session-history-observation-pool.ts) 按准确 Session／调用选项共享 Provider watch，通知只使已读来源失效；`conversationCheckpoint`／`readConversationChanges` 使用 Provider 的持久 source continuation，独立于 UI cursor。当前 [`Claude`](../../packages/core/src/providers/claude.ts) 和 [`Codex`](../../packages/core/src/providers/codex.ts) 注册 durable changes，其余 Provider 是否支持以对应能力为准。取消读取或一个观察消费者不终止原 Run。
+纯投影只对本次已接受的 records 计算关系。公共 Reader 的有界候选集与客户端已接受的阅读窗口可以不同；共用投影函数或读到 cursor 末尾，本身不证明跨批关系已闭合。精确原文、来源覆盖与已闭合关系必须分别解释，不能由接入方另做关联。
+
+Core 经 [`SessionHistoryObservationPool`](../../packages/core/src/session-history-observation-pool.ts) 共享准确 native source 的 watch；captured 通知沿原 Session Timeline publisher。取消一个 reader 不终止 Run。来源失败保留已接受的其他记录、准确 Gap 与重试位置，不用最新版本替换失效的原锚点。
 
 ## Desktop 的共同阅读链
 
 ```mermaid
 flowchart LR
-  Core["Core 原历史 / Timeline"] --> Main["Main RuntimeController / IPC"]
-  Main --> Facts["useSessionUserMessages 近期事实"]
-  Facts --> Pane["SessionPane"]
-  Pane --> Activity["ActivityView / 阅读窗口"]
-  Activity --> View["ConversationView / RecordSequence"]
-  View --> Message["ConversationMessage / Trace / Resource"]
-  Activity --> Captured["captured 原记录适配"]
-  Captured --> Message
-  Captured --> Process["共同 RecordedSteps / ToolRow / Payload"]
-  View --> Process
-  Pane --> Composer["AgentSessionComposer / Mailbox"]
-  Composer --> Message
+  Provider[Provider 原生记录] --> Core[Core 原来源与纯 timeline]
+  Captured[原 Session Store captured 流] --> Core
+  Core --> Window[Desktop 近期事实与阅读窗口]
+  Core --> Mobile[Mobile Hosted 阅读状态]
+  Core --> Public[统一公共 Reader]
+  Window --> Shared[client-ui 共同消息与过程]
+  Mobile --> Shared
+  Public --> Publication[原 Binding 与 Publication Outbox]
+  Publication --> Adapter[平台适配器]
 ```
 
-[`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 以实际可见阅读面计算 `activityDemand`，从 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts) 取得近期原生页、输入投影和观察结果。后者按 Host／Session／Run 共享近期读取需求，`fetchSessionHistoryPage` 先取得观察再首读；隐藏消费者释放需求，已有正文与服务窗仍由宿主保留。
+[`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 以实际阅读需求启用 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts)；近期 native 页和 captured 事实经同一 Core facade 投影。原生观察先于首读建立，隐藏消费者释放需求，原正文和服务窗仍保留。客户端按 Host／Session／Run 共享相关近期读取，不按所有 Session 放大热路径工作。
 
-[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 持有已提交窗口、返回位置与阅读锚点；更早／较新页仍调用同一 `readSessionConversationPage`，`protectsConversationWindow` 检查选区与已读节点。窗口是客户端阅读状态，事实仍来自 Core／Provider。当前 Activity 和 History 把已提交 page 交给同一 `ConversationView`；captured 原文在同一阅读面常显，保独立记录及来源，不再以总详情隐藏。退休 Session 的只读入口也使用 `ActivityView`。
+[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持原页、阅读锚点、返回位置与选区；native 继续原 cursor，captured 较早页沿原 bounded reader 补读。窗口只持阅读状态，事件关联和顺序仍由 Core 决定。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。
 
-用户命名阅读点由 [`ConversationLandmarks`](../../apps/desktop/src/renderer/src/components/ConversationLandmarks.tsx) 接入原消息动作区与 Activity 阅读工具。Main 的原 IPC 与公共控制服务注入同一个 Core Store，preload 和 Renderer 严格解析同一请求及回执；列表仅显式打开或刷新时读取，消息动作不订阅元数据目录。返回沿 SessionPane 原导航 owner，已退休阅读面复用 Activity 的准确已加载记录定位。未确认的写入输入复用 [`AppStore`](../../apps/desktop/src/renderer/src/store.ts) 的原工作面保存机制暂存，按完整记录或准确 point 身份隔离，确认后只清除同一个 operation；它不持有已保存阅读点或正文的第二份事实。原记录离开窗口或重开后，阅读工具仍可查询或重试原操作。
+[`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 与 [`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx) 消费共同 records／originals；[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、完整 Copy、Question、reasoning、tool 与 resource。captured 输入保原输入身份，回复和系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 薄适配。原生与 captured 过程使用共同 [`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 和 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)。
 
-captured 输入沿既有 `AgentSessionUserMessage` 交共同 Message，captured 回复及系统原文经 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 薄适配到同一 Message，并在原消息详情保采集来源与原记录身份。Activity 的 Row／Run 只适配原 Timeline 事件：与 native 过程消费相同 [`RecordedStepsCard`／`RecordedToolRow`](../../packages/client-ui/src/components/WorkflowObservation.tsx)，使用紧凑呈现；参数和结果交共同 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)，编辑 diff 保原只读预览和完整原参数。Provider 专有的 native metrics／collaboration 与 captured 的原分组仍由各自准确适配表达，不能将 Timeline 强制转换成 native parts。
+来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
 
-原生分页尾 marker 与当前已呈现内容尾分别供分页、latest／follow 使用；captured 正文追加或增长也参与显示变化判定。可见 captured 段沿原 segment key 参与锚点、精确定位和图片可见性门，不持第二份正文。现有公共 Timeline 尚无通用 captured→native record 的准确关联，客户端既不按正文／时间删除副本，也不从内部 ID 解出一个回执键；查看消息详情不会产生接纳或执行事实。
+用户命名阅读点由 [`ConversationLandmarks`](../../apps/desktop/src/renderer/src/components/ConversationLandmarks.tsx) 经原 Main／公共控制服务到同一 [`ConversationLandmarkStore`](../../packages/core/src/conversation-landmark-store.ts)。该 Store 只持引用元数据。返回沿原 SessionPane 导航 owner；未确认写入保留原 operation 与暂存草稿，不建立第二份已保存事实。
 
-`ConversationView` 给每条消息传入原 source／record／turn 和 ordered parts。`ConversationRecordSequence` 组织过程披露，宿主注入共同 [`NativeProcessObservation`](../../packages/client-ui/src/components/NativeProcessObservation.tsx)；Message 对 text、reasoning、tool、resource 使用同一套正文与 trace 组件。Gallery 使用这些生产组件的隔离输入，不能成为生产数据来源。
-
-图片有两条 IO 路径。原生 resource 经 `SessionPane.readHistoryResource` → [`sessions:historyResource`](../../apps/desktop/src/main/ipc.ts) → [`RuntimeController.sessionHistoryResource`](../../apps/desktop/src/main/runtime-controller.ts) → Core 的准确原记录读取；[`ConversationResourceImage`](../../packages/client-ui/src/components/ConversationResourceImage.tsx) 核对回执后交共同缩略图／灯箱。正文中的 pasted 引用经 `readPastedImage` → Main [`readPastedImage`](../../apps/desktop/src/main/pasted-image-read.ts) 读取受限 pasted 目录，不能替代原生资源 owner。deferred text 由 [`readSessionHistoryTextResource`](../../packages/core/src/session-history-content.ts) 重组校验，Message 的完整 Copy 也复用它。
+资源读取沿原 `SessionPane.readHistoryResource` → IPC → [`RuntimeController`](../../apps/desktop/src/main/runtime-controller.ts) → `sessionHistoryResource`。共同 [`ConversationResourceImage`](../../packages/client-ui/src/components/ConversationResourceImage.tsx) 和 [`readSessionHistoryTextResource`](../../packages/core/src/session-history-content.ts) 校验准确原记录、part、引用、完整 extent 和 digest。pasted 图片另经 Main 的受限 [`readPastedImage`](../../apps/desktop/src/main/pasted-image-read.ts)，不能替代原生资源 owner。
 
 ## Mobile、样式与宿主差异
 
-[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 使用 [`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 通过 Hosted SDK 读取原 Host 的 Timeline／native page 并观察相关来源；原生消息／过程消费共同 `ConversationView` 与 `NativeProcessObservation`，captured 输入／回复消费共同 Message 及 Captured adapter；本端尚未呈现 captured 工具／lifecycle 过程。captured 正文同样常显，并保原作者、来源及失败／未确认状态；没有额外的总来源折叠。连接、草稿和未确认操作归本端既有 owner，原生读取失败不自动撤销普通输入。
+[`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 读取准确 Hosted Session 的 native 页与 captured 流，独立保留读失败及较早范围；[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 交同一 `ConversationView` 和 Core facade。Mobile 保留自己的窗口、连接、草稿及未确认操作，不照搬 Desktop 的窗口 Hook，也不另做语义 merge。保留页的资源继续使用其原 client／Session／Host，连接或 Session 改变后不接受旧结果。
 
-Mobile 自己持有单页阅读状态，没有使用 Desktop 的连续窗口 Hook。`MobileConversationSurface` 向主 `ConversationView` 与 `MobileMailbox` 注入原 `sessionHistoryResource`，并传递准确执行 Host 与可见性。已接受 native page 在原阅读投影保留其 client／Session／Host 归属；切换连接后仍展示的旧页继续沿原 reader，Mailbox 不把旧页交给新 Host。原生 image／deferred-text part 交共同 Message 的准确资源读取、完整重组与身份校验；隐藏时释放相应展示读取，切换 Session 后不采用旧资源结果。资源失败保原引用、正文、草稿及普通输入，不另建资源 Store。这条接线不代替[共同阅读要求](../design/behavior/conversation-mode.md#共同阅读组件与完整原生内容)的各项验收。
-
-两端样式来自共同 [`client-ui/styles`](../../packages/client-ui/src/styles/index.css)：Desktop 在 [`styles/index.css`](../../apps/desktop/src/renderer/src/styles/index.css) 分项导入，Mobile 在 [`main.tsx`](../../apps/mobile/src/main.tsx) 导入整包，再由 [`conversation.css`](../../apps/mobile/src/conversation/conversation.css) 覆盖触控尺寸、气泡和容器。其中对共享 `.log-turn` 的气泡、padding、字号和消息间距的直接覆写，与[共享样式 owner](../design/presentation/shared-rules.md#样式表的组织)要求存在差异；不能把共享组件的 import 当作两端布局和视觉已经统一的证明。触控和外层容器适配与共同消息本身的样式职责须分别核对。
+共享样式归 [`client-ui/styles`](../../packages/client-ui/src/styles/index.css)，两端按宿主入口导入。Mobile 的触控尺寸、外层容器和本端覆盖归 [`conversation.css`](../../apps/mobile/src/conversation/conversation.css)；共同组件的存在不代签两端视觉、性能或交互验收。
 
 ## 阅读入口与控制入口
 
-| 动作 | 当前接线与独立事实 |
+| 动作 | 接线与独立事实 |
 | --- | --- |
-| 普通消息、Queue／steer | [`AgentSessionComposer`](../../apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx) 回到原 store.send／enqueueAgentSteer；Mobile 回到 Hosted Core 输入。草稿与已入队不代替投递回执。 |
-| 当前同步问题／权限请求 | [`AgentInteractionCard`](../../packages/client-ui/src/components/AgentInteractionCard.tsx) 回原 interaction response owner；历史卡片不产生当前 pending 资格。 |
-| 原生异步问题答复 | [`projectConversationQuestions`](../../packages/core/src/conversation-questions.ts) → 共同 question card → Provider 声明的原 Terminal 路径；当前 `replySessionQuestion` 明确拒绝自动回复。单题草稿／Copy／导航不派发输入，原 native answer 与本端未知意图分别持有。 |
-| reaction 快捷回复 | [`useConversationReactions`](../../apps/desktop/src/renderer/src/lib/conversation-reactions.tsx) 沿原输入队列发送带回复引用的新人工消息。 |
-| Mailbox 阅读／定位 | [`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 及 [`mailboxMessages`](../../apps/desktop/src/renderer/src/lib/session-mailbox-messages.ts) 消费原输入投影与准确记录引用，保留原 row／read-marker；详情复用 Message。 |
-| Activity／Terminal 切换 | [`AgentComposerTools`](../../apps/desktop/src/renderer/src/components/AgentComposerTools.tsx) → store.setViewMode；`SessionPane` 保留已打开 Terminal，用可见性切换表面，不向 CLI 注入模式按键。 |
+| 普通消息、Queue／steer | Desktop [`AgentSessionComposer`](../../apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx) → 原 store.send／enqueueAgentSteer；Mobile → Hosted Core 输入。草稿、入队、投递与原生采用分别解释。 |
+| 当前同步问题／权限 | [`AgentInteractionCard`](../../packages/client-ui/src/components/AgentInteractionCard.tsx) → 原 interaction owner；历史记录不取得当前 pending 资格。 |
+| 原生异步问题 | [`projectConversationQuestions`](../../packages/core/src/conversation-questions.ts) → [`AgentAsyncQuestionCard`](../../packages/client-ui/src/components/AgentAsyncQuestionCard.tsx) → Provider 声明的原 Terminal 路由；`replySessionQuestion` 明确拒绝无原生协议的自动回复。选项、草稿、Copy 和导航不派发输入。 |
+| 显式打开原终端 | SessionPane 选择原展示 Region，再向原 caret owner 请求该终端；[`TerminalView`](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 只消费准确、可见且非 inert 的目标，保留后来的人工焦点。 |
+| reaction／Mailbox | [`useConversationReactions`](../../apps/desktop/src/renderer/src/lib/conversation-reactions.tsx) 沿原输入队列；[`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 保原消息和 read-marker，详情复用共同 Message。 |
 
-各输入与 Mailbox 的行为归[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题；查看、复制、标注与发送仍是不同动作。
+具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
+
+## 外部 publication 的接线
+
+[`RoomBindingHost`](../../packages/connectors/src/room-binding.ts) 在原授权动作内冻结准确 source frontier；既有 native cut、Binding revision、scope 和受众保持其原含义。旧 Binding 缺少 captured 起点时保留明确 Gap，不用当前 discovery 重设历史起点。
+
+[`createPublicationConversationPort`](../../packages/connectors/src/core-conversation-port.ts) 复用 Core checkpoint／changes／inspect／watch 和原 route/source fence；[`PublicationHost`](../../packages/connectors/src/publication-host.ts) 重组完整 unit、读取准确 deferred part，并交原 [`PublicationStore`](../../packages/connectors/src/publication-store.ts)。该 Store 在同一事务内持久化表示意图、准确 Gap 和下一读取 frontier；不再选择原生或 captured 角色、顺序、作者或关联。
+
+[`publication-content`](../../packages/connectors/src/publication-content.ts) 只决定已授权内容怎样由现有平台能力表示。原 Outbox 保留准确 part/revision 的平台表示及已确认映射；Core 后续 coalescence 更新这些表示，无权重做 unknown effect。无法表示的资源、未确认 public span、失效原版本或缺少准确关系仍可由原 `connection.delivery.ls` 查询，其他可投内容继续流转。原平台 ingress 的表示只由准确 durable ingress 与 Core 原 writer 的 `inputRef` 对账；作者和正文相同不是关联证据。
+
+[`FeishuPublicationAdapter`](../../packages/connectors/src/adapters/feishu/publication.ts) 持有平台编码、请求容量、原 prepared bytes 和平台回执的解释，不持有 conversation merge。平台投递、原生采用与个人身份不互相代签；当前权限和 public-content producer 的能力边界见[公共协议](../specs/conversation-protocol.md#state-change-and-delivery)。
 
 ## 公共消费者与证据范围
 
-[`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts) 把 `agent.conversation.inspect` 委托原 `agent.history`，watch 委托原 `observeSessionHistory`，资源走 `agent.history.resource`，checkpoint／changes 走原 Core API；[`CLI 命令树`](../../packages/core/src/agentmux-cli-commands.ts) 消费同一服务。[`Hosted 方法合同`](../../packages/core/src/hosted-client-contract.ts) 公开 `readAgentSessionHistory`、historyPage/resource、checkpoint/changes，未公开本地 class 的 `readAgentConversation` alias。GUI 经 IPC 或 Hosted 调同 owner，不要求先绕一层 alias。
+[`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts) 将 `agent.conversation.inspect`／checkpoint／changes／watch 接到原统一 Core owner；[`Hosted 合同`](../../packages/core/src/hosted-client-contract.ts)、本地 SDK 和 [`CLI 命令树`](../../packages/core/src/agentmux-cli-commands.ts) 消费同一类型与严格 codec。原 `agent.history` 和资源 API 保留自己的读取职责，GUI 不要求绕行 CLI。
 
-上述结论来自源码与产品消费者的静态核对。Mobile 先读页后建立 watch、较早页替换单页而未使用 Desktop 锚点保护，是待复现的观察／阅读风险，不能写成已证实用户故障。真实进程重启、活跃终端连续阅读、选区、性能、视觉及安装身份要由各自实际验收证明；验证方法归[测试策略](../testing/strategy.md#任务验收与假绿防护)，本页不持有任务状态或通过记录。
+当前机制与完整产品验收分别成立。未提供 native 采用、公有用户内容边界或可寻址答复能力的 Provider 不能由 UI 文案补齐；原记录、输入与准确缺口继续保留。真实跨接入一致性、进程重启、活跃终端阅读、选区、性能、视觉、安装与当前加载身份，由[测试策略](../testing/strategy.md#任务验收与假绿防护)规定的各类证据分别证明。
