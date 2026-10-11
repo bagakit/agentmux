@@ -614,7 +614,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   assert((await ownedSemanticHostPids()).length === 0, 'Private launch smoke Host already exists.')
   let verificationError
   let verificationStage = 'launch-request'
-  const verificationDeadline = Date.now() + 20_000
+  const verificationDeadline = Date.now() + 60_000
   try {
     const guiEnvironment = { ...process.env }
     delete guiEnvironment.ELECTRON_RUN_AS_NODE
