@@ -8,7 +8,7 @@
 
 Remote 管理是独立、完整的产品主题；设置提供明确入口，以可探索的拓扑改善远端管理与监控的理解，实现时优先复用项目已有的无限画布依赖。用户提供的深色节点拓扑与右侧详情是构图参考，不授权接入其中的公网入口、代理出网、网络跳点或探测服务。
 
-本文的观察层级、主流程和信息优先级是据此收敛的产品方案。分期是设计建议，不自动创建执行任务；新增采集、历史保存、通知策略、远端部署和控制能力须在对应 owner 明确合同后安排。当前实施范围是完整管理工作台与所选 Host 的真实只读运行监控；长期历史、主动告警、部署和批量运维仍按各自用户任务单独决策。
+本文的观察层级、主流程和信息优先级是据此收敛的产品方案。分期是设计建议，不自动创建执行任务；新增采集、历史保存、通知策略、远端部署和控制能力须在对应 owner 明确合同后安排。当前实施范围是完整管理工作台、所选 Host 的真实只读运行监控、同身份路由修复，以及用户配置的应用授权同步；长期历史、主动告警、部署和批量运维仍按各自用户任务单独决策。
 
 ## 产品目标与主要任务
 
@@ -145,6 +145,7 @@ GUI、CLI 和其他客户端消费相同业务 owner。已有公开能力足够�
 | Host 读取、Test 与路由修复 | [settings-hosts-control](../../../apps/desktop/src/main/settings-hosts-control.ts)、[公共 RPC](../../../packages/core/src/public-rpc.ts) | 已公开清单、测试及沿同配置 owner 的已绑定 SSH 路由更新；修复范围见本页连接合同。Test 结果为完整输入、outcome 与人读 detail，不能解析 detail 猜结构化版本、PID 或实时连接 |
 | Session 与项目投影 | [SessionSnapshot / WorkspaceRecord](../../../apps/desktop/src/shared/contracts.ts)、[HostProjectsPane](../../../apps/desktop/src/renderer/src/components/settings/HostProjectsPane.tsx) | 原 Host / Session / Workspace 引用与已有状态可复用；引用数量与当前运行数量须分口径，读取缺口不能补成零 |
 | Host 执行器和来源信任 | [public-rpc-host-settings](../../../packages/core/src/public-rpc-host-settings.ts)、[executor-contract](../../../packages/core/src/executor-contract.ts)、[HostCreationTrustPanel](../../../apps/desktop/src/renderer/src/components/settings/HostCreationTrustPanel.tsx) | 已有准确 Host 的发现、注册、可信来源读取与真人批准入口；不由拓扑另建配置或审批系统 |
+| 应用授权同步 | [应用授权 owner](../../../packages/core/src/application-access-owner.ts)、[Desktop 执行绑定](../../../apps/desktop/src/main/application-access-owner.ts)、[HostApplicationAccessPanel](../../../apps/desktop/src/renderer/src/components/settings/HostApplicationAccessPanel.tsx) | 用户配置连接器，GUI 与 CLI 共用配置、比较、显式执行、目标验真和原操作查询；准确范围与未知恢复归[应用授权同步合同](remote-application-access.md)，不代签任意外部应用支持迁移 |
 | 所选 Host 的只读运行观察 | [分源观察](../../../packages/core/src/host-runtime-observation.ts)、[公共 Host 方法](../../../packages/core/src/public-rpc-host-settings.ts)、[HostRuntimePanel](../../../apps/desktop/src/renderer/src/components/settings/HostRuntimePanel.tsx) | 原 runtimeIdentity、runtimeDiagnostics、runtimeResourceSnapshot 由公共服务按准确 Host 组合；GUI 与 `settings hosts inspect` 消费同一结果。只观察当前已连接来源，缺失按来源报告，不冷启动 Native |
 | Core 维护与原结果查询 | [remote-core-upgrade](../../../packages/core/src/remote-core-upgrade.ts)、[HostUpgradePanel](../../../apps/desktop/src/renderer/src/components/settings/HostUpgradePanel.tsx) | 管理台复用原检查、升级、operation 查询及诊断，保留已访问维护面及未决回执，不另写流程 |
 | 无限画布 | [Desktop 依赖](../../../apps/desktop/package.json)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | 复用 `@xyflow/react`，缩放 / 平移仅改变投影；窄窗自动使用同对象列表，不新增持久画布配置 |
