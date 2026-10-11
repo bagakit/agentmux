@@ -1,5 +1,5 @@
 import type { AgentNativeSessionCandidate, AgentProviderSessionHistoryPage, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
-import { projectConversationRecords } from '@agentmux/core/conversation'
+import { projectConversationRecords, type AgentConversationRecord } from '@agentmux/core/conversation'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { sessionUserMessageText } from '@agentmux/core/session-user-messages'
 import type { AgentSessionRecoveryCandidate, AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
@@ -23,9 +23,7 @@ function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displa
 }
 
 /** A recap is a labelled excerpt of observed conversation, never an invented summary. */
-export function launcherTimelineRecap(timeline: AgentTimelineSnapshot | undefined): LauncherRecap | null {
-  if (!timeline) return null
-  const records = projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline })
+export function launcherTimelineRecap(records: readonly AgentConversationRecord[]): LauncherRecap | null {
   const latestFirst = [...records].reverse()
   const replies = latestFirst.filter(record => record.role === 'observation' || record.role === 'message' && record.author?.kind === 'agent')
   for (const record of replies.length ? replies : latestFirst) {
@@ -147,6 +145,7 @@ export function launcherResumeRows(input: {
   return input.candidates.map(candidate => {
     const workspace = input.config?.workspaces.find(item => workspaceOwnsSessionPath(item, candidate, input.topics))
     const timeline = input.timelines[candidate.agentSessionId]
+    const records = timeline ? projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline }) : []
     const session = sessions.get(candidate.agentSessionId)
     const continuity = session?.status.continuity
     const stateLabel = continuity === 'unavailable' ? 'Resume unavailable'
@@ -165,7 +164,7 @@ export function launcherResumeRows(input: {
       projectName: workspace?.name ?? candidate.workspacePath.split(/[\\/]/u).filter(Boolean).at(-1) ?? candidate.workspacePath,
       hostName: input.config?.hosts.find(host => host.id === candidate.hostId)?.label ?? candidate.hostId,
       executorName: input.config?.executors[candidate.executorId]?.label ?? candidate.executorId,
-      recap: launcherTimelineRecap(timeline) ?? input.nativeRecaps[candidate.agentSessionId] ?? null,
+      recap: launcherTimelineRecap(records) ?? input.nativeRecaps[candidate.agentSessionId] ?? null,
       inProject: Boolean(projectId && workspace && workspaceProjectId(workspace) === projectId),
       stateLabel,
       stateDetail: continuity === 'unavailable' || continuity === 'conflict' ? session!.status.detail ?? 'The saved Session is kept. Check its recovery status before retrying.'
