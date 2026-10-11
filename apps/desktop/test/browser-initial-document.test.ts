@@ -206,8 +206,7 @@ describe('the original initial Browser document',()=>{
   it('reads the committed top-level document while a normal image or iframe keeps full load pending',async()=>{
     for(const resource of ['image','iframe']) {
       const f=fixture(),held=deferred();native.Contents.beforeLoad=()=>held.promise
-      await f.manager.create('original-browser',url,'workspace')
-      f.manager.setViewport('original-browser','tablet')
+      await f.manager.create('original-browser',url,'workspace',undefined,undefined,'tablet')
       const pending=f.manager.runScript('original-browser','return await js("document.body.innerText")')
       await started(f);expect(f.sendCommand).not.toHaveBeenCalled()
       const contents=f.views[0]!.webContents
@@ -313,13 +312,13 @@ describe('the original initial Browser document',()=>{
     const f=fixture();await f.manager.create('original-browser',url,'workspace')
     const foreign=new native.View()
     await expect(f.manager.captureScreenshot('original-browser',{view:foreign as never,sendCommand:f.sendCommand})).rejects.toThrow('Browser page changed')
-    expect(f.sendCommand).not.toHaveBeenCalled();expect(f.views[0]!.webContents.executeJavaScriptInIsolatedWorld.mock.calls.filter(([,scripts]:[number,{code:string}[]])=>scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT))).toHaveLength(0)
+    expect(f.sendCommand).not.toHaveBeenCalled();expect(f.views[0]!.webContents.executeJavaScriptInIsolatedWorld.mock.calls.filter(([,scripts])=>scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT))).toHaveLength(0)
     expect(f.views[0]!.webContents.capturePage).not.toHaveBeenCalled();expect(foreign.webContents.capturePage).not.toHaveBeenCalled()
   })
   it.each(['owner','navigation'] as const)('rejects a protocol screenshot before sending when its original %s changes during viewport observation',async changed=>{
     const f=fixture();await f.manager.create('original-browser',url,'workspace')
-    const original=f.entry().view,nav=f.entry().navigationId
-    original.webContents.executeJavaScriptInIsolatedWorld.mockImplementation(async(_world:number,scripts:{code:string}[])=>{
+    const original=f.entry().view as InstanceType<typeof native.View>,nav=f.entry().navigationId
+    original.webContents.executeJavaScriptInIsolatedWorld.mockImplementation(async(_world,scripts)=>{
       if(scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT)) {
         if(changed==='owner')f.entry().view=new native.View()
         else f.entry().navigationId='replacement-navigation'
@@ -338,7 +337,7 @@ describe('the original initial Browser document',()=>{
     await f.manager.create('original-browser',url,'workspace')
     let resolve!:(value:unknown)=>void
     f.sendCommand.mockImplementation(async method=>method==='Page.captureScreenshot'?await new Promise(yes=>{resolve=yes}):{})
-    const pending=f.manager.runScript('original-browser','return await captureScreenshot()'),original=f.entry().view,nav=f.entry().navigationId
+    const pending=f.manager.runScript('original-browser','return await captureScreenshot()'),original=f.entry().view as InstanceType<typeof native.View>,nav=f.entry().navigationId
     try {
       await vi.waitFor(()=>expect(resolve).toBeTypeOf('function'))
       if(changed==='owner')f.entry().view=new native.View()
@@ -347,7 +346,7 @@ describe('the original initial Browser document',()=>{
       const result=await pending
       expect(result.outcome).toMatchObject({kind:'script-failed',message:expect.stringContaining('Browser page changed')})
       expect(result.result).toBeUndefined();expect(original.webContents.capturePage).not.toHaveBeenCalled()
-      expect(original.webContents.executeJavaScriptInIsolatedWorld.mock.calls.filter(([,scripts]:[number,{code:string}[]])=>scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT))).toHaveLength(1)
+      expect(original.webContents.executeJavaScriptInIsolatedWorld.mock.calls.filter(([,scripts])=>scripts.some(s=>s.code===SCREENSHOT_VIEWPORT_SCRIPT))).toHaveLength(1)
       expect(original.webContents.dead).toBe(false);expect(f.session.detach).toHaveBeenCalledOnce()
     } finally { f.entry().view=original;f.entry().navigationId=nav }
   })
@@ -366,6 +365,15 @@ describe('the original initial Browser document',()=>{
     await started(f);expect(f.sendCommand).not.toHaveBeenCalled();expect((await f.manager.getOperation('original-operation'))?.phase).toBe('running')
     load.resolve();const result=await pending
     expect(result.outcome.kind).toBe('completed');expect(result.result).toEqual({url,body:'Original loaded document'});expect(f.sendCommand).toHaveBeenCalledOnce()
+  })
+  it('follows a replacement initial navigation even when the new promise settles before the old rejection',async()=>{
+    const f=fixture(),old=deferred(),next=deferred();native.Contents.beforeLoad=(_c,u)=>u===url?old.promise:next.promise
+    await f.manager.create('original-browser',url,'workspace')
+    const shot=f.manager.captureScreenshot('original-browser');await Promise.resolve();expect(f.views[0]!.webContents.capturePage).not.toHaveBeenCalled()
+    await f.manager.navigate('original-browser','https://fixture.invalid/replacement');next.resolve()
+    const capture=await shot;expect(capture.source.url).toBe('https://fixture.invalid/replacement')
+    old.reject(new Error('Old initial request aborted'));await Promise.resolve();await Promise.resolve()
+    expect((await f.manager.ensure('original-browser',async()=>{throw Error('No cold read')})).error).toBeNull()
   })
   it('does not gate later ordinary live navigation after the initial document has finished',async()=>{
     const f=fixture();await f.manager.create('original-browser',url,'workspace');await Promise.resolve();await Promise.resolve()
