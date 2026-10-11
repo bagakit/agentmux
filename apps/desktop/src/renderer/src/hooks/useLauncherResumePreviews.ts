@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
-import { launcherCandidateKey, launcherNativeRecap, type LauncherRecap, type LauncherResumeRow } from '../lib/launcher-resume'
+import { launcherCandidateKey, launcherNativeRecap, launcherSavedNativeRecap, type LauncherRecap, type LauncherResumeRow } from '../lib/launcher-resume'
 import { launcherNativeSourceKey } from '../lib/launcher-native-discovery'
 
 type Preview = { state: 'loading' | 'ready' | 'error'; recap: LauncherRecap | null; error?: string }
@@ -24,7 +24,7 @@ async function readPreview(row: LauncherResumeRow): Promise<LauncherRecap | null
       page.source.providerId !== candidate.providerId || page.source.nativeSessionId !== candidate.nativeSessionId) {
       throw new Error('Conversation preview returned another saved source.')
     }
-    return launcherNativeRecap(page)
+    return launcherSavedNativeRecap(page)
   }
   const page = await api.sessions.historyPage({ hostId: candidate.hostId, agentSessionId: candidate.agentSessionId }, { limit: 100 })
   const nativeId = candidate.nativeSessionId ?? candidate.nativeHandle?.sessionId
