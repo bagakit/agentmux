@@ -19,7 +19,7 @@ const checkpoint = (cursor = 'original-cut'): ConversationCheckpoint => ({ hostI
   frontier: { hostId: 'host-a', agentSessionId: 'session-a', scope: { sources: [{ kind: 'native', ...nativeCheckpoint().source }] }, cuts: [{ kind: 'native', checkpoint: nativeCheckpoint(cursor) }] } })
 const boundary: PublicationBoundary = { bindingId: 'binding-a', revision: 1, connectionId: 'connection-a', application: { domain: 'chat.example', appId: 'app-a' },
   executionHostId: 'host-a', agentSessionId: 'session-a', externalConversationId: 'room-a', sourceCheckpoints: [nativeCheckpoint()], scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' } }
-const speech = (id: string, text = 'Same original speech'): AgentSessionHistoryItem => ({ id, kind: 'assistant-message', contentParts: [{ kind: 'text', text }] })
+const speech = (id: string, text = 'Same original speech'): AgentSessionHistoryItem => ({ id, kind: 'assistant-message', contentParts: [{ kind: 'text', text, contentEligibility: 'public' }] })
 /** Lower outbox state tests consume actual Core projection; no fixture authors event roles or identities. */
 const page = (items: AgentSessionHistoryItem[], cursor = 'next-cut'): ConversationChangesPage => {
   const timeline = projectConversationTimeline({ agentSessionId: boundary.agentSessionId, executionHostId: boundary.executionHostId,
@@ -29,7 +29,7 @@ const page = (items: AgentSessionHistoryItem[], cursor = 'next-cut'): Conversati
     items: [...timeline.events].reverse().map(event => ({ kind: 'item', item: { event, records: timeline.records.filter(record => event.recordIds.includes(record.id)) } })),
     nextCursor: null, budgetBytes: 4 * 1024 * 1024, checkpoint: checkpoint(cursor), more: false,
     window: { id: 'outbox-fixture-window', revision: 1, itemCount: timeline.events.length, complete: true,
-      view: 'outbox-fixture-view', replay: 'outbox-fixture-replay', checkpoint: checkpoint(cursor), outside: { older: null, newer: null } } }
+      view: 'outbox-fixture-view', replay: 'outbox-fixture-replay', checkpoint: checkpoint(cursor), outside: { older: null, newer: null }, navigation: { older: null, newer: null } } }
 }
 function commit(owner: PublicationStore, audience: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean, options: { fragmentBytes?: number } = {}) {
   owner.commitPage(audience, after, value, authorized, { ...options, units: [...value.items].reverse().flatMap(entry => entry.kind === 'item' ? [entry.item] : []), resolvedText: new Map() })
@@ -40,8 +40,8 @@ it('commits every required original speech and explicit skip with the same sourc
   const owner = store()
   commit(owner, boundary, checkpoint(), page([
     { id: 'input-a', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Private original input' }] },
-    { ...speech('reply-a'), contentParts: [{ kind: 'reasoning', text: 'Private reasoning' }, { kind: 'tool-call', name: 'internal', input: 'Private arguments' },
-      { kind: 'text', text: 'Shared speech' }, { kind: 'resource', resourceType: 'file', reference: 'private-resource-reference' }, { kind: 'tool-result', output: 'Private result' }], title: 'Private metadata' },
+    { ...speech('reply-a'), contentParts: [{ kind: 'reasoning', text: 'Private reasoning', contentEligibility: 'private' }, { kind: 'tool-call', name: 'internal', input: 'Private arguments', contentEligibility: 'private' },
+      { kind: 'text', text: 'Shared speech', contentEligibility: 'public' }, { kind: 'resource', resourceType: 'file', reference: 'private-resource-reference', contentEligibility: 'private' }, { kind: 'tool-result', output: 'Private result', contentEligibility: 'private' }], title: 'Private metadata' },
     speech('reply-b', 'Shared speech'), { id: 'activity-a', kind: 'activity', contentParts: [] }
   ]), () => true)
   const operations = owner.list(boundary)
@@ -189,8 +189,8 @@ it('source and mapping object property order cannot change an accepted identity'
 it('a missing original text resource is durably accounted beside complete speech without blocking the read cut', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([{ ...speech('large'), contentParts: [
-    { kind: 'text', text: 'Only one part of the original speech' },
-    { kind: 'resource', resourceType: 'text', reference: 'original-resource', content: { kind: 'text', encoding: 'json-utf8', byteLength: 300_000, sha256: 'a'.repeat(64) } }
+    { kind: 'text', text: 'Only one part of the original speech', contentEligibility: 'public' },
+    { kind: 'resource', resourceType: 'text', reference: 'original-resource', contentEligibility: 'public', content: { kind: 'text', encoding: 'json-utf8', byteLength: 300_000, sha256: 'a'.repeat(64) } }
   ] }]), () => true)
   expect(owner.list(boundary)[0]).toMatchObject({ payload: { kind: 'speech', text: 'Only one part of the original speech' } })
   expect(owner.coverage(boundary)).toMatchObject({ state: 'incomplete', gaps: [expect.objectContaining({ reason: 'resource-unavailable', part: expect.objectContaining({ selector: { kind: 'native-part', partIndex: 1 } }) })] })

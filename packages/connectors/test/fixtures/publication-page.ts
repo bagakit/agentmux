@@ -13,6 +13,6 @@ export function publicationPage(boundary: PublicationBoundary, native: NativeCon
     coverage: timeline.coverage, order: { ...timeline.order, direction: 'newest-first' }, items: [...units].reverse().map(item => ({ kind: 'item', item })),
     nextCursor: null, budgetBytes: 4 * 1024 * 1024, checkpoint, more: false,
     window: { id: 'outbox-fixture-window', revision: 1, itemCount: units.length, complete: true,
-      view: 'outbox-fixture-view', replay: 'outbox-fixture-replay', checkpoint, outside: { older: null, newer: null } } }
+      view: 'outbox-fixture-view', replay: 'outbox-fixture-replay', checkpoint, outside: { older: null, newer: null }, navigation: { older: null, newer: null } } }
   return { page, units, resolvedText: new Map() }
 }
