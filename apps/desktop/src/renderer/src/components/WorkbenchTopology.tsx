@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import type { SelectorPresenceAgent } from './SelectorList'
-import { getWindowOverlayHost } from './WindowOverlayHost'
+import { useWindowOverlayHost } from './WindowOverlayHost'
 
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
@@ -174,7 +174,7 @@ export function WorkbenchTopology({ tabs, onSelectTab, interactive = true, enabl
   const inspected = tabs.find((tab, index) => entryKey(tab, index) === inspectedKey) ?? active
   const [aspectRatio, setAspectRatio] = useState(16 / 10)
   const label = `${tabs.length} ${tabs.length === 1 ? 'Tab' : 'Tabs'}. Hover or focus a Tab to inspect its Regions and recent activity.`
-  const overlayHost = getWindowOverlayHost(document)
+  const overlayHost = useWindowOverlayHost()
   const inspectorInPortal = enabled && inspectorOpen && overlayHost !== null
 
   const inspectTab = (key: string) => {

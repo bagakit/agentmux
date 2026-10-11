@@ -1,5 +1,5 @@
 import { ComposerTextarea, InputGroup } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -13,6 +13,8 @@ import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { DocumentOverlayPortal, WindowOverlayPortal } from './WindowOverlayHost'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import { autoUpdate, computePosition, offset, flip, shift } from '@floating-ui/dom'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -26,15 +28,25 @@ const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 export function MoteBehaviorAction({ label, children, onClick, expanded, disabled, busy }: {
   label: string; children: ReactNode; onClick(): void; expanded?: boolean; disabled?: boolean; busy?: boolean
 }) {
-  const id = useId(), [anchor, setAnchor] = useState<DOMRect | null>(null)
+  const id = useId(), [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
+  const [tooltip, setTooltip] = useState<HTMLSpanElement | null>(null)
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (!anchor || !tooltip || anchor.ownerDocument !== tooltip.ownerDocument) return
+    let current = true
+    const update = () => { void computePosition(anchor, tooltip, { strategy: 'fixed', placement: 'bottom-start', middleware: [offset(6), flip(), shift({ padding: 12 })] })
+      .then(({ x, y }) => { if (current) setPosition({ left: x, top: y }) }) }
+    const stop = autoUpdate(anchor, tooltip, update, { layoutShift: true })
+    return () => { current = false; stop() }
+  }, [anchor, tooltip])
   return <>
     <button type="button" className="icon-button mote-behavior-action" aria-label={label} aria-expanded={expanded}
       disabled={disabled} aria-busy={busy || undefined}
       aria-describedby={anchor ? id : undefined} onClick={() => { setAnchor(null); onClick() }}
-      onPointerEnter={event => setAnchor(event.currentTarget.getBoundingClientRect())} onPointerLeave={() => setAnchor(null)}
-      onFocus={event => setAnchor(event.currentTarget.getBoundingClientRect())} onBlur={() => setAnchor(null)}>{children}</button>
-    {anchor ? <WindowOverlayPortal layer="tooltip"><span id={id} role="tooltip" className="mote-behavior-tooltip"
-      style={{ left: Math.max(12, Math.min(anchor.left, window.innerWidth - 220)), top: anchor.bottom + 6 }}>{label}</span></WindowOverlayPortal> : null}
+      onPointerEnter={event => { setPosition(null); setAnchor(event.currentTarget) }} onPointerLeave={() => setAnchor(null)}
+      onFocus={event => { setPosition(null); setAnchor(event.currentTarget) }} onBlur={() => setAnchor(null)}>{children}</button>
+    {anchor ? <WindowOverlayPortal layer="tooltip"><span ref={setTooltip} id={id} role="tooltip" className="mote-behavior-tooltip"
+      style={position ?? { left: 0, top: 0, visibility: 'hidden' }}>{label}</span></WindowOverlayPortal> : null}
   </>
 }
 
@@ -43,6 +55,7 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
   onOpenPath(path: string): Promise<unknown>; onClose(): void; returnFocus(): HTMLElement | null
 }) {
+  const document = useWorkbenchDocument()
   const [draft, setDraft] = useState<MoteBehaviorDraft>({ custom: '' }), [saved, setSaved] = useState<SavedMoteBehavior | null>(null)
   const [loading, setLoading] = useState(true), [issue, setIssue] = useState<string | null>(null), [busy, setBusy] = useState(false)
   const [extra, setExtra] = useState<'custom' | 'trial' | null>(null), [question, setQuestion] = useState(''), [attempt, setAttempt] = useState(0)

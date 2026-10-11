@@ -1,4 +1,4 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useEffect, useRef, useState } from 'react'
 import type { MoteAvatarSeriesCreateResult } from '@agentmux/core/mote-avatar-series'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'

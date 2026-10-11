@@ -1,7 +1,7 @@
 import { civilClock } from "../lib/civil-clock"
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { focusUtcOffset, type FocusRulerMode, type FocusRulerPreferences } from '../lib/focus-timeline-ruler'

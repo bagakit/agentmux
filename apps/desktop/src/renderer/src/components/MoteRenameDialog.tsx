@@ -1,5 +1,6 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TextInput } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_TOPIC_TITLE_MAX_LENGTH } from '../../../shared/scratch-topics'
@@ -13,6 +14,7 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
   target: { topic: ScratchTopicSnapshot; workspace: WorkspaceRecord } | null
   onClose(): void; returnFocus?(): HTMLElement | null
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const [name, setName] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null), content = useRef<HTMLDivElement>(null)
   const errorId = useId()
@@ -35,13 +37,13 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
     } catch (cause) { if (isCurrent()) setError(presentError(cause)) }
     finally { if (isCurrent()) setBusy(false) }
   }
-  return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
+  return <Dialog.Root recoveryCloseDisabled={busy} open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface mote-rename" aria-busy={busy}
         onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus(); input.current?.select() }}
-        onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus?.(); const active = document.activeElement
-          if (node?.isConnected && (active === document.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
+        onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus?.(); const active = ownerDocument.activeElement
+          if (node?.isConnected && (active === ownerDocument.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">Rename Mote</Dialog.Title>

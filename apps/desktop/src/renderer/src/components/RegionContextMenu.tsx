@@ -214,7 +214,7 @@ export function RegionContextMenu({
   })
   const model = { ...base, entries: [...base.entries, ...(onOpenWindow ? [{ kind: 'window' as const, onSelect: onOpenWindow }] : []), ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
   // 让位不在这里接线：原生视图的让位由 App 的那一个 MutationObserver 按 Radix 的 DOM 协议
-  // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-surface-overlay.ts。
+  // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-overlay-regions.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
     <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: connector.onOpen, dialogOpen: connector.dialogOpen }}>

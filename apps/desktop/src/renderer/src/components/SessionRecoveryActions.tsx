@@ -1,4 +1,5 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store'
@@ -18,6 +19,7 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', restoreIcon = 'action.resume-session', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
   source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; restoreIcon?: 'action.resume-session' | 'action.refresh' | 'status.waiting'; workingLabel?: string; onRestore: () => void; onTakeOver?: (() => void) | undefined
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const [mode, setMode] = useState<RecoveryMode | null>(null), [destination, setDestination] = useState<'agent' | 'mote'>('agent')
   const config = useAppStore(state => mode ? state.config : null)
   const tabs = useAppStore(state => mode === 'analyze' ? state.tabs : null), sessions = useAppStore(state => mode === 'analyze' ? state.sessions : null)
@@ -84,13 +86,13 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
     </button>
     {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={onTakeOver}><ThemeNavigationForwardIcon size={12} /> Take over</button> : null}
     <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><ThemeActionSearchIcon size={12} /> Analyze…</button>
-    <Dialog.Root open={mode !== null} onOpenChange={next => { if (!next) close() }}>
+    <Dialog.Root recoveryCloseDisabled={busy} open={mode !== null} onOpenChange={next => { if (!next) close() }}>
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="dialog-scrim" />
         <Dialog.Content className="session-recovery-dialog dialog-surface" aria-busy={busy}
-          onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; openedContent.current = event.target instanceof Element ? event.target : null; cancel.current?.focus() }}
-          onCloseAutoFocus={event => { event.preventDefault(); const originalFocus = previousFocus.current, focused = document.activeElement
-            if (originalFocus?.isConnected && (focused === document.body || focused === originalFocus || !focused?.isConnected || openedContent.current?.contains(focused))) originalFocus.focus({ preventScroll: true }) }}
+          onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = ownerDocument.activeElement?.nodeType === 1 ? ownerDocument.activeElement as HTMLElement : null; openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null; cancel.current?.focus() }}
+          onCloseAutoFocus={event => { event.preventDefault(); const originalFocus = previousFocus.current, focused = ownerDocument.activeElement
+            if (originalFocus?.isConnected && (focused === ownerDocument.body || focused === originalFocus || !focused?.isConnected || openedContent.current?.contains(focused))) originalFocus.focus({ preventScroll: true }) }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
           <Dialog.Title>Analyze the original work</Dialog.Title>
           <Dialog.Description>Choose a new Agent or a Mote to read and assess the original work. Analysis does not execute the task. The original Session and drafts stay available.</Dialog.Description>

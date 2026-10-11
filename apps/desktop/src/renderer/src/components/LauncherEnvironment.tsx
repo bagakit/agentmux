@@ -1,6 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import type { HostCheckState } from '../store'

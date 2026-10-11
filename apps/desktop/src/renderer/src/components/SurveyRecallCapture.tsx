@@ -2,7 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useIconFeedback } from '../lib/use-icon-feedback'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
 import { useEffect, useRef, useState } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
@@ -82,7 +82,7 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
     } catch (cause) { setError(presentError(cause) + ' The saved page and current draft are kept.') }
   }
   const saved = receipt?.status === 'written' && receipt.notebookRegistered
-  return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
+  return <Dialog.Root recoveryCloseDisabled={busy} open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface topic-dialog survey-recall-capture"
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}

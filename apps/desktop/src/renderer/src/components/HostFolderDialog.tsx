@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -27,7 +27,7 @@ export function HostFolderDialog({ hostId, label, onClose }: { hostId: string; l
     } catch (error) { setIssue(presentError(error)) }
     finally { setBusy(false) }
   }
-  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}>
+  return <Dialog.Root recoveryCloseDisabled={busy} open onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface project-group-dialog" aria-busy={busy}

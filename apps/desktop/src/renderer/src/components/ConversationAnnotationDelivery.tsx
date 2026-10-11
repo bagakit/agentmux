@@ -128,7 +128,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
           {current ? <RecipientAvatar recipient={current} /> : <ThemeActionCreateAgentIcon size={16} aria-hidden="true" />}
           <span>{recipient.kind === 'new' ? '新建 Agent' : current?.name ?? recipient.id}{current?.current ? <small>当前</small> : null}</span><ThemeNavigationDownIcon size={12} aria-hidden="true" />
         </button></Menu.Trigger>
-        <DocumentOverlayPortal component={Menu.Portal}><div className="window-overlay-host__entry" data-overlay-layer="dialog">
+        <DocumentOverlayPortal component={Menu.Portal}><div className="window-overlay-host__entry" data-overlay-layer="popover">
           <Menu.Content className="tab-context-menu conversation-annotation-delivery__menu" align="start" sideOffset={5} collisionPadding={8} aria-label="批注接收者">
             <Menu.RadioGroup value={recipient.kind === 'new' ? 'new-agent' : `agent:${recipient.id}`} onValueChange={value => {
               if (locked || !activeRef.current) return

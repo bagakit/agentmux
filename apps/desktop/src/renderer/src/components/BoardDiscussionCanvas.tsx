@@ -2,7 +2,7 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentAvatar } from './AgentAvatar'
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useState } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
@@ -120,7 +120,7 @@ export function BoardDiscussionCanvas({
   const ContextIcon = isTopic ? ThemeObjectTopicIcon : ThemeObjectBranchIcon
 
   return (
-    <Dialog.Root open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
+    <Dialog.Root recoveryCloseDisabled={launching} open={row !== null} onOpenChange={(open) => !open && !launching && onClose()}>
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="discussion-canvas__overlay dialog-scrim" />
         <Dialog.Content

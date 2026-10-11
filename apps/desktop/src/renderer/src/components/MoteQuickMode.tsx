@@ -1,5 +1,6 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sessionPresentationById } from '../lib/session-presentation'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -34,6 +35,7 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
   onOpenPath(path: string): Promise<unknown>
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const [editing, setEditing] = useState(false), invoker = useRef<HTMLElement | null>(null)
   const saved = scope.topic.quickMode, defaults = saved?.status === 'saved' ? saved.defaults : {}
   const resolved = useMoteDefaultConversation(scope.topic, scope.workspace.id, active)
@@ -41,7 +43,7 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   const executorLabel = useMemo(() => executorsForHost(executorFacts.config, scope.workspace.hostId, executorFacts.detections, executorFacts.inventory)
     .find(item => item.id === defaults.executorId)?.label ?? defaults.executorId, [executorFacts, scope.workspace.hostId, defaults.executorId])
   const conversationLabel = useAppStore(state => defaults.conversation ? moteConversationLabel(state, defaults.conversation) : undefined)
-  const edit = () => { invoker.current = document.activeElement as HTMLElement; setEditing(true) }
+  const edit = () => { invoker.current = ownerDocument.activeElement as HTMLElement; setEditing(true) }
   return <section className="mote-quick-mode" aria-label="Quick mode">
     <div className="mote-details__section-actions"><span><ThemeActionQuickModeIcon size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
@@ -57,6 +59,7 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
   onOpenPath(path: string): Promise<unknown>; onClose(): void; returnFocus(): HTMLElement | null
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const [saved, setSaved] = useState<SavedMoteQuickMode | null>(null), [draft, setDraft] = useState<MoteQuickDefaults>(() => scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults : {})
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null), [attempt, setAttempt] = useState(0)
   const form = useRef(draft); form.current = draft
@@ -105,8 +108,8 @@ function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocu
     <Dialog.Overlay className="dialog-scrim mote-behavior-overlay" />
     <Dialog.Content ref={content} className="dialog-surface mote-quick-mode-dialog" aria-busy={busy}
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLButtonElement>('.selection-field')?.focus() }}
-      onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = document.activeElement
-        if (node?.isConnected && (active === document.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
+      onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement
+        if (node?.isConnected && (active === ownerDocument.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
       <header className="mote-behavior-header"><div><Dialog.Title>Quick mode</Dialog.Title><Dialog.Description>{scope.topic.title} · ready to continue</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
       <div className="mote-quick-mode-dialog__body">
         <label htmlFor={id + '-agent'}><ThemeObjectAgentIcon size={16} /><span>Executor for new chat<small>Preselected for new conversations.</small></span></label>
