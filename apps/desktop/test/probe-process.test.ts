@@ -130,6 +130,32 @@ describe('probe process ownership', () => {
     expect(result).toMatchObject({ exitCode: 0, originalExitCode: 0, exitSignal: null, exitConfirmed: true })
   })
 
+  it('publishes the spawned child identity before exit without sharing mutable outcome facts', async () => {
+    const child = heldChild(), received: number[] = []
+    ports.spawn.mockReturnValue(child)
+    const pending = runProbeProcess('private-probe', [], { timeoutMs: 10000,
+      onSpawn: (fact: { originalPid: number }) => { received.push(fact.originalPid); fact.originalPid = 1 } })
+    expect(received).toEqual([])
+    child.emit('spawn')
+    expect(received).toEqual([child.pid])
+    end(child, 0)
+    expect(await pending).toMatchObject({ originalPid: child.pid, exitConfirmed: true, exitCode: 0 })
+    expect(globalSignal).not.toHaveBeenCalled()
+  })
+
+  it('retains the original child receipt when its spawn receipt sink fails', async () => {
+    const child = heldChild(), failure = new Error('original spawn receipt write failed')
+    child.kill.mockImplementation(() => { end(child, null, 'SIGTERM'); return true })
+    ports.spawn.mockReturnValue(child)
+    const pending = runProbeProcess('private-probe', [], { timeoutMs: 10000, onSpawn: () => { throw failure } }).catch((error: any) => error)
+    child.emit('spawn')
+    const error = await pending
+    expect(error.errors).toContain(failure)
+    expect(error.probe).toMatchObject({ originalPid: child.pid, exitConfirmed: true, exitSignal: 'SIGTERM' })
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']])
+    expect(globalSignal).not.toHaveBeenCalled()
+  })
+
   it('does not turn accepted signals without an exit receipt into success', async () => {
     const child = heldChild(); ports.spawn.mockReturnValue(child); vi.useFakeTimers()
     const pending = runProbeProcess('private-probe', [], { temporaryRoot: _reshape_fixturePath("controlled/path"), timeoutMs: 10, graceMs: 20 }).catch((error: any) => error)

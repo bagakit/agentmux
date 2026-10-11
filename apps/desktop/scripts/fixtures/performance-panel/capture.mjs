@@ -10,7 +10,7 @@ import { isBuiltin } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
 export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel', prepareOnly = false }) {
-  assert.ok(['full','placement','buttons','toolkit','attribution','agent-cards','epoch-peak'].includes(captureScope),'已知明确 capture scope')
+  assert.ok(['full','placement','buttons','toolkit','attribution','agent-cards','epoch-peak','diagnostic'].includes(captureScope),'已知明确 capture scope')
   assert.ok(typeof prepareOnly === 'boolean' && (!prepareOnly || captureScope === 'attribution'), 'Compile preparation is explicit attribution-only, never a full qualification')
   const toolkitFixture = fixtureName === 'toolkit-custom-ui'
   assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || toolkitFixture && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
@@ -29,13 +29,13 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,prepareOnly,cssMutant,evidence,privateRoot,processes:[],frames:[],rawInputs:[],
     actualApp:!prepareOnly,actualSettings:!prepareOnly,actualTerminalView:!prepareOnly,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
     boundary:'Actual mounted product Renderer, original TerminalView input handler, ConfigOwner/ConfigStore and product isolated preload/registered Toolkit IPC. Explicit controlled Metrics DTO port and original preview Session facts; not official Toolkit CLI/Native execution or user performance.'}
-  if(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak')await fs.writeFile(path.join(evidence,'capture-start.json'),JSON.stringify({privateRoot,captureScope,prepareOnly,startedAt:Date.now()})+'\n')
+  if(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak'||captureScope==='diagnostic')await fs.writeFile(path.join(evidence,'capture-start.json'),JSON.stringify({privateRoot,captureScope,prepareOnly,startedAt:Date.now()})+'\n')
   const bind=async file=>{const bytes=await fs.readFile(file),key=path.relative(root,file);if(inputs.has(key))assert.equal(sha(inputs.get(key)),sha(bytes),'实际输入构建漂移: '+key);else inputs.set(key,bytes);return bytes}
   try {
     for(const file of [configFile,path.join(desktop,'electron.vite.config.ts'),path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
       ...['capture.mjs','entry.tsx','main.cjs','preload.cjs','owner-entry.ts','index.html','data.ts'].map(file=>path.join(fixture,file))])await bind(file)
     if(toolkitQualification)for(const name of ['health-entry.ts','coordinator.cjs','qualification.cjs'])await bind(path.join(fixture,name))
-    if(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak')for(const file of [path.join(desktop,`scripts/capture-${captureScope==='agent-cards'?'toolkit-agent-cards':captureScope==='epoch-peak'?'performance-epoch-peak':'performance-attribution'}.mjs`),path.join(fixture,'attribution-owner-entry.ts')])await bind(file)
+    if(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak'||captureScope==='diagnostic')for(const file of [path.join(desktop,`scripts/capture-${captureScope==='agent-cards'?'toolkit-agent-cards':captureScope==='epoch-peak'?'performance-epoch-peak':'performance-attribution'}.mjs`),path.join(fixture,'attribution-owner-entry.ts')])await bind(file)
     if(captureScope==='agent-cards') {
       const customFile=process.env.AGENTMUX_TOOLKIT_AGENT_CARDS_CUSTOM_RESULT
       assert.ok(customFile&&path.isAbsolute(customFile),'Exact confirmed Custom product result is required')
@@ -45,7 +45,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       await fs.writeFile(path.join(evidence,'custom-result.json'),bytes)
     }
     const aliases=new Map()
-    for(const name of ['core','demand','layout','identity','relay','client-ui']){
+    for(const name of ['core','demand','layout','identity','relay','client-ui','diagnostic-evidence']){
       const dir=path.join(root,'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))
       for(const [key,value]of Object.entries(pkg.exports)){
         const target=typeof value==='string'?value:value.browser??value.import
@@ -87,16 +87,18 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     for(const [entry,outfile,format]of [
       [path.join(desktop,'src/preload/index.ts'),path.join(compiled,'product-preload.cjs'),'cjs'],
       [path.join(fixture,'preload.cjs'),path.join(compiled,'fixture-preload.cjs'),'cjs'],
-      [path.join(fixture,(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak')?'attribution-owner-entry.ts':'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
+      [path.join(fixture,(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak'||captureScope==='diagnostic')?'attribution-owner-entry.ts':'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
       [path.join(root,'packages/core/src/agentmux.ts'),path.join(compiled,'agentmux.mjs'),'esm'],
       ...(toolkitQualification?[[path.join(fixture,'health-entry.ts'),path.join(compiled,'health.mjs'),'esm']]:[])
-    ])await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:format==='cjs'?'bundle':'external',logLevel:'error',
+    ]) { const built=await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:format==='cjs'?'bundle':'external',logLevel:'error',metafile:captureScope==='diagnostic',
       plugins:[{name:'bind-product-node-source',setup(builder){
         builder.onResolve({filter:/^@agentmux\//},args=>{const target=resolveAlias(args.path);return target?{path:target}:undefined})
         builder.onResolve({filter:/^[^./]/},args=>{
           if(args.path==='electron'||isBuiltin(args.path))return {path:args.path,external:true}
+          if(captureScope==='diagnostic'&&format==='cjs'&&args.path==='yaml')return {path:path.join(path.dirname(require.resolve('yaml/package.json',{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]})),'browser/index.js'),external:false}
           if(resolveAlias(args.path))return
           if(args.path==='@ctxmux/sdk')return {path:fixedSdkEntry,external:true}
+          if(args.path==='node-diff3'&&captureScope==='diagnostic')return {path:require.resolve(args.path,{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]}),external:false}
           return {path:require.resolve(args.path,{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]}),external:format!=='cjs'}
         })
         builder.onLoad({filter:/\.[cm]?tsx?$/},async args=>{
@@ -104,6 +106,13 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
           const bytes=await bind(args.path);return{contents:bytes.toString(),loader:args.path.endsWith('tsx')?'tsx':'ts'}
         })
       }}]})
+      if(captureScope==='diagnostic'&&format==='cjs') {
+        const imports=Object.values(built.metafile.outputs).flatMap(output=>output.imports).filter(value=>value.external)
+        assert.ok(imports.length>0,'Sandbox preload has an explicit Electron transport')
+        assert.ok(imports.every(value=>value.path==='electron'),'Sandbox preload must not externalise Node modules')
+        await fs.writeFile(path.join(evidence,path.basename(outfile)+'.sandbox-preflight.json'),JSON.stringify({outfile,sha256:sha(await fs.readFile(outfile)),imports},null,2)+'\n')
+      }
+    }
     const cssRules=[
       ['agent.css',".surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher):is([aria-current='page'], [aria-expanded='true'])",'background','state'],
       ['agent.css','.surface-navigation button.surface-navigation__slot:not(.surface-navigation__slot--launcher):focus-visible, .window-status-bar__utilities > .window-status-bar__utility-button:focus-visible','outline','focus'],
@@ -136,6 +145,14 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     const env={...process.env,AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD:path.join(compiled,'fixture-preload.cjs'),AGENTMUX_PERFORMANCE_BUTTON_MUTANT:cssMutant,
       AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'runtime/state'),
       AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'runtime/queue.ndjson'),AGENTMUX_AGENT_SESSION_STORE:path.join(privateRoot,'runtime/sessions.json')};delete env.ELECTRON_RUN_AS_NODE
+    if(captureScope==='diagnostic') {
+      for(const key of Object.keys(env))if(/^(AGENTMUX|AMUX|CODEX|CTXMUX|BAGAKIT|CLAUDE|OPENAI|ANTHROPIC)_/.test(key))delete env[key]
+      for(const key of ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS','NODE_PATH'])delete env[key]
+      const home=path.join(privateRoot,'home');await fs.mkdir(home,{recursive:true});env.HOME=home
+      env.AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD=path.join(compiled,'fixture-preload.cjs')
+      env.AGENTMUX_RUNTIME_DIRECTORY=path.join(privateRoot,'runtime');env.AGENTMUX_STATE_DIRECTORY=path.join(privateRoot,'runtime/state')
+      env.AGENTMUX_MESSAGE_QUEUE_PATH=path.join(privateRoot,'runtime/queue.ndjson');env.AGENTMUX_AGENT_SESSION_STORE=path.join(privateRoot,'runtime/sessions.json')
+    }
     for(const phase of prepareOnly?[]:captureScope==='full'?['control','restart','joined']:[captureScope]){
       const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs'),...(toolkitQualification?[path.join(fixture,'qualification.cjs')]:[])]
       const executable=toolkitQualification?globalThis.process.execPath:require('electron')
