@@ -1,328 +1,200 @@
 // @vitest-environment happy-dom
-import type { ComponentProps, ReactElement, ReactNode } from 'react'
-import { flushSync } from 'react-dom'
-import { createRoot } from 'react-dom/client'
-import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
-
-import {
-  OPEN_DESTINATION_BAR_ITEMS,
-  OpenDestinationBar,
-  OpenDestinationPopover,
-  nextFocusedDestination
-} from '../src/renderer/src/components/OpenDestinationBar.js'
+import { act, useState, type ReactNode } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createClientUiRoot } from './helpers/client-ui-render'
+import { OpenDestinationBar, OpenDestinationPopover } from '../src/renderer/src/components/OpenDestinationBar.js'
 import { OPEN_DESTINATIONS, openDestinationNeedsRegion, type OpenDestination } from '../src/renderer/src/lib/open-destination.js'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 
-function renderPopoverMarkup(props: ComponentProps<typeof OpenDestinationPopover>): string {
-  const container = document.createElement('div')
-  const host = document.createElement('div')
-  host.className = 'window-overlay-host'
-  host.dataset.overlayHost = ''
-  document.body.append(container, host)
-  const root = createRoot(container)
-  flushSync(() => root.render(<OpenDestinationPopover {...props} />))
-  const markup = host.innerHTML
-  root.unmount()
-  container.remove(); host.remove()
-  return markup
-}
-
-// The desktop test project has no DOM (no jsdom / testing-library), so behaviour is pinned two ways:
-// static markup for what renders, and a walk of the hookless element tree for what a click emits.
-// OpenDestinationBar takes no hooks precisely so it can be called as a plain function here.
-type ButtonProps = {
-  'data-destination'?: OpenDestination
-  disabled?: boolean
-  'data-disabled-reason'?: string
-  onClick?: () => void
-}
-
-function collectButtons(node: ReactNode, out: ButtonProps[] = []): ButtonProps[] {
-  if (Array.isArray(node)) {
-    for (const child of node) collectButtons(child, out)
-    return out
-  }
-  if (!node || typeof node !== 'object') return out
-  const element = node as ReactElement<{ children?: ReactNode } & ButtonProps>
-  if (element.type === 'button') out.push(element.props)
-  if (element.props?.children) collectButtons(element.props.children, out)
-  return out
-}
-
-function renderBarButtons(canSplit: boolean): ButtonProps[] {
-  const element = OpenDestinationBar({ canSplit, onSelect: () => {} }) as ReactElement
-  return collectButtons(element)
-}
-
-describe('OpenDestinationBar', () => {
-  it('lays out one icon button per destination in the enum order — no second list of destinations', () => {
-    // Order and membership are derived from the SSOT, not restated here.
-    expect(OPEN_DESTINATION_BAR_ITEMS.map((item) => item.destination)).toEqual([...OPEN_DESTINATIONS])
-
-    const buttons = renderBarButtons(true)
-    expect(buttons).toHaveLength(OPEN_DESTINATIONS.length)
-    expect(buttons.map((button) => button['data-destination'])).toEqual([...OPEN_DESTINATIONS])
-  })
-
-  it('routes each icon to the destination it draws — the left button opens left, not right', () => {
-    // Mutation guard (b): the destination a button emits must equal the one it visibly represents.
-    // Wiring 'left' to emit 'right' breaks emitted === data-destination === OPEN_DESTINATIONS[i].
-    OPEN_DESTINATIONS.forEach((destination, index) => {
-      let emitted: OpenDestination | null = null
-      const element = OpenDestinationBar({
-        canSplit: true,
-        onSelect: (chosen) => {
-          emitted = chosen
-        }
-      }) as ReactElement
-      const buttons = collectButtons(element)
-      const button = buttons[index]!
-      // Anchor: prove we are exercising the button we think we are before trusting its click.
-      expect(button['data-destination']).toBe(destination)
-      button.onClick?.()
-      expect(emitted).toBe(destination)
-      expect(emitted).toBe(button['data-destination'])
-    })
-  })
-
-  it('points every directional chevron at the side its split lands on', () => {
-    // The defect this pins was shipped and reported as "the directions are exactly reversed".
-    //
-    // Behaviour was never wrong: the button emits the destination it draws (pinned above), and the
-    // engine puts the new pane on the named side (workbench-view-layout.ts). Only the ICONS lied.
-    // lucide's Panel*Open family draws the divider on the right side but aims its chevron the other
-    // way, because its subject is "which way a collapsed panel swings open", not "which side the new
-    // pane appears on". All four were borrowed for the latter, so all four arrows pointed backwards —
-    // which is why it read as a systematic reversal instead of one odd glyph.
-    //
-    // Asserting the icon NAMES would only pin today's pick: the next swap to a differently-named
-    // family could point backwards again and stay green. So this walks the rendered <path> geometry
-    // and asserts the chevron's tip sits on the side the destination names. Every lucide chevron is
-    // `m<x> <y> …` with three points — the middle one is the tip; the outer two are the tails.
-    const AXIS = {
-      left: { axis: 'x', tipBeyondTails: false },
-      right: { axis: 'x', tipBeyondTails: true },
-      up: { axis: 'y', tipBeyondTails: false },
-      down: { axis: 'y', tipBeyondTails: true }
-    } as const
-
-    for (const [destination, expectation] of Object.entries(AXIS)) {
-      const item = OPEN_DESTINATION_BAR_ITEMS.find((candidate) => candidate.destination === destination)
-      expect(item, `${destination} vanished from the row`).toBeDefined()
-      const Icon = item!.icon
-      const markup = renderToStaticMarkup(<Icon />)
-      const paths = [...markup.matchAll(/\sd="([^"]+)"/g)].map((match) => match[1]!)
-      // Premise self-check: the chevron is the relative path (lowercase `m`); the divider is the
-      // absolute one (`M`). Without this, a glyph that lost its chevron would make the loop below
-      // vacuous instead of red.
-      const chevron = paths.find((d) => d.startsWith('m'))
-      expect(chevron, `${destination}'s icon has no relative-path chevron to read a direction from`)
-        .toBeDefined()
-
-      // Numbers, in order. lucide minifies its paths, so separators are inconsistent: `m16 15-3-3 3-3`
-      // packs two negative deltas with no separator at all (the leading `-` does the separating).
-      // Match numbers rather than pairs — pairing on a separator misses those and silently reads a
-      // 3-point chevron as 2 points.
-      const numbers = [...chevron!.matchAll(/-?\d+(?:\.\d+)?/g)].map((match) => Number(match[0]))
-      // A chevron is three points; anything else means the glyph shape changed and the reading below
-      // would be guesswork.
-      expect(numbers, `${destination}'s chevron is not the expected 3-point shape`).toHaveLength(6)
-      const points = [0, 2, 4].map((index) => ({ x: numbers[index]!, y: numbers[index + 1]! }))
-      // lucide relative paths give the first point absolutely, then deltas. Accumulate to absolutes.
-      const absolute = points.reduce<{ x: number; y: number }[]>((acc, point, index) => {
-        const previous = acc[index - 1]
-        acc.push(previous ? { x: previous.x + point.x, y: previous.y + point.y } : point)
-        return acc
-      }, [])
-      const read = (point: { x: number; y: number }): number =>
-        expectation.axis === 'x' ? point.x : point.y
-      const tip = read(absolute[1]!)
-      const tails = [read(absolute[0]!), read(absolute[2]!)]
-      // Tails sit on the same side of the tip (that is what makes it a chevron rather than a zigzag),
-      // so comparing the tip against either one is enough — assert against both to be explicit.
-      for (const tail of tails) {
-        expect(
-          expectation.tipBeyondTails ? tip > tail : tip < tail,
-          `the "${destination}" icon's chevron points the wrong way: tip at ${expectation.axis}=${tip}, ` +
-            `tail at ${expectation.axis}=${tail}. A user reads this as the split going the other way.`
-        ).toBe(true)
-      }
-    }
-  })
-
-  it('disables only the directional choices when there is no precise pane, and says why', () => {
-    // Mutation guard (a): drop the disabling and the directional buttons stop reporting disabled.
-    const buttons = renderBarButtons(false)
-    const disabled = buttons.filter((button) => button.disabled)
-    const directional = OPEN_DESTINATIONS.filter((destination) => openDestinationNeedsRegion(destination))
-
-    expect(disabled.map((button) => button['data-destination'])).toEqual([...directional])
-    for (const button of disabled) {
-      expect(button['data-disabled-reason']).toBe('A precise pane is required')
-    }
-    // Anchor: system and tab must stay live, or "only directional" would be vacuously true.
-    const live = buttons.filter((button) => !button.disabled).map((button) => button['data-destination'])
-    expect(live).toEqual(['system', 'tab'])
-  })
-
-  it('opens every direction once a precise pane exists', () => {
-    const buttons = renderBarButtons(true)
-    // 先钉住「按钮真的画出来了」：下面两条都是「没有一个是 X」的形状，对空数组恒成立，
-    // 于是整条栏子一个按钮都不画时它们照样绿——而那是个严重得多的缺陷。
-    expect(buttons).toHaveLength(OPEN_DESTINATIONS.length)
-    expect(buttons.some((button) => button.disabled)).toBe(false)
-    expect(buttons.every((button) => button['data-disabled-reason'] === undefined)).toBe(true)
-  })
-
-  it('gives every wordless button a spoken name that carries the disabled reason', () => {
-    const markup = renderToStaticMarkup(
-      <OpenDestinationBar canSplit={false} onSelect={() => {}} />
-    )
-    // A row of icons with no aria-label would be unusable to a screen reader.
-    expect(markup.match(/aria-label="/g) ?? []).toHaveLength(OPEN_DESTINATIONS.length + 1)
-    expect(markup).toContain('aria-label="Open in a split on the left — A precise pane is required"')
-    expect(markup).toContain('role="toolbar"')
-  })
-
-  it('seeds roving focus on the first enabled button so the keyboard has an entry point', () => {
-    // With directions disabled, focus must start on the first live button, not a dead one.
-    const disabledMarkup = renderToStaticMarkup(
-      <OpenDestinationBar canSplit={false} onSelect={() => {}} />
-    )
-    const firstTabbable = /data-destination="([a-z]+)"[^>]*tabindex="0"/.exec(disabledMarkup)?.[1]
-    expect(firstTabbable).toBe('system')
-    // Exactly one button is in the tab order at a time (roving tabindex).
-    expect(disabledMarkup.match(/tabindex="0"/g) ?? []).toHaveLength(1)
-  })
+let container: HTMLDivElement
+let root: ReturnType<typeof createClientUiRoot>
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  container = document.createElement('div'); document.body.append(container)
+  root = createClientUiRoot(container)
 })
+afterEach(async () => {
+  await act(async () => root.unmount())
+  container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove()
+  vi.unstubAllGlobals()
+})
+async function render(content: ReactNode) { await act(async () => root.render(content)) }
+const buttons = () => [...document.querySelectorAll<HTMLButtonElement>('button[data-destination]')]
+const button = (destination: OpenDestination) => document.querySelector<HTMLButtonElement>(`button[data-destination="${destination}"]`)!
+const row = (name: string) => document.querySelector<HTMLElement>(`.workbench-menu-row[role="group"][aria-label="${name}"]`)!
+const rowLabel = (name: string) => row(name).querySelector('.workbench-menu-row__label-text')!
+async function focus(target: HTMLElement) { await act(async () => target.focus()) }
+async function key(target: Element, value: string, isComposing = false) {
+  const event = new KeyboardEvent('keydown', { key: value, isComposing, bubbles: true, cancelable: true })
+  await act(async () => { target.dispatchEvent(event) })
+  return event
+}
+async function pointer(target: Element, type: string, relatedTarget: EventTarget | null = null) {
+  await act(async () => { target.dispatchEvent(new PointerEvent(type, { pointerType: 'mouse', relatedTarget, bubbles: true })) })
+}
+async function click(target: HTMLElement) { await act(async () => target.click()) }
 
-describe('OpenDestinationBar cluster geometry', () => {
-  // The redesign's claim is that position replaces decoding: `left` is drawn on the left. These pin that
-  // claim as RELATIONS between coordinates rather than literal cells, so retuning the cluster stays free
-  // while a swap — the failure this exists to catch — reddens. `tab` is the centre the arms are read
-  // against, which is why it is the reference point rather than a fourth hardcoded number.
-  const meta = (destination: OpenDestination) => {
-    const item = OPEN_DESTINATION_BAR_ITEMS.find((entry) => entry.destination === destination)
-    if (!item) throw new Error(`no bar item for ${destination}`)
-    return item
-  }
-
-  it('places each direction on the side it names, around the centre', () => {
-    const centre = meta('tab')
-    // Anchor: the directions are read against the centre, so the centre must actually be interior —
-    // otherwise "beyond the centre" could be satisfied by everything sitting in one line.
-    expect(centre.column).toBeGreaterThan(meta('left').column)
-    expect(centre.column).toBeLessThan(meta('right').column)
-    expect(centre.row).toBeGreaterThan(meta('up').row)
-    expect(centre.row).toBeLessThan(meta('down').row)
-    // left/right must differ only across the horizontal axis, up/down only across the vertical one: a
-    // cross, not a diagonal scatter. Without this, `left` could drift up a row and still pass above.
-    expect(meta('left').row).toBe(centre.row)
-    expect(meta('right').row).toBe(centre.row)
-    expect(meta('up').column).toBe(centre.column)
-    expect(meta('down').column).toBe(centre.column)
-  })
-
-  it('gives every destination its own cell, so no button hides behind another', () => {
-    const cells = OPEN_DESTINATION_BAR_ITEMS.map((item) => `${item.column},${item.row}`)
-    expect(new Set(cells).size).toBe(OPEN_DESTINATIONS.length)
-  })
-
-  it('hands each button its own cell as a custom property, or the grid places nothing', () => {
-    // The wiring axis: the coordinate table can be perfect while the element receives none of it, which
-    // renders as every button stacked in one cell. Assert the VALUES travel, matched per destination.
-    const markup = renderToStaticMarkup(<OpenDestinationBar canSplit onSelect={() => {}} />)
-    for (const item of OPEN_DESTINATION_BAR_ITEMS) {
-      const button = new RegExp(`<button[^>]*data-destination="${item.destination}"[^>]*>`).exec(markup)?.[0]
-      expect(button).toBeDefined()
-      expect(button).toContain(`--destination-column:${item.column}`)
-      expect(button).toContain(`--destination-row:${item.row}`)
+// The original destination adapter and shared row surface are mounted together. These
+// assertions follow rendered command identity and behavior, not a second coordinate table.
+describe('OpenDestinationBar', () => {
+  it('renders all original destinations in two stable named rows with shared direction glyphs', async () => {
+    await render(<OpenDestinationBar canSplit onSelect={vi.fn()} />)
+    expect(document.querySelector('[role="toolbar"]')?.getAttribute('aria-label')).toBe('Choose where to open the link')
+    expect(buttons().map(item => item.dataset.destination)).toEqual([...OPEN_DESTINATIONS])
+    expect([...document.querySelectorAll('.workbench-menu-row')].map(group => group.getAttribute('aria-label'))).toEqual(['Open in', 'New region'])
+    expect(rowLabel('Open in').textContent).toBe('Open in'); expect(rowLabel('New region').textContent).toBe('New region')
+    expect([...row('Open in').querySelectorAll<HTMLButtonElement>('button')].map(item => item.dataset.destination)).toEqual(['system', 'tab'])
+    expect([...row('New region').querySelectorAll<HTMLButtonElement>('button')].map(item => item.dataset.destination)).toEqual(OPEN_DESTINATIONS.filter(openDestinationNeedsRegion))
+    for (const destination of OPEN_DESTINATIONS) {
+      const glyph = button(destination).querySelector('svg')!
+      expect(glyph.getAttribute('width')).toBe('16'); expect(glyph.getAttribute('height')).toBe('16')
+      expect(button(destination).getAttribute('aria-label')).toBeTruthy()
+      if (openDestinationNeedsRegion(destination)) expect(glyph.dataset.semanticIcon).toBe(`layout.split-${destination}`)
     }
+    expect(document.querySelector('.workbench-layout-menu__hint, .workbench-layout-menu footer')).toBeNull()
   })
 
-  it('moves focus to the neighbour on screen, not the next entry in the enum', () => {
-    const all = () => true
-    // From the centre each arrow reaches the arm it points at.
-    expect(nextFocusedDestination('tab', 'ArrowLeft', all)).toBe('left')
-    expect(nextFocusedDestination('tab', 'ArrowRight', all)).toBe('right')
-    expect(nextFocusedDestination('tab', 'ArrowUp', all)).toBe('up')
-    expect(nextFocusedDestination('tab', 'ArrowDown', all)).toBe('down')
-    // The load-bearing case: `right` follows `left` in the enum, but on screen `tab` sits between them.
-    // A flat next/previous walk over DOM order would answer 'right' here.
-    expect(nextFocusedDestination('left', 'ArrowRight', all)).toBe('tab')
-    // And the scan reaches past an empty cell: nothing occupies (2,1)'s left neighbour column for
-    // `system` at (1,1) going right except `up`, which a strict adjacency check would miss.
-    expect(nextFocusedDestination('system', 'ArrowRight', all)).toBe('up')
+  it('routes each original rendered button to its exact destination once', async () => {
+    const select = vi.fn()
+    await render(<OpenDestinationBar canSplit onSelect={select} />)
+    expect(buttons()).toHaveLength(OPEN_DESTINATIONS.length)
+    for (const destination of OPEN_DESTINATIONS) {
+      await click(button(destination))
+      expect(select).toHaveBeenLastCalledWith(destination)
+    }
+    expect(select.mock.calls.map(call => call[0])).toEqual([...OPEN_DESTINATIONS])
   })
 
-  it('stops at the edge instead of wrapping to the far side', () => {
-    // In a spatial arrangement, wrapping reads as the cursor teleporting across the cluster.
-    expect(nextFocusedDestination('left', 'ArrowLeft', () => true)).toBeNull()
-    expect(nextFocusedDestination('up', 'ArrowUp', () => true)).toBeNull()
+  it('disables only directions without a precise pane, keeps both other exits and explains why', async () => {
+    const select = vi.fn()
+    await render(<OpenDestinationBar canSplit={false} onSelect={select} />)
+    expect(buttons()).toHaveLength(OPEN_DESTINATIONS.length)
+    expect(buttons().filter(item => item.disabled).map(item => item.dataset.destination)).toEqual(OPEN_DESTINATIONS.filter(openDestinationNeedsRegion))
+    for (const destination of OPEN_DESTINATIONS.filter(openDestinationNeedsRegion)) {
+      expect(button(destination).dataset.disabledReason).toBe('A precise pane is required')
+      expect(button(destination).getAttribute('aria-label')).toContain('A precise pane is required')
+      await click(button(destination))
+    }
+    expect(select).not.toHaveBeenCalled()
+    expect(buttons().filter(item => !item.disabled).map(item => item.dataset.destination)).toEqual(['system', 'tab'])
+    expect(buttons().filter(item => item.tabIndex === 0).map(item => item.dataset.destination)).toEqual(['system'])
   })
 
-  it('skips a disabled destination rather than stranding focus on it', () => {
-    // With no precise pane, only system and tab are live: an arrow must never land on a dead button.
-    const live = (destination: OpenDestination) => !openDestinationNeedsRegion(destination)
-    expect(nextFocusedDestination('tab', 'ArrowLeft', live)).toBeNull()
-    expect(nextFocusedDestination('tab', 'ArrowUp', live)).toBeNull()
-    // Anchor: the same steps DO find those buttons when they are live, so the nulls above are the
-    // disabling at work and not a broken step.
-    expect(nextFocusedDestination('tab', 'ArrowLeft', () => true)).toBe('left')
-    expect(nextFocusedDestination('tab', 'ArrowUp', () => true)).toBe('up')
+  it('retains the allowed destination subset and its original accessible context', async () => {
+    const select = vi.fn()
+    await render(<OpenDestinationBar canSplit allowedDestinations={['tab', 'left', 'right', 'up', 'down']}
+      accessibleContext="Choose where to fork the current conversation" onSelect={select} />)
+    expect(document.querySelector('[role="toolbar"]')?.getAttribute('aria-label')).toBe('Choose where to fork the current conversation')
+    expect(buttons().map(item => item.dataset.destination)).toEqual(['tab', 'left', 'right', 'up', 'down'])
+    expect(button('system')).toBeNull()
+    expect(buttons().filter(item => item.tabIndex === 0).map(item => item.dataset.destination)).toEqual(['tab'])
+    await click(button('right')); expect(select).toHaveBeenCalledExactlyOnceWith('right')
+  })
+
+  it('navigates the actual row peers and corresponding enabled cross-row position', async () => {
+    const select = vi.fn()
+    await render(<OpenDestinationBar canSplit onSelect={select} />)
+    const toolbar = document.querySelector<HTMLElement>('[role="toolbar"]')!
+    await focus(toolbar); await key(toolbar, 'End'); expect(document.activeElement).toBe(button('down'))
+    await key(button('down'), 'Home'); expect(document.activeElement).toBe(button('system'))
+    for (const [value, expected] of [['ArrowRight', 'tab'], ['ArrowDown', 'right'], ['ArrowRight', 'up'], ['ArrowUp', 'tab'], ['ArrowDown', 'right'], ['ArrowLeft', 'left'], ['ArrowUp', 'system']] as const) {
+      await key(document.activeElement!, value)
+      expect(document.activeElement).toBe(button(expected))
+      expect(buttons().filter(item => item.tabIndex === 0)).toEqual([button(expected)])
+    }
+    await key(button('system'), 'ArrowLeft'); expect(document.activeElement).toBe(button('system'))
+    await key(button('system'), 'End'); expect(document.activeElement).toBe(button('down'))
+    await key(button('down'), 'Home'); expect(document.activeElement).toBe(button('system'))
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('skips an unavailable direction row and leaves IME-owned navigation untouched', async () => {
+    const select = vi.fn()
+    await render(<OpenDestinationBar canSplit={false} onSelect={select} />)
+    await focus(button('tab'))
+    await key(button('tab'), 'ArrowDown'); expect(document.activeElement).toBe(button('tab'))
+    const event = await key(button('tab'), 'ArrowLeft', true)
+    expect(event.defaultPrevented).toBe(false); expect(document.activeElement).toBe(button('tab'))
+    await key(button('tab'), 'ArrowLeft'); expect(document.activeElement).toBe(button('system'))
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('shows full names in the shared row slot without moving editor focus and keeps keyboard focus above hover', async () => {
+    await render(<><input aria-label="Original editor" /><OpenDestinationBar canSplit onSelect={vi.fn()} /></>)
+    const editor = container.querySelector('input')!
+    await focus(editor); await pointer(button('down'), 'pointermove')
+    expect(rowLabel('New region').textContent).toBe('Open in a split below')
+    expect(document.activeElement).toBe(editor)
+    await focus(button('left')); await pointer(button('down'), 'pointermove')
+    expect(rowLabel('New region').textContent).toBe('Open in a split on the left')
+    expect(row('New region').getAttribute('aria-label')).toBe('New region')
+    expect(button('left').getAttribute('aria-label')).toBe('Open in a split on the left')
+    await pointer(row('New region'), 'pointerout', editor); await focus(editor)
+    expect(rowLabel('New region').textContent).toBe('New region')
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
   })
 })
 
 describe('OpenDestinationPopover', () => {
-  it('keeps the URL in view so the choice never loses what it opens', () => {
-    // Mutation guard (c): remove the URL display and this disappears while the shell still renders.
-    const markup = renderPopoverMarkup({
-      request: { id: 7, url: 'https://example.com/a/long/path', x: 24, y: 32 },
-      canSplit: false,
-      onSelect: () => {},
-      onDismiss: () => {}
-    })
-    // Anchor: the popover mounted, so a missing URL is a real loss, not a null render.
-    expect(markup).toContain('role="dialog"')
-    expect(markup).toContain('data-state="open"')
-    // Pin the URL as *visible* text, not merely present anywhere: it also rides in a title attribute,
-    // so a bare toContain(url) would pass with the text gone. Assert it sits between the tags.
-    expect(markup).toContain('>https://example.com/a/long/path</span>')
+  const request = { id: 7, url: 'https://example.test/a/long/path?q=source#part', x: 24, y: 32 }
+  it('keeps the real URL readable and expands it through a keyboard-reachable non-destination control', async () => {
+    const select = vi.fn(), dismiss = vi.fn()
+    await render(<OpenDestinationPopover request={request} canSplit onSelect={select} onDismiss={dismiss} />)
+    expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Choose where to open the link')
+    const target = document.querySelector<HTMLButtonElement>('[aria-label="Show full link target"]')!
+    expect(target.textContent).toBe(request.url); expect(target.getAttribute('aria-expanded')).toBe('false')
+    const toolbar = document.querySelector<HTMLElement>('[role="toolbar"]')!
+    expect(document.activeElement).toBe(toolbar)
+    await key(toolbar, 'ArrowRight'); expect(document.activeElement).toBe(button('system'))
+    await focus(target); await click(target)
+    expect(target.getAttribute('aria-expanded')).toBe('true'); expect(target.getAttribute('aria-label')).toBe('Collapse link target')
+    expect(target.textContent).toBe(request.url); expect(select).not.toHaveBeenCalled(); expect(dismiss).not.toHaveBeenCalled()
+    await click(target); expect(target.getAttribute('aria-expanded')).toBe('false')
   })
 
-  it('spells out the disabled directions for keyboard users who cannot land on a disabled button', () => {
-    const markup = renderPopoverMarkup({
-      request: { id: 8, url: 'https://example.com/', x: 1, y: 2 },
-      canSplit: false,
-      onSelect: () => {},
-      onDismiss: () => {}
-    })
-    expect(markup).toContain('data-split-destination-explanation')
-    expect(markup).toContain('Choose a precise pane to open beside it.')
-    // Four directional buttons carry the reason on the button too.
-    expect(markup.match(/data-disabled-reason="A precise pane is required"/g) ?? []).toHaveLength(4)
+  it('explains unavailable directions outside their disabled controls and removes the explanation when addressable', async () => {
+    const props = { request, onSelect: vi.fn(), onDismiss: vi.fn() }
+    await render(<OpenDestinationPopover {...props} canSplit={false} />)
+    expect(document.querySelector('[data-split-destination-explanation]')?.textContent).toBe('Choose a precise pane to open beside it.')
+    expect(buttons().filter(item => item.disabled)).toHaveLength(4)
+    await render(<OpenDestinationPopover {...props} canSplit />)
+    expect(document.querySelector('[data-split-destination-explanation]')).toBeNull()
+    expect(buttons().some(item => item.disabled)).toBe(false)
   })
 
-  it('drops the explanation once every direction is available', () => {
-    const markup = renderPopoverMarkup({
-      request: { id: 9, url: 'https://example.com/', x: 0, y: 0 },
-      canSplit: true,
-      onSelect: () => {},
-      onDismiss: () => {}
-    })
-    expect(markup).not.toContain('data-split-destination-explanation')
-    expect(markup).not.toContain('data-disabled-reason')
+  it('dismisses the exact current request with Escape or outside press and leaves no stale surface', async () => {
+    const dismiss = vi.fn(), select = vi.fn()
+    await render(<OpenDestinationPopover request={request} canSplit onSelect={select} onDismiss={dismiss} />)
+    await key(button('system'), 'Escape'); expect(dismiss).toHaveBeenCalledExactlyOnceWith(request.id)
+    dismiss.mockClear()
+    const newer = { ...request, id: request.id + 1, url: 'https://example.test/new-target' }
+    await render(<OpenDestinationPopover request={newer} canSplit onSelect={select} onDismiss={dismiss} />)
+    await pointer(container, 'pointerdown'); expect(dismiss).toHaveBeenCalledExactlyOnceWith(newer.id)
+    expect(select).not.toHaveBeenCalled()
+    await render(<OpenDestinationPopover request={null} canSplit onSelect={select} onDismiss={dismiss} />)
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
   })
 
-  it('renders nothing without a request, so a dismissed popover leaves no stale row', () => {
-    const markup = renderPopoverMarkup({
-      request: null,
-      canSplit: true,
-      onSelect: () => {},
-      onDismiss: () => {}
-    })
-    expect(markup).toBe('')
+  it('restores the original invoker after React removes the chooser without taking later outside focus', async () => {
+    function Scene() {
+      const [pending, setPending] = useState<typeof request | null>(null)
+      return <><button onClick={() => setPending(request)}>Original link</button><input aria-label="Later editor" />
+        <OpenDestinationPopover request={pending} canSplit onSelect={vi.fn()} onDismiss={() => setPending(null)} /></>
+    }
+    await render(<Scene />)
+    const invoker = container.querySelector<HTMLButtonElement>('button')!
+    const editor = container.querySelector<HTMLInputElement>('input')!
+    await focus(invoker); await click(invoker)
+    const toolbar = document.querySelector<HTMLElement>('[role="toolbar"]')!
+    expect(document.activeElement).toBe(toolbar)
+    await key(toolbar, 'Escape')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(invoker)
+    await click(invoker); await focus(editor)
+    await key(editor, 'Escape')
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(editor)
   })
 })
 
