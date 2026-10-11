@@ -245,7 +245,8 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       setPlacedHostId(destinationId)
       if (placementWaiters.current.length) {
         const waiters = placementWaiters.current.splice(0)
-        queueMicrotask(() => host.ownerDocument.defaultView?.requestAnimationFrame(() => { for (const waiter of waiters) waiter.resolve() }))
+        // A committed DOM placement is applied even when its document cannot paint.
+        queueMicrotask(() => { for (const waiter of waiters) waiter.resolve() })
       }
       // Confirm the actual placement before describing it. Pending targets retain
       // the original View; a destination hint alone does not prove it moved.
