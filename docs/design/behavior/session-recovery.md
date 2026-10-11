@@ -147,7 +147,18 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 - 远端 endpoint 首次可信连接所得的语义 Runtime 持久身份与原 Session 引用一并保留，独立于可改的 Host 名称、SSH 连接配置、服务进程代次和 ctxmux 身份；请求始终区分原语义 owner 与当前服务代次。重启或重连遇到不同语义 owner 时保原绑定与工作面，明确身份未确认/不匹配，不能据另一个 owner 的 `unknown Session` 删除旧投影或静默换绑。最后观察是带来源的缓存，不是授权或当前权威事实；只有目标的完整成功读取才能更新对应集合。
 - 完整交付包含真实 Linux Headless 服务、真实 Provider 的输入输出/权限/语义恢复及客户端与服务重启后的自动续接。原 Tab、Tab Group、Region、焦点与 split 先恢复，续接仍归原 Session；终端连续阅读、可信续接、Gap 与成本只沿《Terminal 连续向上阅读历史》及既有终端续接合同，不因远端 framing、响应预算或断网裁掉可用历史或复制 byte 真值。
 - 连接已有服务不暗中安装、部署、升级、重启或停止远端 owner；部署管理须有显式操作与准确回执。浏览器／手机远程控制沿[公共控制合同](public-control.md#手机版-relay-连接)，不成为连接与管理既有 Runtime 的隐式前提；无关 Goal／PMO 域也不能成为前置条件。
-- 远端 Core 的维护升级资格由维护 owner 核对准确原进程、软件包、Native、持久命名空间与固定候选。替包前沿原 producer 自身的严格公共读取器取得 owner、Session/Run 与停止回执，只保留部署所需的有限事实；新版普通 SDK 只消费当前协议，不增加旧 DTO parser、兼容加载或 fallback。新版普通客户端握手尚不兼容旧服务，不能覆写已确认的维护资格。仅换 Core 时，先确认实际 Native 的进程出生身份、可执行文件与原产物归属，再由当前 Core 唯一的 Runtime 协议和必需能力合同判定相容性；候选包内备用 Native 的字节不同不是更换实际 Native 的资格，也不是相容 Core 更新的阻断理由。维护所需的物理 Run 状态来自同一 Native 实例的准确 Run 查询，不依赖 Provider 状态、输出文案或原生历史读取。Native 明确确认原引用的 Run 不存在时，保留原 Session/Run 绑定并记录该次物理缺失，不冒充 Session 终局，也不无意义阻断相容的 Core-only 更新。前后须保原 Native instance、进程、持久状态和 Run 的有序字节，源码声明不冒充 serving 源码已验证。缺少原 reader、归属或能力事实，只拒绝本次更新并保留健康 Run。已完成升级的命令绑定仍须准确，升级后的普通连接沿原操作独立确认，未知不重放升级。仅更新同一 SSH 路由、Socket 与持久 Runtime 绑定的启动命令时，先确认候选连接确属原 Runtime，再持久保存并更新后续建连命令；保留原消费者、Attachment、历史观察与健康输入输出，不要求停止 Run。候选身份未知或保存失败时保留原连接及配置。业务回执保留其原 `operationId`，不与内部 Control 请求或 JSON-RPC 关联身份混换。
+- 远端 Core 的维护升级资格由维护 owner 核对准确原进程、软件包、Native、持久命名空间与固定候选。替包前沿原 producer 自身的严格公共读取器取得 owner、Session/Run 与停止回执，只保留部署所需的有限事实；新版普通 SDK 只消费当前协议，不增加旧 DTO parser、兼容加载或 fallback。新版普通客户端握手尚不兼容旧服务，不能覆写已确认的维护资格。仅换 Core 时，先确认实际 Native 的进程出生身份、可执行文件与原产物归属，再由当前 Core 唯一的 Runtime 协议和必需能力合同判定相容性；候选包内备用 Native 的字节不同不是更换实际 Native 的资格，也不是相容 Core 更新的阻断理由。维护所需的物理 Run 状态来自同一 Native 实例的准确 Run 查询，不依赖 Provider 状态、输出文案或原生历史读取。Native 明确确认原引用的 Run 不存在时，保留原 Session/Run 绑定并记录该次物理缺失，不冒充 Session 终局，也不无意义阻断相容的 Core-only 更新。前后须保原 Native instance、进程、持久状态和 Run 的有序字节，源码声明不冒充 serving 源码已验证。缺少原 reader、归属或能力事实，只拒绝本次更新并保留健康 Run。已完成升级的命令绑定仍须准确，升级后的普通连接沿原操作独立确认，未知不重放升级。升级后的已确认启动命令采用及其他同身份接入修改沿下述[同身份路由修复](#同身份路由修复)，不因维护结果已完成而跳过候选身份核验或原读者保全。业务回执保留其原 `operationId`，不与内部 Control 请求或 JSON-RPC 关联身份混换。
+
+
+#### 同身份路由修复
+
+已持久绑定的 SSH Host 可以在 Host ID、类型和语义 Runtime 身份不变时采用经核验的新路线；产品输入、配置冲突与提交回执归[Remote 连接合同](remote-management.md#连接配置与测试)。旧路线不可达只证明旧接入未确认，不能成为尝试新已认证路线的前置条件；新路线确认失败只拒绝本次修改，保留原身份、配置、读者和仍可用能力。SSH 主机认证与原用户权限仍由系统 SSH 判定，语义 Runtime ID 不代替主机密钥或授权。
+
+候选准备不修改当前 Hosted 消费者，不以启动 Native、创建 Run 或重启原服务证明身份。经候选路线读取原 Core 权威身份并核对固定 Runtime 绑定；合法 Core 重启的服务代次仍按原 fence 重新确认，不能永久固定旧 ownerInstanceId。准确来源、候选和配置基线在采用前再核对，迟到候选不能覆盖后续配置；持久保存失败释放候选，保留原通路。
+
+采用新路线时保留同一 Hosted 消费者及其 publisher、独立 reader、Attachment 目标、最后确认的 afterByte 与历史观察意图。只结束准确旧 transport 的 lease，并由原 Hosted 恢复机制在新路线重新取得初始切面；旧 transport 的迟到 close、失败或回执不能释放后继路线的读者或撤销新确认。原 Run、AgentSession、Provider handle、Native 身份和工作面不因改地址重建；实际 Native 或进程事实尚未取得时如实未确认，Runtime 身份匹配不代签原 PTY 连续性。
+
+恢复只重开观察，绝不重发已受理或结果未知的输入、Prompt、创建、停止及其他业务写入。Run 字节连续性、Gap、读者隔离与终端阅读继续由原 owner 合同判定；附件取得准确初始切面后才收口其对应观察告示，单个失败保留其他健康能力。Files、Git、Build 和 Worktree 的后续瞬时操作使用已提交的新路线；已经发出的操作保留原目标与回执，不自动重跑。
 
 ## 恢复时机与明确操作
 
