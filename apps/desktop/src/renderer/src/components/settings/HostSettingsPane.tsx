@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { HostIcon } from '../HostBadge'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
 import { HostConnectionLibrary, type HostConnectionPanel } from './HostConnectionLibrary'
 import { HostProjectsPane } from './HostProjectsPane'
@@ -15,7 +15,13 @@ import { ConfirmationDialog } from '../ConfirmationDialog'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { HostUpgradePanel } from './HostUpgradePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
+import { HostTopology } from './HostTopology'
+import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
+import '../../styles/remote-management.css'
 
+const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')
+const ThemeLayoutListIcon = semanticIconComponent('object.list')
+const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionCreateHostIcon = semanticIconComponent('action.create-host')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
@@ -46,9 +52,22 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
   const [selectedId, setSelectedId] = useState<string | null>(() => config.hosts[0]?.id ?? null)
-  const [panel, setPanel] = useState<HostConnectionPanel>('connection')
+  const [panel, setPanel] = useState<HostConnectionPanel>('overview')
   const [projectHosts, setProjectHosts] = useState<string[]>([])
   const [upgradeHosts, setUpgradeHosts] = useState<string[]>([])
+  const [mode, setMode] = useState<'topology' | 'list'>('topology')
+  const [wide, setWide] = useState(true)
+  const container = useRef<HTMLDivElement>(null)
+  const showTopology = mode === 'topology' && wide
+  useLayoutEffect(() => {
+    const element = container.current
+    if (!element) return
+    const measure = () => { const width = element.getBoundingClientRect().width; if (width > 0) setWide(width >= 800) }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
   const [view, setView] = useState<'library' | 'editor'>('library')
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
@@ -64,13 +83,30 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const checks = useAppStore((state) => active ? state.hostChecks : NO_HOST_CHECKS)
   const checkHost = useAppStore((state) => state.checkHost)
   const sessions = useAppStore((state) => active ? state.sessions : NO_SESSIONS)
-  const projectCounts = useMemo(() => {
-    const grouped = new Map<string, number>()
+  const projectFacts = useMemo(() => {
+    const grouped = new Map<string, { count: number; search: string }>()
     for (const project of projectRailNavigation(config.workspaces).projects) {
-      grouped.set(project.hostId, (grouped.get(project.hostId) ?? 0) + 1)
+      const previous = grouped.get(project.hostId)
+      grouped.set(project.hostId, { count: (previous?.count ?? 0) + 1, search: `${previous?.search ?? ''} ${project.name} ${project.repoPath} ${project.workspaces.map(item => `${item.name} ${item.path}`).join(' ')}` })
     }
     return grouped
   }, [config.workspaces])
+  const sessionsByHost = useMemo(() => {
+    const grouped = new Map<string, SessionSnapshot[]>()
+    for (const session of sessions) {
+      const group = grouped.get(session.hostId)
+      if (group) group.push(session)
+      else grouped.set(session.hostId, [session])
+    }
+    return grouped
+  }, [sessions])
+  const selectTopologyHost = useCallback((id: string): void => {
+    setRequestedHost(null)
+    setSelectedId(id)
+    setPanel('overview')
+    setView('editor')
+    setPendingEdit(null)
+  }, [])
 
   useEffect(() => {
     if (navigationRequest?.section !== 'hosts' || navigationRequest.hostId === undefined) return
@@ -98,7 +134,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   function filterHosts(query: string): void {
     const normalized = query.trim().toLowerCase()
     setFilter({ query, snapshot: hosts.filter((host) =>
-      `${host.label} ${host.id} ${host.kind === 'ssh' ? `${host.hostname} ${host.user ?? ''}` : 'local computer'}`.toLowerCase().includes(normalized)
+      `${host.label} ${host.id} ${host.kind === 'ssh' ? `${host.hostname} ${host.user ?? ''}` : 'local computer'} ${projectFacts.get(host.id)?.search ?? ''}`.toLowerCase().includes(normalized)
     ).map((host) => host.id) })
   }
   function selectHost(id: string): void {
@@ -180,16 +216,23 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   }
 
   return (
-    <div className="settings-pane-stack settings-resource-workbench" data-resource-view={view}>
-      <div className="settings-pane-toolbar">
-        <span className="settings-resource-count">{filter.query.trim() ? `${hosts.filter((host) => matches(host.id)).length} of ` : ''}{hosts.length} {hosts.length === 1 ? 'connection' : 'connections'}</span>
-        <button className="small-button" disabled={saving} onClick={addHost}><ThemeActionCreateHostIcon size={13} /> Add SSH host</button>
+    <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}>
+      <div className="settings-pane-toolbar remote-management__toolbar">
+        <div className="remote-management__scope"><strong>{hosts.length}</strong><span>environments</span><small>{hosts.filter(host => host.kind === 'ssh').length} SSH</small></div>
+        {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find an environment or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
+        {wide ? <div className="remote-management__modes" aria-label="Environment view">
+          <button type="button" aria-label="Topology" aria-pressed={showTopology} onClick={() => setMode('topology')}><ThemeObjectTopologyIcon size={14} /><span>Topology</span></button>
+          <button type="button" aria-label="List" aria-pressed={!showTopology} onClick={() => setMode('list')}><ThemeLayoutListIcon size={14} /><span>List</span></button>
+        </div> : null}
+        <button className="small-button" data-add-host disabled={saving} onClick={addHost}><ThemeActionCreateHostIcon size={13} /> Add SSH host</button>
       </div>
-      <div className="settings-resource-split">
-        <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
+      {filter.query.trim() ? <p className="remote-management__filter" role="status">{hosts.filter(host => matches(host.id)).length} of {hosts.length} configured environments match “{filter.query}”{selectedId && !matches(selectedId) ? ' · Selected environment remains open' : ''}</p> : null}
+      <div className="settings-resource-split remote-management__body">
+        {showTopology ? active ? <HostTopology selectedId={selectedId} onSelect={selectTopologyHost}
+          items={hosts.filter(host => matches(host.id)).map(host => ({ host, check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)
-            const projects = projectCounts.get(host.id) ?? 0
+            const projects = projectFacts.get(host.id)?.count ?? 0
             return {
               id: host.id, name: host.label,
               projectCount: projects,
@@ -197,12 +240,13 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
               mark: <HostIcon kind={host.kind} size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state === 'error' ? check.result?.outcome ?? 'check-failed' : check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
-          })} />
+          })} />}
         <div ref={editor} className="settings-resource-editor">
           <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All connections</button>
         {hosts.filter((host) => host.id === selectedId).map((host) => {
           const check = currentHostCheck(checks[host.id], host)
-          const sessionCount = sessions.filter((session) => session.hostId === host.id).length
+          const hostSessions = sessionsByHost.get(host.id) ?? NO_SESSIONS
+          const sessionCount = hostSessions.length
           return (
             <section className="host-settings-card" key={host.id} data-resource-editor={host.id} data-host-view={panel} tabIndex={-1}>
               <header className="settings-resource-editor__header">
@@ -218,6 +262,22 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                 {panel === 'connection' ? <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button> : null}
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><ThemeActionRemoveIcon size={14} /></button> : null}
               </header>
+              <nav className="remote-detail-tabs" aria-label={`Sections for ${host.label}`}>
+                {(['overview', 'projects', 'agents', 'connection'] as const).map(page => <button type="button" key={page} data-host-panel={page}
+                  aria-current={panel === page ? 'page' : undefined} onClick={() => selectHostPanel(host.id, page)}>
+                  {{ overview: 'Overview', projects: 'Projects', agents: 'Agents', connection: 'Connection' }[page]}</button>)}
+              </nav>
+              {panel === 'overview' ? <div className="remote-overview">
+                <dl className="remote-overview__facts"><div><dt>Projects</dt><dd>{projectFacts.get(host.id)?.count ?? 0}<small>registered</small></dd></div>
+                  <div><dt>Sessions</dt><dd>{sessionCount}<small>client references</small></dd></div></dl>
+                <div className="remote-overview__identity"><span>Last connection test</span><strong>{hostCheckLabel(check ?? { state: 'idle' })}</strong>
+                  {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
+                  {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
+                <HostSessionSummary sessions={hostSessions} active={active && (wide || view === 'editor')} onOpen={id => { useAppStore.getState().selectSession(id); onClose?.() }} />
+                <details className="remote-overview__technical"><summary>Environment identity</summary><dl><div><dt>Host route</dt><dd><code>{host.id}</code></dd></div>
+                  <div><dt>Runtime binding</dt><dd><code>{host.kind === 'ssh' ? host.runtimeId ?? 'Not confirmed' : 'Local service'}</code></dd></div></dl></details>
+              </div> : null}
+              {panel === 'agents' ? <HostExecutorsSummary config={config} host={host} active={active && (wide || view === 'editor')} /> : null}
               {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
                 <details className="host-check-details">
                   <summary>Test details <ThemeNavigationDownIcon size={13} /></summary>
@@ -233,7 +293,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onClear={(field) => clear(host.id, field)}
                 />
               ) : <div className="settings-local-host"><strong>Your local environment</strong><p>Uses this computer’s installed agents and registered projects. No SSH configuration needed.</p></div> : null}
-              {sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
+              {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )
         })}
