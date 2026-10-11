@@ -80,7 +80,12 @@ async function nativeReady(count?: number) {
     'The matching original modal publication must finish native paint')
 }
 async function point(selector: string, text?: string) {
-  const cssPoint = await read(`(()=>{const node=[...document.querySelectorAll(${JSON.stringify(selector)})].find(node=>${text === undefined ? 'true' : `node.textContent.trim()===${JSON.stringify(text)}`});if(!node)throw Error('Actual target missing');const r=node.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+  const target = await read(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})],node=nodes.find(node=>${text === undefined ? 'true' : `node.textContent.trim()===${JSON.stringify(text)}`});if(node){const r=node.getBoundingClientRect();return{point:{x:r.x+r.width/2,y:r.y+r.height/2}}}const describe=node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return{tag:node.tagName,id:node.id,role:node.getAttribute('role'),state:node.getAttribute('data-state'),text:node.textContent,innerText:node.innerText,ariaLabel:node.getAttribute('aria-label'),bounds:{x:r.x,y:r.y,width:r.width,height:r.height},display:s.display,visibility:s.visibility,html:node.outerHTML.slice(0,2400)}};return{point:null,candidates:nodes.map(describe),menus:[...document.querySelectorAll('[role="menu"]')].map(describe),invokers:[...document.querySelectorAll('[data-pmo-teams-topic-launcher] button')].map(describe)}})()`)
+  if (!target.point) {
+    receipt.targetFailures ??= []; receipt.targetFailures.push({ selector, expectedText: text, ...target })
+    throw new Error('Actual target missing: ' + JSON.stringify({ selector, expectedText: text }))
+  }
+  const cssPoint = target.point
   const zoom = window.webContents.getZoomFactor()
   return { x: Math.round(cssPoint.x * zoom), y: Math.round(cssPoint.y * zoom) }
 }
@@ -508,11 +513,32 @@ async function verifyAvatar() {
     window.setContentSize(1280, 960); layout(); await painted()
     await read('layeringProbe.avatar.start(' + JSON.stringify(fixture.seed) + ')'); await painted()
     await wait(() => read('!!document.querySelector("[data-pmo-teams-topic-launcher] button[data-space-icon-target]")'), 'The original Mote entry must resolve its exact directory/avatar target')
-    const invoker = await point('[data-pmo-teams-topic-launcher] button')
+    // The gallery retains Workbench behind this launcher. Reuse the production
+    // navigation slot's chrome placement, rather than placing a bare invoker below it.
+    const inspectInvoker = () => read(`(()=>{
+      const nodes=[...document.querySelectorAll('[data-pmo-teams-topic-launcher] button')].filter(node=>node.dataset.spaceIconTarget===${JSON.stringify(fixture.seed.baseline.target.objectKey)});
+      if(nodes.length!==1)return{count:nodes.length};
+      const node=nodes[0],slot=node.closest('[data-pmo-teams-topic-launcher]');slot.classList.add('surface-navigation__slot--launcher');
+      for(const property of ['position','left','top'])slot.style.removeProperty(property);
+      node.setAttribute('data-ui-layering-avatar-invoker','');
+      const r=node.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+      const chain=node=>{const values=[];for(;node;node=node.parentElement){const s=getComputedStyle(node),r=node.getBoundingClientRect();values.push({tag:node.tagName,id:node.id,className:node.className,role:node.getAttribute('role'),position:s.position,zIndex:s.zIndex,isolation:s.isolation,pointerEvents:s.pointerEvents,visibility:s.visibility,bounds:{x:r.x,y:r.y,width:r.width,height:r.height}})}return values};
+      return{count:nodes.length,targetKey:node.dataset.spaceIconTarget,slot:'surface-navigation__slot--launcher',layer:getComputedStyle(slot).zIndex,bounds:{x:r.x,y:r.y,width:r.width,height:r.height},hit:hit===node||node.contains(hit),invokerChain:chain(node),hitChain:chain(hit),topLayers:[...document.querySelectorAll(':popover-open,dialog[open]')].map(node=>({tag:node.tagName,id:node.id,className:node.className}))}
+    })()`)
+    receipt.avatarInvokerBeforeMove = await inspectInvoker()
+    assert.equal(receipt.avatarInvokerBeforeMove.count, 1, 'The exact original Avatar target has one fixture Mote invoker')
+    const invoker = await point('[data-ui-layering-avatar-invoker]')
+    await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: invoker.x / window.webContents.getZoomFactor(), y: invoker.y / window.webContents.getZoomFactor(), button: 'none' })
+    await painted(); receipt.avatarInvoker = await inspectInvoker()
+    assert.equal(receipt.avatarInvoker.count, 1, 'The exact original Avatar target has one fixture Mote invoker')
+    assert.equal(receipt.avatarInvoker.hit, true, 'The original Mote invoker must own the actual pointer hit before its context menu opens')
     for (const type of ['mousePressed', 'mouseReleased']) await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type,
       x: invoker.x / window.webContents.getZoomFactor(), y: invoker.y / window.webContents.getZoomFactor(), button: 'right', clickCount: 1 })
-    await wait(() => read('!!document.querySelector("[role=menu]")'), 'The original Mote context menu must open')
-    await click('[role=menuitem]', 'Change avatar…')
+    await wait(() => read('!!document.querySelector("[role=menu][data-state=open]")'), 'The original Mote context menu must open')
+    receipt.avatarMenu = await read(`(()=>{const trigger=document.querySelector('[data-ui-layering-avatar-invoker]')?.closest('[data-pmo-teams-topic-launcher]'),menus=[...document.querySelectorAll('[role=menu][data-state=open]')];return{triggerOpen:trigger?.getAttribute('data-state')==='open',targetKey:trigger?.querySelector('button')?.dataset.spaceIconTarget,menus:menus.map(node=>({className:node.className,labels:[...node.querySelectorAll('[role=menuitem]')].map(item=>item.textContent.trim())}))}})()`)
+    assert.equal(receipt.avatarMenu.triggerOpen, true, 'The exact original Mote trigger must own the open context menu')
+    assert.equal(receipt.avatarMenu.targetKey, fixture.seed.baseline.target.objectKey); assert.equal(receipt.avatarMenu.menus.length, 1)
+    await click('[role=menu][data-state=open] [role=menuitem]', 'Change avatar…')
     await wait(() => read('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady === "true"'), 'The real Avatar editor must read the original isolated saved identity')
     await nativeReady(); assert.equal((await avatar()).menuOpen, false, 'The original menu releases focus before opening Avatar')
     await click('[data-avatar-source=series]', undefined, true)
@@ -545,6 +571,7 @@ async function verifyAvatar() {
     }
     await click('.space-icon-picker footer button', 'Cancel', true); await nativeReady(0)
     const cancelled = await avatar(); assert.equal(cancelled.modalId, undefined); assert.equal(cancelled.activeInvoker, true, 'Avatar Cancel returns focus to its exact original Mote entry')
+    assert.equal(await read('document.activeElement?.matches("[data-ui-layering-avatar-invoker]")'), true, 'Avatar Cancel focuses the exact target-bound original invoker')
     assert.ok(cancelled.calls.every((call: any) => !['save', 'config.save'].includes(call.method)), 'Avatar Cancel never invokes a saved-avatar/configuration write')
     await fixture.verifyUnchanged()
     for (const field of ['sessions', 'drafts', 'tabs', 'layout', 'stops', 'writes', 'pastes']) assert.deepEqual((await facts()).workbench[field], originalWork[field], 'Avatar retains original workbench ' + field)
