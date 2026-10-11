@@ -481,7 +481,7 @@ export class AgentMuxAgentSessionRegistry {
   }
 
   /** Refresh one binding without replacing unrelated Sessions or writing an unchanged record. */
-  async refresh(agentSessionId: string, expectedRun: AgentMuxRunRef, futureIntentId?: string): Promise<AgentMuxStoredAgentSession> {
+  async refresh(agentSessionId: string, expectedRun?: AgentMuxRunRef, futureIntentId?: string): Promise<AgentMuxStoredAgentSession> {
     return await this.enqueue(agentSessionId, async () => {
       const previous = this.get(agentSessionId)
       const current = await this.store.readMetadata(agentSessionId)
@@ -497,7 +497,7 @@ export class AgentMuxAgentSessionRegistry {
       this.assertAvailable(current)
       this.forget(previous)
       this.remember(current)
-      if (!sameRun(current.run, expectedRun)) {
+      if (expectedRun && !sameRun(current.run, expectedRun)) {
         throw new AgentMuxError('Agent Session changed before prompt Input.', 'STALE_AGENT_SESSION')
       }
       if (futureIntentId === undefined) return this.get(agentSessionId)

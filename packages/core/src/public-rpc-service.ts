@@ -194,6 +194,7 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
+  'agent.refresh': ['agentSessionId'],
   'agent.native.confirm': ['agentSessionId', 'expectedRun', 'expectedNativeHandle', 'candidateNativeHandle', 'expectedObservationAt', 'operationId'],
   'agent.native.ls': ['hostId', 'executorId', 'workspacePath'],
   'agent.native.history': ['hostId', 'executorId', 'source', 'cursor', 'limit'],
@@ -1278,6 +1279,16 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted()
         result = await readAgentContext(scope.client, input, descriptor)
         break
+      }
+      case 'agent.refresh': {
+        const agentSessionId = rpcString(p.agentSessionId, 'Complete original Session ID')
+        const selected = await this.owner(agentSessionId)
+        if (selected.agentSessionId !== agentSessionId) throw new AgentMuxError(
+          'Session refresh requires the complete original Session ID.', 'INVALID_CONTROL_REQUEST')
+        const session = await selected.client.refreshAgentSession(agentSessionId)
+        if (session.agentSessionId !== agentSessionId || session.hostId !== selected.session.hostId) throw new AgentMuxError(
+          'Session refresh returned another original Session or Host.', 'CONTROL_PROTOCOL_ERROR')
+        result = { session }; break
       }
       case 'agent.inspect': {
         const target = rpcRecord(p.target)
