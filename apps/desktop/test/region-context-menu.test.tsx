@@ -101,11 +101,14 @@ describe('换位一节住在 entries 里：给了目标就有，没有就整节�
       writeClipboardText: vi.fn(async () => {}),
       swapMenu
     }).entries
-    const swaps = entries.filter((entry) => entry.kind === 'swap')
+    const groups = entries.filter((entry) => entry.kind === 'swaps')
+    expect(groups).toHaveLength(1)
+    expect(groups[0]!.entries).toBe(swapMenu)
+    const swaps = groups.flatMap((entry) => entry.entries)
     expect(swaps).toHaveLength(swapMenu.length)
-    expect(swaps.map((entry) => (entry.kind === 'swap' ? entry.entry : null))).toEqual(swapMenu)
+    expect(swaps).toEqual(swapMenu)
     // 排在末尾一组，前面隔一道分隔线（不画悬在别处的孤线）。
-    const firstSwapAt = entries.findIndex((entry) => entry.kind === 'swap')
+    const firstSwapAt = entries.findIndex((entry) => entry.kind === 'swaps')
     expect(firstSwapAt).toBeGreaterThan(0)
     expect(entries[firstSwapAt - 1]?.kind, '换位一节前面缺一道分隔线').toBe('separator')
   })
@@ -120,7 +123,7 @@ describe('换位一节住在 entries 里：给了目标就有，没有就整节�
     // 先钉住「菜单本身还在」：下面两条都是「没有 swap」的形状，对空 entries 恒成立，于是整份
     // 菜单一项都不画时它们照样绿——而「右键出来个空菜单」比「多了两条换位项」严重得多。
     expect(entries.filter((entry) => entry.kind === 'action').length).toBeGreaterThan(0)
-    expect(entries.some((entry) => entry.kind === 'swap')).toBe(false)
+    expect(entries.some((entry) => entry.kind === 'swaps')).toBe(false)
     // 不给 swapMenu 时同样不出现。
     const withoutSwap = createRegionCopyModel({
       regionId: 'region:pane-2',
@@ -128,7 +131,7 @@ describe('换位一节住在 entries 里：给了目标就有，没有就整节�
       writeClipboardText: vi.fn(async () => {})
     }).entries
     expect(withoutSwap.filter((entry) => entry.kind === 'action').length).toBeGreaterThan(0)
-    expect(withoutSwap.some((entry) => entry.kind === 'swap')).toBe(false)
+    expect(withoutSwap.some((entry) => entry.kind === 'swaps')).toBe(false)
   })
 
   it('点一条换位，发出的就是那一条的 onSelect', () => {
@@ -143,8 +146,12 @@ describe('换位一节住在 entries 里：给了目标就有，没有就整节�
         { targetRegionId: 'region:pane-9', label: 'Swap with example.com', onSelect: second }
       ]
     }).entries
-    const swaps = entries.filter((entry) => entry.kind === 'swap')
-    for (const entry of swaps) if (entry.kind === 'swap') entry.entry.onSelect()
+    const swaps = entries.flatMap((entry) => entry.kind === 'swaps' ? entry.entries : [])
+    expect(swaps.map((entry) => entry.targetRegionId)).toEqual(['region:pane-1', 'region:pane-9'])
+    swaps[0]!.onSelect()
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).not.toHaveBeenCalled()
+    swaps[1]!.onSelect()
     expect(first).toHaveBeenCalledTimes(1)
     expect(second).toHaveBeenCalledTimes(1)
   })
