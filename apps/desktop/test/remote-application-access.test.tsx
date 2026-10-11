@@ -166,3 +166,27 @@ it('application-source: source Host edits the true target and removes a rule mov
   expect(queried, 'Changing a rule never changes the original operation ID').toEqual(['original-source-operation'])
   expect(applied, 'Editing a rule never replays synchronization').toEqual([])
 })
+
+it('application-save-baseline: a confirmed delayed save advances only the baseline of a later same-rule draft', async () => {
+  let confirm!: (value: ApplicationAccessConfiguration) => void
+  const requests: Array<{ profileId: string; expectedRevision: string; profile: ApplicationAccessConfiguration['profile'] }> = []
+  const original = vi.mocked(api.applications.call).getMockImplementation()!
+  vi.mocked(api.applications.call).mockImplementation((async (method: string, input: Record<string,unknown>) => {
+    if (method === 'settings.applications.configure') {
+      requests.push(structuredClone(input) as typeof requests[number])
+      if (requests.length === 1) return new Promise<ApplicationAccessConfiguration>(resolve => { confirm=resolve })
+      return { profileId: configuration.profileId, revision: 'second-confirmed-revision', profile: input.profile }
+    }
+    return original(method as never,input as never)
+  }) as typeof api.applications.call)
+  await dom.render(panel()); await click('Edit rule'); await click('Save application rule')
+  expect(requests).toHaveLength(1)
+  const name = () => dom.container.querySelector<HTMLInputElement>('.application-access__fields label:first-child input')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(name(),'Later authored title');name().dispatchEvent(new Event('input',{bubbles:true})) })
+  await act(async () => confirm({ profileId: configuration.profileId, revision: 'first-confirmed-revision', profile: requests[0]!.profile }))
+  expect(name().value, 'Save response preserves every later authored field').toBe('Later authored title')
+  await click('Save application rule')
+  expect(requests[1]?.expectedRevision, 'Later draft uses the confirmed save revision').toBe('first-confirmed-revision')
+  expect(requests[1]?.profile.label).toBe('Later authored title')
+  expect(applied).toEqual([])
+})

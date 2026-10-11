@@ -10,6 +10,7 @@ assert.ok(evidence, 'Explicit owned evidence directory')
 const mutant = process.env.AGENTMUX_CONNECTIONS_MUTANT ?? 'baseline'
 const base = 'apps/desktop/src/renderer/src/components/settings/'
 const edits: Record<string, { file: string; before: string; after: string }> = {
+  'application-save-baseline': { file: base + 'HostApplicationAccessPanel.tsx', before: '{ ...current, revision: result.revision }', after: 'current' },
   'application-source': { file: base + 'HostApplicationAccessPanel.tsx', before: 'value={draft[side]} hosts={hosts}', after: "value={draft[side]} hosts={side === 'target' ? hosts.filter(item => item.id === host.id) : hosts}" },
   'application-target': { file: base + 'HostSettingsPane.tsx', before: '<HostApplicationAccessPanel host={draft}', after: '<HostApplicationAccessPanel host={hosts[0]!}' },
   'application-original': { file: base + 'HostApplicationAccessPanel.tsx', before: "'settings.applications.operation', { operationId: id }", after: "'settings.applications.operation', { operationId: id + '-another' }" },
