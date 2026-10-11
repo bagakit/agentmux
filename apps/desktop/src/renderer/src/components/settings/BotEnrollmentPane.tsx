@@ -354,8 +354,8 @@ function setupHeading(operation: ConnectionEnrollmentOperation | null, view: Con
   return { title: 'Bot creation is not confirmed', summary: 'We cannot confirm whether the original request created a bot. Its original result is kept.' }
 }
 
-export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
-  enrollment: ReturnType<typeof useBotEnrollment>; onExisting(): void; onSaved(record: ConnectionRecord): void
+export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue }: {
+  enrollment: ReturnType<typeof useBotEnrollment>; onExisting(): void; onSaved(record: ConnectionRecord): void; onContinue?: ((record: ConnectionRecord) => void) | undefined
 }) {
   const { operation, view, submitted, selectedId, busy, issuer, label } = enrollment
   const available = enrollment.capabilities.filter(item => item.availability === 'available')
@@ -384,7 +384,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
     <header className="connector-enrollment__heading">
       {current ? <p className="connector-enrollment__identity"><strong>{current.label}</strong><span>{platform}</span></p> : null}
       <h3 className="connector-editor-title">{heading.title}</h3>
-      <p className="connector-enrollment__summary">{heading.summary}</p>
+      <p className="connector-enrollment__summary">{saved && onContinue ? 'Continue with your saved sign-in. You’ll confirm the management account before reviewing this bot.' : heading.summary}</p>
       {operation?.diagnostic ? <p className="connector-enrollment__diagnosis" data-enrollment-diagnosis>{diagnosticCopy[operation.diagnostic.code]}</p> : null}
     </header>
     {!current ? <>
@@ -407,13 +407,13 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved }: {
         <div><dt>Enterprise</dt><dd>{view.account.tenantName ?? view.account.tenantId}{view.account.tenantName ? <small>{view.account.tenantId}</small> : null}</dd></div>
       </dl> : null}
       {primary?.kind === 'create' ? <div className="connector-enrollment__creation">{identity}<p>Creates one bot, gets its credentials and saves it securely here. Message setup and publishing come next.</p></div> : null}
-      {saved ? <ConnectionSetupResult record={saved} /> : null}
+      {saved ? onContinue ? <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult record={saved} /></details> : <ConnectionSetupResult record={saved} /> : null}
       <div className="connector-enrollment__action" aria-busy={!!busy}>
-        {saved ? <button data-enrollment-saved className="small-button" onClick={() => onSaved(saved)}>Manage bot</button> : primary ? <button data-enrollment-advance data-enrollment-action={primary.kind} className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{busy ? primary.kind === 'create' ? 'Creating your bot…' : 'Checking…' : primary.kind === 'confirm-account' ? 'Use this account' : primary.kind === 'read-credential' ? 'Finish saving this bot' : actionLabel[primary.kind]}</button> : <button data-enrollment-inspect className="primary-button" onClick={() => void enrollment.inspect()}>Check original setup</button>}
+        {saved ? <>{onContinue ? <button data-enrollment-continue className="primary-button" onClick={() => onContinue(saved)}>Continue bot setup</button> : null}<button data-enrollment-saved className="small-button" onClick={() => onSaved(saved)}>Manage bot</button></> : primary ? <button data-enrollment-advance data-enrollment-action={primary.kind} className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{busy ? primary.kind === 'create' ? 'Creating your bot…' : 'Checking…' : primary.kind === 'confirm-account' ? 'Use this account' : primary.kind === 'read-credential' ? 'Finish saving this bot' : actionLabel[primary.kind]}</button> : <button data-enrollment-inspect className="primary-button" onClick={() => void enrollment.inspect()}>Check original setup</button>}
         {enrollment.driving && view && !enrollment.issue ? <p role="status" className="settings-group-note">{view.challenge ? 'Waiting for your phone confirmation…' : 'Continuing this sign-in…'}</p> : null}
         {feedback}
       </div>
-      {!saved ? <div className="connector-enrollment__alternative"><button data-enrollment-existing className="connector-enrollment__text-action" onClick={onExisting}>Connect an existing bot</button></div> : <div className="connector-next-step"><CheckIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. Choose the audience and what to share there.</p></div></div>}
+      {!saved ? <div className="connector-enrollment__alternative"><button data-enrollment-existing className="connector-enrollment__text-action" onClick={onExisting}>Connect an existing bot</button></div> : onContinue ? <div className="connector-next-step"><CheckIcon size={18} /><div><strong>Next, review this bot’s setup</strong><p>Confirm the management account before reviewing its settings. Configuration and publishing are separate steps.</p></div></div> : <div className="connector-next-step"><CheckIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. Choose the audience and what to share there.</p></div></div>}
       {renew ? <details className="connector-optional"><summary>Use another sign-in</summary><p className="settings-group-note">Sign in again for this same {operation?.application ? 'bot' : 'setup'}. The original result is kept; signing in does not create a bot.</p><button data-enrollment-renew className="small-button" disabled={!!busy} onClick={() => void enrollment.advance(renew)}>Show a new sign-in code</button></details> : null}
       <details className="connector-diagnostics"><summary>{saved ? 'Original setup details' : 'Technical details'}</summary>
         {enrollment.issueDetail ? <p className="connector-enrollment__technical" data-enrollment-error-detail>{enrollment.issueDetail}</p> : null}

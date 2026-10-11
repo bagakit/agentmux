@@ -96,8 +96,10 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     catch (error) { setIssue(presentError(error)) }
   }
   const existing = () => { if (selected && !pending.current) edit(null); else setView('new') }
-  const current = selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
-  const management = useConnectionManagementSetup(current, active && (view === 'saved' || view === 'management'), view === 'management')
+  const current = view === 'enrollment' ? enrolled?.connection ?? null : selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
+  const management = useConnectionManagementSetup(current, active && (view === 'saved' || view === 'management' || view === 'enrollment' && !!enrolled), view === 'management')
+  const continuationSupport = management.catalog?.value?.support
+  const canContinueEnrollment = !!current && continuationSupport?.connectionRevision === current.revision && continuationSupport.capabilities.includes('enrollment-continuation')
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
   if (!active) return null
   return <div className="settings-pane-stack connector-onboarding" data-connector-settings>
@@ -105,7 +107,12 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
       <p className="settings-group-note" role="status">Reading saved applications…</p>
       <div className="connector-editor-actions"><button type="button" className="primary-button" onClick={() => setView('enrollment')}>Set up a bot</button><button type="button" className="small-button" onClick={existing}>Connect an existing bot</button></div>
     </section> : null}
-    {view === 'enrollment' ? <BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => saved(record, 'Application saved.')} /> : null}
+    {view === 'enrollment' ? <BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => saved(record, 'Application saved.')} onContinue={canContinueEnrollment ? record => {
+      const operation = enrollment.operation
+      if (!operation?.configured || operation.configured.connection.config.connectionId !== record.config.connectionId) return
+      management.handoff({ kind: 'enrollment', operationId: operation.operationId, expectedRevision: operation.revision })
+      setSelected(record); setView('management')
+    } : undefined} /> : null}
     {view === 'library' ? <section className="connector-library" aria-label="Saved chat applications">
       <div className="settings-pane-toolbar"><strong>Bot applications</strong><button className="small-button" onClick={() => void read()}>Refresh</button><button data-enrollment-new className="primary-button" onClick={() => setView('enrollment')}>Add a bot</button><button data-enrollment-existing className="small-button" onClick={existing}>Connect an existing bot</button></div>
       <p className="settings-group-note">Choose an application to check or change its connection. Groups are connected from each Agent’s menu.</p>
