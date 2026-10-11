@@ -192,6 +192,9 @@ export function NoteReader({ content, path, workspaceId, revision, noteProvenanc
     return blockIds && source ? projectNoteBlocks(source, blockIds, highlightBlockIds) : null
   }, [knowledge, blockIds, highlightBlockIds, workspaceId, path])
   const block = target ? resolveNoteBlock(knowledge, target) : null
+  // A different read-only projection is not a revision of the same editing draft.
+  const readingScope = JSON.stringify([workspaceId, path, parsed.status === 'valid' ? parsed.note.noteId : null,
+    blockIds ? [...new Set(blockIds)].sort() : null, blockIds ? clipBlocks : null])
   useEffect(() => {
     if (!target || block?.status !== 'resolved') return
     const element = [...body.current?.querySelectorAll<HTMLElement>('[data-block-id]') ?? []].find(element => element.dataset.blockId === target.blockId)
@@ -202,7 +205,7 @@ export function NoteReader({ content, path, workspaceId, revision, noteProvenanc
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
+    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : parsed.note.content} />}
   </div></Scope.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
 function EditableNote({ note, content, revision, editing, original, onWritten }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument; onWritten(document: NoteFileDocument): void }) {
