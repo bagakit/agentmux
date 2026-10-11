@@ -9,19 +9,21 @@ import { pathToFileURL } from 'node:url'
 const root = resolve(import.meta.dirname, '../../../../..'), desktop = join(root, 'apps/desktop'), require = createRequire(join(desktop, 'package.json'))
 const output = process.env.AGENTMUX_RECOVERY_ACTION_PRESENTATION
 assert.ok(output, 'Explicit private presentation receipt is required.')
+const recheck = process.env.AGENTMUX_RECOVERY_RECHECK_PRESENTATION === '1'
 const unobserved = process.env.AGENTMUX_RECOVERY_UNOBSERVED_PRESENTATION === '1'
 const evidence = resolve(output, '..'), temporary = await mkdtemp(join(root, '.tmp/recovery-actions-presentation-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const entry = `import React from 'react';import { createRoot } from 'react-dom/client';
-import { initializeRecoveryScene,recoveryScene,setUnobservedRecoveryScene } from '${join(desktop, 'scripts/fixtures/recovery-actions/presentation-cases.tsx')}';
-import { applyAppAppearance } from '${join(desktop,'src/renderer/src/lib/app-appearance.ts')}';
+import { initializeRecoveryScene,recoveryScene,setUnobservedRecoveryScene,setOriginalRecheckScene } from '${join(desktop, 'scripts/fixtures/recovery-actions/presentation-cases.tsx')}';
+import { mountThemeRuntime,updateThemeSelection } from '@agentmux/client-ui/theme';
+const applyAppAppearance=mode=>updateThemeSelection({appAppearance:mode});mountThemeRuntime(window,{appAppearance:'dark'});
 import '${join(desktop,'src/renderer/src/styles/index.css')}';
-await initializeRecoveryScene();${unobserved ? "setUnobservedRecoveryScene('connecting');" : ''}applyAppAppearance('dark');const root=createRoot(document.getElementById('root'));root.render(recoveryScene());
+await initializeRecoveryScene();${recheck ? 'setOriginalRecheckScene();' : ''}${unobserved ? "setUnobservedRecoveryScene('connecting');" : ''}applyAppAppearance('dark');const root=createRoot(document.getElementById('root'));root.render(recoveryScene());
 window.__setUnobservedRecovery=mode=>setUnobservedRecoveryScene(mode);window.__fixtureReady=true;window.__setLight=light=>{applyAppAppearance(light?'light':'dark')};`
 const main = `import { app,BrowserWindow } from 'electron';import { readFileSync,writeFileSync } from 'node:fs';import { createHash } from 'node:crypto';
 app.setPath('home',process.env.PRIVATE_HOME);app.setPath('userData',process.env.PRIVATE_DATA);
 const hash=b=>createHash('sha256').update(b).digest('hex');
-const report={schema:'agentmux.session-recovery-actions-presentation.v1',passed:false,userRuntimeTouched:false,images:[],limitations:['Actual production SessionPane and dialog mounted in a private Electron renderer, with explicit synthetic Store/API replies. No native restore, user GUI, input, Runtime or installed package qualification.']};
+const report={schema:'agentmux.session-recovery-actions-presentation.v1',passed:false,userRuntimeTouched:false,recheckOnly:${recheck},images:[],limitations:['Actual production SessionPane and dialog mounted in a private Electron renderer, with explicit synthetic Store/API replies. No native restore, user GUI, input, Runtime or installed package qualification.']};
 let window;const wait=async(fn,label)=>{const end=Date.now()+12000;while(Date.now()<end){if(await fn())return;await new Promise(r=>setTimeout(r,25))}throw new Error(label)};
 app.whenReady().then(async()=>{try{
  window=new BrowserWindow({width:820,height:760,show:true,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}});
@@ -37,7 +39,11 @@ app.whenReady().then(async()=>{try{
   if(facts.dialogRect&&(facts.dialogRect.left<0||facts.dialogRect.right>width+1||facts.dialogRect.top<0||facts.dialogRect.bottom>height+1||facts.dialogRect.scrollWidth>facts.dialogRect.clientWidth))throw new Error('Dialog escaped viewport: '+label);
   if(process.env.PRIVATE_UNOBSERVED==='1'&&(!facts.actions?.includes('Check original')||!facts.actions.includes('Take over…')||!facts.actions.includes('Analyze…')||facts.stageScrollWidth>facts.stageWidth))throw new Error('Original reference actions are missing or overflow: '+label);
   const png=await window.webContents.capturePage(),bytes=png.toPNG(),path=process.env.PRIVATE_EVIDENCE+'/'+label+'.png';writeFileSync(path,bytes);report.images.push({label,path,sha256:hash(bytes),facts});};
- ${unobserved ? `
+ ${recheck ? `
+ await frame('original-recheck-dark',820,820,false);
+ await click('Re-read original');await wait(()=>evaluate('document.body.textContent.includes("Original Session recheck failed")'),'actual original recheck feedback');
+ await frame('original-recheck-narrow',360,900,true);
+ ` : unobserved ? `
  await frame('connecting-original-dark',820,760,false);await frame('connecting-original-narrow',360,620,false);
  await evaluate('window.__setUnobservedRecovery("created")');await wait(()=>evaluate('document.querySelector("[data-agent-surface-mode=unconfirmed]") && !!document.querySelector(".session-recovery-actions")'),'actual accepted early return');
  await frame('created-original-dark',820,760,false);await frame('created-original-narrow',360,620,false);` : ` await frame('original-three-actions-dark',820,760,false);await click('Take over…');await wait(()=>evaluate('!!document.querySelector(".session-recovery-dialog")'),'takeover dialog');await choose('Recovery Executor','codex');
@@ -50,7 +56,7 @@ app.whenReady().then(async()=>{try{
  await wait(()=>evaluate('document.querySelector(".session-recovery-dialog")?.textContent.includes("Creation is unconfirmed")'),'actual unknown creation notice');await frame('unknown-original-request-dark',820,820,false);`}
 
  const scriptId=scripts.get(process.env.PRIVATE_MODULE_URL);if(!scriptId)throw new Error('Loaded production Renderer module absent');const actual=await window.webContents.debugger.sendCommand('Debugger.getScriptSource',{scriptId});
- report.loadedRendererSha256=hash(readFileSync(process.env.PRIVATE_MODULE));if(hash(Buffer.from(actual.scriptSource))!==report.loadedRendererSha256)throw new Error('Loaded Renderer bytes differ');report.passed=true;
+ report.loadedRendererSha256=hash(readFileSync(process.env.PRIVATE_MODULE));if(hash(Buffer.from(actual.scriptSource))!==report.loadedRendererSha256)throw new Error('Loaded Renderer bytes differ');if(report.console?.some(message=>/Uncaught|Unhandled/u.test(message)))throw new Error('Private presentation has an unhandled Renderer exception');report.passed=true;
 }catch(error){report.error=error.stack||String(error)}finally{writeFileSync(process.env.PRIVATE_REPORT,JSON.stringify(report,null,2));window?.destroy();app.exit(report.passed?0:1)}});`
 let child, completed = false
 try {
@@ -58,6 +64,11 @@ try {
  await writeFile(join(temporary,'entry.tsx'),entry);await writeFile(join(temporary,'terminal.tsx'),'export function TerminalView(){return null}')
  const {build}=require('vite'),react=require('@vitejs/plugin-react').default,coreExports=JSON.parse(await readFile(join(root,'packages/core/package.json'),'utf8')).exports
  const aliases=[{find:/^\.\/TerminalView$/,replacement:join(temporary,'terminal.tsx')},
+  {find:/^@agentmux\/client-ui\/theme$/,replacement:join(root,'packages/client-ui/src/theme/index.ts')},
+  {find:/^@agentmux\/client-ui\/icons$/,replacement:join(root,'packages/client-ui/src/theme/icons.tsx')},
+  {find:/^@agentmux\/client-ui\/note\/(.+)$/,replacement:join(root,'packages/client-ui/src/note/$1.ts')},
+  {find:/^@agentmux\/client-ui\/input\/styles.css$/,replacement:join(root,'packages/client-ui/src/input/input.css')},
+  {find:/^@agentmux\/client-ui\/input$/,replacement:join(root,'packages/client-ui/src/input/index.ts')},
   ...Object.entries(coreExports).map(([key,value])=>({find:new RegExp('^'+(key==='.'?'@agentmux/core':'@agentmux/core'+key.slice(1))+'$'),replacement:join(root,'packages/core',value.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))})),
   {find:/^@agentmux\/layout$/,replacement:join(root,'packages/layout/src/index.ts')},{find:/^@agentmux\/client-ui\/styles\/(.+)$/,replacement:join(root,'packages/client-ui/src/styles/$1')},
   {find:/^@agentmux\/client-ui\/styles.css$/,replacement:join(root,'packages/client-ui/src/styles/index.css')},{find:/^@agentmux\/client-ui\/components\/(.+)$/,replacement:join(root,'packages/client-ui/src/components/$1.tsx')},
@@ -65,7 +76,7 @@ try {
   {find:/^@agentmux\/client-ui\/(.+)$/,replacement:join(root,'packages/client-ui/src/lib/$1.ts')},{find:/^@agentmux\/client-ui$/,replacement:join(root,'packages/client-ui/src/index.ts')},
   ...Object.entries({react:join(desktop,'node_modules/react'),'react-dom':join(desktop,'node_modules/react-dom'),'lucide-react':join(desktop,'node_modules/lucide-react')}).map(([find,replacement])=>({find,replacement}))]
  const sourcePins={}
- await build({configFile:false,root:desktop,logLevel:'error',resolve:{alias:aliases},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},plugins:[{name:'private-production-source-pins',enforce:'pre',transform(code,id){const file=id.split('?')[0];if(file.startsWith(root+'/')&&!file.includes('/node_modules/')&&!file.includes('/.tmp/'))sourcePins[file.slice(root.length+1)]=hash(readFileSync(file));return id.endsWith('.tsx')&&id.includes('/src/')?{code:"import React from 'react'\n"+code,map:null}:undefined}},react({jsxRuntime:'classic'})],build:{target:'esnext',outDir:temporary,emptyOutDir:false,lib:{entry:join(temporary,'entry.tsx'),formats:['es'],fileName:()=> 'renderer.mjs'}}})
+ await build({configFile:false,root:desktop,logLevel:'error',worker:{format:'es'},resolve:{alias:aliases},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},plugins:[{name:'private-production-source-pins',enforce:'pre',transform(code,id){const file=id.split('?')[0];if(file.startsWith(root+'/')&&!file.includes('/node_modules/')&&!file.includes('/.tmp/'))sourcePins[file.slice(root.length+1)]=hash(readFileSync(file));return id.endsWith('.tsx')&&id.includes('/src/')?{code:"import React from 'react'\n"+code,map:null}:undefined}},react({jsxRuntime:'classic'})],build:{target:'esnext',outDir:temporary,emptyOutDir:false,lib:{entry:join(temporary,'entry.tsx'),formats:['es'],fileName:()=> 'renderer.mjs'}}})
  const css=(await readdir(temporary)).find(name=>name.endsWith('.css'));assert.ok(css)
  await writeFile(join(temporary,'index.html'),`<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="./${css}"></head><body style="margin:0"><div id="root" style="height:100vh"></div><script type="module" src="./renderer.mjs"></script></body></html>`);await writeFile(join(temporary,'main.mjs'),main);execFileSync(process.execPath,['--check',join(temporary,'main.mjs')])
  const env={...process.env,PRIVATE_HOME:join(temporary,'home'),PRIVATE_DATA:join(temporary,'user-data'),PRIVATE_PAGE:pathToFileURL(join(temporary,'index.html')).href,PRIVATE_REPORT:join(temporary,'report.json'),PRIVATE_MODULE:join(temporary,'renderer.mjs'),PRIVATE_MODULE_URL:pathToFileURL(join(temporary,'renderer.mjs')).href,PRIVATE_EVIDENCE:evidence,PRIVATE_UNOBSERVED:unobserved?'1':'0'}
