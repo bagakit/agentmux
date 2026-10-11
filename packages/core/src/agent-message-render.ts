@@ -13,7 +13,7 @@ import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
  * Keeping this pure-string render in its own module lets renderer code depend on the wrapper
  * shape via a specific import path without dragging node:* into its bundle.
  */
-export function renderAgentMuxMessageEnvelope(envelope: AgentMuxMessageEnvelope): string {
+export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'sender' | 'senderSessionId' | 'body'>): string {
   const source = envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null
     ? `Agent ${envelope.senderSessionId}`
     : envelope.sender.kind === 'external'

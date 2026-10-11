@@ -1903,6 +1903,8 @@ export type AgentTimelineItem = {
   content?: string
   /** Set by the original userContent writer, never inferred from legacy content or author. Not sharing authority. */
   publicContent?: 'confirmed'
+  /** Original submitted Input identity; attribution or opaque item IDs never reconstruct it. */
+  inputRef?: import('./agent-prompt-condition.js').AgentPromptInputKey
   toolName?: string
   toolInput?: string
   /**
