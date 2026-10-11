@@ -1,10 +1,10 @@
 import type { ConnectionSetupReadSubject, ConnectionSetupReadSummary } from '@agentmux/core/connections'
-import type { SetupAdapterInput, SetupChallengeReceipt, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt, SetupConfigurationReceipt } from '../../connection-setup-adapter.js'
+import type { SetupAdapterInput, SetupChallengeReceipt, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt, SetupConfigurationReceipt, SetupPublicationReceipt } from '../../connection-setup-adapter.js'
 import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, type NativeAccountInitialState, type NativeAccountState } from './native-account.js'
 import { supportedScopeId } from './setup-permissions.js'
 import { enrollmentAccountSession } from './enrollment.js'
 import { feishuMessageReceptionIntent } from './setup-message-reception.js'
-import { feishuVersionStatus } from './setup-publication.js'
+import { feishuVersionStatus, feishuSubmissionResponse } from './setup-publication.js'
 import { FEISHU_MESSAGE_EVENT } from './message.js'
 
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
@@ -135,4 +135,22 @@ export async function addFeishuMessageReception(input: SetupAdapterInput & { pri
   if (input.privateIntent !== feishuMessageReceptionIntent()) return { kind: 'unknown' }
   const envelope = await applicationEnvelope(input, '/developers/v1/event/update/', { events: [], appEvents: [FEISHU_MESSAGE_EVENT], userEvents: [], operation: 'add', eventMode: 4 }, signal)
   return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
+}
+
+/** Original native create/commit requests. No list lookup or implied publication. */
+export async function createFeishuVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt> {
+  try {
+    const intent = record(JSON.parse(input.privateIntent)), body = record(intent?.body)
+    if (intent?.kind !== 'create-version' || !body || body.autoPublish !== false) return { kind: 'unknown' }
+    const envelope = await applicationEnvelope(input, '/developers/v1/app_version/create/', body, signal), data = record(envelope?.data)
+    return envelope && opaque(data?.versionId) ? { kind: 'accepted', privateState: JSON.stringify(envelope), versionId: data.versionId, submission: null } : { kind: 'unknown' }
+  } catch { return { kind: 'unknown' } }
+}
+export async function submitFeishuVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt> {
+  try {
+    const intent = record(JSON.parse(input.privateIntent)), body = record(intent?.body)
+    if (intent?.kind !== 'submit-version' || !opaque(intent.versionId) || !body || typeof body.is_full_release !== 'boolean' || Object.keys(body).length !== 1) return { kind: 'unknown' }
+    const envelope = await applicationRequest(input, '/developers/v1/publish/commit/' + encodeURIComponent(input.application.appId) + '/' + encodeURIComponent(intent.versionId), body, signal, true)
+    return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope), versionId: intent.versionId, submission: feishuSubmissionResponse(record(envelope.data)) } : { kind: 'unknown' }
+  } catch { return { kind: 'unknown' } }
 }

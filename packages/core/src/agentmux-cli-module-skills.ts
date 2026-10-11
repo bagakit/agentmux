@@ -190,8 +190,20 @@ request acceptance, effective permissions, publication and actual intake remain 
 recover-configuration-effect uses continue and only repairs its original encrypted ACK. An unknown
 effect cannot be replayed through renewal, a new setup or a known application alias; unresolved
 identifies the original actor-owned request when available. A new current read never signs that
-old ACK. Local recovery does not change menus, modes, events, scopes, ranges or publication. Publication
-remains unimplemented; this does not qualify live rights or the combined Settings journey.
+old ACK. Local recovery does not change menus, modes, events, scopes, ranges or publication.
+For publication select --application-configuration create-application-version or submit-application-version.
+Inspect accepts --publication-draft FILE|- for the exact typed draft; inspection alone sends no request.
+Creation uses {kind: create-version, version, notes, visibility: current|creator-only, optional
+ desktopEntry/mobileEntry/reason}. Confirm the offered action with the same publicationDraft in advance.
+Review all application changes, complete included/excluded audiences, entries and external sharing;
+this affects the whole application and does not lock concurrent platform changes. Creation returns
+its exact versionId without publishing. Submission uses {kind: submit-version, versionId, fullRelease}:
+read and explicitly select that exact version, never a list position or version label. It has a
+separate offered action and original result. Unknown creation cannot replay and does not block an
+independently selected existing version. Unknown submission remains original for that exact version,
+including a received response whose business outcome is unconfirmed. Preserve original local ACK
+recovery before current platform eligibility. Request acceptance, version review, online identity
+and actual message intake remain separate; this does not qualify live rights or the combined journey.
 
 Configure or bind only within the user's authorized target. Inspect current values before
 changing them; use the current help's exact input and operation identities. A grant is an
