@@ -9,8 +9,8 @@ import { AgentMuxControlServer } from '../packages/core/src/public-rpc-server.js
 import { connectAgentMuxRpc } from '../packages/core/src/public-rpc-client.js'
 import { AgentMuxSpatialStateStore } from '../packages/core/src/spatial-state.js'
 import { createWorkspaceLayout } from '../packages/core/src/spatial-layout.js'
-import { consumeJsonReadEntry, parseConversationUnit, projectConversationReading,
-  type AgentConversationReadPage, type ConversationTimelineReadInput, type ConversationUnit, type JsonReadAssembly } from '../packages/core/src/conversation.js'
+import { consumeJsonReadEntry, parseConversationUnit, projectConversationReading, conversationRecordId,
+  type AgentConversationReadPage, type ConversationContentRef, type ConversationTimelineReadInput, type ConversationUnit, type JsonReadAssembly } from '../packages/core/src/conversation.js'
 import type { AgentMuxStoredAgentSession, AgentTimelineItem } from '../packages/core/src/types.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../packages/core/test/helpers/object-cli-rpc.js'
 import { ConnectionHost } from '../packages/connectors/src/connection-host.js'
@@ -132,11 +132,46 @@ it('one original inventory is conserved across SDK, RPC, compiled CLI and the ac
   const text = JSON.stringify([...remote.records.values()])
   expect(text).toContain('Original surrounding speech'); expect(text).toContain('pwd')
   expect(publication.store.coverage(bound.binding).gaps.some(gap => gap.code === 'CONVERSATION_OBSERVED_TARGET_UNREAD')).toBe(true)
+  const decisions = connections.database.prepare('SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? ORDER BY rowid')
+    .all(bound.binding.bindingId, bound.binding.revision).map(row => JSON.parse(String(row.decision_json)))
+  const partKey = (part: ConversationContentRef) => JSON.stringify([conversationRecordId(part.record), part.recordRevision,
+    part.selector.kind, part.selector.kind === 'native-part' ? part.selector.partIndex : part.selector.field])
+  const expectedParts = sdk.units.flatMap(unit => unit.event.content.map(slot => {
+    const record = unit.records.find(record => record.id === slot.recordId)!
+    return { record: record.reference!, recordRevision: record.revision, selector: slot.selector }
+  }))
+  expect(expectedParts).toHaveLength(6)
+  const dispositions = decisions.flatMap(decision => {
+    if (decision.kind === 'representation') return [{ kind: 'represented', part: decision.part as ConversationContentRef }]
+    if (decision.kind === 'origin') return [{ kind: 'origin', part: decision.representation.part as ConversationContentRef }]
+    if (decision.kind === 'scope') return (decision.excluded as ConversationContentRef[]).map(part => ({ kind: 'excluded', part }))
+    if (decision.kind === 'gap' && decision.state === 'unresolved' && decision.gap.part && decision.gap.reason !== 'source-gap')
+      return [{ kind: 'gap', part: decision.gap.part as ConversationContentRef }]
+    return []
+  })
+  expect(dispositions.map(disposition => partKey(disposition.part)).sort()).toEqual(expectedParts.map(partKey).sort())
+  expect(dispositions.every(disposition => disposition.kind === 'represented')).toBe(true)
   expect((await f.client.readConversationChanges({ ...reference, checkpoint: checkpoint.checkpoint })).items.length).toBeGreaterThan(0)
   expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
   if (process.env.AGENTMUX_JOINT_EVIDENCE) {
     await mkdir(process.env.AGENTMUX_JOINT_EVIDENCE, { recursive: true })
-    await writeFile(join(process.env.AGENTMUX_JOINT_EVIDENCE, 'original-inventory.json'), JSON.stringify({ reference, historyPage, timeline, sdk, rpc: routed, cli: { code: cli.code, page: cliPage },
-      publication: { operations: publication.store.list(bound.binding), coverage: publication.store.coverage(bound.binding), platform: [...remote.records.values()] } }))
+    const capturedPage = await f.client.readAgentSessionHistory({ ...reference, source: 'captured', limit: 100 })
+    await writeFile(join(process.env.AGENTMUX_JOINT_EVIDENCE, 'original-inventory.json'), JSON.stringify({ reference, historyPage, timeline, capturedPage, sdk, rpc: routed, cli: { code: cli.code, page: cliPage },
+      publication: { operations: publication.store.list(bound.binding), coverage: publication.store.coverage(bound.binding), platform: [...remote.records.values()],
+        contentLedger: { expectedParts, dispositions, sourceGaps: decisions.filter(decision => decision.kind === 'gap' && decision.gap.reason === 'source-gap') } } }))
   }
+  const updated = { ...gapItem, content: 'Readable observation after an exact source update', updatedAt: gapItem.updatedAt + 1 }
+  await f.store.applyTimelineMutation({ type: 'upsert', agentSessionId: reference.agentSessionId, item: updated })
+  const after = await collect(input => f.client.readAgentConversation(input), reference, 1)
+  const afterRpc = await collect(input => rpc.call('agent.conversation.inspect', input), reference, 100)
+  expect(ledger(after.units)).toEqual(ledger(afterRpc.units))
+  expect(after.units.map(unit => unit.event.id)).toEqual(sdk.units.map(unit => unit.event.id))
+  const priorEvent = sdk.units.find(unit => unit.records.some(record => record.original.item.id === gapItem.id))!.event
+  const updatedEvent = after.units.find(unit => unit.records.some(record => record.original.item.id === gapItem.id))!.event
+  expect(updatedEvent.revision).not.toBe(priorEvent.revision)
+  expect(after.units.flatMap(unit => unit.records)).toHaveLength(5)
+  if (process.env.AGENTMUX_JOINT_EVIDENCE) await writeFile(join(process.env.AGENTMUX_JOINT_EVIDENCE, 'upsert-inventory.json'), JSON.stringify({ reference,
+    historyPage: await f.client.sessionHistoryPage(reference.agentSessionId), timeline: await f.client.sessionTimeline(reference.agentSessionId),
+    capturedPage: await f.client.readAgentSessionHistory({ ...reference, source: 'captured', limit: 100 }), sdk: after, rpc: afterRpc,
+    update: { recordId: gapItem.id, priorEvent, updatedEvent } }))
 }, 30_000)
