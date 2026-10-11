@@ -147,5 +147,5 @@
 @keyframes semantic-icon-probe-once { 0%, 100% { transform: none; } 38% { transform: translate(.6px, -.4px); } 68% { transform: translate(-.2px, .2px); } }
 @keyframes semantic-icon-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
-  .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; animation: none; will-change: auto; }
+  .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; --icon-feedback-content: none; --icon-feedback-probe: none; animation: none; will-change: auto; }
 }
