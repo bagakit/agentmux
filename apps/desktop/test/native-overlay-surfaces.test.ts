@@ -41,11 +41,17 @@ vi.mock('electron', () => ({ WebContentsView: class {
 } }))
 
 function fixture() {
-  const contents = { capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => Buffer.from('chrome-frame') })),
-    getZoomFactor: () => 1.25, sendInputEvent: vi.fn(), isDestroyed: () => false, focus: vi.fn() }
+  let frameListener: ((image: any, rect: any) => void) | undefined
+  const frameListeners: ((image: any, rect: any) => void)[] = []
+  let currentImage = { isEmpty: () => false, toPNG: () => Buffer.from('chrome-frame') }
+  const contents = { capturePage: vi.fn(async () => currentImage),
+    getZoomFactor: () => 1.25, sendInputEvent: vi.fn(), isDestroyed: () => false, focus: vi.fn(),
+    beginFrameSubscription: vi.fn((_onlyDirty: boolean, listener: (image: any, rect: any) => void) => { frameListener = listener; frameListeners.push(listener) }),
+    endFrameSubscription: vi.fn(() => { frameListener = undefined }) }
   const pageView = originalPage({ x: 100, y: 100, width: 600, height: 500 })
-  const window = { getContentBounds: () => ({ width: 1000, height: 700 }), webContents: contents,
-    contentView: { children: [pageView] as any[], addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false, isFocused: vi.fn(() => true) }
+  const window = Object.assign(new EventEmitter(), { getContentBounds: () => ({ width: 1000, height: 700 }), webContents: contents,
+    contentView: { children: [pageView] as any[], addChildView: vi.fn(), removeChildView: vi.fn() }, isDestroyed: () => false, isFocused: vi.fn(() => true),
+    isVisible: vi.fn(() => true), isMinimized: vi.fn(() => false) })
   window.contentView.addChildView.mockImplementation(view => {
     const index = window.contentView.children.indexOf(view)
     if (index >= 0) window.contentView.children.splice(index, 1)
@@ -61,7 +67,8 @@ function fixture() {
   const nativeOwner = vi.fn((browserId: string) => { const view = pages.get(browserId); return view ? { browserId, bounds: view.getBounds(), view } : undefined })
   const nativeOwnerForView = vi.fn((view: unknown) => { for (const [id, candidate] of pages) if (candidate === view) return nativeOwner(id) })
   const warning = vi.fn(), pointer = vi.fn()
-  return { owner: new NativeOverlaySurfaces(window as any, { visibleNativeBounds: visible, nativeOwner, nativeOwnerForView } as any, warning, pointer), window, contents, visible, nativeOwner, nativeOwnerForView, pages, pageView, warning, pointer }
+  return { owner: new NativeOverlaySurfaces(window as any, { visibleNativeBounds: visible, nativeOwner, nativeOwnerForView } as any, warning, pointer), window, contents, visible, nativeOwner, nativeOwnerForView, pages, pageView, warning, pointer,
+    frameListeners, emitFrame: (image: any) => { currentImage = image.cropped ?? currentImage; frameListener?.(image, { x: 0, y: 0, width: 2000, height: 1400 }) } }
 }
 function originalPage(bounds: { x: number; y: number; width: number; height: number }) {
   const page = { bounds, getBounds: () => page.bounds, getVisible: () => true,
@@ -219,8 +226,10 @@ describe('required modal presentation unit', () => {
   it('an asynchronous modal repaint failure removes the whole original group and addresses its recovery', async () => {
     const f = fixture()
     await f.owner.update(modal())
-    f.contents.capturePage.mockRejectedValueOnce(new Error('Repaint failed'))
+    const frame = sourceFrame('failed-paint')
+    frame.cropped.toPNG.mockImplementationOnce(() => { throw new Error('Repaint failed') })
     fake.views[1].listeners['input-event']({}, { type: 'mouseMove', x: 5, y: 7, button: 'none' })
+    f.emitFrame(frame)
     await vi.waitFor(() => expect(f.warning).toHaveBeenCalledWith(expect.stringContaining('could not be repainted'), 'original-confirmation'))
     expect(f.window.contentView.children).toEqual([f.pageView])
     expect(f.pageView.webContents.listenerCount('before-input-event')).toBe(0)
@@ -373,6 +382,7 @@ function lateDocumentAfterRemoval(): {
       const Owner = load(path.join(root, 'apps/desktop/src/main/native-overlay-surfaces.ts')).NativeOverlaySurfaces;
       const window = {
         getContentBounds: () => ({ width: 800, height: 600 }), isDestroyed: () => false,
+        on() {}, off() {}, isVisible: () => true, isMinimized: () => false,
         webContents: { isDestroyed: () => false },
         contentView: {
           addChildView() {
@@ -493,7 +503,7 @@ describe('actual native Chrome owner', () => {
     let finishDocument!: () => void, finishContent!: () => void
     fake.load = new Promise(resolve => { finishDocument = resolve })
     fake.image = new Promise(resolve => { finishContent = resolve })
-    const { owner, window, contents } = fixture()
+    const { owner, window, contents, emitFrame } = fixture()
     const pending = owner.update([float])
     expect(fake.views).toHaveLength(1)
     const view = fake.views[0]
@@ -516,7 +526,9 @@ describe('actual native Chrome owner', () => {
     expect(await owner.update([{ ...float, bounds: { ...float.bounds, x: 200 } }])).toEqual({ projected: 1, capturedPixels: 8000 })
     expect(contents.focus).not.toHaveBeenCalled()
     view.listeners['input-event']({}, { type: 'keyDown', key: 'Escape', modifiers: [] })
-    await vi.waitFor(() => expect(contents.capturePage).toHaveBeenCalledTimes(4))
+    emitFrame(sourceFrame('original-hover-focus-paint'))
+    await vi.waitFor(() => expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(5))
+    expect(contents.capturePage).toHaveBeenCalledTimes(4)
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[false]])
     expect(fake.views).toHaveLength(1)
     expect(view.setVisible.mock.calls).toEqual([[true]])
@@ -613,7 +625,8 @@ describe('actual native Chrome owner', () => {
       const cold = fake.views[1]
       expect(cold.ownerWindow).toBeNull()
       first.listeners['input-event']({}, { type: 'mouseMove', x: 5, y: 7, button: 'none' })
-      await vi.waitFor(() => expect(contents.capturePage).toHaveBeenCalledTimes(3))
+      expect(contents.sendInputEvent).toHaveBeenCalledWith({ type: 'mouseMove', x: 125, y: 157, button: 'none' })
+      expect(contents.capturePage).toHaveBeenCalledTimes(2)
       expect(window.contentView.children).toContain(first)
       expect(window.contentView.children).not.toContain(cold)
       expect(cold.ownerWindow).toBeNull()
@@ -1002,12 +1015,17 @@ describe('actual native Chrome owner', () => {
     contents.capturePage.mockResolvedValueOnce({ isEmpty: () => false, toPNG: () => Buffer.from('older-frame') })
     contents.capturePage.mockResolvedValueOnce({ isEmpty: () => false, toPNG: () => Buffer.from('newer-frame') })
     const updating = owner.update([float])
+    let olderSettled = false
+    void updating.then(() => { olderSettled = true })
+    let newest: Promise<unknown> | undefined
     try {
       await vi.waitFor(() => expect(requests).toHaveLength(1))
-      view.listeners['input-event']({}, { type: 'mouseMove', x: 5, y: 7, button: 'none' })
+      newest = owner.update([float])
       await vi.waitFor(() => expect(requests).toHaveLength(2))
       requests[1]!.finish()
       requests[0]!.finish()
+      expect(await newest).toEqual({ projected: 1, capturedPixels: 8000 })
+      await vi.waitFor(() => expect(olderSettled).toBe(true), { timeout: 200 })
       expect(await updating).toEqual({ projected: 1, capturedPixels: 8000 })
       expect(warning).not.toHaveBeenCalled()
       expect(displayed.current?.source).toContain(Buffer.from('newer-frame').toString('base64'))
@@ -1017,6 +1035,7 @@ describe('actual native Chrome owner', () => {
       owner.dispose()
       for (const request of requests) request.finish()
       await updating
+      await newest
     }
   })
   it('pending or failed repaint cannot route a stale picture to the new source position', async () => {
@@ -1058,3 +1077,8 @@ describe('actual native Chrome owner', () => {
     expect(owner.resourceProcessIds()).toEqual([])
   })
 })
+
+function sourceFrame(pixels: string, size = { width: 2000, height: 1400 }) {
+  const cropped = { isEmpty: () => false, toBitmap: vi.fn(() => Buffer.from(pixels)), toPNG: vi.fn(() => Buffer.from(pixels)) }
+  return { isEmpty: () => false, getSize: () => size, crop: vi.fn(() => cropped), cropped }
+}
