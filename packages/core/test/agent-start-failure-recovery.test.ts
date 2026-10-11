@@ -153,3 +153,13 @@ it('preserves a confirmed fatal exit after recovering an applied commit acknowle
   expect(events.filter(event => event.type === 'process-state').at(-1)).toMatchObject({ run: old.run, state: 'exited' })
   expect(input).not.toHaveBeenCalled()
 })
+
+it('retains the typed original direct-resume fatal operation without starting or replaying it again', async () => {
+  const request = { agentSessionId: old.agentSessionId, operationId: 'fatal-original', prompt: 'resume original draft' }
+  await expect(client.resumeAgent(request)).rejects.toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' })
+  const operation = (await store.readMetadata(old.agentSessionId))?.continuityOperations?.[request.operationId]
+  expect(operation).toMatchObject({ reason: 'process-exited', errorCode: 'AGENT_TERMINAL_HANDSHAKE_FAILED', previousRun: old.run, newRun: newRunRef() })
+  await expect(client.resumeAgent(request)).rejects.toMatchObject({ code: 'AGENT_TERMINAL_HANDSHAKE_FAILED' })
+  expect(inner.kernel.start).toHaveBeenCalledTimes(1); expect(input).not.toHaveBeenCalled()
+  expect(client.agentSession(old.agentSessionId).run).toEqual(old.run)
+})
