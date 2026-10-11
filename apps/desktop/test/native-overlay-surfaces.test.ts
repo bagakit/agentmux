@@ -1082,3 +1082,268 @@ function sourceFrame(pixels: string, size = { width: 2000, height: 1400 }) {
   const cropped = { isEmpty: () => false, toBitmap: vi.fn(() => Buffer.from(pixels)), toPNG: vi.fn(() => Buffer.from(pixels)) }
   return { isEmpty: () => false, getSize: () => size, crop: vi.fn(() => cropped), cropped }
 }
+
+function imageScripts(view: any): string[] { return view.webContents.executeJavaScript.mock.calls.map(([script]: [string]) => script).filter((script: string) => script.includes('const image = ')) }
+
+describe('original Renderer compositor frames', () => {
+  beforeEach(() => { fake.views = []; fake.load = null; fake.image = null; fake.radiusError = null })
+
+  it('propagates Canvas and delayed image pixels through original capture without another declaration or input', async () => {
+    const f = fixture()
+    try {
+      await f.owner.update(modal())
+      const view = fake.views[1]
+      for (const pixels of ['painted-canvas-blue', 'decoded-image-green']) {
+        const frame = sourceFrame(pixels)
+        f.emitFrame(frame)
+        await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+        await vi.waitFor(() => expect(imageScripts(view).at(-1)).toContain(Buffer.from(pixels).toString('base64')))
+        expect(frame.crop).toHaveBeenCalledExactlyOnceWith({ x: 240, y: 300, width: 200, height: 160 })
+      }
+      expect(f.contents.capturePage).toHaveBeenCalledTimes(3)
+      expect(f.contents.beginFrameSubscription).toHaveBeenCalledExactlyOnceWith(false, expect.any(Function))
+      expect(f.window.contentView.children).toEqual([f.pageView, ...fake.views])
+      expect(fake.views).toHaveLength(2)
+      expect(f.pageView.setVisible).not.toHaveBeenCalled()
+      expect(f.warning).not.toHaveBeenCalled()
+    } finally { f.owner.dispose() }
+  })
+
+  it('encodes only changed projected pixels when unrelated Root frames repaint', async () => {
+    const f = fixture()
+    try {
+      await f.owner.update([float])
+      f.emitFrame(sourceFrame('unchanged-projected-pixels'))
+      await vi.waitFor(() => expect(fake.views[0].webContents.executeJavaScript).toHaveBeenCalledTimes(3))
+      const unrelated = sourceFrame('unchanged-projected-pixels')
+      for (let index = 0; index < 8; index++) { f.emitFrame(unrelated); await Promise.resolve(); await Promise.resolve() }
+      await Promise.resolve()
+      expect(unrelated.cropped.toPNG).not.toHaveBeenCalled()
+      expect(imageScripts(fake.views[0])).toHaveLength(2)
+      expect(f.contents.capturePage).toHaveBeenCalledTimes(2)
+    } finally { f.owner.dispose() }
+  })
+
+  it('keeps one decoder in flight and retains only the latest pending full frame', async () => {
+    const f = fixture()
+    let release!: () => void
+    try {
+      await f.owner.update([float])
+      fake.image = new Promise(resolve => { release = resolve })
+      const first = sourceFrame('first'), replaced = sourceFrame('replaced'), latest = sourceFrame('latest')
+      f.emitFrame(first)
+      await vi.waitFor(() => expect(imageScripts(fake.views[0])).toHaveLength(2))
+      f.emitFrame(replaced); f.emitFrame(latest)
+      expect(replaced.crop).not.toHaveBeenCalled()
+      expect(latest.crop).not.toHaveBeenCalled()
+      release()
+      await vi.waitFor(() => expect(imageScripts(fake.views[0])).toHaveLength(3))
+      expect(imageScripts(fake.views[0]).at(-1)).toContain(Buffer.from('latest').toString('base64'))
+      expect(replaced.crop).not.toHaveBeenCalled()
+    } finally { release?.(); f.owner.dispose() }
+  })
+
+  it('opens a fresh subscription after atomic preparation to include the capture-to-commit gap', async () => {
+    const f = fixture()
+    let release!: () => void
+    try {
+      fake.image = new Promise(resolve => { release = resolve })
+      const preparing = f.owner.update(modal())
+      await vi.waitFor(() => expect(fake.views[0].webContents.executeJavaScript).toHaveBeenCalledOnce())
+      expect(f.contents.beginFrameSubscription).not.toHaveBeenCalled()
+      const gap = sourceFrame('painted-after-first-capture')
+      f.contents.capturePage.mockResolvedValue(gap.cropped)
+      f.contents.beginFrameSubscription.mockImplementation((_dirty, listener) => listener(gap, { x: 0, y: 0, width: 2000, height: 1400 }))
+      release(); await preparing
+      await vi.waitFor(() => expect(imageScripts(fake.views[1]).at(-1)).toContain(Buffer.from('painted-after-first-capture').toString('base64')))
+      expect(fake.views.map(view => view.getBounds())).toEqual(modal().map(region => region.bounds))
+    } finally { release?.(); f.owner.dispose() }
+  })
+
+  it('does no frame work without visible content and releases exact subscriptions on hide and disposal', async () => {
+    const f = fixture()
+    await f.owner.update([])
+    await f.owner.update(modal().slice(0, 1).map(region => ({ ...region, modal: undefined })))
+    expect(f.contents.beginFrameSubscription).not.toHaveBeenCalled()
+    await f.owner.update([float])
+    expect(f.contents.beginFrameSubscription).toHaveBeenCalledOnce()
+    const old = f.frameListeners[0]!
+    f.window.isVisible.mockReturnValue(false); f.window.emit('hide')
+    expect(f.contents.endFrameSubscription).toHaveBeenCalledOnce()
+    old(sourceFrame('late-hidden'), { x: 0, y: 0, width: 2000, height: 1400 })
+    expect(fake.views.at(-1).webContents.executeJavaScript).toHaveBeenCalledTimes(2)
+    f.window.isVisible.mockReturnValue(true); f.window.emit('show')
+    expect(f.contents.beginFrameSubscription).toHaveBeenCalledTimes(2)
+    f.owner.dispose()
+    expect(f.contents.endFrameSubscription).toHaveBeenCalledTimes(2)
+    for (const event of ['hide', 'show', 'minimize', 'restore']) expect(f.window.listenerCount(event)).toBe(0)
+    expect(f.window.contentView.children).toEqual([f.pageView])
+  })
+
+  it('cannot deliver an old subscription or late decoder to a reopened same-id owner', async () => {
+    const f = fixture()
+    let release!: () => void
+    try {
+      await f.owner.update([float])
+      const old = fake.views[0], oldListener = f.frameListeners[0]!
+      fake.image = new Promise(resolve => { release = resolve })
+      f.emitFrame(sourceFrame('old-held-frame'))
+      await vi.waitFor(() => expect(imageScripts(old)).toHaveLength(2))
+      await f.owner.update([])
+      fake.image = null
+      await f.owner.update([float])
+      const current = fake.views[1]
+      oldListener(sourceFrame('old-callback'), { x: 0, y: 0, width: 2000, height: 1400 })
+      f.emitFrame(sourceFrame('new-current-frame'))
+      release()
+      await vi.waitFor(() => expect(imageScripts(current)).toHaveLength(2))
+      expect(imageScripts(current).at(-1)).toContain(Buffer.from('new-current-frame').toString('base64'))
+      oldListener(sourceFrame('late-old-callback-after-current'), { x: 0, y: 0, width: 2000, height: 1400 })
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+      expect(imageScripts(current)).toHaveLength(2)
+      expect(current.webContents.close).not.toHaveBeenCalled()
+      expect(f.warning).not.toHaveBeenCalled()
+    } finally { release?.(); f.owner.dispose() }
+  })
+
+  it.each([1, 2])('maps DPR %s from the actual image plane without applying the already declared zoom twice', async dpr => {
+    const f = fixture()
+    try {
+      await f.owner.update([float])
+      const frame = sourceFrame('scaled-source', { width: 1000 * dpr, height: 700 * dpr })
+      f.emitFrame(frame)
+      await vi.waitFor(() => expect(imageScripts(fake.views[0])).toHaveLength(2))
+      expect(frame.crop).toHaveBeenCalledExactlyOnceWith({ x: 120 * dpr, y: 150 * dpr, width: 100 * dpr, height: 80 * dpr })
+      expect(f.contents.getZoomFactor()).toBe(1.25)
+    } finally { f.owner.dispose() }
+  })
+
+  it('stops all frame delivery when original Browser demand disappears and resumes only the actual restored owner', async () => {
+    const f = fixture()
+    try {
+      await f.owner.update([float])
+      const old = f.frameListeners[0]!, stale = sourceFrame('hidden-native-demand')
+      f.visible.mockReturnValue([])
+      expect(await f.owner.refresh()).toEqual({ projected: 0, capturedPixels: 0 })
+      expect(f.contents.endFrameSubscription).toHaveBeenCalledOnce()
+      old(stale, { x: 0, y: 0, width: 2000, height: 1400 })
+      expect(stale.crop).not.toHaveBeenCalled()
+      f.visible.mockReturnValue([f.pageView.getBounds()])
+      await f.owner.refresh()
+      expect(f.contents.beginFrameSubscription).toHaveBeenCalledTimes(2)
+      expect(f.window.contentView.children).toEqual([f.pageView, fake.views[1]])
+    } finally { f.owner.dispose() }
+  })
+
+  it('keeps each source window independent and releases its minimize listener', async () => {
+    const first = fixture(), second = fixture()
+    try {
+      await first.owner.update([float]); await second.owner.update([float])
+      first.emitFrame(sourceFrame('first-window-pixels'))
+      await vi.waitFor(() => expect(imageScripts(fake.views[0])).toHaveLength(2))
+      expect(imageScripts(fake.views[1])).toHaveLength(1)
+      first.window.isMinimized.mockReturnValue(true); first.window.emit('minimize')
+      expect(first.contents.endFrameSubscription).toHaveBeenCalledOnce()
+      expect(second.contents.endFrameSubscription).not.toHaveBeenCalled()
+      first.window.isMinimized.mockReturnValue(false); first.window.emit('restore')
+      expect(first.contents.beginFrameSubscription).toHaveBeenCalledTimes(2)
+    } finally { first.owner.dispose(); second.owner.dispose() }
+  })
+
+  it('retires the failed presentation pair and reports its original request when source subscription fails', async () => {
+    const f = fixture()
+    try {
+      f.contents.beginFrameSubscription.mockImplementationOnce(() => { throw new Error('Source frame subscription failed') })
+      expect(await f.owner.update(modal())).toMatchObject({ projected: 0 })
+      expect(f.warning).toHaveBeenCalledWith(expect.stringContaining('could not be repainted'), 'original-confirmation')
+      expect(f.window.contentView.children).toEqual([f.pageView])
+      expect(f.pageView.setVisible).not.toHaveBeenCalled()
+      expect(f.pageView.webContents.listenerCount('before-input-event')).toBe(0)
+    } finally { f.owner.dispose() }
+  })
+
+  it.each(['hide-show', 'earlier-unit'] as const)('never installs a late decoded image after %s revokes its source epoch', async cause => {
+    const f = fixture()
+    let releaseOld!: () => void, releaseDocument: (() => void) | undefined
+    let replacing: Promise<unknown> | undefined
+    try {
+      await f.owner.update([float])
+      const view = fake.views[0], oldSource = Buffer.from('revoked-decoder').toString('base64'), installed: string[] = []
+      class Image {
+        src = ''; alt = ''; style = {}
+        setAttribute() {}
+        decode() { return this.src.includes(oldSource) ? new Promise<void>(resolve => { releaseOld = resolve }) : Promise.resolve() }
+        replaceWith(image: Image) { displayed = image; installed.push(image.src) }
+      }
+      let displayed = new Image(); displayed.src = 'original-confirmed-image'
+      const context = { Image, document: { documentElement: { dataset: {} }, querySelector: (selector: string) => selector === 'img' ? displayed : { style: {} } } }
+      view.webContents.executeJavaScript.mockImplementation((script: string) => runInNewContext(script, context))
+      f.emitFrame(sourceFrame('revoked-decoder'))
+      await vi.waitFor(() => expect(releaseOld).toBeTypeOf('function'))
+      if (cause === 'hide-show') {
+        f.window.isVisible.mockReturnValue(false); f.window.emit('hide')
+        f.window.isVisible.mockReturnValue(true); f.window.emit('show')
+      } else {
+        fake.load = new Promise<void>(resolve => { releaseDocument = resolve })
+        replacing = f.owner.update([{ ...float, id: 'chrome-9', bounds: { ...float.bounds, x: 300 } }, float])
+        await vi.waitFor(() => expect(fake.views).toHaveLength(2))
+        expect(fake.views[1].ownerWindow).toBeNull()
+      }
+      releaseOld()
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
+      expect(displayed.src).toBe('original-confirmed-image')
+      expect(installed).toEqual([])
+      if (releaseDocument) {
+        f.contents.capturePage.mockResolvedValueOnce(sourceFrame('new-geometry-source').cropped).mockResolvedValueOnce(sourceFrame('new-geometry-source').cropped)
+      }
+      releaseDocument?.(); await replacing
+      f.emitFrame(sourceFrame('new-epoch-image'))
+      await vi.waitFor(() => expect(displayed.src).toContain(Buffer.from('new-epoch-image').toString('base64')))
+      expect(installed.some(source => source.includes(oldSource))).toBe(false)
+      expect(view.webContents.close).not.toHaveBeenCalled()
+      expect(f.warning).not.toHaveBeenCalled()
+    } finally { releaseOld?.(); releaseDocument?.(); await replacing; f.owner.dispose() }
+  })
+})
+
+
+
+it('does not enumerate unrelated hidden Browsers on the source frame path', async () => {
+  const f = fixture()
+  try {
+    let unrelatedEntriesVisited = 0
+    f.visible.mockImplementation(() => {
+      for (let index = 0; index < 10000; index++) unrelatedEntriesVisited++
+      return [f.pageView.bounds]
+    })
+    await f.owner.update([float])
+    const acceptedScans = f.visible.mock.calls.length, acceptedVisits = unrelatedEntriesVisited
+    for (let index = 0; index < 5; index++) {
+      f.emitFrame(sourceFrame('actual-frame-' + index))
+      await vi.waitFor(() => expect(imageScripts(fake.views[0]).at(-1)).toContain(Buffer.from('actual-frame-' + index).toString('base64')))
+    }
+    expect(f.visible).toHaveBeenCalledTimes(acceptedScans)
+    expect(unrelatedEntriesVisited).toBe(acceptedVisits)
+    await f.owner.refresh()
+    expect(f.visible.mock.calls.length).toBeGreaterThan(acceptedScans)
+  } finally { f.owner.dispose() }
+})
+
+it('keeps the capture producer PNG unchanged and never encodes the untagged SDK bitmap', async () => {
+  const f = fixture()
+  try {
+    await f.owner.update([float])
+    const exactProducerPNG = Buffer.from('PNG with exact capture color chunks and CRC')
+    f.contents.capturePage.mockResolvedValueOnce({ isEmpty: () => false, toPNG: () => exactProducerPNG })
+    const frame = sourceFrame('changed SDK pixels')
+    frame.cropped.toPNG.mockImplementation(() => { throw new Error('The untagged SDK bitmap is not a transport image') })
+    f.emitFrame(frame)
+    await vi.waitFor(() => expect(imageScripts(fake.views[0]).at(-1)).toContain(exactProducerPNG.toString('base64')))
+    expect(frame.cropped.toPNG).not.toHaveBeenCalled()
+    expect(f.contents.capturePage).toHaveBeenCalledTimes(2)
+    for (let index = 0; index < 5; index++) { f.emitFrame(frame); await Promise.resolve(); await Promise.resolve() }
+    await Promise.resolve()
+    expect(f.contents.capturePage).toHaveBeenCalledTimes(2)
+    expect(f.warning).not.toHaveBeenCalled()
+  } finally { f.owner.dispose() }
+})
