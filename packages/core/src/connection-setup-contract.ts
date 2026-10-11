@@ -5,15 +5,30 @@ import type { ConnectionEnrollmentCallContext } from './connection-enrollment-co
 export type ConnectionSetupGoal = { kind: 'agent-conversation'; interaction: 'messages' | 'cards' }
 export type ConnectionSetupBegin = { operationId: string; connectionId: string; expectedConnectionRevision: number; goal: ConnectionSetupGoal }
 export type ConnectionSetupInput = { operationId: string }
+/** Local child selection only. It never requests the platform or repairs a secure ACK. */
+export type ConnectionSetupInspect = ConnectionSetupInput & { applicationInspection?: { selectedStepId?: string; cursor?: string; limit?: number } }
 export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' } }
 export type ConnectionSetupList = { connectionId: string; cursor?: string; limit?: number }
 /** Local implementation discovery for this exact revision, never platform authority or readiness. */
-export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication'> }
+export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication' | 'application-inspection'> }
 export type ConnectionSetupListing = { operations: ConnectionSetupOperation[]; next: string | null; support: ConnectionSetupSupport | null }
 export type ConnectionSetupReason = 'adapter-unavailable' | 'secure-storage-unavailable' | 'request-unconfirmed' | 'challenge-unconfirmed'
 export type ConnectionSetupAuthenticationStage = 'waiting' | 'scanned' | 'handoff' | 'account' | 'confirmed' | 'expired' | 'unknown'
 export type ConnectionSetupAccount = { userId: string; tenantId: string; userName?: string; tenantName?: string }
-export type ConnectionSetupAction = { actionId: string; expectedRevision: number; kind: 'continue' | 'confirm-account' | 'renew' }
+export type ConnectionSetupAuthenticationAction = { actionId: string; expectedRevision: number; kind: 'continue' | 'confirm-account' | 'renew' }
+export type ConnectionSetupInspectionAction = { actionId: string; expectedRevision: number; kind: 'inspect-application' | 'recover-application-inspection' }
+export type ConnectionSetupAction = ConnectionSetupAuthenticationAction | ConnectionSetupInspectionAction
+/** Effect selection belongs to the offered kind, never to the shared decision string. */
+export function connectionSetupDecisionForAction(action: ConnectionSetupAction): ConnectionSetupAdvance['decision']['value'] {
+  const decisions = { continue: 'continue', 'confirm-account': 'confirm', renew: 'renew', 'inspect-application': 'continue', 'recover-application-inspection': 'continue' } as const satisfies Record<ConnectionSetupAction['kind'], ConnectionSetupAdvance['decision']['value']>
+  return decisions[action.kind]
+}
+export type ConnectionSetupInspectionReceipt = {
+  stepId: string
+  input: ConnectionSetupAdvance
+  request: 'dispatching' | 'confirmed' | 'unknown'
+  secureStorage: 'not-started' | 'storing' | 'stored' | 'unknown'
+}
 export type ConnectionSetupStepReceipt = { actionId: string; stepId: string; state: 'dispatching' | 'confirmed' | 'unknown' }
 /** Safe durable facts only. Discovery and historical summaries never contain a scan payload. */
 export type ConnectionSetupOperation = ConnectionSetupBegin & {
@@ -38,16 +53,18 @@ export type ConnectionSetupView = {
   challenge: ConnectionSetupChallenge | null
   reason?: 'connection-revised' | 'challenge-unavailable'
   /** Original actor only. Account identity is never ordinary discovery/history data. */
-  continuation?: { stage: ConnectionSetupAuthenticationStage; account: ConnectionSetupAccount | null; actions: ConnectionSetupAction[] }
+  continuation?: { stage: ConnectionSetupAuthenticationStage; account: ConnectionSetupAccount | null; actions: ConnectionSetupAuthenticationAction[] }
+  /** Original actor only; stale children retain safe receipts, never current permission. */
+  applicationInspection?: { observations: ConnectionSetupInspectionReceipt[]; next: string | null; selected: ConnectionSetupInspectionReceipt | null; applicationInfoReadPermission: 'confirmed' | 'unknown'; actions: ConnectionSetupInspectionAction[] }
   /** Exact admitted advance result, distinct from today's current continuation. */
   receipt?: ConnectionSetupStepReceipt
 }
 export interface ConnectionSetupPort {
   begin(input: ConnectionSetupBegin, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
   advance(input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
-  inspect(input: ConnectionSetupInput, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
+  inspect(input: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
   list(input: ConnectionSetupList): Promise<ConnectionSetupListing>
 }
-export type ConnectionSetupParamsMap = { 'connection.setup.begin': ConnectionSetupBegin; 'connection.setup.advance': ConnectionSetupAdvance; 'connection.setup.inspect': ConnectionSetupInput; 'connection.setup.ls': ConnectionSetupList }
+export type ConnectionSetupParamsMap = { 'connection.setup.begin': ConnectionSetupBegin; 'connection.setup.advance': ConnectionSetupAdvance; 'connection.setup.inspect': ConnectionSetupInspect; 'connection.setup.ls': ConnectionSetupList }
 export type ConnectionSetupResultMap = { 'connection.setup.begin': ConnectionSetupView; 'connection.setup.advance': ConnectionSetupView; 'connection.setup.inspect': ConnectionSetupView; 'connection.setup.ls': ConnectionSetupListing }
 export type ConnectionSetupMethod = keyof ConnectionSetupParamsMap
