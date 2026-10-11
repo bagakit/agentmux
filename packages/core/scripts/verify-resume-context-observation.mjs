@@ -40,6 +40,12 @@ for (const name of await readdir(join(root, 'packages'))) {
 }
 const variants = [
   { name: 'candidate' },
+  { name: 'reject-direct-locator-enrichment', path: 'packages/core/src/client.ts',
+    from: '!matchesProviderNativeSessionTarget(prior.nativeTarget, canonical.nativeHandle)', to: '!isDeepStrictEqual(prior.nativeTarget, canonical.nativeHandle)',
+    target: 'reads the original explicit resume receipt after a verified first locator enrichment without replaying Start or input', expected: 'promise rejected' },
+  { name: 'replace-frozen-direct-request', path: 'packages/core/src/client.ts',
+    from: 'prior.requestDigest !== requestDigest || !matchesProviderNativeSessionTarget', to: '!matchesProviderNativeSessionTarget',
+    target: 'reads the original explicit resume receipt after a verified first locator enrichment without replaying Start or input', expected: 'promise resolved' },
   { name: 'forget-native-resume-source', path: 'packages/core/src/providers/codex.ts',
     from: " && payload.source === 'resume'", to: '',
     target: 'withholds resume context from other Codex sources while retaining the original main Hook receipt', expected: 'to be undefined' },
@@ -162,7 +168,7 @@ try {
       failed: tests.numFailedTests, total: tests.numTotalTests, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 23 && tests.success, 'Actual nonempty Hook continuity baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 25 && tests.success, 'Actual nonempty Hook continuity baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
   const ts = require('typescript'), consumers = []
