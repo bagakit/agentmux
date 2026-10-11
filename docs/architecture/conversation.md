@@ -82,11 +82,15 @@ flowchart LR
 | 显式打开原终端 | SessionPane 选择原展示 Region，再向原 caret owner 请求该终端；[`TerminalView`](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 只消费准确、可见且非 inert 的目标，保留后来的人工焦点。 |
 | reaction／Mailbox | [`useConversationReactions`](../../apps/desktop/src/renderer/src/lib/conversation-reactions.tsx) 沿原输入队列；[`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 保原消息和 read-marker，详情复用共同 Message。 |
 
+显式 `native-conversation` 意图仍进入原输入 journal／admission，由 [`prompt-submission`](../../packages/core/src/prompt-submission.ts) 在首次派发前保存准确 InputKey、Run、目标和 client correlation；同 key 的未知结果只读原回执，不重新发送。Provider 的原生接纳与原生记录采用分别成立，普通终端发送不改默认目标。外部输入沿原 Binding 的显式 `inputTarget` 进入同一准入链，不从发布 frontier 推导写授权。
+
+当前 Codex 原 actor 写通道由 [`codex-native-input`](../../packages/core/src/providers/codex-native-input.ts) 在原 executable probe 之后、Runtime prepare 之前，对已实证的 create 形状选择受管启动。原 ctxmux Run 内的 helper 启动原 app-server 与唯一创建初始 thread 的 TUI；认证 token 与原 Provider invocation 只保存在原 StoredSession 的私有 lifecycle 字段，公开 Session 不展开它们。每次原生派发核对同一 Run 的进程 birth、监听者、认证及准确 thread。未资格 argv、版本、resume/fork 保原启动计划；受管计划冻结后失败明确保留原失败和恢复身份，不转成另一 actor。旧 Run 不迁移，原 Hook 安装及终端输入仍走原 owner。
+
 外部入站 `DurableIngressHost.deliver` 调用原 `submitAgentMessage`，与本地输入复用原 `DurableAgentMuxMessageQueue`／input journal 及准入 owner。[`readAgentInputMailbox`](../../packages/core/src/client.ts) 沿同一 journal 既有 recipient/intent-sequence 索引有界读取 controlled input 与只读 submission 引用，SDK、`agent.input.ls` RPC／CLI 和 Hosted 消费同一严格结果合同；字节分片复用原 `JsonReadEntry`。新 claim CAS／typed launch commit 记录首次准确 key，旧 claim／unknown launch 不回填；每条 admission 仍从原 owner 读取，失败保该条原内容与缺口。
 
 Desktop 的 [`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 与 [`AgentSessionComposer`](../../apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx)、Mobile 的 [`MobileMailbox`](../../apps/mobile/src/conversation/MobileMailbox.tsx) 通过共同 [`useAgentInputMailbox`](../../packages/client-ui/src/lib/use-agent-input-mailbox.ts) 消费这份原日志。Desktop 沿原 Host 路由和 typed IPC 调用，Mobile 使用原 Hosted 读口；完整条目通过严格分片校验后才进入当前读窗。共同 [`InputMailboxRecords`](../../packages/client-ui/src/components/InputMailboxRecords.tsx) 保留准确作者、正文、原回执与当前读取失败，原本地未发意图和可编辑控件仍归原输入 owner。信箱的来源历史与登记行按原显示时刻共同排序，只有准确原 input key 相同才连接已有本地操作，不按正文或时间认定原生采用。
 
-当前 PTY 发送受据及 `inputRef` 尚不构成原生采用，不能由界面收起卡片来补造关联。准确来源意图和原 actor 写通道仍须沿原 Provider／输入边界实现与核验，不能借历史 reader 冒充控制口。
+当前 PTY 发送受据及 `inputRef` 尚不构成原生采用，不能由界面收起卡片来补造关联。准确原生采用仍须核对原提交及原生记录，原 actor 写通道不授予历史 reader 控制权。
 
 具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
 
