@@ -153,10 +153,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     if (current.revision !== input.expectedConnectionRevision) refuse('ROOM_BINDING_CONNECTION_REVISED')
     return current
   }
-  private async region(input: RoomBindingBindInput): Promise<number> {
-    const target = await readRoomTarget(this.options.spatial, input)
-    if (!target) refuse('ROOM_BINDING_TARGET_CHANGED')
-    return target.revision
+  private async region(input: RoomBindingBindInput): Promise<void> {
+    if (!await readRoomTarget(this.options.spatial, input)) refuse('ROOM_BINDING_TARGET_CHANGED')
   }
   private async cut(input: RoomBindingBindInput): Promise<Pick<RoomBinding, 'sourceCheckpoints' | 'sourceFrontier'>> {
     const ref = { hostId: input.executionHostId, agentSessionId: input.agentSessionId }
@@ -177,12 +175,13 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   }
   async bind(value: RoomBindingBindInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> {
     return this.operate('bind', value, context, async (raw, authority) => {
-      const input = raw as RoomBindingBindInput, spatialRevision = await this.region(input)
+      const input = raw as RoomBindingBindInput
+      await this.region(input)
       this.safe(() => this.connection(input))
       const existing = this.safe(() => this.readCurrent(input.bindingId) ?? this.matching('session', input))
       const cut = existing ? { sourceCheckpoints: existing.sourceCheckpoints, ...(existing.sourceFrontier ? { sourceFrontier: existing.sourceFrontier } : {}) } : await this.cut(input)
       await context.assertCurrent?.()
-      if (await this.region(input) !== spatialRevision) refuse('ROOM_BINDING_TARGET_CHANGED')
+      await this.region(input)
       return this.transaction(() => {
         const saved = this.saved(input.operationId)!.operation
         if (saved.state !== 'preparing') return saved
@@ -201,11 +200,12 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   }
   async relink(value: RoomBindingRelinkInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> {
     return this.operate('relink', value, context, async (raw, authority) => {
-      const input = raw as RoomBindingRelinkInput, spatialRevision = await this.region(input)
+      const input = raw as RoomBindingRelinkInput
+      await this.region(input)
       this.safe(() => this.connection(input))
       const cut = await this.cut(input)
       await context.assertCurrent?.()
-      if (await this.region(input) !== spatialRevision) refuse('ROOM_BINDING_TARGET_CHANGED')
+      await this.region(input)
       return this.transaction(() => {
         const saved = this.saved(input.operationId)!.operation
         if (saved.state !== 'preparing') return saved
