@@ -142,14 +142,14 @@ GUI、CLI 和其他客户端消费相同业务 owner。已有公开能力足够�
 | 已有基础 | 来源 | 已有范围与仍缺的闭环 |
 | --- | --- | --- |
 | 环境配置与管理工作台 | [HostConfig](../../../apps/desktop/src/shared/contracts.ts)、[HostSettingsPane](../../../apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | Remote 入口、拓扑 / 等价列表共用原选择和草稿；本地 / SSH、关联项目、原 Session 导航、执行器、检查及连接管理沿原 owner |
-| Host 读取与 Test | [settings-hosts-control](../../../apps/desktop/src/main/settings-hosts-control.ts)、[公共 RPC](../../../packages/core/src/public-rpc.ts) | 已公开清单及测试；Test 结果为完整输入、outcome 与人读 detail，不能解析 detail 猜结构化版本、PID 或实时连接 |
+| Host 读取、Test 与路由修复 | [settings-hosts-control](../../../apps/desktop/src/main/settings-hosts-control.ts)、[公共 RPC](../../../packages/core/src/public-rpc.ts) | 已公开清单、测试及沿同配置 owner 的已绑定 SSH 路由更新；修复范围见本页连接合同。Test 结果为完整输入、outcome 与人读 detail，不能解析 detail 猜结构化版本、PID 或实时连接 |
 | Session 与项目投影 | [SessionSnapshot / WorkspaceRecord](../../../apps/desktop/src/shared/contracts.ts)、[HostProjectsPane](../../../apps/desktop/src/renderer/src/components/settings/HostProjectsPane.tsx) | 原 Host / Session / Workspace 引用与已有状态可复用；引用数量与当前运行数量须分口径，读取缺口不能补成零 |
 | Host 执行器和来源信任 | [public-rpc-host-settings](../../../packages/core/src/public-rpc-host-settings.ts)、[executor-contract](../../../packages/core/src/executor-contract.ts)、[HostCreationTrustPanel](../../../apps/desktop/src/renderer/src/components/settings/HostCreationTrustPanel.tsx) | 已有准确 Host 的发现、注册、可信来源读取与真人批准入口；不由拓扑另建配置或审批系统 |
 | 所选 Host 的只读运行观察 | [分源观察](../../../packages/core/src/host-runtime-observation.ts)、[公共 Host 方法](../../../packages/core/src/public-rpc-host-settings.ts)、[HostRuntimePanel](../../../apps/desktop/src/renderer/src/components/settings/HostRuntimePanel.tsx) | 原 runtimeIdentity、runtimeDiagnostics、runtimeResourceSnapshot 由公共服务按准确 Host 组合；GUI 与 `settings hosts inspect` 消费同一结果。只观察当前已连接来源，缺失按来源报告，不冷启动 Native |
 | Core 维护与原结果查询 | [remote-core-upgrade](../../../packages/core/src/remote-core-upgrade.ts)、[HostUpgradePanel](../../../apps/desktop/src/renderer/src/components/settings/HostUpgradePanel.tsx) | 管理台复用原检查、升级、operation 查询及诊断，保留已访问维护面及未决回执，不另写流程 |
 | 无限画布 | [Desktop 依赖](../../../apps/desktop/package.json)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | 复用 `@xyflow/react`，缩放 / 平移仅改变投影；窄窗自动使用同对象列表，不新增持久画布配置 |
 
-现有公开 Host 清单、测试和维护不等于完整配置 CRUD CLI；这项缺口由后续连接管理执行计划按原贡献约定判断。远端主机 CPU / RSS / 磁盘、网络跳点、RTT / 丢包、采集趋势与统一远端健康监控，目前不能仅凭上述源码声称已有；未来新增需从准确原 Host / Runtime 的公开事实取得，不能在 Renderer 私有 shell 探测或借展示解析补齐。
+公开 Host 清单、测试、同身份路由修复和维护不等于完整配置 CRUD；新增或删除连接仍沿原配置与引用 owner，不把受约束更新扩大成未交付能力。远端主机 CPU / RSS / 磁盘、网络跳点、RTT / 丢包、采集趋势与统一远端健康监控，目前不能仅凭上述源码声称已有；未来新增需从准确原 Host / Runtime 的公开事实取得，不能在 Renderer 私有 shell 探测或借展示解析补齐。
 
 ## 本次实施的完整结果
 
