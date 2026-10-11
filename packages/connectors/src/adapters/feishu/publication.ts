@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import type { ConnectionApplication } from '@agentmux/core/connections'
-import type { PublicationImage } from '../../publication-image.js'
+import type { PublicationImage, PublicationFile } from '../../publication-resource.js'
 import type { PublicationAdapter } from '../../publication-adapter.js'
 import type { PublicationMapping, PublicationOperation, PublicationReceipt, PublicationTarget } from '../../publication-store.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
@@ -78,6 +78,16 @@ function sameImagePost(value: unknown, prepared: PreparedPublication): boolean {
     return image?.tag === 'img' && image.image_key === requestImage(prepared)
   } catch { return false }
 }
+function requestFile(prepared: PreparedPublication): string | null {
+  try {
+    const body = object(JSON.parse(prepared.request.body!)), content = typeof body?.content === 'string' ? object(JSON.parse(body.content)) : null
+    return body?.msg_type === 'file' && content && Object.keys(content).length === 1 ? feishuIdentity(content.file_key) : null
+  } catch { return null }
+}
+function sameFile(value: unknown, prepared: PreparedPublication): boolean {
+  if (typeof value !== 'string') return false
+  try { return object(JSON.parse(value))?.file_key === requestFile(prepared) } catch { return false }
+}
 function failure(status: number | undefined, code: unknown): PublicationReceipt | null {
   // An explicit in-flight response cannot establish non-application, even under a retry's request key.
   if (code === 230049) return unknown()
@@ -120,6 +130,22 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       } catch { return { state: 'unknown' as const } }
     }
   }
+  readonly files = {
+    maxBytes: 16 * 1024 * 1024,
+    accepts: (file: PublicationFile) => file.byteLength > 0 && file.byteLength <= this.files.maxBytes && typeof file.displayName === 'string' && file.displayName.length > 0,
+    upload: async (file: PublicationFile, target: PublicationTarget, credential: string, signal: AbortSignal) => {
+      if (!this.files.accepts(file) || file.dataBase64.length > Math.ceil(this.files.maxBytes / 3) * 4 || signal.aborted) return { state: 'unknown' as const }
+      const bytes = Buffer.from(file.dataBase64, 'base64')
+      if (bytes.length !== file.byteLength || bytes.toString('base64') !== file.dataBase64 ||
+        createHash('sha256').update(bytes).digest('hex') !== file.sha256 || signal.aborted) return { state: 'unknown' as const }
+      try {
+        const result = object(await this.clients.withClient(target, credential, client => client.im.file.create({
+          data: { file_type: 'stream', file_name: file.displayName, file: bytes }
+        }), signal))
+        return result?.file_key ? { state: 'confirmed' as const, fileKey: feishuIdentity(result.file_key) } : { state: 'unknown' as const }
+      } catch { return { state: 'unknown' as const } }
+    }
+  }
   constructor(private readonly clients: Pick<FeishuAdapter, 'withClient'>) {}
   fragmentBytesFor(target: PublicationTarget): number {
     // One ASCII control byte can occupy seven bytes after both JSON encodings.
@@ -159,7 +185,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     }
     if (operation.payload.kind === 'image') {
       const uploaded = operation.uploads?.at(-1)
-      if (uploaded?.state !== 'confirmed') feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
+      if (uploaded?.state !== 'confirmed' || !('imageKey' in uploaded)) feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
       const imageKey = feishuIdentity(uploaded.imageKey)
       const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId }), msg_type: 'post',
         content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'img', image_key: imageKey }]] } }), ...(mapping ? {} : { uuid: key(operation.operationId) }) })
@@ -167,6 +193,16 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
         method: mapping ? 'PUT' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
         ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
+    }
+    if (operation.payload.kind === 'file') {
+      if (mapping) feishuFailure('FEISHU_FILE_REPLACEMENT_REQUIRES_WITHDRAWAL')
+      const uploaded = operation.uploads?.at(-1)
+      if (uploaded?.state !== 'confirmed' || !('fileKey' in uploaded)) feishuFailure('FEISHU_FILE_UPLOAD_UNCONFIRMED')
+      const body = JSON.stringify({ receive_id: operation.target.externalConversationId, msg_type: 'file',
+        content: JSON.stringify({ file_key: feishuIdentity(uploaded.fileKey) }), uuid: key(operation.operationId) })
+      if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
+      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
+        method: 'POST', path, query: { receive_id_type: 'chat_id' }, contentType: 'application/json', body } }
     }
     const text = operation.payload.kind === 'speech' ? publicationSpeechText(operation.payload) : ''
     if (!text) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
@@ -186,7 +222,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && prepared.renderVersion === this.renderVersion && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && prepared.renderVersion === this.renderVersion && requestCard(prepared) !== null)
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && prepared.renderVersion === this.renderVersion && requestCard(prepared) !== null)
     } catch { return false }
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
@@ -206,9 +242,9 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       if (prepared.request.method === 'DELETE') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
       if (prepared.request.method === 'PATCH') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
       const card = requestCard(prepared), messageId = feishuIdentity(data.message_id)
-      if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== (card ? 'interactive' : 'post')) return unknown()
+      if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== (card ? 'interactive' : requestFile(prepared) ? 'file' : 'post')) return unknown()
       const body = object(data.body)
-      if (body?.content !== undefined && !(card ? sameCard(body.content, prepared) : requestImage(prepared) ? sameImagePost(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
+      if (body?.content !== undefined && !(card ? sameCard(body.content, prepared) : requestFile(prepared) ? sameFile(body.content, prepared) : requestImage(prepared) ? sameImagePost(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
       if (mapping) return { state: 'confirmed', mapping: { ...mapping } }
       const threadId = data.thread_id === undefined ? undefined : feishuIdentity(data.thread_id)
       return { state: 'confirmed', mapping: { messageId, ...(threadId === undefined ? {} : { threadId }) } }
@@ -216,8 +252,9 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   }
   async inspect(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt | null> {
     // No supported lookup by uuid exists. A missing create ID, including after dedup expiry, stays unknown.
-    if (!mapping || !this.valid(prepared, target, mapping)) return null
+    if (!mapping || !(this.valid(prepared, target, mapping) || requestFile(prepared) !== null && this.valid(prepared, target))) return null
     try {
+      feishuIdentity(mapping.messageId)
       let status: number | undefined
       const response = await this.clients.withClient(target, credential, client => client.request<unknown>({ url: `${path}/${encodeURIComponent(mapping.messageId)}`, method: 'GET', params: { user_id_type: 'open_id' }, validateStatus: value => { status = value; return true }, signal }), signal)
       const result = object(response), items = object(result?.data)?.items
@@ -227,7 +264,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const original = matches[0]!
       if (original.deleted !== undefined && typeof original.deleted !== 'boolean' || original.chat_id !== target.externalConversationId || !ownSender(original.sender, target.application) || original.thread_id !== undefined && original.thread_id !== mapping.threadId) return null
       if (prepared.request.method === 'DELETE') return original.deleted === true ? { state: 'confirmed', mapping: { ...mapping } } : null
-      return original.deleted !== true && (requestCard(prepared) ? original.msg_type === 'interactive' && sameCard(object(original.body)?.content, prepared) : original.msg_type === 'post' && (requestImage(prepared) ? sameImagePost(object(original.body)?.content, prepared) : samePost(object(original.body)?.content, requestText(prepared)!))) ? { state: 'confirmed', mapping: { ...mapping } } : null
+      return original.deleted !== true && (requestCard(prepared) ? original.msg_type === 'interactive' && sameCard(object(original.body)?.content, prepared) : requestFile(prepared) ? original.msg_type === 'file' && sameFile(object(original.body)?.content, prepared) : original.msg_type === 'post' && (requestImage(prepared) ? sameImagePost(object(original.body)?.content, prepared) : samePost(object(original.body)?.content, requestText(prepared)!))) ? { state: 'confirmed', mapping: { ...mapping } } : null
     } catch { return null }
   }
 }

@@ -64,7 +64,7 @@ export type ConnectionDelivery = {
   event?: ConnectionDeliveryEvent
   relay?: ConnectionDeliveryRelay
   /** Resource upload is distinct from the original chat-message effect. No bytes or platform asset key are exposed. */
-  resourceUpload?: { kind: 'image'; part: ConversationContentRef; attempt: number; state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' }
+  resourceUpload?: { kind: 'image' | 'file'; part: ConversationContentRef; attempt: number; state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' }
 }
 /** Current process service window for the requested Binding scope; never platform delivery or Agent health. */
 export type ConnectionDeliveryObservation = {

@@ -112,11 +112,11 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   let resourceUpload: ConnectionDelivery['resourceUpload']
   if (p.resourceUpload !== undefined) {
     const upload = object(p.resourceUpload, ['kind', 'part', 'attempt', 'state']), selected = part(upload.part), attempt = integer(upload.attempt, 0)
-    if (p.effect !== 'upsert' || ['dispatching', 'unknown', 'confirmed'].includes(String(p.state)) && upload.state !== 'confirmed' || upload.kind !== 'image' || !['pending', 'dispatching', 'unknown', 'confirmed'].includes(String(upload.state)) ||
+    if (p.effect !== 'upsert' || ['dispatching', 'unknown', 'confirmed'].includes(String(p.state)) && upload.state !== 'confirmed' || (upload.kind !== 'image' && upload.kind !== 'file') || !['pending', 'dispatching', 'unknown', 'confirmed'].includes(upload.state as string) ||
       selected.record.source.kind !== 'native' || selected.selector.kind !== 'native-part' ||
       selected.record.hostId !== original.hostId || selected.record.agentSessionId !== original.agentSessionId ||
       (upload.state === 'pending' ? attempt !== 0 : attempt < 1)) fail()
-    resourceUpload = { kind: 'image', part: selected, attempt, state: upload.state as NonNullable<ConnectionDelivery['resourceUpload']>['state'] }
+    resourceUpload = { kind: upload.kind as NonNullable<ConnectionDelivery['resourceUpload']>['kind'], part: selected, attempt, state: upload.state as NonNullable<ConnectionDelivery['resourceUpload']>['state'] }
   }
   return { operationId, projectionId: text(p.projectionId), sourceRevision: text(p.sourceRevision), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), reference: original,
     target: { connectionId: text(target.connectionId), application: { domain, appId: text(app.appId) }, externalConversationId: text(target.externalConversationId) }, effect: p.effect as ConnectionDelivery['effect'], fragment: { ordinal, count }, state: p.state as ConnectionDeliveryState,
