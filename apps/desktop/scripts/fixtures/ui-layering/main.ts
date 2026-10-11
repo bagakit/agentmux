@@ -22,6 +22,12 @@ const receipt: any = { passed: false, availableChecksPassed: false, completeGate
     ...(!process.env.AGENTMUX_VISUAL_ORCA_CLI ? ['OS-composition'] : [])],
   ...(withoutSystemFullscreen ? { systemFullscreen: { status: 'not-requested', reason: 'explicit-without-system-fullscreen', includedInCompleteGate: false } } : {}),
   cases: [], publications: [], frames: [], chromeFrames: [], osFrames: [], warnings: [], userRunTouched: false }
+function failureDetails(error: unknown) {
+  const value = error as { name?: unknown; message?: unknown; stack?: unknown } | null
+  return { name: typeof value?.name === 'string' ? value.name : typeof error,
+    message: typeof value?.message === 'string' && value.message ? value.message : String(error),
+    ...(typeof value?.stack === 'string' ? { stack: value.stack } : {}) }
+}
 function finishAvailableChecks() {
   receipt.availableChecksPassed = true
   if (!receipt.osFrames.length && !receipt.uncovered.includes('OS-composition')) receipt.uncovered.push('OS-composition')
@@ -254,6 +260,7 @@ async function verifySystemFullscreen() {
 }
 async function verifyCrossDocumentWorkbench() {
   const probe = 'layeringProbe.crossDocument', samples: any[] = []
+  let primaryFailed = false
   const value = () => read(probe + '.read()')
   const act = async (source: string) => { await read(probe + '.' + source); await painted(); return value() }
   const assertRetained = (state: any, destination: 'A' | 'B') => {
@@ -305,29 +312,63 @@ async function verifyCrossDocumentWorkbench() {
     await act('nestFrame()'); await act('open("independent")')
     await wait(async () => { const state = await value(); return state.documents.A.liveModals.length === 1 && state.documents.B.liveModals.length === 1 }, 'The same React runtime must keep a real modal in each original document')
     const both = await value()
+    const independentModal = both.members.independent.modal
+    assert.ok(independentModal, 'B has its own original live modal request')
+    const assertIndependentRetained = (state: any) => {
+      assert.equal(state.frameConnected, true, 'The original iframe remains connected while its parent modal changes')
+      assert.equal(state.frameSameDocument, true, 'The original B document survives each state-preserving iframe placement')
+      assert.equal(state.members.independent.formConnected, true, 'B keeps the original connected form')
+      assert.equal(state.members.independent.modal, independentModal, 'B keeps its original live modal request identity')
+      assert.deepEqual(state.documents.B.liveModals, [independentModal])
+      assert.equal(state.members.independent.cancels, 0)
+      assert.equal(state.members.independent.confirms, both.members.independent.confirms)
+      assert.equal(state.members.independent.draft, both.members.independent.draft)
+      assert.equal(state.members.independent.open, true)
+    }
+    assertIndependentRetained(both)
     assert.equal(both.documents.A.pointerEvents, 'none'); assert.equal(both.documents.B.pointerEvents, 'none')
     const parentTrap = await act('focusBackground("A")')
     assert.equal(parentTrap.members.moving.activeInContent, true, 'A modal keeps its own focus lease while the same runtime also owns a B modal')
     await act('focusEditor("independent")')
     const childTrap = await act('focusBackground("B")')
     assert.equal(childTrap.members.independent.activeInContent, true, 'B modal has its own document-local focus trap')
-    await act('focusEditor("moving")'); const parentEscape = await act('escape("A")')
+    await act('focusEditor("moving")')
+    const parkedBeforeParentEscape = await act('parkFrame()'); assertIndependentRetained(parkedBeforeParentEscape)
+    assert.equal(parkedBeforeParentEscape.members.moving.activeInContent, true, 'The exact A editor remains the target of the next A Escape')
+    const parentEscape = await act('escape("A")'); assertIndependentRetained(parentEscape)
     assert.equal(parentEscape.members.moving.cancels, 1); assert.equal(parentEscape.members.moving.open, false)
     assert.equal(parentEscape.members.independent.cancels, 0); assert.equal(parentEscape.members.independent.open, true, 'A single A Escape never closes the B business request')
-    await act('open("moving")'); await act('focusEditor("independent")')
+    await act('open("moving")')
+    const renested = await act('nestFrame()'); assertIndependentRetained(renested)
+    await act('focusEditor("independent")')
     const childEscape = await act('escape("B")')
     assert.equal(childEscape.members.independent.cancels, 1); assert.equal(childEscape.members.independent.open, false)
     assert.equal(childEscape.members.moving.cancels, 1); assert.equal(childEscape.members.moving.open, true, 'A single B Escape never closes the A business request')
     assert.notEqual(childEscape.documents.B.pointerEvents, 'none'); assert.equal(childEscape.documents.A.pointerEvents, 'none')
     await frame('workbench-document-local-modal-after-child-escape')
+    // A's final Cancel must likewise leave B's original document available for
+    // the final document-local input-release assertions below.
+    const parkedBeforeCancel = await act('parkFrame()')
+    assert.equal(parkedBeforeCancel.frameConnected, true); assert.equal(parkedBeforeCancel.frameSameDocument, true)
     const cancelled = await act('cancel("moving")')
+    assert.equal(cancelled.frameConnected, true); assert.equal(cancelled.frameSameDocument, true)
     assert.equal(cancelled.members.moving.cancels, 2, 'The exact original A Cancel invokes its own callback once')
     assert.equal(cancelled.members.independent.cancels, 1)
     assert.equal(cancelled.documents.A.liveModals.length, 0); assert.equal(cancelled.documents.B.liveModals.length, 0)
     const finalScroll = { A: await read(probe + '.wheelBackground("A")'), B: await read(probe + '.wheelBackground("B")') }
     assert.equal(finalScroll.A.defaultPrevented, false); assert.equal(finalScroll.B.defaultPrevented, false)
-    receipt.cases.push({ label: 'same-runtime-two-document-modal-focus-and-single-dismissal', boundary: initial.boundary, both, parentTrap, childTrap, parentEscape, childEscape, cancelled, finalScroll })
-  } finally { await read(probe + '.dispose()'); page.setVisible(true); layout(); await painted() }
+    receipt.cases.push({ label: 'same-runtime-two-document-modal-focus-and-single-dismissal', boundary: initial.boundary, both, parentTrap, childTrap,
+      parkedBeforeParentEscape, parentEscape, renested, childEscape, parkedBeforeCancel, cancelled, finalScroll })
+  } catch (error) { primaryFailed = true; throw error }
+  finally {
+    const failures: Array<{ step: string; error: unknown }> = []
+    try { await read(probe + '.dispose()') } catch (error) { failures.push({ step: 'dispose-original-documents', error }) }
+    try { page.setVisible(true); layout(); await painted() } catch (error) { failures.push({ step: 'restore-original-native-page', error }) }
+    if (failures.length) {
+      receipt.crossDocumentCleanupFailures = failures.map(({ step, error }) => ({ step, ...failureDetails(error) }))
+      if (!primaryFailed) throw new Error('Cross-document fixture cleanup failed: ' + JSON.stringify(receipt.crossDocumentCleanupFailures))
+    }
+  }
   await nativeReady(0)
 }
 async function verifyMobile() {
@@ -612,7 +653,7 @@ async function run() {
   receipt.browser = { id: page.webContents.id, url: page.webContents.getURL(), clicks: await page.webContents.executeJavaScript('clicks') }
   receipt.captureFaults = captureFaults; finishAvailableChecks()
 }
-void run().catch(async error => { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; try { await frame('failure') } catch {} }).finally(async () => {
+void run().catch(async error => { receipt.failure = failureDetails(error); try { await frame('failure') } catch (captureError) { receipt.failureFrameError = failureDetails(captureError) } }).finally(async () => {
   release?.(); ipcMain.removeHandler('layering:visibility'); ipcMain.removeHandler('layering:publish')
   for (const independent of independentWindows.values()) { independent.overlays.dispose(); independent.page.webContents.close(); independent.window.destroy() }
   overlays?.dispose(); page?.webContents.close(); window?.destroy()
