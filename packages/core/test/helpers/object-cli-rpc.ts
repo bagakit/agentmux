@@ -89,7 +89,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'connection.ls': [], 'connection.inspect': ['--connection', 'connection-a'], 'connection.configure': ['--input', '-'], 'connection.test': ['--connection', 'connection-a'],
     'agent.interaction.respond': ['--input', '-'],
     'agent.interaction.inspect': ['--session', 'SID', '--operation-id', 'RESPONSE'],
-    whoami: [], 'agent.ls': [], 'agent.inspect': ['--session', ids.agent],
+    whoami: [], 'agent.ls': [], 'agent.inspect': ['--session', ids.agent], 'agent.refresh': ['--session', ids.agent],
     'agent.native.confirm': ['--input', '-'],
     'agent.native.history': ['--input', '-'],
     'agent.native.history.resource': ['--input', '-'],
