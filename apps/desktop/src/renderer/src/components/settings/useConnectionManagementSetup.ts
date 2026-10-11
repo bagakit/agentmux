@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupConfigurationSelector, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
 import { connectionSetupDecisionForAction, connectionSetupPublicationSubjects } from '@agentmux/core/connections'
+import { connectionManagementTask } from './connection-management-task'
 import { api } from '../../lib/api'
 
 type Source = typeof api.connections.call
@@ -19,6 +20,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const [catalog, setCatalog] = useState<Catalog | null>(null), [reading, setReading] = useState<Reading | null>(null)
   const [publication, setPublication] = useState<{ key: string; source: Source; id: string; fields: PublicationForm } | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
+  const [guidedCheck, setGuidedCheck] = useState(false), checkOwner = useRef<object | null>(null)
   const [listing, setListing] = useState(false), [driving, setDriving] = useState(false), [fresh, setFresh] = useState(false)
   const context = useRef({ key, source, active, opened }), mounted = useRef(false)
   const occurrence = useRef(0), listOccurrence = useRef(0), selection = useRef<string | null>(null)
@@ -39,7 +41,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const originals = visibleCatalog?.value?.operations ?? []
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
   const choices = [...originals.map(operation => ({ input: inputOf(operation), operation })), ...local.filter(item => !originals.some(o => o.operationId === item.input.operationId)).map(item => ({ input: item.input, operation: null }))]
-  const busy = visible?.pending ?? false
+  const busy = (visible?.pending ?? false) || guidedCheck
   // User-authored fields survive an observation failure; no previous authority or private view does.
   const publicationForm = publication?.key === key && publication.source === source && publication.id === visible?.id ? publication.fields : emptyPublicationForm
   function editPublicationForm(change: Partial<PublicationForm>) {
@@ -73,7 +75,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean, actionKind?: ConnectionSetupAction['kind'], requestedConfiguration?: ConnectionSetupConfigurationSelector) {
     if (!currentSource() || !context.current.opened) return
     const request = ++occurrence.current
-    const intent = requestedConfiguration ?? (visible?.id === id ? configurationSelector : undefined)
+    const intent = requestedConfiguration ?? (visible?.id === id && visible.value?.continuation?.stage === 'confirmed' ? configurationSelector : undefined)
     selection.current = id; setDriving(run)
     setReading(previous => previous?.key === key && previous.source === source && previous.id === id
       ? { ...previous, issue: '', absent: false, pending: true, actionKind, intent } : { key, source, id, value: null, issue: '', absent: false, pending: true, actionKind, intent })
@@ -134,9 +136,10 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   }
   function inspectOriginal(selectors: Omit<ConnectionSetupInspect, 'operationId'> = {}, originalOperationId?: string) {
     const id = originalOperationId ?? visible?.id
+    const intent = selectors.applicationConfiguration ?? (view?.continuation?.stage === 'confirmed' || visible?.intent ? configurationSelector : undefined)
     if (id) void perform(id, () => source('connection.setup.inspect', {
       operationId: id, applicationInspection: {}, applicationConfiguration: configurationSelector, ...selectors
-    }), false, undefined, selectors.applicationConfiguration ?? configurationSelector)
+    }), false, undefined, intent)
   }
   function inspect() { inspectOriginal() }
   function advance(action: ConnectionSetupAction) {
@@ -179,6 +182,58 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const reviewPermissions = () => reviewConfiguration('add-application-permissions')
   const reviewMessageReception = () => reviewConfiguration('add-message-reception')
   const reviewPublication = (selector: Extract<ConnectionSetupConfigurationSelector, { effect: ConnectionSetupPublicationEffect }>) => reviewConfiguration(selector.effect, selector.draft)
+  async function checkGuidedSettings() {
+    if (!operation || busy) return
+    const id = operation.operationId, owner = {}
+    checkOwner.current = owner; setGuidedCheck(true)
+    const checked = new Set<string>()
+    const accepted = async (work: () => Promise<ConnectionSetupView>, selector: ConnectionSetupConfigurationSelector, kind?: ConnectionSetupAction['kind']) => {
+      const expected = occurrence.current + 1, result = await perform(id, work, false, kind, selector)
+      return result && currentSource() && context.current.opened && checkOwner.current === owner && selection.current === id && occurrence.current === expected ? result : null
+    }
+    const inspect = (selector: ConnectionSetupConfigurationSelector) => accepted(() => source('connection.setup.inspect', { operationId: id, applicationInspection: {}, applicationConfiguration: selector }), selector)
+    try {
+      // One explicit bounded check; writes are never part of this loop.
+      for (const effect of ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'add-message-reception'] as const) {
+        const selector: ConnectionSetupConfigurationSelector = effect === 'add-application-permissions' ? { effect, purpose: 'agent-conversation' } : { effect }
+        let result = await inspect(selector)
+        if (!result || result.applicationConfiguration?.effect !== effect) return
+        const task = connectionManagementTask(result)
+        if (task.kind === 'original' || task.kind === 'console' || task.kind === 'action' && (task.action.kind === 'recover-configuration-effect' || task.action.kind === 'recover-application-inspection')) return
+        const subjects = effect === 'enable-messaging' ? ['bot-settings'] as const : effect === 'use-persistent-connection' ? ['event-settings'] as const : effect === 'add-application-permissions' ? ['permission-catalog', 'application-permissions'] as const : ['event-settings', 'event-catalog'] as const
+        for (const subject of subjects) {
+          const configuration = result.applicationConfiguration
+          if (!configuration || configuration.effect !== effect) return
+          const sources = 'source' in configuration ? [configuration.source] : 'sources' in configuration ? Object.values(configuration.sources) : []
+          if (checked.has(subject) && sources.some(value => value?.subject === subject && value.request === 'confirmed' && value.secureStorage === 'stored')) continue
+          const recovery = result.applicationInspection?.selected?.subject === subject && result.applicationInspection.actions.find(action => action.kind === 'recover-application-inspection')
+          const action = recovery || result.applicationInspection?.actions.find(action => action.kind === 'read-' + subject)
+          if (!action) return
+          const input = { operationId: id, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) } }
+          result = await accepted(() => source('connection.setup.advance', input), selector, action.kind)
+          if (!result || result.applicationInspection?.selected?.subject !== subject || result.applicationInspection.selected.request !== 'confirmed' || result.applicationInspection.selected.secureStorage !== 'stored') return
+          checked.add(subject)
+        }
+        if (result.applicationConfiguration?.capability !== 'enabled') return
+      }
+      // History identifies an original result; it never selects a different version by label or order.
+      const submitted = await inspect({ effect: 'submit-application-version' })
+      const selected = submitted?.applicationConfiguration?.selected
+      if (!submitted || submitted.applicationConfiguration?.reason === 'original-effect-unconfirmed' || submitted.applicationConfiguration?.actions.some(action => action.kind === 'recover-configuration-effect')) return
+      if (selected?.effect === 'submit-application-version' && selected.input.publicationDraft?.kind === 'submit-version') {
+        await inspect({ effect: 'submit-application-version', draft: selected.input.publicationDraft, selectedStepId: selected.stepId })
+      } else await inspect({ effect: 'create-application-version' })
+    } finally { if (checkOwner.current === owner) { checkOwner.current = null; setGuidedCheck(false) } }
+  }
+  function inspectOriginalConfiguration() {
+    const original = configuration?.unresolved, stepId = original?.stepId ?? configuration?.selected?.stepId
+    inspectOriginal({ applicationInspection: {}, applicationConfiguration: { ...configurationSelector, ...(stepId ? { selectedStepId: stepId } : {}) } }, original?.operationId)
+  }
+  function checkPublicationStatus() {
+    const selected = configuration?.selected
+    if (selected?.effect === 'submit-application-version' && selected.input.publicationDraft?.kind === 'submit-version') void reviewPublication({ effect: 'submit-application-version', draft: selected.input.publicationDraft })
+  }
+  function returnToGuided() { inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect: 'enable-messaging' } }) }
   function continueOriginal() {
     const action = view?.continuation?.actions.find(action => action.kind === 'continue')
     if (action) { advance(action); return }
@@ -186,18 +241,21 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     if (input) void perform(input.operationId, () => source('connection.setup.begin', input), true)
   }
   function another() {
+    checkOwner.current = null; setGuidedCheck(false)
     occurrence.current++; selection.current = null; draft.current = null; submittedActions.current.clear()
     setReading(null); setPublication(null); setDriving(false); setFresh(true)
   }
 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; occurrence.current++; listOccurrence.current++ } }, [])
   useEffect(() => {
+    checkOwner.current = null; setGuidedCheck(false)
     occurrence.current++; listOccurrence.current++; selection.current = null; draft.current = null
     if (!active || requestedHandoff.current?.key !== key || requestedHandoff.current?.source !== source) requestedHandoff.current = null
     setReading(null); setPublication(null); setDriving(false); setListing(false); setFresh(false); submittedActions.current.clear()
     if (active && record) void list()
   }, [key, source, active])
   useEffect(() => {
+    checkOwner.current = null; setGuidedCheck(false)
     occurrence.current++; selection.current = null; setReading(null); setPublication(null); setDriving(false); setFresh(false); submittedActions.current.clear()
     if (!opened) requestedHandoff.current = null
   }, [opened])
@@ -228,7 +286,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
+  return { task: connectionManagementTask(view), guidedCheck, checkGuidedSettings, checkPublicationStatus, returnToGuided, inspectOriginalConfiguration, publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>

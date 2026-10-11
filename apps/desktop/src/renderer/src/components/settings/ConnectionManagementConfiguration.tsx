@@ -1,4 +1,4 @@
-import type { ConnectionRecord, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
+import type { ConnectionRecord, ConnectionSetupReadSubject } from '@agentmux/core/connections'
 import { SurfaceModeSwitch } from '../SurfaceModeSwitch'
 import { ConnectionManagementPublication } from './ConnectionManagementPublication'
 import { ConnectionManagementPermissions } from './ConnectionManagementPermissions'
@@ -15,40 +15,6 @@ const subjects: Record<ConnectionSetupReadSubject, string> = {
 }
 const resultLabel = (request: string, storage: string) => request === 'confirmed'
   ? storage === 'stored' ? 'Result saved' : 'Result needs saving' : request === 'dispatching' ? 'In progress' : 'Result not confirmed'
-
-/** Presentation only: current capability and the original request remain separate facts. */
-export function connectionConfigurationSummary(view: ConnectionSetupView | null) {
-  const configuration = view?.applicationConfiguration
-  if (configuration?.effect === 'create-application-version' || configuration?.effect === 'submit-application-version') return { title: 'Publish application changes', summary: 'Review the complete application changes, create a version and explicitly submit the exact version. Acceptance and being live are separate.' }
-  if (configuration?.effect === 'add-message-reception') {
-    if (configuration.selected?.request === 'confirmed' && configuration.selected.secureStorage !== 'stored') return { title: 'Finish saving the accepted reception request', summary: 'The platform accepted this addition. Save its original result locally; this does not send it again.' }
-    if (configuration.reason === 'original-effect-unconfirmed') return { title: 'Message reception request not confirmed', summary: 'The original addition is kept. A fresh check cannot confirm that earlier request or send it again.' }
-    if (configuration.capability === 'enabled') return { title: 'Message reception is configured', summary: 'The latest check includes the required application event. Permissions, publishing and actual message intake remain separate.' }
-    if (configuration.selected?.request === 'confirmed') return { title: 'Message reception request accepted', summary: 'Check current reception separately. Acceptance does not confirm publishing or that messages are arriving.' }
-    return { title: 'Receive messages from groups', summary: 'Check this application’s delivery mode and available events, then add the one message event if needed.' }
-  }
-  if (configuration?.effect === 'add-application-permissions') {
-    if (configuration.selected?.request === 'confirmed' && configuration.selected.secureStorage !== 'stored') return { title: 'Finish saving the accepted request', summary: 'The platform accepted this addition. Finish saving its original result locally; this does not send it again.' }
-    if (configuration.reason === 'original-effect-unconfirmed') return { title: 'Permission request not confirmed', summary: 'The original request is kept. Reviewing current permissions does not send it again or confirm its result.' }
-    if (configuration.capability === 'enabled') return { title: 'Necessary permissions are already requested', summary: 'These application permissions are present in the latest check. Effective authorization, publishing and chatting remain separate.' }
-    if (configuration.selected?.request === 'confirmed') return { title: 'Permission request accepted', summary: 'The platform accepted this addition request. Review current permissions separately; authorization and publishing may still be needed.' }
-    return { title: 'Review necessary permissions', summary: 'Check what this bot needs for Agent conversations and creating or connecting groups. Only missing application permissions will be requested.' }
-  }
-  if (configuration?.effect === 'use-persistent-connection') {
-    if (configuration.reason === 'original-effect-unconfirmed') return { title: 'Delivery change not confirmed', summary: 'The original application-wide request is kept. A current read does not confirm that earlier request.' }
-    if (configuration.capability === 'enabled') return { title: 'Events use a persistent connection', summary: 'The current event delivery mode is confirmed. Subscriptions, publishing and message intake are separate steps.' }
-    if (configuration.selected?.request === 'confirmed') return { title: 'Delivery change accepted', summary: 'Read the current event setting to confirm the mode. This does not publish the app.' }
-    return { title: 'Set up event delivery', summary: configuration.capability === 'disabled' ? 'Switch this application’s event delivery to a persistent connection. Existing event consumers will be affected.' : 'Read this application’s current event delivery mode before choosing a change.' }
-  }
-  if (configuration?.capability === 'enabled') return { title: 'Bot messages are on', summary: 'The bot’s message capability is switched on. More setup is needed before it can chat.' }
-  if (configuration?.capability === 'disabled') return { title: 'Bot messages are off', summary: configuration.actions.some(action => action.kind === 'enable-messaging')
-    ? 'Turn on messaging for this bot. It will still need the remaining setup before it can chat.'
-    : 'The current setting is off. Check again or continue setup in the developer console.' }
-  if (configuration?.reason === 'original-effect-unconfirmed') return { title: 'Turn-on result not confirmed', summary: 'The original request is kept. Check its result; checking will not send it again.' }
-  if (configuration?.selected?.request === 'confirmed') return { title: 'Turn-on request accepted', summary: 'Check the current setting to see whether messaging is now on. This is one part of setup.' }
-  if (view?.applicationInspection?.selected?.subject === 'bot-settings') return { title: 'Bot setting not confirmed', summary: 'This check did not confirm the current setting. The original result is kept.' }
-  return { title: 'Prepare bot messages', summary: 'Check this bot’s current message setting, then turn it on if needed.' }
-}
 
 /** Controls consume exact Host-offered actions; activity selection is a local read. */
 export function ConnectionManagementConfiguration({ record, model, current, onConsole, onBack }: {
@@ -97,7 +63,6 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
       {enable ? <><button className="primary-button" data-management-enable={!transport ? '' : undefined} data-management-use-persistent={transport ? '' : undefined} disabled={busy} onClick={() => model.advance(enable)}>{busy && model.reading?.actionKind === effect ? transport ? 'Changing event delivery…' : 'Turning on messages…' : transport ? 'Use persistent connection' : 'Turn on bot messages'}</button><p className="settings-group-note">{transport ? `This changes event delivery for the whole ${record.config.label} application, including existing event consumers. This step does not add or remove subscriptions, or publish the app.` : `This requests messaging for ${record.config.label}. Publishing is a separate step.`}</p></> : null}
       {read ? <button className={primaryRead ? 'primary-button' : 'small-button'} data-management-read-bot={!transport && !acceptedEffect ? '' : undefined} data-management-read-events={transport ? '' : undefined} data-management-current-setting={acceptedEffect ? '' : undefined} disabled={busy} onClick={() => model.advance(read)}>{busy && model.reading?.actionKind === read.kind ? 'Checking current setting…' : acceptedEffect ? 'Check current setting' : scalarConfiguration?.source ? 'Check setting again' : transport ? 'Check event delivery' : 'Check bot settings'}</button> : null}
       {!inspection && !configuration || model.reading?.configurationIssue ? <><p className="connector-check-feedback" role="status">Bot setup actions could not be read. Your confirmed account is kept.</p><button className="small-button" data-management-inspect disabled={busy} onClick={model.inspect}>Check setup actions</button></> : null}
-      {configuration?.capability === 'enabled' && !transport ? <p className="settings-group-note">Complete the remaining platform setup in the developer console, then return to check the connection.</p> : null}
       {transport && supported.includes('message-reception') ? <button className={configuration.capability === 'enabled' && !uncertainEffect ? 'primary-button' : 'small-button'} data-management-review-reception disabled={busy} onClick={() => void model.reviewMessageReception()}>Check message reception</button> : null}
       {supported.includes('application-publication') ? <button className="small-button" data-management-publication-open disabled={busy} onClick={() => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect: 'create-application-version' } })}>Review publishing</button> : null}
       <button className="small-button" data-management-console onClick={() => void onConsole()}>Open developer console</button>
