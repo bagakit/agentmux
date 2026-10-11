@@ -114,7 +114,7 @@ function deferred() { let release!: () => void; const gate = new Promise<void>(r
 function expectNoAdditionalWrites() {
   const methods = calls.map(call => call.method)
   expect(methods.length).toBeGreaterThan(0)
-  expect(methods.filter(method => !['connection.ls', 'connection.inspect', 'connection.test', 'connection.enrollment.ls', 'connection.service.get'].includes(method))).toEqual([])
+  expect(methods.filter(method => !['connection.ls', 'connection.inspect', 'connection.test', 'connection.enrollment.ls', 'connection.service.get', 'connection.setup.ls'].includes(method))).toEqual([])
 }
 
 it('continues the original creation through current Host reads, explicit checks and the original SDK receiver without navigating away', async () => {
