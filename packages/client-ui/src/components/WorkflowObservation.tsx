@@ -6,6 +6,7 @@ type ObservationProps = {
   observation: {
     id: string
     stepCount: number
+    countUnit?: 'records'
     counts?: { complete: number; streaming: number; failed: number; unknown: number }
     status?: WorkflowObservationStatus
     recordedTime?: WorkflowRecordedTime
@@ -60,7 +61,7 @@ export function RecordedStepsCard({ observation, compact = false, expanded, onEx
           <span>{recordedTime.from}</span><span aria-hidden="true">–</span><span>{recordedTime.to}</span>
         </span> : null}
         {observation.metrics}
-        <span className="log-fold__steps">{observation.stepCount} {compact ? observation.metrics ? '条已加载记录' : '步' : observation.metrics ? 'loaded records' : 'steps'}</span>
+        <span className="log-fold__steps">{observation.stepCount} {compact ? observation.countUnit === 'records' || observation.metrics ? '条已加载记录' : '步' : observation.countUnit === 'records' || observation.metrics ? 'loaded records' : 'steps'}</span>
         {observation.elapsed ? <span className="log-fold__elapsed">{observation.elapsed}</span> : null}
         {status === 'running' ? <span className="wf-chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
         {status === 'interrupted' ? <span className="wf-chip"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}

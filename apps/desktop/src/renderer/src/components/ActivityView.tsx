@@ -99,6 +99,12 @@ type RawEntry =
   | { type: 'timeline'; item: AgentTimelineItem; time: number }
   | { type: 'user-message'; message: AgentSessionUserMessage; time?: number }
 
+/** A Hook snapshot is an observation, never an inferred second utterance or native join. */
+function isReplyObservation(item: AgentTimelineItem): boolean {
+  return item.source === 'native-hook' && item.kind === 'assistant_message'
+    && item.authorHuman !== true && item.authorAgentSessionId === undefined && item.authorExternal === undefined
+}
+
 function buildActivityEntries(
   sourceItems: AgentTimelineItem[],
   userMessages?: readonly AgentSessionUserMessage[],
@@ -159,7 +165,11 @@ function buildActivityEntries(
       unifiedItems.push(entry.message)
     } else {
       unifiedItems.push(entry.item)
-      if (entry.item.source === 'native-hook' && !isConversationTurn(entry.item)) {
+      if (nativePage) {
+        // The shared sequence groups individual source placements once, across both sources.
+        flush()
+        segments.push({ kind: 'item', item: entry.item, ...position })
+      } else if (entry.item.source === 'native-hook' && !isConversationTurn(entry.item)) {
         if (run.length && beforeRecordId !== runBefore) flush()
         runBefore = beforeRecordId
         run.push(entry.item)
@@ -844,9 +854,12 @@ export function ActivityView({
   // This same exact rendered-record owner also serves closed Sessions with no Run.
   function locateLoadedRecord(sourceKey: string, isCurrent: () => boolean): boolean {
     if (!readingEnabled || !feedEl?.isConnected || !isCurrent()) return false
-    const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]')).filter(node => node.dataset.messageSourceKey === sourceKey)
+    const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key], .conversation-reply-observation[data-message-source-key]'))
+      .filter(node => node.dataset.messageSourceKey === sourceKey && (node.matches('.conversation-reply-observation') || !node.closest('.conversation-reply-observation')))
     if (matches.length !== 1) return false
-    const node = matches[0]!, head = node.querySelector<HTMLElement>('.log-turn__head') ?? node
+    const node = matches[0]!, head = node.matches('.conversation-reply-observation')
+      ? node.querySelector<HTMLElement>('[data-observation-step-id]') ?? node
+      : node.querySelector<HTMLElement>('.log-turn__head') ?? node
     followRef.current = { ...followRef.current, following: false }
     head.scrollIntoView({ block: 'center', behavior: 'instant' })
     anchorRef.current = captureReadingAnchor(feedEl, node)
@@ -1207,6 +1220,7 @@ export function ActivityView({
       ) : speaker ? (
         <CapturedConversationMessage
           item={entry.item}
+          {...(isReplyObservation(entry.item) ? { replyObservation: { compact: Boolean(nativeHistoryPage?.items.length) && !readingWindow.error && !userMessageRead?.error } } : {})}
           messageActions={<>{executionHostId && renderRecordActions?.({ hostId: executionHostId, agentSessionId: entry.item.agentSessionId, source: { kind: 'captured', recordId: entry.item.id } }, readingEnabled)}{entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
             !entry.item.authorAgentSessionId && entry.item.authorHuman !== true && entry.item.authorExternal === undefined && entry.item.source !== 'user'
             ? renderMessageActions?.({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) : null}</>}
@@ -1275,8 +1289,9 @@ export function ActivityView({
       {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
         insertions={[
-          { key: 'native-reading-tail', content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> },
+          { key: 'native-reading-tail', role: 'anchor', content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> },
           ...placed.map(segment => ({ key: segment.key, ...(segment.entry.beforeRecordId === undefined ? {} : { beforeRecordId: segment.entry.beforeRecordId }),
+            role: segment.entry.kind === 'item' && !isConversationTurn(segment.entry.item) ? 'process' as const : 'message' as const,
             recordIds: segment.entry.kind === 'run' ? segment.entry.items.map(item => item.id) : segment.entry.kind === 'item' ? [segment.entry.item.id] : [],
             content: (disclosure: NonNullable<ConversationProcessProps['disclosure']>) => renderPlaced(segment, disclosure) }))
         ]}

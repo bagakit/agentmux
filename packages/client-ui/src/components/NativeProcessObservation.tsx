@@ -2,7 +2,7 @@ import type { AgentSessionHistoryItem, AgentSessionHistorySource } from '@agentm
 import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { describeActivityRecordTime } from '../lib/activity-record-time.js'
 import { stepTitle } from '../lib/activity-step-summary.js'
-import { useId, useState, type ReactNode } from 'react'
+import { Fragment, useId, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
 import { ConversationMetricsDetails, ConversationMetricsInline, conversationMetricsLabel } from './ConversationMetrics.js'
@@ -32,29 +32,36 @@ function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRec
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, items, renderRecord, metrics, disclosure, compact = false }: ConversationProcessProps & { compact?: boolean }) {
+export function NativeProcessObservation({ id, items, entries, renderRecord, metrics, disclosure, compact = false }: ConversationProcessProps & { compact?: boolean }) {
   const [localExpanded, setExpanded] = useState(!compact)
   const expanded = disclosure?.expanded ?? localExpanded
+  const layout = entries ?? items.map(item => ({ kind: 'native' as const, item }))
+  const records = layout.filter(entry => entry.kind !== 'insertion' || entry.role !== 'anchor')
+  const nativeOnly = records.every(entry => entry.kind === 'native')
   const states = items.map(recordedStatus)
   const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
     : states.every(state => state === 'complete') ? 'complete' : undefined
-  const status = recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status)
-  const first = items[0]!
-  const last = items.at(-1)!
-  const recordedTime = items.every(item => item.startedAt !== undefined) ? recordTime({
+  const status = nativeOnly ? recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status) : undefined
+  const first = items[0]
+  const last = items.at(-1)
+  const recordedTime = nativeOnly && first && last && items.every(item => item.startedAt !== undefined) ? recordTime({
     ...first, completedAt: last.completedAt ?? last.startedAt!
   }) : undefined
-  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: items.length,
+  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: records.length, countUnit: 'records',
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
     expanded={expanded} onExpandedChange={open => { setExpanded(open); disclosure?.onExpandedChange(open) }}>
     {metrics ? <ConversationMetricsDetails observation={metrics} /> : null}
-    {items.map(item => renderRecord(item, body =>
-      <NativeProcessStep item={item} {...(first.startedAt === undefined ? {} : { origin: first.startedAt })}
-        {...(disclosure?.steps.get(item.id) === undefined ? {} : { expanded: disclosure.steps.get(item.id)! })}
-        {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(item.id, open) } : {})}>{body}</NativeProcessStep>))}
-  </WorkflowCard>{items.map(item => item.metricsDiagnostic
+    {layout.map(entry => entry.kind === 'insertion' ? entry.role === 'anchor'
+      ? <Fragment key={JSON.stringify(['anchor', entry.key])}>{expanded ? entry.content : null}</Fragment>
+      : <div key={JSON.stringify(['insertion', entry.key])}>{entry.content}</div>
+      : renderRecord(entry.item, body =>
+      <NativeProcessStep item={entry.item} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
+        {...(disclosure?.steps.get(entry.item.id) === undefined ? {} : { expanded: disclosure.steps.get(entry.item.id)! })}
+        {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(entry.item.id, open) } : {})}>{body}</NativeProcessStep>))}
+  </WorkflowCard>{!expanded ? layout.flatMap(entry => entry.kind === 'insertion' && entry.role === 'anchor'
+    ? [<Fragment key={JSON.stringify(['anchor', entry.key])}>{entry.content}</Fragment>] : []) : null}{items.map(item => item.metricsDiagnostic
     ? <p key={item.id} className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null)}</div>
 }
 
