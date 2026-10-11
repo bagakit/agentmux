@@ -1,4 +1,5 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useContext, useEffect, useId, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -63,6 +64,7 @@ export function MoteConnectionIdentity({ scope, active }: { scope: MoteWorkfaceS
 function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, returnFocus }: {
   target: MotePreferencesTarget | null; topicId: string; moteName: string; onClose(): void; onRead(value: Snapshot): void; returnFocus(): HTMLElement | null
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [selection, setSelection] = useState(''), fieldId = useId()
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
   const [attempt, setAttempt] = useState<{ input: MoteConnectionPreferencesSaveParams; receipt: MoteConnectionPreferencesSaveResult | null } | null>(null)
@@ -128,10 +130,10 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
   const currentChoice = current && snapshot && !snapshot.connectionIssue ? moteConnectionChoice(current, snapshot.connections) : null
   const savedBotIssue = current ? snapshot?.connectionIssue ?? currentChoice?.issue : null
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
-    <div className="window-overlay-host__entry" data-overlay-layer="dialog"><Dialog.Overlay className="dialog-scrim" />
+    <Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
-        onCloseAutoFocus={event => { event.preventDefault(); const active = document.activeElement, node = returnFocus();
-          if (node?.isConnected && (active === document.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
+        onCloseAutoFocus={event => { event.preventDefault(); const active = ownerDocument.activeElement, node = returnFocus();
+          if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
         <header className="mote-connection-dialog__header"><div><Dialog.Title>Bot for {moteName}</Dialog.Title>
           <Dialog.Description>New group chats use this bot. Existing groups keep their bot.</Dialog.Description></div>
           <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close bot choice"><CloseIcon size={16} /></button></Dialog.Close>
@@ -160,6 +162,5 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
           <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>
         </footer> : null}
       </Dialog.Content>
-    </div>
   </DocumentOverlayPortal></Dialog.Root>
 }

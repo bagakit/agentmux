@@ -1,8 +1,9 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { DocumentOverlayPortal } from '../WindowOverlayHost'
+import { useWorkbenchDocument } from '../../lib/workbench-document'
 
 export type AnnotationFileActionResult = { status: 'done' } |
   { status: 'error' | 'conflict' | 'unknown'; message: string }
@@ -17,6 +18,7 @@ export function AnnotationFileDialog({ mode, initialPath, onSubmit, onCheck, onC
   onCheck?(path: string): Promise<AnnotationFileActionResult>
   onClose(): void
 }) {
+  const document = useWorkbenchDocument()
   const [path, setPath] = useState(initialPath), [busy, setBusy] = useState<'submit' | 'check' | null>(null)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
   const input = useRef<HTMLInputElement>(null), content = useRef<HTMLDivElement>(null)
@@ -67,8 +69,9 @@ export function AnnotationFileDialog({ mode, initialPath, onSubmit, onCheck, onC
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface annotation-file-dialog" aria-busy={busy !== null}
         onOpenAutoFocus={event => {
           event.preventDefault()
-          previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-          openedContent.current = event.target instanceof Element ? event.target : null
+          const active = document.activeElement
+          previousFocus.current = active?.nodeType === 1 ? active as HTMLElement : null
+          openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null
           input.current?.focus(); input.current?.select()
         }}
         onCloseAutoFocus={event => {

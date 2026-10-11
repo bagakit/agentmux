@@ -1,4 +1,4 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useState } from 'react'
 import type { WorkspaceDirectoryEntry, WorkspaceRecord } from '../../../shared/contracts'

@@ -2,7 +2,7 @@ import { inputMailboxItemKey, inputMailboxKey, useAgentInputMailbox } from '@age
 import { InputMailboxRecords } from '@agentmux/client-ui/components/InputMailboxRecords'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxAgentSession, AgentSessionUserMessage } from '@agentmux/core'
 import { ConversationMessage, speakerOfUserMessage, type ClientUiPlatform, type DescribeSpeaker } from '@agentmux/client-ui'

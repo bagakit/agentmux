@@ -1,4 +1,4 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { workspaceFileFormat } from '../../../shared/workspace-file-format'
 import { NoteRecoveryDrawer, NoteRecoverySummary, type NoteRecoverySection } from './NoteRecoveryDrawer'
 import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'

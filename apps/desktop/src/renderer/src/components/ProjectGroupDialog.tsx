@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useMemo, useState } from 'react'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
@@ -51,7 +51,7 @@ export function ProjectGroupDialog({ projects, seed, editing, related, observati
     } catch (error) { setIssue(presentError(error)) }
     finally { setBusy(false) }
   }
-  return <Dialog.Root open onOpenChange={open => { if (!open && !busy) onClose() }}>
+  return <Dialog.Root recoveryCloseDisabled={busy} open onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface project-group-dialog" aria-busy={busy}

@@ -1,5 +1,6 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentMuxSpaceLocation } from '@agentmux/core/control'
 import { groupIds, regionIds } from '@agentmux/layout'
@@ -27,6 +28,7 @@ type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpa
 
 /** Rich presentation on the original File surface and its original update/save/reveal owner. */
 export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
+  const ownerDocument = useWorkbenchDocument()
   const key = documentKey(surface.workspaceId, surface.path)
   const presentation = useWorkbenchBrowserPresentation()
   // Retain the original editor without deriving a global graph for a hidden projection.
@@ -140,7 +142,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       choice.location.tabId === current.tabId && choice.location.regionId === current.regionId)
     if (local) { setChoices([]); setNotice(null); void openAt(local); return }
     if (exact.length > 1) {
-      choiceOpener.current = globalThis.document.activeElement instanceof HTMLElement ? globalThis.document.activeElement : null
+      choiceOpener.current = ownerDocument.activeElement?.nodeType === 1 ? ownerDocument.activeElement as HTMLElement : null
       restoreChoiceFocus.current = true
       setNotice(null); setChoices(exact); return
     }

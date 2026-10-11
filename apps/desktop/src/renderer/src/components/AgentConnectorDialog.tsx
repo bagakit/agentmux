@@ -1,4 +1,5 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useContext, useEffect, useId, useRef, useState, type ComponentProps } from 'react'
 import { TextInput, Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -32,6 +33,7 @@ export type AgentConnectorTarget = { target: RoomBindingTarget; session: AgentNa
 export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
   original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; onClose(): void; returnFocus(): HTMLElement | null
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const { target, session } = original, identity = JSON.stringify(target), fieldId = useId()
   const [changingGroup, setChangingGroup] = useState(false), [accessOpen, setAccessOpen] = useState(false)
   const mote = useContext(MoteWorkfaceContext), settings = useContext(SettingsNavigation)
@@ -86,7 +88,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     if (!initialFocus.current || !connection || mode !== 'existing') return
     initialFocus.current = false
     const close = content.current?.querySelector('[aria-label="Close group setup"]')
-    if (document.activeElement === close) content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]')?.focus({ preventScroll: true })
+    if (ownerDocument.activeElement === close) content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]')?.focus({ preventScroll: true })
   }, [connection, mode])
   const approvedMembers = binding && actors?.bindingId === binding.bindingId && actors.revision === binding.revision
     ? new Set(actors.grants.filter(grant => grant.state === 'active').map(grant => JSON.stringify([grant.actor.application.domain, grant.actor.application.appId, grant.actor.idType, grant.actor.userId]))).size : null
@@ -313,7 +315,7 @@ export function AgentConnectorDialog({ original, mode, onClose, returnFocus }: {
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content ref={content} className="dialog-surface agent-connector-dialog" aria-busy={busy}
         onOpenAutoFocus={event => { event.preventDefault(); (content.current?.querySelector<HTMLElement>('[aria-label="Group name"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Close group setup"]'))?.focus({ preventScroll: true }) }}
-        onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = document.activeElement; if (node?.isConnected && (active === document.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
+        onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement; if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
         onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
         <header className="agent-connector-dialog__header"><div><Dialog.Title>{binding ? 'Shared group details' : mode === 'create' ? 'Create group chat' : 'Bind existing group chat'}</Dialog.Title>
           <Dialog.Description className="agent-connector-description">Connect {original.name} to an exact group conversation.</Dialog.Description></div>

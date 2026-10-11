@@ -1,5 +1,5 @@
 import { TextInput } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
@@ -576,6 +576,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
       </div>
       {actionError && !createBranch && snapshot ? <div className="branches-inline-error" role="alert">{actionError}</div> : null}
       <Dialog.Root
+        recoveryCloseDisabled={busyBranch !== null}
         open={active && createBranch !== null}
         onOpenChange={(open) => {
           if (!open && busyBranch === null) {
@@ -633,6 +634,7 @@ export function BranchesPanel({ workspace, active = true }: { workspace: Workspa
       {/* Fan one prompt across N fresh branches. Lives beside "create worktree" because it is the same
           act repeated — the branch names and paths are main's to derive, never chosen here. */}
       <Dialog.Root
+        recoveryCloseDisabled={fanningOut}
         open={active && fanOutOpen}
         onOpenChange={(open) => {
           if (fanningOut) return

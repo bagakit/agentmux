@@ -1,6 +1,7 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { attentionAccentFor } from '../lib/attention-event'
@@ -46,6 +47,7 @@ function KindGlyph({ item }: { item: QuickSwitchItem }) {
 }
 
 export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; onClose: () => void; returnFocus?: () => HTMLElement | null }) {
+  const ownerDocument = useWorkbenchDocument()
   const scratchTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
@@ -108,9 +110,9 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
           onCloseAutoFocus={event => {
             event.preventDefault()
             if (activated.current) return
-            const target = returnFocus?.(), active = document.activeElement
+            const target = returnFocus?.(), active = ownerDocument.activeElement
             if (target && desktopElementVisible(target) &&
-                (active === document.body || active === target || !active?.isConnected || contentRef.current?.contains(active))) target.focus({ preventScroll: true })
+                (active === ownerDocument.body || active === target || !active?.isConnected || contentRef.current?.contains(active))) target.focus({ preventScroll: true })
           }}
           onKeyDown={(event) => {
             if (mode === 'files') return

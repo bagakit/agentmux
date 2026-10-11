@@ -1,4 +1,5 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconId, type SpaceIconTarget } from '../lib/space-object-appearance'
@@ -38,6 +39,7 @@ const ThemeObjectLibraryIcon = semanticIconComponent('object.library')
 export function SpaceIconPicker({ target, onClose, returnFocus }: {
   target: SpaceIconTarget | null; onClose(): void; returnFocus?: () => HTMLElement | null
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const [draft, setDraft] = useState<SpaceIconChoice | null>(null)
   const [preview, setPreview] = useState<{ dataUrl: string; revision: number } | null>(null)
   const [previewReady, setPreviewReady] = useState(false)
@@ -261,17 +263,17 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       : editingSeries && seriesAttempt?.state === 'unsent' ? 'Save not sent'
         : editingSeries && seriesStorageIssue ? 'Request unconfirmed'
           : error && errorStep === 'save' ? 'Retry saving' : supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'
-  return <Dialog.Root open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
+  return <Dialog.Root recoveryCloseDisabled={busy} open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="space-icon-picker__overlay dialog-scrim" />
       <Dialog.Content ref={content} data-series-draft-ready={Boolean(seriesDraft)} data-avatar-baseline-ready={Boolean(avatarBaseline)} data-avatar-save-state={busy && seriesAttempt ? 'saving' : seriesAttempt?.state} data-avatar-operation={seriesAttempt?.request.operationId} className={`space-icon-picker dialog-surface${editingSeries ? ' space-icon-picker--series' : ''}${supportsImages ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}
         onCloseAutoFocus={event => {
           event.preventDefault()
-          const row = returnFocus ? returnFocus() : [...document.querySelectorAll<HTMLElement>('[data-space-icon-target]')]
+          const row = returnFocus ? returnFocus() : [...ownerDocument.querySelectorAll<HTMLElement>('[data-space-icon-target]')]
             .find(node => node.dataset.spaceIconTarget === returnKey.current)
-          const active = document.activeElement
-          if (row?.isConnected && (active === document.body || active === row || !active?.isConnected || content.current?.contains(active))) row.focus({ preventScroll: true })
+          const active = ownerDocument.activeElement
+          if (row?.isConnected && (active === ownerDocument.body || active === row || !active?.isConnected || content.current?.contains(active))) row.focus({ preventScroll: true })
         }}>
         <header className="space-icon-picker__header">
           <Dialog.Title className="space-icon-picker__title">{supportsImages ? 'Change avatar' : 'Change icon'}</Dialog.Title>

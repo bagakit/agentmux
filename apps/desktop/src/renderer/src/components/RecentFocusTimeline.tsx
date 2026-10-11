@@ -29,7 +29,7 @@ import { sessionPresentationById } from '../lib/session-presentation'
 import { observeAgentSession } from '../lib/agent-observation'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { createFocusTimelineOrder, extendFocusTimelineOrder, focusTimelineOrderCandidates, focusTimelineTrackKey, groupFocusTimeline, observeFocusInputTracks, orderFocusTimelineProjects, resolveFocusInputTrack, type FocusTimelineProject, type FocusTimelineTrack } from '../lib/focus-history-timeline'
 import { FocusMessagePreview } from './FocusMessagePreview'
@@ -469,7 +469,7 @@ function FocusHistoryObservation({ segment, anchor, time, onClose }: { segment: 
   const dateClock = time.detailed
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
-    <Dialog.Content className="confirmation-dialog dialog-surface recent-focus__observation" onCloseAutoFocus={event => { event.preventDefault(); if (anchor.isConnected && document.activeElement === document.body) anchor.focus() }}>
+    <Dialog.Content className="confirmation-dialog dialog-surface recent-focus__observation" onCloseAutoFocus={event => { event.preventDefault(); if (anchor.isConnected && anchor.ownerDocument.activeElement === anchor.ownerDocument.body) anchor.focus() }}>
       <Dialog.Title className="confirmation-dialog__title">{identity?.name ?? segment.sessionId}</Dialog.Title>
       <Dialog.Description className="confirmation-dialog__description">Retained focus observation. Reading it does not restore a Session.</Dialog.Description>
       <dl><dt>Focused</dt><dd>{dateClock(segment.focusedAt)}</dd><dt>Next focus</dt><dd>{segment.end === undefined ? 'Not recorded' : dateClock(segment.end)}</dd>
@@ -488,7 +488,7 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
     <Dialog.Content className="confirmation-dialog dialog-surface recent-focus__observation" onCloseAutoFocus={event => {
       event.preventDefault()
-      if (anchor.isConnected && !anchor.closest('[inert]') && document.activeElement === document.body) anchor.focus()
+      if (anchor.isConnected && !anchor.closest('[inert]') && anchor.ownerDocument.activeElement === anchor.ownerDocument.body) anchor.focus()
     }}>
       <Dialog.Title className="confirmation-dialog__title">{track.current?.name ?? track.identity?.name ?? track.sessionId}</Dialog.Title>
       <Dialog.Description className="confirmation-dialog__description">Recorded working state. Reading this observation does not restore a Session or start a Run.</Dialog.Description>

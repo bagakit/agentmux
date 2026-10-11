@@ -1,4 +1,4 @@
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
@@ -80,7 +80,7 @@ function TopicMoveContent({ target, onClose, onMoved }: TopicMoveDialogProps & {
   }
 
   return <>
-    <Dialog.Root open onOpenChange={open => { if (!open && !moving.current && !creating) onClose() }}>
+    <Dialog.Root recoveryCloseDisabled={moving.current || creating} open onOpenChange={open => { if (!open && !moving.current && !creating) onClose() }}>
       <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
         <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog topic-move-dialog"
           onEscapeKeyDown={event => { if (moving.current || creating || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}

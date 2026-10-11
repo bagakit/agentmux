@@ -1,5 +1,5 @@
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import type { ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'

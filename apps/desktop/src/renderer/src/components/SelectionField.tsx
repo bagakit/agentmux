@@ -36,13 +36,12 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
     const target = items?.[last ? items.length - 1 : 0]
     target?.focus()
   }
-  const [layer, setLayer] = useState<'dialog' | 'popover'>('popover')
   const selected = options.find(option => option.value === value)
   const currentLabel = selected?.label ?? 'Saved selection · not in current options'
   const currentDescription = selected?.description ? `${currentLabel} · ${selected.description}` : currentLabel
   return <Menu.Root open={open} onOpenChange={open => {
     setOpen(open)
-    if (open) { setSearchSession(searchable ?? options.length > 8); setLayer(trigger.current?.closest('[role=dialog]') ? 'dialog' : 'popover') }
+    if (open) { setSearchSession(searchable ?? options.length > 8) }
     else { setQuery(''); setSearchSession(false) }
   }}>
     <Menu.Trigger asChild>
@@ -52,7 +51,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
       </button>
     </Menu.Trigger>
     <DocumentOverlayPortal component={Menu.Portal}>
-      <div className="window-overlay-host__entry" data-overlay-layer={layer}><Menu.Content ref={menu} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onKeyDown={event => {
+      <div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content ref={menu} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onKeyDown={event => {
         if (canSearch && event.target !== search.current && !isImeOwnedKeyboardEvent(event) && event.key === 'Tab') {
           event.preventDefault()
           if (event.shiftKey && query) menu.current?.querySelector<HTMLButtonElement>('.selection-field__clear')?.focus()

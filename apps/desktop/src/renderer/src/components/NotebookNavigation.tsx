@@ -1,6 +1,7 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -90,6 +91,7 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, onTal
 
 /** Creating a container is deliberate; the original metadata operation owns uncertain receipts. */
 export function NotebookCreateDialog({ open, active, onClose, onCreated, onCreateIntent, restoreFocus }: { open: boolean; active: boolean; onClose(): void; onCreated(notebookId: string): void; onCreateIntent?(): void; restoreFocus?(): void }) {
+  const ownerDocument = useWorkbenchDocument()
   const [name, setName] = useState('')
   const operation = useNotebookOperation()
   const input = useRef<HTMLInputElement>(null)
@@ -101,13 +103,13 @@ export function NotebookCreateDialog({ open, active, onClose, onCreated, onCreat
     const notebookId = mintObjectId()
     await operation.run({ kind: 'create', notebookId, name: name.trim() }, () => { setName(''); onCreated(notebookId) })
   }
-  return <Dialog.Root open={open} onOpenChange={value => { if (!value) close() }}>
+  return <Dialog.Root recoveryCloseDisabled={operation.busy} open={open} onOpenChange={value => { if (!value) close() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content className="notebook-create-dialog dialog-surface" onOpenAutoFocus={event => { if (!operation.pending) { event.preventDefault(); input.current?.focus() } }} onCloseAutoFocus={event => {
         if (!active || restoreFocus) event.preventDefault()
-        const stillInDialog = event.target instanceof HTMLElement && event.target.contains(document.activeElement)
-        if (active && (stillInDialog || document.activeElement === document.body)) restoreFocus?.()
+        const stillInDialog = (event.target as Node | null)?.nodeType === 1 && (event.target as HTMLElement).contains(ownerDocument.activeElement)
+        if (active && (stillInDialog || ownerDocument.activeElement === ownerDocument.body)) restoreFocus?.()
       }} onEscapeKeyDown={event => { if (operation.busy) event.preventDefault() }} onInteractOutside={event => { if (operation.busy) event.preventDefault() }}>
         <header><Dialog.Title>New notebook</Dialog.Title><button type="button" className="icon-button" aria-label="Close notebook creation" disabled={operation.busy} onClick={close}><ThemeActionCloseIcon size={15} /></button></header>
         <Dialog.Description className="notebook-create-description">A home for related notes.</Dialog.Description>

@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeSource } from '@agentmux/core/control'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
@@ -36,7 +36,7 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
     } catch (cause) { setError(presentError(cause) + ' Your draft is kept here. Inspect the saved entry before repeating an unconfirmed save.') }
     finally { setBusy(false) }
   }
-  return <Dialog.Root open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
+  return <Dialog.Root recoveryCloseDisabled={busy} open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog topic-knowledge-editor" onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>

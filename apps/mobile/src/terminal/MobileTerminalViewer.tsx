@@ -1,6 +1,6 @@
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '@agentmux/client-ui/terminal/unicode'
