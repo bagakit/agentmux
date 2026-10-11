@@ -6,6 +6,8 @@ import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
 import { PerformanceTrend } from './PerformanceTrend'
 import { PerformanceCapture } from './PerformanceCapture'
+import { PerformanceScene } from './PerformanceScene'
+import type { PerformanceSceneState } from '../../lib/use-performance-scene'
 
 import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type ToolkitAgentCardFacts } from '../toolkit/ToolkitAgentCards'
 
@@ -53,9 +55,11 @@ function RunRow({ run, card, fields, facts, onToggle, basis }: { run: RunUsage; 
   </details>
 }
 
-export function PerformanceOverview({ snapshot, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript }: {
+export function PerformanceOverview({ snapshot, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript,
+  scene, singleCaptureBusy = false, onSingleCaptureBusyChange }: {
   snapshot: ToolkitMetricsSnapshot | null; close(): void
   paused?: boolean; pending?: boolean; error?: string | null; onPause?(): void; onConfigure(): void; onViewScript(): void
+  scene?: PerformanceSceneState; singleCaptureBusy?: boolean; onSingleCaptureBusyChange?(busy: boolean): void
 }) {
   const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')
   const [sort, setSort] = useState<'cpu' | 'rss'>('cpu')
@@ -212,7 +216,8 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
               <Metric label="Selected resident memory" value={memory(activeRun.rssKib)} hint="Latest · root + descendants" points={selectedTrend.map(point => ({ id: JSON.stringify(point), at: point.at, value: point.rss }))} sourceKey={runSourceKey} unit="KiB" color="var(--blue)" /></div></> : null}</>}
         <SourceNote source={source} />
         {scope === 'app' && app && app.cpuPercent === null ? <p className="performance-state">CPU unavailable · waiting for a valid interval</p> : null}
-        {scope === 'app' ? <><PerformanceCapture observation={observation} /><PerformanceAttribution observation={observation} paused={paused} /></> : <>
+        {scope === 'app' ? <>{scene ? <PerformanceScene state={scene} observation={observation} externalBusy={singleCaptureBusy} /> : null}
+          <PerformanceCapture observation={observation} externalBusy={scene?.busy} onBusyChange={onSingleCaptureBusyChange} /><PerformanceAttribution observation={observation} paused={paused} /></> : <>
           <div className="performance-section-heading"><strong>Run processes</strong><div className="performance-sort" role="group" aria-label="Sort contributors">
             <button type="button" aria-pressed={sort === 'cpu'} onClick={() => setSort('cpu')}>CPU</button><button type="button" aria-pressed={sort === 'rss'} onClick={() => setSort('rss')}>RSS</button></div></div>
           <div className="performance-table-head"><span>Run</span><span>CPU</span><span>RSS</span></div>

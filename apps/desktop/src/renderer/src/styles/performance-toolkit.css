@@ -96,6 +96,20 @@
 .performance-capture-actions { display:flex; flex-wrap:wrap; gap:var(--sp-3); margin:var(--sp-4) 0; }
 .performance-capture-actions > button,.performance-inline-action { border:1px solid var(--line-soft); border-radius:var(--radius-sm); background:var(--surface-1); color:var(--text-2); padding:var(--sp-2) var(--sp-3); font-size:var(--fs-meta); cursor:pointer; }
 .performance-capture-actions > button:disabled,.performance-inline-action:disabled { opacity:.5; cursor:default; }
+.performance-scene { border-block:1px solid var(--line-soft); padding-block:var(--sp-3); margin-block:var(--sp-4); }
+.performance-scene-result { padding-top:var(--sp-3); }
+.performance-scene-id { overflow-wrap:anywhere; }
+.performance-scene-phases { display:grid; gap:var(--sp-3); margin:var(--sp-4) 0; font-size:var(--fs-meta); }
+.performance-scene-phases > div { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.5fr); gap:var(--sp-3); }
+.performance-scene-phases dt { color:var(--text-2); }
+.performance-scene-phases dd { display:grid; gap:var(--sp-1); min-width:0; margin:0; overflow-wrap:anywhere; }
+.performance-scene-phases dd > span,.performance-scene-phases dd > small { color:var(--text-3); font:inherit; }
+.performance-allocation-list { display:grid; gap:var(--sp-3); margin:var(--sp-4) 0; padding:0; list-style:none; }
+.performance-allocation-list > li { display:flex; justify-content:space-between; gap:var(--sp-3); font-size:var(--fs-meta); }
+.performance-allocation-list li > span { min-width:0; overflow-wrap:anywhere; }
+.performance-allocation-list strong { font-weight:500; }
+.performance-allocation-list small { display:block; color:var(--text-3); }
+.performance-allocation-list b { flex:none; font-variant-numeric:tabular-nums; font-weight:500; }
 .performance-module-list { display:grid; gap:var(--sp-1); }
 .performance-module-row { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); width:100%; border:0; border-radius:var(--radius-sm); padding:var(--sp-3); color:var(--text-2); font:inherit; text-align:left; cursor:pointer; }
 .performance-module-row > span { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
