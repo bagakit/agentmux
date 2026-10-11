@@ -65,6 +65,8 @@ Focus 入口与注意力明细使用共享状态语汇、对象数量和可访�
 
 ## Status Bar CPU/Memory 资源面板
 
+- Performance 提供显式的一键现场采集，沿原 metrics owner 绑定准确窗口、WebContents、Renderer 代次、PID 与创建身份，组合资源读数、CPU 调用栈、Chromium timeline、堆分类与短时内存分配采样。各阶段保留实际来源、时间、原件、失败或 unknown；串行采集不冒充同一时刻的快照，部分成功仍可导出。分配采样用于定位窗口内的分配调用栈，不是全部 RSS 分账、历史对象持有链或泄漏判定；默认不强制 GC、扫描对象正文或生成会长时间暂停界面的大型堆快照。
+- 现场仅由明确操作启动，查看面板或读取最近现场不启动采集；只保留最近一份本机原件，不新增后台记录、自动上传或历史库。保存失败保留已取得材料并明确实际阶段：替换前失败保旧原件；替换后耐久确认失败时，当前文件可能已变更，沿原 captureId 读取实际原件，不冒称未写、回滚成功或自动重采。面板关闭不丢掉 Main 已取得的现场；重新打开可读取并导出原 JSON 及各类 profile，已替换的旧 captureId 明确不可读。原目标换代后仍表达旧归属，不能改采新进程、重试未知操作或抢占已有 DevTools。公共 RPC／CLI 与 GUI 消费同一现场 owner，大材料沿领域原件能力读取，诊断封套只提供有界摘要或引用。
 - Renderer 高 RSS 的明细查询沿原公共 metrics owner，绑定窗口、WebContents、Renderer 代次、PID 与创建身份，显式读取一次原生 V8 isolate heap、backing/external 和 embedder 计数，以 bytes 保留原字段与采样时间。缺失实验字段表达未知；backing 包含 ArrayBuffer、external strings 等，不能把计数与 RSS 相加冒充独占分账，也不能据短时回落宣称无泄漏。此查询不主动 GC、扫描对象正文或常驻采样；既有 debugger／DevTools 保留，取消、目标换代与释放未知只影响本次查询。对象持有链、其他 worker、DOM／原生缓存与终端容量若未测到须明确缺证，不能凭逻辑行数或排队字节排除其成本。
 
 - Performance 在准确当前窗口提供显式短时函数采样与 timeline 入口，委托同一公共 metrics owner；打开面板或下钻不会自动采集。结果保留原目标、实际区间、completed／failed／unknown 与清理事实，不自动重采未知操作。当前观察面分别保留最近一份已完成的函数采样与最新采集回执；后续失败或未知采集不抹掉已可用的 profile，二者各自标明原归属并导出，不建立跨重启历史。原始材料可显式导出；模块热度仅由实际 V8 sample 与 timeDeltas 聚合 self-time，调用栈火焰图保留原树及样本权重，不冒充 React 组件精确成本、全部 native CPU 或泄漏结论。缺样本、无法安全分析或目标失配时具名说明，其他观察与健康工作面仍可用。
