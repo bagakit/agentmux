@@ -38,5 +38,5 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache
     'packages/core/test/conversation-timeline.test.ts', 'packages/core/test/client-event-publisher.test.ts',
     'packages/connectors/test/room-binding.test.ts', 'packages/connectors/test/durable-publication.test.ts', 'packages/connectors/test/publication-worker-consumer.test.ts'
   ] : ['packages/core/test/conversation-unified-public.test.ts',
-    ...(process.env.AGENTMUX_UNIFIED_COMPILED === '1' ? ['packages/core/test/conversation-catch-up.test.ts', 'packages/core/test/conversation-facade.test.ts'] : [])],
+    ...(process.env.AGENTMUX_UNIFIED_COMPILED === '1' ? ['packages/core/test/conversation-catch-up.test.ts', 'packages/core/test/conversation-facade.test.ts', 'packages/core/test/conversation-resource-anchor.test.ts'] : [])],
     passWithNoTests: false, fileParallelism: false } })
