@@ -97,7 +97,7 @@ Tab、树、Session、Board 与 Browser rail 的普通身份图按提醒价值�
 - 跨 Session 消息来源沿既有一行来源与正文呈现，不新增视觉层或认证徽章；统一来源头、首条及 `whoami`／启动／技能的使用要求只引用交互合同[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。
 
 - 发送回执与收件侧信封必须能对应同一条消息：首层明确显示已入队、已投递或失败，详情能核对稳定 `messageId` 和 Core 核验的双方 Session/Run；重试不得像一条新消息，队列暂不可写时不得出现虚假的“已送达”。交互行为以[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)为准。
-- 收件来源显示 Core 已解析的参与者身份；Region、Tab 和其他视觉位置不能冒充发送者或接收者。实际可读来源与机器消息字段的归属只见上述 A2A 交互合同，不沿用旧 XML 属性表达。
+- 收件来源显示 Core 已解析的参与者身份；Region、Tab 和其他视觉位置不能冒充发送者或接收者。实际可读来源与机器消息字段的归属只见上述 A2A 交互合同，可读属性只沿新信封合同表达，不替代结构化事实。
 - Message Tools 的首层只显示发送者、接收者、当前投递状态和必要的失败/重试动作；`messageId`、receipt、generation、thread/correlation 和 workspace/session/run 关联进入详情或审计入口，不占用 Composer 主输入区。
 - 队列重启、replay、背压或 Store 降级使用现有 Agent/Session 服务窗的一行状态提示，说明事实、当前能力和恢复动作；不清空消息列表、不覆盖 Composer，也不把健康 Agent 画成终局错误。
 - 读取和审计入口支持按 thread、recipient、session 或 receipt 收窄范围；默认列表按 durable sequence 排序，不能用当前 Region 或视觉位置替代消息身份。
@@ -110,7 +110,7 @@ Tab、树、Session、Board 与 Browser rail 的普通身份图按提醒价值�
 
 ## Message Tool 的等待与失败说明
 
-Desktop 的发送等待与失败提醒 dock 在所属 Message Tool 的右侧，复用 SessionMailbox 的 Notices／Outbox 作为唯一处理面；入口随原邮箱对齐，提醒不覆盖工具行、不在输入编辑区重复铺大错误块。主提醒最多两行：简洁的原消息状态／短原因与紧凑的可用操作；窄面仍保留可辨操作，不以多行原错误、嵌套 JSON、常驻大横幅或缩字补空间。失败、结果未知和暂时等待可区分；通知到达不偷焦点、不撑高 Composer、不遮住原工作面，关闭或披露后保原草稿、选择与输入位置。
+Desktop 的发送等待与失败提醒 dock 在所属 Message Tool 的右侧，复用 SessionMailbox 的 Notices／User Messages 作为唯一处理面；入口随原邮箱对齐，提醒不覆盖工具行、不在输入编辑区重复铺大错误块。主提醒最多两行：简洁的原消息状态／短原因与紧凑的可用操作；窄面仍保留可辨操作，不以多行原错误、嵌套 JSON、常驻大横幅或缩字补空间。失败、结果未知和暂时等待可区分；通知到达不偷焦点、不撑高 Composer、不遮住原工作面，关闭或披露后保原草稿、选择与输入位置。
 
 同一条原输入的标题、处理动作与完整诊断消费同一 Core 等待／接纳回执。Core 已确认保存且仍在等待时，不仅因底层观察携带 `AbortError` 而改称发送失败或结果未知；真正 unknown、部分输入及已派发事实仍优先保留，不能从错误名称、等待阶段或零字节提示补造未派发。完整复制保原 key、等待代次、当前控制与接纳事实及原错误，首层仍保持紧凑。
 
