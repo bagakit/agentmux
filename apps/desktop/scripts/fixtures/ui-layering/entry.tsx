@@ -77,11 +77,12 @@ Object.assign(window, { layeringProbe: {
   },
   read() {
     const rect = (node: Element) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
-    const nodes = [...document.querySelectorAll<HTMLElement>('[data-overlay-modal-id], [role="menu"], [role="tooltip"]')]
+    const nodes = [...document.querySelectorAll<HTMLElement>('[data-overlay-modal-id], [role="menu"], [role="tooltip"], .composer-completion-popover')]
       .filter(node => { const s = getComputedStyle(node), r = node.getBoundingClientRect(); return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0 })
     return { nodes: nodes.map(node => ({ id: node.id, role: node.getAttribute('role'), modal: node.dataset.overlayModalId, part: node.dataset.overlayModalPart,
+      ...(node.matches('.composer-completion-popover') ? { kind: 'composer-completion' } : {}),
       inSlot: !!node.closest('[data-overlay-modal-slot]'), bounds: rect(node), background: getComputedStyle(node).backgroundColor,
-      hit: document.elementFromPoint(node.getBoundingClientRect().x + node.getBoundingClientRect().width / 2, node.getBoundingClientRect().y + node.getBoundingClientRect().height / 2)?.closest('[role="dialog"], [role="menu"], [role="tooltip"]') === node })),
+      hit: document.elementFromPoint(node.getBoundingClientRect().x + node.getBoundingClientRect().width / 2, node.getBoundingClientRect().y + node.getBoundingClientRect().height / 2)?.closest('[role="dialog"], [role="menu"], [role="tooltip"], .composer-completion-popover') === node })),
       active: document.activeElement?.textContent, failures: document.querySelectorAll('.modal-presentation-note').length,
       workbench: (window as any).dialogCraft.facts(), events }
   }

@@ -629,7 +629,35 @@ async function run() {
   assert.equal(await read('!!document.querySelector(".composer-completion-popover")?.closest("[data-overlay-modal-slot]")'), true, 'Real completion Portal belongs to the original modal slot')
   await key('ArrowDown', 40)
   assert.equal(await read('document.activeElement?.getAttribute("role")'), 'option', 'Modal focus ownership allows a real portaled completion choice to receive keyboard focus')
-  await frame('modal-focusable-completion'); await key('Enter', 13)
+  await frame('modal-focusable-completion')
+  const completionFrame = receipt.frames.at(-1), completion = completionFrame.fact.nodes.find((node: any) => node.kind === 'composer-completion')
+  const completionParent = completionFrame.fact.nodes.find((node: any) => node.part === 'content')
+  assert.ok(completion?.inSlot && completionParent, 'The original painted completion box belongs to its actual modal slot')
+  const dip = (box: any) => Object.fromEntries(Object.entries(box).map(([key, value]) => [key, Number(value) * window.webContents.getZoomFactor()])) as { x: number; y: number; width: number; height: number }
+  const popupBounds = dip(completion.bounds), parentBounds = dip(completionParent.bounds)
+  const left = Math.max(popupBounds.x, pageBounds.x), top = Math.max(popupBounds.y, pageBounds.y)
+  const right = Math.min(popupBounds.x + popupBounds.width, pageBounds.x + pageBounds.width)
+  const bottom = Math.min(popupBounds.y + popupBounds.height, pageBounds.y + pageBounds.height)
+  const overlap = { x: left, y: top, width: right - left, height: bottom - top }
+  const overhang = [
+    { x: left, y: top, width: Math.min(right, parentBounds.x) - left, height: bottom - top },
+    { x: Math.max(left, parentBounds.x + parentBounds.width), y: top, width: right - Math.max(left, parentBounds.x + parentBounds.width), height: bottom - top },
+    { x: left, y: top, width: right - left, height: Math.min(bottom, parentBounds.y) - top },
+    { x: left, y: Math.max(top, parentBounds.y + parentBounds.height), width: right - left, height: bottom - Math.max(top, parentBounds.y + parentBounds.height) }
+  ].find(box => box.width > 0 && box.height > 0)
+  const matching = (receipt.publications.at(-1)?.regions ?? []).filter((region: NativeOverlayRegion) => !region.modal &&
+    ['x', 'y', 'width', 'height'].every(key => Math.abs(region.bounds[key as keyof typeof region.bounds] - popupBounds[key as keyof typeof popupBounds]) < 1))
+  const proof: any = receipt.completionProjection = { label: 'modal-focusable-completion', popupBounds, parentBounds, browserBounds: { ...pageBounds }, overlap, overhang,
+    matchingDeclarations: matching, chromeOwners: completionFrame.chrome.map((owner: any) => ({ file: owner.file, before: owner.before, paintedPixels: owner.paintedPixels })) }
+  assert.ok(overlap.width > 0 && overlap.height > 0 && overhang, 'The original completion must actually extend outside modal content over the native Browser')
+  assert.equal(matching.length, 1, 'The original overhanging completion has its own complete native projection, independent of parent content capture')
+  const completionChrome = completionFrame.chrome.find((owner: any) => owner.before.regionId === matching[0].id)
+  assert.ok(completionChrome && !completionChrome.scrim && completionChrome.paintedPixels > 0, 'The exact completion projection supplies painted compositor pixels from its original attached View')
+  const hitPoint = { x: overhang.x + overhang.width / 2, y: overhang.y + overhang.height / 2 }
+  const hitOwner = topAt(hitPoint)
+  proof.hitPoint = hitPoint; proof.hitWebContentsId = hitOwner?.webContents.id; proof.chromeFile = completionChrome.file
+  assert.equal(hitOwner?.webContents.id, completionChrome.before.webContentsId, 'The exact completion View is the top native hit owner at its original overhang above the Browser')
+  await key('Enter', 13)
   await wait(() => read('layeringProbe.actions().includes("completion:/inspect")'), 'Original completion keyboard selection must reach its own callback')
   assert.equal(await read('document.querySelector(".confirmation-dialog [role=textbox]")?.textContent'), '/inspect ', 'Completion edits the original unsent modal draft')
   assert.equal(await read('layeringProbe.actions().includes("send")'), false, 'Choosing completion does not send or confirm the original draft')
