@@ -81,7 +81,7 @@ flowchart LR
 | 显式打开原终端 | SessionPane 选择原展示 Region，再向原 caret owner 请求该终端；[`TerminalView`](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 只消费准确、可见且非 inert 的目标，保留后来的人工焦点。 |
 | reaction／Mailbox | [`useConversationReactions`](../../apps/desktop/src/renderer/src/lib/conversation-reactions.tsx) 沿原输入队列；[`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 保原消息和 read-marker，详情复用共同 Message。 |
 
-外部入站 `DurableIngressHost.deliver` 已经调用原 `submitAgentMessage`，与本地输入复用原 `DurableAgentMuxMessageQueue`／input journal 及准入 owner；无需新增发送队列。当前 Renderer 的本地待发列表不能代签全部入口发现，旧 exact-condition／launch 输入也不一定具有 input-intent 记录；共同信箱的读取覆盖及旧缺口须按原事实说明。当前 PTY 发送受据及 `inputRef` 尚不构成原生采用，不能由界面收起卡片来补造关联。准确来源意图和原 actor 写通道仍须沿原 Provider／输入边界实现与核验，不能借历史 reader 冒充控制口。
+外部入站 `DurableIngressHost.deliver` 已经调用原 `submitAgentMessage`，与本地输入复用原 `DurableAgentMuxMessageQueue`／input journal 及准入 owner；无需新增发送队列。[`readAgentInputMailbox`](../../packages/core/src/client.ts) 沿同一 journal 既有 recipient/intent-sequence 索引有界读取 controlled input 与只读 submission 引用，SDK、`agent.input.ls` RPC／CLI 和 Hosted 消费同一严格结果合同；字节分片复用原 `JsonReadEntry`。原新 claim CAS／typed launch commit 记录首次准确 key，旧 claim／unknown launch 不回填；每条 admission 仍从原 owner 读取，失败保该条原内容与缺口。当前 Renderer 的本地待发列表尚未消费该公开读，不能代签全部入口发现。当前 PTY 发送受据及 `inputRef` 尚不构成原生采用，不能由界面收起卡片来补造关联。准确来源意图和原 actor 写通道仍须沿原 Provider／输入边界实现与核验，不能借历史 reader 冒充控制口。
 
 具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
 
