@@ -8,7 +8,7 @@ node apps/desktop/scripts/verify-ui-layering.mjs --mutations --output .tmp/ui-la
 node apps/desktop/scripts/verify-ui-layering.mjs --without-system-fullscreen --mutations --output .tmp/ui-layering/available-checks
 node apps/desktop/scripts/verify-ui-layering.mjs --mobile-only --output .tmp/ui-layering/mobile-development
 node apps/desktop/scripts/verify-ui-layering.mjs --fullscreen-only --output .tmp/ui-layering/system-fullscreen-development
-AGENTMUX_VISUAL_ORCA_CLI="$(command -v orca)" node apps/desktop/scripts/verify-ui-layering.mjs --output .tmp/ui-layering/visual
+AGENTMUX_VISUAL_ORCA_CLI=orca node apps/desktop/scripts/verify-ui-layering.mjs --output .tmp/ui-layering/visual
 ```
 
 真实链路是 `WorkspaceWorkbench` 关闭最后一个 Agent View → Store 关闭计划 → `ConfirmationDialog` → 共享 `Modal` → Window overlay host → collector → `useNativeOverlayChrome` → IPC → `NativeOverlaySurfaces`。点击原生投影后，通过原生产转发返回原 DOM handler，记录可信事件和原 API control。外部 Agent API 使用 preview 受控事实；不停止任何用户 Run。原生 Browser 使用隔离测试页及真实 `WebContentsView`，而非替换成 Renderer DOM；这不代表 BrowserPane 导航或用户页面协议已验收。
