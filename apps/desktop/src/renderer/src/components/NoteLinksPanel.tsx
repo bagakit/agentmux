@@ -10,6 +10,7 @@ import { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
 import '../styles/note-links.css'
 
 const Disclosure = semanticIconComponent('navigation.disclosure'), Refresh = semanticIconComponent('action.refresh')
+const NoteIcon = semanticIconComponent('object.note'), LinkIcon = semanticIconComponent('object.link')
 type OpenNote = (page: NotebookPage, blockId?: string) => void
 export type NoteLinksPanelProps = { noteId: string; active?: boolean; selectedBlockId?: string | undefined; onOpen: OpenNote }
 
@@ -20,12 +21,21 @@ function LinkActions({ reference, snapshot, onOpen }: { reference: NoteGraphRefe
     {page && target.kind !== 'unbound' && <button type="button" onClick={() => onOpen(page, target.kind === 'block' && reference.resolution === 'resolved' ? target.blockId : undefined)}>{reference.resolution === 'resolved' ? target.kind === 'page' ? 'Open target page' : 'Open target block' : 'Inspect registered original'}</button>}</div>
 }
 function Occurrence({ reference, snapshot, onOpen }: { reference: NoteGraphReference; snapshot: NotebookGraphSnapshot; onOpen: OpenNote }) {
-  const target = reference.target
-  return <li className="note-links-occurrence"><div className="note-links-kind"><strong>{noteGraphReferenceLabel(reference)}</strong><span data-resolution={reference.resolution}>{reference.resolution === 'resolved' ? 'Confirmed' : reference.resolution}</span></div>
-    <p className="note-links-location">From <code>{reference.source.blockId}</code>{target.kind === 'block' ? <> · To block <code>{target.blockId}</code></> : target.kind === 'unbound' ? <> · <code>[[{target.text}]]</code></> : ' · To page'}</p>
+  const target = reference.target, source = snapshot.catalog.pages[reference.source.noteId]
+  const page = target.kind !== 'unbound' ? snapshot.catalog.pages[target.noteId] : undefined
+  return <li className="note-links-occurrence"><div className="note-links-kind"><span>{noteGraphReferenceLabel(reference)}</span>
+      {page && target.kind !== 'unbound' ? <button type="button" className="note-links-target" aria-label={`${reference.resolution === 'resolved' ? target.kind === 'block' ? 'Open target block' : 'Open target page' : 'Inspect registered original'}: ${page.title}`} onClick={() => onOpen(page, target.kind === 'block' && reference.resolution === 'resolved' ? target.blockId : undefined)}>{page.title}</button> : target.kind === 'unbound' ? <span>[[{target.text}]]</span> : null}
+      {reference.resolution !== 'resolved' && <span data-resolution={reference.resolution}>{reference.resolution}</span>}
+      {target.kind === 'unbound' && source && <button type="button" className="note-links-target" onClick={() => onOpen(source, reference.source.blockId)}>Open written link</button>}
+    </div>
     {target.kind === 'unbound' && <p className="note-links-state">The written query has no confirmed target. Choose it in its original Note.</p>}
     {target.kind !== 'unbound' && reference.resolution !== 'resolved' && <p className="note-links-state">The original target is {reference.resolution}. Its exact identity is retained.</p>}
-    <LinkActions reference={reference} snapshot={snapshot} onOpen={onOpen} />
+    <details className="note-links-details"><summary aria-label="Reference details">Details</summary>
+      <p className="note-links-location">From <code>{reference.source.blockId}</code>{target.kind === 'block' ? <> · To block <code>{target.blockId}</code></> : target.kind === 'unbound' ? <> · <code>[[{target.text}]]</code></> : ' · To page'}</p>
+      {target.kind !== 'unbound' && <p className="note-links-location">Target Note <code>{target.noteId}</code></p>}
+      <p className="note-links-location">{reference.sourceResource.path}{reference.occurrence.kind === 'text' ? <> · {reference.occurrence.revision}</> : null}</p>
+      <LinkActions reference={reference} snapshot={snapshot} onOpen={onOpen} />
+    </details>
   </li>
 }
 
@@ -52,14 +62,16 @@ function IncomingSource({ references, snapshot, active, onOpen }: { references: 
     for (const reference of references) { const held = grouped.get(reference.source.blockId) ?? []; held.push(reference); grouped.set(reference.source.blockId, held) }
     return [...grouped.entries()]
   }, [references])
-  return <section className="note-links-source"><button type="button" className="note-links-source-toggle" aria-expanded={expanded} onClick={() => expand(value => !value)}><Disclosure size={12} /><span>{page?.title ?? sourceId}</span><small>{references.length} {references.length === 1 ? 'link' : 'links'}</small></button>
-    {expanded && <div className="note-links-source-body"><p className="note-links-origin">{page ? snapshot.catalog.notebooks[page.notebookId]?.name ?? page.notebookId : 'Original source'} · {references[0]!.sourceResource.path}</p>
+  return <section className="note-links-source"><div className="note-links-source-heading"><button type="button" className="note-links-source-toggle" aria-expanded={expanded} onClick={() => expand(value => !value)}><Disclosure size={12} /><NoteIcon size={15} /><span>{page?.title ?? sourceId}</span><small>{references.length}</small></button>
+      {page && <button type="button" className="note-links-source-open" aria-label={`Open source note: ${page.title}`} onClick={() => onOpen(page)}>Open</button>}
+    </div>
+    {expanded && <div className="note-links-source-body">
       {!confirmed && <p className="note-links-state" role="status">{!observed ? 'Reading saved source…' : content?.status === 'read' ? 'The saved source changed after this graph. Refresh links to read that revision.' : observed.issue ?? (content && 'message' in content ? content.message : 'Source content is unconfirmed.')}{observed && content?.status !== 'read' && <button type="button" onClick={() => retry(value => value + 1)}>Retry source</button>}</p>}
       {blocks.map(([blockId, occurrences]) => <div className="note-links-block" key={blockId}>
-        <p className="note-links-location">Source block <code>{blockId}</code></p>
-        {source && <p className="note-links-excerpt">{source.blocks.get(blockId)?.text || 'Empty source block'}</p>}
+        {source && (page ? <button type="button" className="note-links-excerpt" title={`Open source block in ${page.title}`} onClick={() => onOpen(page, blockId)}>{source.blocks.get(blockId)?.text || 'Empty source block'}</button> : <p className="note-links-excerpt">{source.blocks.get(blockId)?.text || 'Empty source block'}</p>)}
         <ol>{occurrences.map(reference => <Occurrence key={noteGraphReferenceKey(reference)} reference={reference} snapshot={snapshot} onOpen={onOpen} />)}</ol>
       </div>)}
+      <details className="note-links-details note-links-source-details"><summary>Source details</summary><p className="note-links-origin">{page ? snapshot.catalog.notebooks[page.notebookId]?.name ?? page.notebookId : 'Original source'} · {references[0]!.sourceResource.path}</p>{confirmed && <p className="note-links-location">Revision {confirmed.revision}</p>}</details>
     </div>}
   </section>
 }
@@ -81,18 +93,19 @@ function NoteLinksPanelSurface({ noteId, active = true, selectedBlockId, onOpen 
     return [...groups.entries()]
   }, [links])
   const complete = snapshot?.graph.completeness === 'complete'
-  return <section className="note-links" aria-label="Saved Note links"><button type="button" className="note-links-toggle" aria-expanded={expanded} onClick={() => expand(value => !value)}><Disclosure size={12} /><strong>Linked references</strong><span>{!expanded ? 'Explore saved sources' : busy ? 'Reading…' : links ? `${links.incoming.length} incoming · ${links.outgoing.length} outgoing` : 'Not yet observed'}</span></button>
+  return <section className="note-links" aria-label="Saved Note links"><button type="button" className="note-links-toggle" aria-expanded={expanded} onClick={() => expand(value => !value)}><Disclosure size={12} /><LinkIcon size={14} /><strong>Linked references</strong>{busy ? <span>Reading…</span> : issue || stale ? <span>Needs refresh</span> : snapshot?.graph.completeness === 'partial' ? <span>Partial coverage</span> : snapshot?.graph.completeness === 'unknown' ? <span>Unconfirmed coverage</span> : null}</button>
     {expanded && <div className="note-links-body">
       <div className="note-links-controls"><div role="group" aria-label="Link direction"><button type="button" aria-pressed={direction === 'incoming'} onClick={() => setDirection('incoming')}>Incoming{links ? ` (${links.incoming.length})` : ''}</button><button type="button" aria-pressed={direction === 'outgoing'} onClick={() => setDirection('outgoing')}>Outgoing{links ? ` (${links.outgoing.length})` : ''}</button></div>
         {selectedBlockId && <button type="button" aria-pressed={blockOnly} onClick={() => setBlockOnly(value => !value)}>Selected block only</button>}
         <button type="button" className="note-links-refresh" aria-label="Refresh saved links" aria-busy={busy} onClick={refresh}><Refresh size={12} />Refresh</button></div>
       {(issue || stale) && <p className="note-links-state" role="status">{issue ? `Links could not be observed: ${issue}. The last confirmed view is kept.` : 'Saved originals changed. Refresh links to observe them; this view is kept.'}<button type="button" onClick={refresh}>Refresh links</button></p>}
-      {snapshot && <p className="note-links-scope">Saved {complete ? 'catalog observed' : snapshot.graph.completeness === 'partial' ? 'partial catalog' : 'catalog unconfirmed'} · {snapshot.graph.observations.filter(item => item.status === 'read').length}/{snapshot.graph.observations.length} originals read · catalog r{snapshot.catalog.revision}</p>}
+      {snapshot && !complete && <p className="note-links-state" role="status">{snapshot.graph.completeness === 'partial' ? 'Partial link coverage' : 'Link coverage is unconfirmed'} · {snapshot.graph.observations.filter(item => item.status === 'read').length}/{snapshot.graph.observations.length} originals read</p>}
       {links && snapshot && (direction === 'incoming' ? incoming.length ? incoming.map(([key, references]) => <IncomingSource key={key} references={references} snapshot={snapshot} active={active && expanded} onOpen={onOpen} />)
         : <p className="note-links-state">{complete ? 'No incoming links in this saved catalog.' : 'No confirmed incoming links in this observation. Some sources or targets remain unconfirmed.'}</p>
-        : links.outgoing.length ? <ol>{links.outgoing.map(reference => <li className="note-links-outgoing" key={noteGraphReferenceKey(reference)}><p className="note-links-destination">{reference.target.kind === 'unbound' ? 'Unbound query' : snapshot.catalog.pages[reference.target.noteId]?.title ?? reference.target.noteId}</p><ol><Occurrence reference={reference} snapshot={snapshot} onOpen={onOpen} /></ol></li>)}</ol>
+        : links.outgoing.length ? <ol>{links.outgoing.map(reference => <Occurrence key={noteGraphReferenceKey(reference)} reference={reference} snapshot={snapshot} onOpen={onOpen} />)}</ol>
           : <p className="note-links-state">{complete ? 'No outgoing links in this saved catalog.' : 'No confirmed outgoing links in this observation. Some sources or targets remain unconfirmed.'}</p>)}
       {links && links.unboundElsewhere > 0 && <p className="note-links-state" role="status">{links.unboundElsewhere} written link {links.unboundElsewhere === 1 ? 'query elsewhere has' : 'queries elsewhere have'} no confirmed destination; incoming coverage is partial.</p>}
+      {snapshot && links && <details className="note-links-details note-links-coverage"><summary>About these links</summary><p className="note-links-scope">Saved {complete ? 'catalog observed' : snapshot.graph.completeness === 'partial' ? 'partial catalog' : 'catalog unconfirmed'} · {snapshot.graph.observations.filter(item => item.status === 'read').length}/{snapshot.graph.observations.length} originals read · catalog r{snapshot.catalog.revision}<br />{links.incoming.length} incoming · {links.outgoing.length} outgoing</p></details>}
       {!snapshot && !busy && !issue && <button type="button" className="note-text-button" onClick={refresh}>Read saved links</button>}
     </div>}
   </section>

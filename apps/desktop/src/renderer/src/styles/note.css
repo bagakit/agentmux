@@ -13,9 +13,9 @@
 .note-conversion-backup summary { cursor: pointer; }
 .note-conversion-backup__content { max-height: 240px; overflow: auto; padding-top: 8px; color: var(--text-2); }
 .note-conversion-backup__content code, .note-conversion-backup__content pre { white-space: pre-wrap; overflow-wrap: anywhere; }
-.note-directory-sources { flex: none; width: 100%; max-width: var(--note-content-width, 760px); margin: 0 auto; padding: var(--sp-3) var(--sp-8); color: var(--text-2); font-size: var(--fs-meta); }
-.note-directory-sources summary { cursor: pointer; }
-.note-directory-sources summary span { margin-left: 8px; color: var(--text-3); }
+.note-directory-sources { flex: none; width: 100%; max-width: var(--note-content-width, 760px); margin: 0 auto; padding: 0 var(--sp-8) var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.note-directory-sources summary { cursor: pointer; min-height: 30px; padding: 6px 0; font-size: 12px; }
+.note-directory-sources summary span { margin-left: 8px; color: var(--text-3); font-size: 11px; }
 .note-directory-sources > .note-text-button { margin-top: 8px; padding: 3px 0; font-size: 11px; }
 .note-directory-sources .note-scope { overflow-wrap: anywhere; }
 .note-unread-source { display: flex; align-items: center; gap: 12px; margin-top: 5px; }
