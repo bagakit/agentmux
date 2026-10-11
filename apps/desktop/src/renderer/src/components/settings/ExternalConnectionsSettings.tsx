@@ -7,6 +7,8 @@ import { api } from '../../lib/api'
 import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
 import { ConnectionSetupResult, connectionSummary } from './ConnectionSetupResult'
+import { ConnectionManagementSetup } from './ConnectionManagementSetup'
+import { useConnectionManagementSetup } from './useConnectionManagementSetup'
 
 const LinkIcon = semanticIconComponent('action.open-external')
 const GroupIcon = semanticIconComponent('object.conversations')
@@ -15,7 +17,7 @@ const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : do
 export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [listIssue, setListIssue] = useState('')
-  const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit'>('loading')
+  const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management'>('loading')
   const [saveNotice, setSaveNotice] = useState('')
   const [selected, setSelected] = useState<ConnectionRecord | null>(null), [label, setLabel] = useState(''), [appId, setAppId] = useState(''), [domain, setDomain] = useState('open.feishu.cn'), [secret, setSecret] = useState(''), [enabled, setEnabled] = useState(true)
   const [saveAbsent, setSaveAbsent] = useState(false)
@@ -84,12 +86,13 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     } catch (error) { if (epoch === generation.current) setIssue(`The original save is still not confirmed. ${presentError(error)}`) }
     finally { writing.current = false; setBusy(false) }
   }
-  const openConsole = async () => {
-    try { await api.ui.openExternal(`https://${domain}/app`) }
+  const openConsole = async (applicationDomain = domain) => {
+    try { await api.ui.openExternal(`https://${applicationDomain}/app`) }
     catch (error) { setIssue(presentError(error)) }
   }
   const existing = () => { if (selected && !pending.current) edit(null); else setView('new') }
   const current = selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
+  const management = useConnectionManagementSetup(current, active && (view === 'saved' || view === 'management'), view === 'management')
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
   if (!active) return null
   return <div className="settings-pane-stack connector-onboarding" data-connector-settings>
@@ -102,7 +105,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
         <button className="connector-record__open" onClick={() => { edit(record); setView('saved') }}><span className="connector-record__mark"><GroupIcon size={18} /></span><span><strong className="connector-record__name">{record.config.label}</strong><small>{platform(record.config.application.domain)} · {connectionSummary(record)}</small></span><span className="connector-record__action">View connection</span></button>
       </article>)}
     </section> : null}
-    {editing || view === 'saved' && current ? <section className="connector-setup" data-connection-editor>
+    {view === 'management' && current ? <ConnectionManagementSetup record={current} model={management} platformLabel={platform(current.config.application.domain)} onBack={() => { setView('saved'); setIssue('') }} onConsole={() => openConsole(current.config.application.domain)} /> : editing || view === 'saved' && current ? <section className="connector-setup" data-connection-editor>
       {!pending.current ? <button type="button" className="connector-back small-button" onClick={() => { setView(records.length ? 'library' : 'enrollment'); setIssue('') }}>{records.length ? 'All applications' : 'Bot setup'}</button> : null}
       {editing ? <>
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{selected ? 'Edit application' : 'Connect an existing bot'}</h3><p>{selected ? 'Changes apply to this saved application.' : 'Use a Feishu or Lark bot for your Agents’ group conversations.'}</p></div></header>
@@ -122,8 +125,8 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{current.config.label}</h3><p>{platform(current.config.application.domain)} bot application</p></div></header>
         {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
         <ConnectionSetupResult record={current} active={active} />
-        <div className="connector-editor-actions"><button className="small-button" disabled={busy} onClick={() => edit(current)}>Edit application</button></div>
-        <details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" onClick={() => void openConsole()}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>
+        <div className="connector-editor-actions"><button className="small-button" disabled={busy} onClick={() => edit(current)}>Edit application</button>{management.supported || management.choices.length || management.catalog?.issue ? <button className="small-button" data-management-open onClick={() => setView('management')}>Confirm account</button> : null}</div>
+        <details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" data-management-console onClick={() => void openConsole(current.config.application.domain)}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>
         <div className="connector-next-step"><GroupIcon size={18} /><div><strong>Next, choose an Agent and a group</strong><p>Open an Agent’s menu → Create group or Connect existing group. You choose the audience and what to share there.</p></div></div>
         <ConnectionProfilePanel key={JSON.stringify([current.config.connectionId, current.config.application, current.revision])} record={current} />
       </> : null}
