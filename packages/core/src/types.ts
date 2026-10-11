@@ -910,6 +910,9 @@ export type AgentSessionHistoryPage = {
   /** Each page is chronological; the first page contains the newest items. */
   items: AgentSessionHistoryItem[]
   nextCursor: string | null
+  /** Provider-issued changes boundary of this exact frozen history snapshot.
+   * Absent means a history-to-changes join is not established. Never decode or order it. */
+  changesCursor?: string
   /** Physical native transcript snapshot bytes, including Provider metadata; not message, turn or token counts.
    * An unfinished append may be excluded. Absent means the Provider does not establish this extent. */
   sourceSizeBytes?: number

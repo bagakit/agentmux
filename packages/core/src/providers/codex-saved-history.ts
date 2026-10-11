@@ -147,11 +147,11 @@ const requestBudgetDiagnostic = { code: 'CODEX_QUESTION_REQUEST_DETAILS_UNAVAILA
   message: 'Structured question details did not fit this page. The original body is kept; read a smaller history page or the original record for complete question details.' }
 
 /** Optional question/answer details cannot make original content exceed its existing read budget. */
-function fitQuestionAnswerProjection(context: AgentProviderSessionHistoryContext, items: AgentSessionHistoryItem[], nextCursor: string | null): AgentSessionHistoryItem[] {
+function fitQuestionAnswerProjection(context: AgentProviderSessionHistoryContext, items: AgentSessionHistoryItem[], nextCursor: string | null, changesCursor?: string): AgentSessionHistoryItem[] {
   if (!items.some(item => item.questionAnswers !== undefined || item.questionRequest !== undefined)) return items
   const projected = [...items]
   // Match the Provider page envelope checked by normalizeSessionHistoryPage.
-  let pageBytes = Buffer.byteLength(JSON.stringify({ source: context.source, items, nextCursor }))
+  let pageBytes = Buffer.byteLength(JSON.stringify({ source: context.source, items, nextCursor, changesCursor }))
   if (pageBytes <= SESSION_HISTORY_MAX_PAGE_BYTES) return items
   const diagnostic = { code: 'CODEX_QUESTION_ANSWER_DETAILS_UNAVAILABLE',
     message: 'Answer details did not fit this history page’s existing byte budget. The original reply remains complete and readable/copyable.' }
@@ -239,8 +239,9 @@ export async function readCodexSavedSessionHistoryPage(context: AgentProviderSes
     }
     const nextCursor = await reader.nextCursor()
     const materialized = await Promise.all(items.reverse().map(value => materializeSavedItem(reader, context, value.record, value.start, value.converted, paginated)))
-    return { source: context.source, items: fitQuestionAnswerProjection(context, materialized, nextCursor),
-      nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
+    const changesCursor = await reader.historyChangesCursor()
+    return { source: context.source, items: fitQuestionAnswerProjection(context, materialized, nextCursor, changesCursor),
+      nextCursor, changesCursor, sourceSizeBytes: reader.sourceSizeBytes }
   } finally { await reader.close() }
 }
 

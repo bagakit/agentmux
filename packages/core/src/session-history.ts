@@ -180,7 +180,8 @@ export function normalizeSessionHistoryPage(
     throw new AgentMuxError('Native history source does not match the main Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
   }
   if (!Array.isArray(page.items) || page.items.length > limit ||
-    (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor))) return invalid()
+    (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor)) ||
+    page.changesCursor !== undefined && (typeof page.changesCursor !== 'string' || !page.changesCursor || page.changesCursor.length > 16_384)) return invalid()
   // Invalid optional size metadata must not prevent an otherwise valid history page from being read.
   const { sourceSizeBytes: _sourceSizeBytes, ...pageBody } = page
   const originalBody = { ...pageBody, items: page.items }, originalPage = sessionHistoryWithoutMetrics(withoutConversationProvenance(originalBody))
@@ -274,6 +275,7 @@ export function normalizeSessionHistoryPage(
     }
   }
   return { source: { ...source }, items, nextCursor: page.nextCursor as string | null,
+    ...(page.changesCursor === undefined ? {} : { changesCursor: page.changesCursor as string }),
     ...(Number.isSafeInteger(page.sourceSizeBytes) && (page.sourceSizeBytes as number) >= 0
       ? { sourceSizeBytes: page.sourceSizeBytes as number } : {}) }
 }
