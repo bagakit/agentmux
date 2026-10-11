@@ -1,5 +1,6 @@
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
-import { cloneElement, useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react'
+import { useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react'
+import { retainActivityControls } from '../lib/retained-activity'
 import { useAppStore } from '../store'
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
@@ -67,8 +68,11 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})} />
   }
   const reading = activity?.conversationReading ?? presented.current.content?.props.conversationReading
+  if (presented.current.content) presented.current.content = retainActivityControls(presented.current.content, {
+    activitySemantic: activity?.activitySemantic ?? 'unknown',
+    ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})
+  })
   const content = presented.current.content
-    ? cloneElement(presented.current.content, { activitySemantic: activity?.activitySemantic ?? 'unknown', ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: false, onClose: undefined } } : {}) }) : null
   const hostId = workbenchSessionStageHostId(target, regionId)
   return <StableWorkbenchView kind="region" homeId={`${hostId}:parked`} targetId={hostId}
     active={target.active} visible={visible} retainedRegionId={regionId} reference={{ ...reference, regionId }}

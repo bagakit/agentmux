@@ -10,6 +10,7 @@ import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState,
 import { agentRegionExecution, useAppStore } from '../store'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
+import { retainActivityControls } from '../lib/retained-activity'
 import { createFirstPromptSelector, createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason, AgentSessionUserMessage, AgentSessionHistoryPage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
@@ -136,7 +137,7 @@ export function SessionPane({
   const primaryReference = primaryPresentation.reference
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
     tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
-  const selectOwnRegion = (): void => {
+  const selectOwnRegion = useCallback((): void => {
     if (!linkOrigin.regionId) return
     // The current presentation owns navigation. The Session's resource home
     // cannot stand in for a Survey, Mote or Focus selection callback.
@@ -145,7 +146,8 @@ export function SessionPane({
       useAppStore.getState().focusRegion(mailboxOrigin.workspaceId, mailboxOrigin.tabId, linkOrigin.regionId,
         'pointer', mailboxOrigin.tabGroupId)
     }
-  }
+  }, [linkOrigin.regionId, primaryPresentation.onSelectRegion, primaryPresentation.survey, primaryPresentation.surface,
+    mailboxOrigin.workspaceId, mailboxOrigin.tabId, mailboxOrigin.tabGroupId])
   const session = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
@@ -277,7 +279,7 @@ export function SessionPane({
     historyReturnFocusRef.current = trigger ?? header?.querySelector<HTMLButtonElement>('.agent-region-header__more') ?? null
     setHistoryOpen(true)
   }
-  const closeHistory = (): void => {
+  const closeHistory = useCallback((): void => {
     const document = surfaceRef.current?.ownerDocument ?? globalThis.document
     const reader = surfaceRef.current?.querySelector('.activity-feed')
     const target = historyReturnFocusRef.current
@@ -291,7 +293,7 @@ export function SessionPane({
       if (active && active !== document.body && (active !== closingFocus || !reader?.contains(active))) return
       target.focus()
     })
-  }
+  }, [historyReturnContext, selectOwnRegion])
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
   const [retainedOutputKey, setRetainedOutputKey] = useState<string | null>(null)
   const readingRetainedOutput = pendingAgentRestore && retainedOutputKey === activitySourceKey
@@ -1009,8 +1011,10 @@ export function SessionPane({
     activityLifetime.current.opened = true
     activityContent.current = <ActivityView {...activityProps} revealRequest={revealRequest?.displayId === null ? revealRequest : null} />
   }
+  if (activityContent.current) activityContent.current = retainActivityControls(activityContent.current, {
+    ...(conversationReading ? { conversationReading } : {}), activitySemantic: activityProps.activitySemantic ?? 'unknown'
+  })
   const presentedActivity = activityContent.current
-    ? cloneElement(activityContent.current, { ...(conversationReading ? { conversationReading } : {}), activitySemantic: activityProps.activitySemantic ?? 'unknown' }) : null
   const resultReview = session.kind === 'agent'
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
