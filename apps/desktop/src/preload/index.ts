@@ -1,3 +1,4 @@
+import { createPreloadConversationRead } from './conversation-read'
 import { WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_RESPONSE, WORKBENCH_WINDOW_CHANGED } from '../shared/workbench-windows'
 import { createPreloadNotebookObservation } from './notebook-observation'
 import { readInputObservation } from '@agentmux/core/control'
@@ -99,6 +100,7 @@ const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
 projectInitialTheme(initialTheme)
 
 const api: AgentMuxPreloadApi = {
+  conversation: createPreloadConversationRead(ipcRenderer),
   performance: {
     captureProfile: input => ipcRenderer.invoke('metrics:captureProfile', input),
     captureTrace: input => ipcRenderer.invoke('metrics:captureTrace', input)

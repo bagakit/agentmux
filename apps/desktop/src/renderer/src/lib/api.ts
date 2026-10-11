@@ -1,3 +1,4 @@
+import { createConversationReadApi } from './conversation-read-api'
 import { conversationRevision } from '@agentmux/core/conversation'
 import { createConversationLandmarksApi } from './conversation-landmarks-api'
 import { createRendererNotebookObservation } from './notebook-observation-api'
@@ -375,6 +376,12 @@ async function mockHistorySources(options?: { observation: true }): Promise<Agen
 }
 
 const mockApi: AgentMuxDesktopApi = {
+  conversation: {
+    readAgentConversation: async () => { throw new Error('Open Desktop to read the original conversation.') },
+    readConversationChanges: async () => { throw new Error('Open Desktop to read original conversation changes.') },
+    observeConversation: async () => { throw new Error('Open Desktop to observe the original conversation.') },
+    releaseConversationView: async () => { throw new Error('Open Desktop to release the original reading view.') }
+  },
   performance: {
     captureProfile: async () => { throw new Error('Open Desktop to sample the original Renderer.') },
     captureTrace: async () => { throw new Error('Open Desktop to trace the original Renderer.') }
@@ -1500,6 +1507,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   return {
     ...preload,
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
+    conversation: createConversationReadApi(preload.conversation),
     hosts: { ...preload.hosts, inspect: async (host, context) => {
       const signal = context?.signal
       signal?.throwIfAborted()

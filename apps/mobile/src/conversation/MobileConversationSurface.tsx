@@ -17,7 +17,7 @@ import type { AgentInputSubmissionReceipt, AgentInputWaitRef, AgentMuxAgentSessi
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { protectsConversationWindow } from '@agentmux/client-ui/conversation-reading-anchor'
 import { HUMAN_SPEAKER_ID, speakerOfExternalAuthor } from '@agentmux/client-ui/conversation-speaker'
 import {
   AgentComposer, AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationMessage, ConversationView,
@@ -102,7 +102,8 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
 export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
-  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected', snapshot => canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following))
+  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected', snapshot => canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following),
+    (page, previous) => !protectsConversationWindow(feed.current, page, !follow.current.following, previous ?? undefined, { current: previous }))
   const [jump, setJump] = useState(false)
   useEffect(() => { follow.current = initFollowState(); setJump(false) }, [agentSessionId])
   useLayoutEffect(() => {
@@ -580,9 +581,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     },
     ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? `${session.providerId} Agent`, providerId: session.providerId } } : {})
   }), [client, session, agentSessionId, displayName])
-  const mailboxMessages = useMemo(() => agentSessionId ? projectSessionUserMessages({ agentSessionId,
-    ...(reading.page && reading.pageOwner?.client === client ? { historyPage: reading.page } : {}), ...(reading.timeline ? { timeline: reading.timeline } : {}) }) : [],
-  [agentSessionId, reading.page, reading.pageOwner, reading.timeline, client])
+  const mailboxMessages = useMemo(() => reading.projection?.records.flatMap(record => record.input ? [record.input] : []) ?? [], [reading.projection])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
   const readHistoryResource = useCallback<NonNullable<ConversationMessageProps['readHistoryResource']>>(input => {
     if (!client || !agentSessionId) throw new Error('原 Host 尚未连接，原资源引用和草稿保留。')
@@ -682,6 +681,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         setJump(shouldShowJumpToLatest(follow.current))
       }}>
         {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
+        {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
         {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
           follow.current = initFollowState(); setJump(false)
           if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
@@ -690,7 +690,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
         {agentSessionId ? <>
-          <ConversationView page={reading.page} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+          <ConversationView page={reading.page} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
             questionReplyState={target => {
               const state = mobileQuestionReplyState(local, agentSessionId, target), original = state?.original

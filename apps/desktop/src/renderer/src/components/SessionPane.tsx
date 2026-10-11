@@ -64,7 +64,7 @@ import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
 import { agentContinuityPresentation } from '../lib/continuity-presentation'
-import { projectConversationRecords, type ConversationItemRef } from '@agentmux/core/conversation'
+import { type ConversationItemRef } from '@agentmux/core/conversation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import type { ConversationRevealRequest, MailboxMessageNavigationResult } from '../lib/mailbox-message-navigation'
@@ -399,21 +399,15 @@ export function SessionPane({
     for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove', 'focusin']) document.addEventListener(event, changedIntent, true)
     void (async () => {
     let present = false
-    if (itemRef.source.kind === 'captured') {
-      present = projectConversationRecords({ agentSessionId: control.agentSessionId, executionHostId: control.hostId, timeline: useAppStore.getState().timelines[sessionId] })
-        .some(record => (mailboxInputId || record.sourceHostId === itemRef.hostId) && (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
-    } else {
-      const read = await readForReveal(itemRef.source)
-      if (!current()) { finish({ kind: 'cancelled' }); return result }
-      if (read.sourceChanged || read.page && (read.page.source.providerId !== itemRef.source.providerId ||
-        read.page.source.nativeSessionId !== itemRef.source.nativeSessionId)) {
-        finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。')); return result
-      }
-      if (read.error) { finish(unavailable(`读取对话失败：${read.error.message}`)); return result }
-      if (read.windowFrozen) { finish(unavailable('当前阅读窗口已达边界，无法确认位置。')); return result }
-      present = projectConversationRecords({ agentSessionId: control.agentSessionId, executionHostId: control.hostId, historyPage: read.page ?? undefined })
-        .some(record => (mailboxInputId || record.sourceHostId === itemRef.hostId) && (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
+    const read = await readForReveal(itemRef.source)
+    if (!current()) { finish({ kind: 'cancelled' }); return result }
+    if (itemRef.source.kind === 'native' && (read.sourceChanged || read.page &&
+      (read.page.source.providerId !== itemRef.source.providerId || read.page.source.nativeSessionId !== itemRef.source.nativeSessionId))) {
+      finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。')); return result
     }
+    if (read.error) { finish(unavailable(`读取对话失败：${read.error.message}`)); return result }
+    present = read.records.some(record => (mailboxInputId || record.sourceHostId === itemRef.hostId) &&
+      (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
     if (!current()) { finish({ kind: 'cancelled' }); return result }
     if (!present) { finish(unavailable('当前有界对话窗口中没有这条记录，无法确认位置。')); return result }
     switched = true

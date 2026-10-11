@@ -4,7 +4,7 @@ import { conversationItemRef } from '@agentmux/core/conversation'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
 import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
 import { type AgentConversationRecord, type ConversationItemRef } from '@agentmux/core/conversation'
-import { projectConversationReading, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
+import { projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import { ConversationToolPayload } from '@agentmux/client-ui/components/ConversationToolPayload'
@@ -100,28 +100,17 @@ type Segment = (
   | { kind: 'user-message'; message: AgentSessionUserMessage }) & { beforeRecordId?: string }
 
 /** Positions only adapt the already ordered Core events to retained source renderers. */
-function buildActivityEntries(sessionId: string, sourceItems: AgentTimelineItem[], timeline: AgentTimelineSnapshot | undefined,
-  userMessages?: readonly AgentSessionUserMessage[], nativePage?: AgentSessionHistoryPage | null, executionHostId?: string) {
-  const projection = projectConversationReading({ agentSessionId: sessionId, executionHostId, historyPage: nativePage ?? undefined,
-    timeline: timeline?.items === sourceItems ? timeline : { ...(timeline?.agentSessionId === sessionId ? timeline : { revision: 0 }), agentSessionId: sessionId, items: sourceItems } })
-  const records = projection.records
-  const segments: Segment[] = []
-  const unifiedItems: ConversationAxisItem[] = []
+function buildActivityEntries(projection: ReturnType<typeof projectConversationWindow> | null) {
+  const records = projection?.records ?? [], segments: Segment[] = [], unifiedItems: ConversationAxisItem[] = []
   let beforeRecordId: string | undefined
   for (let index = records.length - 1; index >= 0; index--) {
     const record = records[index]!
     if (record.original.kind === 'native') { beforeRecordId = record.rawId; continue }
     const item = record.original.item
-    unifiedItems.push(item)
-    segments.push({ kind: 'item', item, record, ...(beforeRecordId === undefined ? {} : { beforeRecordId }) })
+    unifiedItems.push(item); segments.push({ kind: 'item', item, record, ...(beforeRecordId === undefined ? {} : { beforeRecordId }) })
   }
   segments.reverse(); unifiedItems.reverse()
-  // These are already projected Core inputs supplied by a legacy input-only caller.
-  // Without an original page they remain readable in source order, never time-merged.
-  if (!nativePage) for (const message of userMessages ?? []) if (message.source.kind === 'native') {
-    segments.push({ kind: 'user-message', message }); unifiedItems.push(message)
-  }
-  return { records, originalRecords: projection.originalRecords, coverage: projection.timeline.coverage, unifiedItems, segments }
+  return { records, originalRecords: projection?.originalRecords ?? [], coverage: projection?.timeline.coverage ?? [], unifiedItems, segments }
 }
 
 function Row({
@@ -401,7 +390,7 @@ export function ActivityView({
   const physicalScrollRef = useRef<ScrollGeometry | null>(null)
   const edgeRef = useRef({ earlier: false, newer: false })
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
-  const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal, projection) => {
+  const readingWindow = useSessionConversationWindow(conversationReading, (page, intent, currentOriginal, projection) => {
     if (intent === 'earlier' || intent === 'newer') followRef.current = { ...followRef.current, following: false }
     const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
     if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal, projection, userMessages)) return false
@@ -413,7 +402,7 @@ export function ActivityView({
       edgeRef.current.earlier = false; edgeRef.current.newer = false
     }
     return true
-  }, nativeContextItems, RULER_WINDOWS[rulerWindow], timelineSnapshot, snapshot => {
+  }, RULER_WINDOWS[rulerWindow], snapshot => {
     if (!feedEl) return true
     if (!canReplaceCapturedWindow(feedEl, snapshot, !followRef.current.following)) return false
     anchorRef.current = captureReadingAnchor(feedEl)
@@ -461,7 +450,7 @@ export function ActivityView({
   const boundaryIndex = !historyBoundary || !nativeHistoryPage ? -1 : nativeHistoryPage.items.findIndex(item => item.id === historyBoundary.beforeRecordId)
   const lastEarlierRecord = nativeHistoryPage?.items[boundaryIndex - 1]
   const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
-  const items = readingWindow.captured ?? observedItems
+  const items = readingWindow.captured ?? []
   const readingEnabled = conversationReading?.enabled !== false
   useLayoutEffect(() => {
     if (earlierCommitPending.current) {
@@ -499,9 +488,9 @@ export function ActivityView({
     if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
     returnRef.current?.focus({ preventScroll: true })
   }, [conversationReading?.opened, conversationReading?.identity])
-  const { records: conversationRecords, originalRecords: originalConversationRecords, coverage: conversationCoverage, unifiedItems, segments } = useMemo(() => buildActivityEntries(sessionId, items,
-    readingWindow.capturedSnapshot ?? timelineSnapshot, userMessages, nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null, executionHostId),
-    [items, timelineSnapshot, readingWindow.capturedSnapshot, userMessages, nativeHistoryPage, sessionId, executionHostId])
+  const { records: conversationRecords, originalRecords: originalConversationRecords, coverage: conversationCoverage, unifiedItems, segments } = useMemo(
+    () => buildActivityEntries(readingWindow.projection), [readingWindow.projection])
+
   const proposedSegments = useMemo(() => placeSegments(segments), [segments])
   const proposedLayout = proposedSegments.map(segmentLayout)
   const layoutSource = JSON.stringify([sessionId, nativeHistoryPage?.source])
@@ -1119,7 +1108,7 @@ export function ActivityView({
         <CapturedConversationMessage
           item={entry.item}
           {...(entry.record ? { record: entry.record } : {})}
-          {...(entry.record?.role === 'observation' ? { replyObservation: { compact: Boolean(nativeHistoryPage?.items.length) && !readingWindow.error && !userMessageRead?.error } } : {})}
+          {...(entry.record?.role === 'observation' ? { replyObservation: { compact: true } } : {})}
           messageActions={<>{entry.record && conversationItemRef(entry.record) && renderRecordActions?.(conversationItemRef(entry.record)!, readingEnabled, executionHostId)}{entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
             !entry.item.authorAgentSessionId && entry.item.authorHuman !== true && entry.item.authorExternal === undefined && entry.item.source !== 'user'
             ? renderMessageActions?.({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) : null}</>}
