@@ -1,4 +1,5 @@
 import type { SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import type { MoteWorkfaceScope } from './mote-workface'
 import { attentionAccentFor, type AttentionCategory } from './attention-event'
 import type { AgentDisplayState } from '@agentmux/core'
 import {
@@ -34,12 +35,13 @@ export type WorkspaceTool = (typeof WORKSPACE_TOOL_IDS)[number]
 export function resolveWorkspaceTools(input: {
   workspaceTool: WorkspaceTool
   isScratch: boolean
+  moteScope?: MoteWorkfaceScope | null
 }): { tools: readonly WorkspaceTool[]; effective: WorkspaceTool } {
   // Scratch keeps `files-branches` as the stored enum value (zero side-effect when switching back
   // to a real project); it is re-skinned as `Files + Topics`, not removed. `isScratch` is retained
   // in the signature so callers keep a single source of truth for the flag even though the tool
   // set no longer diverges.
-  const tools: readonly WorkspaceTool[] = input.isScratch ? WORKSPACE_TOOL_IDS.filter(tool => tool !== 'git') : WORKSPACE_TOOL_IDS
+  const tools: readonly WorkspaceTool[] = input.isScratch || input.moteScope ? WORKSPACE_TOOL_IDS.filter(tool => tool !== 'git') : WORKSPACE_TOOL_IDS
   const effective = tools.includes(input.workspaceTool) ? input.workspaceTool : tools[0]!
   return { tools, effective }
 }
@@ -82,14 +84,15 @@ export function resolveExplorerCollapsed(override: boolean | undefined, defaultC
   return override ?? defaultCollapsed
 }
 
-export function contentSlotPresentation(isScratch: boolean): ContentSlotPresentation {
+export function contentSlotPresentation(isScratch: boolean, moteScope: MoteWorkfaceScope | null = null): ContentSlotPresentation {
+  const label = moteScope ? 'Files + Mote' : isScratch ? 'Files + Topics' : 'Files + Zones'
   if (isScratch) {
     // Topics (the wiki) is the primary view in Scratch, so the file tree shrinks to the smaller
     // share and Topics takes the larger remainder — wiki-first: filesystem is the substrate,
     // the topic is the first-class view.
-    return { label: 'Files + Topics', showTopics: true, fileTreeDefaultSize: 38, fileTreeMinSize: 20, explorerCollapsedByDefault: true }
+    return { label, showTopics: !moteScope, fileTreeDefaultSize: 38, fileTreeMinSize: 20, explorerCollapsedByDefault: true }
   }
-  return { label: 'Files + Zones', showTopics: false, fileTreeDefaultSize: 68, fileTreeMinSize: 34, explorerCollapsedByDefault: false }
+  return { label, showTopics: false, fileTreeDefaultSize: 68, fileTreeMinSize: 34, explorerCollapsedByDefault: false }
 }
 
 export type AgentSessionSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>

@@ -27,6 +27,7 @@ import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { WorkspaceFilesTool } from './WorkspaceFilesTool'
 import { WorkspaceGitTool } from './WorkspaceGitTool'
 import { useWorkspaceZoneContext } from '../lib/workspace-zone-context'
+import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
@@ -167,19 +168,22 @@ export function SurfaceToolDock({
   // re-skinned as `Files + Topics` (see contentSlotPresentation), so the tool set never diverges
   // and the global workspaceTool is never mutated.
   const isScratch = Boolean(workspace && isScratchWorkspaceId(workspace.id))
-  const [lastFolder, setLastFolder] = useState<WorkspaceRecord | null>(workspace && !isScratch ? workspace : null)
-  useEffect(() => { if (workspace && !isScratch) setLastFolder(workspace) }, [workspace, isScratch])
-  const gitWorkspace = workspace && !isScratch ? workspace : lastFolder
+  const moteScope = useMoteWorkfaceScope(workspace?.id, undefined, visible)
+  const [lastFolder, setLastFolder] = useState<WorkspaceRecord | null>(workspace && !isScratch && !moteScope ? workspace : null)
+  useEffect(() => { if (workspace && !isScratch && !moteScope) setLastFolder(workspace) }, [workspace, isScratch, moteScope])
+  const gitWorkspace = workspace && !isScratch && !moteScope ? workspace : lastFolder
   const { tools: workspaceToolIds, effective: effectiveWorkspaceTool } = resolveWorkspaceTools({
     workspaceTool,
-    isScratch
+    isScratch,
+    moteScope
   })
-  const contentSlot = contentSlotPresentation(isScratch)
+  const contentSlot = contentSlotPresentation(isScratch, moteScope)
   const tools: ToolDefinition<WorkspaceTool>[] = workspaceToolIds.map((id) => {
         const meta = WORKSPACE_TOOL_META[id]
         // Re-skin the content slot for Scratch without changing its enum id.
-        if (id === 'files-branches' && isScratch) {
-          return { id, ...meta, label: contentSlot.label, description: 'Browse the topic wiki and collaborators', icon: ThemeObjectTopicIcon }
+        if (id === 'files-branches' && (isScratch || moteScope)) {
+          return { id, ...meta, label: contentSlot.label,
+            description: moteScope ? 'Browse this Mote’s profile, ideas and materials' : 'Browse the topic wiki and collaborators', icon: ThemeObjectTopicIcon }
         }
         return { id, ...meta }
       })
@@ -230,8 +234,8 @@ export function SurfaceToolDock({
           </div>
         ) : null}
         {gitWorkspace ? (
-          <div className="workspace-tool-slot" hidden={selectedTool !== 'git' || isScratch}>
-            <WorkspaceGitSlot workspace={gitWorkspace} visible={visible && selectedTool === 'git' && !isScratch} />
+          <div className="workspace-tool-slot" hidden={selectedTool !== 'git' || isScratch || Boolean(moteScope)}>
+            <WorkspaceGitSlot workspace={gitWorkspace} visible={visible && selectedTool === 'git' && !isScratch && !moteScope} />
           </div>
         ) : null}
         {visible && effectiveWorkspaceTool === 'agents' && workspace ? (
