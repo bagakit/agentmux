@@ -49,7 +49,7 @@ const variants = [
     from: 'run = await this.observation(() => this.deps.status(session));', to: 'run = await this.deps.status(session);',
     target: 'dispose cancels a never-replying status observation and ignores its late result without changing the original Run', expected: 'expected false to be true' },
   { name: 'forget-supervision', path: 'packages/core/src/client.ts',
-    from: "if (!receipt.intentOperationId && !['manual', 'input'].includes(receipt.trigger) && !receipt.supervision)", to: 'if (false)',
+    from: "if (!receipt.intentOperationId && !['manual', 'input'].includes(receipt.trigger) && (!receipt.supervision || receipt.supervision.attemptCount === 0))", to: 'if (false)',
     target: 'observes a later exact Native exit even when no terminal consumer is attached', expected: 'to be called 2 times' },
   { name: 'replay-later-input', path: 'packages/core/src/client.ts',
     from: '} : {})\n      }, input.expectedRun, capability ?? undefined)',
