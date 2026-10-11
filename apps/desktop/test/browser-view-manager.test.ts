@@ -950,6 +950,80 @@ describe('BrowserViewManager', () => {
     manager.close(initial.id)
   })
 
+  it('applies custom dimensions on the same page, fits resize and zoom, and retains the original released owner', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const original = await manager.create('custom-viewport', 'https://example.com/original', 'workspace-a', 'work')
+    const sibling = await manager.create('custom-sibling', 'https://example.com/sibling', 'workspace-a', 'personal')
+    const view = fixture.children[0]!, contents = view.webContents
+    manager.setBounds(original.id, { x: 10, y: 20, width: 600, height: 500 })
+    const requested = { width: 412, height: 915, screenPosition: 'mobile' as const }
+    const applied = manager.setViewport(original.id, requested)
+    expect(applied).toMatchObject({ id: original.id, navigationId: original.navigationId, profileId: 'work', url: original.url, viewport: requested })
+    expect(contents.deviceEmulation).toEqual({
+      screenPosition: 'mobile', screenSize: { width: 412, height: 915 },
+      viewPosition: { x: 0, y: 0 }, deviceScaleFactor: 0,
+      viewSize: { width: 412, height: 915 }, scale: 500 / 915
+    })
+    requested.width = 1000
+    expect(Reflect.set(applied.viewport as object, 'width', 2000)).toBe(false)
+    expect((await manager.create(original.id, original.url)).viewport).toEqual({ width: 412, height: 915, screenPosition: 'mobile' })
+    manager.setViewport(original.id, { width: 915, height: 412, screenPosition: 'mobile' })
+    expect(contents.deviceEmulation).toMatchObject({ viewSize: { width: 915, height: 412 }, scale: 600 / 915 })
+    manager.setBounds(original.id, { x: 10, y: 20, width: 300, height: 250 })
+    expect(contents.deviceEmulation).toMatchObject({ scale: 300 / 915 })
+    expect(contents.getZoomFactor()).toBe(DEFAULT_BROWSER_ZOOM_FACTOR)
+    manager.setViewport(original.id, { width: 1440, height: 900, screenPosition: 'desktop' })
+    expect(contents.deviceEmulation).toMatchObject({ screenPosition: 'desktop', viewSize: { width: 1296, height: 810 }, scale: 300 / 1296 })
+    expect(await manager.create(sibling.id, sibling.url)).toEqual(sibling)
+    await manager.release(original.id)
+    const restored = await manager.restore(original.id, { workspaceId: 'workspace-a' })
+    expect(restored).toMatchObject({ id: original.id, url: original.url, profileId: 'work', viewport: { width: 1440, height: 900, screenPosition: 'desktop' } })
+    expect(fixture.children.at(-1)!.webContents.deviceEmulation).toMatchObject({ screenPosition: 'desktop', viewSize: { width: 1296, height: 810 } })
+    manager.close(original.id)
+    manager.close(sibling.id)
+  })
+
+  it('does not publish rejected custom dimensions or native failures and permits correction on the original owner', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const initial = await manager.create('custom-rejected', 'https://example.com/original', 'workspace-a', 'work')
+    const view = fixture.children[0]!
+    const custom = { width: 1366, height: 768, screenPosition: 'desktop' as const }
+    manager.setViewport(initial.id, custom)
+    const sentBefore = fixture.sent.length, callsBefore = view.webContents.enableDeviceEmulation.mock.calls.length
+    for (const viewport of [{ ...custom, width: 0 }, { ...custom, height: 1.5 }, { ...custom, width: 2_147_483_648 }, { ...custom, screenPosition: 'watch' }]) {
+      expect(() => manager.setViewport(initial.id, viewport as never)).toThrow('Unknown browser viewport')
+    }
+    expect(view.webContents.enableDeviceEmulation).toHaveBeenCalledTimes(callsBefore)
+    expect(fixture.sent).toHaveLength(sentBefore)
+    view.webContents.enableDeviceEmulation.mockImplementationOnce(() => { throw new Error('Native custom size rejected') })
+    expect(() => manager.setViewport(initial.id, { width: 430, height: 932, screenPosition: 'mobile' })).toThrow('Native custom size rejected')
+    expect(fixture.sent).toHaveLength(sentBefore)
+    expect(await manager.create(initial.id, initial.url)).toMatchObject({ viewport: custom, navigationId: initial.navigationId, url: initial.url, profileId: initial.profileId })
+    view.webContents.zoomFactor = 2
+    expect(() => manager.setViewport(initial.id, { width: 2_147_483_647, height: 768, screenPosition: 'desktop' })).toThrow('current page zoom')
+    expect(fixture.sent).toHaveLength(sentBefore)
+    view.webContents.zoomFactor = DEFAULT_BROWSER_ZOOM_FACTOR
+    expect(manager.setViewport(initial.id, 'responsive').viewport).toBe('responsive')
+    await manager.release(initial.id)
+    await expect(manager.restore(initial.id, { viewport: { width: 0, height: 400, screenPosition: 'mobile' } })).rejects.toThrow('Unknown browser viewport')
+    expect(await manager.restore(initial.id)).toMatchObject({ id: initial.id, viewport: 'responsive', url: initial.url, profileId: initial.profileId })
+    manager.close(initial.id)
+  })
+
+  it('creates a cold native owner with confirmed custom dimensions and validates before allocating it', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    await expect(manager.create('custom-cold-invalid', 'https://example.com/', 'workspace-a', 'work', 'normal', { width: -1, height: 844, screenPosition: 'mobile' })).rejects.toThrow('Unknown browser viewport')
+    expect(fixture.children).toHaveLength(0)
+    const size = { width: 820, height: 1180, screenPosition: 'mobile' as const }
+    const created = await manager.create('custom-cold', 'https://example.com/original', 'workspace-a', 'work', 'normal', size)
+    expect(created).toMatchObject({ viewport: size, profileId: 'work', url: 'https://example.com/original' })
+    expect(fixture.sent.every(event => event.type !== 'updated' || event.browser.viewport !== 'responsive')).toBe(true)
+    expect(fixture.children[0]!.webContents.deviceEmulation).toMatchObject({ screenPosition: 'mobile', viewSize: { width: 820, height: 1180 } })
+    size.width = 500
+    expect((await manager.create(created.id, created.url)).viewport).toEqual({ width: 820, height: 1180, screenPosition: 'mobile' })
+    manager.close(created.id)
+  })
+
   it('fits fixed viewports again only when the original Pane size changes', async () => {
     const fixture = fakeWindow(), manager = browserManager(fixture.window)
     const initial = await manager.create('browser-fit', 'https://example.com/')
