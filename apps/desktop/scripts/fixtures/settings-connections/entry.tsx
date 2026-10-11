@@ -1,6 +1,7 @@
 import { fixturePath as _historyFixturePath } from "../../../../../test/fixture-values.mjs"
 import { useState } from 'react'
 import type { HostRuntimeObservation, RemoteCoreUpgradeCheck } from '@agentmux/core'
+import type { ApplicationAccessConfiguration, ApplicationAccessOperation, ApplicationAccessPlan, ApplicationAccessProfile } from '@agentmux/core'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -74,6 +75,54 @@ api.hosts.upgradeCheck = async host => {
     latestOperation: { input: structuredClone(host), operationId: 'controlled-original-upgrade', expected, status: 'unknown', stage: 'verifying',
       detail: 'Original operation result is unconfirmed.', updatedAt: Date.now() - 90_000 } } satisfies RemoteCoreUpgradeCheck
 }
+// Controlled metadata for real application UI. Domain transfer/verification is proved separately through actual connectors.
+const applications = { configurations: [] as ApplicationAccessConfiguration[], operations: [] as ApplicationAccessOperation[], plans: [] as ApplicationAccessPlan[] }
+api.applications.call = (async (method: string, input: Record<string, unknown>) => {
+  calls.push({ kind: 'controlled-application-method', input: { method, ...structuredClone(input) } })
+  if (method === 'settings.applications.ls') return {
+    configurations: applications.configurations.filter(item => !input.hostId || item.profile.target.hostId === input.hostId),
+    operations: applications.operations.filter(item => !input.hostId || item.target.hostId === input.hostId)
+  }
+  if (method === 'settings.applications.configure') {
+    const next: ApplicationAccessConfiguration = { profileId: input.profileId as string, revision: 'controlled-rule-' + calls.length, profile: structuredClone(input.profile as ApplicationAccessProfile) }
+    applications.configurations = [...applications.configurations.filter(item => item.profileId !== next.profileId), next]
+    return next
+  }
+  if (method === 'settings.applications.delete') {
+    applications.configurations = applications.configurations.filter(item => item.profileId !== input.profileId)
+    return { profileId: input.profileId, deleted: true }
+  }
+  if (method === 'settings.applications.plan') {
+    const configuration = applications.configurations.find(item => item.profileId === input.profileId)!, p = configuration.profile
+    const observation = (source: boolean) => {
+      const endpoint = source ? p.source : p.target
+      return { hostId: endpoint.hostId, runtimeId: endpoint.runtimeId, osAccount: endpoint.osAccount, applicationId: p.applicationId,
+        status: source ? 'ready' as const : 'login-required' as const, accountId: source ? p.accountId : null,
+        scopes: source ? p.scopes : [], revision: 'controlled-app-revision', transferable: true }
+    }
+    const plan: ApplicationAccessPlan = { planId: 'controlled-plan-' + calls.length, profileId: configuration.profileId,
+      configurationRevision: configuration.revision, createdAt: new Date().toISOString(), source: observation(true), target: observation(false),
+      disposition: 'transfer', accountId: p.accountId, scopes: p.scopes }
+    applications.plans.push(plan); return plan
+  }
+  if (method === 'settings.applications.apply') {
+    const plan = applications.plans.find(item => item.planId === input.planId)!, profile = applications.configurations.find(item => item.profileId === input.profileId)!.profile
+    const operation: ApplicationAccessOperation = { operationId: input.operationId as string, profileId: input.profileId as string,
+      planId: plan.planId, configurationRevision: plan.configurationRevision, applicationId: profile.applicationId,
+      source: { hostId: profile.source.hostId, runtimeId: profile.source.runtimeId, osAccount: profile.source.osAccount },
+      target: { hostId: profile.target.hostId, runtimeId: profile.target.runtimeId, osAccount: profile.target.osAccount }, accountId: plan.accountId, scopes: plan.scopes,
+      status: 'unknown', stage: 'import-dispatched', createdAt: new Date(Date.now() - 60_000).toISOString(), updatedAt: new Date().toISOString(),
+      cause: { code: 'CONTROLLED_APPLICATION_RECEIPT_UNKNOWN', message: 'The target import response was not confirmed. Check this original operation.' } }
+    applications.operations = [operation]; return operation
+  }
+  if (method === 'settings.applications.operation') {
+    const original = applications.operations.find(item => item.operationId === input.operationId)!
+    const result: ApplicationAccessOperation = { ...original, status: 'succeeded', stage: 'complete', updatedAt: new Date().toISOString() }
+    delete result.cause
+    applications.operations = [result]; return result
+  }
+  throw new Error('Unknown controlled application method')
+}) as typeof api.applications.call
 api.deviceManagement.ls = async input => { calls.push({ kind: 'device.ls', input }); return structuredClone(deviceList) }
 api.deviceManagement.link = async input => { calls.push({ kind: 'device.link', input }); return structuredClone(deviceInvitation) }
 api.deviceManagement.revoke = async input => { calls.push({ kind: 'device.revoke-intent', input }); throw new Error('Controlled preview does not revoke OS authorization') }
@@ -94,6 +143,13 @@ const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
       const { user: _user, port: _port, ...inherited } = host
       return inherited
     })
+    const target = hosts.find(host => host.id === 'host-01')!
+    applications.configurations = [{ profileId: 'controlled-build-access', revision: 'controlled-rule-original', profile: {
+      label: 'Build service access', applicationId: 'build-cli', accountId: 'engineer@work.example', scopes: ['project:read', 'artifacts:write'],
+      source: { hostId: 'local', runtimeId: 'controlled-local-runtime', osAccount: 'engineer', command: _historyFixturePath("usr/local/bin/application-connector"), args: ['--profile', 'work'] },
+      target: { hostId: target.id, runtimeId: target.kind === 'ssh' ? target.runtimeId ?? 'controlled-semantic-runtime' : 'controlled-local-runtime', osAccount: 'builder', command: _historyFixturePath("opt/tools/application-connector"), args: [] }
+    } }]
+    applications.operations = []; applications.plans = []
     await realSave({ ...current, hosts, workspaces: seeded.workspaces }, current)
     const base = (await api.sessions.snapshot()).sessions.find(session => session.kind === 'agent')!
     if (base.kind !== 'agent') throw new Error('The original Preview Agent DTO is required')

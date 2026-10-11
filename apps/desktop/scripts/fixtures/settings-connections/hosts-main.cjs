@@ -188,6 +188,48 @@ app.whenReady().then(async () => {
       }
       result.interactions.push({kind:'native-apps-access-original-trust-retained',width,theme,hostId:target,approvals,
         boundary:'Controlled original public trust and maintenance DTOs; no real target grants or service update.'})
+      // The actual application workbench consumes controlled metadata; no credential is exported by this Renderer probe.
+      const application = `${pane} [data-application-host="${target}"]`
+      const applicationAction = label => `js:[...document.querySelector(${JSON.stringify(application)}).querySelectorAll('button')].find(node=>node.textContent.trim()===${JSON.stringify(label)})`
+      await until(`document.querySelector(${JSON.stringify(application)})?.textContent.includes('Build service access')`)
+      await click(applicationAction('Edit rule'))
+      await until(`document.querySelector(${JSON.stringify(application + ' [aria-label="Source connector arguments"]')})`)
+      if(theme==='light') {
+        await read(`document.querySelector(${JSON.stringify(application + ' .application-access__editor')}).scrollIntoView({block:'start'})`)
+        await settle();await supplemental(width,theme,'application-editor')
+      }
+      await type(`${application} [aria-label="Source connector arguments"]`,'["--profile","work profile"]')
+      await click(applicationAction('Save application rule'))
+      await until(`!document.querySelector(${JSON.stringify(application + ' .application-access__editor')})`)
+      const configuredApplication=await read(`window.connectionsProof.calls.filter(c=>c.kind==='controlled-application-method'&&c.input.method==='settings.applications.configure').at(-1).input`)
+      assert.deepEqual(configuredApplication.profile.source.args,['--profile','work profile'],'Native application editor preserves independent argv')
+      assert.equal(configuredApplication.profile.target.hostId,target)
+      await click(applicationAction('Compare access'))
+      await until(`document.querySelector(${JSON.stringify(application + ' .application-access__plan')})?.textContent.includes('Ready to synchronize')`)
+      if(width===1480) {
+        await read(`document.querySelector(${JSON.stringify(application + ' .application-access__plan')}).scrollIntoView({block:'center'})`)
+        await settle();await supplemental(width,theme,'application-plan')
+      }
+      await click(applicationAction('Synchronize selected access'))
+      await until(`document.querySelector(${JSON.stringify(application + ' .application-access__result')})?.textContent.includes('Synchronization result not confirmed')`)
+      const originalApplication=await read(`window.connectionsProof.calls.find(c=>c.kind==='controlled-application-method'&&c.input.method==='settings.applications.apply').input`)
+      if(theme==='dark') {
+        await read(`document.querySelector(${JSON.stringify(application + ' .application-access__result')}).scrollIntoView({block:'center'})`)
+        await settle();await supplemental(width,theme,'application-unknown')
+      }
+      await choose(target,'connection');await choose(target,'agents')
+      assert.ok(await read(`document.querySelector(${JSON.stringify(application)})?.textContent.includes('Synchronization result not confirmed')`))
+      await click(applicationAction('Check original operation'))
+      await until(`document.querySelector(${JSON.stringify(application + ' .application-access__result')})?.textContent.includes('Target account and scopes verified')`)
+      const applicationQueries=await read(`window.connectionsProof.calls.filter(c=>c.kind==='controlled-application-method'&&c.input.method==='settings.applications.operation').map(c=>c.input.operationId)`)
+      assert.deepEqual(applicationQueries,[originalApplication.operationId],'Native original operation queries never become another apply')
+      assert.equal(await read(`window.connectionsProof.calls.filter(c=>c.kind==='controlled-application-method'&&c.input.method==='settings.applications.apply').length`),1)
+      if(width===1480) {
+        await read(`document.querySelector(${JSON.stringify(application + ' .application-access__result')}).scrollIntoView({block:'center'})`)
+        await settle();await supplemental(width,theme,'application-verified')
+      }
+      result.interactions.push({kind:'native-application-configure-plan-original-result',width,theme,configuredApplication,originalApplication,applicationQueries,
+        boundary:'Actual production UI and native input, controlled public metadata only. Domain material transfer and target verification have separate process/RPC evidence.'})
       // Exercise the same saved Host panel and its explicit Refresh operation, without replacing the UI.
       await read('window.connectionsProof.runtimeScenario("healthy")')
       await choose(target,'overview')
@@ -257,6 +299,9 @@ app.whenReady().then(async () => {
         await read(`window.connectionsProof.theme(${JSON.stringify(theme)},'retro-future')`)
         await until("document.documentElement.dataset.theme==='retro-future'")
         await settle();await supplemental(width,theme,'retro-topology')
+        await choose(target,'agents')
+        await read(`document.querySelector(${JSON.stringify(application)}).scrollIntoView({block:'start'})`)
+        await settle();await supplemental(width,theme,'retro-application-access')
       }
       await click('[aria-label="Close settings"]');await until('!document.querySelector(".settings-page")')
     }

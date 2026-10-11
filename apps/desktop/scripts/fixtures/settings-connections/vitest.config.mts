@@ -10,6 +10,8 @@ assert.ok(evidence, 'Explicit owned evidence directory')
 const mutant = process.env.AGENTMUX_CONNECTIONS_MUTANT ?? 'baseline'
 const base = 'apps/desktop/src/renderer/src/components/settings/'
 const edits: Record<string, { file: string; before: string; after: string }> = {
+  'application-target': { file: base + 'HostSettingsPane.tsx', before: '<HostApplicationAccessPanel host={draft}', after: '<HostApplicationAccessPanel host={hosts[0]!}' },
+  'application-original': { file: base + 'HostApplicationAccessPanel.tsx', before: "'settings.applications.operation', { operationId: id }", after: "'settings.applications.operation', { operationId: id + '-another' }" },
   remote: { file: base + 'modules/hosts.tsx', before: "group: 'remote'", after: "group: 'connections'" },
   access: { file: base + 'HostSettingsPane.tsx', before: "data-host-access={id} hidden={selectedId !== id || panel !== 'agents'}", after: "data-host-access={id} hidden={selectedId !== id || panel !== 'connection'}" },
   route: { file: base + 'HostTopology.tsx', before: "host.user || 'SSH config'", after: "'borrowed-user'" },
@@ -41,6 +43,6 @@ export default defineConfig({ root, cacheDir: resolve(evidence, 'cache'),
       appendFileSync(resolve(evidence, 'loaded-source.jsonl'), JSON.stringify({ path, originalSHA256: sha(original), consumedSHA256: sha(code), mutant, applied }) + '\n')
       return code === input ? undefined : { code, map: null }
     } }],
-  test: { include: ['apps/desktop/test/settings-connections.test.tsx', 'apps/desktop/test/host-settings-navigation.test.tsx', 'apps/desktop/test/remote-management.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')],
+  test: { include: ['apps/desktop/test/settings-connections.test.tsx', 'apps/desktop/test/host-settings-navigation.test.tsx', 'apps/desktop/test/remote-management.test.tsx', 'apps/desktop/test/remote-application-access.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')],
     maxWorkers: 1, passWithNoTests: false, testTimeout: 15_000 }
 })
