@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { readSessionSupervisionEvidence, verifySupervisionProduct } from './session-supervision-evidence.mjs'
 
 const root = path.resolve(import.meta.dirname, '../../..'), args = process.argv.slice(2), captureOnly = args.includes('--capture')
-const at = args.indexOf('--owners'), ownerFile = at < 0 ? null : path.resolve(root, args[at + 1])
+const at = args.indexOf('--owners'), ownerFile = path.resolve(root, at < 0 ? '.tmp/session-continuity-supervision/owners.json' : args[at + 1])
 const output = path.resolve(args.find((one, index) => !one.startsWith('--') && (at < 0 || index !== at + 1)) ?? path.join(root, '.tmp/session-continuity-supervision/product'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const producers = [new URL(import.meta.url).pathname, path.join(import.meta.dirname, 'session-supervision-evidence.mjs'),
@@ -20,7 +20,6 @@ await mkdir(output, { recursive: true })
 try {
   let files
   if (!captureOnly) {
-    assert.ok(ownerFile, 'Joined qualification requires the original task receipt locators via --owners')
     files = JSON.parse(await readFile(ownerFile, 'utf8'))
     receipt.owners = await readSessionSupervisionEvidence(root, files)
   }
