@@ -52,7 +52,8 @@ export class ConversationReaderState {
   }
   get(id: string, ref: ConversationRef, scope: ConversationFrontier['scope']): ReadingView {
     const view = this.views.get(id)
-    if (!view || view.hostId !== ref.hostId || view.agentSessionId !== ref.agentSessionId || !same(view.scope, scope)) return fail('The original temporary reading window expired or changed scope. Retain its displayed originals and exact anchor.')
+    if (!view) return fail('The original temporary reading window expired. Retain its displayed originals and exact source references for a new read.', 'AGENT_CONVERSATION_VIEW_EXPIRED')
+    if (view.hostId !== ref.hostId || view.agentSessionId !== ref.agentSessionId || !same(view.scope, scope)) return fail('The original temporary reading window changed scope. Retain its displayed originals and exact anchor.')
     this.views.delete(id); this.views.set(id, view); return view
   }
   observe(token: string, ref: ConversationRef, scope: ConversationFrontier['scope']): { scope: ConversationFrontier['scope']; dispose(): void } {
