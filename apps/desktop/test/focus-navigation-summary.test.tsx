@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
 vi.mock('../src/renderer/src/components/PmoTeamsTopicEntry', () => ({ PmoTeamsTopicEntry: () => createElement('button', null, 'PMO') }))
 import { SurfaceSwitch } from '../src/renderer/src/components/TopRowChrome'
 const baseline = useAppStore.getState()
@@ -29,9 +30,29 @@ it('does not redraw navigation for bytes from a Session when its relevant facts 
   expect(commits.mock.calls.length).toBe(before)
 })
 it('keeps typed requests visible before their display status catches up and hides zero badges', async () => {
-  await act(async () => useAppStore.setState(state => ({ sessions: [{ ...state.sessions[2]!, pendingInteraction: { kind: 'question', id: 'pending' } as never }] })))
+  await act(async () => useAppStore.setState(state => ({ sessions: [{ ...state.sessions[2]!, pendingInteraction: {
+    kind: 'question', id: 'pending', agentSessionId: state.sessions[2]!.id,
+    questions: [{ id: 'next', prompt: 'Choose the next action', options: [{ id: 'continue', label: 'Continue' }] }],
+    evidence: { source: 'native-hook', observedAt: Date.now() }
+  } }] })))
   await act(async () => root.render(createElement(SurfaceSwitch)))
   expect(container.querySelector('[data-focus-count="working"]')).toBeNull(); expect(container.querySelector('[data-focus-count="attention"]')!.textContent).toBe('1')
   await act(async () => useAppStore.setState({ sessions: [] }))
   expect(container.querySelectorAll('[data-focus-count]')).toHaveLength(0); expect(container.querySelector('.surface-navigation__focus')).toBeTruthy()
+})
+it('rechecks original activity expiry when the original timeline invalidation arrives', async () => {
+  let now = Date.now()
+  vi.spyOn(Date, 'now').mockImplementation(() => now)
+  const session = { ...useAppStore.getState().sessions[0]!, status: { state: 'working' as const, source: 'native-hook' as const, observedAt: now } }
+  await act(async () => useAppStore.setState({ sessions: [session], timelines: {} }))
+  await act(async () => root.render(createElement(SurfaceSwitch)))
+  const focus = container.querySelector<HTMLButtonElement>('.surface-navigation__focus')!
+  expect(focus.querySelector('[data-focus-count="working"]')?.textContent).toBe('1')
+  const remaining = msUntilSemanticStatusStale(session.status, now)
+  expect(remaining).toBeGreaterThan(0)
+  now += remaining
+  await act(async () => useAppStore.setState({ timelines: { [session.id]: { agentSessionId: session.id, revision: 1, items: [] } } }))
+  expect(container.querySelector('.surface-navigation__focus')).toBe(focus)
+  expect(focus.querySelector('[data-focus-count="working"]')).toBeNull()
+  expect(useAppStore.getState().sessions[0]!.control).toBe(session.control)
 })
