@@ -4557,7 +4557,7 @@ export class AgentMuxClient {
       const reservation = await this.store.loadResumeCorrelation(input.agentSessionId, lifecycleId)
       const prior = canonical.continuityOperations?.[input.operationId] ?? reservation?.preparedSession?.continuityOperations?.[input.operationId]
       if (prior) {
-        if (prior.requestDigest !== requestDigest || !isDeepStrictEqual(prior.nativeTarget, canonical.nativeHandle)) throw new AgentMuxError(
+        if (prior.requestDigest !== requestDigest || !matchesProviderNativeSessionTarget(prior.nativeTarget, canonical.nativeHandle)) throw new AgentMuxError(
           'This original resume has another frozen request or native target. Its original Run and input are kept.', 'AGENT_PROMPT_OPERATION_CONFLICT')
         if (prior.errorCode) throw new AgentMuxError(prior.error ?? 'The original resume failed.', prior.errorCode)
         if (prior.newRun && sameRun(prior.newRun, canonical.run) && prior.kind === 'resumed') {
