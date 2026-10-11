@@ -19,7 +19,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 
 /** 用户此刻能做的那件事。恢复动作是否可用，取决于原因，不取决于"失败了没有"。 */
 export type ContinuityRemedy =
-  /** 换个时间点也不会变——只能新开一个 Agent。 */
+  /** 当前原生恢复能力缺席；用户仍可明确选择接手或分析。 */
   | { kind: 'start-new' }
   /** 东西还在，只是被别的操作**此刻**占着——等它结束。 */
   | { kind: 'wait' }
@@ -113,10 +113,10 @@ export function classifyContinuityFailure(
       }
     case 'native-handle-unavailable':
       return {
-        title: 'No resume token for this Agent',
-        reason: 'Core does not currently have a confirmed native identity for this Agent Session, so the Provider was not invoked for this restore. The original Session and saved work remain. Other Agents are unaffected.',
-        remedy: { kind: 'start-new' },
-        actionLabel: 'Start a new Agent'
+        title: 'Recovery identity is unconfirmed',
+        reason: 'Recovery identity is not confirmed. The original Session, output and draft are kept.',
+        remedy: { kind: 'refresh' },
+        actionLabel: 'Re-read original'
       }
     case 'provider-unavailable':
       return {

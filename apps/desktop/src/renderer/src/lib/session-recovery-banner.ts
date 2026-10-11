@@ -1,4 +1,18 @@
 import type { AgentDisplayState } from '@agentmux/core'
+import type { SessionSnapshot } from '../../../shared/contracts'
+
+/** A later restore refusal cannot replace the exact Run's confirmed exit facts. */
+export function sessionExitPresentation(session: Pick<SessionSnapshot, 'kind' | 'processState' | 'status'>): { title: string; detail: string } | null {
+  if (session.processState !== 'exited') return null
+  const reason = session.status.exitReason
+  const detail = reason === 'user-stopped' ? 'You stopped this session.'
+    : reason === 'crashed' ? 'The process exited on its own.'
+      : 'The process is no longer running; the reason could not be determined.'
+  return {
+    title: `${session.kind === 'agent' ? 'Agent' : 'Terminal'} process exited`,
+    detail: detail + (session.status.exitCode === undefined ? '' : ` Exit code ${session.status.exitCode}.`)
+  }
+}
 
 /**
  * 恢复横幅代表的是哪个状态。
