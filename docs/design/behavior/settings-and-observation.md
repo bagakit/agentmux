@@ -205,9 +205,9 @@ Provider / Executor 的设置采用上述层级，保留本产品的准确关系
 
 ### 会话连续性设置
 
-Preferences 中的独立 Session continuity 模块编辑全局连续性偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、权威 idle 窗口、确证退出后原生 resume、同一操作的复查次数与间隔，以及提醒和恢复后续行分别可编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
+Preferences 中的 Execution 模块编辑全局恢复偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、自动恢复活动时间窗、确证退出后原生 resume、同一操作的复查次数与间隔沿同一配置 owner 编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
 
-提醒支持关闭、完整默认内容、默认内容追加自定义三种模式；追加不能替换默认提醒。续行有独立开关和完整 prompt。页面显示当前草稿的完整有效正文、内置默认／自定义保存来源、作用范围与实际可能发生的投递：提醒与续行随原 Provider 的 native 恢复／输入 plan 执行，只用于权威确认中断 working 的 Session；健康 reattach 与 idle 恢复不自动续行；选中内容中非空的提醒作为 platform note，与非空续行 prompt 合成一次新的 Native input；任一部分独自包含非空内容时仍为一次输入，两部分均关闭或均无内容时不发送。两个部分可独立查询，但共享同一原 input key 与真实运输／投递回执；原生 launch argv 回执只确认 Runtime 承载了参数，Provider 是否消费需要独立证据。该输入可能以普通 User 角色开启一个新 turn，不能承诺所有 Provider 都接收原生 system 角色，也不把投递回执冒充模型完成任务。旧输入结果未知时不重放。
+Execution 提供“Provider 不支持中断识别时，使用退出前 active 状态”的独立开关，默认关闭。页面明确 Provider 已支持但本次 unknown 不使用该兜底，并展示准确中断的原生恢复成功后只发送一次固定 `<amux:continue />`；正常结束回合、健康接回和 unknown 不主动发送。该标记可能开启一个普通 User 回合，投递不代表模型已经完成任务。技术恢复信息留在操作回执与服务窗，不提供新的恢复提醒或自定义续行正文编辑；历史已冻结正文和未知输入受据保留。自动原生恢复的活动时间窗覆盖退出前活动与已确认闲置，不能只将旧 working 作为不限时恢复资格。
 
 保存只影响下一次准入的新恢复意图，不启动 Agent、不发消息、不修改原草稿或在途已冻结政策和正文。GUI 与 `settings inspect continuity`／已声明 `continuity.*` scalar 的 `settings set` 复用唯一 ConfigOwner，保留首次多字段并发 authored 合并、保存期间后续输入、原字段期望值与冲突；有效默认不回填未编辑字段。具体键和查询入口见[设置目录](../../settings-catalog.md)，不增加任意路径 setter 或第二配置 owner。
 
