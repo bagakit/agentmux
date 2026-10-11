@@ -89,9 +89,14 @@ export async function moteConnectionJourney() {
       found = [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label)
       expect(found, label).toBeDefined(); expect(found!.disabled, label).toBe(false)
     })
+    const folded: HTMLDetailsElement[] = []
+    for (let parent = found!.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement && !parent.open) folded.push(parent)
+    for (const details of folded.reverse()) await moteClick(details.querySelector('summary')!)
     await moteClick(found!)
   }
   async function choose(label: string, accessibleName = 'Mote chat bot') {
+    const options = document.querySelector<HTMLDetailsElement>('.mote-identity-options')
+    if (accessibleName === 'Mote chat bot' && options && !options.open) await moteClick(options.querySelector('summary')!)
     const disclosure = document.querySelector<HTMLDetailsElement>('.mote-bot-existing')
     if (accessibleName === 'Mote chat bot' && disclosure && !disclosure.open) await moteClick(disclosure.querySelector('summary')!)
     await moteClick(document.querySelector<HTMLButtonElement>('[aria-label="' + accessibleName + '"]')!)

@@ -89,7 +89,7 @@ async function click(selector: string) {
   await act(async () => button!.click())
 }
 async function savedCreation() {
-  await dom.render(<MountedSettings />); await click('[data-enrollment-create]')
+  await dom.render(<MountedSettings />); await click('[data-enrollment-new]'); await click('[data-enrollment-create]')
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-action="confirm-account"]')).not.toBeNull() }, { timeout: 10_000 })
   await click('[data-enrollment-action="confirm-account"]'); await click('[data-enrollment-action="create"]')
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-continue]')).not.toBeNull() }, { timeout: 6000 })
@@ -108,7 +108,7 @@ async function savedCreation() {
 
 it('keeps the original QR through repeated waiting and scanning, then automatically reaches account review', async () => {
   pendingPolls = [1, 1, 2]
-  await dom.render(<MountedSettings />); await click('[data-enrollment-create]')
+  await dom.render(<MountedSettings />); await click('[data-enrollment-new]'); await click('[data-enrollment-create]')
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull() })
   const qr = dom.container.querySelector('[data-enrollment-code] svg')!, original = calls.find(call => call.method === 'connection.enrollment.begin')!.result as ConnectionEnrollmentView
   const progress = () => calls.filter(call => call.method === 'connection.enrollment.advance').map(call => call.result as ConnectionEnrollmentView)
