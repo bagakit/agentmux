@@ -19,7 +19,7 @@ async function render(content:ReactNode){const host=document.createElement('div'
 afterEach(async()=>{for(const {host,root} of mounts.splice(0)){await act(async()=>root.unmount());host.remove()}window.getSelection()?.removeAllRanges()})
 const source={providerId:'codex' as const,nativeSessionId:'native'}
 const path=fixturePath("native/device/clipboard.png")
-const request:AgentSessionHistoryResourceRequest={source,turnId:'turn',recordId:'record',partIndex:1,expectedReference:path}
+const request:AgentSessionHistoryResourceRequest={source,turnId:'turn',recordId:'record',partIndex:1,expectedReference:path,representation:'image'}
 const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg=='
 function response(input:AgentSessionHistoryResourceRequest):AgentSessionHistoryResourceReadResult{return{agentSessionId:'session',source:input.source,...(input.turnId?{turnId:input.turnId}:{}),recordId:input.recordId,partIndex:input.partIndex,reference:input.expectedReference,result:{status:'read',mimeType:'image/png',dataBase64:png,byteLength:70}}}
 function page(reference=path):AgentSessionHistoryPage{return{agentSessionId:'session',sourceHostId:'local',source,nextCursor:null,items:[{id:'record',turnId:'turn',kind:'user-message',contentParts:[{kind:'text',text:'Original **selected** message'},{kind:'resource',resourceType:'image',reference,label:'Screenshot'},{kind:'resource',resourceType:'file',reference:fixturePath("document/report.txt")}]}]}}

@@ -105,7 +105,7 @@ it('the shared selected-record image face reads the exact native resource withou
     <ConversationMessage compact content={[{ kind: 'text', text: 'Original surrounding context' },
       { kind: 'resource', resourceType: 'image', reference }]} nativeResourceRecord={record} readHistoryResource={read} />
   </ClientUiProvider>))
-  expect(read).toHaveBeenCalledExactlyOnceWith({ ...record, partIndex: 1, expectedReference: reference })
+  expect(read).toHaveBeenCalledExactlyOnceWith({ ...record, partIndex: 1, expectedReference: reference, representation: 'image' })
   expect(container.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${png}`)
   expect(container.textContent).toContain('Original surrounding context')
 })
