@@ -102,7 +102,7 @@ it('preserves title commit/cancel and moves the exact original through the same 
   await act(async () => dom.container.querySelector<HTMLFormElement>('[aria-label="Move Note page"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   await vi.waitFor(async () => expect((await owner.read()).pages.original!.notebookId).toBe('research'))
   await choose('Page activity')
-  expect(dom.container.querySelector('[aria-label="Page activity"]')?.textContent).toContain('Moved')
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Page activity"]')?.textContent).toContain('Moved'))
   expect(title.value).toBe('A durable finding')
   await dom.click('[aria-label="Close page activity"]')
   await choose('Archive page')

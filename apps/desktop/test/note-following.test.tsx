@@ -43,7 +43,7 @@ it('uses the original Notebook owner to follow and unfollow, preserves other ide
   const followed = await owner.read()
   expect(followed.pages.original!.followers?.map(f => f.actor)).toEqual([agent, self])
   expect(dom.container.querySelector('[aria-label="Note followers"]')?.textContent).toContain('You')
-  expect(dom.container.querySelector('[aria-label="Note followers"]')?.textContent).not.toContain('user ·')
+  expect(dom.container.querySelector('[aria-label="Note followers"]')?.textContent).toContain(`user · ${self.id}`)
   expect(vi.mocked(api.notebooks.apply).mock.calls.at(-1)?.[0].change).toEqual({ kind: 'follow', noteId: 'original' })
   await dom.render(null)
   const reopened = new AgentMuxNotebookStore(owner.path)
