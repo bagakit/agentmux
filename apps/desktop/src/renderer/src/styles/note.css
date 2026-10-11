@@ -96,7 +96,7 @@
 .notebook-follow-action[aria-pressed="true"] svg { fill: currentColor; fill-opacity: .12; }
 /* Saved editors and persistent followers share one secondary identity row. */
 .note-participants { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-3); min-width: 0; color: var(--text-3); }
-.note-participants__trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; min-width: 0; padding: 2px 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); cursor: pointer; }
+.note-participants__trigger { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; min-width: 0; padding: 2px 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); cursor: pointer; }
 .note-participants__trigger:hover, .note-participants__trigger[aria-expanded="true"] { color: var(--text); }
 .note-participants__trigger:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
 .note-participants__group { flex: none; }
