@@ -95,7 +95,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
   return { page, projection, snapshot: view.snapshot, inspect: view.inspect, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
-    readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') }, capturedError: view.sourceError ? null : error,
+    readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') },
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,
     previousSource, coverageLoading: view.loading && intent.current === 'coverage', loading: view.loading, error,
     held: view.held, loadingEarlier: view.loading && intent.current === 'earlier',
