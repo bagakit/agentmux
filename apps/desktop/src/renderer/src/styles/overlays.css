@@ -5,6 +5,10 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
+/* Native bitmap chrome cannot fade through a sibling Browser. With native content
+ * visible, stabilize mounted floats before their final overlap can be measured. */
+[data-native-overlay-motion='static'] { animation: none !important; }
+
 /* One material for task dialogs; each caller owns its layout and behavior. */
 .dialog-scrim { position: fixed; z-index: var(--layer-dialog); inset: 0; background: var(--scrim-2); backdrop-filter: blur(4px); pointer-events: auto; }
 .dialog-surface {
