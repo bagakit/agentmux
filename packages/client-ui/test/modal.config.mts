@@ -23,6 +23,11 @@ const dependencyMutations: Record<string, [string, string, string]> = {
   'stale-branch-document': ['react-dismissable-layer', 'getDocumentLayers', 'branch-dependency']
 }
 if (mutation) assert.ok(mutation in mutations || mutation in dependencyMutations, 'Unknown actual Modal mutation')
+function changedSource(source: string, changed: string, file: string): string {
+  if (process.env.MODAL_MUTATION_HIT) appendFileSync(process.env.MODAL_MUTATION_HIT, JSON.stringify({ mutation, file,
+    sourceSHA256: createHash('sha256').update(source).digest('hex'), changedSHA256: createHash('sha256').update(changed).digest('hex') }) + '\n')
+  return changed
+}
 
 export default defineConfig({
   root,
@@ -36,18 +41,15 @@ export default defineConfig({
       if (snapshot === 'branch-dependency') {
         const needle = '}, [node, contexts, ownerDocument]);'
         assert.equal(source.split(needle).length, 2, 'Actual locked Branch document dependency must be unique')
-        return source.replace(needle, '}, [node, contexts]);')
+        return changedSource(source, source.replace(needle, '}, [node, contexts]);'), path)
       }
       const extension = path.endsWith('.mjs') ? 'mjs' : 'js'
-      return readFileSync(`${root}/.local/ui-layering-ssot/${snapshot}/dist/index.${extension}`, 'utf8')
+      return changedSource(source, readFileSync(`${root}/.local/ui-layering-ssot/${snapshot}/dist/index.${extension}`, 'utf8'), path)
     }
     if (!path.endsWith('/packages/client-ui/src/components/Modal.tsx')) return
     const [needle, replacement] = mutations[mutation]!
     assert.equal(source.split(needle).length, 2, 'Actual Modal mutation anchor must be unique')
-    const changed = source.replace(needle, replacement)
-    if (process.env.MODAL_MUTATION_HIT) appendFileSync(process.env.MODAL_MUTATION_HIT, JSON.stringify({ mutation, file: path,
-      sourceSHA256: createHash('sha256').update(source).digest('hex'), changedSHA256: createHash('sha256').update(changed).digest('hex') }) + '\n')
-    return changed
+    return changedSource(source, source.replace(needle, replacement), path)
   } }],
   test: {
     include: ['packages/client-ui/test/modal.test.tsx'], environment: 'happy-dom', globals: false,
