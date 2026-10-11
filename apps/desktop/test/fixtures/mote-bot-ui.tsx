@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { expect, vi } from 'vitest'
 import { createClientUiRoot } from '../helpers/client-ui-render'
 import { moteConnectionOwner } from './mote-connection-owner'
+import { moteEnrollmentWeb } from './mote-enrollment-web'
 import { registerMoteConnectionIpc } from '../../src/main/mote-connection-ipc'
 import { registerMotePreferencesIpc } from '../../src/main/mote-preferences-ipc'
 import { registerConnectorIpc } from '../../src/main/connector-ipc'
@@ -24,13 +25,8 @@ export async function moteBotUi(options: Parameters<typeof moteConnectionOwner>[
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const root = await mkdtemp(join(tmpdir(), 'amx-mote-ui-')), original = useAppStore.getState()
   const restore = installNativePopover(), calls: Array<{ method?: string; url?: string; data?: any }> = []
-  let clock = Date.now(), beginCount = 0, pollCount = 0, unknownPoll = false, unknownPatch = false
-  const registration = vi.fn(async (_url: unknown, init?: RequestInit) => {
-    const fields = new URLSearchParams(String(init?.body))
-    if (fields.get('action') === 'begin') { beginCount++; return Response.json({ device_code: 'private-device-' + beginCount, user_code: 'PUBLIC', verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=PUBLIC', interval: 1, expires_in: 600 }) }
-    pollCount++
-    return Response.json(unknownPoll ? { error: 'unknown_result' } : { client_id: 'cli_mote_' + fields.get('device_code')!.split('-').at(-1), client_secret: 'private-credential', user_info: { tenant_brand: 'feishu' } })
-  })
+  let unknownPatch = false
+  const native = moteEnrollmentWeb(), registration = vi.fn(native.fetch)
   vi.stubGlobal('fetch', registration)
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(async (r: any) => {
     if (r.url?.includes('/auth/v3/')) return { code: 0, tenant_access_token: 'controlled-tenant-access', app_access_token: 'controlled-app-access', expire: 3600 }
@@ -42,7 +38,14 @@ export async function moteBotUi(options: Parameters<typeof moteConnectionOwner>[
     if (r.url?.includes('/app_versions/')) return { code: 0, data: { app_version: { app_id: app, version_id: 'online-exact', description: 'Original online description', status: 1 } } }
     return { code: 0, data: { app: { app_id: app, online_version_id: 'online-exact', description: 'Metadata only', i18n: [{ i18n_key: 'zh_cn', name: 'Before' }, { i18n_key: 'en_us', name: 'Keep English' }] } } }
   })
-  const owner = await moteConnectionOwner(root, options)
+  let owner: Awaited<ReturnType<typeof moteConnectionOwner>>
+  try { owner = await moteConnectionOwner(root, options) }
+  catch (error) {
+    const cleanupErrors: unknown[] = []
+    for (const close of [restore, () => rm(root, { recursive: true, force: true }), () => vi.restoreAllMocks(), () => vi.unstubAllGlobals(), () => vi.unstubAllEnvs()]) { try { await close() } catch (failure) { cleanupErrors.push(failure) } }
+    if (cleanupErrors.length) throw new AggregateError([error, ...cleanupErrors], 'Mote fixture initialization and cleanup failed')
+    throw error
+  }
   const config = { ...moteConfig, workspaces: [owner.workspace], startup: { skipAgentAvailabilityCheckWait: true } }
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
@@ -86,12 +89,17 @@ export async function moteBotUi(options: Parameters<typeof moteConnectionOwner>[
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   return { ...owner, container, scopes, calls, registration, parentCalls, connectionCalls, saves, forward, handlers, sender, navigation, open, click, render, settle,
     async renderMotePanel(index = 0) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><MoteDetailsPanel scope={scopes[index]!} active onOpenPath={async () => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() },
-    get beginCount() { return beginCount }, get pollCount() { return pollCount },
-    afterPollInterval() { clock = Math.max(clock, Date.now()) + 5000; vi.spyOn(Date, 'now').mockImplementation(() => clock) },
-    setUnknownPoll() { unknownPoll = true }, setUnknownPatch() { unknownPatch = true },
+    get beginCount() { return options.generic ? owner.counts.begin : native.begins }, get authenticationCount() { return options.generic ? owner.counts.authentication : native.authentications },
+    get creationCount() { return options.generic ? owner.counts.create : native.creates },
+    setUnknownPatch() { unknownPatch = true },
     async preferenceCli() { const r = await runCompiledObjectCli(['--endpoint', 'unix:' + owner.server.path, 'space', 'mote', 'preferences', 'read', '--input', '-'], objectCliEnvironment(root), JSON.stringify({kind: 'connection', target: owner.target()})); expect(r.code, r.stdout + r.stderr).toBe(0); return JSON.parse(r.stdout).result },
     async cli(action: string, input: unknown) { const r = await runCompiledObjectCli(['--endpoint', 'unix:' + owner.server.path, 'space', 'mote', 'connection', action, '--input', '-'], objectCliEnvironment(root), JSON.stringify(input)); expect(r.code, r.stdout + r.stderr).toBe(0); return JSON.parse(r.stdout).result },
     async remount(index = 0) { if (mounted) await act(async () => view.unmount()); view = createClientUiRoot(container); await useAppStore.persist.rehydrate(); await open(index) },
-    async close() { await act(async () => view.unmount()); container.remove(); await owner.close(); await settle(); restore(); window.localStorage.clear(); useAppStore.setState(original, true); await rm(root, { recursive: true, force: true }); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() }
+    async close() {
+      const errors: unknown[] = []
+      const actions = [async () => { if (mounted) await act(async () => view.unmount()) }, () => container.remove(), () => owner.close(), settle, restore, () => window.localStorage.clear(), () => useAppStore.setState(original, true), () => rm(root, { recursive: true, force: true }), () => vi.restoreAllMocks(), () => vi.unstubAllGlobals(), () => vi.unstubAllEnvs()]
+      for (const close of actions) { try { await close() } catch (error) { errors.push(error) } }
+      if (errors.length) throw new AggregateError(errors, 'Mote Renderer consumer cleanup failed')
+    }
   }
 }

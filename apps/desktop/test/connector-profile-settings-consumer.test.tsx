@@ -2,6 +2,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { moteBotUi } from './fixtures/mote-bot-ui'
+import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>
 beforeEach(async () => { f = await moteBotUi() })
@@ -9,8 +10,7 @@ afterEach(async () => { await f?.close() })
 async function text(value: string) { await vi.waitFor(async () => { await f.settle(); expect(document.body.textContent).toContain(value) }, { timeout: 4000 }) }
 async function seed(id = 'settings-original') {
   const pending = await f.client.call('space.mote.connection.create', await f.input(id))
-  f.afterPollInterval()
-  const saved = await f.client.call('space.mote.connection.advance', { operationId: pending.operationId })
+  const saved = await confirmAndCreateMote(f, pending.operationId)
   expect(saved.profile?.patch.state).toBe('confirmed')
   return saved
 }
@@ -42,21 +42,21 @@ it('recovers the exact original profile update while preserving written, pending
   await text('The original update is shown. Unconfirmed platform effects are not sent again.')
   expect(document.querySelector('[data-profile-operation]')?.getAttribute('data-profile-operation')).toBe(original.profileOperationId)
   expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(1)
-  expect(f.registration.mock.calls).toHaveLength(2)
+  expect(f.registration.mock.calls).toHaveLength(8)
 })
 
 it('keeps unknown effects inspectable and does not upload, patch or register again from Settings recovery', async () => {
   f.setUnknownPatch()
   const input = await f.input('settings-unknown')
-  await f.client.call('space.mote.connection.create', input); f.afterPollInterval()
-  const saved = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  await f.client.call('space.mote.connection.create', input)
+  const saved = await confirmAndCreateMote(f, input.operationId)
   expect(saved.profile?.patch.state).toBe('unknown')
   await details(saved.connection!.connectionId); await text('Saved public name · Result not confirmed')
   await f.click('Saved public name · Result not confirmed'); await text('The profile write is not confirmed')
   await f.click('Check update progress'); await text('The original update is shown')
   expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(1)
   expect(f.calls.filter(r => r.url?.endsWith('/app_avatar/upload'))).toHaveLength(1)
-  expect(f.registration.mock.calls).toHaveLength(2)
+  expect(f.registration.mock.calls).toHaveLength(8)
 })
 
 it('rejects forged IPC methods and untrusted senders without creating a setup', async () => {

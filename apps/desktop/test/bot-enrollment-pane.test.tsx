@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import type { AgentMuxRpcParams } from '@agentmux/core'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import iconUrl from '../resources/icon-512.png'
 import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
@@ -20,8 +22,13 @@ async function open(options?: Parameters<typeof enrollmentFixture>[0]) {
   vi.spyOn(api.connections, 'storeCredential').mockImplementation(input => fixture.services.secrets.store(input))
   vi.spyOn(api.connections, 'inspectCredential').mockImplementation(operationId => fixture.services.secrets.inspect(operationId))
 }
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux')) })
-afterEach(async () => { await dom.render(null); await fixture?.close(); vi.unstubAllEnvs() })
+beforeEach(async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
+  const image = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => { expect(url).toBe(iconUrl); return new Response(new Uint8Array(image)) }))
+})
+afterEach(async () => { await dom.render(null); await fixture?.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 async function mount() {
   await dom.render(<ExternalConnectionsSettings active />)
   await ready('[data-enrollment-create]')
@@ -41,7 +48,7 @@ async function click(selector: string) {
 }
 async function inspectOriginal() {
   await act(async () => {
-    const button = dom.container.querySelector<HTMLButtonElement>('[data-enrollment-inspect]')!
+    const button = dom.container.querySelector<HTMLButtonElement>('[data-enrollment-inspect], [data-enrollment-recover]')!
     expect(button).toBeTruthy()
     const details = button.closest<HTMLDetailsElement>('details:not([open])')
     if (details) details.querySelector<HTMLElement>('summary')!.click()
@@ -53,7 +60,7 @@ async function select(operationId: string) {
   if (dom.container.querySelector('[data-enrollment-operation]')) await click('.connector-enrollment > .connector-back')
   const history = dom.container.querySelector<HTMLDetailsElement>('.connector-enrollment__history')!
   if (!history.open) await dom.click('.connector-enrollment__history > summary')
-  await click(`[data-enrollment-select="${operationId}"]`)
+  await click(`[data-enrollment-history="${operationId}"]`)
 }
 async function fill(label: string, value: string) {
   const field = dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!
@@ -61,20 +68,32 @@ async function fill(label: string, value: string) {
   return field
 }
 
+async function finishCreation() {
+  if (dom.container.querySelector('[data-enrollment-action="continue-authentication"]'))
+    await click('[data-enrollment-action="continue-authentication"]')
+  await ready('[data-enrollment-action="confirm-account"]')
+  await click('[data-enrollment-action="confirm-account"]')
+  await ready('[data-enrollment-action="create"]')
+  expect(fixture.create).not.toHaveBeenCalled()
+  await click('[data-enrollment-action="create"]')
+  await ready('[data-enrollment-saved]')
+}
+
 it('reads earlier durable setups by their real cursor without selecting or recreating the first pending entry', async () => {
   await open()
   for (let index = 0; index < 26; index++) await fixture.sdk.call('connection.enrollment.begin', { ...fixture.input, operationId: `setup-${index}`, connectionId: `connection-${index}`, label: `Bot ${index}` })
   await mount()
   expect(dom.container.querySelector('[data-enrollment-operation]')).toBeNull()
-  expect(dom.container.querySelector('[data-enrollment-select="setup-0"]')).toBeNull()
+  expect(dom.container.querySelector('[data-enrollment-history="setup-0"]')).toBeNull()
   expect(fixture.begin).toHaveBeenCalledTimes(26)
-  await click('[data-enrollment-more]')
-  await ready('[data-enrollment-select="setup-0"]')
+  await dom.click('.connector-enrollment__history > summary')
+  await click('.connector-enrollment__history .small-button')
+  await ready('[data-enrollment-history="setup-0"]')
   await select('setup-0')
   expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe('setup-0')
   expect(dom.container.querySelector('.connector-enrollment__identity')?.textContent).toContain('Bot 0')
   await inspectOriginal()
-  expect(fixture.begin).toHaveBeenCalledTimes(26); expect(fixture.poll).not.toHaveBeenCalled()
+  expect(fixture.begin).toHaveBeenCalledTimes(26); expect(fixture.authentication).not.toHaveBeenCalled()
   const result = await fixture.cli(['enrollment', 'inspect', '--operation-id', 'setup-0'])
   expect(result.code).toBe(0)
   expect(JSON.parse(result.stdout).result.operation).toMatchObject({ operationId: 'setup-0', connectionId: 'connection-0' })
@@ -90,26 +109,25 @@ it('explicitly recovers an unknown encrypted handoff locally before a separate u
     return result
   })
   await mount(); await click('[data-enrollment-create]')
-  await vi.waitFor(async () => { await act(async () => {}); expect((await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]?.authorization).toBe('unknown'); expect(dom.container.querySelector('[data-enrollment-advance]')).not.toBeNull() })
+  await vi.waitFor(async () => { await act(async () => {}); expect((await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]?.authentication?.stage).toBe('unknown'); expect(dom.container.querySelector('[data-enrollment-advance]')).not.toBeNull() })
   const original = (await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]!
   expect(original.diagnostic).toEqual({ stage: 'secure-storage', code: 'challenge-unconfirmed' })
   expect(dom.container.querySelector('[data-enrollment-diagnosis]')?.textContent).toBe('Secure confirmation progress could not be checked or saved here.')
   expect(dom.container.querySelectorAll('[data-bot-enrollment] .primary-button')).toHaveLength(1)
   await inspectOriginal()
-  expect(fixture.poll).not.toHaveBeenCalled()
+  expect(fixture.authentication).not.toHaveBeenCalled()
   await click('[data-enrollment-advance]')
   await ready('[data-enrollment-code] svg')
-  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).not.toHaveBeenCalled()
-  await click('[data-enrollment-advance]')
-  await ready('[data-enrollment-saved]')
-  const final = (await fixture.sdk.call('connection.enrollment.inspect', { operationId: original.operationId })).operation!
-  expect(final).toMatchObject({ operationId: original.operationId, connectionId: original.connectionId, configuration: 'configured' })
-  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).toHaveBeenCalledTimes(1)
+  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).not.toHaveBeenCalled()
+  await finishCreation()
+  const final = (await fixture.sdk.call('connection.enrollment.inspect', { operationId: original!.operationId })).operation!
+  expect(final).toMatchObject({ operationId: original!.operationId, connectionId: original.connectionId, configuration: 'configured' })
+  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).toHaveBeenCalledTimes(1)
 })
 
 it('a delayed original list cannot regress the same setup after its real configure receipt is confirmed', async () => {
-  await open(); const original = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
-  await mount(); await select(original.operationId)
+  await open(); const { operation: original } = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
+  await mount(); await select(original!.operationId)
   let release!: () => void, delayed = false
   const gate = new Promise<void>(resolve => { release = resolve })
   vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
@@ -121,34 +139,36 @@ it('a delayed original list cannot regress the same setup after its real configu
     await dom.render(<ExternalConnectionsSettings active={false} />)
     await dom.render(<ExternalConnectionsSettings active />)
     await vi.waitFor(() => expect(delayed).toBe(true))
-    await click('[data-enrollment-advance]'); await ready('[data-enrollment-saved]')
-    const saved = (await fixture.sdk.call('connection.enrollment.inspect', { operationId: original.operationId })).operation!
+    await inspectOriginal()
+    await ready('[data-enrollment-action="continue-authentication"]')
+    await finishCreation()
+    const saved = (await fixture.sdk.call('connection.enrollment.inspect', { operationId: original!.operationId })).operation!
     await act(async () => { release(); await gate })
     expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull()
     expect(dom.container.querySelector('[data-enrollment-code]')).toBeNull()
     expect(dom.container.querySelector('.connector-enrollment > .connector-diagnostics')?.textContent).toContain(String(saved.revision))
-    expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).toHaveBeenCalledTimes(1)
+    expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).toHaveBeenCalledTimes(1)
   } finally { release() }
 })
 
 it('an earlier lookup failure does not become current after selecting A, B and the same exact A again', async () => {
   await open()
-  const a = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
-  const b = await fixture.sdk.call('connection.enrollment.begin', { ...fixture.input, operationId: 'other-setup', connectionId: 'other-connection', label: 'Other bot' })
-  await mount(); await select(a.operationId)
-  let release!: () => void, read = false
+  const { operation: a } = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
+  const { operation: b } = await fixture.sdk.call('connection.enrollment.begin', { ...fixture.input, operationId: 'other-setup', connectionId: 'other-connection', label: 'Other bot' })
+  await mount(); await select(a!.operationId)
+  let release!: () => void, read = false, holdFirst = true
   const gate = new Promise<void>(resolve => { release = resolve })
   vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     const result = await originalCall(method, params)
-    if (method === 'connection.enrollment.inspect' && (params as { operationId: string }).operationId === a.operationId) { read = true; await gate; throw new Error('Only the earlier setup lookup failed') }
+    if (method === 'connection.enrollment.inspect' && (params as { operationId: string }).operationId === a!.operationId && holdFirst) { holdFirst = false; read = true; await gate; throw new Error('Only the earlier setup lookup failed') }
     return result
   })
   try {
-    await inspectOriginal(); await vi.waitFor(() => expect(read).toBe(true))
-    await select(b.operationId)
-    await select(a.operationId)
+    await select(a!.operationId); await vi.waitFor(() => expect(read).toBe(true))
+    await select(b!.operationId)
+    await select(a!.operationId)
     await act(async () => { release(); await gate })
-    expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(a.operationId)
+    expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(a!.operationId)
     expect(dom.container.querySelector('.connector-enrollment__identity')?.textContent).toContain('Original bot')
     expect(dom.container.textContent).not.toContain('Only the earlier setup lookup failed')
   } finally { release() }
@@ -157,7 +177,9 @@ it('an earlier lookup failure does not become current after selecting A, B and t
 it('a late original begin result preserves the manual draft, composing input node, focus and selection', async () => {
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
-  await open({ begin: async () => { await gate; return { kind: 'pending', verificationUrl: 'https://verify.example.invalid/confirm', expiresInMs: null, pollIntervalMs: 0, privateState: 'private-original' } } })
+  await open()
+  const begin = fixture.begin.getMockImplementation()!
+  fixture.begin.mockImplementation(async input => { await gate; return begin(input) })
   await mount(); await click('[data-enrollment-create]')
   await vi.waitFor(() => expect(fixture.begin).toHaveBeenCalledTimes(1))
   await click('.connector-enrollment > .connector-back'); await click('[data-enrollment-existing]')
@@ -166,7 +188,7 @@ it('a late original begin result preserves the manual draft, composing input nod
   await act(async () => { input.focus(); input.setSelectionRange(2, 5); input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '组字' })) })
   try {
     await act(async () => { release(); await gate })
-    await vi.waitFor(async () => expect((await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]?.authorization).toBe('pending'))
+    await vi.waitFor(async () => expect((await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]?.authentication?.stage).toBe('waiting'))
     expect(dom.container.querySelector('[aria-label="Connection app ID"]')).toBe(input)
     expect(document.activeElement).toBe(input); expect(input.value).toBe('原有机器人-草稿'); expect([input.selectionStart, input.selectionEnd]).toEqual([2, 5])
     expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Connection app secret"]')?.value).toBe('private-manual-draft')
@@ -211,67 +233,35 @@ it('a successful list refresh cannot clear an unconfirmed application save or re
 })
 
 it('unavailable secure creation keeps original setups and the existing-bot path without pretending a platform picker is ready', async () => {
-  await open(); const original = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
+  await open(); const { operation: original } = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
   vi.spyOn(fixture.encryption, 'isEncryptionAvailable').mockReturnValue(false)
   await dom.render(<ExternalConnectionsSettings active />)
   await ready('[data-enrollment-existing]')
-  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Scan setup is not available here') })
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('In-app bot creation is not available here') })
   expect(dom.container.querySelector('[data-enrollment-create]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Bot creation platform"]')).toBeNull()
-  await select(original.operationId)
+  await select(original!.operationId)
   await inspectOriginal()
-  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).not.toHaveBeenCalled()
+  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).not.toHaveBeenCalled()
   await click('.connector-enrollment > .connector-back'); await click('[data-enrollment-existing]')
   expect(dom.container.querySelector('[aria-label="Connection app ID"]')).not.toBeNull()
 })
 
-it.each(['denied', 'expired'] as const)('shows original %s without another QR, implicit cancellation or repeated creation', async kind => {
-  await open({ poll: async () => ({ kind }) })
-  await mount(); await click('[data-enrollment-create]'); await ready('[data-enrollment-code] svg')
-  await click('[data-enrollment-advance]')
-  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('.connector-diagnostics')?.textContent).toContain(kind) })
+it('keeps an expired original sign-in and offers explicit renewal without creating a bot', async () => {
+  await open({ advance: async input => ({ kind: 'authentication', stage: 'expired', challenge: null, account: null, privateState: input.privateState }) })
+  const { operation } = await fixture.sdk.call('connection.enrollment.begin', fixture.input)
+  await mount(); await select(operation!.operationId)
+  await click('[data-enrollment-action="continue-authentication"]')
+  await ready('[data-enrollment-action="renew-authentication"]')
   expect(dom.container.querySelector('[data-enrollment-code]')).toBeNull()
-  expect(dom.container.querySelector('[data-enrollment-create]')).toBeNull()
-  expect(dom.container.querySelector('[data-enrollment-advance]')).toBeNull()
-  expect(dom.container.querySelector('[data-bot-enrollment] h3')?.textContent).toBe(kind === 'denied' ? 'Platform did not approve this setup' : 'Confirmation expired')
-  expect(dom.container.querySelectorAll('[data-bot-enrollment] .primary-button')).toHaveLength(1)
-  expect(dom.container.querySelector('[data-enrollment-existing]')?.classList.contains('primary-button')).toBe(true)
-  await inspectOriginal()
-  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).toHaveBeenCalledTimes(1)
-})
-
-
-it('a known not-started setup explicitly resumes its exact original begin after secure storage is repaired', async () => {
-  await open(); await mount()
-  vi.spyOn(fixture.encryption, 'isEncryptionAvailable').mockReturnValue(false)
-  await click('[data-enrollment-create]')
-  await vi.waitFor(async () => { await act(async () => {}); expect((await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]?.authorization).toBe('not-started'); expect(dom.container.querySelector('[data-enrollment-advance]')?.hasAttribute('disabled')).toBe(false) })
-  const original = (await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]!
-  expect(fixture.begin).not.toHaveBeenCalled()
-  vi.mocked(fixture.encryption.isEncryptionAvailable).mockReturnValue(true)
-  await click('[data-enrollment-advance]'); await ready('[data-enrollment-code] svg')
-  const inputs = vi.mocked(api.connections.call).mock.calls.filter(call => call[0] === 'connection.enrollment.begin').map(call => call[1])
-  expect(inputs).toHaveLength(2); expect(inputs[1]).toEqual(inputs[0])
-  expect((await fixture.sdk.call('connection.enrollment.inspect', { operationId: original.operationId })).operation).toMatchObject({ operationId: original.operationId, connectionId: original.connectionId, authorization: 'pending' })
+  expect(dom.container.querySelector('[data-bot-enrollment] h3')?.textContent).toBe('This sign-in code expired')
   expect(fixture.begin).toHaveBeenCalledTimes(1)
-  await click('[data-enrollment-advance]'); await ready('[data-enrollment-saved]')
-  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).toHaveBeenCalledTimes(1)
+  expect(fixture.authentication).toHaveBeenCalledTimes(1)
+  expect(fixture.create).not.toHaveBeenCalled()
+  await inspectOriginal()
+  expect(fixture.begin).toHaveBeenCalledTimes(1)
+  expect(fixture.authentication).toHaveBeenCalledTimes(1)
 })
-
-
-it('opens only the original public confirmation URL and keeps its QR and recovery after a failed external handoff', async () => {
-  await open(); await mount(); await click('[data-enrollment-create]'); await ready('[data-enrollment-code] svg')
-  const original = (await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]!
-  const external = vi.spyOn(api.ui, 'openExternal').mockRejectedValue(new Error('Controlled confirmation handoff failed'))
-  await click('[data-enrollment-open]')
-  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Controlled confirmation handoff failed') })
-  expect(external).toHaveBeenCalledExactlyOnceWith(original.challenge!.verificationUrl)
-  expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull()
-  expect(dom.container.querySelector('[data-enrollment-advance]')?.hasAttribute('disabled')).toBe(false)
-  expect(dom.container.querySelector('[data-enrollment-inspect]')?.hasAttribute('disabled')).toBe(false)
-  expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).not.toHaveBeenCalled()
-})
-
 
 it('keeps a submitted original intent reachable after its real begin reply is lost and the user returns to all setups', async () => {
   await open(); await mount()
@@ -286,18 +276,18 @@ it('keeps a submitted original intent reachable after its real begin reply is lo
   try {
     await click('[data-enrollment-create]')
     await vi.waitFor(async () => { await act(async () => {}); expect(operationId).not.toBe(''); expect(dom.container.querySelector('[data-enrollment-inspect]')?.hasAttribute('disabled')).toBe(false) })
-    expect((await fixture.sdk.call('connection.enrollment.inspect', { operationId })).operation?.authorization).toBe('pending')
+    expect((await fixture.sdk.call('connection.enrollment.inspect', { operationId })).operation?.authentication?.stage).toBe('waiting')
     delayList = true
     await click('.connector-enrollment > .connector-back')
     expect(dom.container.querySelector('[data-enrollment-create]')).toBeNull()
     expect(dom.container.querySelector('[data-enrollment-resume]')).not.toBeNull()
     expect(dom.container.querySelector('[aria-label="New bot name"]')).toBeNull()
     expect(dom.container.querySelector('[aria-label="Bot creation platform"]')).toBeNull()
-    expect(dom.container.querySelector('.connector-enrollment__identity')?.textContent).toContain('Signed challenge bot')
+    expect(dom.container.querySelector('.connector-enrollment__resume')?.textContent).toContain('AgentMux bot')
     await select(operationId)
     expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(operationId)
-    await inspectOriginal(); await ready('[data-enrollment-code] svg')
-    expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).not.toHaveBeenCalled()
+    await ready('[data-enrollment-code] svg'); await inspectOriginal()
+    expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).not.toHaveBeenCalled()
     await act(async () => { release(); await gate })
     expect((await fixture.sdk.call('connection.enrollment.ls', {})).operations.map(item => item.operationId)).toEqual([operationId])
   } finally { release() }
