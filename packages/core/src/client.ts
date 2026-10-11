@@ -20,6 +20,7 @@ import {
   type AgentMuxAcpBinding
 } from './acp-adapter.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath, matchesProviderNativeSessionTarget } from './agent-native-locator.js'
+import { continuityExecutorEntries, readContinuityExecutor, unconfirmedContinuityExecutor, type AgentContinuityExecutor } from './agent-continuity-executor.js'
 import { captureAgentNativeSessionIdentity } from './agent-native-session-capture.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
@@ -5318,6 +5319,15 @@ export class AgentMuxClient {
       input = { ...input, operationId: current.continuity.operationId }
     }
     const prior = current?.continuityOperations?.[input.operationId]
+    const originalExecutorRoot = prior?.intentOperationId ?? input.operationId
+    if (current && !current.creation?.executorRevision && ['commandOverride', 'args', 'env'].some(key => input[key as 'commandOverride' | 'args' | 'env'] !== undefined)) {
+      const originalExecutor = readContinuityExecutor(current.continuityExecutors, originalExecutorRoot)
+      if (originalExecutor && ['commandOverride', 'args', 'env'].some(key => {
+        const field = key as 'commandOverride' | 'args' | 'env'
+        return input[field] !== undefined && (originalExecutor.source !== 'sdk' || !isDeepStrictEqual(input[field], originalExecutor.options[field]))
+      })) throw new AgentMuxError('The original recovery execution options are frozen. Recheck the original request or authorize a separate recovery intent.',
+        'AGENT_CONTINUITY_EXECUTOR_CONFLICT')
+    }
     if (intentOperationId && prior?.intentOperationId !== intentOperationId) throw new AgentMuxError('The original supervised attempt changed.', 'AGENT_CONTINUITY_SUPERSEDED')
     if (input.input) {
       if (input.trigger !== 'input' || typeof input.input.prompt !== 'string' ||
@@ -5336,6 +5346,28 @@ export class AgentMuxClient {
       ...(input.timingOverride ? { timingOverride: input.timingOverride } : {}), policy,
       previousRun: { ...input.expectedRun }, admittedAt: now, observedAt: now, rechecks: 0,
       kind: 'pending', reason: 'runtime-unverified', evidence: { kind: 'run-unknown', observedAt: now, message: 'Not yet observed.' }
+    }
+    const executorRoot = receipt.intentOperationId ?? receipt.operationId
+    let authoredExecutor: AgentContinuityExecutor | undefined
+    if (current && !prior && (current.continuityExecutors === undefined || continuityExecutorEntries(current.continuityExecutors) &&
+      !Object.hasOwn(continuityExecutorEntries(current.continuityExecutors)!, executorRoot))) {
+      const explicit = input.commandOverride !== undefined || input.args !== undefined || input.env !== undefined
+      const common = { providerId: current.providerId, executorId: current.executorId }
+      authoredExecutor = !current.creation?.executorRevision && explicit
+        ? { ...common, source: 'sdk', options: {
+          ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride }),
+          ...(input.args === undefined ? {} : { args: [...input.args] }),
+          ...(input.env === undefined ? {} : { env: { ...input.env } }) } }
+        : { ...common, source: current.creation?.executorRevision || this.hostExecutorOwner ? 'host' : 'provider' }
+    }
+    const retainExecutor = (value: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession => {
+      if (!authoredExecutor) return value
+      const entries = continuityExecutorEntries(value.continuityExecutors)
+      if (value.continuityExecutors !== undefined && !entries) throw unconfirmedContinuityExecutor()
+      const frozen = entries?.[executorRoot]
+      if (frozen && !isDeepStrictEqual(frozen, authoredExecutor)) throw new AgentMuxError(
+        'The original recovery operation has another execution source. Keep its original operation and input.', 'AGENT_CONTINUITY_EXECUTOR_CONFLICT')
+      return { ...value, continuityExecutors: { ...entries, [executorRoot]: frozen ?? authoredExecutor } }
     }
     // Freeze a new authored input even when Runtime/provider observation has not
     // succeeded yet. A retry reads this same request rather than inventing one.
@@ -5370,7 +5402,7 @@ export class AgentMuxClient {
             // lifecycle-busy result. The durable original operation remains the reconciliation owner.
             if (latest?.supervision && ((latest.kind === 'starting' && result.kind === 'conflict') ||
                 latest.newRun && sameRun(latest.newRun, value.run) && !receipt.newRun)) return value
-            return { ...value,
+            return { ...retainExecutor(value),
             continuity: { ...structuredClone(receipt), ...(value.continuityOperations?.[receipt.operationId]?.recoveryDelivery
               ? { recoveryDelivery: value.continuityOperations[receipt.operationId]!.recoveryDelivery! } : {}),
               ...(originalLaunch(value) ? { launchInput: originalLaunch(value)! } : {}),
@@ -5382,7 +5414,7 @@ export class AgentMuxClient {
           })
           this.publishSession(current)
         } catch (error) {
-          if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_OPERATION_CONFLICT') throw error
+          if (error instanceof AgentMuxError && ['AGENT_PROMPT_OPERATION_CONFLICT', 'AGENT_CONTINUITY_EXECUTOR_CONFLICT'].includes(error.code)) throw error
           receipt.error = `Continuity receipt persistence is unconfirmed. ${error instanceof Error ? error.message : String(error)}`
           this.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED',
             message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
@@ -5482,9 +5514,22 @@ export class AgentMuxClient {
     let launchExecutable: string | undefined
     if (canProbe && current) {
       try {
-        input = await this.sessionExecutorOptions(current, input)
         receipt.evidence = evidence
         receipt.nativeTarget = structuredClone(handle!)
+        // All attempts share only the root's private logical invocation source.
+        // Generated Hook credentials and the first input remain attempt-owned.
+        // Current target-owned configuration is independently authoritative. A bad
+        // private record must not close that original Host owner's recovery path.
+        const executor = current.creation?.executorRevision && this.hostExecutorOwner
+          ? { providerId: current.providerId, executorId: current.executorId, source: 'host' as const }
+          : readContinuityExecutor(current.continuityExecutors, executorRoot) ?? authoredExecutor
+        if (!executor || executor.providerId !== current.providerId || executor.executorId !== current.executorId) throw unconfirmedContinuityExecutor()
+        const { commandOverride: _command, args: _args, env: _env, ...rest } = input
+        const originalInput: AgentMuxAgentContinuityInput = rest
+        if (current.creation?.executorRevision || executor.source === 'host') {
+          if (!this.hostExecutorOwner) throw unconfirmedContinuityExecutor()
+          input = await this.sessionExecutorOptions(current, originalInput)
+        } else input = executor.source === 'sdk' ? { ...originalInput, ...structuredClone(executor.options) } : originalInput
         const oldInput = current?.promptCompletionAdmission
         receipt.previousInput = { scope: 'typed-prompt', outcome: !oldInput ? 'none' : current && agentPromptNotApplied(current) ? 'not-applied'
           : oldInput.acknowledged ? oldInput.transport === 'native' ? oldInput.native.outcome === 'admitted' ? 'native-admitted' : 'unknown' : 'terminal-confirmed' : 'unknown',
@@ -5501,6 +5546,7 @@ export class AgentMuxClient {
         capability = await this.probeAgent(current.providerId, plan.command, { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) })
       } catch (error) {
         receipt.error = error instanceof Error ? error.message : String(error)
+        if (error instanceof AgentMuxError) receipt.errorCode = error.code
         if (prior) receipt.rechecks++
         return pending('provider-unverified', evidence, receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
       }
@@ -5533,7 +5579,7 @@ export class AgentMuxClient {
       const frozen = value.continuityOperations?.[receipt.operationId]?.launchInput
       if (frozen && receipt.launchInput && !isDeepStrictEqual(frozen.input, receipt.launchInput.input)) throw new AgentMuxError(
         'The original recovery input was already frozen with another body or source.', 'AGENT_PROMPT_OPERATION_CONFLICT')
-      return { ...value, continuity: structuredClone(receipt),
+      return { ...retainExecutor(value), continuity: structuredClone(receipt),
         continuityOperations: { ...value.continuityOperations, [receipt.operationId]: structuredClone(receipt) } }
     })
     try {
