@@ -56,6 +56,14 @@ async function click(text: string) {
   expect(button, text).toBeDefined(); await act(async () => button!.click())
 }
 async function opened() { await mount(); await vi.waitFor(() => expect(dom.container.querySelector('.note-version-history__activity')).not.toBeNull()); await expand() }
+function presented(element: Element | null) {
+  if (!element) return false
+  for (let node: Element | null = element; node; node = node.parentElement) {
+    const style = getComputedStyle(node)
+    if (node.hasAttribute('hidden') || style.display === 'none' || style.visibility === 'hidden') return false
+  }
+  return true
+}
 
 it('reads only when the parent activates Saved versions and keeps full trusted IDs behind activity details without polling', async () => {
   await mount(false)
@@ -83,6 +91,8 @@ it('previews exact before/after models read-only and requires explicit whole-doc
   await dom.click('[aria-label="Preview version original-event-2"]')
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Version preview"]'), dom.container.textContent ?? '').not.toBeNull())
   await vi.waitFor(() => expect(pairs).toHaveLength(1))
+  expect(presented(dom.container.querySelector('[aria-label="Version preview"]'))).toBe(true)
+  expect(presented(dom.container.querySelector('.note-version-history__activities'))).toBe(false)
   expect([pairs[0]!.original.getValue(), pairs[0]!.modified.getValue()]).toEqual([content('Before 2'), content('After 2')])
   expect(useAppStore.getState().documents).toBe(before); expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
   expect(useAppStore.getState().applyNoteHistory).not.toHaveBeenCalled()
@@ -120,7 +130,7 @@ it('keeps the newest explicit version selection when an earlier body read return
   let release!: (value: FileHistoryResult) => void
   const late = new Promise<FileHistoryResult>(resolve => { release = resolve })
   vi.mocked(api.files.historyPublic).mockImplementation(params => params.eventId === 'original-event-2' ? late : Promise.resolve(history(params)))
-  await opened(); await dom.click('[aria-label="Preview version original-event-2"]'); await dom.click('[aria-label="Preview version original-event-1"]')
+  await opened(); await dom.click('[aria-label="Preview version original-event-2"]'); await click('Back to activities'); await dom.click('[aria-label="Preview version original-event-1"]')
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Version preview"]'), dom.container.textContent ?? '').not.toBeNull())
   await vi.waitFor(() => expect(pairs).toHaveLength(1))
   await act(async () => { release(history({ ...target(), eventId: 'original-event-2', includeContent: true })); await late })
@@ -169,8 +179,98 @@ it('retains the loaded window and exact original selection when history is partl
   await dom.click('[aria-label="Preview version original-event-2"]')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Older activity metadata is unavailable'))
   expect(pairs).toHaveLength(0)
+  await click('Back to activities')
   await click('Undo this activity…'); await click('Undo selected activity')
   expect(useAppStore.getState().applyNoteHistory).toHaveBeenCalledWith(tabId, regionId, { target: target(), batchId: 'original-batch', batchLastEventId: 'original-event-2' })
+})
+
+it('presents a selected version immediately while loading or failed, then restores the same expanded activities without rereading metadata', async () => {
+  let reject!: (reason: unknown) => void
+  const late = new Promise<FileHistoryResult>((_resolve, fail) => { reject = fail })
+  vi.mocked(api.files.historyPublic).mockImplementation(params => params.eventId ? late : Promise.resolve(history(params)))
+  await opened(); await expand('.note-version-history__identity')
+  const activities = dom.container.querySelector('.note-version-history__activities')!, activity = dom.container.querySelector<HTMLDetailsElement>('.note-version-history__activity')!
+  const identity = dom.container.querySelector<HTMLDetailsElement>('.note-version-history__identity')!, opener = dom.container.querySelector<HTMLButtonElement>('[aria-label="Preview version original-event-2"]')!
+  await dom.click('[aria-label="Preview version original-event-2"]')
+  const preview = dom.container.querySelector('[aria-label="Version preview"]')
+  expect(presented(preview)).toBe(true)
+  expect(preview!.textContent).toContain('Reading saved version…')
+  expect(presented(activities)).toBe(false)
+  expect(activities.closest('[hidden]')).not.toBeNull(); expect(activities.closest('[inert]')).not.toBeNull()
+  expect(pairs).toHaveLength(0)
+  await act(async () => { reject(Error('This selected original version is unavailable')); await late.catch(() => {}) })
+  expect(presented(dom.container.querySelector('[aria-label="Version preview"]'))).toBe(true)
+  expect(dom.container.querySelector('[aria-label="Version preview"]')!.textContent).toContain('This selected original version is unavailable')
+  await click('Back to activities')
+  expect(dom.container.querySelector('[aria-label="Version preview"]')).toBeNull()
+  expect(dom.container.querySelector('.note-version-history__activities')).toBe(activities)
+  expect(presented(activities)).toBe(true); expect(activity.open).toBe(true); expect(identity.open).toBe(true)
+  expect(document.activeElement).toBe(opener)
+  expect(useAppStore.getState().inspectNoteHistory).toHaveBeenCalledTimes(1)
+  expect(api.files.historyPublic).toHaveBeenCalledTimes(2)
+  expect(useAppStore.getState().applyNoteHistory).not.toHaveBeenCalled()
+})
+
+it('returns from a pending selected version without letting its late body allocate models or reopen the preview', async () => {
+  let release!: (value: FileHistoryResult) => void
+  const late = new Promise<FileHistoryResult>(resolve => { release = resolve })
+  vi.mocked(api.files.historyPublic).mockImplementation(params => params.eventId ? late : Promise.resolve(history(params)))
+  await opened(); const documents = useAppStore.getState().documents
+  await dom.click('[aria-label="Preview version original-event-2"]')
+  await click('Back to activities')
+  expect(presented(dom.container.querySelector('.note-version-history__activities'))).toBe(true)
+  await act(async () => { release(history({ ...target(), eventId: 'original-event-2', includeContent: true })); await late })
+  expect(dom.container.querySelector('[aria-label="Version preview"]')).toBeNull()
+  expect(pairs).toHaveLength(0); expect(monaco.editor.getModels()).toHaveLength(baseline)
+  expect(useAppStore.getState().documents).toBe(documents)
+  expect(useAppStore.getState().inspectNoteHistory).toHaveBeenCalledTimes(1)
+  expect(api.files.historyPublic).toHaveBeenCalledTimes(2)
+})
+
+it('does not make Back cancel a real history write, and keeps its unknown result visible until the user returns', async () => {
+  let reject!: (reason: unknown) => void
+  const applying = new Promise<void>((_resolve, fail) => { reject = fail })
+  vi.mocked(useAppStore.getState().applyNoteHistory).mockImplementation(() => applying)
+  await opened(); await dom.click('[aria-label="Preview version original-event-2"]')
+  await vi.waitFor(() => expect(pairs).toHaveLength(1))
+  await click('Restore this entire version…'); await click('Replace saved document')
+  const back = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Back to activities')!
+  expect(back.disabled).toBe(true)
+  await act(async () => back.click())
+  expect(presented(dom.container.querySelector('[aria-label="Version preview"]'))).toBe(true)
+  expect(useAppStore.getState().applyNoteHistory).toHaveBeenCalledTimes(1)
+  await act(async () => { reject(Error('Original restore outcome is unconfirmed')); await applying.catch(() => {}) })
+  expect(back.disabled).toBe(false)
+  expect(dom.container.textContent).toContain('Original restore outcome is unconfirmed')
+  await click('Back to activities')
+  expect(presented(dom.container.querySelector('.note-version-history__activities'))).toBe(true)
+  expect(useAppStore.getState().applyNoteHistory).toHaveBeenCalledTimes(1)
+  expect(api.files.historyPublic).toHaveBeenCalledTimes(2)
+})
+
+it('anchors and focuses an activity undo confirmation beside its trigger in a full 50-activity window without reading bodies or writing before confirmation', async () => {
+  const rows = Array.from({ length: 50 }, (_, index) => {
+    const sequence = 50 - index
+    return { ...records()[0]!, eventId: `window-event-${sequence}`, batchId: `window-activity-${sequence}`, sequence, at: sequence, parentEventId: sequence === 1 ? null : `window-event-${sequence - 1}` }
+  })
+  vi.mocked(api.files.historyPublic).mockImplementation(async params => history(params, rows))
+  await mount(); await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-version-history__activity')).toHaveLength(50))
+  await expand('.note-version-history__activity:nth-child(25)')
+  const activity = dom.container.querySelectorAll('.note-version-history__activity')[24]!
+  const undo = [...activity.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Undo this activity…')!
+  await act(async () => { undo.focus(); undo.click() })
+  const confirmation = dom.container.querySelector('[aria-label="Confirm history change"]')!
+  expect(confirmation.closest('.note-version-history__activity')).toBe(activity)
+  expect(presented(confirmation)).toBe(true)
+  expect(document.activeElement).toBe(confirmation)
+  expect(confirmation.querySelector('p')!.textContent).toContain('Undo all edits in this saved activity while keeping later nonconflicting changes')
+  expect(confirmation.querySelector('button')!.textContent).toBe('Undo selected activity')
+  expect(useAppStore.getState().applyNoteHistory).not.toHaveBeenCalled()
+  expect(api.files.historyPublic).toHaveBeenCalledTimes(1)
+  expect(api.files.historyPublic).toHaveBeenCalledWith({ ...target(), limit: 50 })
+  await click('Undo selected activity')
+  expect(useAppStore.getState().applyNoteHistory).toHaveBeenCalledWith(tabId, regionId, { target: target(), batchId: 'window-activity-26', batchLastEventId: 'window-event-26' })
+  expect(api.files.historyPublic).not.toHaveBeenCalledWith(expect.objectContaining({ includeContent: true }))
 })
 
 it('keeps unavailable history explicit and never presents it as an empty saved timeline', async () => {
