@@ -16,7 +16,7 @@ import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
-import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
+import { sessionExitPresentation, sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
@@ -293,6 +293,8 @@ export function SessionPane({
     })
   }
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
+  const [retainedOutputKey, setRetainedOutputKey] = useState<string | null>(null)
+  const readingRetainedOutput = pendingAgentRestore && retainedOutputKey === activitySourceKey
   const terminalLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
   if (terminalLifetime.current.sourceKey !== activitySourceKey) terminalLifetime.current = { sourceKey: activitySourceKey, opened: false }
   const startupDecision = session?.kind === 'agent' ? session.continuity : undefined
@@ -563,6 +565,7 @@ export function SessionPane({
   const onProseLinkClick = linkOpening.activateHttp
   const onProseLinkSelect = linkOpening.choose
   const [refreshing, setRefreshing] = useState(false)
+  const [originalReadError, setOriginalReadError] = useState<{ source: string; message: string } | null>(null)
   const [unobservedReadError, setUnobservedReadError] = useState<string | null>(null)
   const observationScope = JSON.stringify([sessionId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.workspaceId, linkOrigin.tabGroupId])
   const observationScopeRef = useRef<string | null>(observationScope)
@@ -892,8 +895,8 @@ export function SessionPane({
   // 抖动预算用尽后的终局会顶着「Reconnecting…」的皮，用户永远不知道该自己动手了。
   const gaveUpReconnecting =
     disconnected && session.status.detail === CONNECTION_UNRECOVERABLE_DETAIL
-  // A continuity failure names its own class; the generic banner copy only covers the rest.
-  const recoveryTitle = continuityNotice
+  const exitNotice = sessionExitPresentation(session)
+  const recoveryTitle = exitNotice?.title ?? (continuityNotice
       ? continuityNotice.title
       : gaveUpReconnecting
         ? `Can’t reach this host`
@@ -901,7 +904,19 @@ export function SessionPane({
           ? 'Remote terminal disconnected'
           : exited
             ? `${noun} process exited`
-            : `${noun} session unavailable`
+            : `${noun} session unavailable`)
+  const recoveryDetail = exitNotice?.detail ?? continuityNotice?.reason ??
+    humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
+
+  async function refreshOriginal(): Promise<void> {
+    if (refreshing) return
+    const source = activitySourceKey
+    setRefreshing(true); setOriginalReadError(null)
+    try { await refreshSession(sessionId) }
+    catch (error) {
+      if (currentSourceKey.current === source) setOriginalReadError({ source, message: presentError(error) })
+    } finally { setRefreshing(false) }
+  }
 
   async function refresh(observationOnly = false): Promise<void> {
     if (refreshing) return
@@ -915,26 +930,38 @@ export function SessionPane({
   }
 
   // The history notice and the underlying Session share one Core-reasoned action.
-  const agentRecoveryAction = !projectionPolicy.allowsRecovery ? (
+  const agentRecoveryControls = !projectionPolicy.allowsRecovery ? (
     <span>Open this Session in its Project to restore it.</span>
   ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={onTakeOver} restoring={recovering || refreshing}
     workingLabel={refreshing ? 'Re-reading…' : 'Restoring…'}
     restoreIcon={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'action.refresh' : continuityNotice?.remedy.kind === 'wait' ? 'status.waiting' : 'action.resume-session'}
     restoreDisabled={continuityNotice ? !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) : false}
     restoreLabel={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'Re-read original' : continuityNotice?.remedy.kind === 'wait' ? 'Waiting for operation' : 'Restore original'}
-    onRestore={() => { if (continuityNotice && continuityRefreshEnabled(continuityNotice)) void refresh(); else void recover() }} /> : (
+    onRestore={() => { if (continuityNotice && continuityRefreshEnabled(continuityNotice)) void refreshOriginal(); else void recover() }} /> : (
     <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
       <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Resuming…' : 'Resume'}
     </button>
   )
+  const originalReadNotice = originalReadError?.source === activitySourceKey ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+    step: 'Original Session recheck failed', mode: originalReadError.message,
+    restore: 'Re-read original to check again. Your Session and draft are kept.'
+  } }} /> : null
+  const identityNotice = exitNotice && continuityNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+    step: continuityNotice.title, mode: continuityNotice.reason,
+    restore: continuityNotice.remedy.kind === 'refresh' ? 'Re-read original checks again without restarting the Agent or resending messages.' : 'Recovery remains a separate explicit action.'
+  } }} /> : null
+  const agentRecoveryAction = <>{agentRecoveryControls}{pendingAgentRestore ? <button type="button" className="small-button"
+    onClick={() => { setRetainedOutputKey(readingRetainedOutput ? null : activitySourceKey); setHistoryOpen(false); useAppStore.getState().setViewMode(sessionId, 'terminal') }}>
+    {readingRetainedOutput ? 'Back to recovery' : 'Read original output'}
+  </button> : null}</>
   const coreRestorePresentation = session.kind === 'agent' ? agentContinuityPresentation(session) : null
   const restoreFailed = continuityNotice || session.status.state === 'error' && coreRestorePresentation?.kind !== 'unconfirmed'
   const restorePresentation = coreRestorePresentation?.kind === 'restoring' ? { ...coreRestorePresentation, phase: 'recovering' as const } : pendingAgentRestore ? {
     phase: recovering ? 'recovering' as const : restoreFailed ? 'failed' as const : 'parked' as const,
-    title: recovering ? 'Restoring your session' : continuityNotice ? continuityNotice.title
+    title: recovering ? 'Restoring your session' : exitNotice?.title ?? (continuityNotice ? continuityNotice.title
       : restoreFailed ? recoveryTitle
-        : coreRestorePresentation?.title ?? (exited ? 'Agent process exited' : 'Session state unconfirmed'),
-    detail: continuityNotice?.reason ?? (restoreFailed
+        : coreRestorePresentation?.title ?? (exited ? 'Agent process exited' : 'Session state unconfirmed')),
+    detail: exitNotice?.detail ?? continuityNotice?.reason ?? (restoreFailed
       ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
       : coreRestorePresentation?.detail ?? (exited && !session.runUnobserved
         ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
@@ -992,7 +1019,7 @@ export function SessionPane({
                 title={restorePresentation?.title ?? 'Session state unconfirmed'}
                 detail={restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
                 actions={!historyOpen ? agentRecoveryAction : null}
-                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}
+                supplement={<>{identityNotice}{originalReadNotice}{session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}</>}
                 details={{ summary: 'Retained session', content: <dl>
                   <dt>Session</dt><dd>{session.label}</dd>
                   <dt>Session ID</dt><dd>{session.id}</dd>
@@ -1044,7 +1071,7 @@ export function SessionPane({
             <div hidden={session.kind === 'agent' && (historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore)}
               ref={element => { if (element && !pendingAgentRestore && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
               inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore} style={{ height: '100%' }}>
-            {pendingAgentRestore ? (inlineHistory ? null :
+            {pendingAgentRestore && !readingRetainedOutput ? (inlineHistory ? null :
               restoreSurface
             ) : parked ? (
               <FullPageLoadingSurface scope="region" phase="parked" eyebrow="View retained"
@@ -1053,30 +1080,27 @@ export function SessionPane({
             ) : (
               <TerminalView
                 session={session}
-                autoFocus={autoFocus && visible && !historyOpen && viewMode === 'terminal'}
+                autoFocus={!readingRetainedOutput && autoFocus && visible && !historyOpen && viewMode === 'terminal'}
                 themeId={terminalThemeId}
                 fontSize={terminalFontSize}
-                interactiveResize={projectionPolicy.interactiveResize && interactiveResize}
+                interactiveResize={!readingRetainedOutput && projectionPolicy.interactiveResize && interactiveResize}
                 visible={visible && !historyOpen && viewMode === 'terminal'}
-                readOnly={!projectionPolicy.acceptsInput}
+                readOnly={readingRetainedOutput || !projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
                 onObservationRefresh={bindObservationRefresh}
               />
             )
             }</div>
           ) : null}
-          {(disconnected || missing || exited) && !pendingAgentRestore ? (
+          {(disconnected || missing || exited) && (!pendingAgentRestore || readingRetainedOutput) ? (
             <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
                 {refreshing || recovering ? <ThemeStatusLoadingIcon animation="spin" size={16} /> : session.status.state === 'error' ? <ThemeStatusWarningIcon size={16} /> : disconnected || missing ? <ThemeStatusHostUnavailableIcon size={16} /> : <ThemeActionStopIcon size={16} />}
               </span>
               <div>
                 <strong>{recoveryTitle}</strong>
-                <span>{
-                  continuityNotice
-                    ? continuityNotice.reason
-                    : humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
-                }</span>
+                <span>{recoveryDetail}</span>
+                {identityNotice}{originalReadNotice}
               </div>
               <div className="terminal-recovery__actions">
                 {!projectionPolicy.allowsRecovery ? (

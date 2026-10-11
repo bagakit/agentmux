@@ -10789,40 +10789,72 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       kind: 'agent', hostId: accepted.hostId, agentSessionId: accepted.agentSessionId, run: accepted.run
     } : undefined)
     if (!control) return
-    if (accepted) {
-      const result: AgentLaunchResult = { created: accepted, projectionFailures: [] }
-      try {
-        const session = await api.sessions.refresh(control)
-        if (session.kind !== 'agent' || session.id !== sessionId || session.control.run.runId !== accepted.run.runId) {
-          throw new Error('Created Session re-read returned a different identity.')
-        }
-        result.session = session
-      } catch (error) { result.projectionFailures.push({ step: 'session', message: presentError(error) }) }
-      try {
-        const timeline = await api.sessions.timeline(control as AgentSessionControl)
-        if (timeline.agentSessionId !== sessionId) throw new Error('Created Timeline re-read returned a different identity.')
-        result.timeline = timeline
-      } catch (error) { result.projectionFailures.push({ step: 'timeline', message: presentError(error) }) }
-      set((state) => {
-        const live = state.sessions.find((item) => item.id === sessionId)
-        if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId) ||
-          !hasAttachedSessionView(state.tabs, sessionId) || (live && !sessionOwnsControl(live, control))) return state
-        return reduceDetachedAgentLaunch(state, result).state
-      })
-      return result.session
-    } else {
-      try {
-        const session = await api.sessions.refresh(control)
+    const originalViews = Object.values(before.tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface => (
+      isSessionSurface(surface) && surface.phase === 'attached' && surface.sessionId === sessionId
+        ? [{ tabId: tab.id, regionId: surface.regionId }] : []
+    )))
+    const retainedOriginalViews = new Set(originalViews)
+    const hasOriginalBinding = (state: AppState, { tabId, regionId }: typeof originalViews[number]): boolean => {
+      const view = state.tabs[tabId]?.regions[regionId]
+      return !!view && isSessionSurface(view) && view.phase === 'attached' && view.sessionId === sessionId
+    }
+    const ownsOriginalView = (state: AppState): boolean => [...retainedOriginalViews].some(view => hasOriginalBinding(state, view))
+    const sameOriginalOwner = (session: SessionSnapshot): boolean => session.id === sessionId &&
+      session.hostId === control.hostId && session.control.hostId === control.hostId &&
+      (control.kind === 'agent' ? session.kind === 'agent' && session.control.agentSessionId === control.agentSessionId
+        : session.kind === 'terminal' && sessionOwnsControl(session, control))
+    // An invalidated binding cannot rejoin this read after the same IDs are reopened.
+    // Another continuously retained original view still owns the same Session metadata.
+    const stopObservingView = useAppStore.subscribe((state, previous) => {
+      for (const view of retainedOriginalViews) {
+        if (!hasOriginalBinding(state, view) || !hasOriginalBinding(previous, view)) retainedOriginalViews.delete(view)
+      }
+      if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId) ||
+        !workbenchViewCloseAllowsSession(previous.closingWorkbenchViews, sessionId)) retainedOriginalViews.clear()
+    })
+    try {
+      if (accepted) {
+        const result: AgentLaunchResult = { created: accepted, projectionFailures: [] }
+        try {
+          const session = await api.sessions.refresh(control)
+          if (session.kind !== 'agent' || !sameOriginalOwner(session) || session.control.run.runId !== accepted.run.runId) {
+            throw new Error('Created Session re-read returned a different identity.')
+          }
+          result.session = session
+        } catch (error) { result.projectionFailures.push({ step: 'session', message: presentError(error) }) }
+        try {
+          const timeline = await api.sessions.timeline(control as AgentSessionControl)
+          if (timeline.agentSessionId !== sessionId) throw new Error('Created Timeline re-read returned a different identity.')
+          result.timeline = timeline
+        } catch (error) { result.projectionFailures.push({ step: 'timeline', message: presentError(error) }) }
         set((state) => {
           const live = state.sessions.find((item) => item.id === sessionId)
           if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId) ||
-            !live || !sessionOwnsControl(live, control) || !hasAttachedSessionView(state.tabs, sessionId)) return state
-          const refreshed = retainTimelineObservation(live, session)
-          return { sessions: [...state.sessions.filter((item) => item.id !== session.id), refreshed] }
+            !ownsOriginalView(state) || (live && !sessionOwnsControl(live, control))) return state
+          return reduceDetachedAgentLaunch(state, result).state
         })
-        return session
-      } catch (error) { get().reportError(error); throw error }
-    }
+        return result.session
+      } else {
+        try {
+          const session = await api.sessions.refresh(control)
+          if (!sameOriginalOwner(session)) throw new Error('Session recheck returned another original owner. The original Session and drafts are kept.')
+          set((state) => {
+            const live = state.sessions.find((item) => item.id === sessionId)
+            if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, sessionId) ||
+              !live || !sessionOwnsControl(live, control) || !ownsOriginalView(state)) return state
+            let refreshed = retainTimelineObservation(live, session)
+            // A metadata read alone does not settle this original Run's refused identity check.
+            if (live.kind === 'agent' && refreshed.kind === 'agent' && live.control.run.runId === refreshed.control.run.runId &&
+              live.status.continuityReason === 'native-handle-unavailable' && !refreshed.status.continuity &&
+              (!refreshed.nativeHandle || refreshed.nativeHandlePersistence === 'unconfirmed')) {
+              refreshed = { ...refreshed, status: { ...refreshed.status, continuity: 'unavailable', continuityReason: 'native-handle-unavailable' } }
+            }
+            return { sessions: [...state.sessions.filter((item) => item.id !== session.id), refreshed] }
+          })
+          return session
+        } catch (error) { get().reportError(error); throw error }
+      }
+    } finally { stopObservingView() }
   },
   async reopenRetiredSession(source, operationId = crypto.randomUUID(), observeOnly = false) {
     if (source.state !== 'retired' || source.retiredAt === undefined) {

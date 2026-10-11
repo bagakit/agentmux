@@ -2095,14 +2095,26 @@ export class RuntimeController {
 
   async refresh(control: SessionControl, config: AppConfig): Promise<SessionSnapshot> {
     const client = await this.connectedClient(control.hostId)
-    if (control.kind === 'agent') await client.refreshAgentSession(control.agentSessionId, control.run)
-    return await this.sessionByTarget(
+    // Observation reads the current original Session; mutation/input callers retain their Run fence.
+    if (control.kind === 'agent') {
+      const original = await client.refreshAgentSession(control.agentSessionId)
+      if (original.agentSessionId !== control.agentSessionId) {
+        throw new AgentMuxError('Session recheck returned another original owner.', 'STALE_AGENT_SESSION')
+      }
+    }
+    const session = await this.sessionByTarget(
       client,
       control.kind === 'agent'
         ? { kind: 'agent-session', agentSessionId: control.agentSessionId }
         : { kind: 'terminal-run', runId: control.runId },
       config
     )
+    if (session.kind !== control.kind || session.control.hostId !== control.hostId ||
+      (control.kind === 'agent' ? session.kind !== 'agent' || session.id !== control.agentSessionId ||
+        session.control.agentSessionId !== control.agentSessionId : session.control.run.runId !== control.run.runId)) {
+      throw new AgentMuxError('Session recheck returned another original owner.', 'STALE_AGENT_SESSION')
+    }
+    return session
   }
 
   async confirmNativeSession(control: AgentSessionControl, input: AgentMuxNativeSessionConfirmationInput): Promise<AgentMuxNativeSessionConfirmation> {
