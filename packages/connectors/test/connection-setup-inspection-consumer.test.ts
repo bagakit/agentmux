@@ -252,7 +252,7 @@ it('an unrecoverable original result after reopen stays unknown but cannot suppr
   const calls = fetch.mock.calls.length
   await f.close(); await f.reopen()
   const local = await inspect(f, { selectedStepId: original.stepId }), recover = inputFor(local, 'recover-application-inspection')
-  expect(local.applicationInspection?.actions.map(action => action.kind).sort()).toEqual(['inspect-application', 'recover-application-inspection'].sort())
+  expect(local.applicationInspection?.actions.map(action => action.kind).sort()).toEqual(['inspect-application', 'recover-application-inspection', 'read-application-details', 'read-event-settings', 'read-callback-settings', 'read-bot-settings'].sort())
   const stillUnknown = await f.sdk.call('connection.setup.advance', recover)
   expect(selected(stillUnknown)).toEqual(original); expect(stillUnknown.applicationInspection?.applicationInfoReadPermission).toBe('unknown')
   expect(fetch).toHaveBeenCalledTimes(calls)
@@ -393,7 +393,7 @@ it('actual SDK and compiled CLI decoders reject malformed selected-child results
   const f = await fixture(), fetch = vi.fn(nativeRoute().route); vi.stubGlobal('fetch', fetch)
   await confirmed(f); await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
   const valid = await inspect(f), wire = await wireFault(f), calls = fetch.mock.calls.length, before = changes(f)
-  expect(valid.applicationInspection?.actions.map(action => action.kind)).toEqual(['inspect-application'])
+  expect(valid.applicationInspection?.actions.map(action => action.kind)).toEqual(['inspect-application', 'read-application-details', 'read-event-settings', 'read-callback-settings', 'read-bot-settings'])
   expect(await wire.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {} })).toEqual(valid)
   const faults = [
     (value: ConnectionSetupView) => ({ ...value, applicationInspection: { ...value.applicationInspection!, selected: { ...selected(value), privateRef: 'fixture-forbidden-inspection-private-ref' } } }),
