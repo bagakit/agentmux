@@ -77,6 +77,8 @@ import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapsh
 import { directoryIdentity } from '../src/shared/space-addresses'
 import { useAppStore, restorePersistedUiState } from '../src/renderer/src/store'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const dom = composerDOM()
 const realInitialize = useAppStore.getState().initialize
@@ -616,6 +618,34 @@ it('resizes the actual Survey sidebar with pointer and keyboard while preserving
   expect(projectPersistedWorkbench(useAppStore.getState())).toEqual(projectPersistedWorkbench(state))
   expect(useAppStore.getState().surveyZoneSelection).toEqual(state.surveyZoneSelection)
   expect(api.browser.create).not.toHaveBeenCalled(); healthy()
+})
+
+it('reopens Survey with a quietly focused original address and explicit history intent', async () => {
+  const history = vi.spyOn(api.browser, 'listInputHistory').mockResolvedValue({
+    scope: { workspaceId: workspace.id, profileId: browser.profileId! },
+    entries: [{ text: 'retained search', submittedAt: _historyFixtureEpoch(0, 0, 1) }]
+  })
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
+  const field = address(), original = slot().querySelector('.retained-workbench-view')
+  await vi.waitFor(() => expect(document.activeElement).toBe(field))
+  expect(field.getAttribute('aria-expanded')).toBe('false')
+  expect(document.querySelector('[aria-label="Browser input history"]')).toBeNull()
+  await dom.click('[aria-label="Space: show terminal and file workbench"]')
+  history.mockClear()
+  await enterSurvey()
+  await vi.waitFor(() => expect(document.activeElement).toBe(field))
+  expect(address()).toBe(field)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original)
+  expect(field.getAttribute('aria-expanded')).toBe('false')
+  expect(history).not.toHaveBeenCalled()
+  await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+  expect(history).toHaveBeenCalledExactlyOnceWith({ kind: 'browser', browserId: pageB.browserId, profileId: pageB.profileId })
+  expect(document.querySelector('[aria-label="Browser input history"]')?.textContent).toContain('retained search')
+  await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(document.querySelector('[aria-label="Browser input history"]')).toBeNull()
+  expect(document.activeElement).toBe(field)
+  expect(api.browser.navigate).not.toHaveBeenCalled()
+  healthy()
 })
 
 it('controls Tab and Region selection without moving Space focus or the original editor caret', async () => {
