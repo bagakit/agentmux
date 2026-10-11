@@ -67,6 +67,20 @@ export class AgentSessionContinuitySupervisor {
     return await this.serialize(input.agentSessionId, () => this.deps.perform(input))
   }
 
+  /** A fresh automatic observer joins the original current intent, never resets its budget or cancellation. */
+  retainedAutomaticIntent(session: AgentMuxStoredAgentSession, input: AgentMuxAgentContinuityInput): AgentMuxContinuityOperation | undefined {
+    if (!input.trigger || input.input || ['manual', 'input'].includes(input.trigger) || session.continuityOperations?.[input.operationId] ||
+      session.hostId !== 'local' || !sameRun(session.run, input.expectedRun)) return
+    const pointer = session.continuity, rootId = pointer?.intentOperationId ?? pointer?.operationId
+    const root = rootId ? session.continuityOperations?.[rootId] : undefined, supervision = root?.supervision
+    const active = supervision ? session.continuityOperations?.[supervision.activeAttemptOperationId] : undefined
+    if (!root || root.operationId !== rootId || root.agentSessionId !== session.agentSessionId || !supervision ||
+      supervision.phase === 'settled' || root.intentOperationId || !active || active.agentSessionId !== session.agentSessionId ||
+      active.operationId !== rootId && active.intentOperationId !== rootId ||
+      (active.newRun ? !sameRun(active.newRun, session.run) : !sameRun(active.previousRun, session.run))) return
+    return active
+  }
+
   restore(sessions: readonly AgentMuxStoredAgentSession[]): void {
     for (const session of sessions) {
       this.observe(session, true)
@@ -80,7 +94,7 @@ export class AgentSessionContinuitySupervisor {
     if (this.disposed) return
     const roots = Object.values(session.continuityOperations ?? {}).filter(op => op.supervision &&
       (!terminal(op.supervision.phase) || retryObservation && op.supervision.phase === 'paused' &&
-        ['runtime-unverified', 'exit-outcome-unverified', 'original-operation-unconfirmed'].includes(op.supervision.reason)))
+        ['runtime-unverified', 'provider-unverified', 'exit-outcome-unverified', 'original-operation-unconfirmed'].includes(op.supervision.reason)))
     const live = new Set(roots.map(op => op.operationId))
     for (const rootId of this.roots.get(session.agentSessionId) ?? []) if (!live.has(rootId)) this.clearTimer(session.agentSessionId, rootId)
     if (!roots.length) { this.release(session.agentSessionId); return }
@@ -98,7 +112,8 @@ export class AgentSessionContinuitySupervisor {
     const rootId = receipt.intentOperationId ?? (receipt.supervision ? receipt.operationId : undefined)
     if (rootId) {
       const roots = this.roots.get(input.agentSessionId) ?? new Set<string>(); roots.add(rootId); this.roots.set(input.agentSessionId, roots)
-      if (receipt.nextActionAt !== undefined) this.at(input.agentSessionId, rootId, receipt.nextActionAt, () => this.wake(input.agentSessionId))
+      if (receipt.supervision && terminal(receipt.supervision.phase)) this.wake(input.agentSessionId)
+      else if (receipt.nextActionAt !== undefined) this.at(input.agentSessionId, rootId, receipt.nextActionAt, () => this.wake(input.agentSessionId))
       else this.wake(input.agentSessionId)
     } else if (receipt.nextActionAt !== undefined) {
       this.at(input.agentSessionId, receipt.operationId, receipt.nextActionAt, () => {
@@ -178,7 +193,8 @@ export class AgentSessionContinuitySupervisor {
     if (!session || !root || !supervision) { this.release(id); return }
     if (terminal(supervision.phase)) {
       if (supervision.phase === 'paused' && this.reobservations.delete(JSON.stringify([id, rootId]))) {
-        await this.save(session, root, { ...supervision, phase: 'observing', observedAt: Date.now() }, undefined, { rechecks: 0 })
+        await this.save(session, root, { ...supervision, phase: 'observing', observedAt: Date.now() }, undefined,
+          { rechecks: 0, ...(supervision.attemptCount === 0 ? { nextActionAt: Date.now() } : {}) })
         return await this.advance(id, rootId)
       }
       this.clearTimer(id, rootId); this.roots.get(id)?.delete(rootId)
@@ -192,6 +208,14 @@ export class AgentSessionContinuitySupervisor {
       if (terminal(phase)) { this.clearTimer(id, rootId); this.roots.get(id)?.delete(rootId); if (!this.roots.get(id)?.size) this.release(id) }
     }
     if (session.hostId !== 'local') { this.release(id); throw new AgentMuxError('The original recovery Host changed; its metadata and Run are retained.', 'AGENT_CONTINUITY_SUPERSEDED') }
+    if (active && supervision.attemptCount === 0) {
+      if (active.operationId !== rootId || !sameRun(active.previousRun, session.run)) return await settle('paused', 'current-run-changed')
+      if (active.nextActionAt === undefined) return await settle('paused', active.reason)
+      if (active.nextActionAt !== undefined && active.nextActionAt > Date.now()) {
+        this.at(id, rootId, active.nextActionAt, () => this.wake(id)); return
+      }
+      await this.deps.perform(operationInput(active)); return
+    }
     if (!active || !root.nativeTarget || !matchesProviderNativeSessionTarget(root.nativeTarget, session.nativeHandle) ||
       !matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) || !matchesProviderNativeSessionTarget(active.nativeTarget, session.nativeHandle)) return await settle('paused', 'original-target-changed')
     // A failed lifecycle read is not evidence that Stop is absent.

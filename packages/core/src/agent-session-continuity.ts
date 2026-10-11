@@ -66,7 +66,7 @@ export function resolveAgentContinuityReminder(policy: AgentMuxContinuityPolicy)
   return DEFAULT_AGENT_CONTINUITY_REMINDER + (policy.reminderMode === 'default-plus-custom' && policy.reminderAppend.trim() ? '\n\n' + policy.reminderAppend : '')
 }
 
-export type AgentMuxContinuityPendingReason = 'runtime-unverified' | 'active-manual' | 'active-delay' | 'idle-unknown' | 'not-active' | 'idle-window-expired' | 'resume-disabled' | 'provider-unverified' | 'operation-unconfirmed'
+export type AgentMuxContinuityPendingReason = 'runtime-unverified' | 'active-manual' | 'active-delay' | 'idle-unknown' | 'not-active' | 'idle-window-expired' | 'resume-disabled' | 'provider-unverified' | 'operation-unconfirmed' | 'recovery-supervised' | 'intent-cancelled'
 /** Each selected part shares one physical input and its actual delivery receipt. */
 export type AgentMuxContinuityInputPart = {
   selected: boolean
@@ -149,7 +149,7 @@ export type AgentMuxContinuitySupervision = {
   controlOperations?: Record<string, AgentMuxContinuityControlReceipt>
   phase: 'observing' | 'retry-wait' | 'paused' | 'settled' | 'cancelled'
   activeAttemptOperationId: string
-  /** Includes the initial admitted native resume. History never resets on explicit continuation. */
+  /** Zero while waiting for initial admission; includes that resume once admitted. History never resets. */
   attemptCount: number
   /** Total admitted attempts authorized by the frozen policy and exact later control receipts. */
   attemptLimit: number
@@ -232,7 +232,9 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
   if (op.intentOperationId !== undefined && (typeof op.intentOperationId !== 'string' || !op.intentOperationId || op.intentOperationId === op.operationId) ||
     supervision && (!['observing', 'retry-wait', 'paused', 'settled', 'cancelled'].includes(supervision.phase) ||
       typeof supervision.activeAttemptOperationId !== 'string' || !supervision.activeAttemptOperationId || typeof supervision.reason !== 'string' ||
-      supervision.attemptCount < 1 || supervision.attemptLimit < 1 ||
+      supervision.attemptCount < 0 || supervision.attemptLimit < 1 ||
+      supervision.attemptCount === 0 && (op.intentOperationId !== undefined || op.newRun !== undefined ||
+        supervision.activeAttemptOperationId !== op.operationId || supervision.phase === 'retry-wait') ||
       ![supervision.attemptCount, supervision.attemptLimit, supervision.observedAt, ...(supervision.nextAttemptAt === undefined ? [] : [supervision.nextAttemptAt])].every(value => Number.isSafeInteger(value) && value >= 0) ||
       supervision.process && (!supervision.process.run || typeof supervision.process.run.runId !== 'string' || !supervision.process.run.runId || !['running', 'exited', 'interrupted', 'unknown'].includes(supervision.process.state) ||
         !Number.isSafeInteger(supervision.process.observedAt) || supervision.process.observedAt < 0 ||

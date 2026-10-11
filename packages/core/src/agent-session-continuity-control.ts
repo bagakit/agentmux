@@ -70,7 +70,7 @@ export function parseAgentContinuityControlReceipt(value: unknown): AgentMuxCont
   if (typeof p.outcome !== 'string' || !['continued', 'cancelled', 'unchanged'].includes(p.outcome) ||
     typeof p.reason !== 'string' || !['explicit-continue', 'explicit-cancel', 'already-active', 'already-settled', 'already-cancelled'].includes(p.reason) ||
     typeof p.phaseAtCommit !== 'string' || !['observing', 'retry-wait', 'paused', 'settled', 'cancelled'].includes(p.phaseAtCommit)) invalid()
-  const before = count(p.attemptLimitBefore, 1), after = count(p.attemptLimitAfter, 1), attemptCount = count(p.attemptCount, 1)
+  const before = count(p.attemptLimitBefore, 1), after = count(p.attemptLimitAfter, 1), attemptCount = count(p.attemptCount)
   if (attemptCount > before) invalid()
   if (p.outcome === 'continued' ? request.action !== 'continue' || !Number.isSafeInteger(before + request.additionalAttempts) ||
       after !== before + request.additionalAttempts || p.phaseAtCommit !== 'observing' || p.reason !== 'explicit-continue'
