@@ -11,6 +11,10 @@ import * as Menu from '../../../src/renderer/src/components/HoverDropdownMenu'
 import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import { createCrossDocumentGallery } from './cross-document'
+import { PmoTeamsTopicEntry } from '../../../src/renderer/src/components/PmoTeamsTopicEntry'
+import { useAppStore } from '../../../src/renderer/src/store'
+import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
+import type { AvatarLayeringSeed } from './avatar-seed'
 
 // Actual Workbench, Store, confirmation, collector and Hook. Only IO facts cross
 // this fixture bridge; no component, selector or presentation owner is replaced.
@@ -41,6 +45,68 @@ for (const type of ['pointerdown', 'click', 'keydown']) document.addEventListene
   if (target?.closest('.confirmation-dialog, [role="menu"], .modal-presentation-note')) events.push({ type, trusted: event.isTrusted, label: target.closest('button, [role="menuitem"]')?.textContent })
 }, true)
 let actions: string[] = []
+let avatarCleanup: (() => void) | undefined
+let avatarSeed: AvatarLayeringSeed | undefined
+let avatarCalls: Array<{ method: string; target?: unknown }> = []
+let avatarOriginal: { canvas: HTMLCanvasElement; modal: HTMLElement } | undefined
+function avatarRead() {
+  const modal = document.querySelector<HTMLElement>('.space-icon-picker'), canvas = modal?.querySelector<HTMLCanvasElement>('.mote-series__preview canvas')
+  const png = modal?.querySelector<HTMLImageElement>('.mote-series__sizes img')?.src
+  const box = (node: Element) => { const r = node.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height } }
+  let material: { point: { x: number; y: number }; hit: boolean; rgba: number[] } | undefined
+  if (modal) {
+    const bounds = modal.getBoundingClientRect(), style = getComputedStyle(modal)
+    const point = { x: bounds.x + Math.max(3, parseFloat(style.paddingLeft) / 2), y: bounds.y + bounds.height / 2 }
+    const reference = document.createElement('canvas'); reference.width = reference.height = 1
+    const context = reference.getContext('2d')!; context.fillStyle = style.backgroundColor; context.fillRect(0, 0, 1, 1)
+    material = { point, hit: document.elementFromPoint(point.x, point.y) === modal, rgba: [...context.getImageData(0, 0, 1, 1).data] }
+  }
+  return { target: avatarCalls.find(call => call.method === 'read')?.target,
+    invokerTargetKey: document.querySelector<HTMLElement>('[data-pmo-teams-topic-launcher] button')?.dataset.spaceIconTarget,
+    seriesTargetKey: modal?.querySelector<HTMLElement>('[data-series-target]')?.dataset.seriesTarget,
+    controls: { material: modal?.querySelector<HTMLElement>('[data-series-material][aria-pressed="true"]')?.dataset.seriesMaterial,
+      yaw: modal?.querySelector<HTMLInputElement>('[aria-label="Series model rotation"]')?.value,
+      morphs: [...modal?.querySelectorAll<HTMLInputElement>('[data-series-morph]') ?? []].map(node => ({ id: node.dataset.seriesMorph, value: node.value })) },
+    originalChoice: useAppStore.getState().spaceObjectIcons[avatarSeed?.baseline.target.objectKey ?? ''],
+    modalId: modal?.dataset.overlayModalId, sameModal: !!avatarOriginal && avatarOriginal.modal === modal,
+    sameCanvas: !!avatarOriginal && avatarOriginal.canvas === canvas, canvas: canvas ? box(canvas) : null, png,
+    frameSource: canvas?.dataset.seriesFrameSource, renderFacts: canvas?.dataset.seriesRenderFacts,
+    draftReady: modal?.dataset.seriesDraftReady, calls: avatarCalls, material,
+    sourceInputs: avatarSeed?.sourceInputs, menuOpen: !!document.querySelector('[role="menu"]'),
+    activeInvoker: document.activeElement === document.querySelector('[data-pmo-teams-topic-launcher] button') }
+}
+function startAvatar(seed: AvatarLayeringSeed) {
+  if (avatarCleanup) throw new Error('The original private Avatar scene must finish before another begins')
+  avatarSeed = seed; avatarCalls = []; avatarOriginal = undefined
+  const original = { config: useAppStore.getState().config, icons: useAppStore.getState().spaceObjectIcons,
+    snapshots: useAppStore.getState().scratchTopicSnapshots, avatars: { ...api.moteAvatars }, listTopics: api.scratch.listTopics, saveConfig: api.config.save }
+  api.scratch.listTopics = async workspaceId => workspaceId === seed.workspace.id ? [structuredClone(seed.topic)] : original.listTopics(workspaceId)
+  api.moteAvatars.list = async () => { avatarCalls.push({ method: 'list' }); return structuredClone(seed.catalog) }
+  api.moteAvatars.read = async input => {
+    avatarCalls.push({ method: 'read', target: input.target })
+    if (JSON.stringify(input.target) !== JSON.stringify(seed.baseline.target)) throw new Error('Only the original isolated Mote identity may be read')
+    return structuredClone(seed.baseline)
+  }
+  api.moteAvatars.preview = async input => {
+    avatarCalls.push({ method: 'preview', target: input.source })
+    const found = seed.prepared.find(value => value.source.origin === input.source.origin && value.source.seriesId === input.source.seriesId && value.source.entryId === input.source.entryId)
+    if (!found || input.expectedRevision && input.expectedRevision !== found.source.revision) throw new Error('Only the exact original prepared source bytes may be consumed')
+    return structuredClone(found)
+  }
+  api.moteAvatars.save = async input => { avatarCalls.push({ method: 'save', target: input.target }); throw new Error('This layering scene cancels the original avatar; it never saves') }
+  api.config.save = async () => { avatarCalls.push({ method: 'config.save' }); throw new Error('This layering scene never saves original configuration') }
+  avatarCleanup = () => {
+    flushSync(() => galleryRoot.render(null)); Object.assign(api.moteAvatars, original.avatars)
+    api.scratch.listTopics = original.listTopics; api.config.save = original.saveConfig
+    useAppStore.setState({ config: original.config, spaceObjectIcons: original.icons, scratchTopicSnapshots: original.snapshots })
+    avatarCleanup = undefined
+  }
+  useAppStore.setState({ config: { ...original.config!, workspaces: [...original.config!.workspaces.filter(value => value.id !== seed.workspace.id), seed.workspace] },
+    spaceObjectIcons: { ...original.icons, [seed.baseline.target.objectKey]: seed.baseline.choice as 'rocket' },
+    scratchTopicSnapshots: { ...original.snapshots, [seed.workspace.id]: { scope: scratchTopicsScope(seed.workspace), revision: 0, topics: [seed.topic], error: null, reading: false } } })
+  flushSync(() => galleryRoot.render(<DesktopClientUiProvider><PmoTeamsTopicEntry style={{ position: 'fixed', left: 28, top: 84 }} /></DesktopClientUiProvider>))
+  return avatarRead()
+}
 function closeGallery() { actions.push('cancel'); flushSync(() => galleryRoot.render(null)) }
 function CompletionConfirmation() {
   const [draft, setDraft] = useState('')
@@ -51,6 +117,11 @@ function CompletionConfirmation() {
 }
 Object.assign(window, { layeringProbe: {
   crossDocument,
+  avatar: { start: startAvatar, read: avatarRead, remember() {
+    avatarOriginal = { modal: document.querySelector('.space-icon-picker')!, canvas: document.querySelector('.mote-series__preview canvas')! }
+    if (!avatarOriginal.modal || !avatarOriginal.canvas) throw new Error('The original Avatar modal and real GLB canvas must exist')
+    return avatarRead()
+  }, dispose() { avatarCleanup?.() } },
   events: () => events,
   seed() { flushSync(() => galleryRoot.render(null)); (window as any).dialogCraft.seed() },
   nested() {
