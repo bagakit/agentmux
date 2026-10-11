@@ -55,7 +55,7 @@
 .topic-knowledge-notice > summary { cursor: pointer; border-radius: var(--radius-sm); padding-block: var(--sp-2); }
 .topic-knowledge-notice > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 .topic-knowledge-notice--error { color: var(--red-text); }
-.topic-knowledge-notice__details { max-height: 160px; overflow: auto; overflow-wrap: anywhere; padding: var(--sp-2) var(--sp-3); background: var(--surface-1); border-radius: var(--radius-sm); }
+.topic-knowledge-notice__details { overflow-wrap: anywhere; padding: var(--sp-2) var(--sp-3); background: var(--surface-1); border-radius: var(--radius-sm); }
 .topic-knowledge-notice__details p { margin: 0 0 var(--sp-3); }
 .topic-knowledge-notice__details ul { display: grid; gap: var(--sp-4); margin: 0; padding: 0; list-style: none; }
 .topic-knowledge-notice__details li { display: flex; flex-direction: column; gap: var(--sp-1); }
