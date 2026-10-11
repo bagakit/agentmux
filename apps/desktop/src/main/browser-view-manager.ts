@@ -12,7 +12,6 @@ import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, 
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
-  BROWSER_VIEWPORT_PRESETS,
   type BrowserAnnotationMarker,
   type BrowserBounds,
   type BrowserElementRect,
@@ -34,6 +33,7 @@ import type {
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
+import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '../shared/browser-viewport.js'
 import { resolveBrowserAddress } from '../shared/browser-address.js'
 import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
@@ -865,8 +865,9 @@ export class BrowserViewManager {
     return [...pids]
   }
 
-  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode): Promise<BrowserSnapshot> {
+  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive'): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
+    if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (mode !== undefined && mode !== 'normal' && mode !== 'private') throw new Error('Browser mode must be normal or private')
     if (mode === 'private' && rememberedProfileId !== undefined) throw new Error('A private Browser cannot use a saved Profile. Open a normal Browser to use that Profile.')
     // A repeated recovery handshake addresses this owner, not a new navigation/profile choice.
@@ -886,7 +887,7 @@ export class BrowserViewManager {
       const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
       storage = { mode: 'normal', profileId, partition: this.resolvePartition(profileId) }
     }
-    try { return await this.createEntry(id, url, storage, 'responsive', workspaceId) }
+    try { return await this.createEntry(id, url, storage, viewport, workspaceId) }
     catch (error) {
       if (storage.mode === 'private') await this.clearPrivateStorage(storage).catch(cleanup => {
         throw new AggregateError([error, cleanup], 'Private Browser creation and website-data cleanup failed')
@@ -940,6 +941,7 @@ export class BrowserViewManager {
 
   /** Rebuild a previously released Browser native owner from its retained projection metadata. */
   async restore(id: string, input?: Partial<BrowserRestoreInput>): Promise<BrowserSnapshot> {
+    if (input?.viewport !== undefined && !isBrowserViewport(input.viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     const existing = this.entries.get(id)
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, input?.workspaceId ?? null)
@@ -956,10 +958,7 @@ export class BrowserViewManager {
     // Renderer tab.url can lag did-start-navigation, so accepting it here could restore an older
     // committed page and silently change the Region's identity.
     const url = released.requestedUrl
-    const viewport = input?.viewport ?? released.viewport
-    if (!Object.hasOwn(BROWSER_VIEWPORT_PRESETS, viewport)) {
-      throw new Error(`Unknown browser viewport: ${String(viewport)}`)
-    }
+    const viewport = cloneBrowserViewport(input?.viewport ?? released.viewport)
     // Validate the profile before removing the retained descriptor. A failed restore must leave the
     // original profile ownership intact so deleting/repairing a profile cannot orphan this Region.
     const storage: BrowserStorage = released.storage.mode === 'private' ? released.storage
@@ -982,6 +981,7 @@ export class BrowserViewManager {
     viewport: BrowserViewport = 'responsive',
     workspaceId: string | null = null
   ): Promise<BrowserSnapshot> {
+    if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
     const view = this.createView(storage.partition)
     const entry: BrowserEntry = {
@@ -999,7 +999,7 @@ export class BrowserViewManager {
       pendingSwitch: null,
       bounds: null,
       visible: false,
-      viewport,
+      viewport: cloneBrowserViewport(viewport),
       error: null,
       driving: false,
       appLinkPrompt: null,
@@ -1018,6 +1018,7 @@ export class BrowserViewManager {
       this.placeView(view, this.window)
       view.setVisible(false)
       this.attach(entry, view)
+      this.applyViewport(entry, view)
       this.emit(entry)
       if (this.demonstrations) void this.getDemonstration(id).catch(() => {
         if (!this.owns(entry, view) || this.demonstrationCapture?.entry === entry) return
@@ -1266,11 +1267,10 @@ export class BrowserViewManager {
 
   setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
     const entry = this.require(id)
-    if (!Object.hasOwn(BROWSER_VIEWPORT_PRESETS, viewport)) {
-      throw new Error(`Unknown browser viewport: ${String(viewport)}`)
-    }
-    this.applyViewport(entry, entry.view, viewport)
-    entry.viewport = viewport
+    if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
+    const ownedViewport = cloneBrowserViewport(viewport)
+    this.applyViewport(entry, entry.view, ownedViewport)
+    entry.viewport = ownedViewport
     this.emit(entry)
     return this.snapshot(entry)
   }
@@ -3173,23 +3173,26 @@ export class BrowserViewManager {
 
   private applyViewport(entry: BrowserEntry, view = entry.view, viewport = entry.viewport): void {
     const contents = view.webContents
-    if (viewport === 'responsive') {
+    const size = browserViewportSize(viewport)
+    if (size === null) {
       contents.disableDeviceEmulation()
       return
     }
-    const size = BROWSER_VIEWPORT_PRESETS[viewport]
     // Desktop emulation includes page zoom in its layout size. Compensate locally:
     // changing zoom would also change same-origin pages in this profile.
     const zoom = contents.getZoomFactor()
-    const viewSize = viewport === 'desktop'
+    const viewSize = size.screenPosition === 'desktop'
       ? { width: Math.round(size.width * zoom), height: Math.round(size.height * zoom) }
-      : size
+      : { width: size.width, height: size.height }
+    if (!isBrowserViewport({ ...viewSize, screenPosition: size.screenPosition })) {
+      throw new Error('Browser viewport dimensions cannot be represented at the current page zoom')
+    }
     const scale = entry.bounds
       ? Math.min(1, entry.bounds.width / viewSize.width, entry.bounds.height / viewSize.height)
       : 1
     contents.enableDeviceEmulation({
-      screenPosition: viewport === 'desktop' ? 'desktop' : 'mobile',
-      screenSize: size,
+      screenPosition: size.screenPosition,
+      screenSize: { width: size.width, height: size.height },
       viewPosition: { x: 0, y: 0 },
       deviceScaleFactor: 0,
       viewSize,

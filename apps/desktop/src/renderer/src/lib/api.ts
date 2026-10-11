@@ -26,6 +26,7 @@ import type {
   WorkspaceBranchRecord
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
+import { cloneBrowserViewport, isBrowserViewport } from '../../../shared/browser-viewport'
 import { applyConfigEdit } from '../../../shared/config-edit'
 import type { AgentCatalogEntry, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { DesktopControlRequest, DesktopControlResult } from '../../../shared/contracts'
@@ -1255,7 +1256,8 @@ const mockApi: AgentMuxDesktopApi = {
       mockConfig = structuredClone(next)
       for (const listener of configListeners) listener(structuredClone(mockConfig))
     },
-    create: async (id, url, _workspace, rememberedProfileId, mode = 'normal') => {
+    create: async (id, url, _workspace, rememberedProfileId, mode = 'normal', viewport = 'responsive') => {
+      if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
       const browser: BrowserSnapshot = {
         id,
         mode,
@@ -1266,7 +1268,7 @@ const mockApi: AgentMuxDesktopApi = {
         loading: false,
         canGoBack: false,
         canGoForward: false,
-        viewport: 'responsive',
+        viewport: cloneBrowserViewport(viewport),
         error: null,
         // 预览里没有子进程，`runScript` 直接抛（见下面那条注释），所以这一位永远是 false——
         // 不是省事，是预览里确实没有任何东西能驱动它。
@@ -1357,7 +1359,8 @@ const mockApi: AgentMuxDesktopApi = {
     openDevTools: async () => {},
     setViewport: async (id, viewport: BrowserViewport) => {
       const current = requireMockBrowser(id)
-      const browser = { ...current, viewport }
+      if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
+      const browser = { ...current, viewport: cloneBrowserViewport(viewport) }
       mockBrowsers.set(id, browser)
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
@@ -1425,6 +1428,7 @@ const mockApi: AgentMuxDesktopApi = {
       if (!mockBrowsers.has(id)) return
     },
     restore: async (id, input) => {
+      if (!isBrowserViewport(input.viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
       const current = mockBrowsers.get(id)
       if (!current) {
         const browser: BrowserSnapshot = {
@@ -1437,7 +1441,7 @@ const mockApi: AgentMuxDesktopApi = {
           loading: false,
           canGoBack: false,
           canGoForward: false,
-          viewport: input.viewport,
+          viewport: cloneBrowserViewport(input.viewport),
           error: null,
           driving: false,
           appLinkPrompt: null
@@ -1451,7 +1455,7 @@ const mockApi: AgentMuxDesktopApi = {
         navigationId: crypto.randomUUID(),
         profileId: input.profileId,
         url: current.url,
-        viewport: input.viewport
+        viewport: cloneBrowserViewport(input.viewport)
       }
       mockBrowsers.set(id, browser)
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))

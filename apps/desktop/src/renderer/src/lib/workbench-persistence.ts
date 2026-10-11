@@ -1,4 +1,5 @@
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
+import { cloneBrowserViewport, isBrowserViewport, type BrowserViewport } from '../../../shared/browser-viewport'
 import {
   createWorkspaceLayout,
   groupIds,
@@ -30,7 +31,7 @@ import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-
 /**
  * 一个 browser 面**存到盘上的**最小可再实例化子集：browserId + Profile 资源身份 + url（+ title 供加载完成前
  * 先画个标签），以及可选的稳定书签来源 path/binary。整个活体 `BrowserSnapshot` 的其余字段（navigationId/loading/canGoBack/canGoForward/
- * driving/appLinkPrompt/viewport/error/id）都是**每次运行**的瞬时事实，不进盘——它们由冷启动
+ * driving/appLinkPrompt/error/id）都是**每次运行**的瞬时事实，不进盘——它们由冷启动
  * 重建 WebContentsView 那一刻的真快照补回（见 store 启动路径的 browser 复活循环 + `reduceBrowserEvent`）。
  *
  * 为什么是这个形状而不是整面剥离：旧决定「browser 面整面剥离」的顾虑本身是对的——硬存整个活体结构
@@ -48,6 +49,7 @@ export type PersistedBrowserSurface = {
   profileId?: string | null
   url: string
   title: string
+  viewport?: BrowserViewport
   bookmarkOrigin?: BrowserWorkbenchSurface['bookmarkOrigin']
 }
 
@@ -99,7 +101,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     loading: false,
     canGoBack: false,
     canGoForward: false,
-    viewport: 'responsive',
+    viewport: isBrowserViewport(surface.viewport) ? cloneBrowserViewport(surface.viewport) : 'responsive',
     error: null,
     driving: false,
     appLinkPrompt: null
@@ -110,7 +112,8 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
 function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): PersistedBrowserSurface {
   if (surface.mode === 'private') return {
     regionId: surface.regionId, kind: 'browser', workspaceId: surface.workspaceId,
-    browserId: surface.browserId, mode: 'private', url: 'about:blank', title: 'Private page'
+    browserId: surface.browserId, mode: 'private', url: 'about:blank', title: 'Private page',
+    viewport: cloneBrowserViewport(surface.viewport)
   }
   return {
     regionId: surface.regionId,
@@ -120,6 +123,7 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
     ...(surface.profileId ? { profileId: surface.profileId } : {}),
     url: surface.url,
     title: surface.title,
+    viewport: cloneBrowserViewport(surface.viewport),
     ...(surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {})
   }
 }

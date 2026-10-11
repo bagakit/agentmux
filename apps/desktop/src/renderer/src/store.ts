@@ -4904,7 +4904,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           browserIndex += 1
           set({ startupProgress: { step: 'browsers', current: browserIndex, total: browserSurfaces.length } })
           try {
-            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId, surface.profileId || undefined, surface.mode)
+            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId, surface.profileId || undefined, surface.mode, surface.viewport)
             get().applyBrowserEvent({ type: 'updated', browser })
           } catch (error) {
             // Failure to acquire a native owner is not a user close. Keep the current durable Region

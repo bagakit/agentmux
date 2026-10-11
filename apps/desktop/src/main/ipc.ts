@@ -1810,10 +1810,10 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:stopSharingExternal', event)
     externalBridge.stopSharing(id)
   })
-  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode) => {
+  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport) => {
     const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, workspaceId)
     if (mode !== 'private') await browserProfiles.initialize()
-    return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId, mode)
+    return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId, mode, viewport)
   })
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
