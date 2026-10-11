@@ -3,7 +3,14 @@ import { rpcRecord } from './rpc-data.js'
 import type { ConversationItemRef, ConversationRef } from './conversation.js'
 
 /** A user-named reference, never a second conversation body or availability fact. */
-export type ConversationLandmark = { id: string; name: string; reference: ConversationItemRef }
+export type ConversationLandmark = {
+  id: string
+  name: string
+  reference: ConversationItemRef
+  /** Original catalog route, independent of the record's Core source namespace.
+   * Existing points without this field retain their original single-namespace context. */
+  routeHostId?: string
+}
 export type ConversationLandmarkActor = { kind: 'user' | 'device' | 'agent'; id: string }
 export type ConversationLandmarkChange =
   | { kind: 'create'; point: ConversationLandmark }
@@ -35,21 +42,26 @@ export function parseConversationLandmarkRef(value: unknown): ConversationItemRe
   return { ...ref, source: { kind: 'captured', recordId } }
 }
 export function parseConversationLandmark(value: unknown): ConversationLandmark {
-  const p = object(value, ['id', 'name', 'reference'])
-  return { id: text(p.id), name: text(p.name), reference: parseConversationLandmarkRef(p.reference) }
+  const p = object(value, ['id', 'name', 'reference', 'routeHostId'])
+  return { id: text(p.id), name: text(p.name), reference: parseConversationLandmarkRef(p.reference),
+    ...(p.routeHostId === undefined ? {} : { routeHostId: text(p.routeHostId) }) }
 }
 export function parseConversationLandmarkQuery(value: unknown): ConversationLandmarkQuery {
   const p = object(value, ['hostId', 'agentSessionId', 'operationId'])
   return { hostId: text(p.hostId), agentSessionId: text(p.agentSessionId), ...(p.operationId === undefined ? {} : { operationId: text(p.operationId) }) }
 }
 export function sameLandmarkScope(a: ConversationRef, b: ConversationRef): boolean { return a.hostId === b.hostId && a.agentSessionId === b.agentSessionId }
+/** Catalog ownership only; the original source reference remains unchanged. */
+export function conversationLandmarkScope(point: ConversationLandmark): ConversationRef {
+  return { hostId: point.routeHostId ?? point.reference.hostId, agentSessionId: point.reference.agentSessionId }
+}
 export function parseConversationLandmarkWrite(value: unknown): ConversationLandmarkWrite {
   const p = object(value, ['hostId', 'agentSessionId', 'operationId', 'expectedRevision', 'change'])
   const scope = parseConversationLandmarkQuery({ hostId: p.hostId, agentSessionId: p.agentSessionId }), c = object(p.change, ['kind', 'point', 'id', 'name'])
   let change: ConversationLandmarkChange
   if (c.kind === 'create') {
     object(c, ['kind', 'point']); const point = parseConversationLandmark(c.point)
-    if (!sameLandmarkScope(scope, point.reference)) fail('The point belongs to another original conversation.')
+    if (!sameLandmarkScope(scope, conversationLandmarkScope(point))) fail('The point belongs to another original conversation.')
     change = { kind: 'create', point }
   } else if (c.kind === 'rename') { object(c, ['kind', 'id', 'name']); change = { kind: 'rename', id: text(c.id), name: text(c.name) } }
   else if (c.kind === 'remove') { object(c, ['kind', 'id']); change = { kind: 'remove', id: text(c.id) } }
@@ -69,7 +81,7 @@ export function parseConversationLandmarkPage(value: unknown, query: Conversatio
     if (!sameLandmarkScope(p as ConversationRef, query) || !Array.isArray(p.points)) return fail('The metadata response belongs to another conversation.')
     const points = p.points.map(parseConversationLandmark), ids = new Set<string>()
     for (const point of points) {
-      if (!sameLandmarkScope(point.reference, query) || ids.has(point.id)) fail('The original point identity is unconfirmed.')
+      if (!sameLandmarkScope(conversationLandmarkScope(point), query) || ids.has(point.id)) fail('The original point identity is unconfirmed.')
       ids.add(point.id)
     }
     const operation = p.recordedOperation === null ? null : parseConversationLandmarkOperation(p.recordedOperation)
