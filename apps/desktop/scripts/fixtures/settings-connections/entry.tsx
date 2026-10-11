@@ -1,4 +1,6 @@
+import { fixturePath as _historyFixturePath } from "../../../../../test/fixture-values.mjs"
 import { useState } from 'react'
+import type { HostRuntimeObservation } from '@agentmux/core'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -28,6 +30,30 @@ api.hosts.check = async (host: HostConfig) => {
     detail: 'Controlled service observation: the remote Runtime identity is unconfirmed. Original Sessions are retained. ' +
       'Verify this exact existing connection; no service was installed, stopped or restarted. Original diagnostic '.repeat(5) }
 }
+// Controlled public DTOs only; these are not observations of a real Host or Native process.
+const runtimeCapture = { phase: 'healthy' as 'healthy' | 'partial' | 'recovered', producerAt: Date.now() - 45_000 }
+api.hosts.inspect = async (host: HostConfig) => {
+  const now = Date.now(), recovered = runtimeCapture.phase === 'recovered'
+  const available = <T,>(value: T) => ({ state: 'available' as const, value, readAt: now })
+  const native = { hostId: 'controlled-native-host', ownership: 'owned' as const, buildIdentity: 'controlled-native-build',
+    protocolVersion: 22, processId: 42001, instanceId: 'controlled-native-instance' }
+  const owner = { runtimeId: host.kind === 'ssh' ? host.runtimeId ?? 'controlled-semantic-runtime' : 'controlled-local-runtime',
+    ownerInstanceId: 'controlled-core-instance', protocolVersion: 2 as const, processId: 42000, ctxmux: native, availability: 'connected' as const }
+  const diagnostics = { nodeVersion: 'v24.0.0', platform: 'linux', arch: 'x64', supported: true,
+    ctxmux: { state: { configuredDirectory: _historyFixturePath("controlled/runtime"), servingDirectory: _historyFixturePath("controlled/runtime") },
+      serving: { buildIdentity: native.buildIdentity, protocolVersion: native.protocolVersion, instanceId: native.instanceId, sourceCommit: null },
+      bundled: { version: 'controlled-bundle', sourceCommit: 'f'.repeat(40), artifactPlatform: 'linux-x64' }, ready: true,
+      capabilities: { transport: 'local-unix' as const, orderedOutputBytes: true as const, boundedReplay: true as const,
+        recoverableInput: true as const, resize: true as const, interrupt: true as const, completeStop: true as const } } }
+  const resources = { observedAt: runtimeCapture.producerAt + (recovered ? 1000 : 0), runCount: recovered ? 7 : 6,
+    runningRuns: recovered ? 5 : 4, terminatedRuns: 2, terminatedUnattachedRuns: 1,
+    attachments: recovered ? 4 : 3, retainedOutputBytes: (recovered ? 14 : 12) * 1024 * 1024 }
+  calls.push({ kind: 'controlled-runtime-inspect', input: { host: structuredClone(host), phase: runtimeCapture.phase, producerAt: resources.observedAt } })
+  return { routeHostId: host.id, configuration: structuredClone(host), requestedAt: now, completedAt: now,
+    owner: available(owner), nativeIdentity: available(native), diagnostics: available(diagnostics),
+    resources: runtimeCapture.phase === 'partial' ? { state: 'unavailable', readAt: now, code: 'CONTROLLED_RESOURCE_OBSERVATION_UNAVAILABLE',
+      message: 'Resource observation is temporarily unavailable. Existing Agent work remains available.' } : available(resources) } satisfies HostRuntimeObservation
+}
 api.deviceManagement.ls = async input => { calls.push({ kind: 'device.ls', input }); return structuredClone(deviceList) }
 api.deviceManagement.link = async input => { calls.push({ kind: 'device.link', input }); return structuredClone(deviceInvitation) }
 api.deviceManagement.revoke = async input => { calls.push({ kind: 'device.revoke-intent', input }); throw new Error('Controlled preview does not revoke OS authorization') }
@@ -39,6 +65,7 @@ let disposeAppearance = mountThemeRuntime(window, { appAppearance: 'dark' })
 const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
   select: (_section: SettingsPageId) => {}, reopen: (_section: SettingsPageId) => {}, theme: (_theme: 'light' | 'dark') => {},
   current: () => api.config.get(),
+  runtimeScenario: (phase: typeof runtimeCapture.phase) => { runtimeCapture.phase = phase },
   selection: () => useAppStore.getState().workbenchSpaceSelection,
   seedRemote: async () => {
     const current = await api.config.get()

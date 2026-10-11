@@ -77,3 +77,17 @@ describe('public Runtime resource inventory', () => {
     expect(listPage).toHaveBeenCalledOnce()
   })
 })
+
+it('cancels an in-flight original page reader without continuing the inventory or mutating a Run', async () => {
+  const adapter = new CtxmuxRunAdapter(), controller = new AbortController()
+  let finish!: (page: RunPage) => void
+  const listPage = vi.fn(() => new Promise<RunPage>(resolve => { finish = resolve }))
+  const { status, list } = connectFixture(adapter, listPage)
+  const reading = adapter.resourceSnapshot({ signal: controller.signal })
+  controller.abort(new Error('Original inventory reader cancelled'))
+  await expect(reading).rejects.toBeDefined()
+  finish({ runs: [summary('still-running', { type: 'running' }, 100)], nextCursor: 'another-page' })
+  await Promise.resolve(); await Promise.resolve()
+  expect(listPage).toHaveBeenCalledExactlyOnceWith(null)
+  expect(status).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled()
+})
