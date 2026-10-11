@@ -42,6 +42,7 @@ async function close() { await key(query(), 'Escape'); await vi.waitFor(() => ex
 it('queries real skill descriptions and sources, then inserts the exact original choice', async () => {
   const discover = vi.spyOn(api.ui, 'listAgentSkills').mockResolvedValue(skills)
   await session(); const original = dom.draft()
+  const originalEditor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!
   await open(); await search('architecture')
   expect(items()).toHaveLength(1); expect(items()[0]!.textContent).toContain('Explain')
   expect(dom.draft()).toBe(original)
@@ -51,9 +52,9 @@ it('queries real skill descriptions and sources, then inserts the exact original
   await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull())
   expect(discover).toHaveBeenCalledExactlyOnceWith('agent-1')
   expect(dom.draft()).toContain(original); expect(expandSemanticReferences(dom.draft()!)).toContain('@' + skills[1]!.path); expect(dom.draft()).not.toContain(skills[0]!.path)
-  // The original maintained insertion can retain its editor; menu dismissal can restore
-  // its trigger. Neither path may move focus to another Session or the document body.
-  await vi.waitFor(() => expect([trigger(), dom.container.querySelector('.tiptap')]).toContain(document.activeElement))
+  await vi.waitFor(() => expect(document.activeElement).toBe(originalEditor))
+  expect(dom.container.querySelector('.tiptap')).toBe(originalEditor)
+  expect(originalEditor.editor.state.selection.empty).toBe(true)
 })
 
 it('query, no match, clear and reopen preserve original editor, draft and selection', async () => {
@@ -142,7 +143,7 @@ it('switching exact Session invalidates its old query and discovery through orig
   expect(dom.draft()).toBe('First draft'); expect(dom.draft('agent-2')).toBe('Second draft')
 })
 
-it('original Launcher command menu queries descriptions and inserts only its explicit command', async () => {
+it('Launcher command selection returns to its original editor and inserted caret after searching', async () => {
   vi.spyOn(useAppStore.getState(), 'prewarmTerminal').mockResolvedValue(undefined)
   vi.spyOn(useAppStore.getState(), 'releaseWarmTerminal').mockResolvedValue(undefined)
   vi.spyOn(useAppStore.getState(), 'detectExecutors').mockResolvedValue(undefined)
@@ -159,7 +160,12 @@ it('original Launcher command menu queries descriptions and inserts only its exp
   await search(description); expect(items().some(item => item.textContent?.includes(text))).toBe(true); expect(dom.draft('region')).toBe(draft)
   await search('no matching command'); expect(items()).toHaveLength(0); expect(menu().textContent).toContain('No matching commands.')
   await search(description); await act(async () => items().find(item => item.textContent?.includes(text))!.click())
-  expect(dom.draft('region')).toBe(text + ' ' + draft); expect(document.querySelector('[role="menu"]')).toBeNull(); await vi.waitFor(() => expect(document.activeElement).toBe(trigger('command')))
+  expect(dom.draft('region')).toBe(text + ' ' + draft)
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  await vi.waitFor(() => expect(document.activeElement).toBe(originalEditor.view.dom))
+  expect(dom.container.querySelector('.tiptap')).toBe(originalEditor.view.dom)
+  expect(originalEditor.state.selection.empty).toBe(true)
+  expect(originalEditor.state.selection.head).toBe(text.length + 2)
 })
 
 it('still-open menu cannot insert once its original surface becomes disabled', async () => {
