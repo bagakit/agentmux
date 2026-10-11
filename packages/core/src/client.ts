@@ -4604,10 +4604,12 @@ export class AgentMuxClient {
           receipt = existing; return current
         }
         const root = current.continuityOperations?.[input.intentOperationId], supervision = root?.supervision
-        if (!root || !supervision || root.intentOperationId || !root.nativeTarget || !isDeepStrictEqual(root.nativeTarget, current.nativeHandle)) throw new AgentMuxError(
+        if (!root || !supervision || root.intentOperationId || !root.nativeTarget || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle)) throw new AgentMuxError(
           'The exact original supervised recovery target is unavailable.', 'AGENT_CONTINUITY_SUPERSEDED')
         const active = current.continuityOperations?.[supervision.activeAttemptOperationId]
-        if (!active || !(active.newRun ? sameRun(active.newRun, current.run) : sameRun(active.previousRun, current.run))) throw new AgentMuxError(
+        if (!active || !matchesProviderNativeSessionTarget(root.nativeTarget, active.nativeTarget) ||
+          !matchesProviderNativeSessionTarget(active.nativeTarget, current.nativeHandle) ||
+          !(active.newRun ? sameRun(active.newRun, current.run) : sameRun(active.previousRun, current.run))) throw new AgentMuxError(
           'The active recovery attempt no longer names the exact current Run.', 'AGENT_CONTINUITY_SUPERSEDED')
         const next = structuredClone(supervision), observedAt = Date.now()
         let outcome: AgentMuxContinuityControlReceipt['outcome'] = 'unchanged'
