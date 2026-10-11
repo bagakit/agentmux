@@ -7,6 +7,7 @@ import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
+import { SpaceObjectImages } from '../../../src/main/space-object-images'
 const [html, privateRoot, phase, preload, resultDirectory, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -18,6 +19,13 @@ const config = { version: 9, hosts: [{ id: 'local', kind: 'local' as const, labe
   workspaces: [scratch], appearance: { terminalTheme: 'graphite' },
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const topics = new ScratchTopics()
+const images = new SpaceObjectImages(async target => {
+  assert.equal(target.kind, 'topic', 'Only private Topic images belong to this fixture')
+  if (target.kind !== 'topic') throw new Error('Private Topic image required')
+  assert.equal(target.workspaceId, scratch.id)
+  const identity = await topics.topicAppearanceIdentity(scratch, target.topicId, target.objectKey)
+  return { hostId: scratch.hostId, directoryPath: identity.physicalDirectoryPath }
+})
 const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')), localRuntimeConnector, topics)
 const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial-state.json'))
 const calls: { operation: string; args: any[]; at: number }[] = []
@@ -47,6 +55,7 @@ ipcMain.handle('topic-terminal:request', async (event, operation, ...args) => {
     case 'topic': return topics.read(scratch, args[1])
     case 'ensure-topic': return topics.ensure(scratch, args[1])
     case 'ensure-mote': return topics.ensureMote(scratch, args[1])
+    case 'object-appearance': return images.appearance(args[0])
     case 'save-ids': await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(args[0])); return
     case 'flush': await win.webContents.session.flushStorageData(); return
     default: throw new Error(`Unsupported private fixture request: ${operation}`)
@@ -77,6 +86,10 @@ app.whenReady().then(async () => {
     const state = () => win.webContents.executeJavaScript('topicTerminalState()')
     const ui = () => win.webContents.executeJavaScript('topicTerminalUi()')
     await until('window.topicTerminalUi().floating.activeTabIds.length === 1 && window.topicTerminalUi().floating.activeTabIds[0] === "mote-tab"')
+    // Current startup publishes the durable workface before its independent
+    // Runtime membership read settles. Observe the original owner's recovery;
+    // seeing Terminal DOM alone cannot certify that the read has completed.
+    await until('window.topicTerminalState().error === null')
     result.initial = { state: await state(), ui: await ui(), savedFloatingAtStartup: await win.webContents.executeJavaScript('window.topicTerminalFloatingAtStartup') }
     assert.equal(result.initial.savedFloatingAtStartup.open, true, 'Both App generations start from the saved open floating state')
     assert.equal(result.initial.savedFloatingAtStartup.targetTabId, 'mote-tab', 'Both App generations read the original saved explicit target')
@@ -132,18 +145,41 @@ app.whenReady().then(async () => {
     // Keep the floating terminal genuinely usable after a full cold-parking deadline.
     if (phase === 'seed') await delay(31000)
     assert.equal(await win.webContents.executeJavaScript('window.originalMoteTerminal.element?.isConnected && document.getElementById(topicTerminalMoteSlotId("mote-floating-tab-slot")).contains(window.originalMoteTerminal.element)'), true)
-    await win.webContents.executeJavaScript(`(() => { const term = window.originalMoteTerminal; term.focus(); })()`)
+    const moteInput = (await ui()).terminals.find((terminal: any) => terminal.regionId === 'mote-region')
+    assert.equal(moteInput?.visible, true, 'The original Mote Terminal must be a visible native input target')
+    result.nativeInputTarget = await win.webContents.executeJavaScript(`(() => {
+      window.topicTerminalPointerEvents = [];
+      document.addEventListener('pointerdown', event => window.topicTerminalPointerEvents.push({ trusted: event.isTrusted,
+        originalMote: window.originalMoteTerminal.element.contains(event.target) }), { capture: true });
+      return { point: ${JSON.stringify(moteInput.point)},
+        originalMote: window.originalMoteTerminal.element.contains(document.elementFromPoint(${moteInput.point.x}, ${moteInput.point.y})) };
+    })()`)
+    assert.equal(result.nativeInputTarget.originalMote, true, 'The measured native pointer point hits the exact original Mote Terminal')
+    for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',
+      { type, x: moteInput.point.x, y: moteInput.point.y, button: 'left', clickCount: 1 })
+    await until('window.originalMoteTerminal.element.contains(document.activeElement)')
+    result.nativeInputTarget.pointerEvents = await win.webContents.executeJavaScript('window.topicTerminalPointerEvents')
+    assert.ok(result.nativeInputTarget.pointerEvents.some((event: any) => event.trusted && event.originalMote),
+      'A trusted native pointer reaches the original Mote Terminal before typing')
+    result.nativeInputTarget.caretWithinOriginalMote = true
     for (const text of 'private-input-still-works') await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'char', text })
     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' })
     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
-    await until('window.terminals.some(one => Array.from({length:one.buffer.active.length},(_,n)=>one.buffer.active.getLine(n)?.translateToString()).some(line=>line?.includes("ACK:private-input-still-works")))')
+    await until('Array.from({length:window.originalMoteTerminal.buffer.active.length},(_,n)=>window.originalMoteTerminal.buffer.active.getLine(n)?.translateToString()).some(line=>line?.includes("ACK:private-input-still-works"))')
+    const inputControls = calls.filter(call => call.operation === 'write').map(call => call.args[0])
+    assert.ok(inputControls.length > 0)
+    assert.ok(inputControls.every(control => control.kind === 'terminal' && control.hostId === 'local' && control.runId === ids.moteId && control.run.runId === ids.moteId),
+      'Every actual input write targets only the original Mote Run')
     result.inputWrites = calls.filter(call => call.operation === 'write').length
     assert.ok(result.inputWrites > 0)
     result.inputFocus = (await state()).focus.execution
-    assert.equal(result.inputFocus.sessionId, ids.moteId, 'Explicit native input selects the original Mote Run')
-    assert.deepEqual(result.inputFocus.reference, { displayWorkspaceId: '__scratch__', groupId: 'original-group', tabId: 'mote-tab', regionId: 'mote-region' }, 'Native input retains the exact original Mote occurrence')
+    result.inputPmoFocus = (await state()).focus.pmo
+    result.inputReference = (await ui()).floating.saved.reference
+    assert.equal(result.inputPmoFocus.sessionId, ids.moteId, 'Original Mote input retains its coordination focus lane')
+    assert.deepEqual(result.inputFocus, result.initial.state.focus.execution, 'Mote input preserves the complete original execution focus and MRU')
+    assert.deepEqual(result.inputReference, { displayWorkspaceId: '__scratch__', groupId: 'original-group', tabId: 'mote-tab', regionId: 'mote-region' }, 'Native input retains the exact original Mote occurrence')
     await win.webContents.executeJavaScript('topicTerminalCloseFloat()')
-    assert.deepEqual((await state()).focus.execution, result.inputFocus, 'Shortcut closing preserves the latest explicit input execution focus and history')
+    assert.deepEqual((await state()).focus.execution, result.inputFocus, 'Shortcut closing preserves the original execution focus and history')
     await win.webContents.executeJavaScript('window.topicTerminalWorkbench()')
     await win.webContents.executeJavaScript('window.topicTerminalRestoreWorkspace()')
     await until('document.getElementById(topicTerminalMoteSlotId("workbench-tab-slot"))?.contains(window.originalMoteTerminal.element)')
@@ -152,7 +188,7 @@ app.whenReady().then(async () => {
     result.originalViewportAfterFloat = await win.webContents.executeJavaScript('window.originalTopicTerminal.buffer.active.viewportY')
     assert.equal(result.originalViewportAfterFloat, result.reading.at(-1).after, 'Floating navigation preserves the original ongoing history reading position')
     assert.equal((await state()).layouts.__scratch__.groups[0].activeTabId, ids.tabId, 'Floating open/close must keep the original main Topic selected')
-    assert.deepEqual((await state()).focus.execution, result.inputFocus, 'Returning to Workbench keeps the latest explicit input execution Session and history')
+    assert.deepEqual((await state()).focus.execution, result.inputFocus, 'Returning to Workbench keeps the original execution Session and history')
     result.closeEntries = (await ui()).close
     assert.ok(result.closeEntries.length > 0)
     assert.ok(result.closeEntries.every((entry: any) => Number(entry.opacity) > 0), 'All actual close entries must be visible without hovering')

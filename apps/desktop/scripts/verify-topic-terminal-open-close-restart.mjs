@@ -11,13 +11,14 @@ import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe
 const desktop = path.resolve(import.meta.dirname, '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/topic-terminal-open-close-restart')
-const evidence = path.join(root, '.tmp/topic-terminal-open-close-restart/last')
+const outputIndex = process.argv.indexOf('--output')
+assert.ok(outputIndex < 0 || process.argv[outputIndex + 1], '--output requires a fresh evidence directory')
+const evidence = outputIndex < 0 ? path.join(root, '.tmp/topic-terminal-open-close-restart/last') : path.resolve(process.argv[outputIndex + 1])
 const workspaceMoveBuild = path.join(desktop, 'scripts/build-workspace-move-helper.mjs')
 const workspaceMoveHelper = path.join(desktop, 'resources/bin/agentmux-workspace-move')
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = require('electron')
-const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-topic-terminal-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const receipt = { schema: 'agentmux.topic-terminal-open-close-restart.v1', passed: false, phases: [], inputs: null, cleanup: null,
   limitations: ['Real private Electron process restart and production App/Store/SessionPane/TerminalView are exercised.',
@@ -29,11 +30,18 @@ const files = async directory => (await Promise.all((await fs.readdir(directory,
 const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/probe-process.mjs'),
   workspaceMoveBuild, path.join(desktop, 'native/workspace-move.c'), workspaceMoveHelper,
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
-  ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/dist')), electron]
+  ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/dist')),
+  ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/client-ui/dist')),
+  ...await files(path.join(root, 'patches')), path.join(root, 'pnpm-lock.yaml'), path.join(root, 'pnpm-workspace.yaml'), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 let client
 await fs.mkdir(evidence, { recursive: true })
+if (outputIndex >= 0) assert.equal((await fs.readdir(evidence)).length, 0, '--output must preserve existing evidence')
+// macOS exposes /var through /private/var. Seed every original directory, Run
+// and spatial identity from the same actual root before creating any records.
+// Keep the private prefix short enough for macOS's Unix-domain socket address.
+const privateRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'amux-')))
 try {
   execFileSync(process.execPath, [workspaceMoveBuild], { cwd: root, stdio: 'inherit' })
   receipt.inputs = await hashes()
@@ -51,9 +59,13 @@ try {
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"', __TERMINAL_WHEEL_UMD_URL__: '"unused"' },
     resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
-  await build({ configFile: false, root: fixture, logLevel: 'error',
+  await build({ configFile: false, root: fixture, logLevel: 'error', ssr: { noExternal: true },
     build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'out/main'), emptyOutDir: true,
       rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
+  const compiledHashes = async () => Object.fromEntries(await Promise.all(
+    [...await files(path.join(privateRoot, 'renderer')), ...await files(path.join(privateRoot, 'out/main'))]
+      .map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
+  receipt.compiled = await compiledHashes()
   // The ordinary Core daemon is shared by the two private Electron generations. Each Electron
   // watchdog owns only its own process group and phase directory; parent cleanup owns all Runs.
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
@@ -87,6 +99,8 @@ try {
   assert.equal(new Set(receipt.phases.map(phase => phase.native.pid)).size, 2)
   receipt.inputsAfter = await hashes()
   assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'Source changed during native verification')
+  receipt.compiledAfter = await compiledHashes()
+  assert.deepEqual(receipt.compiledAfter, receipt.compiled, 'Compiled inputs changed during native verification')
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {
