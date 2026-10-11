@@ -14,7 +14,7 @@ const aliases = ['core', 'demand', 'relay'].flatMap(name => {
 const changes: Record<string, [string, string, string]> = {
   'lose-prepared': ['packages/core/src/agent-session-store.ts', "reservation.kind === 'create' && (reservation.preparedCreation", "false && (reservation.preparedCreation"],
   'lose-queued': ['packages/core/src/agent-global-message-queue.ts', 'return messageId ? structuredClone(this.messages.get(messageId)!) : null', 'return null'],
-  'skip-core-resolution': ['packages/core/src/client.ts', '? await this.resolveAgentCreationSessionId(createOperationId)', '? await deriveAgentSessionId(createOperationId)'],
+  'skip-core-resolution': ['packages/core/src/client.ts', '?? await this.resolveAgentCreationSessionId(createOperationId)', '?? await deriveAgentSessionId(createOperationId)'],
   'skip-hosted-offline': ['packages/core/src/hosted-runtime-service.ts', "'readDeliveryAttempt', 'resolveAgentCreationSessionId',", "'readDeliveryAttempt',"],
   'skip-desktop-resolution': ['apps/desktop/src/main/runtime-controller.ts', 'await client.resolveAgentCreationSessionId(hostIntent.createOperationId!)', "'mutated-new-session'"]
 }

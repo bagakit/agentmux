@@ -86,7 +86,7 @@ function healthyOneCreation() {
 describe('public Agent creation retains the original first-prompt delivery fact', () => {
   it.each([undefined, '   '])('persists not-requested for absent or blank original prompt %j', async prompt => {
     const result = await create(prompt)
-    const creation = { createOperationId: requestId, initialPrompt: 'not-requested' }
+    const creation = { createOperationId: requestId, initialPrompt: 'not-requested', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'confirmed' }
     expect(result.creation).toEqual(creation)
     expect(result.session.creation).toEqual(creation)
     expect(client.agentSession(sessionId).creation).toEqual(creation)
@@ -98,7 +98,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
 
   it('confirms an at-launch first prompt from the same creation, without another Input', async () => {
     const result = await create(task)
-    const creation = { createOperationId: requestId, initialPrompt: 'confirmed' }
+    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'confirmed' }
     expect(result).toMatchObject({ promptConfirmed: true, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -115,12 +115,12 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     submit.mockImplementation(async () => { await new Promise<void>(resolve => { release = resolve }) })
     const creating = create(task)
     await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
-    expect((await stored()).creation).toEqual({ createOperationId: requestId, initialPrompt: 'unknown' })
-    expect(client.agentSession(sessionId).creation).toEqual({ createOperationId: requestId, initialPrompt: 'unknown' })
+    expect((await stored()).creation).toEqual({ createOperationId: requestId, initialPrompt: 'unknown', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unknown' })
+    expect(client.agentSession(sessionId).creation).toEqual({ createOperationId: requestId, initialPrompt: 'unknown', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unknown' })
     expect((await store.loadTimeline(sessionId)).items).toEqual([])
     release()
     const result = await creating
-    const creation = { createOperationId: requestId, initialPrompt: 'confirmed' }
+    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'confirmed' }
     expect(result).toMatchObject({ promptConfirmed: true, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -128,7 +128,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     expect(submit.mock.calls).toEqual([[expect.objectContaining({ agentSessionId: sessionId, run: { runId } }),
       expect.objectContaining({ runId }), `launch-prompt:${start.mock.calls[0]![0].operationKey}`, task, expect.any(Object),
       { expectedRun: { runId }, afterSubmissionId: null }, undefined, undefined, false, expect.any(AbortSignal),
-      undefined, { userContent: task }]])
+      undefined, { userContent: task }, undefined, undefined, undefined, undefined, undefined, undefined]])
     expect((await store.loadTimeline(sessionId)).items.map(({ content, status }) => ({ content, status })))
       .toEqual([{ content: task, status: 'complete' }])
     healthyOneCreation()
@@ -138,7 +138,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     providerId = 'kimi'
     submit.mockRejectedValue(new Error('Private fixture loses the original Input receipt'))
     const result = await create(task)
-    const creation = { createOperationId: requestId, initialPrompt: 'unconfirmed' }
+    const creation = { createOperationId: requestId, initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unconfirmed' }
     expect(result).toMatchObject({ promptConfirmed: false, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -169,7 +169,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     expect(failedReceiptWrites).toBe(1)
     expect(result).toMatchObject({ promptConfirmed: true,
       creation: { createOperationId: requestId, initialPrompt: 'confirmed' } })
-    const retained = { createOperationId: requestId, initialPrompt: 'unknown' }
+    const retained = { createOperationId: requestId, initialPrompt: 'unknown', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unknown' }
     expect(result.session.creation).toEqual(retained)
     expect(client.agentSession(sessionId).creation).toEqual(retained)
     expect((await stored()).creation).toEqual(retained)
