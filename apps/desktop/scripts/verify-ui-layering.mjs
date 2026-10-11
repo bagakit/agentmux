@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
+import { execFileSync } from 'node:child_process'
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
 import { resolve, join, relative } from 'node:path'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
@@ -23,16 +24,26 @@ const root = outputIndex < 0 ? join(repository, '.tmp/ui-layering', randomUUID()
 await mkdir(root, { recursive: true })
 assert.equal((await readdir(root)).length, 0, '--output must select a fresh directory; existing evidence is preserved')
 const hash = value => createHash('sha256').update(value).digest('hex')
-const dependencyLockSHA256 = hash(await readFile(join(repository, 'pnpm-lock.yaml')))
-const originalInputs = new Map(), dependencyInputs = new Map(), results = []
-for (const path of ['apps/desktop/scripts/verify-ui-layering.mjs', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/lib/fixture-values.mjs']) {
-  originalInputs.set(path, hash(await readFile(join(repository, path))))
+function candidateIdentity() {
+  const git = args => execFileSync('git', args, { cwd: repository })
+  const status = git(['status', '--porcelain=v1', '--untracked-files=all']).toString().trim()
+  const trackedStatus = git(['status', '--porcelain=v1', '--untracked-files=no']).toString().trim()
+  return { head: git(['rev-parse', 'HEAD']).toString().trim(), clean: status === '', trackedClean: trackedStatus === '', status, trackedStatus,
+    trackedDiffSHA256: hash(Buffer.concat([git(['diff', '--binary', 'HEAD']), git(['diff', '--cached', '--binary'])])) }
 }
+const candidate = { started: candidateIdentity(), finished: null, unchanged: false }
+const originalInputs = new Map(), dependencyInputs = new Map(), results = []
+const harnessInputs = {}
+for (const path of ['apps/desktop/scripts/verify-ui-layering.mjs', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/radix-overlay-aliases.ts',
+  'apps/desktop/scripts/lib/fixture-values.mjs', 'pnpm-lock.yaml']) {
+  const digest = hash(await readFile(join(repository, path))); originalInputs.set(path, digest); harnessInputs[path] = digest
+}
+const dependencyLockSHA256 = harnessInputs['pnpm-lock.yaml']
 const partial = mobileOnly || fullscreenOnly || withoutSystemFullscreen
 const evidence = { schema: 'agentmux.ui-layering.v1', passed: false, availableChecksPassed: false, completeGate: false,
   uncovered: [...(withoutSystemFullscreen ? ['native-system-fullscreen'] : []), ...(!process.env.AGENTMUX_VISUAL_ORCA_CLI ? ['OS-composition'] : [])],
   scope: mobileOnly ? 'mobile-only' : fullscreenOnly ? 'system-fullscreen-only' : withoutSystemFullscreen ? 'partial-without-system-fullscreen' : 'complete', captureOnly: false, aestheticReview: 'independent-review-pending', userRunTouched: false,
-  boundary: 'Isolated actual Workbench→Store→ConfirmationDialog→Modal→window host→collector→Hook→IPC→NativeOverlaySurfaces→native input→original DOM handler. Preview Agent facts and explicit native Browser test page; no real CLI stop, installed App, durable restart or physical OS keyboard claim.', results }
+  boundary: 'Isolated actual Workbench→Store→ConfirmationDialog→Modal→window host→collector→Hook→IPC→NativeOverlaySurfaces→native input→original DOM handler. Preview Agent facts and explicit native Browser test page; no real CLI stop, installed App, durable restart or physical OS keyboard claim.', candidate, harnessInputs, results }
 const mutations = [
   { label: 'non-atomic-required-pair', path: 'apps/desktop/src/main/native-overlay-surfaces.ts',
     before: 'await boundedChromePaint(this.paint(projection, Boolean(modalId)))', after: 'await boundedChromePaint(this.paint(projection, false))', expected: /Required modal pair has no orphan scrim/ },
@@ -155,6 +166,7 @@ async function run(label, mutation) {
   console.log(label + ': ' + (mutation ? 'expected RED' : partial ? 'available checks passed — PARTIAL; completeGate=false' : 'all machine coverage gates passed; independent image review pending'))
 }
 try {
+  if (!mobileOnly && !fullscreenOnly) assert.equal(candidate.started.clean, true, 'The complete requested matrix must consume a clean committed candidate; scoped development checks retain their dirty identity')
   await run('candidate')
   if (process.argv.includes('--mutations')) { for (const mutation of mutations) await run(mutation.label, mutation); await run('restored') }
   evidence.sourceInputs = Object.fromEntries(originalInputs)
@@ -171,14 +183,23 @@ try {
   evidence.passed = evidence.completeGate
 } catch (error) { evidence.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
 finally {
+  try {
+    candidate.finished = candidateIdentity()
+    assert.deepEqual(candidate.finished, candidate.started, 'The original Git candidate identity must remain unchanged through the actual proof run')
+    for (const [path, digest] of Object.entries(harnessInputs)) assert.equal(hash(await readFile(join(repository, path))), digest, 'The original proof harness input must remain unchanged: ' + path)
+    candidate.unchanged = true
+  } catch (error) {
+    evidence.identityFailure = { name: error.name, message: error.message, stack: error.stack }
+    evidence.passed = false; evidence.availableChecksPassed = false; evidence.completeGate = false; process.exitCode = 1
+  }
   await writeFile(join(root, 'receipt.json'), JSON.stringify(evidence, null, 2))
-  const candidate = results.find(result => result.label === 'candidate')
+  const candidateResult = results.find(result => result.label === 'candidate')
   await writeFile(join(root, 'review.md'), ['# UI layering — independent image review pending', '',
     `Scope: ${evidence.scope}. availableChecksPassed=${evidence.availableChecksPassed}; completeGate=${evidence.completeGate}. Uncovered: ${evidence.uncovered.join(', ') || 'none'}.`, '',
     'Read the complete actual candidate OS window screenshots. Separate Renderer/native PNGs are diagnostic scope only and are never an OS screenshot.', '',
     'Actual Workbench close → shared modal → native Chrome projection and trusted input. Preview Agent/Browser facts only; no user Session was stopped. Capture success does not sign aesthetic approval.', '',
-    ...(candidate?.osFrames ?? []).map(frame => `- ${frame.label}: [OS window](candidate/${frame.file}) · [identity/owners](candidate/${frame.metadata})`),
-    ...(!candidate?.osFrames?.length ? ['No actual OS window screenshot was captured. Do not sign compositor visual approval.'] : []), '',
+    ...(candidateResult?.osFrames ?? []).map(frame => `- ${frame.label}: [OS window](candidate/${frame.file}) · [identity/owners](candidate/${frame.metadata})`),
+    ...(!candidateResult?.osFrames?.length ? ['No actual OS window screenshot was captured. Do not sign compositor visual approval.'] : []), '',
     'Review: Stop readability above scrim/Browser, action priority, narrow/short/125% fit, failure service window, retained content, nested control clarity. Record exact images opened, concrete issues and explicit delivery conclusion.', ''].join('\n'))
   console.log(JSON.stringify({ passed: evidence.passed, availableChecksPassed: evidence.availableChecksPassed, completeGate: evidence.completeGate,
     uncovered: evidence.uncovered, receipt: join(root, 'receipt.json'), failure: evidence.failure ?? null }))
