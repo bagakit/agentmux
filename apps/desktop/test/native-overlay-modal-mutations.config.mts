@@ -12,7 +12,9 @@ const changes = {
   partialFailure: ['if (modalId) fail(modalId, message)', 'if (modalId) this.remove(prepared.at(-1)!.region.id, prepared.at(-1)!)'],
   backgroundInput: ['if (this.modalBlocks(view, owner.browserId)) event.preventDefault()', 'if (false) event.preventDefault()'],
   staleOwner: ['if (this.browsers.nativeOwner(browserId)?.view !== view) return false', 'if (false) return false'],
-  scrimChrome: ['const x = Math.max(bounds.x, browser.x), y = Math.max(bounds.y, browser.y)', 'const x = bounds.x, y = bounds.y']
+  scrimChrome: ['const x = Math.max(bounds.x, browser.x), y = Math.max(bounds.y, browser.y)', 'const x = bounds.x, y = bounds.y'],
+  sharedDecoder: ['const image = new Image(); image.alt', "const image = document.querySelector('img'); image.alt"],
+  staleDecodedImage: ['if (root.dataset.chromeRevision !== revision) return;', 'if (false) return;']
 } as const
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 

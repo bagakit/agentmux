@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { EventEmitter } from 'node:events'
+import { runInNewContext } from 'node:vm'
 import { NativeOverlaySurfaces } from '../src/main/native-overlay-surfaces'
 import type { NativeOverlayRegion } from '../src/shared/native-overlay'
 
@@ -944,6 +945,55 @@ describe('actual native Chrome owner', () => {
     expect(owner.hasProjectionInFocusedWindow()).toBe(false)
     expect(fake.views).toHaveLength(1)
     expect(fake.views[0].webContents.close).toHaveBeenCalledTimes(1)
+  })
+  it('settles overlapping image preparations independently and retains the newest decoded frame', async () => {
+    const { owner, contents, warning } = fixture()
+    await owner.update([float])
+    const view = fake.views[0]
+    const requests: { image: Image; source: string; finish(): void }[] = []
+    class Image {
+      style = {}; alt = ''; onload?: () => void; onerror?: () => void
+      current?: typeof requests[number]
+      private decoded = Promise.resolve()
+      setAttribute() {}
+      set src(source: string) {
+        let decoded!: () => void
+        this.decoded = new Promise(resolve => { decoded = resolve })
+        const request = { image: this, source, finish: () => {
+          // A later src cancels the earlier image request; its replaced load handler
+          // cannot settle the earlier caller. Independent Image objects do settle.
+          if (this.current !== request) return
+          decoded(); this.onload?.()
+        } }
+        requests.push(request); this.current = request
+      }
+      decode() { return this.decoded }
+      replaceWith(image: Image) { displayed = image }
+    }
+    let displayed = new Image()
+    const svg = { style: {} }
+    const context = { Image, document: { documentElement: { dataset: {} },
+      createElement: () => new Image(), querySelector: (selector: string) => selector === 'img' ? displayed : svg } }
+    view.webContents.executeJavaScript.mockImplementation((script: string) => runInNewContext(script, context))
+    contents.capturePage.mockResolvedValueOnce({ isEmpty: () => false, toPNG: () => Buffer.from('older-frame') })
+    contents.capturePage.mockResolvedValueOnce({ isEmpty: () => false, toPNG: () => Buffer.from('newer-frame') })
+    const updating = owner.update([float])
+    try {
+      await vi.waitFor(() => expect(requests).toHaveLength(1))
+      view.listeners['input-event']({}, { type: 'mouseMove', x: 5, y: 7, button: 'none' })
+      await vi.waitFor(() => expect(requests).toHaveLength(2))
+      requests[1]!.finish()
+      requests[0]!.finish()
+      expect(await updating).toEqual({ projected: 1, capturedPixels: 8000 })
+      expect(warning).not.toHaveBeenCalled()
+      expect(displayed.current?.source).toContain(Buffer.from('newer-frame').toString('base64'))
+      expect(view.webContents.close).not.toHaveBeenCalled()
+      expect(view.getBounds()).toEqual(float.bounds)
+    } finally {
+      owner.dispose()
+      for (const request of requests) request.finish()
+      await updating
+    }
   })
   it('pending or failed repaint cannot route a stale picture to the new source position', async () => {
     const { owner, contents } = fixture()
