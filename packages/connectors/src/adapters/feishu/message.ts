@@ -2,6 +2,8 @@ import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionApplication } from '@agentmux/core/connections'
 import type { VerifiedIngressEvent } from '../../durable-ingress.js'
 
+export const FEISHU_MESSAGE_EVENT = 'im.message.receive_v1'
+
 export type FeishuMessageEvent = {
   schema: string
   header: { app_id: string; event_id: string; event_type: string }
@@ -32,7 +34,7 @@ export function readFeishuMessage(raw: string, application: ConnectionApplicatio
   try { parsed = JSON.parse(raw) } catch { return feishuFailure('FEISHU_EVENT_INVALID') }
   const payload = object(parsed), header = object(payload.header), event = object(payload.event)
   const sender = object(event.sender), message = object(event.message)
-  if (payload.schema !== '2.0' || header.event_type !== 'im.message.receive_v1' || header.app_id !== application.appId) feishuFailure('FEISHU_EVENT_IDENTITY_MISMATCH')
+  if (payload.schema !== '2.0' || header.event_type !== FEISHU_MESSAGE_EVENT || header.app_id !== application.appId) feishuFailure('FEISHU_EVENT_IDENTITY_MISMATCH')
   feishuIdentity(header.event_id); feishuIdentity(message.message_id); feishuIdentity(message.chat_id)
   feishuIdentity(sender.sender_type); feishuIdentity(message.chat_type)
   if (message.parent_id !== undefined) feishuIdentity(message.parent_id)

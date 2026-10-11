@@ -5,7 +5,7 @@ import { parseConnectionConfig, type ConnectionConfig, type ConnectionObservatio
 import type { ConnectionAdapter } from '../../connection-host.js'
 import type { ConnectionIngressTransport, ConnectionIngressReceiver } from '../../connection-receivers.js'
 import type { IngressAuthenticator, VerifiedIngressEvent } from '../../durable-ingress.js'
-import { feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
+import { FEISHU_MESSAGE_EVENT, feishuFailure, feishuIdentity, readFeishuMessage, projectFeishuMessage } from './message.js'
 import { feishuParentAddressing } from './reply.js'
 import { readFeishuAction } from './action.js'
 import { FeishuPublicationAdapter } from './publication.js'
@@ -157,7 +157,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
       if (!this.current(receiver)) feishuFailure('FEISHU_CONNECTION_REVISED')
       const dispatcher = new EventDispatcher({ logger: safeLogger, loggerLevel: LoggerLevel.error, cache: new DefaultCache() })
       dispatcher.unregister('app_ticket')
-      dispatcher.register({ 'im.message.receive_v1': async () => {
+      dispatcher.register({ [FEISHU_MESSAGE_EVENT]: async () => {
         const witness = this.callback.getStore()
         if (!witness || !this.witnesses.has(witness) || witness.receiver !== receiver) feishuFailure('FEISHU_TRANSPORT_PROOF_REQUIRED')
         const payload = readFeishuMessage(witness.raw, config.application)
