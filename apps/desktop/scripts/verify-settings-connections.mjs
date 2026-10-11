@@ -13,7 +13,7 @@ const packet = resolve(root, ".bagakit/design/settings-connections-fixture")
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const argv = process.argv.slice(2), operation = argv[0]
 const section = operation === '--capture' ? argv[1] : 'connections'
-assert.ok(['--owning', '--callers', '--capture', '--visual', '--preflight', '--remote-owning'].includes(operation), 'Explicit finite operation')
+assert.ok(['--owning', '--callers', '--capture', '--visual', '--preflight', '--remote-owning', '--topology-owning'].includes(operation), 'Explicit finite operation')
 if (operation === '--capture') assert.ok(section === 'hosts' || section === 'devices')
 const evidence = resolve(packet, ("" + (operation.slice(2)) + "-" + (section) + "-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(evidence, { recursive: true })
@@ -43,10 +43,10 @@ async function finalizeInputs() {
   receipt.sourceUnchanged = true
 }
 async function owning() {
-  const variants = operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
-  const messages = { remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
+  const variants = operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
+  const messages = { route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
-  const modes = [{ label: 'baseline', mutant: 'baseline' }, ...variants.flatMap(kind => [
+  const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
     { label: kind + '-mutant', mutant: kind, test: (kind === 'remote' ? 'catalog' : kind) + ':' }, { label: kind + '-restored', mutant: 'baseline', test: (kind === 'remote' ? 'catalog' : kind) + ':' }
   ])]
   for (const mode of modes) {
@@ -72,7 +72,7 @@ async function owning() {
     } else {
       assert.equal(execution.exitCode, 0, JSON.stringify(failures.map(test => test.failureMessages)))
       assert.equal(result.success, true); assert.equal(result.numFailedTests, 0)
-      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? 10 : 1), 'Nonempty complete bounded cases')
+      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? operation === '--topology-owning' ? 3 : 10 : 1), 'Nonempty complete bounded cases')
       assert.equal(applied.length, 0); assert.ok(loaded.every(input => input.originalSHA256 === input.consumedSHA256))
     }
     receipt.runs.push({ ...mode, execution, passed: mode.mutant === 'baseline', specificAssertionRED: mode.mutant !== 'baseline',
@@ -189,7 +189,7 @@ async function capture() {
       assert.equal(bytes.readUInt32BE(16), frame.pngPixels.width); assert.equal(bytes.readUInt32BE(20), frame.pngPixels.height)
       receipt.supplementalImages.push({ path: frame.image, bytes: bytes.length, sha256: sha(bytes), width: frame.width, theme: frame.theme, scenario: frame.scenario })
     }
-    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, 8, 'Nonempty original access, upgrade and capability scenes')
+    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, 13, 'Nonempty original access, upgrade, capability, canvas-motion and Retro scenes')
     receipt.cssInputs = [...cssInputs].map(file => relative(root, file)).sort(); receipt.compiled = compiled
     receipt.aestheticReview = 'pending independent actual PNG review'
   } finally {
@@ -224,7 +224,7 @@ async function visual() {
 
 try {
   await bindBase()
-  if (operation === '--owning' || operation === '--preflight' || operation === '--remote-owning') await owning()
+  if (operation === '--owning' || operation === '--preflight' || operation === '--remote-owning' || operation === '--topology-owning') await owning()
   else if (operation === '--callers') await callers()
   else if (operation === '--capture') await capture()
   else await visual()

@@ -83,13 +83,17 @@ useAppStore.setState({ config, providerCatalog: await api.providers.list(), acti
 api.config.onChange(next => useAppStore.setState({ config: next }))
 let disposeAppearance = mountThemeRuntime(window, { appAppearance: 'dark' })
 const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
-  select: (_section: SettingsPageId) => {}, reopen: (_section: SettingsPageId) => {}, theme: (_theme: 'light' | 'dark') => {},
+  select: (_section: SettingsPageId) => {}, reopen: (_section: SettingsPageId) => {}, theme: (_theme: 'light' | 'dark', _themeId: string = 'graphite') => {},
   current: () => api.config.get(),
   runtimeScenario: (phase: typeof runtimeCapture.phase) => { runtimeCapture.phase = phase },
   selection: () => useAppStore.getState().workbenchSpaceSelection,
   seedRemote: async () => {
     const current = await api.config.get()
-    const hosts = seeded.hosts.slice(0, 7)
+    const hosts = seeded.hosts.slice(0, 7).map(host => {
+      if (host.id !== 'host-02' || host.kind !== 'ssh') return host
+      const { user: _user, port: _port, ...inherited } = host
+      return inherited
+    })
     await realSave({ ...current, hosts, workspaces: seeded.workspaces }, current)
     const base = (await api.sessions.snapshot()).sessions.find(session => session.kind === 'agent')!
     if (base.kind !== 'agent') throw new Error('The original Preview Agent DTO is required')
@@ -127,8 +131,8 @@ function Fixture() {
   const [epoch, setEpoch] = useState(0)
   probe.select = id => { setSection(id); setRequest({ section: id }) }
   probe.reopen = id => { setSection(id); setRequest({ section: id }); setEpoch(value => value + 1); setOpened(true) }
-  probe.theme = theme => {
-    disposeAppearance(); disposeAppearance = mountThemeRuntime(window, { appAppearance: theme })
+  probe.theme = (theme, themeId = 'graphite') => {
+    disposeAppearance(); disposeAppearance = mountThemeRuntime(window, { appAppearance: theme, themeId })
     useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, appAppearance: theme } } }))
   }
   return <DesktopClientUiProvider>{opened ? <SettingsPanel key={epoch} initialSection={section} navigationRequest={request}
