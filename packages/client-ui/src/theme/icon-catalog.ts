@@ -54,6 +54,8 @@ export const SEMANTIC_ICON_CATALOG = {
   'status.terminal-notice': { label: 'Terminal reading notice', glyph: 'status-dot' },
   'note.reference-incoming': { label: 'Incoming note references', glyph: 'arrow-down' },
   'note.reference-outgoing': { label: 'Outgoing note references', glyph: 'arrow-up' },
+  'action.show-full-note': { label: 'Show the complete saved Note', glyph: 'note-page' },
+  'action.show-related-blocks': { label: 'Show related original blocks', glyph: 'note-related-blocks' },
   'control.checkbox-checked': { label: 'Checked checkbox', glyph: 'check' },
   'control.radio-checked': { label: 'Selected radio', glyph: 'status-dot' },
   'control.select-open': { label: 'Open selection options', glyph: 'chevron-down' },
