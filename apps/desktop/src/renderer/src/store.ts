@@ -89,7 +89,7 @@ import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation,
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
-import { directoryIdentity, homeZoneId, topicSpatialAddress } from '../../shared/space-addresses'
+import { directoryIdentity, topicSpatialAddress } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { observeAgentInputOccupation, readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
@@ -8114,8 +8114,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // A Topic owns its directory before any Tab or Session exists. The launcher is a projection,
     // not the identity from which the Topic is derived.
     const topicId = mintObjectId()
-    const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
-    const targetTab = { ...newLauncherTab(workspace.id, topicId), ...(preset === 'mote' ? {} : { space: { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) } }),
+    const targetTab = { ...newLauncherTab(workspace.id, topicId),
       ...(initialRequest && preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
     const regionId = targetTab.layout.activeRegionId
     const initialSurface = targetTab.regions[regionId]
@@ -8159,10 +8158,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (initialRequest) placeLauncher()
     const bornSelection = fileNavigationSelection(get())
     let snapshot: ScratchTopicSnapshot
+    let createdIdentity: { topicId: string; zoneId: string } | undefined
     try {
       if (preset === 'mote') snapshot = await api.scratch.ensureMote(workspace.id, topicId)
       else {
-        await api.topics.call('topic.create', { topicId, title: knowledge?.title ?? 'New Topic', ...(knowledge?.categoryId ? { categoryId: knowledge.categoryId } : {}) })
+        const result = await api.topics.call('topic.create', { topicId, title: knowledge?.title ?? 'New Topic', ...(knowledge?.categoryId ? { categoryId: knowledge.categoryId } : {}) })
+        createdIdentity = result.topic
         await refreshTopicSpatial()
         const created = await api.scratch.readTopic(workspace.id, topicId)
         if (!created) throw new Error('The created Topic content is still unconfirmed. Its workface is kept; read the original Topic before retrying.')
@@ -8175,7 +8176,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw cause
     }
     const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
-    if (snapshot.id !== topicId || snapshot.readError || !address || preset !== 'mote' && address.zoneId !== targetTab.space?.zoneId) throw new Error('The created Topic original identity is unconfirmed. Its Tab, Region and draft are kept.')
+    // Main owns the directory identity. Confirm its creation receipt against the same
+    // content read, rather than predicting a Zone from the logical Scratch root.
+    if (snapshot.id !== topicId || snapshot.readError || !address || preset !== 'mote' &&
+      (!createdIdentity || createdIdentity.topicId !== topicId || createdIdentity.zoneId !== address.zoneId)) throw new Error('The created Topic original identity is unconfirmed. Read the same Topic to inspect its saved state; any existing Tab, Region and draft are kept.')
     const mayReveal = fileNavigationSelection(get()) === bornSelection
     if (!initialRequest) placeLauncher(mayReveal)
     else set(current => {
