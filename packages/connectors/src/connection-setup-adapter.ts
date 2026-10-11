@@ -1,4 +1,4 @@
-import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview, ConnectionSetupMessageReceptionReview } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAccount, ConnectionSetupAuthenticationStage, ConnectionSetupReadSubject, ConnectionSetupReadSummary, ConnectionSetupCapability, ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview, ConnectionSetupMessageReceptionReview, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupPublicationReview, ConnectionSetupSubmissionResponse } from '@agentmux/core/connections'
 
 export type SetupAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; application: Readonly<ConnectionApplication> }>
 export type SetupChallengeReceipt = { kind: 'challenge'; challenge: ConnectionSetupChallenge; privateState: string } | { kind: 'unknown' }
@@ -7,6 +7,8 @@ export type SetupReadReceipt = { kind: 'observed'; readResult: ConnectionSetupRe
 export type SetupPermissionPlan = { review: ConnectionSetupPermissionReview; appScopeIDs: Array<string | number> }
 /** Native intent stays opaque to the generic Host; the adapter alone owns its schema. */
 export type SetupMessageReceptionPlan = { review: ConnectionSetupMessageReceptionReview; privateIntent: string | null }
+export type SetupPublicationPlan = { review: ConnectionSetupPublicationReview; privateIntent: string | null }
+export type SetupPublicationReceipt = { kind: 'accepted'; privateState: string; versionId: string; submission: ConnectionSetupSubmissionResponse | null } | { kind: 'unknown' }
 export type SetupConfigurationReceipt = { kind: 'accepted'; privateState: string; requiresDataRangeConfiguration?: boolean | null } | { kind: 'unknown' }
 export type SetupInspectionReceipt = { kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }
 export interface ConnectionSetupAdapter {
@@ -24,6 +26,9 @@ export interface ConnectionSetupAdapter {
   /** Separate local implementation declaration; only an admitted current-auth action calls it. */
   readonly applicationConfiguration?: {
     readonly domains: readonly string[]
+    publicationPlan(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null): Promise<SetupPublicationPlan>
+    createVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>
+    submitVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>
     /** Local interpretation of the exact already-bound raw bot read, with zero network effects. */
     messagingCapability(originalReadState: string): Promise<ConnectionSetupCapability>
     /** Local interpretation of the original raw event mode; missing native fields stay unknown. */

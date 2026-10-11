@@ -1,13 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, parseConnectionSetupMessageReceptionReview, parseConnectionSetupPermissionReview, parseConnectionSetupConfigurationReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupConfigurationEffect, type ConnectionSetupScalarEffect, type ConnectionSetupPermissionPurpose, type ConnectionSetupConfigurationAction, type ConnectionSetupConfigurationReceipt, type ConnectionSetupInspect, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
+import { connectionSetupPublicationSubjects, parseConnectionSetupPublicationReview, connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, parseConnectionSetupMessageReceptionReview, parseConnectionSetupPermissionReview, parseConnectionSetupConfigurationReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupConfigurationEffect, type ConnectionSetupScalarEffect, type ConnectionSetupPublicationEffect, type ConnectionSetupPublicationDraft, type ConnectionSetupAccount, type ConnectionSetupSubmissionResponse, type ConnectionSetupPermissionPurpose, type ConnectionSetupConfigurationAction, type ConnectionSetupConfigurationReceipt, type ConnectionSetupInspect, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
-import type { SetupMessageReceptionPlan, SetupPermissionPlan } from './connection-setup-adapter.js'
+import type { SetupMessageReceptionPlan, SetupPermissionPlan, SetupPublicationPlan } from './connection-setup-adapter.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 import type { SetupApplicationInspection, SetupConfigurationSource } from './connection-setup-inspection.js'
 
 type Parent = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
-type Child = { receipt: ConnectionSetupConfigurationReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null; permissionIntentDigest?: string; receptionIntentDigest?: string }
+type Child = { receipt: ConnectionSetupConfigurationReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null; permissionIntentDigest?: string; receptionIntentDigest?: string; publicationIntentDigest?: string }
+type PublicationSources = Record<string, SetupConfigurationSource>
+type PublicationSelector = Extract<NonNullable<ConnectionSetupInspect['applicationConfiguration']>, { effect: ConnectionSetupPublicationEffect }>
+const publicationEffect = (effect: string): effect is ConnectionSetupPublicationEffect => effect === 'create-application-version' || effect === 'submit-application-version'
 type ReceptionSources = { catalog: SetupConfigurationSource; settings: SetupConfigurationSource }
 type PermissionSources = { catalog: SetupConfigurationSource; applied: SetupConfigurationSource }
 type Envelope = { binding: string; stepId: string; privateState: string }
@@ -16,6 +19,7 @@ type Owner = {
   read(id: string): Parent | null
   authority(context: ConnectionEnrollmentCallContext, row: Parent): Promise<void>
   current(row: Parent): boolean
+  creator(row: Parent): Promise<ConnectionSetupAccount | null>
   touch(row: Parent): void
   view(row: Parent, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
 }
@@ -43,11 +47,12 @@ export class SetupApplicationConfiguration {
     if (value.effect !== receipt.effect || record.step_id !== receipt.stepId || record.operation_id !== receipt.input.operationId || record.action_id !== receipt.input.decision.actionId || record.recovery_action_id !== recovery.decision.actionId || typeof value.authenticationStepId !== 'string' || !value.authenticationStepId) throw failure('This original configuration effect has different identity.', 'CONNECTION_OPERATION_CONFLICT')
     if (receipt.effect === 'add-application-permissions' && (typeof value.permissionIntentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.permissionIntentDigest))) throw failure('This original permission intent is unconfirmed.', 'CONNECTION_OPERATION_CONFLICT')
     if (receipt.effect === 'add-message-reception' && (typeof value.receptionIntentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.receptionIntentDigest))) throw failure('This original message-reception intent is unconfirmed.', 'CONNECTION_OPERATION_CONFLICT')
-    return { receipt, authenticationStepId: value.authenticationStepId, recoveryActionId: recovery.decision.actionId, privateRef: record.private_ref === null ? null : String(record.private_ref), ...(receipt.effect === 'add-application-permissions' ? { permissionIntentDigest: value.permissionIntentDigest } : {}), ...(receipt.effect === 'add-message-reception' ? { receptionIntentDigest: value.receptionIntentDigest } : {}) }
+    if (publicationEffect(receipt.effect) && (typeof value.publicationIntentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.publicationIntentDigest))) throw failure('This original publication intent is unconfirmed.', 'CONNECTION_OPERATION_CONFLICT')
+    return { receipt, authenticationStepId: value.authenticationStepId, recoveryActionId: recovery.decision.actionId, privateRef: record.private_ref === null ? null : String(record.private_ref), ...(receipt.effect === 'add-application-permissions' ? { permissionIntentDigest: value.permissionIntentDigest } : {}), ...(receipt.effect === 'add-message-reception' ? { receptionIntentDigest: value.receptionIntentDigest } : {}), ...(publicationEffect(receipt.effect) ? { publicationIntentDigest: value.publicationIntentDigest } : {}) }
   }
   private find(operationId: string, selector: { effect?: ConnectionSetupConfigurationEffect; stepId?: string; actionId?: string }): Child | null {
     return this.safe(() => {
-      const filters = ["operation_id=?", "json_extract(record_json,'$.effect') IN ('enable-messaging','use-persistent-connection','add-application-permissions','add-message-reception')"], values: string[] = [operationId]
+      const filters = ["operation_id=?", "json_extract(record_json,'$.effect') IN ('enable-messaging','use-persistent-connection','add-application-permissions','add-message-reception','create-application-version','submit-application-version')"], values: string[] = [operationId]
       if (selector.effect) { filters.push("json_extract(record_json,'$.effect')=?"); values.push(selector.effect) }
       if (selector.stepId) { filters.push('step_id=?'); values.push(selector.stepId) }
       if (selector.actionId) { filters.push('(action_id=? OR recovery_action_id=?)'); values.push(selector.actionId, selector.actionId) }
@@ -62,9 +67,11 @@ export class SetupApplicationConfiguration {
   }
   private binding(row: Parent, child: Child): string {
     const o = row.operation, effect = child.receipt.effect
+    if (child.receipt.effect === 'create-application-version' || child.receipt.effect === 'submit-application-version') return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, draft: child.receipt.input.publicationDraft, nativeIntentDigest: child.publicationIntentDigest, authenticationStepId: child.authenticationStepId, sourceStepIds: child.receipt.sourceStepIds, versionId: child.receipt.versionId, submission: child.receipt.submission })
     if (child.receipt.effect === 'add-message-reception') return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: { messageReception: true, transport: child.receipt.transport, nativeIntentDigest: child.receptionIntentDigest }, authenticationStepId: child.authenticationStepId, sourceStepIds: child.receipt.sourceStepIds })
     if (child.receipt.effect === 'add-application-permissions') return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: { purpose: child.receipt.purpose, scopeNames: child.receipt.scopeNames, nativeIntentDigest: child.permissionIntentDigest }, authenticationStepId: child.authenticationStepId, sourceStepIds: child.receipt.sourceStepIds })
-    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: effect === 'enable-messaging' ? true : 'persistent-connection', authenticationStepId: child.authenticationStepId, sourceStepId: child.receipt.sourceStepId })
+    const scalar = child.receipt as Extract<ConnectionSetupConfigurationReceipt, { effect: ConnectionSetupScalarEffect }>
+    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: effect === 'enable-messaging' ? true : 'persistent-connection', authenticationStepId: child.authenticationStepId, sourceStepId: scalar.sourceStepId })
   }
   private envelope(value: string | null, row: Parent, child: Child): Envelope | null {
     try {
@@ -74,6 +81,7 @@ export class SetupApplicationConfiguration {
   }
   private adapter(row: Parent, effect: ConnectionSetupConfigurationEffect) {
     const adapter = this.owner.connections.registeredAdapter(row.operation.adapterId)?.setup?.applicationConfiguration
+    if (publicationEffect(effect)) return adapter?.domains.includes(row.operation.application.domain) && typeof adapter.publicationPlan === 'function' && typeof adapter.createVersion === 'function' && typeof adapter.submitVersion === 'function' ? adapter : null
     if (effect === 'add-message-reception') return adapter?.domains.includes(row.operation.application.domain) && typeof adapter.messageReceptionPlan === 'function' && typeof adapter.addMessageReception === 'function' ? adapter : null
     if (effect === 'add-application-permissions') return adapter?.domains.includes(row.operation.application.domain) && typeof adapter.permissionPlan === 'function' && typeof adapter.addApplicationPermissions === 'function' ? adapter : null
     return adapter?.domains.includes(row.operation.application.domain) && (effect === 'enable-messaging' ? typeof adapter.messagingCapability === 'function' && typeof adapter.enableMessaging === 'function' : typeof adapter.eventTransportCapability === 'function' && typeof adapter.usePersistentConnection === 'function') ? adapter : null
@@ -135,10 +143,11 @@ export class SetupApplicationConfiguration {
     return { kind: effect, expectedRevision: row.operation.revision, actionId: (effect === 'enable-messaging' ? 'setup-enable:' : 'setup-persistent:') + digest({ operation: row.operation, actor: row.actor, sourceStepId: source.receipt.stepId, authenticationStepId: source.authenticationStepId, desired: effect === 'enable-messaging' ? true : 'persistent-connection' }) }
   }
   async attach(base: ConnectionSetupView, row: Parent, context: ConnectionEnrollmentCallContext, selector: NonNullable<ConnectionSetupInspect['applicationConfiguration']>): Promise<ConnectionSetupView> {
+    if (publicationEffect(selector.effect)) return this.attachPublication(base, row, context, selector as PublicationSelector)
     if (selector.effect === 'add-message-reception') return this.attachReception(base, row, context, selector)
     if (selector.effect === 'add-application-permissions') return this.attachPermissions(base, row, context, selector)
     await this.owner.authority(context, row)
-    const effect = selector.effect, subject = connectionSetupConfigurationSubject(effect)
+    const effect = selector.effect as ConnectionSetupScalarEffect, subject = connectionSetupConfigurationSubject(effect)
     const limit = selector.limit ?? 25, before = selector.cursor === undefined ? Number.MAX_SAFE_INTEGER : Number(selector.cursor)
     if (!Number.isSafeInteger(before) || before < 1 || selector.cursor !== undefined && !/^[1-9][0-9]*$/u.test(selector.cursor)) throw failure('The original configuration history cursor is invalid.', 'INVALID_CONNECTION_SETUP_DATA')
     const records = this.safe(() => this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect')=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?").all(row.operation.operationId, effect, before, limit + 1))
@@ -167,10 +176,10 @@ export class SetupApplicationConfiguration {
     const original = unresolved ? this.originalTarget(fresh, unresolved) : undefined
     return { ...base, applicationConfiguration: { effect, subject, effects: records.slice(0, limit).map(record => this.summary(this.decode(record))), next: records.length > limit ? String(records[limit - 1]!.ordinal) : null, selected: selected ? this.summary(selected) : null, source: source?.receipt ?? null, capability, actions, ...(original ? { unresolved: original } : {}), ...(reason ? { reason } : {}) } }
   }
-  private update(row: Parent, child: Child, change: Partial<Pick<ConnectionSetupConfigurationReceipt, 'request' | 'secureStorage'>> & { requiresDataRangeConfiguration?: boolean | null }, privateRef = child.privateRef): Child {
+  private update(row: Parent, child: Child, change: Partial<Pick<ConnectionSetupConfigurationReceipt, 'request' | 'secureStorage'>> & { requiresDataRangeConfiguration?: boolean | null; versionId?: string | null; submission?: ConnectionSetupSubmissionResponse | null }, privateRef = child.privateRef): Child {
     return this.safe(() => {
       const next = { ...child, receipt: parseConnectionSetupConfigurationReceipt({ ...child.receipt, ...change }), privateRef }
-      const record = (c: Child) => JSON.stringify({ effect: c.receipt.effect, receipt: c.receipt, authenticationStepId: c.authenticationStepId, recoveryActionId: c.recoveryActionId, ...(c.receipt.effect === 'add-application-permissions' ? { permissionIntentDigest: c.permissionIntentDigest } : {}), ...(c.receipt.effect === 'add-message-reception' ? { receptionIntentDigest: c.receptionIntentDigest } : {}) })
+      const record = (c: Child) => JSON.stringify({ effect: c.receipt.effect, receipt: c.receipt, authenticationStepId: c.authenticationStepId, recoveryActionId: c.recoveryActionId, ...(c.receipt.effect === 'add-application-permissions' ? { permissionIntentDigest: c.permissionIntentDigest } : {}), ...(c.receipt.effect === 'add-message-reception' ? { receptionIntentDigest: c.receptionIntentDigest } : {}), ...(publicationEffect(c.receipt.effect) ? { publicationIntentDigest: c.publicationIntentDigest } : {}) })
       if (record(next) === record(child) && privateRef === child.privateRef) return child
       const db = this.owner.connections.database
       db.exec('BEGIN IMMEDIATE')
@@ -202,7 +211,7 @@ export class SetupApplicationConfiguration {
   }
   private async result(row: Parent, child: Child, input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const current = this.owner.read(row.operation.operationId)!
-    return { ...await this.attach(await this.owner.view(current, context), current, context, { effect: child.receipt.effect, ...(child.receipt.effect === 'add-application-permissions' ? { purpose: child.receipt.purpose } : {}), selectedStepId: child.receipt.stepId } as NonNullable<ConnectionSetupInspect['applicationConfiguration']>), receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: this.summary(child).request } }
+    return { ...await this.attach(await this.owner.view(current, context), current, context, { effect: child.receipt.effect, ...(child.receipt.effect === 'add-application-permissions' ? { purpose: child.receipt.purpose } : {}), ...(publicationEffect(child.receipt.effect) ? { draft: child.receipt.input.publicationDraft } : {}), selectedStepId: child.receipt.stepId } as NonNullable<ConnectionSetupInspect['applicationConfiguration']>), receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: this.summary(child).request } }
   }
   async advance(input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView | null> {
     const row = this.owner.read(input.operationId)!
@@ -217,6 +226,7 @@ export class SetupApplicationConfiguration {
     }
     // The original actor's local secure ACK is independent of all current native eligibility.
     if (previous) return repeat(previous)
+    if (input.decision.actionId.startsWith('setup-publish-create:') || input.decision.actionId.startsWith('setup-publish-submit:')) return this.advancePublication(row, input, context)
     if (input.decision.actionId.startsWith('setup-reception:')) return this.advanceReception(row, input, context)
     if (input.decision.actionId.startsWith('setup-permissions:')) return this.advancePermissions(row, input, context)
     const effect: ConnectionSetupScalarEffect | null = input.decision.actionId.startsWith('setup-enable:') ? 'enable-messaging' : input.decision.actionId.startsWith('setup-persistent:') ? 'use-persistent-connection' : null
@@ -248,6 +258,126 @@ export class SetupApplicationConfiguration {
     this.pending.set(child.receipt.stepId, work)
     try { return await work } finally { this.live.delete(child.receipt.stepId); this.pending.delete(child.receipt.stepId) }
   }
+  /** The same exact subject and writer epoch qualify partial references and complete reviews. */
+  private publicationSourceCurrent(row: Parent, source: SetupConfigurationSource, admittedStepId?: string): boolean {
+    if (!source.receipt.subject.startsWith('publication-') || !this.owner.current(row) || !this.owner.inspection.configurationSourceCurrent(row, source)) return false
+    return this.safe(() => {
+      const db = this.owner.connections.database, subject = source.receipt.subject
+      const version = subject === 'publication-version' ? " AND json_extract(i.record_json,'$.receipt.versionId')=?" : ''
+      const current = db.prepare("SELECT i.step_id,i.ordinal FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND json_extract(i.record_json,'$.effect') IS NULL AND json_extract(i.record_json,'$.receipt.subject')=?" + version + ' ORDER BY i.ordinal DESC LIMIT 1').get(row.operation.application.domain, row.operation.application.appId, subject, ...(subject === 'publication-version' ? [source.receipt.versionId!] : []))
+      if (current?.step_id !== source.receipt.stepId) return false
+      const effects = subject === 'publication-visibility' || subject === 'publication-sharing' ? "json_extract(i.record_json,'$.effect')='submit-application-version'" : subject === 'publication-pending' ? "json_extract(i.record_json,'$.effect') IS NOT NULL" : subject === 'publication-versions' || subject === 'publication-version' ? "json_extract(i.record_json,'$.effect') IN ('create-application-version','submit-application-version')" : null
+      if (!effects) return true
+      const writer = db.prepare("SELECT i.step_id,i.ordinal FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND " + effects + ' ORDER BY i.ordinal DESC LIMIT 1').get(row.operation.application.domain, row.operation.application.appId)
+      return !writer || writer.step_id === admittedStepId || Number(current.ordinal) > Number(writer.ordinal)
+    })
+  }
+  private publicationSourcesCurrent(row: Parent, sources: PublicationSources, effect: ConnectionSetupPublicationEffect, admittedStepId?: string): boolean {
+    const values = Object.values(sources), first = values[0]
+    return !!first && values.length === connectionSetupPublicationSubjects(effect).length && values.every(source => source.authenticationStepId === first.authenticationStepId && source.attemptId === first.attemptId && this.publicationSourceCurrent(row, source, admittedStepId))
+  }
+  private async publicationSources(row: Parent, effect: ConnectionSetupPublicationEffect, draft: ConnectionSetupPublicationDraft | null): Promise<PublicationSources> {
+    const sources: PublicationSources = {}
+    for (const subject of connectionSetupPublicationSubjects(effect)) {
+      if (subject === 'publication-version' && draft?.kind !== 'submit-version') continue
+      const source = await this.owner.inspection.configurationSource(row, subject, draft?.kind === 'submit-version' ? draft.versionId : undefined)
+      if (source) sources[subject.slice(12)] = source
+    }
+    return sources
+  }
+  private async publicationPlan(row: Parent, sources: PublicationSources, effect: ConnectionSetupPublicationEffect, draft: ConnectionSetupPublicationDraft | null): Promise<SetupPublicationPlan | null> {
+    if (!Object.keys(sources).length) return null
+    try {
+      const creator = await this.owner.creator(row)
+      const plan = await this.adapter(row, effect)?.publicationPlan(effect, Object.fromEntries(Object.entries(sources).map(([key, value]) => [key, value.originalReadState])), draft, creator)
+      if (!plan || plan.privateIntent !== null && (typeof plan.privateIntent !== 'string' || !plan.privateIntent)) return null
+      const review = parseConnectionSetupPublicationReview(plan.review)
+      if (plan.privateIntent && (!draft || review.issues.length)) return null
+      return { review, privateIntent: plan.privateIntent }
+    } catch { return null }
+  }
+  private publicationFact(row: Parent, effect: ConnectionSetupPublicationEffect, draft: ConnectionSetupPublicationDraft | null): string | null {
+    return this.safe(() => {
+      const filter = effect === 'submit-application-version' ? " AND json_extract(i.record_json,'$.receipt.input.publicationDraft.versionId')=?" : ''
+      const record = this.owner.connections.database.prepare("SELECT i.step_id FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND json_extract(i.record_json,'$.effect')=? AND (json_extract(i.record_json,'$.receipt.request') IS NOT 'confirmed' OR json_extract(i.record_json,'$.receipt.secureStorage') IS NOT 'stored' OR (json_extract(i.record_json,'$.effect')='submit-application-version' AND json_extract(i.record_json,'$.receipt.submission.outcome')='unknown'))" + filter + ' ORDER BY i.ordinal DESC LIMIT 1').get(row.operation.application.domain, row.operation.application.appId, effect, ...(effect === 'submit-application-version' ? [draft?.kind === 'submit-version' ? draft.versionId : ''] : []))
+      return record ? String(record.step_id) : null
+    })
+  }
+  private publicationAction(row: Parent, sources: PublicationSources, effect: ConnectionSetupPublicationEffect, draft: ConnectionSetupPublicationDraft, plan: SetupPublicationPlan): ConnectionSetupConfigurationAction {
+    return { kind: effect, expectedRevision: row.operation.revision, actionId: (effect === 'create-application-version' ? 'setup-publish-create:' : 'setup-publish-submit:') + digest({ operation: row.operation, actor: row.actor, sourceStepIds: Object.fromEntries(Object.entries(sources).map(([key, source]) => [key, source.receipt.stepId])), authenticationStepId: Object.values(sources)[0]!.authenticationStepId, draft, nativeIntentDigest: digest(plan.privateIntent) }) }
+  }
+  private async attachPublication(base: ConnectionSetupView, row: Parent, context: ConnectionEnrollmentCallContext, selector: PublicationSelector): Promise<ConnectionSetupView> {
+    await this.owner.authority(context, row)
+    const effect = selector.effect, draft = selector.draft ?? null, limit = selector.limit ?? 25, before = selector.cursor === undefined ? Number.MAX_SAFE_INTEGER : Number(selector.cursor)
+    if (!Number.isSafeInteger(before) || before < 1 || selector.cursor !== undefined && !/^[1-9][0-9]*$/u.test(selector.cursor)) throw failure('The original publication history cursor is invalid.', 'INVALID_CONNECTION_SETUP_DATA')
+    const records = this.safe(() => this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect')=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?").all(row.operation.operationId, effect, before, limit + 1))
+    const selected = this.find(row.operation.operationId, selector.selectedStepId ? { effect, stepId: selector.selectedStepId } : { effect }), actions: ConnectionSetupConfigurationAction[] = []
+    if (selected?.receipt.request === 'confirmed' && selected.receipt.secureStorage !== 'stored') actions.push({ kind: 'recover-configuration-effect', actionId: selected.recoveryActionId, expectedRevision: selected.receipt.input.expectedRevision })
+    const adapter = this.adapter(row, effect), partial = await this.publicationSources(row, effect, draft)
+    let plan = adapter ? await this.publicationPlan(row, partial, effect, draft) : null
+    await this.owner.authority(context, row)
+    const fresh = this.owner.read(row.operation.operationId)!, qualified = base.reason !== 'connection-revised' && base.operation?.authentication?.stepId === fresh.operation.authentication?.stepId
+    const sources = Object.fromEntries(Object.entries(partial).filter(([, source]) => qualified && this.publicationSourceCurrent(fresh, source)).map(([key, source]) => [key, source.receipt]))
+    if (!qualified || !Object.values(partial).every(source => this.publicationSourceCurrent(fresh, source))) plan = null
+    const complete = qualified && this.publicationSourcesCurrent(fresh, partial, effect)
+    const capability = complete && plan && draft && plan.privateIntent ? 'disabled' : 'unknown'
+    let reason: NonNullable<ConnectionSetupView['applicationConfiguration']>['reason'] = !adapter ? 'adapter-unavailable' : capability === 'unknown' ? 'source-unconfirmed' : undefined
+    const unresolved = this.publicationFact(fresh, effect, draft)
+    if (unresolved) reason = 'original-effect-unconfirmed'
+    if (draft && plan?.privateIntent && complete && !unresolved && this.adapter(fresh, effect) === adapter && base.operation?.revision === fresh.operation.revision) actions.push(this.publicationAction(fresh, partial, effect, draft, plan))
+    const original = unresolved ? this.originalTarget(fresh, unresolved) : undefined
+    return { ...base, applicationConfiguration: { effect, subject: effect === 'create-application-version' ? 'publication-pending' : 'publication-version', effects: records.slice(0, limit).map(record => this.summary(this.decode(record))), next: records.length > limit ? String(records[limit - 1]!.ordinal) : null, selected: selected ? this.summary(selected) : null, sources, draft, review: plan?.review ?? null, capability, actions, ...(reason ? { reason } : {}), ...(original ? { unresolved: original } : {}) } }
+  }
+  private async advancePublication(row: Parent, input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+    const effect = input.decision.actionId.startsWith('setup-publish-create:') ? 'create-application-version' : 'submit-application-version', draft = input.publicationDraft ?? null
+    const sources = await this.publicationSources(row, effect, draft), adapter = this.adapter(row, effect), plan = adapter ? await this.publicationPlan(row, sources, effect, draft) : null
+    await this.owner.authority(context, row)
+    const db = this.owner.connections.database
+    const admission = this.safe(() => {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const existing = this.find(input.operationId, { actionId: input.decision.actionId })
+        if (existing) { db.exec('COMMIT'); return { child: existing, claimed: false } }
+        const fresh = this.owner.read(input.operationId)!
+        if (!draft || !plan?.privateIntent || this.adapter(fresh, effect) !== adapter || !this.publicationSourcesCurrent(fresh, sources, effect) || this.publicationFact(fresh, effect, draft) || input.expectedRevision !== fresh.operation.revision || input.decision.value !== 'confirm' || this.publicationAction(fresh, sources, effect, draft, plan).actionId !== input.decision.actionId) throw failure('This publication action no longer has its exact current sources, draft and original authority. Keep the original result; independent configuration and Agents remain available.', 'CONNECTION_SETUP_ACTION_STALE')
+        const receipt: ConnectionSetupConfigurationReceipt = { effect, stepId: randomUUID(), input, request: 'dispatching', secureStorage: 'not-started', sourceStepIds: Object.fromEntries(Object.entries(sources).map(([key, source]) => [key, source.receipt.stepId])), versionId: draft.kind === 'submit-version' ? draft.versionId : null, submission: null }
+        const child: Child = { receipt, authenticationStepId: Object.values(sources)[0]!.authenticationStepId, recoveryActionId: 'setup-effect-recover:' + digest(receipt), privateRef: null, publicationIntentDigest: digest(plan.privateIntent) }
+        db.prepare('INSERT INTO connection_setup_inspection(step_id,operation_id,action_id,recovery_action_id,record_json) VALUES(?,?,?,?,?)').run(receipt.stepId, input.operationId, input.decision.actionId, child.recoveryActionId, JSON.stringify({ effect, receipt, authenticationStepId: child.authenticationStepId, recoveryActionId: child.recoveryActionId, publicationIntentDigest: child.publicationIntentDigest }))
+        this.owner.touch(fresh); db.exec('COMMIT'); return { child, claimed: true }
+      } catch (error) { db.exec('ROLLBACK'); throw error }
+    })
+    let child = admission.child
+    if (!admission.claimed) {
+      if (!same(child.receipt.input, input)) throw failure('This publication action has different original input.', 'CONNECTION_OPERATION_CONFLICT')
+      const pending = this.pending.get(child.receipt.stepId); if (pending) await pending
+      return this.result(row, await this.secure(row, this.find(input.operationId, { stepId: child.receipt.stepId })!), input, context)
+    }
+    const work = async () => {
+      let original: Envelope | null = null
+      try {
+        const assertCurrent = () => {
+          context.signal?.throwIfAborted()
+          const fresh = this.owner.read(input.operationId)!
+          if (this.closed || this.adapter(fresh, effect) !== adapter || !this.publicationSourcesCurrent(fresh, sources, effect, child.receipt.stepId)) throw failure('The original publication sources changed before dispatch.')
+        }
+        assertCurrent()
+        const source = Object.values(sources)[0]!
+        const result = await (effect === 'create-application-version' ? adapter!.createVersion : adapter!.submitVersion)({ operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState, privateIntent: plan!.privateIntent!, assertCurrent }, context.signal)
+        if (result.kind === 'accepted' && typeof result.privateState === 'string' && typeof result.versionId === 'string' && result.versionId && (draft?.kind !== 'submit-version' || draft.versionId === result.versionId)) {
+          child = this.update(row, child, { request: 'confirmed', secureStorage: 'storing', versionId: result.versionId, submission: result.submission })
+          original = { binding: this.binding(row, child), stepId: child.receipt.stepId, privateState: result.privateState }
+        }
+      } catch { /* Retain the exact unconfirmed request. No list matching or replay. */ }
+      if (this.closed) return { operation: row.operation, challenge: null, reason: 'challenge-unavailable' as const, receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: 'unknown' as const } }
+      if (!original) child = this.update(row, child, { request: 'unknown' })
+      else { this.unsettled.set(child.receipt.stepId, original); child = await this.secure(row, child) }
+      return this.result(row, child, input, context)
+    }
+    this.live.add(child.receipt.stepId)
+    const running = work(); this.pending.set(child.receipt.stepId, running)
+    try { return await running } finally { this.live.delete(child.receipt.stepId); this.pending.delete(child.receipt.stepId) }
+  }
+
   private permissionSourcesCurrent(row: Parent, sources: PermissionSources, admittedStepId?: string): boolean {
     const latest = this.targetFact(row, 'add-application-permissions', false)
     const original = (subject: string) => this.safe(() => this.owner.connections.database.prepare("SELECT i.step_id FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND json_extract(i.record_json,'$.effect') IS NULL AND json_extract(i.record_json,'$.receipt.subject')=? ORDER BY i.ordinal DESC LIMIT 1").get(row.operation.application.domain, row.operation.application.appId, subject)?.step_id)
