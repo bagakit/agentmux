@@ -140,6 +140,18 @@ const receipt = { schema: 'agentmux.session-continuity-control-proof.v1', passed
 const save = () => writeFile(join(attempt, 'receipt.json'), JSON.stringify(receipt, null, 2))
 await save()
 try {
+  const browserFile = join(attempt, 'browser-control.mjs')
+  const browser = await build({ stdin: { contents: 'export { parseAgentContinuityControlInput, sameAgentContinuityControlInput } from "@agentmux/core/agent-session-continuity-control"',
+    resolveDir: join(root, 'packages/core'), loader: 'js' }, outfile: browserFile,
+    bundle: true, platform: 'browser', format: 'esm', target: 'es2022', metafile: true, logLevel: 'warning' })
+  for (const path of Object.keys(browser.metafile.inputs)) if (path !== '<stdin>') await bind(path)
+  const browserControl = await import(pathToFileURL(browserFile).href)
+  const browserPacket = { agentSessionId: 'browser-session', intentOperationId: 'browser-intent', expectedRun: { runId: 'browser-run' }, operationId: 'browser-control', action: 'continue', additionalAttempts: 1 }
+  assert.deepEqual(browserControl.parseAgentContinuityControlInput(browserPacket), browserPacket)
+  assert.ok(browserControl.sameAgentContinuityControlInput(browserPacket, browserControl.parseAgentContinuityControlInput(browserPacket)))
+  assert.throws(() => browserControl.parseAgentContinuityControlInput({ ...browserPacket, additionalAttempts: 0 }))
+  receipt.browser = { publicSubpath: '@agentmux/core/agent-session-continuity-control', actualBrowserBundle: true,
+    parsedOriginalPacket: true, rejectedInvalidBudget: true, bundleSha256: sha(await readFile(browserFile)) }
   async function bundle(options, variant) {
     let transformed = false
     const compiled = await build({ ...options, bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', alias, metafile: true,
