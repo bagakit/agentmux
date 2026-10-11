@@ -62,6 +62,35 @@ function recordingIo(overrides: Partial<StartupFailureExitIo> = {}): {
 }
 
 describe('启动失败的收尾序列', () => {
+  it('私有 smoke 保留原始结构化诊断和非零退出，不弹用户对话框', async () => {
+    const persistDiagnostic = vi.fn()
+    const { io, dialogs, diagnostics, order, exitCodes } = recordingIo({ privateSmoke: true, persistDiagnostic })
+    const error = Object.assign(new Error('Original semantic Host startup unconfirmed'), { code: 'CONTROL_TIMEOUT' })
+    await reportStartupFailureAndExit(error, io)
+    expect(dialogs).toEqual([])
+    expect(diagnostics).toEqual([error.message])
+    expect(persistDiagnostic).toHaveBeenCalledWith(expect.objectContaining({ kind: 'startup-failure' }))
+    expect(JSON.stringify(persistDiagnostic.mock.calls)).toContain(error.message)
+    expect(order).toEqual(['stderr', 'dispose', 'exit'])
+    expect(exitCodes).toEqual([1])
+  })
+
+  it('私有 smoke 清理未确认仍有界退出，不停止原 Host 或 Run', async () => {
+    vi.useFakeTimers()
+    try {
+      const { io, dialogs, diagnostics, exitCodes } = recordingIo({ privateSmoke: true,
+        disposeOwners: () => new Promise(() => {}) })
+      const pending = reportStartupFailureAndExit(new Error('Original failure'), io)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(exitCodes).toEqual([])
+      await vi.advanceTimersByTimeAsync(1)
+      await pending
+      expect(dialogs).toEqual([])
+      expect(diagnostics).toEqual(['Original failure', 'Private launch smoke cleanup is unconfirmed; the original Host and Runs are retained.'])
+      expect(exitCodes).toEqual([1])
+    } finally { vi.useRealTimers() }
+  })
+
   it('弹的是那个纯函数算出来的标题与正文，不是就地拼的第二份文案', async () => {
     // 判据是「同一个取值层」。就地拼串的实现会绕过 startup-failure-notice.test.ts 那六条内容断言：
     // 文案能对一次，之后必然与纯函数漂移。
@@ -379,6 +408,31 @@ describe('宿主 API 组装成 io', () => {
   it('配置路径原样带过来，不在这一层重算', () => {
     const io = startupFailureExitIo(recordingHost().host)
     expect(io.configPath).toBe(CONFIG_PATH)
+  })
+
+  it.each([
+    [{}, true],
+    [{ AGENTMUX_DESKTOP_READY_FILE: 'private-ready.json' }, true],
+    [{ AGENTMUX_DESKTOP_EXIT_AFTER_READY: '1' }, true],
+    [{ AGENTMUX_DESKTOP_READY_FILE: 'private-ready.json', AGENTMUX_DESKTOP_EXIT_AFTER_READY: '1' }, false]
+  ] as const)('实际 index 壳仅为完整私有 smoke 环境取消 modal: %j', async (env, interactive) => {
+    const recorder = recordingHost(), persist = vi.fn()
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8')
+    const start = source.indexOf('const exitAfterFailure = ')
+    const end = source.indexOf('\n  async function ', start)
+    expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start)
+    const shell = source.slice(start, end).replace('(error: unknown): Promise<void>', '(error)')
+    // Execute the actual production forwarding expression with the original adapters.
+    const exitAfterFailure = new Function('reportStartupFailureAndExit', 'startupFailureExitIo', 'configStore',
+      'dialog', 'disposeOwners', 'process', 'crashLog', 'startupAttemptId', 'app', shell + '\nreturn exitAfterFailure;')(
+      reportStartupFailureAndExit, startupFailureExitIo, { filePath: CONFIG_PATH }, recorder.host.dialog,
+      recorder.host.disposeOwners, { env, stderr: recorder.host.stderr, pid: 123 }, { appendSync: persist },
+      'private-attempt', { ...recorder.host.app, getVersion: () => 'private-version' }) as (error: unknown) => Promise<void>
+    await exitAfterFailure(new Error('Unconfirmed startup'))
+    expect(recorder.boxes).toHaveLength(interactive ? 1 : 0)
+    expect(recorder.exitCodes).toEqual([1])
+    expect(recorder.disposals).toBe(1)
+    expect(persist).toHaveBeenCalledOnce()
   })
 
   it('组装出来的 io 真能驱动整条序列——组装与序列接得上', () => {
