@@ -165,11 +165,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
       const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
       if (part.contentEligibility !== 'public' || part.kind !== 'resource') continue
-      if (part.resourceType === 'image' && binding.scope.publication === 'future-shared-conversation' && adapter.images) {
+      if ((part.resourceType === 'image' || part.resourceType === 'text' && part.content?.kind === 'resource') && binding.scope.publication === 'future-shared-conversation' && adapter.images) {
         result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), { kind: 'image-unavailable' })
         try {
           const input = { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id,
-            ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference, maxBytes: adapter.images.maxBytes }
+            ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference, maxBytes: adapter.images.maxBytes, representation: 'image' as const }
           const response = await this.options.conversation.resource(reference, input, signal)
           if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign image resource Session')
           const { agentSessionId: _session, ...original } = response
