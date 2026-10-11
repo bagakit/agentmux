@@ -92,14 +92,29 @@
 .notebook-page-actions { display: flex; flex: none; align-items: center; gap: var(--sp-2); color: var(--text-3); }
 .notebook-page-actions .note-text-button { min-height: 28px; padding: 0 var(--sp-2); font: var(--fs-meta)/1.5 var(--font-sans); color: var(--text-3); }
 .notebook-page-actions .note-text-button:hover, .notebook-page-actions .note-text-button[aria-expanded="true"] { color: var(--text); background: var(--wash-1); }
-.notebook-page-actions .notebook-follow-action[aria-pressed="true"] { color: var(--text-2); }
+.note-participants .notebook-follow-action[aria-pressed="true"] { color: var(--text-2); }
 .notebook-follow-action[aria-pressed="true"] svg { fill: currentColor; fill-opacity: .12; }
-.notebook-followers ul { display: grid; gap: 13px; list-style: none; margin: 0; padding: 0; }
-.notebook-followers li { display: flex; align-items: baseline; gap: 16px; min-width: 0; }
-.notebook-followers li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.notebook-followers strong { font-size: 12px; font-weight: 500; }
-.notebook-followers small { display: block; margin-top: 4px; font-size: 10px; color: var(--text-3); }
-.notebook-followers time { flex: none; font-size: 10px; color: var(--text-3); }
+/* Saved editors and persistent followers share one secondary identity row. */
+.note-participants { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin-top: var(--sp-3); min-width: 0; color: var(--text-3); }
+.note-participants__trigger { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 30px; min-width: 0; padding: 2px 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); cursor: pointer; }
+.note-participants__trigger:hover, .note-participants__trigger[aria-expanded="true"] { color: var(--text); }
+.note-participants__trigger:focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.note-participants__group { flex: none; }
+.note-participants__stack { display: inline-flex; align-items: center; padding-left: 4px; }
+.note-participants__avatar, .note-participants__overflow { display: inline-flex; flex: none; margin-left: -4px; border: 2px solid var(--bg); border-radius: 50%; }
+.note-participants__avatar .conversation-avatar { flex: none; }
+.note-participants__overflow { align-items: center; justify-content: center; min-width: 26px; height: 26px; padding: 0 3px; background: var(--surface-1); color: var(--text-2); font: var(--fs-micro)/1 var(--font-sans); }
+.note-participants__count { font-variant-numeric: tabular-nums; }
+.note-participants__uncertainty { font-size: var(--fs-micro); }
+.note-participants .notebook-follow-action { margin-left: auto; padding: 0; min-height: 28px; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); }
+.note-participants__list { display: grid; gap: var(--sp-4); max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-3) 2px 2px 0; margin: 0; list-style: none; }
+.note-participants__list li { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
+.note-participants__list .conversation-avatar { flex: none; margin-top: 1px; }
+.note-participants__identity { display: grid; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.note-participants__identity strong { color: var(--text-2); font: 500 var(--fs-body)/1.5 var(--font-sans); }
+.note-participants__identity small { color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); }
+.note-participants__identity code { font: inherit; }
+.note-participants__panel > .note-text-button { margin-top: var(--sp-3); }
 .notebook-follow-recovery { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 5px; }
 .notebook-page-panel { margin-top: 17px; border-top: 1px solid var(--line-soft); padding-top: 14px; color: var(--text-2); font-size: 12px; }
 .notebook-page-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); width: 100%; margin-bottom: var(--sp-3); }
