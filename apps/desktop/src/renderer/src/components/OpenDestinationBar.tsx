@@ -1,14 +1,14 @@
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { OPEN_DESTINATIONS, openDestinationNeedsRegion, type OpenDestination } from '../lib/open-destination'
-import { getWindowOverlayHost } from './WindowOverlayHost'
+import { useWindowOverlayHost } from './WindowOverlayHost'
 import { WorkbenchActionRows } from './WorkbenchActionRows'
 import { workbenchSplitDirectionIcon } from './workbench-split-menu-icons'
-import { useAppStore } from '../store'
 
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeActionCreateIcon = semanticIconComponent('action.create')
@@ -108,9 +108,7 @@ export function OpenDestinationPopover({
   const requestId = request?.id ?? null
   const [expandedTarget, setExpandedTarget] = useState<number | null>(null)
   const expanded = expandedTarget === requestId
-  const overlayHost = getWindowOverlayHost(document)
-  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
-  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
+  const overlayHost = useWindowOverlayHost()
 
   useLayoutEffect(() => {
     const panel = containerRef.current
@@ -146,18 +144,10 @@ export function OpenDestinationPopover({
   }, [request, document])
 
   useEffect(() => {
-    if (!request) return
-    acquireNativeSurfaceOverlay()
-    return () => {
-      releaseNativeSurfaceOverlay()
-    }
-  }, [request, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
-
-  useEffect(() => {
-    if (requestId === null) return
+    if (requestId === null || !overlayHost) return
     const dismiss = (): void => onDismiss(requestId)
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented && !isImeOwnedKeyboardEvent(event)) {
         event.preventDefault()
         dismiss()
       }
@@ -172,12 +162,12 @@ export function OpenDestinationPopover({
       document.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('pointerdown', onPointerDown, true)
     }
-  }, [requestId, onDismiss, document])
+  }, [requestId, onDismiss, document, overlayHost])
 
   if (!request || !overlayHost) return null
 
   return createPortal(
-    <div
+    <><div
       ref={containerRef}
       className="open-destination-bar"
       data-state="open"
@@ -199,7 +189,9 @@ export function OpenDestinationPopover({
           {NEEDS_PANE_HINT}
         </p>
       ) : null}
-    </div>,
+    </div><ModalAttachmentDismissal active={overlayHost.hasAttribute('data-overlay-modal-slot')} targetRef={containerRef}
+      onOwnerRemoved={() => onDismiss(request.id)}
+      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); onDismiss(request.id) }} /></>,
     overlayHost
   )
 }

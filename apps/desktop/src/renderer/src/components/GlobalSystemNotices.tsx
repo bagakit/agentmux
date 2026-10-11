@@ -1,3 +1,6 @@
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -22,6 +25,8 @@ const ThemeNavigationCollapseIcon = semanticIconComponent('navigation.up')
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
+  const document = useWorkbenchDocument()
+  const window = document.defaultView!
   useRunServiceHealthChanges()
   const warning = useAppStore((state) => state.environmentWarning)
   const nameMetadataWarning = useAppStore(state => state.sessionNameMetadataWarning)
@@ -79,7 +84,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     const reference: VirtualElement = { contextElement: trigger, getBoundingClientRect() {
       const anchor = trigger.getBoundingClientRect()
       const top = inputs.filter(desktopElementVisible).reduce((top, input) => Math.min(top, input.getBoundingClientRect().top), anchor.top)
-      return new DOMRect(anchor.left, top, anchor.width, 0)
+      return new window.DOMRect(anchor.left, top, anchor.width, 0)
     } }
     const update = async () => {
       const { x, y } = await computePosition(reference, details, {
@@ -92,14 +97,14 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       if (!disposed) Object.assign(details.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
     }
     const stopPosition = autoUpdate(reference, details, () => { void update() })
-    const resize = new ResizeObserver(() => { void update() })
+    const resize = new window.ResizeObserver(() => { void update() })
     for (const input of inputs) resize.observe(input)
     return () => {
       disposed = true
       stopPosition(); resize.disconnect()
       for (const property of ['left', 'top', 'max-height', 'visibility']) details.style.removeProperty(property)
     }
-  }, [open])
+  }, [open, document])
   const environment: ServiceNoticeItem[] = warning ? [{ id: 'shell', notice: {
     kind: 'process-degraded', notice: {
       step: 'Local shell environment is incomplete', mode: warning,
@@ -199,15 +204,6 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length)
   const count = notices.length + events.length
   const available = inboxes.every((inbox) => inbox.available)
-  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
-  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
-  useEffect(() => {
-    if (!open) return
-    acquireNativeSurfaceOverlay()
-    return () => {
-      releaseNativeSurfaceOverlay()
-    }
-  }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (!open) return
     for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
@@ -289,5 +285,8 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       })}
       {!available ? <p>Waiting for Runtime status.</p> : count === 0 ? <p>No system notifications.</p> : null}
     </div>
+    <ModalAttachmentDismissal active={Boolean(open && detailsRef.current && getModalOverlayContainer(detailsRef.current))} targetRef={detailsRef}
+      onOwnerRemoved={() => detailsRef.current?.hidePopover()}
+      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); detailsRef.current?.hidePopover() }} />
   </div>
 }

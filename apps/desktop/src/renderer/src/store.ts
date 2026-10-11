@@ -1010,20 +1010,6 @@ type AppState = {
   /** 在一个 scope 内 pin/unpin 一个 id。保序；unpin 恰好移除一条；移空则删掉该 scope 键（同 toggleProjectGroup 删键，不留空数组）。 */
   togglePinnedItem(scope: string, id: string): void
   toolsOpen: boolean
-  /** Transient leases held by Renderer overlays that must sit above window-level native surfaces. */
-  nativeSurfaceOverlayCount: number
-  /**
-   * 观察到的、portal 到 React 根之外的浮层数（Radix 的 Dialog/菜单/下拉/Popover 全在此列）。
-   *
-   * 与上面那把手工租约**分开存**，因为它们的生命周期不同：这个由一个 MutationObserver 全量观察
-   * 后整体写入（绝对值），那个由个别浮层自己 acquire/release（增量）。混成一个数的话，观察器
-   * 的每次整体写入都会把手工租约抹掉。两者在 `nativeSurfacesVisible` 那一处合并，只合并一次。
-   *
-   * 为什么要观察而不是让每个浮层上报：全仓 21 个文件用 Radix 的 Root，逐个接线会漂——新加一个
-   * 对话框的人不会知道有这条规矩，而没有任何断言会红（它只在恰好开在浏览器上方时才消失）。
-   * 判据落在 Radix 自己的 DOM 协议上，新加的第 22 个自动覆盖。
-   */
-  portalOverlayCount: number
   workspaceTool: WorkspaceTool
   workspaceGitView: WorkspaceGitView
   gitCommitDrafts: Record<string, string>
@@ -1218,9 +1204,6 @@ type AppState = {
   setMainSurface(surface: MainSurface): void
   toggleProjectRail(): void
   toggleProjectGroup(key: string): void
-  setPortalOverlayCount(count: number): void
-  acquireNativeSurfaceOverlay(): void
-  releaseNativeSurfaceOverlay(): void
   setWorkspaceTool(tool: WorkspaceTool): void
   setWorkspaceGitView(view: WorkspaceGitView): void
   setGitCommitDraft(scope: string, message: string): void
@@ -4432,8 +4415,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   pinnedItems: {},
   spaceObjectIcons: {},
   toolsOpen: true,
-  nativeSurfaceOverlayCount: 0,
-  portalOverlayCount: 0,
   workspaceTool: 'files-branches',
   workspaceGitView: 'changes',
   gitCommitDrafts: {},
@@ -7403,15 +7384,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (selected && typeof selected === 'object' && configValuesEqual(get().spaceObjectIcons[key], selected))
         set(state => ({ spaceObjectIcons: { ...state.spaceObjectIcons, [key]: { ...selected } } }))
     } finally { if (spaceIconSaveRequests.get(key) === request) spaceIconSaveRequests.delete(key) }
-  },
-  setPortalOverlayCount(portalOverlayCount) {
-    set({ portalOverlayCount })
-  },
-  acquireNativeSurfaceOverlay() {
-    set((state) => ({ nativeSurfaceOverlayCount: state.nativeSurfaceOverlayCount + 1 }))
-  },
-  releaseNativeSurfaceOverlay() {
-    set((state) => ({ nativeSurfaceOverlayCount: Math.max(0, state.nativeSurfaceOverlayCount - 1) }))
   },
   setWorkspaceTool(workspaceTool) {
     set({ workspaceTool, toolsOpen: true, mainSurface: 'workbench' })

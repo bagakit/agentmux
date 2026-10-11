@@ -1,10 +1,11 @@
+import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentTurnUsage } from '@agentmux/core'
 import { contextUsedPercent, formatTokenCount } from '../lib/agent-usage'
 import { AgentUsageDetails } from './AgentUsageDetails'
-import { useAppStore } from '../store'
 
 const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
 
@@ -34,6 +35,7 @@ const ThemeObjectPerformanceIcon = semanticIconComponent('object.performance')
  * from ONE rounded number (`remaining = 100 - used`) so they always sum to 100.
  */
 export function AgentContextUsage({ usage, source, visible = true }: { usage?: AgentTurnUsage | undefined; source?: string; visible?: boolean }) {
+  const document = useWorkbenchDocument()
   const cardId = useId(), anchor = `--context-${cardId.replace(/[^a-zA-Z0-9_-]/gu, '')}`
   const owner = useMemo(() => ({}), [source, visible])
   const latest = useRef(owner); latest.current = owner
@@ -74,16 +76,7 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
     }
     document.addEventListener('keydown', dismissPreview, true)
     return () => document.removeEventListener('keydown', dismissPreview, true)
-  }, [open])
-  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
-  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
-  useEffect(() => {
-    if (!open) return
-    acquireNativeSurfaceOverlay()
-    return () => {
-      releaseNativeSurfaceOverlay()
-    }
-  }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
+  }, [open, document])
 
   const context = usage?.context
   // 「这个数知不知道」由 agent-usage 的 contextUsedPercent 独判——全窗口唯一一处。此处曾自己写那 6 行，
@@ -117,6 +110,9 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
         } }}>
         <AgentUsageDetails usage={usage} />
       </div>
+      <ModalAttachmentDismissal active={Boolean(open && card.current && getModalOverlayContainer(card.current))} targetRef={card}
+        onOwnerRemoved={() => card.current?.hidePopover()}
+        onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); card.current?.hidePopover() }} />
     </>
   )
 }

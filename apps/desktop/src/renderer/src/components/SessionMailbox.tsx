@@ -1,6 +1,8 @@
 import { api } from '../lib/api'
 import { inputMailboxKey, inputMailboxItemKey, useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { InputMailboxRecords, type InputMailboxDisplayRow } from '@agentmux/client-ui/components/InputMailboxRecords'
+import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { MailboxLocationContext } from './MailboxLocationContext'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react'
@@ -182,6 +184,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   onEditQueued?: EditQueuedMessage
   sendImmediately?: boolean
 }) {
+  const document = useWorkbenchDocument()
+  const window = document.defaultView!
   const id = useId()
   const [open, setOpen] = useState(false)
   const [viewed, setViewed] = useState(false)
@@ -220,7 +224,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     }
     document.addEventListener('keydown', dismissPreview, true)
     return () => document.removeEventListener('keydown', dismissPreview, true)
-  }, [open])
+  }, [open, document])
   const [folder, setFolder] = useState<Folder>('inbox')
   useEffect(() => { onHistoryVisible?.(open && visible && folder === 'outbox'); return () => onHistoryVisible?.(false) },
     [open, visible, folder, onHistoryVisible])
@@ -336,15 +340,6 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   function openFolder(): Folder {
     return receipts.unread.length ? 'inbox' : system.unread.length ? 'system' : counts.outbox || sent.length ? 'outbox' : 'inbox'
   }
-  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
-  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
-  useEffect(() => {
-    if (!open) return
-    acquireNativeSurfaceOverlay()
-    return () => {
-      releaseNativeSurfaceOverlay()
-    }
-  }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (!open || !viewed) return
     if (folder === 'inbox' && receipts.unread.length) receipts.acknowledge(receipts.unread)
@@ -420,10 +415,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       panel.style.maxHeight = `${Math.max(1, Math.min(480, c.top - 12))}px`
     }
     measure()
-    const observer = new ResizeObserver(measure); observer.observe(editor); observer.observe(region)
+    const observer = new window.ResizeObserver(measure); observer.observe(editor); observer.observe(region)
     window.addEventListener('resize', measure)
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
-  }, [open])
+  }, [open, document])
   const motion = useMailboxMotion(popover, dock, open, visible, scope)
   const readingMounted = open || motion.retaining
   // Retain the original reading DOM through exit paint so its native anchor baseline
@@ -561,6 +556,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div> : null}
       </div>
     </div>
+    <ModalAttachmentDismissal active={Boolean(open && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}
+      onOwnerRemoved={() => popover.current?.hidePopover()}
+      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); popover.current?.hidePopover(); trigger.current?.focus({ preventScroll: true }) }} />
   </>
   return children ? children(mailbox, visible ? <ComposerPendingDelivery surfaceRef={dock} returning={!open && motion.retaining} notice={noticePresentation?.content} suppressed={open} anchorRef={trigger} queued={pendingIntents} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
 }
