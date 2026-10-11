@@ -91,6 +91,32 @@ it.runIf(process.platform === 'darwin')('does not qualify custom profile/config,
   }
 })
 
+it.runIf(process.platform === 'darwin')('qualifies the configured bypass for create and transfers its exact native policy on resume', async () => {
+  const f = await command(), sid = '00000000-0000-4000-8000-000000000001', flag = '--dangerously-bypass-approvals-and-sandbox'
+  const create = { command: f.path, args: [flag, '--dangerously-bypass-hook-trust', 'Original initial prompt'], env: {} }
+  const first = await prepareCodexManagedLaunch(create, 'original-create', { kind: 'create', prompt: 'Original initial prompt' })
+  expect(first.nativeActor?.launch).toEqual({ command: create.command, args: create.args })
+  expect(JSON.parse(first.plan.args[1]!)).toEqual({ command: create.command, args: create.args, serverConfig: [] })
+  for (const prompt of ['Original continuation', flag]) {
+    const args = ['resume', sid, '--dangerously-bypass-hook-trust', prompt, flag, '--model', 'original-model', '-C', '.']
+    const next = await prepareCodexManagedLaunch({ ...create, args }, 'original-resume', { kind: 'resume', prompt })
+    const actualArgs = args.filter((_, index) => index !== 4)
+    expect(next.nativeActor?.launch).toEqual({ command: create.command, args: actualArgs })
+    expect(JSON.parse(next.plan.args[1]!)).toEqual({ command: create.command, args: actualArgs, serverConfig: [],
+      resume: { threadId: sid, sandbox: 'danger-full-access', approvalPolicy: 'never', model: 'original-model', cwd: '.' } })
+  }
+})
+
+it.runIf(process.platform === 'darwin')('keeps duplicate or mixed bypass permission forms on their complete original launch', async () => {
+  const f = await command(), sid = '00000000-0000-4000-8000-000000000001', flag = '--dangerously-bypass-approvals-and-sandbox'
+  for (const tail of [[flag], ['--sandbox', 'read-only'], ['--ask-for-approval', 'never'], ['--profile', 'original-profile'], ['-c', 'model="original"']]) {
+    for (const args of [[flag, ...tail], [...tail, flag]]) for (const kind of ['create', 'resume'] as const) {
+      const plan = { command: f.path, args: [...(kind === 'resume' ? ['resume', sid] : []), ...args], env: {} }
+      expect(await prepareCodexManagedLaunch(plan, 'original-lifecycle', { kind })).toEqual({ plan })
+    }
+  }
+})
+
 it.runIf(process.platform === 'darwin')('does not strip a misplaced resume prompt or upgrade a different native version', async () => {
   const f = await command(), args = ['resume', '00000000-0000-4000-8000-000000000001', '--model', 'original-model', 'Original resume prompt']
   const plan = { command: f.path, args, env: {} }
