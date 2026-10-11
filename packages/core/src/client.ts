@@ -19,7 +19,7 @@ import {
   AgentMuxAcpBridge,
   type AgentMuxAcpBinding
 } from './acp-adapter.js'
-import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from './agent-native-locator.js'
+import { normalizeNativeSessionId, normalizeNativeTranscriptPath, matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { captureAgentNativeSessionIdentity } from './agent-native-session-capture.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
@@ -5357,7 +5357,7 @@ export class AgentMuxClient {
       if (receipt.intentOperationId) {
         const root = current.continuityOperations?.[receipt.intentOperationId]
         if (!root?.supervision || root.supervision.activeAttemptOperationId !== receipt.operationId ||
-          ['cancelled', 'settled', 'paused'].includes(root.supervision.phase) || !isDeepStrictEqual(root.nativeTarget, current.nativeHandle)) {
+          ['cancelled', 'settled', 'paused'].includes(root.supervision.phase) || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle)) {
           throw new AgentMuxError('The original recovery intent no longer authorizes this attempt.', 'AGENT_CONTINUITY_SUPERSEDED')
         }
         admission = { kind: 'resume', reason: 'supervised-retry', interruptedWorking: false }
@@ -8708,6 +8708,35 @@ export class AgentMuxClient {
               ? { turnUsage: current.turnUsage }
               : {})
       }
+      const continuity = normalized.continuity, nativeTarget = next.nativeHandle
+      if (continuity && normalized.mainSubject && normalized.subject?.kind === 'main' &&
+        normalized.agentSessionId === current.agentSessionId && normalized.providerId === current.providerId && sameRun(normalized.run, current.run) &&
+        current.hookToken === session.hookToken && current.hookBindingId === session.hookBindingId &&
+        current.nativeHandle?.kind === 'provider' && nativeTarget?.kind === 'provider' && continuity.nativeSessionId === current.nativeHandle.sessionId &&
+        matchesProviderNativeSessionTarget(current.nativeHandle, nativeTarget)) {
+        for (const root of Object.values(current.continuityOperations ?? {})) {
+          const supervision = root.supervision, attempt = supervision && current.continuityOperations?.[supervision.activeAttemptOperationId]
+          if (!supervision || root.agentSessionId !== current.agentSessionId || supervision.phase === 'cancelled' ||
+            !attempt?.newRun || !sameRun(attempt.newRun, current.run) ||
+            !matchesProviderNativeSessionTarget(root.nativeTarget, nativeTarget) ||
+            !matchesProviderNativeSessionTarget(root.nativeTarget, attempt.nativeTarget) || !matchesProviderNativeSessionTarget(attempt.nativeTarget, nativeTarget)) continue
+          if (continuity.kind === 'context-restored') {
+            if (supervision.cancellation || supervision.phase === 'settled' || supervision.contextEvidence && sameRun(supervision.contextEvidence.run, current.run)) continue
+            const updated = { ...root, supervision: { ...supervision, contextEvidence: { source: 'native-hook' as const,
+              run: { ...current.run }, nativeTarget: structuredClone(nativeTarget), hookReceiptId: receipt.id, observedAt: receipt.observedAt } } }
+            next.continuityOperations = { ...next.continuityOperations, [root.operationId]: updated }
+            if (next.continuity?.operationId === root.operationId) next.continuity = updated
+          } else if (continuity.kind === 'explicit-user-cancelled') {
+            if (supervision.phase === 'settled' && supervision.reason !== 'context-observed') continue
+            const updated = { ...root, supervision: { ...supervision, phase: 'cancelled' as const, reason: 'explicit-native-cancellation',
+              observedAt: receipt.observedAt, cancellation: { source: 'native-hook' as const, run: { ...current.run },
+                nativeTarget: structuredClone(nativeTarget), operationId: continuity.nativeOperationId, hookReceiptId: receipt.id, observedAt: receipt.observedAt } } }
+            delete updated.supervision.nextAttemptAt
+            next.continuityOperations = { ...next.continuityOperations, [root.operationId]: updated }
+            if (next.continuity?.operationId === root.operationId) next.continuity = updated
+          }
+        }
+      }
       if ((nativeActivity || childrenChanged) && next.semanticStatus) {
         next.semanticStatus = { ...next.semanticStatus,
           currentActivityRevision: (next.semanticStatus.currentActivityRevision ?? 0) + 1 }
@@ -8843,6 +8872,13 @@ export class AgentMuxClient {
     const persistedReceipt = next.hookReceipt
     if (!persistedReceipt) {
       throw new AgentMuxError('Native Hook receipt was not persisted.', 'HOOK_RECEIPT_INVALID')
+    }
+    if (normalized.continuityObservationFailure) this.publisher.publish({ type: 'agent-error', agentSessionId: next.agentSessionId,
+      ...normalized.continuityObservationFailure, evidence: { source: 'native-hook', run: { ...next.run }, hookReceiptId: persistedReceipt.id, observedAt: persistedReceipt.observedAt } })
+    if (normalized.continuity && Object.values(next.continuityOperations ?? {}).some(root =>
+      root.supervision?.contextEvidence?.hookReceiptId === persistedReceipt.id || root.supervision?.cancellation?.hookReceiptId === persistedReceipt.id)) {
+      // A fresh verified source may reobserve an exhausted read-only observer, never add retry budget.
+      this.continuitySupervisor.observe(next, true)
     }
     if (witness.handle && next.nativeHandle && witness.handle.sessionId !== next.nativeHandle.sessionId) this.publisher.publish({
       type: 'agent-error', agentSessionId: next.agentSessionId,

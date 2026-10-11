@@ -138,6 +138,8 @@ export type AgentMuxContinuityCancellation = {
   run: AgentMuxRunRef
   nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
   operationId: string
+  /** Exact authenticated Hook receipt, alongside the original native cancellation operation. */
+  hookReceiptId?: string
   observedAt: number
 }
 export type AgentMuxContinuitySupervision = {
@@ -234,6 +236,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
         supervision.process.exitCode !== undefined && supervision.process.exitCode !== null && !Number.isSafeInteger(supervision.process.exitCode)) ||
       supervision.contextEvidence && (supervision.contextEvidence.source !== 'native-hook' || typeof supervision.contextEvidence.hookReceiptId !== 'string' || !supervision.contextEvidence.hookReceiptId) ||
       supervision.cancellation && (!['native-hook', 'control', 'user-stop'].includes(supervision.cancellation.source) || typeof supervision.cancellation.operationId !== 'string' || !supervision.cancellation.operationId) ||
+      supervision.cancellation?.hookReceiptId !== undefined && (typeof supervision.cancellation.hookReceiptId !== 'string' || !supervision.cancellation.hookReceiptId) ||
       supervision.observationError && (typeof supervision.observationError.code !== 'string' || typeof supervision.observationError.message !== 'string' ||
         !Number.isSafeInteger(supervision.observationError.observedAt) || supervision.observationError.observedAt < 0) ||
       [supervision.contextEvidence, supervision.cancellation].some(fact => fact && (!fact.run || typeof fact.run.runId !== 'string' || !fact.run.runId ||

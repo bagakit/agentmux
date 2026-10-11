@@ -2017,6 +2017,11 @@ export type AgentCurrentActivity = AgentNativeActivityEvent & {
 /** A Provider observation failure is diagnostic only; it does not alter Agent authority. */
 export type AgentHookObservationFailure = { code: string; message: string }
 
+/** Optional Provider protocol evidence; neither form grants input or task-completion authority. */
+export type AgentHookContinuityObservation =
+  | { kind: 'context-restored'; nativeSessionId: string }
+  | { kind: 'explicit-user-cancelled'; scope: 'recovery-intent'; nativeSessionId: string; nativeOperationId: string }
+
 export type NormalizedHookEvent = {
   agentSessionId: string
   run: AgentMuxRunRef
@@ -2032,6 +2037,8 @@ export type NormalizedHookEvent = {
   mainSubject: boolean
   currentActivity?: AgentNativeActivityEvent
   observationFailure?: AgentHookObservationFailure
+  continuity?: AgentHookContinuityObservation
+  continuityObservationFailure?: AgentHookObservationFailure
   nativeTurnId?: string
   toolInvocation?: AgentHookToolInvocation
   subject?: AgentHookSubject
