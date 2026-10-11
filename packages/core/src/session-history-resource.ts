@@ -10,7 +10,7 @@ const MAX_DIMENSION = 16_384
 const MAX_REFERENCE_CHARS = Math.ceil(SESSION_HISTORY_IMAGE_MAX_BYTES / 3) * 4 + 128
 export type AgentSessionHistoryResourceParams = AgentSessionHistoryResourceRequest & { hostId: string; agentSessionId: string }
 export type AgentSessionHistoryResourceResult = AgentSessionHistoryResourceReadResult & { hostId: string }
-const requestFields = ['source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'] as const
+const requestFields = ['source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'] as const
 function invalid(message: string, code = 'INVALID_AGENT_SESSION_HISTORY_RESOURCE'): never { throw new AgentMuxError(message, code) }
 function exactString(value: unknown, name: string, code: string, max = 16_384): asserts value is string {
   if (typeof value !== 'string' || !value || value.length > max || /[\0\r\n]/u.test(value)) invalid(`${name} requires an exact bounded string.`, code)
@@ -28,6 +28,8 @@ export function parseSessionHistoryResourceOptions(value: unknown): AgentSession
   if (p.maxBytes !== undefined && (!Number.isSafeInteger(p.maxBytes) || (p.maxBytes as number) < 1 || (p.maxBytes as number) > SESSION_HISTORY_IMAGE_MAX_BYTES))
     invalid('Image maxBytes may only reduce the fixed 16 MiB budget.', code)
   if (p.offsetBytes !== undefined && (!Number.isSafeInteger(p.offsetBytes) || (p.offsetBytes as number) < 0)) invalid('Content offset must be a nonnegative safe byte position.', code)
+  if (p.representation !== undefined && p.representation !== 'image' || p.representation === 'image' && p.offsetBytes !== undefined)
+    invalid('Image representation requires its explicit image purpose and no text offset.', code)
   if (p.signal !== undefined && !(p.signal instanceof AbortSignal)) invalid('Resource cancellation requires an AbortSignal.', code)
   if (p.commandOverride !== undefined) exactString(p.commandOverride, 'Executor command', code)
   if (p.args !== undefined && (!Array.isArray(p.args) || p.args.some(arg => typeof arg !== 'string' || arg.includes('\0')))) invalid('Executor args must be strings.', code)
@@ -119,6 +121,7 @@ export function parseProviderSessionHistoryResourceReadResult(value: unknown,
     if (bytes.length !== result.byteLength || encodeBase64(bytes) !== result.dataBase64 || checked.status !== 'read' ||
       checked.width !== result.width || checked.height !== result.height) invalid('Recorded resource bytes, MIME or dimensions are invalid.', code)
   } else if (result.status === 'fragment') {
+    if (expected.representation === 'image') invalid('The original image representation did not return raster bytes.', code)
     rpcRecord(result, ['status', 'encoding', 'dataBase64', 'byteLength', 'offsetBytes', 'totalBytes', 'sha256', 'nextOffsetBytes', 'continuationReference'], code)
     if (result.continuationReference !== undefined) exactString(result.continuationReference, 'Renewed content authority', code, MAX_REFERENCE_CHARS)
     const max = expected.maxBytes ?? 64 * 1024

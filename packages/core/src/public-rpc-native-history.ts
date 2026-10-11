@@ -51,7 +51,7 @@ export function parseNativeHistoryParams(value: unknown): AgentMuxRpcNativeHisto
 /** Preserve the exact resource identity and the existing Provider history page contract. */
 export function parseNativeHistoryResult(value: unknown, input: AgentMuxRpcNativeHistoryParams): AgentMuxRpcNativeHistoryResult {
   try {
-    const p = rpcRecord(value, ['hostId', 'executorId', 'nativeSource', 'source', 'items', 'nextCursor', 'changesCursor', 'sourceSizeBytes'], 'CONTROL_PROTOCOL_ERROR')
+    const p = rpcRecord(value, ['hostId', 'executorId', 'nativeSource', 'source', 'items', 'nextCursor', 'changesCursor', 'replayCursor', 'sourceSizeBytes'], 'CONTROL_PROTOCOL_ERROR')
     if (p.hostId !== input.hostId || p.executorId !== input.executorId ||
         !isDeepStrictEqual(parseAgentNativeResumeSource(p.nativeSource), input.source)) throw new Error('Native history target changed.')
     const { hostId: _host, executorId: _executor, nativeSource: _native, ...body } = p
@@ -67,7 +67,7 @@ export function parseNativeHistoryResult(value: unknown, input: AgentMuxRpcNativ
 }
 
 export function parseNativeHistoryResourceParams(value: unknown): AgentMuxRpcNativeHistoryResourceParams {
-  const p = rpcRecord(value, ['hostId', 'executorId', 'nativeSource', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'])
+  const p = rpcRecord(value, ['hostId', 'executorId', 'nativeSource', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'])
   const { hostId, executorId, nativeSource, ...resource } = p
   const route = parseNativeHistoryParams({ hostId, executorId, source: nativeSource })
   const request = parseSessionHistoryResourceOptions(resource)
