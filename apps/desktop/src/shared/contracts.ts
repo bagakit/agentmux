@@ -1603,6 +1603,10 @@ export type HostCreationTrustSnapshot = {
 export type ThemeFileExportResult = { status: 'saved'; path: string } | { status: 'cancelled' } | { status: 'download-requested' }
 
 export type AgentMuxDesktopApi = {
+  performance: {
+    captureProfile(input: import('@agentmux/core/control').RendererV8ProfileInput): Promise<import('@agentmux/core/control').RendererV8ProfileResult>
+    captureTrace(input: import('@agentmux/core/control').RendererTraceInput): Promise<import('@agentmux/core/control').RendererTraceResult>
+  }
   /** Fixed-size synchronous V8-isolate observation; no process dump or object scan. */
   readRendererMemory(): import('@agentmux/core/control').RendererMemorySnapshot
   git: import('./git-contracts').GitProjectIdentityApi

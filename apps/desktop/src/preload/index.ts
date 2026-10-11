@@ -99,6 +99,10 @@ const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
 projectInitialTheme(initialTheme)
 
 const api: AgentMuxPreloadApi = {
+  performance: {
+    captureProfile: input => ipcRenderer.invoke('metrics:captureProfile', input),
+    captureTrace: input => ipcRenderer.invoke('metrics:captureTrace', input)
+  },
   search: {
     query: async (input, context) => {
       const token = crypto.randomUUID()

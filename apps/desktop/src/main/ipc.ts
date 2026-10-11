@@ -1,4 +1,5 @@
 import { RendererV8Profiler } from './renderer-v8-profile.js'
+import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
 import { RendererTimelineTracer } from './renderer-trace.js'
 import { ConversationLandmarkStore } from '@agentmux/core'
 import { registerMoteConnectionIpc } from './mote-connection-ipc.js'
@@ -1200,6 +1201,11 @@ export async function registerIpc(args: {
   const disposeToolkitIpc = registerToolkitIpc(toolkit, (channel, handler) => handleWithEvent(channel, (event, ...values) => {
     assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
     return handler(event, ...values)
+  }))
+
+  registerPerformanceCaptureIpc(metrics, (channel, handler) => handleWithEvent(channel, (event, input) => {
+    assertToolkitSenderTrusted(event.sender, event.senderFrame, contents, contents.mainFrame)
+    return handler(event, input)
   }))
 
   handleWithEvent('notesStorage:inspect', async (event, operationId?: string) => { requireTrustedSender('notesStorage:inspect', event); await notesStorageReady; return notesStorageOwner.inspect(operationId) })
