@@ -1,0 +1,12 @@
+[data-choice-reading] { display: block; min-width: 0; overflow: hidden; white-space: nowrap; }
+[data-choice-reading] > span { display: block; overflow: hidden; text-overflow: ellipsis; }
+@media (prefers-reduced-motion: no-preference) {
+  [data-composer-choice]:is(:hover, :focus-visible) [data-choice-reading][data-overflow] > span {
+    width: max-content; min-width: 100%; overflow: visible;
+    animation: composer-choice-reading var(--choice-reading-duration) linear .6s both;
+  }
+}
+@keyframes composer-choice-reading {
+  from { transform: translateX(0); }
+  to { transform: translateX(var(--choice-reading-offset)); }
+}
