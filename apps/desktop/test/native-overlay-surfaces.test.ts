@@ -489,7 +489,7 @@ describe('actual native Chrome owner', () => {
     expect(contents.focus).not.toHaveBeenCalled()
     owner.dispose()
   })
-  it('synchronizes throttling once on the attached owner after document and content load, never during subsequent paints', async () => {
+  it('synchronizes scheduling once on the attached loaded owner before image preparation, never during subsequent paints', async () => {
     let finishDocument!: () => void, finishContent!: () => void
     fake.load = new Promise(resolve => { finishDocument = resolve })
     fake.image = new Promise(resolve => { finishContent = resolve })
@@ -505,11 +505,12 @@ describe('actual native Chrome owner', () => {
     await vi.waitFor(() => expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(1))
     expect(view.documentLoaded).toBe(true)
     expect(view.contentLoaded).toBe(false)
-    expect(view.webContents.setBackgroundThrottling).not.toHaveBeenCalled()
+    expect(view.webContents.setBackgroundThrottling).toHaveBeenCalledExactlyOnceWith(false)
     finishContent()
     expect(await pending).toEqual({ projected: 1, capturedPixels: 8000 })
-    expect(view.syncStates).toEqual([{ value: false, ownerWindow: window, bounds: float.bounds,
-      visible: true, documentLoaded: true, contentLoaded: true }])
+    expect(view.syncStates).toEqual([{ value: false, ownerWindow: window,
+      bounds: { ...float.bounds, x: -float.bounds.width, y: -float.bounds.height },
+      visible: true, documentLoaded: true, contentLoaded: false }])
     expect(view.webContents.setBackgroundThrottling.mock.calls).toEqual([[false]])
     expect(await owner.refresh()).toEqual({ projected: 1, capturedPixels: 8000 })
     expect(await owner.update([{ ...float, bounds: { ...float.bounds, x: 200 } }])).toEqual({ projected: 1, capturedPixels: 8000 })
@@ -521,6 +522,28 @@ describe('actual native Chrome owner', () => {
     expect(view.setVisible.mock.calls).toEqual([[true]])
     expect(contents.focus).toHaveBeenCalledOnce()
     owner.dispose()
+  })
+  it('synchronizes the attached Chrome scheduler before waiting for an offscreen decoder', async () => {
+    let releaseDecoder!: () => void
+    fake.image = new Promise(resolve => { releaseDecoder = resolve })
+    const { owner, window, contents, pageView } = fixture()
+    const pending = owner.update([float])
+    const view = fake.views[0]
+    const synchronize = view.webContents.setBackgroundThrottling.getMockImplementation()!
+    view.webContents.setBackgroundThrottling.mockImplementation((allowed: boolean) => {
+      synchronize(allowed)
+      if (!allowed && view.ownerWindow === window && view.getBounds().x < 0 && view.documentLoaded) releaseDecoder()
+    })
+    try {
+      expect(await pending).toEqual({ projected: 1, capturedPixels: 8000 })
+      expect(view.syncStates).toEqual([{ value: false, ownerWindow: window,
+        bounds: { ...float.bounds, x: -float.bounds.width, y: -float.bounds.height },
+        visible: true, documentLoaded: true, contentLoaded: false }])
+      expect(view.contentLoaded).toBe(true)
+      expect(view.getBounds()).toEqual(float.bounds)
+      expect(contents.focus).not.toHaveBeenCalled()
+      expect(pageView.webContents.sendInputEvent).not.toHaveBeenCalled()
+    } finally { releaseDecoder(); await pending; owner.dispose() }
   })
   it.each(['document', 'image'] as const)('does not swallow an original menu gesture while its cold %s paint is pending', async phase => {
     let finishPaint!: () => void
@@ -627,10 +650,11 @@ describe('actual native Chrome owner', () => {
     await vi.waitFor(() => expect(contents.capturePage).toHaveBeenCalledTimes(1))
     expect(fake.views).toHaveLength(1)
     const view = fake.views[0]
+    expect(view.webContents.setBackgroundThrottling).toHaveBeenCalledExactlyOnceWith(false)
     expect(await owner.update([])).toEqual({ projected: 0, capturedPixels: 0 })
     finishContent()
     expect(await pending).toEqual({ projected: 0, capturedPixels: 8000 })
-    expect(view.webContents.setBackgroundThrottling).not.toHaveBeenCalled()
+    expect(view.webContents.setBackgroundThrottling).toHaveBeenCalledExactlyOnceWith(false)
     view.listeners['input-event']({}, { type: 'mouseDown', x: 5, y: 7, button: 'left' })
     expect(contents.sendInputEvent).not.toHaveBeenCalled()
     expect(view.ownerWindow).toBeNull()
