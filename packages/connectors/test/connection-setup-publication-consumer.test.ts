@@ -1,14 +1,19 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fork, type ChildProcess } from 'node:child_process'
+import { once } from 'node:events'
+import { createServer, type Socket } from 'node:net'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
-import type { ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupView } from '@agentmux/core/connections'
+import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } from '@agentmux/core'
+import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
+import type { ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupConfigurationEffect, ConnectionSetupView } from '@agentmux/core/connections'
+import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
-const APP = 'cli_publication_original'
+const APP = 'cli_publication_original', effect = 'create-application-version' as const
 const VERSION = 'exact-version-original'
 const clean: Array<() => void | Promise<void>> = []
 afterEach(async () => {
@@ -20,7 +25,7 @@ afterEach(async () => {
 function action(view: ConnectionSetupView, kind: ConnectionSetupAction['kind']): ConnectionSetupAdvance {
   const offered = [...view.continuation?.actions ?? [], ...view.applicationInspection?.actions ?? [], ...view.applicationConfiguration?.actions ?? []].find(a => a.kind === kind)
   expect(offered, kind).toBeDefined()
-  return { operationId: view.operation!.operationId, expectedRevision: offered!.expectedRevision, decision: { actionId: offered!.actionId, value: kind === 'confirm-account' || kind === 'enable-messaging' || kind === 'use-persistent-connection' ? 'confirm' : kind === 'renew' ? 'renew' : 'continue' } }
+  return { operationId: view.operation!.operationId, expectedRevision: offered!.expectedRevision, decision: { actionId: offered!.actionId, value: connectionSetupDecisionForAction(offered!) } }
 }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'publication-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
@@ -32,11 +37,14 @@ async function fixture() {
   const close = async () => { if (closed) return; closed = true; sdk.dispose(); await server.stop(); services.close() }
   clean.push(() => rm(root, { recursive: true, force: true }), close)
   const native: Array<{ path: string; body: unknown }> = []
+  let accepted = true, submission: 'accepted' | 'unknown' | 'attention' = 'accepted'
+  let catalog: unknown = {}, settings: unknown = {}
   let returnedVersion: string | undefined
-  const pending = { ChangeScope: { addScopesV2: ['scope-original'], removeScopesV2: [], addUserTypeScopes: [], removeUserTypeScopes: [], addTenantTypeScopes: [], removeTenantTypeScopes: [] }, changeClientSystemScope: { addScopesV2: [], removeScopesV2: [] }, changeEventConfig: { changed: true, eventModeChanged: false }, changeBotCardCallbackConfig: { changed: false }, changeExtension: { changed: true }, changePrivilege: { changed: false }, changeAllowRefreshToken: { changed: false, allowRefreshToken: false }, pcDefaultAbility: 'web-app', mobileDefaultAbility: 'web-app', pcDefaultAbilityList: ['bot', 'web-app'], mobileDefaultAbilityList: ['web-app'], equalToVisible: false, applyReasonConfig: { apiPrivilegeNeedReason: true, dataPrivilegeNeedReason: false, isDataPrivilegeExpandMap: {}, contactPrivilegeNeedReason: false, isContactExpand: false, visibleScopeNeedReason: true } }
+  const pending = { ChangeScope: { scopeNames: { 'scope-original': 'Original application permission' }, addScopesV2: ['scope-original'], removeScopesV2: [], addUserTypeScopes: [], removeUserTypeScopes: [], addTenantTypeScopes: [], removeTenantTypeScopes: [] }, changeClientSystemScope: { addScopesV2: [], removeScopesV2: [] }, changeEventConfig: { changed: true, eventModeChanged: false }, changeBotCardCallbackConfig: { abilityEnableState: 0, callbackMode: 1, callbackModeChanged: false }, changeExtension: { status: 1 }, changePrivilege: { changed: false, privileges: [] }, contactRangeDetail: {}, changeAllowRefreshToken: { changed: false, allowRefreshToken: false }, pcDefaultAbility: 'web-app', mobileDefaultAbility: 'web-app', pcDefaultAbilityList: ['bot', 'web-app'], mobileDefaultAbilityList: ['web-app'], equalToVisible: false, applyReasonConfig: { apiPrivilegeNeedReason: true, dataPrivilegeNeedReason: false, isDataPrivilegeExpandMap: {}, contactPrivilegeNeedReason: false, isContactExpand: false, visibleScopeNeedReason: true } }
   const visibility = { whiteList: { departments: [{ id: 17 }], members: [{ id: 'original-person' }], groups: [{ id: 'original-group' }], isAll: 0 }, blackList: { departments: [{ id: 'excluded-department' }], members: [{ id: 29 }], groups: [{ id: 31 }], isAll: 0 } }
   const versions = [{ versionId: 'unrelated-list-head', appVersion: '1.0.0', versionStatus: 2 }]
   const features = { hitFeatureKeyList: ['openplatform.b2c.bot_b2c_share_switch_split'] }, sharing = { onlineB2CShareSplitConfig: { b2cGroupChatShareEnable: true, b2cP2PChatShareEnable: true, b2cP2PChatNeedAudit: false } }
+  const detail = { ...pending, ChangeScope: undefined, changeScope: pending.ChangeScope, appVersion: '1.1.0', versionStatus: 4, visibleRange: visibility, changeLog: 'Original selected version release notes', pcDefaultAbility: 'desktop-existing', mobileDefaultAbility: '', changeAppShareConfig: { b2cShareSplitConfigSuggest: { b2cGroupChatShareEnable: false, b2cP2PChatShareEnable: true, b2cP2PChatNeedAudit: true } }, changeB2BShareConfig: { changed: true, status: true } }
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = new URL(String(url)); native.push({ path: target.pathname, body: JSON.parse(String(init?.body ?? '{}')) })
     if (target.pathname === '/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: 'publication-private-token' } } }, { headers: { 'x-flow-key': 'publication-private-flow', 'set-cookie': 'session=publication-private-cookie; Domain=.feishu.cn; Path=/; Secure' } })
@@ -52,7 +60,9 @@ async function fixture() {
     if (target.pathname === '/developers/v1/app_version/list/' + APP) return Response.json({ code: 0, data: { versions } })
     if (target.pathname === '/developers/v1/visible/online/' + APP) return Response.json({ code: 0, data: visibility })
     if (target.pathname === '/developers/v1/b2c_share/' + APP) return Response.json({ code: 0, data: sharing })
-    if (target.pathname === '/developers/v1/app_version/detail/' + APP + '/' + VERSION) return Response.json({ code: 0, data: { ...pending, ChangeScope: undefined, changeScope: pending.ChangeScope, ...(returnedVersion === undefined ? {} : { versionId: returnedVersion }), appVersion: '1.1.0', versionStatus: 4, visibleRange: visibility } })
+    if (target.pathname === '/developers/v1/app_version/detail/' + APP + '/' + VERSION) return Response.json({ code: 0, data: { ...detail, ...(returnedVersion === undefined ? {} : { versionId: returnedVersion }) } })
+    if (target.pathname === '/developers/v1/app_version/create/' + APP) { expect(new Headers(init?.headers).get('X-AppPlatform-RequestFrom')).toBeNull(); return accepted ? Response.json({ code: 0, data: { versionId: VERSION } }) : new Response('Unconfirmed', { status: 502 }) }
+    if (target.pathname === '/developers/v1/publish/commit/' + APP + '/' + VERSION) { expect(new Headers(init?.headers).get('X-AppPlatform-RequestFrom')).toBe('develop_panel'); return accepted ? Response.json({ code: 0, data: submission === 'unknown' ? {} : submission === 'attention' ? { urlConflict: true } : { urlConflict: false, avatar: 'avatar-original', isOk: true } }) : new Response('Unconfirmed', { status: 502 }) }
     throw Error('Unexpected event transport native request')
   }))
   const credential = await services.secrets.store({ operationId: 'publication-credential', secret: 'publication-private-secret' })
@@ -66,6 +76,7 @@ async function fixture() {
   expect(view.continuation?.stage).toBe('confirmed'); return view
   }
   await confirm()
+  const inspect = (selectedEffect: Exclude<ConnectionSetupConfigurationEffect, 'add-application-permissions'> = effect, operationId: string = input.operationId) => sdk.call('connection.setup.inspect', { operationId, applicationInspection: {}, applicationConfiguration: { effect: selectedEffect } })
   const read = async (subject: 'publication-pending' | 'publication-versions' | 'publication-visibility' | 'publication-sharing' | 'publication-features', operationId: string = input.operationId) => {
     const view = await sdk.call('connection.setup.inspect', { operationId, applicationInspection: {} })
     return sdk.call('connection.setup.advance', action(view, ('read-' + subject) as ConnectionSetupAction['kind']))
@@ -74,7 +85,7 @@ async function fixture() {
     const result = await runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'setup', ...args], objectCliEnvironment(root), input === undefined ? '' : JSON.stringify(input))
     expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result
   }
-  return { root, directory, services, sdk, native, saved, input, read, cli, confirm, close, pending, visibility, sharing, versions, wrongVersion: (value: string) => { returnedVersion = value } }
+  return { root, directory, services, sdk, native, saved, input, inspect, read, cli, confirm, close, pending, visibility, sharing, versions, detail, wrongVersion: (value: string) => { returnedVersion = value }, catalog: (value: unknown) => { catalog = value }, settings: (value: unknown) => { settings = value }, submission: (value: typeof submission) => { submission = value }, accept: (value: boolean) => { accepted = value } }
 }
 
 
@@ -111,6 +122,56 @@ it('an exact version read never accepts another version or replays an unknown or
   await expect(f.sdk.call('connection.setup.advance', { ...input, versionId: 'unrelated-list-head' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
 }, 30_000)
 
+const createDraft = { kind: 'create-version', version: '1.1.0', notes: 'Receive Agent conversation messages and retain the existing application settings.', visibility: 'current', reason: 'Allow the team to use the Agent in its existing application audience.' } as const
+const creationSubjects = ['publication-pending', 'publication-versions', 'publication-visibility', 'publication-sharing', 'publication-features'] as const
+async function prepareCreation(f: Awaited<ReturnType<typeof fixture>>, draft = createDraft) {
+  for (const subject of creationSubjects) await f.read(subject)
+  return f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {}, applicationConfiguration: { effect: 'create-application-version', draft } })
+}
+async function prepareSubmission(f: Awaited<ReturnType<typeof fixture>>, versionId = VERSION) {
+  await f.read('publication-versions'); await f.read('publication-features')
+  const offered = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: { versionId } })
+  await f.sdk.call('connection.setup.advance', { ...action(offered, 'read-publication-version'), versionId })
+  return f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {}, applicationConfiguration: { effect: 'submit-application-version', draft: { kind: 'submit-version', versionId, fullRelease: false } } })
+}
+it('SDK and compiled CLI create the reviewed complete form then submit only the explicitly selected returned version', async () => {
+  const f = await fixture(), reviewed = await prepareCreation(f), configuration = reviewed.applicationConfiguration!
+  expect(configuration).toMatchObject({ effect: 'create-application-version', capability: 'disabled', draft: createDraft, review: { reasonRequired: true, creatorAudienceAvailable: false, issues: [], audience: { include: { all: false, departments: [17], people: ['original-person'], groups: ['original-group'] }, exclude: { all: false, departments: ['excluded-department'], people: [29], groups: [31] } }, entries: { desktop: { current: 'web-app', choices: ['bot', 'web-app'] }, mobile: { current: 'web-app', choices: ['web-app'] } }, sharing: { kind: 'split', groups: true, direct: true, directReview: false } } })
+  expect(configuration.effect === 'create-application-version' && configuration.review?.changes.map(c => c.category)).toEqual(['events', 'extensions', 'permissions'])
+  const cliReviewed = await f.cli(['inspect', '--operation-id', f.input.operationId, '--application-inspection', '--application-configuration', 'create-application-version', '--publication-draft', '-'], createDraft)
+  expect(cliReviewed.applicationConfiguration).toEqual(reviewed.applicationConfiguration)
+  const before = f.native.length, input = { ...action(cliReviewed, 'create-application-version'), publicationDraft: createDraft }
+  const created = await f.cli(['advance', '--input', '-'], input)
+  expect(created.applicationConfiguration!.selected).toMatchObject({ effect: 'create-application-version', input, versionId: VERSION, submission: null, request: 'confirmed', secureStorage: 'stored' })
+  expect(f.native.slice(before)).toEqual([{ path: '/developers/v1/app_version/create/' + APP, body: { autoPublish: false, appVersion: createDraft.version, changeLog: createDraft.notes, visibleSuggest: { departments: [17], members: ['original-person'], groups: ['original-group'], isAll: 0 }, blackVisibleSuggest: { departments: ['excluded-department'], members: [29], groups: [31], isAll: 0 }, pcDefaultAbility: 'web-app', mobileDefaultAbility: 'web-app', b2cShareSplitConfigSuggest: f.sharing.onlineB2CShareSplitConfig, applyReasonConfig: f.pending.applyReasonConfig, remark: createDraft.reason } }])
+  expect(created.applicationConfiguration).toMatchObject({ capability: 'unknown', review: null })
+  const reviewedSubmit = await prepareSubmission(f)
+  expect(reviewedSubmit.applicationConfiguration).toMatchObject({ effect: 'submit-application-version', capability: 'disabled', review: { selectedVersion: { versionId: VERSION, version: '1.1.0', status: 'draft' }, issues: [] } })
+  const submit = { ...action(reviewedSubmit, 'submit-application-version'), publicationDraft: { kind: 'submit-version', versionId: VERSION, fullRelease: false } as const }, count = f.native.length
+  const accepted = await f.cli(['advance', '--input', '-'], submit)
+  expect(f.native.slice(count)).toEqual([{ path: '/developers/v1/publish/commit/' + APP + '/' + VERSION, body: { is_full_release: false } }])
+  expect(accepted.applicationConfiguration!.selected).toMatchObject({ effect: 'submit-application-version', versionId: VERSION, request: 'confirmed', secureStorage: 'stored', submission: { outcome: 'accepted', issues: [] } })
+  const after = f.native.length
+  await f.sdk.call('connection.setup.advance', input); await f.sdk.call('connection.setup.advance', submit)
+  expect(f.native).toHaveLength(after)
+  expect(JSON.stringify(accepted)).not.toContain('publication-private')
+}, 30_000)
+
+it('an unknown create remains original while an explicitly selected existing version can be independently submitted', async () => {
+  const f = await fixture(), offered = await prepareCreation(f), input = { ...action(offered, 'create-application-version'), publicationDraft: createDraft }
+  f.accept(false)
+  const created = await f.sdk.call('connection.setup.advance', input)
+  expect(created.applicationConfiguration!.selected).toMatchObject({ request: 'unknown', versionId: null })
+  const submitReview = await prepareSubmission(f)
+  expect(submitReview.applicationConfiguration!.actions.map(a => a.kind)).toContain('submit-application-version')
+  f.accept(true)
+  await f.sdk.call('connection.setup.advance', { ...action(submitReview, 'submit-application-version'), publicationDraft: { kind: 'submit-version', versionId: VERSION, fullRelease: false } })
+  const again = await prepareCreation(f)
+  expect(again.applicationConfiguration).toMatchObject({ reason: 'original-effect-unconfirmed', actions: [], unresolved: { operationId: f.input.operationId, stepId: created.receipt!.stepId } })
+  expect(f.native.filter(r => r.path.includes('/app_version/create/'))).toHaveLength(1)
+  expect(f.native.filter(r => r.path.includes('/publish/commit/'))).toHaveLength(1)
+}, 30_000)
+
 it('the actual SDK rejects a self-consistent response for a different version than its original advance input', async () => {
   const f = await fixture()
   const offered = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: { versionId: VERSION } })
@@ -132,4 +193,148 @@ it('the actual SDK rejects a self-consistent response for a different version th
   expect(f.native).toHaveLength(count)
   const historical = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: { selectedStepId: result.receipt!.stepId, versionId: 'other-version' } })
   expect(historical.applicationInspection!.readResult).toMatchObject({ versionId: VERSION })
+}, 30_000)
+
+it('a current version-list observation supports explicit existing-version choice without reading unrelated creation sources', async () => {
+  const f = await fixture(), before = f.native.length
+  const versions = (await f.read('publication-versions')).applicationInspection!.selected!
+  await f.read('publication-features')
+  const view = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {}, applicationConfiguration: { effect: 'submit-application-version' } })
+  expect(view.applicationConfiguration).toMatchObject({ effect: 'submit-application-version', sources: { versions }, capability: 'unknown', actions: [], review: { versions: [{ versionId: 'unrelated-list-head', version: '1.0.0', status: 'approved' }], selectedVersion: null, issues: ['Choose an exact version to review'] } })
+  expect(f.native.slice(before).map(r => r.path)).toEqual(['/developers/v1/app_version/list/' + APP, '/developers/v1/developer_panel/config'])
+}, 30_000)
+
+it('the actual SDK rejects a different publication draft in a self-consistent original result', async () => {
+  const f = await fixture(), offered = await prepareCreation(f), input = { ...action(offered, 'create-application-version'), publicationDraft: createDraft }
+  const original = f.services.connections.setup!.advance.bind(f.services.connections.setup!)
+  vi.spyOn(f.services.connections.setup!, 'advance').mockImplementation(async (input, context) => {
+    const result = structuredClone(await original(input, context)), configuration = result.applicationConfiguration!
+    const draft = { ...createDraft, notes: 'Different unapproved release notes' }
+    if (configuration.effect !== 'create-application-version') throw Error('Wrong publication consumer')
+    configuration.draft = draft
+    configuration.selected!.input.publicationDraft = draft
+    for (const receipt of configuration.effects) if (receipt.stepId === configuration.selected!.stepId) receipt.input.publicationDraft = draft
+    return result
+  })
+  await expect(f.sdk.call('connection.setup.advance', input)).rejects.toMatchObject({ code: 'INVALID_CONNECTION_SETUP_DATA' })
+}, 30_000)
+
+it('a submit claim invalidates earlier online audience and sharing before a later creation review', async () => {
+  const f = await fixture(), first = await prepareCreation(f)
+  expect(first.applicationConfiguration).toMatchObject({ capability: 'disabled' })
+  const submit = await prepareSubmission(f)
+  await f.sdk.call('connection.setup.advance', { ...action(submit, 'submit-application-version'), publicationDraft: { kind: 'submit-version', versionId: VERSION, fullRelease: false } })
+  await f.read('publication-pending'); await f.read('publication-versions')
+  const incomplete = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {}, applicationConfiguration: { effect: 'create-application-version', draft: createDraft } })
+  expect(incomplete.applicationConfiguration).toMatchObject({ capability: 'unknown', actions: [] })
+  expect(incomplete.applicationConfiguration?.effect === 'create-application-version' && incomplete.applicationConfiguration.sources.visibility).toBeUndefined()
+  expect(incomplete.applicationConfiguration?.effect === 'create-application-version' && incomplete.applicationConfiguration.sources.sharing).toBeUndefined()
+  await f.read('publication-visibility'); await f.read('publication-sharing')
+  const current = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {}, applicationConfiguration: { effect: 'create-application-version', draft: createDraft } })
+  expect(current.applicationConfiguration).toMatchObject({ capability: 'disabled' })
+  expect(current.applicationConfiguration!.actions.map(a => a.kind)).toContain('create-application-version')
+  await f.sdk.call('connection.setup.advance', { ...action(current, 'create-application-version'), publicationDraft: createDraft })
+  expect(f.native.filter(call => call.path.includes('/app_version/create/'))).toHaveLength(1)
+}, 30_000)
+
+it('a received but unknown submission outcome remains the exact version original without blocking a separate creation', async () => {
+  const f = await fixture(), offered = await prepareSubmission(f)
+  const input = { ...action(offered, 'submit-application-version'), publicationDraft: { kind: 'submit-version', versionId: VERSION, fullRelease: false } as const }
+  f.submission('unknown')
+  const accepted = await f.sdk.call('connection.setup.advance', input)
+  expect(accepted.applicationConfiguration!.selected).toMatchObject({ request: 'confirmed', secureStorage: 'stored', submission: { outcome: 'unknown', issues: ['response-unconfirmed'] } })
+  const current = await prepareSubmission(f)
+  expect(current.applicationConfiguration).toMatchObject({ reason: 'original-effect-unconfirmed', actions: [], unresolved: { operationId: f.input.operationId, stepId: accepted.receipt!.stepId } })
+  const count = f.native.length
+  await f.sdk.call('connection.setup.advance', input)
+  expect(f.native).toHaveLength(count)
+  const independent = await prepareCreation(f)
+  expect(independent.applicationConfiguration!.actions.map(a => a.kind)).toContain('create-application-version')
+  expect(f.native.filter(call => call.path.includes('/publish/commit/'))).toHaveLength(1)
+}, 30_000)
+
+it('rejected, initial and testing versions do not prevent a version newer than the original native reference', async () => {
+  const f = await fixture()
+  f.versions.unshift({ versionId: 'rejected-high-version', appVersion: '9.0.0', versionStatus: 3 }, { versionId: 'initial-high-version', appVersion: '8.0.0', versionStatus: 0 }, { versionId: 'testing-high-version', appVersion: '7.0.0', versionStatus: 10 })
+  const result = await prepareCreation(f)
+  expect(result.applicationConfiguration).toMatchObject({ capability: 'disabled', review: { issues: [] } })
+  expect(result.applicationConfiguration!.actions.map(a => a.kind)).toContain('create-application-version')
+}, 30_000)
+
+function childMessage(child: ChildProcess, kind: string): Promise<Record<string, unknown>> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (value: unknown) => { if (value && typeof value === 'object' && (value as { kind?: string }).kind === kind) { child.off('message', onMessage); child.off('exit', onExit); resolve(value as Record<string, unknown>) } }
+    const onExit = () => { child.off('message', onMessage); reject(new Error('Publication owner exited before ' + kind)) }
+    child.on('message', onMessage); child.once('exit', onExit)
+  })
+}
+
+it.each([['create-application-version', 'native-inflight'], ['create-application-version', 'stored-ack'], ['submit-application-version', 'native-inflight'], ['submit-application-version', 'stored-ack']] as const)('a true %s %s writer exit preserves its original child and local ACK without a current adapter or native replay', async (effect, mode) => {
+  const f = await fixture(), offered = effect === 'create-application-version' ? await prepareCreation(f) : await prepareSubmission(f)
+  const input: ConnectionSetupAdvance = { ...action(offered, effect), publicationDraft: effect === 'create-application-version' ? createDraft : { kind: 'submit-version', versionId: VERSION, fullRelease: false } }
+  await f.close()
+  const start = async (mode: string) => {
+    const child = fork(new URL('./fixtures/connection-setup-publication-owner.mjs', import.meta.url), [f.directory, mode, effect], { execArgv: ['--experimental-transform-types'], env: objectCliEnvironment(f.root), stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
+    clean.push(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child, 'exit') } })
+    let errors = ''; child.stderr!.on('data', data => { errors += data })
+    await childMessage(child, 'ready').catch(error => { throw new Error(errors || String(error)) })
+    return child
+  }
+  const writer = await start(mode), reached = childMessage(writer, mode === 'stored-ack' ? 'stored-ack' : 'native-dispatched')
+  const cli = async (args: string[], input?: unknown) => {
+    const result = await runCompiledObjectCli(['--endpoint', 'unix:' + join(f.directory, 'owner.sock'), 'connection', 'setup', ...args], objectCliEnvironment(f.root), input === undefined ? '' : JSON.stringify(input))
+    expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result as ConnectionSetupView
+  }
+  const pending = runCompiledObjectCli(['--endpoint', 'unix:' + join(f.directory, 'owner.sock'), 'connection', 'setup', 'advance', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(input))
+  await reached
+  const original = (await cli(['inspect', '--operation-id', f.input.operationId, '--application-configuration', effect])).applicationConfiguration!.selected!
+  expect(original).toMatchObject({ effect, input })
+  writer.kill('SIGKILL'); await once(writer, 'exit'); expect((await pending).code).not.toBe(0)
+  const native = await readFile(join(f.directory, 'publication-writes.ndjson'), 'utf8')
+  await start('recover')
+  const local = await cli(['inspect', '--operation-id', f.input.operationId, '--application-configuration', effect, '--configuration-step', original.stepId])
+  expect(local.applicationConfiguration!.capability).toBe('unknown')
+  const resumed = await cli(['advance', '--input', '-'], mode === 'stored-ack' ? { ...action(local, 'recover-configuration-effect'), publicationDraft: input.publicationDraft } : input)
+  expect(resumed.applicationConfiguration!.selected).toEqual({ ...original, request: mode === 'stored-ack' ? 'confirmed' : 'unknown', secureStorage: mode === 'stored-ack' ? 'stored' : 'not-started' })
+  expect((await cli(['advance', '--input', '-'], input)).applicationConfiguration!.selected).toEqual(resumed.applicationConfiguration!.selected)
+  expect(await readFile(join(f.directory, 'publication-writes.ndjson'), 'utf8')).toBe(native)
+  const writes = native.trim().split('\n').map(line => JSON.parse(line))
+  expect(writes).toHaveLength(1)
+  expect(writes[0].path).toBe(effect === 'create-application-version' ? '/developers/v1/app_version/create/' + APP : '/developers/v1/publish/commit/' + APP + '/' + VERSION)
+}, 30_000)
+
+
+it.each(['pending', 'visibility', 'target', 'actor'] as const)('a %s change during a private source yield refuses only the uncommitted version creation', async change => {
+  const f = await fixture(), offered = await prepareCreation(f), input = { ...action(offered, 'create-application-version'), publicationDraft: createDraft }, db = f.services.database!
+  const configuration = offered.applicationConfiguration!
+  if (configuration.effect !== 'create-application-version') throw Error('Wrong publication source')
+  const source = change === 'visibility' ? configuration.sources.visibility! : configuration.sources.pending!
+  const ref = db.prepare('SELECT private_ref FROM connection_setup_inspection WHERE step_id=?').get(source.stepId)!.private_ref
+  const actor = JSON.parse(String(db.prepare('SELECT actor_json FROM connection_setup_operation WHERE operation_id=?').get(f.input.operationId)!.actor_json))
+  let entered!: () => void, release!: () => void, held = false, authorized = true
+  const waiting = new Promise<void>(done => { entered = done }), gate = new Promise<void>(done => { release = done }), resolve = DesktopConnectorSecrets.prototype.resolve
+  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function (this: DesktopConnectorSecrets, current) {
+    const value = await resolve.call(this, current)
+    if (!held && current === ref) { held = true; entered(); await gate }
+    return value
+  })
+  const pending = f.services.connections.setup!.advance(input, { actor, assertCurrent: () => { if (!authorized) throw new AgentMuxError('The current actor is no longer authorized', 'CONTROL_PERMISSION_DENIED') } }).then(value => ({ value, error: null }), error => ({ value: null, error }))
+  try {
+    await waiting
+    if (change === 'pending' || change === 'visibility') await f.read(change === 'pending' ? 'publication-pending' : 'publication-visibility')
+    else if (change === 'target') await f.sdk.call('connection.configure', { operationId: 'publication-target-revised', expectedRevision: f.saved.connection.revision, connection: { ...f.saved.connection.config, label: 'Revised publication target' } })
+    else authorized = false
+  } finally { release() }
+  expect((await pending).error?.code).toBe(change === 'actor' ? 'CONTROL_PERMISSION_DENIED' : 'CONNECTION_SETUP_ACTION_STALE')
+  expect(f.native.filter(call => call.path.includes('/app_version/create/'))).toEqual([])
+  expect(db.prepare("SELECT count(*) AS count FROM connection_setup_inspection WHERE json_extract(record_json,'$.effect')='create-application-version'").get()!.count).toBe(0)
+}, 30_000)
+
+
+it('submission reviews the selected version own notes, entries and sharing instead of pending or online values', async () => {
+  const f = await fixture(), offered = await prepareSubmission(f)
+  expect(offered.applicationConfiguration).toMatchObject({ effect: 'submit-application-version', review: { selectedVersion: { versionId: VERSION, notes: 'Original selected version release notes' }, entries: { desktop: { current: 'desktop-existing' }, mobile: { current: null } }, sharing: { kind: 'split', groups: false, direct: true, directReview: true }, changes: expect.arrayContaining([{ category: 'sharing', details: expect.arrayContaining(['Sharing with other organizations will be enabled']) }]) } })
+  const before = f.native.length
+  await f.sdk.call('connection.setup.advance', { ...action(offered, 'submit-application-version'), publicationDraft: { kind: 'submit-version', versionId: VERSION, fullRelease: false } })
+  expect(f.native.slice(before)).toEqual([{ path: '/developers/v1/publish/commit/' + APP + '/' + VERSION, body: { is_full_release: false } }])
 }, 30_000)
