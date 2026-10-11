@@ -1302,6 +1302,14 @@ export class BrowserViewManager {
     const ownedViewport = cloneBrowserViewport(viewport)
     this.applyViewport(entry, entry.view, ownedViewport)
     entry.viewport = ownedViewport
+    // Emulation is already applied. Keep its dimensions observable even if native
+    // drawing synchronization fails; the original failure still reaches the caller.
+    try { this.synchronizeVisiblePage(entry, entry.view) }
+    catch (error) {
+      try { this.emit(entry) }
+      catch (publicationError) { throw new AggregateError([error, publicationError], 'Viewport applied; drawing synchronization and publication failed') }
+      throw error
+    }
     this.emit(entry)
     return this.snapshot(entry)
   }
