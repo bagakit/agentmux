@@ -895,17 +895,21 @@ function BrowserPaneContent({
   const bookmarkSaving = currentBookmarkSave?.status === 'saving'
   const currentUnconfirmedBookmarks = unconfirmedBookmarks.filter(source => sameBookmarkSource(source, tab))
   const bookmarkSaveLabel = currentUnconfirmedBookmarks.length ? 'Save another copy as a bookmark' : 'Save this page as a bookmark'
-  const openSavedBookmark = () => void runCommand(async () => {
+  const openSavedBookmark = (target?: WorkbenchViewTarget) => void runCommand(async () => {
     if (!currentBookmark || browserIdentity.current.id !== currentBookmark.browserId ||
       browserIdentity.current.navigationId !== currentBookmark.navigationId) return
-    await openFile(currentBookmark.path, undefined, undefined, currentBookmark.workspaceId)
+    await openBookmarkFile(currentBookmark.path, false, target)
   })
   const viewBookmarkSource = (target?: WorkbenchViewTarget) => void runCommand(async () => {
     const origin = tab.bookmarkOrigin
     if (!origin || origin.binary) return
+    await openBookmarkFile(origin.path, true, target)
+  })
+  async function openBookmarkFile(path: string, openAsText: boolean, target?: WorkbenchViewTarget): Promise<void> {
     const presentation = target ?? primaryPresentation
     if (presentation.surface !== 'survey' && presentation.surface !== 'mote') {
-      await openFile(origin.path, undefined, undefined, tab.workspaceId, true)
+      if (openAsText) await openFile(path, undefined, undefined, tab.workspaceId, true)
+      else await openFile(path, undefined, undefined, tab.workspaceId)
       return
     }
     const state = useAppStore.getState(), reference = presentation.reference && { ...presentation.reference, regionId: tab.regionId }
@@ -940,11 +944,11 @@ function BrowserPaneContent({
         else current.projection?.onSelect(next)
       } }
     try {
-      await openFile(origin.path, reference.groupId, undefined, tab.workspaceId, true, { displayWorkspaceId: reference.displayWorkspaceId,
+      await openFile(path, reference.groupId, undefined, tab.workspaceId, openAsText, { displayWorkspaceId: reference.displayWorkspaceId,
         resource: { hostId: workspace.hostId, path: workspace.path }, space: { zoneId: zone.zoneId, spaceId: zoneContext(state, topics, zone) },
-        fileOnly: true, split: { tabId: reference.tabId, regionId: reference.regionId, direction: 'right' }, projection })
+        ...(openAsText ? { fileOnly: true } : {}), split: { tabId: reference.tabId, regionId: reference.regionId, direction: 'right' }, projection })
     } finally { release() }
-  })
+  }
   const viewportOptions = (presentationId: string) => <BrowserViewportOptions value={tab.viewport} disabled={busy}
     onSelect={viewport => void run(() => api.browser.setViewport(tab.browserId, viewport))}
     onCustom={() => setCustomViewport(presentationId)} />
@@ -1275,14 +1279,14 @@ function BrowserPaneContent({
       {currentBookmark ? <p className="browser-bookmark-result" role="status">
         <ThemeStatusSavedIcon size={12} aria-hidden="true" /><span>Saved</span>
         <code title={currentBookmark.path}>{currentBookmark.path}</code>
-        <button type="button" className="small-button" disabled={busy} onClick={openSavedBookmark}>Open bookmark</button>
+        <button type="button" className="small-button" disabled={busy} onClick={() => openSavedBookmark(presentation?.target)}>Open bookmark</button>
       </p> : null}
       {currentBookmarkSave?.status === 'error' ? <p className="browser-address-error" role="alert">
         Bookmark could not be saved: {currentBookmarkSave.message}. <button type="button" className="small-button" disabled={busy} onClick={saveBookmark}>Retry bookmark save</button>
       </p> : null}
       {currentUnconfirmedBookmarks.map((original, index) => <p key={index} className="browser-address-error browser-bookmark-error" role="alert">
         Bookmark save not confirmed{original.path ? <>: <code>{original.path}</code></> : null}. {original.message}. Check the workspace before saving another copy.
-        {original.path ? <button type="button" className="small-button" onClick={() => void openFile(original.path!, undefined, undefined, original.workspaceId).catch(reportError)}>Check bookmark</button> : null}
+        {original.path ? <button type="button" className="small-button" onClick={() => void openBookmarkFile(original.path!, false, presentation?.target).catch(reportError)}>Check bookmark</button> : null}
       </p>)}
       {currentUnconfirmedBookmarks.length ? <p className="browser-bookmark-result">
         <button type="button" className="small-button" disabled={pageToolDisabled || bookmarkSaving} onClick={saveBookmark}>Save another copy</button>
