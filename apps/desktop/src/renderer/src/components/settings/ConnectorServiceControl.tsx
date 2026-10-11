@@ -85,15 +85,13 @@ export function ConnectorServiceControl({ active }: { active: boolean }) {
 
   if (!active) return null
   return <section className="settings-group connector-service-control" aria-label="Connector service" data-connector-service>
-    <div className="connector-service-control__heading"><h3>Connector service</h3><span role="status" data-connector-service-state={state ? state.enabled ? 'on' : 'off' : 'unconfirmed'}>{state ? `${issue ? 'Last confirmed: ' : ''}${state.enabled ? 'On' : 'Off'}` : 'State not confirmed'}</span></div>
-    <p className="settings-group-note">Controls automatic messages in both directions for all applications. Turning it off keeps your bots, groups and individual application preferences.</p>
-    {state ? <label className="connector-enabled"><input type="checkbox" aria-label="Enable Agent Conversation Connector" checked={draft ?? state.enabled} onChange={event => {
+    <div className="connector-service-control__heading"><div><h3>Automatic chat sync</h3><p className="settings-group-note">Send and receive messages for connected Agents.</p></div><div className="connector-service-control__setting"><span role="status" data-connector-service-state={state ? state.enabled ? 'on' : 'off' : 'unconfirmed'}>{state ? `${issue ? 'Last confirmed: ' : ''}${state.enabled ? 'On' : 'Off'}` : 'State not confirmed'}</span>{state ? <label className="connector-enabled"><input type="checkbox" aria-label="Enable Agent Conversation Connector" checked={draft ?? state.enabled} onChange={event => {
       ++selection.current; if (!needsCurrent) setBaseline({ state, source: api.connections.call }); setDraft(event.target.checked); setNotice('')
-    }} /><span>Enable Agent Conversation Connector</span></label> : null}
-    <div className="connector-editor-actions"><button className="primary-button" disabled={busy || draft === null || !baseline || needsCurrent || baseline.source !== api.connections.call} onClick={() => void save()}>{busy ? 'Saving service…' : 'Save Connector service'}</button><button className="small-button" onClick={checkCurrent}>Check current service</button>{draft !== null ? <button className="small-button" onClick={() => void newChoice()}>Use current revision for a new change</button> : null}</div>
-    {issue ? <p className="connector-issue" role="status">The current service check is unconfirmed. {issue} Application management and original request checks remain available.</p> : null}
+    }} /><span>Enable</span></label> : null}<button className="small-button connector-service-control__refresh" onClick={checkCurrent}>Refresh status</button></div></div>
+    {draft !== null ? <div className="connector-editor-actions"><span className="settings-group-note">Unsaved change</span><button data-connector-service-save className="primary-button" disabled={busy || !baseline || needsCurrent || baseline.source !== api.connections.call} onClick={() => void save()}>{busy ? 'Saving…' : 'Save changes'}</button>{needsCurrent ? <button className="small-button" onClick={() => void newChoice()}>Review latest setting</button> : null}</div> : null}
+    {issue ? <p className="connector-check-feedback" role="status">The sync status could not be refreshed. Bot setup and saved connections are still available.</p> : null}
     {notice ? <p className="settings-group-note" role="status">{notice}</p> : null}
-    {Object.values(intents).length ? <details className="connector-service-requests"><summary>Original service requests</summary><p className="settings-group-note">These are the submitted inputs and their original receipts. A current state read cannot confirm an earlier save.</p>{Object.values(intents).map(intent => {
+    <details className="connector-service-requests"><summary>Sync settings and history</summary><p className="settings-group-note">Turning sync off pauses new automatic messages for all bots. Your bots, groups and each bot’s own setting are kept.</p>{issue ? <p className="connector-enrollment__technical">{issue}</p> : null}{Object.values(intents).length ? <p className="settings-group-note">Earlier changes and their original results are kept here. Refreshing the current status does not confirm an earlier save.</p> : null}{Object.values(intents).map(intent => {
       const result = requests[intent.input.operationId]
       return <div className="agent-connector-receipt" key={intent.input.operationId} data-service-operation={intent.input.operationId}>
         <strong>Requested {intent.input.service.enabled ? 'On' : 'Off'}</strong><code>{intent.input.operationId}</code>
@@ -102,6 +100,6 @@ export function ConnectorServiceControl({ active }: { active: boolean }) {
         <button className="small-button" aria-label={`Check original service request ${intent.input.operationId}`} onClick={() => void inspect(intent.input.operationId)}>Check original request</button>
         <details><summary>Submitted input</summary><code>{JSON.stringify(intent.input)}</code></details>
       </div>
-    })}</details> : null}
+    })}</details>
   </section>
 }
