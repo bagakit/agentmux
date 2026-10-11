@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
@@ -39,8 +40,8 @@ function session(agentSessionId: string, runId: string): AgentMuxStoredAgentSess
     hookBindingId: `hook-${agentSessionId}`,
     hookToken: `token-${agentSessionId}`,
 
-    createdAt: 1,
-    updatedAt: 1
+    createdAt: _tailFixtureEpoch(0, 0, 1),
+    updatedAt: _tailFixtureEpoch(0, 0, 1)
   })
 }
 
@@ -56,8 +57,8 @@ function assistantAppend(
       kind: 'assistant_message',
       status: 'streaming',
       source: 'acp',
-      createdAt: 10,
-      updatedAt: 10,
+      createdAt: _tailFixtureEpoch(0, 0, 10),
+      updatedAt: _tailFixtureEpoch(0, 0, 10),
       title: 'Assistant response',
       content: 'Hello'
     }
@@ -73,7 +74,7 @@ describe('Agent Session Timeline', () => {
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'assistant-1',
-      updatedAt: 11,
+      updatedAt: _tailFixtureEpoch(0, 0, 11),
       content: 'Hello, world',
       status: 'complete'
     }
@@ -84,17 +85,42 @@ describe('Agent Session Timeline', () => {
       id: 'assistant-1',
       content: 'Hello, world',
       status: 'complete',
-      updatedAt: 11
+      updatedAt: _tailFixtureEpoch(0, 0, 11)
     })
-    expect(applyAgentTimelineMutation(updated, { ...update, updatedAt: 12 })).toEqual(updated)
+    expect(applyAgentTimelineMutation(updated, { ...update, updatedAt: _tailFixtureEpoch(0, 0, 12) })).toEqual(updated)
     expect('contentDelta' in update).toBe(false)
     expect(() => normalizeAgentTimelineMutation({
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'assistant-1',
-      updatedAt: 12,
+      updatedAt: _tailFixtureEpoch(0, 0, 12),
       contentDelta: '!'
     })).toThrowError(expect.objectContaining({ code: 'INVALID_AGENT_TIMELINE' }))
+  })
+
+  it('preserves captured content purpose through normalization and updates without changing tool fields', () => {
+    const append = assistantAppend()
+    const toolFields = { toolName: 'Original tool', toolInput: 'Original input', toolOutput: 'Original output' }
+    for (const contentEligibility of ['public', 'private', 'unconfirmed'] as const) {
+      const marked = { ...append, item: { ...append.item, ...toolFields, contentEligibility } }
+      expect(normalizeAgentTimelineMutation(marked)).toEqual(marked)
+    }
+    for (const contentEligibility of [null, ['public'], { kind: 'public' }, 'unknown']) {
+      expect(() => normalizeAgentTimelineMutation({ ...append, item: { ...append.item, contentEligibility } }))
+        .toThrowError(expect.objectContaining({ code: 'INVALID_AGENT_TIMELINE' }))
+    }
+    const marked = { ...append, item: { ...append.item, ...toolFields, contentEligibility: 'unconfirmed' as const } }
+    const original = applyAgentTimelineMutation([], marked)
+    const metadata = applyAgentTimelineMutation(original, {
+      type: 'update', agentSessionId: append.agentSessionId, itemId: append.item.id,
+      updatedAt: _tailFixtureEpoch(0, 0, 11), title: 'Original result', status: 'complete'
+    })
+    expect(metadata).toEqual([{ ...marked.item, updatedAt: _tailFixtureEpoch(0, 0, 11), title: 'Original result', status: 'complete' }])
+    const updated = applyAgentTimelineMutation(metadata, {
+      type: 'update', agentSessionId: append.agentSessionId, itemId: append.item.id,
+      updatedAt: _tailFixtureEpoch(0, 0, 12), content: 'Updated exact content'
+    })
+    expect(updated).toEqual([{ ...metadata[0], updatedAt: _tailFixtureEpoch(0, 0, 12), content: 'Updated exact content' }])
   })
 
   it('fails closed for conflicting identities, unknown update targets, and crossed Sessions', () => {
@@ -107,7 +133,7 @@ describe('Agent Session Timeline', () => {
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'missing',
-      updatedAt: 11,
+      updatedAt: _tailFixtureEpoch(0, 0, 11),
       content: 'x'
     })).toThrowError(expect.objectContaining({ code: 'UNKNOWN_AGENT_TIMELINE_ITEM' }))
     expect(() => applyAgentTimelineMutation(current, assistantAppend('session-2')))
@@ -128,8 +154,8 @@ describe('Agent Session Timeline', () => {
         kind: 'tool_call',
         status: 'complete',
         source: 'native-hook',
-        createdAt: 20,
-        updatedAt: 20,
+        createdAt: _tailFixtureEpoch(0, 0, 20),
+        updatedAt: _tailFixtureEpoch(0, 0, 20),
         title: 'Bash',
         toolName: 'Bash',
         toolInput: 'ls',
@@ -167,19 +193,19 @@ describe('Agent Session Timeline', () => {
           kind: 'tool_call',
           status: 'streaming',
           source: 'native-hook',
-          createdAt: 10,
-          updatedAt: 10,
+          createdAt: _tailFixtureEpoch(0, 0, 10),
+          updatedAt: _tailFixtureEpoch(0, 0, 10),
           title: 'Bash',
           toolName: 'Bash',
           toolInput: 'ls'
         }
       })
-      const afterPost = applyAgentTimelineMutation(afterPre, toolItem('run-x:tool:toolu_2', { updatedAt: 20 }))
+      const afterPost = applyAgentTimelineMutation(afterPre, toolItem('run-x:tool:toolu_2', { updatedAt: _tailFixtureEpoch(0, 0, 20) }))
       expect(afterPost).toHaveLength(1)
-      expect(afterPost[0]).toMatchObject({ status: 'complete', toolOutput: 'total 24', updatedAt: 20 })
+      expect(afterPost[0]).toMatchObject({ status: 'complete', toolOutput: 'total 24', updatedAt: _tailFixtureEpoch(0, 0, 20) })
       // createdAt 仍是 Pre 的 10——这仍是「同一件事」，事后投递不该改写它的创建时刻。
       // 变异守卫：把实现里 `createdAt: previous.createdAt` 删掉（让 item 自带的 20 生效），这条变红。
-      expect(afterPost[0]!.createdAt).toBe(10)
+      expect(afterPost[0]!.createdAt).toBe(_tailFixtureEpoch(0, 0, 10))
     })
 
     it('upsert 语义未变时不推空 revision（幂等重投）', () => {
@@ -193,16 +219,16 @@ describe('Agent Session Timeline', () => {
       // 于是 `complete` + 真实 toolOutput 会被静默换成 `streaming` + 旧输出，`updatedAt` 还倒流——
       // 这一行随后被持久化、被 renderer 用同一个函数原样重放，那次调用在界面上「退回未完成」。
       const settled = applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_4', {
-        updatedAt: 30,
+        updatedAt: _tailFixtureEpoch(0, 0, 30),
         toolOutput: 'final output'
       }))
       const afterStale = applyAgentTimelineMutation(settled, toolItem('run-x:tool:toolu_4', {
-        updatedAt: 20,
+        updatedAt: _tailFixtureEpoch(0, 0, 20),
         status: 'streaming',
         toolOutput: 'stale output'
       }))
       // 期望值写死字面量、不从被测输入派生：否则实现变异时样本跟着漂，断言恒真。
-      expect(afterStale[0]).toMatchObject({ status: 'complete', toolOutput: 'final output', updatedAt: 30 })
+      expect(afterStale[0]).toMatchObject({ status: 'complete', toolOutput: 'final output', updatedAt: _tailFixtureEpoch(0, 0, 30) })
       // 整份原样返回（同一个数组内容），不推空 revision——拒绝这次回退，而不是产生一次新版本。
       expect(afterStale).toEqual(settled)
     })
@@ -211,8 +237,8 @@ describe('Agent Session Timeline', () => {
       // 与 update 那侧判的是同一件事（后观测者胜），处置必须不同：upsert 的调用方是 hook 事件，
       // 而 index<0 那支之所以补落也是同一个理由。这条把「拒绝」与「失败」分开钉住——若有人图省事
       // 照抄 update 的 `throw STALE_AGENT_TIMELINE_ITEM`，它立刻变红。
-      const settled = applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_5', { updatedAt: 30 }))
-      expect(() => applyAgentTimelineMutation(settled, toolItem('run-x:tool:toolu_5', { updatedAt: 20 })))
+      const settled = applyAgentTimelineMutation([], toolItem('run-x:tool:toolu_5', { updatedAt: _tailFixtureEpoch(0, 0, 30) }))
+      expect(() => applyAgentTimelineMutation(settled, toolItem('run-x:tool:toolu_5', { updatedAt: _tailFixtureEpoch(0, 0, 20) })))
         .not.toThrow()
     })
 
@@ -228,19 +254,19 @@ describe('Agent Session Timeline', () => {
           kind: 'tool_call',
           status: 'streaming',
           source: 'native-hook',
-          createdAt: 30,
-          updatedAt: 30,
+          createdAt: _tailFixtureEpoch(0, 0, 30),
+          updatedAt: _tailFixtureEpoch(0, 0, 30),
           title: 'Bash',
           toolName: 'Bash',
           toolInput: 'ls'
         }
       })
       const settled = applyAgentTimelineMutation(pending, toolItem('run-x:tool:toolu_6', {
-        updatedAt: 30,
+        updatedAt: _tailFixtureEpoch(0, 0, 30),
         status: 'complete',
         toolOutput: 'landed'
       }))
-      expect(settled[0]).toMatchObject({ status: 'complete', toolOutput: 'landed', updatedAt: 30 })
+      expect(settled[0]).toMatchObject({ status: 'complete', toolOutput: 'landed', updatedAt: _tailFixtureEpoch(0, 0, 30) })
     })
 
     it('upsert 也受 200 上限约束——补落一条时最旧的被逐出', () => {
@@ -249,7 +275,7 @@ describe('Agent Session Timeline', () => {
         items = applyAgentTimelineMutation(items, toolItem(`run-x:tool:fill_${index}`, { createdAt: index + 1, updatedAt: index + 1 }))
       }
       expect(items).toHaveLength(200)
-      const grown = applyAgentTimelineMutation(items, toolItem('run-x:tool:fresh', { createdAt: 999, updatedAt: 999 }))
+      const grown = applyAgentTimelineMutation(items, toolItem('run-x:tool:fresh', { createdAt: _tailFixtureEpoch(0, 0, 999), updatedAt: _tailFixtureEpoch(0, 0, 999) }))
       expect(grown).toHaveLength(200)
       expect(grown.some((item) => item.id === 'run-x:tool:fill_0')).toBe(false)
       expect(grown.some((item) => item.id === 'run-x:tool:fresh')).toBe(true)
@@ -259,7 +285,7 @@ describe('Agent Session Timeline', () => {
   it('maps ACP updates to full content and scopes raw ids by adapter and native Session', () => {
     const evidence = {
       source: 'acp' as const,
-      observedAt: 20,
+      observedAt: _tailFixtureEpoch(0, 0, 20),
       acpAdapterId: 'adapter-1',
       acpSessionId: 'native-1'
     }
@@ -278,13 +304,13 @@ describe('Agent Session Timeline', () => {
       activityId: 'response-1',
       status: 'complete',
       content: 'AB'
-    }, { ...evidence, observedAt: 21 })
+    }, { ...evidence, observedAt: _tailFixtureEpoch(0, 0, 21) })
     const permission = agentTimelineMutationFromAcpEvent('session-1', {
       type: 'permission',
       requestId: 'response-1',
       title: 'Run tests',
       options: [{ id: 'allow', label: 'Allow', kind: 'allow-once' }]
-    }, { ...evidence, observedAt: 22 })
+    }, { ...evidence, observedAt: _tailFixtureEpoch(0, 0, 22) })
     const otherAdapter = agentTimelineMutationFromAcpEvent('session-1', {
       type: 'activity',
       operation: 'append',
@@ -293,7 +319,7 @@ describe('Agent Session Timeline', () => {
       status: 'complete',
       title: 'Another adapter',
       content: 'Separate'
-    }, { ...evidence, acpAdapterId: 'adapter-2', observedAt: 22 })
+    }, { ...evidence, acpAdapterId: 'adapter-2', observedAt: _tailFixtureEpoch(0, 0, 22) })
     const otherNativeSession = agentTimelineMutationFromAcpEvent('session-1', {
       type: 'activity',
       operation: 'append',
@@ -302,7 +328,7 @@ describe('Agent Session Timeline', () => {
       status: 'complete',
       title: 'Another native Session',
       content: 'Separate again'
-    }, { ...evidence, acpSessionId: 'native-2', observedAt: 23 })
+    }, { ...evidence, acpSessionId: 'native-2', observedAt: _tailFixtureEpoch(0, 0, 23) })
 
     expect(append).toMatchObject({ type: 'append', item: { status: 'streaming' } })
     expect(update).toMatchObject({ type: 'update', content: 'AB' })
@@ -343,8 +369,8 @@ describe('Agent Session Timeline', () => {
         kind: 'assistant_message',
         status: 'streaming',
         source: 'acp',
-        createdAt: 10,
-        updatedAt: 10,
+        createdAt: _tailFixtureEpoch(0, 0, 10),
+        updatedAt: _tailFixtureEpoch(0, 0, 10),
         title: 'Assistant response',
         content: 'A'
       }
@@ -353,11 +379,11 @@ describe('Agent Session Timeline', () => {
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'response-9',
-      updatedAt: 30,
+      updatedAt: _tailFixtureEpoch(0, 0, 30),
       status: 'complete',
       content: 'ABC'
     })
-    expect(settled[0]).toMatchObject({ status: 'complete', content: 'ABC', updatedAt: 30 })
+    expect(settled[0]).toMatchObject({ status: 'complete', content: 'ABC', updatedAt: _tailFixtureEpoch(0, 0, 30) })
 
     let code: string | null = null
     try {
@@ -365,7 +391,7 @@ describe('Agent Session Timeline', () => {
         type: 'update',
         agentSessionId: 'session-1',
         itemId: 'response-9',
-        updatedAt: 20,
+        updatedAt: _tailFixtureEpoch(0, 0, 20),
         status: 'streaming',
         content: 'AB'
       })
@@ -376,7 +402,7 @@ describe('Agent Session Timeline', () => {
     // 只判「抛了」的话把守卫改成任意一种别的错都不会红。
     expect(code).toBe('STALE_AGENT_TIMELINE_ITEM')
     // 抛错之外还要证内容没被动过——纯函数不该在抛错前留下半个改写。
-    expect(settled[0]).toMatchObject({ status: 'complete', content: 'ABC', updatedAt: 30 })
+    expect(settled[0]).toMatchObject({ status: 'complete', content: 'ABC', updatedAt: _tailFixtureEpoch(0, 0, 30) })
   })
 
   it('assigns continuous Store revisions and does not advance revision for a no-op', async () => {
@@ -403,7 +429,7 @@ describe('Agent Session Timeline', () => {
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'assistant-1',
-      updatedAt: 11,
+      updatedAt: _tailFixtureEpoch(0, 0, 11),
       content: 'Hello, world',
       status: 'complete'
     })).resolves.toMatchObject({
@@ -416,7 +442,7 @@ describe('Agent Session Timeline', () => {
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'assistant-1',
-      updatedAt: 12,
+      updatedAt: _tailFixtureEpoch(0, 0, 12),
       content: 'Hello, world',
       status: 'complete'
     })).resolves.toMatchObject({
@@ -440,7 +466,7 @@ describe('Agent Session Timeline', () => {
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'assistant-1',
-      updatedAt: 11,
+      updatedAt: _tailFixtureEpoch(0, 0, 11),
       title: ''
     })).rejects.toMatchObject({ code: 'INVALID_AGENT_TIMELINE' })
     await expect(store.loadTimeline('session-1')).resolves.toMatchObject({
@@ -514,7 +540,7 @@ describe('Agent Session Timeline', () => {
       retiredRuns: [{ ...initial.run }],
       hookBindingId: 'hook-session-1-run-2',
       hookToken: 'token-session-1-run-2',
-      updatedAt: 2
+      updatedAt: _tailFixtureEpoch(0, 0, 2)
     })
     await expect(store.loadTimeline(initial.agentSessionId)).resolves.toMatchObject({
       agentSessionId: initial.agentSessionId,
@@ -596,7 +622,7 @@ describe('Agent Session Timeline', () => {
       type: 'update',
       agentSessionId: 'session-1',
       itemId: 'assistant-1',
-      updatedAt: 11,
+      updatedAt: _tailFixtureEpoch(0, 0, 11),
       content: 'This change requires the next revision.'
     })).rejects.toMatchObject({ code: 'AGENT_TIMELINE_REVISION_LIMIT' })
     await expect(restarted.loadTimeline('session-1')).resolves.toMatchObject({

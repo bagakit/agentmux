@@ -229,6 +229,57 @@ it('Claude typed API error containers stay locally complete without publishing t
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20_000)
 
+it('captured Hook content purpose survives durable reading without hiding independent conversation or tool fields', async () => {
+  const f = await fixture('claude'), providers = new core.AgentProviderRegistry()
+  const hidden = 'Unconfirmed Hook failure canary', privateBody = 'Private captured body canary'
+  const normal = 'Independent normal Stop reply', other = 'Independent other Provider reply'
+  const tool = 'Independent marked item tool output', user = 'Original confirmed captured user input'
+  const hook = async (providerId: 'claude' | 'cursor', eventName: string, receiptId: string, payload: Record<string, unknown>) => {
+    const normalized = providers.get(providerId).normalizeHook({ receiptId, agentSessionId: f.ref.agentSessionId,
+      runId: 'run-original-agent', providerId, eventName, payload: { session_id: source.nativeSessionId, ...payload } }, {})
+    for (const mutation of normalized.timeline) await f.store.applyTimelineMutation(mutation)
+    return normalized.timeline
+  }
+  const failure = await hook('claude', 'StopFailure', 'original-failure-hook', { error: 'unknown', last_assistant_message: hidden })
+  const captured = failure.find(mutation => mutation.type !== 'update' && mutation.item.kind === 'assistant_message')
+  if (!captured || captured.type === 'update') throw new Error('Original Hook assistant record missing')
+  await f.store.applyTimelineMutation({ type: 'update', agentSessionId: f.ref.agentSessionId, itemId: captured.item.id,
+    updatedAt: captured.item.updatedAt + 1, content: hidden + '\nOriginal updated diagnostic' })
+  await hook('claude', 'Stop', 'original-normal-stop', { last_assistant_message: normal })
+  await hook('cursor', 'afterAgentResponse', 'original-other-provider', { text: other, conversation_id: source.nativeSessionId })
+  await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.ref.agentSessionId, item: {
+    id: 'private-body-with-tool', agentSessionId: f.ref.agentSessionId, kind: 'tool_call', source: 'native-hook',
+    status: 'complete', title: 'Original independent tool', content: privateBody, contentEligibility: 'private', toolOutput: tool,
+    createdAt: captured.item.createdAt, updatedAt: captured.item.updatedAt
+  } })
+  await appendFile(f.transcript, jsonl([{ sessionId: source.nativeSessionId, uuid: 'independent-native-hook-sibling',
+    type: 'assistant', message: { role: 'assistant', content: 'Independent native public reply beside captured failure' } }]))
+  await f.client.submitAgentPrompt({ ...agentPromptCondition(f.client.agentSession(f.ref.agentSessionId)), agentSessionId: f.ref.agentSessionId,
+    operationId: 'original-hook-positive-input', prompt: user, authorHuman: true, allowUncertainTurn: true })
+  f.services.publication!.refresh()
+  await vi.waitFor(() => {
+    const wire = JSON.stringify(f.remote.messageCalls())
+    for (const text of [normal, other, tool, user, 'Independent native public reply beside captured failure']) expect(wire).toContain(text)
+    expect(f.services.publication!.store.list(f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
+  }, { timeout: 10_000 })
+  const wire = JSON.stringify(f.remote.messageCalls())
+  expect(wire).not.toContain(hidden); expect(wire).not.toContain(privateBody)
+  const reopened = new core.AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json'))
+  const saved = (await reopened.loadTimeline(f.ref.agentSessionId)).items.find(item => item.id === captured.item.id)
+  expect(saved).toMatchObject({ content: hidden + '\nOriginal updated diagnostic', contentEligibility: 'unconfirmed' })
+  const read = core.consumeConversationWindowPage(await f.rpc.call('agent.conversation.inspect', f.ref))
+  expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw new Error('Original Hook conversation incomplete')
+  const original = read.snapshot.units.flatMap(unit => unit.records).find(record => record.original.kind === 'captured' && record.original.item.id === captured.item.id)
+  expect(original?.original).toMatchObject({ kind: 'captured', item: saved })
+  const delivery = await f.cli(['connection', 'delivery', 'ls', '--connection', f.binding.connectionId, '--binding', f.binding.bindingId, '--binding-revision', String(f.binding.revision)])
+  expect(delivery.coverage.gaps.some((gap: ConnectionDeliveryGap) => gap.reason === 'public-content-unconfirmed' &&
+    gap.part?.record.source.kind === 'captured' && gap.part.record.source.recordId === captured.item.id &&
+    gap.part.selector.kind === 'captured-field' && gap.part.selector.field === 'content')).toBe(true)
+  expect(delivery.coverage.gaps.some((gap: ConnectionDeliveryGap) => gap.part?.record.source.kind === 'captured' && gap.part.record.source.recordId === 'private-body-with-tool')).toBe(false)
+  expect(f.client.agentSession(f.ref.agentSessionId).run).toEqual({ runId: 'run-original-agent' })
+  expect(f.inner.kernel.input).toHaveBeenCalledTimes(2); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 25_000)
+
 it('known model context is an accounted scope exclusion rather than a permanent synchronization failure', async () => {
   const f = await fixture()
   const privateResource = vi.spyOn(f.port, 'resource'), privateText = 'Private model context only '.repeat(90000)
