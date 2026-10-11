@@ -9,6 +9,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { readTerminalViewObservation } from '../../../src/renderer/src/lib/terminal-view-observation'
+import { unwrapSessionObservationResult } from '../../../src/shared/session-observation-result'
 import '../../../src/renderer/src/styles/index.css'
 window.terminals = []
 const request = window.nativeBoundary.request
@@ -39,6 +40,7 @@ api.sessions.recover = async (...args) => {
 }
 api.sessions.resolve = control => request('resolve', control)
 api.sessions.refresh = control => request('refresh', control)
+api.sessions.controlContinuity = async (hostId, input) => unwrapSessionObservationResult(await request('control-continuity', hostId, input))
 api.sessions.stop = control => request('stop', control)
 const spatialEvent = event => event.kind === 'native-proof-spatial-state'
 api.sessions.onEvent = createRendererSessionEvents(listener => window.nativeBoundary.onEvent(event => { if (!spatialEvent(event)) listener(event) }))
@@ -66,6 +68,7 @@ window.continuityState = () => {
   return { loading: state.loading, tabs: workbench.tabs, layouts: workbench.layouts, drafts: state.agentComposerDrafts,
     focus: state.agentFocus, activeWorkspaceId: state.activeWorkspaceId,
     sessions: state.sessions, queues: state.agentSteerQueues, recoveryReceipts: window.continuityRecoveryReceipts,
+    continuityControlIntents: state.continuityControlIntents,
     error: state.error, dom: document.body.innerText }
 }
 window.continuitySendIdle = () => useAppStore.getState().send(setup.ids.idle.sessionId,
