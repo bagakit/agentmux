@@ -8,6 +8,7 @@ import { RuntimeController } from '../../../src/main/runtime-controller'
 import { verifyCapabilityRecovery } from './capability-recovery'
 import { verifySupervisionSurface } from './supervision-surface'
 import { verifyInitialWaitSurface } from './initial-wait-surface'
+import { verifySupervisionDurability } from './supervision-durability'
 import { sessionObservationResult } from '../../../src/shared/session-observation-result'
 const [html, privateRoot, phase, preload, evidence, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
@@ -143,6 +144,11 @@ app.whenReady().then(async () => {
     }
     if (supervisionSurface) {
       await verifySupervisionSurface({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config, nodeExecutable })
+      result.passed = true
+      return
+    }
+    if (supervision) {
+      await verifySupervisionDurability({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config, nodeExecutable })
       result.passed = true
       return
     }
