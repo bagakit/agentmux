@@ -7,6 +7,7 @@ import { localRuntimeConnector } from '../../../test/helpers/local-runtime-conne
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { verifyCapabilityRecovery } from './capability-recovery'
 import { verifySupervisionSurface } from './supervision-surface'
+import { verifyInitialWaitSurface } from './initial-wait-surface'
 import { sessionObservationResult } from '../../../src/shared/session-observation-result'
 const [html, privateRoot, phase, preload, evidence, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
@@ -15,6 +16,7 @@ process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
+const initialWaitSurface = process.env.AGENTMUX_CONTINUITY_INITIAL_WAIT_SURFACE === '1'
 const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
 const supervision = process.env.AGENTMUX_CONTINUITY_SUPERVISION_PROOF === '1' || supervisionSurface
 const executor = (mode: string) => ({ label: 'Private native continuity fixture', providerId: 'codex', command: path.join(privateRoot, 'fake-codex'), args: [],
@@ -26,7 +28,7 @@ const supervisedExecutor = (mode: string, failure: string) => { const value = ex
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private continuity proof' }],
   executors: { healthy: executor('before'), working: capability ? { ...executor('before'), env: { ...executor('before').env, AGENTMUX_FAKE_OMIT_HANDLE: '1' } }
     : supervision ? supervisedExecutor('working-until-resume', 'once') : executor('working-until-resume'), idle: supervision ? supervisedExecutor('before', 'always') : executor('before') },
-  ...(capability ? { continuity: { activeRecovery: 'manual' } } : supervision ? { continuity: { retryMaxAttempts: 0, retryInitialDelayMs: 30000, retryMaxDelayMs: 30000 } } : {}),
+  ...(capability ? { continuity: { activeRecovery: 'manual' } } : supervision ? { continuity: { ...(initialWaitSurface ? { activeRecoveryDelayMs: 300000 } : {}), retryMaxAttempts: 0, retryInitialDelayMs: 30000, retryMaxDelayMs: 30000 } } : {}),
   workspaces: [{ id: 'continuity-workspace', hostId: 'local', name: 'Private continuity proof', path: path.join(privateRoot, 'workspace'), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
@@ -131,6 +133,11 @@ app.whenReady().then(async () => {
     await wait('actual App and nonempty workface', async () => await win.webContents.executeJavaScript(`window.continuityReady && !window.continuityState().loading && Object.keys(window.continuityState().tabs).length ${capability ? '>= 1' : '=== 2'}`))
     if (capability) {
       await verifyCapabilityRecovery({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config })
+      result.passed = true
+      return
+    }
+    if (initialWaitSurface) {
+      await verifyInitialWaitSurface({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config, nodeExecutable })
       result.passed = true
       return
     }
