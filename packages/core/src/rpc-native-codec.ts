@@ -3,7 +3,7 @@ import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
-import { parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'
+import { parseConversationViewReleaseResult, parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'
 import { parseAgentMuxSearchInput, parseAgentMuxSearchPage } from './search-codec.js'
 import { isConnectionMethod, parseConnectionParams, parseConnectionResult } from './connections-codec.js'
 import { parseConversationReadPage } from './conversation.js'
@@ -387,7 +387,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           })
         }
         if (p.native !== null) {
-          const page = record(p.native, ['agentSessionId', 'sourceHostId', 'source', 'items', 'nextCursor', 'sourceSizeBytes'])
+          const page = record(p.native, ['agentSessionId', 'sourceHostId', 'source', 'items', 'nextCursor', 'changesCursor', 'sourceSizeBytes'])
           if (page.agentSessionId !== expected.agentSessionId) fail()
           if (page.sourceHostId !== undefined && page.sourceHostId !== p.sourceHostId) fail()
           const source = record(page.source, ['providerId', 'nativeSessionId']); string(source.providerId); string(source.nativeSessionId)
@@ -429,6 +429,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.history.resource': return parseSessionHistoryResourceResult(value, input as AgentSessionHistoryResourceParams)
+      case 'agent.conversation.release': return parseConversationViewReleaseResult(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.checkpoint': return parseConversationCheckpointPage(value, input as import('./conversation.js').ConversationRef)
       case 'agent.conversation.changes': return parseConversationChangesPage(value, input as import('./conversation-changes.js').ConversationChangesInput)
       case 'agent.conversation.watch': return parseConversationWatchOpening(value, input as import('./conversation.js').ConversationRef)

@@ -1,5 +1,5 @@
 import { AgentMuxError, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { consumeJsonReadEntry, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
@@ -12,7 +12,7 @@ export interface PublicationConversationPort {
   checkpoint(reference: ConversationRef, signal: AbortSignal): Promise<ConversationCheckpointPage>
   changes(input: ConversationChangesInput, signal: AbortSignal): Promise<ConversationChangesPage>
   inspect(input: ConversationTimelineReadInput, signal: AbortSignal): Promise<AgentConversationReadPage>
-  observe(reference: ConversationRef, listener: (value: ConversationObservation) => void, signal: AbortSignal): Promise<ConversationObservationHandle>
+  observe(reference: ConversationWatchInput, listener: (value: ConversationObservation) => void, signal: AbortSignal): Promise<ConversationObservationHandle>
   resource(reference: ConversationRef, input: AgentSessionHistoryResourceRequest, signal: AbortSignal): Promise<AgentSessionHistoryResourceReadResult>
 }
 export interface PublicationPermissionsPort {
@@ -21,7 +21,7 @@ export interface PublicationPermissionsPort {
   authorized(operation: PublicationOperation): boolean
 }
 export type PublicationObservation = ConnectionDeliveryObservation
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; work?: Promise<void> | undefined; watch?: ConversationObservationHandle | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; gapAfter?: number; read?: { after: ConversationCheckpoint; cursor?: string; pending?: JsonReadAssembly | undefined; units: ConversationUnit[]; bytes: number } | undefined }
+type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; work?: Promise<void> | undefined; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort }
 
 
@@ -96,7 +96,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     catch {
       // COMMIT may have succeeded before its acknowledgment was lost. Reload
       // the retained cut before retrying, without inventing another operation.
-      lane.read = undefined
+      lane.read = undefined; lane.view = undefined; lane.viewId = undefined
       if (!signal.aborted) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
     }
     if (!signal.aborted && this.authorized(binding)) {
@@ -112,10 +112,10 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
     const sourceHostId = binding.sourceFrontier?.sourceHostId ?? (await this.options.conversation.checkpoint(reference, signal)).sourceHostId
     let after = this.store.checkpoint(binding, sourceHostId)
-    if (!lane.watch || lane.watch.closed.aborted) {
+    if (!lane.watch || lane.watch.closed.aborted || lane.watchViewId !== lane.viewId) {
       lane.watch?.dispose(); lane.watch = undefined
       try {
-        const watch = await this.options.conversation.observe(reference, observation => {
+        const watch = await this.options.conversation.observe({ ...reference, ...(lane.view ? { view: lane.view } : {}) }, observation => {
           if (signal.aborted) return
           if (observation.hostId !== reference.hostId || observation.agentSessionId !== reference.agentSessionId || observation.sourceHostId !== sourceHostId) { lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
           if (!after.frontier.scope.sources.some(source => conversationSourceKey(source) === conversationSourceKey(observation.source))) return
@@ -124,39 +124,32 @@ export class PublicationHost implements ConnectionDeliveryPort {
         }, signal)
         if (signal.aborted) { watch.dispose(); return }
         if (watch.hostId !== reference.hostId || watch.agentSessionId !== reference.agentSessionId || watch.sourceHostId !== sourceHostId) { watch.dispose(); throw Error('Foreign observation owner') }
-        lane.watch = watch
+        lane.watch = watch; lane.watchViewId = lane.viewId
         watch.closed.addEventListener('abort', () => { if (!signal.aborted) lane.observation = { state: 'unknown', reason: 'source-unconfirmed' } }, { once: true })
       } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
     }
     // Transient fragment state is bounded to one original batch. A restart discards
     // it and resumes the original durable cut, preserving all unknown effects.
-    lane.read ??= { after, units: [], bytes: 0 }
+    lane.read ??= { after }
     for (let reads = 0; reads < 8; reads++) {
       if (signal.aborted || !this.authorized(binding)) return
-      const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, ...(state.cursor ? { cursor: state.cursor } : {}) }
+      const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}) }
       let page: ConversationChangesPage
       try { page = parseConversationChangesPage(await this.options.conversation.changes(input, signal), input) }
-      catch { lane.read = undefined; lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
-      const scopeKey = JSON.stringify([reference, page.sourceHostId, state.after])
-      for (const entry of page.items) {
-        const consumed = consumeJsonReadEntry({ entry, scopeKey, ...(state.pending ? { pending: state.pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
-        if (consumed.kind === 'pending') { state.pending = consumed.pending; continue }
-        const unit = parseConversationUnit(consumed.value, { hostId: page.sourceHostId, agentSessionId: reference.agentSessionId }, page.scope)
-        if (entry.kind === 'fragment' && entry.itemId !== unit.event.id) throw Error('Foreign unit fragment')
-        state.pending = undefined; state.bytes += Buffer.byteLength(JSON.stringify(unit)); state.units.push(unit)
-        if (state.bytes > CONVERSATION_MAX_UNIT_BYTES * Math.max(1, page.scope.sources.length)) throw Error('Original batch exceeds its declared source budget')
-      }
-      if (page.nextCursor) {
+      catch { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
+      const consumed = consumeConversationWindowPage(page, state.pending)
+      if (consumed.kind === 'pending') {
+        state.pending = consumed.pending
         if (page.nextCursor === state.cursor) throw Error('Original continuation made no progress')
-        state.cursor = page.nextCursor
+        state.cursor = page.nextCursor!
         if (reads === 7) lane.dirty = true
         continue
       }
-      if (state.pending) throw Error('Incomplete original unit')
-      const ordered = [...state.units].reverse() // The Core wire explicitly declares newest-first.
+      const ordered = [...consumed.snapshot.units].reverse() // The Core wire explicitly declares newest-first.
       const resolvedText = await this.resolve(reference, ordered, signal, binding)
       this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes })
-      after = page.checkpoint; lane.read = { after, units: [], bytes: 0 }
+      after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
+      if (lane.watchViewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
       if (reads === 7) lane.dirty = true
     }

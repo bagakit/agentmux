@@ -13,7 +13,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource', 'configureHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession', 'confirmAgentNativeSession',
-  'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
+  'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
@@ -115,7 +115,7 @@ export type AgentMuxHostedRuntimeParameterMap = {
   'runtime.invoke': { consumerId: string; fence: AgentMuxRuntimeFence; invocation: AgentMuxHostedInvocation }
   'runtime.release-consumer': { consumerId: string; fence: AgentMuxRuntimeFence }
   'runtime.events': { consumerId: string; fence: AgentMuxRuntimeFence }
-  'runtime.conversation-watch': { consumerId: string; fence: AgentMuxRuntimeFence; reference: import('./conversation.js').ConversationRef; options?: Omit<import('./conversation-changes.js').ConversationReadOptions, 'signal'> }
+  'runtime.conversation-watch': { consumerId: string; fence: AgentMuxRuntimeFence; reference: import('./conversation-changes.js').ConversationWatchInput; options?: Omit<import('./conversation-changes.js').ConversationReadOptions, 'signal'> }
   'runtime.history-watch': { consumerId: string; fence: AgentMuxRuntimeFence; agentSessionId: string;
     options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'> }
   'runtime.attachment-watch': { consumerId: string; fence: AgentMuxRuntimeFence; target: AgentMuxHostedAttachmentTarget;

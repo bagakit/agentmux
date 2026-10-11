@@ -15,7 +15,7 @@ import { isRoomBindingMethod, parseRoomBindingParams } from './room-binding-code
 import { isRoomProvisioningMethod, parseRoomProvisioningParams } from './room-provisioning-codec.js'
 import { isRoomDiscoveryMethod, parseRoomDiscoveryParams } from './room-discovery-codec.js'
 import { forwardConversationInput, readRoutedConversation } from './conversation-reader.js'
-import { parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage, parseConversationTimelineReadInput, parseConversationReadPage } from './conversation-changes.js'
+import { parseConversationViewReleaseInput, parseConversationViewReleaseResult, parseConversationWatchInput, parseConversationRef, parseConversationCheckpointPage, parseConversationChangesInput, parseConversationChangesPage, parseConversationTimelineReadInput, parseConversationReadPage } from './conversation-changes.js'
 import { createAgentMuxSearchReader, type AgentMuxSearchReadContext } from './search-reader.js'
 import { createAgentMuxSearchObservationOwner } from './search-observation.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
@@ -91,7 +91,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
@@ -215,9 +215,10 @@ const NATIVE_FIELDS = {
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes'],
   'agent.conversation.checkpoint': ['hostId', 'agentSessionId'],
-  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes'],
-  'agent.conversation.watch': ['hostId', 'agentSessionId'],
-  'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor'],
+  'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'],
+  'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
+  'agent.conversation.watch': ['hostId', 'agentSessionId', 'view'],
+  'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor', 'view'],
   'agent.conversation.landmark.ls': ['hostId', 'agentSessionId', 'operationId'],
   'agent.conversation.landmark.apply': ['hostId', 'agentSessionId', 'operationId', 'expectedRevision', 'change'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
@@ -867,6 +868,14 @@ export class AgentMuxRpcService {
       }
       return parseSessionHistoryResourceResult(result, input) as AgentMuxRpcResult<M>
     }
+    if (method === 'agent.conversation.release') {
+      const input = parseConversationViewReleaseInput(params), forwarded = forwardConversationInput(input)
+      const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
+      const result = await owners[0]!.client.releaseConversationView(forwarded.input)
+      if (result.sourceHostId !== forwarded.sourceHostId) throw new AgentMuxError('The release returned another original conversation Host.', 'CONTROL_PROTOCOL_ERROR')
+      return parseConversationViewReleaseResult({ ...result, hostId: input.hostId }, input) as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.conversation.checkpoint' || method === 'agent.conversation.changes' || method === 'agent.conversation.inspect') {
       const input = method === 'agent.conversation.changes' ? parseConversationChangesInput(params)
         : method === 'agent.conversation.inspect' ? parseConversationTimelineReadInput(params) : parseConversationRef(params)
@@ -881,11 +890,11 @@ export class AgentMuxRpcService {
       }
       if (method === 'agent.conversation.inspect') {
         const request = input as import('./conversation-changes.js').ConversationTimelineReadInput, forwarded = forwardConversationInput(request)
-        const page = await readRoutedConversation(request, sized => client.readAgentConversation({ ...forwarded.input, maxBytes: sized.maxBytes! }, options), forwarded.sourceHostId)
+        const page = await readRoutedConversation(request, (maxBytes, replay) => client.readAgentConversation({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, options), forwarded.sourceHostId)
         return parseConversationReadPage(page, request) as AgentMuxRpcResult<M>
       }
       const request = input as import('./conversation-changes.js').ConversationChangesInput, forwarded = forwardConversationInput(request)
-      const page = await readRoutedConversation(request, sized => client.readConversationChanges({ ...forwarded.input, maxBytes: sized.maxBytes! }, options), forwarded.sourceHostId)
+      const page = await readRoutedConversation(request, (maxBytes, replay) => client.readConversationChanges({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, options), forwarded.sourceHostId)
       return parseConversationChangesPage(page, request) as AgentMuxRpcResult<M>
     }
     if (method === 'app.search') {
@@ -1974,15 +1983,16 @@ export class AgentMuxRpcService {
     try {
       let initial: unknown, start: (() => void | Promise<void>) | undefined
       if (method === 'agent.conversation.watch') {
-        const input = parseConversationRef(params), owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+        const input = parseConversationWatchInput(params), forwarded = forwardConversationInput(input), owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
         if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
         // Hosted Clients delegate this same reader to the original semantic Host.
-        const observer = await owners[0]!.client.observeConversation({ ...input, hostId: 'local' }, observation => {
+        const observer = await owners[0]!.client.observeConversation(forwarded.input, observation => {
           void Promise.resolve().then(() => emit({ type: 'snapshot', data: { ...observation, hostId: input.hostId } })).catch(dispose).catch(() => {})
         }, { signal: controller.signal })
         const ended = () => { void Promise.resolve().then(() => emit({ type: 'end', data: { reason: 'source-observation-released' } })).finally(dispose).catch(() => {}) }
         observer.closed?.addEventListener('abort', ended, { once: true })
-        initial = { ...input, sourceHostId: observer.sourceHostId, scope: observer.scope, coverage: observer.coverage }
+        if (forwarded.sourceHostId && observer.sourceHostId !== forwarded.sourceHostId) { observer.dispose(); throw new AgentMuxError('The observation returned another original conversation Host.', 'CONTROL_PROTOCOL_ERROR') }
+        initial = { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: observer.sourceHostId, scope: observer.scope, coverage: observer.coverage }
         cleanup = () => { observer.closed?.removeEventListener('abort', ended); observer.dispose() }
         if (observer.closed?.aborted) ended()
       } else if (method === 'agent.output') {

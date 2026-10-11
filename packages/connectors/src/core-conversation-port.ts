@@ -17,14 +17,16 @@ export function createPublicationConversationPort(clients: () => readonly { host
     },
     changes: async (input, signal) => {
       const client = original(input.hostId), forwarded = forwardConversationInput(input)
-      return parseConversationChangesPage(await readRoutedConversation(input, sized => client.readConversationChanges({ ...forwarded.input, maxBytes: sized.maxBytes! }, { signal }), forwarded.sourceHostId), input)
+      return parseConversationChangesPage(await readRoutedConversation(input, (maxBytes, replay) => client.readConversationChanges({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, { signal }), forwarded.sourceHostId), input)
     },
     inspect: async (input, signal) => {
       const client = original(input.hostId), forwarded = forwardConversationInput(input)
-      return parseConversationReadPage(await readRoutedConversation(input, sized => client.readAgentConversation({ ...forwarded.input, maxBytes: sized.maxBytes! }, { signal }), forwarded.sourceHostId), input)
+      return parseConversationReadPage(await readRoutedConversation(input, (maxBytes, replay) => client.readAgentConversation({ ...forwarded.input, maxBytes, ...(replay ? { cursor: replay } : {}) }, { signal }), forwarded.sourceHostId), input)
     },
     observe: async (reference, listener, signal) => {
-      const handle = await original(reference.hostId).observeConversation({ ...reference, hostId: 'local' }, value => listener({ ...value, hostId: reference.hostId }), { signal })
+      const forwarded = forwardConversationInput(reference)
+      const handle = await original(reference.hostId).observeConversation(forwarded.input, value => listener({ ...value, hostId: reference.hostId }), { signal })
+      if (forwarded.sourceHostId && forwarded.sourceHostId !== handle.sourceHostId) { handle.dispose(); throw new AgentMuxError('The observation returned another original conversation Host.', 'CONTROL_PROTOCOL_ERROR') }
       return { ...handle, hostId: reference.hostId }
     },
     resource: async (reference, input, signal) => await original(reference.hostId).sessionHistoryResource(reference.agentSessionId, { ...input, signal })

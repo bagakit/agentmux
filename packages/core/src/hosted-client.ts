@@ -1,6 +1,6 @@
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
-import { parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
+import { parseConversationViewReleaseResult, parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
 import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage } from './session-history-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
 import { dequal } from 'dequal'
@@ -232,6 +232,7 @@ export async function connectHostedAgentMux(options: {
         : method === 'conversationCheckpoint' ? parseConversationCheckpointPage(decoded, expected)
         : parseConversationChangesPage(decoded, { ...expected, checkpoint: (input as import('./conversation-changes.js').ConversationChangesInput).checkpoint })
     }
+    if (method === 'releaseConversationView') return parseConversationViewReleaseResult(decoded, wireArgs[0] as ConversationRef)
     if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     return decoded
@@ -670,7 +671,7 @@ export async function connectHostedAgentMux(options: {
           close: async () => { outputs.delete(output); await output.close() } }
       } catch (error) { outputs.delete(output); await output.close().catch(() => {}); throw error }
     },
-    observeConversation: async (input: ConversationRef, listener: (value: import('./conversation-changes.js').ConversationObservation) => void,
+    observeConversation: async (input: import('./conversation-changes.js').ConversationWatchInput, listener: (value: import('./conversation-changes.js').ConversationObservation) => void,
       readOptions: import('./conversation-changes.js').ConversationReadOptions = {}) => {
       await connectControl(); readOptions.signal?.throwIfAborted()
       const expected = input, closed = new AbortController()
@@ -697,7 +698,7 @@ export async function connectHostedAgentMux(options: {
             }
           },
           onEnd: error => {
-            if (opening && !stopped) for (const source of opening.scope.sources) notify({ ...expected, sourceHostId: opening.sourceHostId, source, kind: 'unavailable', code: 'AGENT_CONVERSATION_OBSERVATION_UNAVAILABLE', message: error instanceof Error ? error.message : 'This observation ended; retain its frontier and resume authoritative changes.' })
+            if (opening && !stopped) for (const source of opening.scope.sources) notify({ hostId: expected.hostId, agentSessionId: expected.agentSessionId, sourceHostId: opening.sourceHostId, source, kind: 'unavailable', code: 'AGENT_CONVERSATION_OBSERVATION_UNAVAILABLE', message: error instanceof Error ? error.message : 'This observation ended; retain its frontier and resume authoritative changes.' })
             dispose()
           }
         })

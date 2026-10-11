@@ -8,10 +8,10 @@ import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage, 
 import type { AgentSessionHistoryItem } from './types.js'
 import type { AgentConversationReadPage, ConversationRef } from './conversation.js'
 import { readAgentConversation as readUnifiedConversation, conversationCheckpoint as cutUnifiedConversation, readConversationChanges as readUnifiedChanges,
-  type ConversationReaderPort } from './conversation-reader.js'
-import { parseConversationRef, parseConversationWatchOpening, parseConversationObservation, parseConversationFrontier, parseConversationCheckpoint,
+  ConversationReaderState, type ConversationReaderPort } from './conversation-reader.js'
+import { parseConversationRef, parseConversationWatchInput, parseConversationViewReleaseInput, parseConversationWatchOpening, parseConversationObservation, parseConversationFrontier, parseConversationCheckpoint,
   type ConversationTimelineReadInput, type ConversationReadOptions, type ConversationCheckpointPage, type ConversationChangesInput,
-  type ConversationChangesPage, type ConversationObservation, type ConversationObservationHandle } from './conversation-changes.js'
+  type ConversationChangesPage, type ConversationObservation, type ConversationObservationHandle, type ConversationWatchInput, type ConversationViewReleaseInput, type ConversationViewReleaseResult } from './conversation-changes.js'
 import { SessionHistoryObservationPool } from './session-history-observation-pool.js'
 import { createInputPerformanceRecorder, hostedCarrierPerformance, readInputObservation, readInputObservationField, type InputObservationReference, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
@@ -871,6 +871,7 @@ export class AgentMuxClient {
   }>()
   private readonly continuitySupervisor: AgentSessionContinuitySupervisor
   private readonly providerReads = new Set<AbortController>()
+  private readonly conversationReadState = new ConversationReaderState()
   /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
   private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
   private readonly historyObservationPool = new SessionHistoryObservationPool()
@@ -1860,6 +1861,7 @@ export class AgentMuxClient {
     this.cancelReconnect()
     this.reopensDisposed = true
     this.providerReadsDisposed = true
+    this.conversationReadState.dispose()
     this.cancelProviderReads()
     this.historyObservationPool.dispose()
     for (const resources of this.historyObservationControllers.values()) {
@@ -2335,6 +2337,14 @@ export class AgentMuxClient {
     return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
   }
 
+  /** Release only this temporary read view; original records, cuts and Runs are unchanged. */
+  async releaseConversationView(input: ConversationViewReleaseInput): Promise<ConversationViewReleaseResult> {
+    input = parseConversationViewReleaseInput(input)
+    const owner = await this.conversationReader(input, {})
+    return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: owner.reference.hostId,
+      ...this.conversationReadState.release(input.view, owner.reference) }
+  }
+
   private async conversationReader(input: ConversationRef, options: ConversationReadOptions): Promise<{ reference: ConversationRef; port: ConversationReaderPort }> {
     parseConversationRef({ hostId: input.hostId, agentSessionId: input.agentSessionId })
     options.signal?.throwIfAborted()
@@ -2343,11 +2353,11 @@ export class AgentMuxClient {
     // Source references stay in this original Core namespace. A client route is
     // external addressing context and never rewrites a source, cut or unit.
     const reference = parseConversationRef({ hostId: descriptor.hostId, agentSessionId: input.agentSessionId })
-    return { reference, port: { descriptor, readHostId: input.hostId, ...(options.signal ? { signal: options.signal } : {}),
+    return { reference, port: { state: this.conversationReadState, descriptor, readHostId: input.hostId, ...(options.signal ? { signal: options.signal } : {}),
       captured: query => this.store.readCapturedHistory(input.agentSessionId, query),
-      nativePage: cursor => this.sessionHistoryPage(input.agentSessionId, { limit: 1, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }),
+      nativePage: (cursor, limit) => this.sessionHistoryPage(input.agentSessionId, { limit, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }),
       nativeCheckpoint: () => this.sessionHistoryCheckpoint(input.agentSessionId, options.signal ? { signal: options.signal } : {}),
-      nativeChanges: checkpoint => this.readSessionHistoryChanges(input.agentSessionId, { checkpoint, limit: 1, ...(options.signal ? { signal: options.signal } : {}) }),
+      nativeChanges: (checkpoint, limit) => this.readSessionHistoryChanges(input.agentSessionId, { checkpoint, limit, ...(options.signal ? { signal: options.signal } : {}) }),
       nativeRecord: (source, id) => this.readConversationNativeRecord(input.agentSessionId, source, id, options.signal) } }
   }
 
@@ -2376,13 +2386,14 @@ export class AgentMuxClient {
   }
 
   /** Notifications only wake authoritative reads. Each native/captured source keeps its original scope. */
-  async observeConversation(input: ConversationRef, listener: (value: ConversationObservation) => void, options: ConversationReadOptions = {}): Promise<ConversationObservationHandle> {
+  async observeConversation(input: ConversationWatchInput, listener: (value: ConversationObservation) => void, options: ConversationReadOptions = {}): Promise<ConversationObservationHandle> {
+    input = parseConversationWatchInput(input)
     const owner = await this.conversationReader(input, options), ref = owner.reference
     const controller = new AbortController(), resources = this.historyObservationControllers.get(input.agentSessionId) ?? new Set<NativeHistoryObservationResource>()
     const resource: NativeHistoryObservationResource = { controller, binding: null }
     resources.add(resource); this.historyObservationControllers.set(input.agentSessionId, resources)
     let native: AgentSessionHistoryObservationHandle | undefined, opening: import('./conversation-changes.js').ConversationWatchOpening | undefined
-    let pendingCaptured = false, unsubscribe = () => {}, nativeEnded = () => {}, disposed = false
+    let pendingCaptured = false, unsubscribe = () => {}, nativeEnded = () => {}, releaseView = () => {}, disposed = false
     const emit = (value: ConversationObservation): void => {
       if (!opening || controller.signal.aborted) return
       try { listener(parseConversationObservation({ ...value, hostId: input.hostId }, opening)) } catch { /* Read callbacks cannot gate the original Agent. */ }
@@ -2394,7 +2405,7 @@ export class AgentMuxClient {
     }
     const dispose = () => {
       if (disposed) return
-      disposed = true; unsubscribe(); native?.closed?.removeEventListener('abort', nativeEnded); native?.dispose()
+      disposed = true; unsubscribe(); native?.closed?.removeEventListener('abort', nativeEnded); native?.dispose(); releaseView()
       options.signal?.removeEventListener('abort', dispose); resources.delete(resource)
       if (!resources.size) this.historyObservationControllers.delete(input.agentSessionId)
       if (!controller.signal.aborted) controller.abort(new AgentMuxError('This conversation reader was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
@@ -2403,7 +2414,11 @@ export class AgentMuxClient {
     unsubscribe = this.publisher.onTimelineEvent(input.agentSessionId, event => { if (event.type === 'agent-timeline') captured() })
     try {
       const cut = await cutUnifiedConversation(ref, owner.port)
-      opening = parseConversationWatchOpening({ ...input, sourceHostId: ref.hostId, scope: cut.scope, coverage: cut.coverage }, input)
+      const observed = input.view ? this.conversationReadState.observe(input.view, ref, cut.scope) : undefined
+      if (observed) releaseView = observed.dispose
+      const scope = observed?.scope ?? cut.scope
+      opening = parseConversationWatchOpening({ hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: ref.hostId, scope,
+        coverage: cut.coverage.filter(value => scope.sources.some(source => isDeepStrictEqual(source, value.source))) }, input)
       const source = opening.scope.sources.find(s => s.kind === 'native')
       if (source?.kind === 'native') {
         try {
