@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
+import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer } from '@agentmux/core'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionEnrollmentView, ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
@@ -25,11 +26,14 @@ let lastBegin: ConnectionEnrollmentView | null
 let platform: Array<{ path: string; body: RequestInit['body'] }>, calls: Array<{ method: ConnectionMethod; input: unknown }>
 let deliverBegin: ((resume: () => void) => void) | null
 let trusted: ReturnType<typeof vi.fn>
+let initWait: 'headers' | 'body' | null
+let releaseInit: Set<() => void>, initSignals: Array<AbortSignal | null | undefined>
 
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'settings-web-'))
   asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   failList = false; loseCreate = false; loseCredential = false; lastBegin = null; deliverBegin = null; platform = []; calls = []
+  initWait = null; releaseInit = new Set(); initSignals = []
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, options: RequestInit = {}) => {
     if (String(url) === iconUrl) return new Response(new Uint8Array(asset))
@@ -37,9 +41,22 @@ beforeEach(async () => {
     platform.push({ path: target.pathname, body: options.body })
     expect(options.redirect).toBe('manual')
     if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') {
+      initSignals.push(options.signal)
+      const waitForAbort = () => new Promise<never>((_, reject) => {
+        const finish = () => {
+          options.signal?.removeEventListener('abort', finish)
+          releaseInit.delete(finish)
+          reject(options.signal?.reason ?? new Error('Controlled init cleanup'))
+        }
+        releaseInit.add(finish)
+        if (options.signal?.aborted) finish()
+        else options.signal?.addEventListener('abort', finish, { once: true })
+      })
+      if (initWait === 'headers') return waitForAbort()
       const response = Response.json({ code: 0, data: { step_info: { token: QR } } }, { headers: { 'x-flow-key': 'settings-private-flow' } })
       // happy-dom removes Set-Cookie during Response construction; preserve the real response header.
       response.headers.append('set-cookie', `session=${COOKIE}; Domain=.feishu.cn; Path=/; Secure; HttpOnly`)
+      if (initWait === 'body') Object.defineProperty(response, 'json', { value: waitForAbort })
       return response
     }
     if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
@@ -76,6 +93,7 @@ beforeEach(async () => {
   })
 })
 afterEach(async () => {
+  for (const release of releaseInit) release()
   const errors: unknown[] = []
   for (const cleanup of [async () => { await server?.stop() }, () => { services?.close() }, async () => { if (root) await rm(root, { recursive: true, force: true }) }]) {
     try { await cleanup() } catch (error) { errors.push(error) }
@@ -129,6 +147,71 @@ it('keeps independently available creation after list failure and reaches native
   for (const privateText of [QR, COOKIE, CSRF, 'settings-private-app-secret']) expect(dom.container.textContent).not.toContain(privateText)
   expect(dom.draft('agent-1')).toBe('Keep my draft')
 }, 20_000)
+
+it.each(['headers', 'body'] as const)('ends only the original QR init observation when its %s stall, then explicitly renews the same setup', async phase => {
+  const timeout = AbortSignal.timeout.bind(AbortSignal)
+  // Compress only the native request clock; Unix IPC and React keep their real scheduling.
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => timeout(ms === 20_000 ? 10 : ms))
+  initWait = phase
+  await dom.render(<MountedSettings />); await click('[data-enrollment-create]')
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    expect(lastBegin?.operation?.authentication?.stage, 'The original init must finish as unconfirmed rather than remain pending').toBe('unknown')
+  })
+  const original = lastBegin!.operation
+  assert.ok(original)
+  expect(original.diagnostic).toEqual({ stage: 'authentication', code: 'native-unconfirmed' })
+  expect(initSignals[0]?.aborted).toBe(true)
+  expect(platform.map(call => call.path)).toEqual(['/accounts/qrlogin/init'])
+  expect(dom.container.querySelector('[data-enrollment-code]')).toBeNull()
+  expect(dom.container.querySelector('[data-enrollment-action="renew-authentication"]')).not.toBeNull()
+  const inspected = await api.connections.call('connection.enrollment.inspect', { operationId: original.operationId })
+  expect(inspected.operation).toEqual(original)
+  const details = dom.container.querySelector<HTMLDetailsElement>('.connector-diagnostics')!
+  await act(async () => details.querySelector<HTMLElement>('summary')!.click())
+  await click('[data-enrollment-recover]')
+  expect(platform.map(call => call.path)).toEqual(['/accounts/qrlogin/init'])
+  expect((await api.connections.call('connection.ls', {})).connections).toEqual([])
+  expect(dom.draft('agent-1')).toBe('Keep my draft')
+  initWait = null
+  await click('[data-enrollment-action="renew-authentication"]')
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull() })
+  await act(async () => closeSettings())
+  const renewed = await api.connections.call('connection.enrollment.inspect', { operationId: original.operationId })
+  assert.ok(renewed.operation)
+  expect(renewed.operation.operationId).toBe(original.operationId)
+  expect(renewed.operation.connectionId).toBe(original.connectionId)
+  expect(renewed.operation.authentication?.attemptId).not.toBe(original.authentication?.attemptId)
+  expect(renewed.operation.authentication?.stage).toBe('waiting')
+  expect(platform.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/init'])
+  expect(calls.filter(call => call.method === 'connection.enrollment.begin')).toHaveLength(1)
+  expect((await services.connections.enrollment!.list({})).operations).toHaveLength(1)
+}, 10_000)
+
+it('keeps caller-cancelled native init unknown and inspectable on its original operation', async () => {
+  await dom.render(<MountedSettings />); await click('[data-enrollment-create]')
+  await vi.waitFor(() => expect(lastBegin?.challenge).toBeTruthy())
+  await act(async () => closeSettings())
+  const input = calls.find(call => call.method === 'connection.enrollment.begin')!.input as import('@agentmux/core/connections').ConnectionEnrollmentBeginInput
+  const cancelled = { ...input, operationId: 'caller-cancelled-init', connectionId: 'caller-cancelled-bot' }
+  initWait = 'headers'
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }), caller = new AbortController()
+  try {
+    const pending = client.call('connection.enrollment.begin', cancelled, { signal: caller.signal })
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'CONTROL_CANCELLED' })
+    await vi.waitFor(() => expect(initSignals).toHaveLength(2))
+    caller.abort()
+    await rejected
+    await vi.waitFor(() => expect(initSignals[1]?.aborted).toBe(true))
+    const result = await client.call('connection.enrollment.inspect', { operationId: cancelled.operationId })
+    assert.ok(result.operation)
+    expect(result.operation.operationId).toBe(cancelled.operationId)
+    expect(result.operation.authentication?.stage).toBe('unknown')
+    expect(result.actions.some(action => action.kind === 'renew-authentication')).toBe(true)
+    expect(platform.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/init'])
+    expect((await client.call('connection.ls', {})).connections).toEqual([])
+  } finally { await client.dispose() }
+}, 10_000)
 
 it('keeps an unknown create on the same original request without another native mutation', async () => {
   loseCreate = true
