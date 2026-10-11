@@ -280,7 +280,18 @@ export class NativeOverlaySurfaces {
     const png = image.toPNG()
     if (png.length > 8 * 1024 * 1024) throw new Error('Native Chrome frame exceeds byte budget')
     projection.paintStage = 'Chrome image'
-    await projection.view.webContents.executeJavaScript(`new Promise((resolve,reject)=>{document.querySelector('svg').style.display='none';const image=document.querySelector('img');image.style.display='block';image.onload=()=>resolve();image.onerror=()=>reject(new Error('Native Chrome image did not load'));image.src=${JSON.stringify(`data:image/png;base64,${png.toString('base64')}`)}})` )
+    // Each in-flight frame owns its decoder. Replacing one shared img.onload could
+    // strand an earlier preparation, and a late image must never replace newer pixels.
+    await projection.view.webContents.executeJavaScript(`(async () => {
+      const root = document.documentElement, revision = ${JSON.stringify(String(revision))};
+      root.dataset.chromeRevision = revision;
+      const image = new Image(); image.alt = ''; image.setAttribute('aria-hidden', 'true');
+      image.src = ${JSON.stringify(`data:image/png;base64,${png.toString('base64')}`)};
+      await image.decode();
+      if (root.dataset.chromeRevision !== revision) return;
+      document.querySelector('svg').style.display = 'none';
+      document.querySelector('img').replaceWith(image);
+    })()`)
     if (!deferCommit) this.finishLoadedPaint(projection, revision)
   }
 
