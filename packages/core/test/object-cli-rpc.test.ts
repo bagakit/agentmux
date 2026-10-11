@@ -7,6 +7,7 @@ import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS } from '../src/public-rpc.js'
 import { ObjectCliProbe, objectCliSeed } from './helpers/object-cli-rpc.js'
 import { parseAgentMuxSpatialGraph } from '../src/spatial-graph.js'
+import { CONNECTION_SETUP_RPC_METHODS } from '../src/connection-setup-codec.js'
 
 const fixtures: ObjectCliProbe[] = []
 afterEach(async () => { for (const fixture of fixtures.splice(0)) await fixture.stop() })
@@ -38,6 +39,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       'space.mote.connection.ls': JSON.stringify({ target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}} }),
       'connection.profile.sync': JSON.stringify({ operationId: 'profile-original', connectionId: 'profile-connection', expectedConnectionRevision: 1, desired: { name: 'Desired name' } }),
       'connection.enrollment.begin': JSON.stringify({ operationId: 'enroll-original', connectionId: 'connection-new', adapterId: 'sample', domain: 'chat.example', label: 'Team' }),
+      'connection.setup.begin': JSON.stringify({ operationId: 'setup-original', connectionId: 'setup-connection', expectedConnectionRevision: 1, goal: { kind: 'agent-conversation', interaction: 'cards' } }),
       'connection.service.configure': JSON.stringify({ operationId: 'service-original', expectedRevision: 0, service: { enabled: false } }),
       'connection.configure': JSON.stringify({ operationId: 'connection-save', expectedRevision: null, connection: { connectionId: 'connection-a', adapterId: 'sample', application: { domain: 'chat.example', appId: 'app-a' }, label: 'Team', enabled: true, credentialRef: 'credential-a' } }),
       'agent.native.history': JSON.stringify({ hostId: 'local', executorId: 'private', source: nativeSource }),
@@ -72,6 +74,38 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     expect(fixture.requests.find(request => request.method === 'browser.run')?.params).toMatchObject({ operationId: 'BOP', code: 'return await snapshot()' })
     expect(fixture.requests.find(request => request.method === 'browser.task.run')?.params).toEqual({ browserId: 'B', assetId: 'A', version: 1, parameters: { fresh: 'input' } })
   }, 120_000)
+
+  it('routes saved-application management registrations through the compiled CLI with exact original inputs', async () => {
+    const fixture = await probe()
+    const entries = AGENTMUX_CLI_COMMANDS.filter(entry => entry.method.startsWith('connection.setup.'))
+    const methods = entries.map(entry => entry.method)
+    const ownerMethods = Object.keys(CONNECTION_SETUP_RPC_METHODS)
+    expect(ownerMethods.length).toBeGreaterThan(0)
+    expect(methods.length).toBeGreaterThan(0)
+    expect(new Set(methods).size).toBe(methods.length)
+    expect([...methods].sort()).toEqual([...ownerMethods].sort())
+    expect(entries.every(entry => !entry.local && !entry.stream)).toBe(true)
+    const input = { operationId: 'setup-original', connectionId: 'setup-connection', expectedConnectionRevision: 1,
+      goal: { kind: 'agent-conversation', interaction: 'cards' } }
+    const paramsByMethod: Record<string, object> = {
+      'connection.setup.begin': input,
+      'connection.setup.inspect': { operationId: input.operationId },
+      'connection.setup.ls': { connectionId: input.connectionId }
+    }
+    for (const entry of entries) {
+      expect(paramsByMethod).toHaveProperty(entry.method)
+      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], JSON.stringify(input))
+      expect(result.code, entry.method + ': ' + result.stderr).toBe(1)
+      expect(JSON.parse(result.stderr)).toMatchObject({ ok: false, operation: entry.method, error: { code: 'CLI_ROUTE_PROBE' } })
+    }
+    expect(fixture.requests.map(request => request.method)).toEqual(methods)
+    for (const request of fixture.requests) {
+      expect(Object.keys(request).sort()).toEqual(['id', 'jsonrpc', 'method', 'params'])
+      expect(request).toMatchObject({ jsonrpc: '2.0', id: expect.anything() })
+      expect(request.params).toEqual(paramsByMethod[request.method])
+      if (request.params.operationId !== undefined) expect(request.id).not.toBe(request.params.operationId)
+    }
+  })
 
   it('keeps literal option-looking text, opaque IDs, input JSON and exact business identities', async () => {
     const fixture = await probe()
