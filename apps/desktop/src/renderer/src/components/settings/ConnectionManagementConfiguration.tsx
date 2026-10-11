@@ -1,9 +1,11 @@
 import type { ConnectionRecord, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
 import { SurfaceModeSwitch } from '../SurfaceModeSwitch'
+import { ConnectionManagementPermissions } from './ConnectionManagementPermissions'
 import type { ConnectionManagementModel } from './useConnectionManagementSetup'
 
 const subjects: Record<ConnectionSetupReadSubject, string> = {
   'application-details': 'Application details', 'bot-settings': 'Bot message setting',
+  'permission-catalog': 'Permission directory', 'application-permissions': 'Requested application permissions',
   'event-settings': 'Event settings', 'callback-settings': 'Callback settings'
 }
 const resultLabel = (request: string, storage: string) => request === 'confirmed'
@@ -12,6 +14,13 @@ const resultLabel = (request: string, storage: string) => request === 'confirmed
 /** Presentation only: current capability and the original request remain separate facts. */
 export function connectionConfigurationSummary(view: ConnectionSetupView | null) {
   const configuration = view?.applicationConfiguration
+  if (configuration?.effect === 'add-application-permissions') {
+    if (configuration.selected?.request === 'confirmed' && configuration.selected.secureStorage !== 'stored') return { title: 'Finish saving the accepted request', summary: 'The platform accepted this addition. Finish saving its original result locally; this does not send it again.' }
+    if (configuration.reason === 'original-effect-unconfirmed') return { title: 'Permission request not confirmed', summary: 'The original request is kept. Reviewing current permissions does not send it again or confirm its result.' }
+    if (configuration.capability === 'enabled') return { title: 'Necessary permissions are already requested', summary: 'These application permissions are present in the latest check. Effective authorization, publishing and chatting remain separate.' }
+    if (configuration.selected?.request === 'confirmed') return { title: 'Permission request accepted', summary: 'The platform accepted this addition request. Review current permissions separately; authorization and publishing may still be needed.' }
+    return { title: 'Review necessary permissions', summary: 'Check what this bot needs for Agent conversations and creating or connecting groups. Only missing application permissions will be requested.' }
+  }
   if (configuration?.effect === 'use-persistent-connection') {
     if (configuration.reason === 'original-effect-unconfirmed') return { title: 'Delivery change not confirmed', summary: 'The original application-wide request is kept. A current read does not confirm that earlier request.' }
     if (configuration.capability === 'enabled') return { title: 'Events use a persistent connection', summary: 'The current event delivery mode is confirmed. Subscriptions, publishing and message intake are separate steps.' }
@@ -35,6 +44,12 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
 }) {
   const { view, busy } = model
   const inspection = view?.applicationInspection, configuration = view?.applicationConfiguration
+  const supported = model.catalog?.value?.support?.capabilities ?? []
+  const selectedMode = configuration?.effect ?? 'enable-messaging'
+  const modeSwitch = current && (supported.includes('persistent-event-transport') || supported.includes('application-permissions')) ? <SurfaceModeSwitch value={selectedMode} active={current} ariaLabel="Bot setup step" options={[
+    { value: 'enable-messaging', label: 'Messages' }, ...(supported.includes('persistent-event-transport') ? [{ value: 'use-persistent-connection' as const, label: 'Delivery' }] : []), ...(supported.includes('application-permissions') ? [{ value: 'add-application-permissions' as const, label: 'Permissions' }] : [])
+  ]} onChange={effect => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: effect === 'add-application-permissions' ? { effect, purpose: 'agent-conversation' } : { effect } })} /> : null
+  if (configuration?.effect === 'add-application-permissions') return <div className="connector-configuration" data-management-configuration>{modeSwitch}<ConnectionManagementPermissions record={record} model={model} current={current} configuration={configuration} onConsole={onConsole} onBack={onBack} /></div>
   const transport = configuration?.effect === 'use-persistent-connection'
   const effect = transport ? 'use-persistent-connection' as const : 'enable-messaging' as const
   const read = inspection?.actions.find(action => action.kind === (transport ? 'read-event-settings' : 'read-bot-settings'))
@@ -58,9 +73,7 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
   const selectedEffect = (stepId: string, operationId?: string) => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect, selectedStepId: stepId } }, operationId)
   const hasActivity = !!visibleReads.length || !!visibleEffects.length
   return <div className="connector-configuration" data-management-configuration>
-    {current && (model.catalog?.value?.support?.capabilities.includes('persistent-event-transport') || transport) ? <SurfaceModeSwitch value={effect} active={current} ariaLabel="Bot setup step" options={[
-      { value: 'enable-messaging', label: 'Bot messages' }, { value: 'use-persistent-connection', label: 'Event delivery' }
-    ]} onChange={effect => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect } })} /> : null}
+    {modeSwitch}
     {current ? <div className="connector-enrollment__action" aria-busy={busy}>
       {busy && !model.reading?.actionKind ? <p className="settings-group-note" role="status">Reading setup actions…</p> : null}
       {transport ? <p className="settings-group-note" data-management-current-transport>Last checked event delivery: {modeLabel}</p> : null}

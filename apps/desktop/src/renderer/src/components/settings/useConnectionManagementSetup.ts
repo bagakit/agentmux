@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
+import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupConfigurationSelector, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
 import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 
@@ -27,6 +27,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const visible = active && opened && reading?.key === key && reading.source === source && reading.id === selection.current && api.connections.call === source ? reading : null
   const view = visible?.value ?? null, operation = view?.operation ?? null
   const configurationEffect = view?.applicationConfiguration?.effect ?? 'enable-messaging'
+  const configurationSelector: ConnectionSetupConfigurationSelector = view?.applicationConfiguration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: view.applicationConfiguration.purpose } : { effect: configurationEffect as 'enable-messaging' | 'use-persistent-connection' }
   const supported = !!record && visibleCatalog?.value?.support?.connectionRevision === record.revision && visibleCatalog.value.support.capabilities.includes('management-authentication')
   const originals = visibleCatalog?.value?.operations ?? []
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
@@ -77,7 +78,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
           const details = await source('connection.setup.inspect', {
             operationId: id,
             applicationInspection: value.applicationInspection?.selected ? { selectedStepId: value.applicationInspection.selected.stepId } : {},
-            applicationConfiguration: { effect: value.applicationConfiguration?.effect ?? (actionKind === 'read-event-settings' ? 'use-persistent-connection' : actionKind === 'read-bot-settings' ? 'enable-messaging' : configurationEffect), ...(value.applicationConfiguration?.selected ? { selectedStepId: value.applicationConfiguration.selected.stepId } : {}) }
+            applicationConfiguration: { ...(value.applicationConfiguration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: value.applicationConfiguration.purpose } : value.applicationConfiguration ? { effect: value.applicationConfiguration.effect } : actionKind === 'read-event-settings' ? { effect: 'use-persistent-connection' } : actionKind === 'read-bot-settings' ? { effect: 'enable-messaging' } : configurationSelector), ...(value.applicationConfiguration?.selected ? { selectedStepId: value.applicationConfiguration.selected.stepId } : {}) }
           })
           if (!accepts()) return
           validate(details); value = details
@@ -90,6 +91,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
       if (value.operation) setCatalog(previous => previous?.key === key && previous.source === source && previous.value
         ? { ...previous, value: { ...previous.value, operations: [value.operation!, ...previous.value.operations.filter(o => o.operationId !== id)] } } : previous)
       if (!value.operation || value.reason || !value.continuation || !['waiting', 'scanned', 'handoff'].includes(value.continuation.stage)) setDriving(false)
+      return value
     } catch (error) {
       if (accepts()) { setReading({ key, source, id, value: null, issue: presentError(error), absent: false, pending: false }); setDriving(false) }
     }
@@ -107,7 +109,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function choose(input: ConnectionSetupBegin) {
     setFresh(false)
     submittedActions.current.clear()
-    void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId, applicationInspection: {}, applicationConfiguration: { effect: configurationEffect } }), true)
+    void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId, applicationInspection: {}, applicationConfiguration: configurationSelector }), true)
   }
   function handoff(enrollment: ConnectionSetupEnrollmentSource) {
     if (!record || !currentSource() || !visibleCatalog?.value?.support?.capabilities.includes('enrollment-continuation')) return
@@ -119,7 +121,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function inspectOriginal(selectors: Omit<ConnectionSetupInspect, 'operationId'> = {}, originalOperationId?: string) {
     const id = originalOperationId ?? visible?.id
     if (id) void perform(id, () => source('connection.setup.inspect', {
-      operationId: id, applicationInspection: {}, applicationConfiguration: { effect: configurationEffect }, ...selectors
+      operationId: id, applicationInspection: {}, applicationConfiguration: configurationSelector, ...selectors
     }), false)
   }
   function inspect() { inspectOriginal() }
@@ -128,6 +130,27 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     const input = { operationId: operation.operationId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) } } as const
     submittedActions.current.add(action.actionId)
     void perform(input.operationId, () => source('connection.setup.advance', input), action.kind === 'continue' || action.kind === 'renew', action.kind)
+  }
+  async function reviewPermissions() {
+    if (!operation || busy || view?.applicationConfiguration?.effect !== 'add-application-permissions') return
+    const id = operation.operationId, purpose = view.applicationConfiguration.purpose
+    const selector = { effect: 'add-application-permissions' as const, purpose }
+    const accepted = async (work: () => Promise<ConnectionSetupView>, kind?: ConnectionSetupAction['kind']) => {
+      const expected = occurrence.current + 1, result = await perform(id, work, false, kind)
+      return result && currentSource() && context.current.opened && selection.current === id && occurrence.current === expected ? result : null
+    }
+    let result = await accepted(() => source('connection.setup.inspect', { operationId: id, applicationInspection: {}, applicationConfiguration: selector }))
+    if (!result || result.applicationConfiguration?.effect !== selector.effect) return
+    const reread = !!result.applicationConfiguration.review || result.applicationConfiguration.selected?.request === 'confirmed'
+    for (const [subject, kind] of [['catalog', 'read-permission-catalog'], ['applied', 'read-application-permissions']] as const) {
+      if (result.applicationConfiguration?.effect !== selector.effect || result.applicationConfiguration.purpose !== purpose) return
+      const recovery = result.applicationInspection?.selected?.subject === (subject === 'catalog' ? 'permission-catalog' : 'application-permissions') && result.applicationInspection.actions.find(a => a.kind === 'recover-application-inspection')
+      const action = recovery || (reread || !result.applicationConfiguration.sources[subject] ? result.applicationInspection?.actions.find(a => a.kind === kind) : null)
+      if (!action) { if (result.applicationConfiguration.sources[subject]) continue; return }
+      const input = { operationId: id, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) } }
+      result = await accepted(() => source('connection.setup.advance', input), action.kind)
+      if (!result || result.applicationInspection?.selected?.request !== 'confirmed' || result.applicationInspection.selected.secureStorage !== 'stored') return
+    }
   }
   function continueOriginal() {
     const action = view?.continuation?.actions.find(action => action.kind === 'continue')
@@ -178,7 +201,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, continueOriginal, another }
+  return { supported, catalog: visibleCatalog, listing, choices, reading: visible, view, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>

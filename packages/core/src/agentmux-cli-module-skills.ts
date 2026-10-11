@@ -163,6 +163,15 @@ The latter reads only the exact event-settings source and offers one explicit ap
 switch to persistent connection. Warn that existing event consumers are affected. Already persistent
 needs no write; unknown native modes stay unknown. Its accepted write is not readback or publication.
 Unknown results are isolated by app/effect/source subject and cannot block independent bot-enable. Copy an offered enable-messaging or use-persistent-connection action with explicit confirm;
+For necessary permissions select --application-configuration add-application-permissions with
+--permission-purpose agent-conversation (messages and create/bind groups) or explicit mote-profile-sync
+(also update the Mote application's own profile). Consume offered read-permission-catalog and
+read-application-permissions separately. Each original read owns its receipt and recovery; an incomplete
+review cannot authorize additions. Confirm only the exact offered add-application-permissions action;
+the Host binds its purpose and native missing IDs without a second caller scope list. Zero missing
+means no request. Acceptance, existing applied configuration, effective grant and publication are
+separate. Unknown permission additions remain original across purpose changes and do not block
+independent messaging or delivery settings. Never write data ranges, subscriptions or publish here.
 recover-configuration-effect uses continue and only repairs its original encrypted ACK. An unknown
 effect cannot be replayed through renewal, a new setup or a known application alias; unresolved
 identifies the original actor-owned request when available. A new current read never signs that

@@ -1,6 +1,7 @@
 import type { ConnectionSetupReadSubject, ConnectionSetupReadSummary } from '@agentmux/core/connections'
 import type { SetupAdapterInput, SetupChallengeReceipt, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt, SetupConfigurationReceipt } from '../../connection-setup-adapter.js'
 import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, type NativeAccountInitialState, type NativeAccountState } from './native-account.js'
+import { supportedScopeId } from './setup-permissions.js'
 import { enrollmentAccountSession } from './enrollment.js'
 
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
@@ -43,6 +44,7 @@ async function applicationEnvelope(input: SetupAdapterInput & { privateState: st
     if (state.phase !== 'account' || !state.account || !opaque(state.csrf) || state.consoleOrigin !== 'https://open.feishu.cn') return null
     const target = new URL(path + encodeURIComponent(input.application.appId), state.consoleOrigin)
     const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
+    if (path === '/developers/v1/scope/update/') headers['X-AppPlatform-RequestFrom'] = 'develop_panel'
     const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
     const bounded = AbortSignal.timeout(20_000)
     input.assertCurrent?.()
@@ -96,7 +98,7 @@ export async function inspectFeishuApplication(input: SetupAdapterInput & { priv
 
 /** A current read is one native subject; catalogs and UI-defaulted objects are excluded. */
 export async function readFeishuApplication(input: SetupAdapterInput & { privateState: string; subject: ConnectionSetupReadSubject }, signal?: AbortSignal): Promise<SetupReadReceipt> {
-  const paths = { 'application-details': '/developers/v1/app/', 'event-settings': '/developers/v1/event/', 'callback-settings': '/developers/v1/callback/', 'bot-settings': '/developers/v1/robot/' } as const
+  const paths = { 'application-details': '/developers/v1/app/', 'event-settings': '/developers/v1/event/', 'callback-settings': '/developers/v1/callback/', 'bot-settings': '/developers/v1/robot/', 'permission-catalog': '/developers/v1/scope/all/', 'application-permissions': '/developers/v1/scope/applied/' } as const
   if (!Object.hasOwn(paths, input.subject)) return { kind: 'unknown' }
   const data = await applicationData(input, paths[input.subject], input.subject === 'event-settings' ? { needEventDetail: true } : {}, signal)
   if (!data) return { kind: 'unknown' }
@@ -107,4 +109,13 @@ export async function readFeishuApplication(input: SetupAdapterInput & { private
       ? { subject: input.subject, transport: data.eventMode === 4 ? 'persistent-connection' : data.eventMode === 1 ? 'webhook' : data.eventMode === 2 || data.eventMode === 3 ? 'function' : 'unknown' }
       : { subject: input.subject }
   return { kind: 'observed', readResult, privateState: JSON.stringify(data) }
+}
+
+/** Preserve the exact original primitive IDs. An empty difference is never a platform ACK. */
+export async function addFeishuApplicationPermissions(input: SetupAdapterInput & { privateState: string; appScopeIDs: Array<string | number>; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
+  if (!input.appScopeIDs.length || !input.appScopeIDs.every(supportedScopeId) || new Set(input.appScopeIDs).size !== input.appScopeIDs.length) return { kind: 'unknown' }
+  const envelope = await applicationEnvelope(input, '/developers/v1/scope/update/', { appScopeIDs: input.appScopeIDs, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true }, signal)
+  if (!envelope) return { kind: 'unknown' }
+  const data = record(envelope.data)
+  return { kind: 'accepted', privateState: JSON.stringify(envelope), requiresDataRangeConfiguration: typeof data?.needConfigurePrivilege === 'boolean' ? data.needConfigurePrivilege : null }
 }
