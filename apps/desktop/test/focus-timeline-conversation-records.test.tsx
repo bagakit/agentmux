@@ -6,7 +6,7 @@ import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
 import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
-import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { useAppStore } from '../src/renderer/src/store'
@@ -437,3 +437,91 @@ it('the original Focus bounded history holder reaches captured records older tha
   expect(Number(host.querySelector<HTMLElement>('.recent-focus')!.dataset.capturedRecordCount)).toBeLessThanOrEqual(240)
   healthy()
 },60000)
+
+
+// The dedicated source config inserts a count immediately before the actual
+// latest projection call. The original function body and Core projector run.
+function observeLatestProjection() {
+  const calls: (AgentTimelineSnapshot | undefined)[] = []
+  vi.stubGlobal('__focusLatestProjectionProbe', (timeline: AgentTimelineSnapshot | undefined) => calls.push(timeline))
+  return { calls, count: (timeline: AgentTimelineSnapshot) => calls.filter(value => value === timeline).length }
+}
+async function reportLatestProjectionCost(facts: Record<string, unknown>) {
+  if (process.env.AGENTMUX_FOCUS_LATEST_FACTS) await appendFile(process.env.AGENTMUX_FOCUS_LATEST_FACTS, JSON.stringify(facts) + '\n')
+}
+
+it('disabled latest projection stops for hidden live updates and reveal uses current original facts', async () => {
+  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
+  await records(); await plotRecord('u')
+  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!
+  const text = body.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
+  range.setStart(text, 0); range.setEnd(text, 8); selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 7
+  const projector = observeLatestProjection()
+  const previousVisibility = document.visibilityState
+  let disabledCalls = 0
+  try {
+    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')) })
+    const readsBefore = reads.mock.calls.length
+    for (const id of ['hidden-input', 'hidden-reply']) {
+      await seedCaptured([captured(id, id.endsWith('input') ? 'user_message' : 'assistant_message', { content: id })])
+      disabledCalls += projector.count(useAppStore.getState().timelines[ID]!)
+    }
+    const disabledReadDelta = reads.mock.calls.length - readsBefore
+    expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
+    expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(7); healthy()
+    expect(overlay().querySelector('[data-record-raw-id="hidden-input"]')).toBeNull()
+    projector.calls.length = 0
+    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')) })
+    await wait(() => expect(overlay().querySelector('[data-record-raw-id="hidden-input"]')).not.toBeNull())
+    expect(overlay().querySelector('[data-record-raw-id="hidden-reply"]')).not.toBeNull()
+    expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
+    expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(7); healthy()
+    await seedCaptured([captured('revealed-live-input', 'user_message', { content: 'Visible latest remains live' })])
+    await wait(() => expect(overlay().querySelector('[data-record-raw-id="revealed-live-input"]')).not.toBeNull())
+    const enabledCalls = projector.count(useAppStore.getState().timelines[ID]!)
+    expect(enabledCalls).toBeGreaterThan(0)
+    await reportLatestProjectionCost({ trigger: 'document-hidden-live', disabledCalls, disabledReadDelta, enabledCalls, originalBody: true, originalRange: selection.toString(), latestRawIds: ['hidden-input', 'hidden-reply'], controls: controls.map(spy => spy.mock.calls.length) })
+    expect(disabledReadDelta).toBe(0)
+    expect(disabledCalls, 'disabled latest projection must not consume hidden live Timeline updates').toBe(0)
+  } finally {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: previousVisibility }); document.dispatchEvent(new Event('visibilitychange')); selection.removeAllRanges()
+  }
+})
+
+it('disabled latest projection leaves actual historical reading fixed and returns to latest facts', async () => {
+  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
+  await records(); await textButton('Read earlier records')
+  await wait(() => expect(overlay().textContent).toContain('native records retained'))
+  const historicalIds = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].filter(node => node.dataset.recordSource === 'native').map(node => node.dataset.recordRawId)
+  const original = overlay().querySelector<HTMLElement>('[data-record-raw-id="u"]')!
+  await act(async () => original.click())
+  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!
+  const text = body.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
+  range.setStart(text, 0); range.setEnd(text, 8); selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 9
+  const projector = observeLatestProjection()
+  let disabledCalls = 0
+  for (const id of ['historical-live-input', 'historical-live-reply']) {
+    await seedCaptured([captured(id, id.endsWith('input') ? 'user_message' : 'assistant_message', { content: id })])
+    disabledCalls += projector.count(useAppStore.getState().timelines[ID]!)
+  }
+  expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].filter(node => node.dataset.recordSource === 'native').map(node => node.dataset.recordRawId)).toEqual(historicalIds)
+  // Captured observations are legitimately admitted by the original reader;
+  // only the original native snapshot and selected body are held here.
+  expect(overlay().querySelector('[data-record-raw-id="historical-live-input"]')).not.toBeNull()
+  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
+  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(9); healthy()
+  // These original toolbar actions reset historical mode. The new latest
+  // projection must work even if its Timeline has not changed since hiding.
+  await click('[aria-label="Collapse focus history"]'); await click('[aria-label="Show focus history"]')
+  projector.calls.length = 0
+  await records()
+  await wait(() => expect(overlay().querySelector('[data-record-raw-id="historical-live-input"]')).not.toBeNull())
+  expect(overlay().querySelector('[data-record-raw-id="historical-live-reply"]')).not.toBeNull()
+  await seedCaptured([captured('enabled-live-input', 'user_message', { content: 'Latest remains live' })])
+  await wait(() => expect(overlay().querySelector('[data-record-raw-id="enabled-live-input"]')).not.toBeNull())
+  const enabledCalls = projector.count(useAppStore.getState().timelines[ID]!)
+  expect(enabledCalls).toBeGreaterThan(0); healthy()
+  await reportLatestProjectionCost({ trigger: 'historical-live', disabledCalls, enabledCalls, historicalIds, originalBodyAndRangeKeptUntilExplicitNavigation: true, latestRawIds: ['historical-live-input', 'historical-live-reply', 'enabled-live-input'], controls: controls.map(spy => spy.mock.calls.length) })
+  selection.removeAllRanges()
+  expect(disabledCalls, 'disabled latest projection must not consume historical live Timeline updates').toBe(0)
+})
