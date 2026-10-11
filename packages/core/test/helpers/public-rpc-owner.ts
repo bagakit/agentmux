@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { vi } from 'vitest'
 import { AgentMuxClient as SourceClient } from '../../src/client.js'
-import { AgentMuxFileAgentSessionStore as SourceStore } from '../../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore as SourceStore, type AgentMuxAgentSessionStore } from '../../src/agent-session-store.js'
 const ownerEntry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
   ? await import(process.env.AGENTMUX_TEST_RPC_CORE_ENTRY) : null
 const AgentMuxClient: typeof SourceClient = ownerEntry ? ownerEntry.AgentMuxClient : SourceClient
@@ -16,8 +16,9 @@ import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
 
 /** Real Core registry, authorization and journal; Runtime byte I/O is a deterministic port. */
-export async function rpcOwnerFixture(ids = ['caller', 'recipient'], ownerModule?: {
-  AgentMuxClient: typeof SourceClient; AgentMuxFileAgentSessionStore: typeof SourceStore
+export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose'> = SourceClient, Store extends AgentMuxAgentSessionStore = SourceStore>(ids = ['caller', 'recipient'], ownerModule?: {
+  AgentMuxClient: new (options: { store: AgentMuxAgentSessionStore }) => Client
+  AgentMuxFileAgentSessionStore: new (path: string) => Store
 }, sessionFacts?: (root: string) => Partial<Pick<AgentMuxStoredAgentSession, 'providerId' | 'executorId' | 'nativeHandle'>>) {
   const Client = ownerModule?.AgentMuxClient ?? AgentMuxClient
   const Store = ownerModule?.AgentMuxFileAgentSessionStore ?? AgentMuxFileAgentSessionStore
