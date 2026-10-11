@@ -7,11 +7,14 @@ import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 export function installNativeOverlayFocus(window: BrowserWindow, overlays: Pick<NativeOverlaySurfaces, 'hasProjectionInFocusedWindow'>,
   scoped?: (document: WorkbenchWindowDocument) => Pick<NativeOverlaySurfaces, 'hasProjectionInFocusedWindow'>): () => void {
   const observe = (event: IpcMainEvent, document?: WorkbenchWindowDocument): void => {
-    event.returnValue = false
-    if (window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return
-    try {
-      event.returnValue = (document === undefined ? overlays : scoped?.(document))?.hasProjectionInFocusedWindow() === true
-    } catch { /* Stale or unknown native documents do not certify focus. */ }
+    let focused = false
+    if (!window.isDestroyed() && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame) {
+      try {
+        focused = (document === undefined ? overlays : scoped?.(document))?.hasProjectionInFocusedWindow() === true
+      } catch { /* Stale or unknown native documents do not certify focus. */ }
+    }
+    // Assignment sends Electron's synchronous reply; it cannot be revised afterward.
+    event.returnValue = focused
   }
   ipcMain.on(NATIVE_OVERLAY_FOCUS_CHANNEL, observe)
   return () => ipcMain.off(NATIVE_OVERLAY_FOCUS_CHANNEL, observe)
