@@ -1,0 +1,667 @@
+diff --git a/dist/es2015/SideEffect.js b/dist/es2015/SideEffect.js
+--- a/dist/es2015/SideEffect.js
++++ b/dist/es2015/SideEffect.js
+@@ -14,8 +14,17 @@
+ var deltaCompare = function (x, y) { return x[0] === y[0] && x[1] === y[1]; };
+ var generateStyle = function (id) { return "\n  .block-interactivity-".concat(id, " {pointer-events: none;}\n  .allow-interactivity-").concat(id, " {pointer-events: all;}\n"); };
+ var idCounter = 0;
+-var lockStack = [];
++var documentLockStacks = new WeakMap();
++function getDocumentLockStack(ownerDocument) {
++    if (!ownerDocument) return [];
++    var stack = documentLockStacks.get(ownerDocument);
++    if (!stack) { stack = []; documentLockStacks.set(ownerDocument, stack); }
++    return stack;
++}
+ export function RemoveScrollSideCar(props) {
++    var ownerDocument = props.ownerDocument || (props.lockRef.current && props.lockRef.current.ownerDocument) || globalThis.document;
++    var ownerWindow = (ownerDocument && ownerDocument.defaultView) || globalThis;
++    var lockStack = getDocumentLockStack(ownerDocument);
+     var shouldPreventQueue = React.useRef([]);
+     var touchStartRef = React.useRef([0, 0]);
+     var activeAxis = React.useRef();
+@@ -27,16 +36,16 @@
+     }, [props]);
+     React.useEffect(function () {
+         if (props.inert) {
+-            document.body.classList.add("block-interactivity-".concat(id));
++            ownerDocument.body.classList.add("block-interactivity-".concat(id));
+             var allow_1 = __spreadArray([props.lockRef.current], (props.shards || []).map(extractRef), true).filter(Boolean);
+             allow_1.forEach(function (el) { return el.classList.add("allow-interactivity-".concat(id)); });
+             return function () {
+-                document.body.classList.remove("block-interactivity-".concat(id));
++                ownerDocument.body.classList.remove("block-interactivity-".concat(id));
+                 allow_1.forEach(function (el) { return el.classList.remove("allow-interactivity-".concat(id)); });
+             };
+         }
+         return;
+-    }, [props.inert, props.lockRef.current, props.shards]);
++    }, [props.inert, props.lockRef.current, props.shards, ownerDocument]);
+     var shouldCancelEvent = React.useCallback(function (event, parent) {
+         if (('touches' in event && event.touches.length === 2) || (event.type === 'wheel' && event.ctrlKey)) {
+             return !lastProps.current.allowPinchZoom;
+@@ -53,7 +62,7 @@
+             return false;
+         }
+         // allow drag selection (iOS); check if selection's anchorNode is the same as target or contains target
+-        var selection = window.getSelection();
++        var selection = (event.target.ownerDocument.defaultView || ownerWindow).getSelection();
+         var anchorNode = selection && selection.anchorNode;
+         var isTouchingSelection = anchorNode ? anchorNode === target || anchorNode.contains(target) : false;
+         if (isTouchingSelection) {
+@@ -82,7 +91,7 @@
+         }
+         var cancelingAxis = activeAxis.current || currentAxis;
+         return handleScroll(cancelingAxis, parent, event, cancelingAxis === 'h' ? deltaX : deltaY, true);
+-    }, []);
++    }, [ownerWindow]);
+     var shouldPrevent = React.useCallback(function (_event) {
+         var event = _event;
+         if (!lockStack.length || lockStack[lockStack.length - 1] !== Style) {
+@@ -111,24 +120,24 @@
+                 }
+             }
+         }
+-    }, []);
++    }, [lockStack, shouldCancelEvent, Style]);
+     var shouldCancel = React.useCallback(function (name, delta, target, should) {
+         var event = { name: name, delta: delta, target: target, should: should, shadowParent: getOutermostShadowParent(target) };
+         shouldPreventQueue.current.push(event);
+-        setTimeout(function () {
++        ownerWindow.setTimeout(function () {
+             shouldPreventQueue.current = shouldPreventQueue.current.filter(function (e) { return e !== event; });
+         }, 1);
+-    }, []);
++    }, [ownerWindow]);
+     var scrollTouchStart = React.useCallback(function (event) {
+         touchStartRef.current = getTouchXY(event);
+         activeAxis.current = undefined;
+     }, []);
+     var scrollWheel = React.useCallback(function (event) {
+         shouldCancel(event.type, getDeltaXY(event), event.target, shouldCancelEvent(event, props.lockRef.current));
+-    }, []);
++    }, [shouldCancel, shouldCancelEvent, props.lockRef]);
+     var scrollTouchMove = React.useCallback(function (event) {
+         shouldCancel(event.type, getTouchXY(event), event.target, shouldCancelEvent(event, props.lockRef.current));
+-    }, []);
++    }, [shouldCancel, shouldCancelEvent, props.lockRef]);
+     React.useEffect(function () {
+         lockStack.push(Style);
+         props.setCallbacks({
+@@ -136,25 +145,26 @@
+             onWheelCapture: scrollWheel,
+             onTouchMoveCapture: scrollTouchMove,
+         });
+-        document.addEventListener('wheel', shouldPrevent, nonPassive);
+-        document.addEventListener('touchmove', shouldPrevent, nonPassive);
+-        document.addEventListener('touchstart', scrollTouchStart, nonPassive);
++        ownerDocument.addEventListener('wheel', shouldPrevent, nonPassive);
++        ownerDocument.addEventListener('touchmove', shouldPrevent, nonPassive);
++        ownerDocument.addEventListener('touchstart', scrollTouchStart, nonPassive);
+         return function () {
+-            lockStack = lockStack.filter(function (inst) { return inst !== Style; });
+-            document.removeEventListener('wheel', shouldPrevent, nonPassive);
+-            document.removeEventListener('touchmove', shouldPrevent, nonPassive);
+-            document.removeEventListener('touchstart', scrollTouchStart, nonPassive);
++            var index = lockStack.indexOf(Style);
++            if (index !== -1) lockStack.splice(index, 1);
++            ownerDocument.removeEventListener('wheel', shouldPrevent, nonPassive);
++            ownerDocument.removeEventListener('touchmove', shouldPrevent, nonPassive);
++            ownerDocument.removeEventListener('touchstart', scrollTouchStart, nonPassive);
+         };
+-    }, []);
++    }, [ownerDocument, lockStack, Style, shouldPrevent, scrollTouchStart, scrollWheel, scrollTouchMove]);
+     var removeScrollBar = props.removeScrollBar, inert = props.inert;
+     return (React.createElement(React.Fragment, null,
+-        inert ? React.createElement(Style, { styles: generateStyle(id) }) : null,
+-        removeScrollBar ? React.createElement(RemoveScrollBar, { noRelative: props.noRelative, gapMode: props.gapMode }) : null));
++        inert ? React.createElement(Style, { styles: generateStyle(id), ownerDocument: ownerDocument }) : null,
++        removeScrollBar ? React.createElement(RemoveScrollBar, { noRelative: props.noRelative, gapMode: props.gapMode, ownerDocument: ownerDocument }) : null));
+ }
+ function getOutermostShadowParent(node) {
+     var shadowParent = null;
+     while (node !== null) {
+-        if (node instanceof ShadowRoot) {
++        if (node.nodeType === 11 && node.host) {
+             shadowParent = node.host;
+             node = node.host;
+         }
+diff --git a/dist/es2015/UI.js b/dist/es2015/UI.js
+--- a/dist/es2015/UI.js
++++ b/dist/es2015/UI.js
+@@ -11,17 +11,19 @@
+  */
+ var RemoveScroll = React.forwardRef(function (props, parentRef) {
+     var ref = React.useRef(null);
++    var nodeState = React.useState(null), node = nodeState[0], setNode = nodeState[1];
++    var ownerDocument = props.ownerDocument || (node && node.ownerDocument);
+     var _a = React.useState({
+         onScrollCapture: nothing,
+         onWheelCapture: nothing,
+         onTouchMoveCapture: nothing,
+     }), callbacks = _a[0], setCallbacks = _a[1];
+-    var forwardProps = props.forwardProps, children = props.children, className = props.className, removeScrollBar = props.removeScrollBar, enabled = props.enabled, shards = props.shards, sideCar = props.sideCar, noRelative = props.noRelative, noIsolation = props.noIsolation, inert = props.inert, allowPinchZoom = props.allowPinchZoom, _b = props.as, Container = _b === void 0 ? 'div' : _b, gapMode = props.gapMode, rest = __rest(props, ["forwardProps", "children", "className", "removeScrollBar", "enabled", "shards", "sideCar", "noRelative", "noIsolation", "inert", "allowPinchZoom", "as", "gapMode"]);
++    var forwardProps = props.forwardProps, children = props.children, className = props.className, removeScrollBar = props.removeScrollBar, enabled = props.enabled, shards = props.shards, sideCar = props.sideCar, noRelative = props.noRelative, noIsolation = props.noIsolation, inert = props.inert, allowPinchZoom = props.allowPinchZoom, _b = props.as, Container = _b === void 0 ? 'div' : _b, gapMode = props.gapMode, rest = __rest(props, ["forwardProps", "children", "className", "removeScrollBar", "enabled", "shards", "sideCar", "noRelative", "noIsolation", "inert", "allowPinchZoom", "as", "gapMode", "ownerDocument"]);
+     var SideCar = sideCar;
+-    var containerRef = useMergeRefs([ref, parentRef]);
++    var containerRef = useMergeRefs([ref, parentRef, setNode]);
+     var containerProps = __assign(__assign({}, rest), callbacks);
+     return (React.createElement(React.Fragment, null,
+-        enabled && (React.createElement(SideCar, { sideCar: effectCar, removeScrollBar: removeScrollBar, shards: shards, noRelative: noRelative, noIsolation: noIsolation, inert: inert, setCallbacks: setCallbacks, allowPinchZoom: !!allowPinchZoom, lockRef: ref, gapMode: gapMode })),
++        enabled && ownerDocument && (React.createElement(SideCar, { sideCar: effectCar, removeScrollBar: removeScrollBar, shards: shards, noRelative: noRelative, noIsolation: noIsolation, inert: inert, setCallbacks: setCallbacks, allowPinchZoom: !!allowPinchZoom, lockRef: ref, gapMode: gapMode, ownerDocument: ownerDocument })),
+         forwardProps ? (React.cloneElement(React.Children.only(children), __assign(__assign({}, containerProps), { ref: containerRef }))) : (React.createElement(Container, __assign({}, containerProps, { className: className, ref: containerRef }), children))));
+ });
+ RemoveScroll.defaultProps = {
+diff --git a/dist/es2015/handleScroll.js b/dist/es2015/handleScroll.js
+--- a/dist/es2015/handleScroll.js
++++ b/dist/es2015/handleScroll.js
+@@ -3,10 +3,10 @@
+     return node.tagName === 'TEXTAREA';
+ };
+ var elementCanBeScrolled = function (node, overflow) {
+-    if (!(node instanceof Element)) {
++    if (!(node && node.nodeType === 1)) {
+         return false;
+     }
+-    var styles = window.getComputedStyle(node);
++    var styles = (node.ownerDocument.defaultView || globalThis).getComputedStyle(node);
+     return (
+     // not-not-scrollable
+     styles[overflow] !== 'hidden' &&
+@@ -20,7 +20,7 @@
+     var current = node;
+     do {
+         // Skip over shadow root
+-        if (typeof ShadowRoot !== 'undefined' && current instanceof ShadowRoot) {
++        if (current.nodeType === 11 && current.host) {
+             current = current.host;
+         }
+         var isScrollable = elementCouldBeScrolled(axis, current);
+@@ -65,7 +65,7 @@
+     return axis === 'h' && direction === 'rtl' ? -1 : 1;
+ };
+ export var handleScroll = function (axis, endTarget, event, sourceDelta, noOverscroll) {
+-    var directionFactor = getDirectionFactor(axis, window.getComputedStyle(endTarget).direction);
++    var directionFactor = getDirectionFactor(axis, (endTarget.ownerDocument.defaultView || globalThis).getComputedStyle(endTarget).direction);
+     var delta = directionFactor * sourceDelta;
+     // find scrollable target
+     var target = event.target;
+@@ -89,10 +89,10 @@
+         var parent_1 = target.parentNode;
+         // we will "bubble" from ShadowDom in case we are, or just to the parent in normal case
+         // this is the same logic used in focus-lock
+-        target = (parent_1 && parent_1.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? parent_1.host : parent_1);
++        target = (parent_1 && parent_1.nodeType === 11 ? parent_1.host : parent_1);
+     } while (
+     // portaled content
+-    (!targetInLock && target !== document.body) ||
++    (!targetInLock && target !== endTarget.ownerDocument.body) ||
+         // self content
+         (targetInLock && (endTarget.contains(target) || endTarget === target)));
+     // handle epsilon around 0 (non standard zoom levels)
+diff --git a/dist/es2015/types.d.ts b/dist/es2015/types.d.ts
+--- a/dist/es2015/types.d.ts
++++ b/dist/es2015/types.d.ts
+@@ -29,6 +29,8 @@
+     children: React.ReactElement;
+ }
+ export interface IRemoveScrollSelfProps {
++    /** Actual document; defaults to the lock node ownerDocument. */
++    ownerDocument?: Document;
+     ref?: Ref<HTMLElement>;
+     /**
+      * prevents 'position="relative"' being set on body
+@@ -82,6 +84,7 @@
+     sideCar: React.FC<any>;
+ };
+ export interface IRemoveScrollEffectProps {
++    ownerDocument?: Document;
+     noRelative?: boolean;
+     noIsolation?: boolean;
+     removeScrollBar?: boolean;
+diff --git a/dist/es2019/SideEffect.js b/dist/es2019/SideEffect.js
+--- a/dist/es2019/SideEffect.js
++++ b/dist/es2019/SideEffect.js
+@@ -12,8 +12,17 @@
+   .allow-interactivity-${id} {pointer-events: all;}
+ `;
+ let idCounter = 0;
+-let lockStack = [];
++var documentLockStacks = new WeakMap();
++function getDocumentLockStack(ownerDocument) {
++    if (!ownerDocument) return [];
++    var stack = documentLockStacks.get(ownerDocument);
++    if (!stack) { stack = []; documentLockStacks.set(ownerDocument, stack); }
++    return stack;
++}
+ export function RemoveScrollSideCar(props) {
++    var ownerDocument = props.ownerDocument || (props.lockRef.current && props.lockRef.current.ownerDocument) || globalThis.document;
++    var ownerWindow = (ownerDocument && ownerDocument.defaultView) || globalThis;
++    var lockStack = getDocumentLockStack(ownerDocument);
+     const shouldPreventQueue = React.useRef([]);
+     const touchStartRef = React.useRef([0, 0]);
+     const activeAxis = React.useRef();
+@@ -25,16 +34,16 @@
+     }, [props]);
+     React.useEffect(() => {
+         if (props.inert) {
+-            document.body.classList.add(`block-interactivity-${id}`);
++            ownerDocument.body.classList.add(`block-interactivity-${id}`);
+             const allow = [props.lockRef.current, ...(props.shards || []).map(extractRef)].filter(Boolean);
+             allow.forEach((el) => el.classList.add(`allow-interactivity-${id}`));
+             return () => {
+-                document.body.classList.remove(`block-interactivity-${id}`);
++                ownerDocument.body.classList.remove(`block-interactivity-${id}`);
+                 allow.forEach((el) => el.classList.remove(`allow-interactivity-${id}`));
+             };
+         }
+         return;
+-    }, [props.inert, props.lockRef.current, props.shards]);
++    }, [props.inert, props.lockRef.current, props.shards, ownerDocument]);
+     const shouldCancelEvent = React.useCallback((event, parent) => {
+         if (('touches' in event && event.touches.length === 2) || (event.type === 'wheel' && event.ctrlKey)) {
+             return !lastProps.current.allowPinchZoom;
+@@ -51,7 +60,7 @@
+             return false;
+         }
+         // allow drag selection (iOS); check if selection's anchorNode is the same as target or contains target
+-        const selection = window.getSelection();
++        const selection = (event.target.ownerDocument.defaultView || ownerWindow).getSelection();
+         const anchorNode = selection && selection.anchorNode;
+         const isTouchingSelection = anchorNode ? anchorNode === target || anchorNode.contains(target) : false;
+         if (isTouchingSelection) {
+@@ -80,7 +89,7 @@
+         }
+         const cancelingAxis = activeAxis.current || currentAxis;
+         return handleScroll(cancelingAxis, parent, event, cancelingAxis === 'h' ? deltaX : deltaY, true);
+-    }, []);
++    }, [ownerWindow]);
+     const shouldPrevent = React.useCallback((_event) => {
+         const event = _event;
+         if (!lockStack.length || lockStack[lockStack.length - 1] !== Style) {
+@@ -109,24 +118,24 @@
+                 }
+             }
+         }
+-    }, []);
++    }, [lockStack, shouldCancelEvent, Style]);
+     const shouldCancel = React.useCallback((name, delta, target, should) => {
+         const event = { name, delta, target, should, shadowParent: getOutermostShadowParent(target) };
+         shouldPreventQueue.current.push(event);
+-        setTimeout(() => {
++        ownerWindow.setTimeout(() => {
+             shouldPreventQueue.current = shouldPreventQueue.current.filter((e) => e !== event);
+         }, 1);
+-    }, []);
++    }, [ownerWindow]);
+     const scrollTouchStart = React.useCallback((event) => {
+         touchStartRef.current = getTouchXY(event);
+         activeAxis.current = undefined;
+     }, []);
+     const scrollWheel = React.useCallback((event) => {
+         shouldCancel(event.type, getDeltaXY(event), event.target, shouldCancelEvent(event, props.lockRef.current));
+-    }, []);
++    }, [shouldCancel, shouldCancelEvent, props.lockRef]);
+     const scrollTouchMove = React.useCallback((event) => {
+         shouldCancel(event.type, getTouchXY(event), event.target, shouldCancelEvent(event, props.lockRef.current));
+-    }, []);
++    }, [shouldCancel, shouldCancelEvent, props.lockRef]);
+     React.useEffect(() => {
+         lockStack.push(Style);
+         props.setCallbacks({
+@@ -134,25 +143,26 @@
+             onWheelCapture: scrollWheel,
+             onTouchMoveCapture: scrollTouchMove,
+         });
+-        document.addEventListener('wheel', shouldPrevent, nonPassive);
+-        document.addEventListener('touchmove', shouldPrevent, nonPassive);
+-        document.addEventListener('touchstart', scrollTouchStart, nonPassive);
++        ownerDocument.addEventListener('wheel', shouldPrevent, nonPassive);
++        ownerDocument.addEventListener('touchmove', shouldPrevent, nonPassive);
++        ownerDocument.addEventListener('touchstart', scrollTouchStart, nonPassive);
+         return () => {
+-            lockStack = lockStack.filter((inst) => inst !== Style);
+-            document.removeEventListener('wheel', shouldPrevent, nonPassive);
+-            document.removeEventListener('touchmove', shouldPrevent, nonPassive);
+-            document.removeEventListener('touchstart', scrollTouchStart, nonPassive);
++            var index = lockStack.indexOf(Style);
++            if (index !== -1) lockStack.splice(index, 1);
++            ownerDocument.removeEventListener('wheel', shouldPrevent, nonPassive);
++            ownerDocument.removeEventListener('touchmove', shouldPrevent, nonPassive);
++            ownerDocument.removeEventListener('touchstart', scrollTouchStart, nonPassive);
+         };
+-    }, []);
++    }, [ownerDocument, lockStack, Style, shouldPrevent, scrollTouchStart, scrollWheel, scrollTouchMove]);
+     const { removeScrollBar, inert } = props;
+     return (React.createElement(React.Fragment, null,
+-        inert ? React.createElement(Style, { styles: generateStyle(id) }) : null,
+-        removeScrollBar ? React.createElement(RemoveScrollBar, { noRelative: props.noRelative, gapMode: props.gapMode }) : null));
++        inert ? React.createElement(Style, { styles: generateStyle(id), ownerDocument: ownerDocument }) : null,
++        removeScrollBar ? React.createElement(RemoveScrollBar, { noRelative: props.noRelative, gapMode: props.gapMode, ownerDocument: ownerDocument }) : null));
+ }
+ function getOutermostShadowParent(node) {
+     let shadowParent = null;
+     while (node !== null) {
+-        if (node instanceof ShadowRoot) {
++        if (node.nodeType === 11 && node.host) {
+             shadowParent = node.host;
+             node = node.host;
+         }
+diff --git a/dist/es2019/UI.js b/dist/es2019/UI.js
+--- a/dist/es2019/UI.js
++++ b/dist/es2019/UI.js
+@@ -10,20 +10,22 @@
+  */
+ const RemoveScroll = React.forwardRef((props, parentRef) => {
+     const ref = React.useRef(null);
++    var nodeState = React.useState(null), node = nodeState[0], setNode = nodeState[1];
++    var ownerDocument = props.ownerDocument || (node && node.ownerDocument);
+     const [callbacks, setCallbacks] = React.useState({
+         onScrollCapture: nothing,
+         onWheelCapture: nothing,
+         onTouchMoveCapture: nothing,
+     });
+-    const { forwardProps, children, className, removeScrollBar, enabled, shards, sideCar, noRelative, noIsolation, inert, allowPinchZoom, as: Container = 'div', gapMode, ...rest } = props;
++    const { forwardProps, children, className, removeScrollBar, enabled, shards, sideCar, noRelative, noIsolation, inert, allowPinchZoom, as: Container = 'div', gapMode, ownerDocument: _ownerDocument, ...rest } = props;
+     const SideCar = sideCar;
+-    const containerRef = useMergeRefs([ref, parentRef]);
++    const containerRef = useMergeRefs([ref, parentRef, setNode]);
+     const containerProps = {
+         ...rest,
+         ...callbacks,
+     };
+     return (React.createElement(React.Fragment, null,
+-        enabled && (React.createElement(SideCar, { sideCar: effectCar, removeScrollBar: removeScrollBar, shards: shards, noRelative: noRelative, noIsolation: noIsolation, inert: inert, setCallbacks: setCallbacks, allowPinchZoom: !!allowPinchZoom, lockRef: ref, gapMode: gapMode })),
++        enabled && ownerDocument && (React.createElement(SideCar, { sideCar: effectCar, removeScrollBar: removeScrollBar, shards: shards, noRelative: noRelative, noIsolation: noIsolation, inert: inert, setCallbacks: setCallbacks, allowPinchZoom: !!allowPinchZoom, lockRef: ref, gapMode: gapMode, ownerDocument: ownerDocument })),
+         forwardProps ? (React.cloneElement(React.Children.only(children), {
+             ...containerProps,
+             ref: containerRef,
+diff --git a/dist/es2019/handleScroll.js b/dist/es2019/handleScroll.js
+--- a/dist/es2019/handleScroll.js
++++ b/dist/es2019/handleScroll.js
+@@ -2,10 +2,10 @@
+ // textarea will always _contain_ scroll inside self. It only can be hidden
+ node.tagName === 'TEXTAREA';
+ const elementCanBeScrolled = (node, overflow) => {
+-    if (!(node instanceof Element)) {
++    if (!(node && node.nodeType === 1)) {
+         return false;
+     }
+-    const styles = window.getComputedStyle(node);
++    const styles = (node.ownerDocument.defaultView || globalThis).getComputedStyle(node);
+     return (
+     // not-not-scrollable
+     styles[overflow] !== 'hidden' &&
+@@ -19,7 +19,7 @@
+     let current = node;
+     do {
+         // Skip over shadow root
+-        if (typeof ShadowRoot !== 'undefined' && current instanceof ShadowRoot) {
++        if (current.nodeType === 11 && current.host) {
+             current = current.host;
+         }
+         const isScrollable = elementCouldBeScrolled(axis, current);
+@@ -53,7 +53,7 @@
+  */
+ axis === 'h' && direction === 'rtl' ? -1 : 1;
+ export const handleScroll = (axis, endTarget, event, sourceDelta, noOverscroll) => {
+-    const directionFactor = getDirectionFactor(axis, window.getComputedStyle(endTarget).direction);
++    const directionFactor = getDirectionFactor(axis, (endTarget.ownerDocument.defaultView || globalThis).getComputedStyle(endTarget).direction);
+     const delta = directionFactor * sourceDelta;
+     // find scrollable target
+     let target = event.target;
+@@ -77,10 +77,10 @@
+         const parent = target.parentNode;
+         // we will "bubble" from ShadowDom in case we are, or just to the parent in normal case
+         // this is the same logic used in focus-lock
+-        target = (parent && parent.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? parent.host : parent);
++        target = (parent && parent.nodeType === 11 ? parent.host : parent);
+     } while (
+     // portaled content
+-    (!targetInLock && target !== document.body) ||
++    (!targetInLock && target !== endTarget.ownerDocument.body) ||
+         // self content
+         (targetInLock && (endTarget.contains(target) || endTarget === target)));
+     // handle epsilon around 0 (non standard zoom levels)
+diff --git a/dist/es2019/types.d.ts b/dist/es2019/types.d.ts
+--- a/dist/es2019/types.d.ts
++++ b/dist/es2019/types.d.ts
+@@ -29,6 +29,8 @@
+     children: React.ReactElement;
+ }
+ export interface IRemoveScrollSelfProps {
++    /** Actual document; defaults to the lock node ownerDocument. */
++    ownerDocument?: Document;
+     ref?: Ref<HTMLElement>;
+     /**
+      * prevents 'position="relative"' being set on body
+@@ -82,6 +84,7 @@
+     sideCar: React.FC<any>;
+ };
+ export interface IRemoveScrollEffectProps {
++    ownerDocument?: Document;
+     noRelative?: boolean;
+     noIsolation?: boolean;
+     removeScrollBar?: boolean;
+diff --git a/dist/es5/SideEffect.js b/dist/es5/SideEffect.js
+--- a/dist/es5/SideEffect.js
++++ b/dist/es5/SideEffect.js
+@@ -19,8 +19,17 @@
+ var deltaCompare = function (x, y) { return x[0] === y[0] && x[1] === y[1]; };
+ var generateStyle = function (id) { return "\n  .block-interactivity-".concat(id, " {pointer-events: none;}\n  .allow-interactivity-").concat(id, " {pointer-events: all;}\n"); };
+ var idCounter = 0;
+-var lockStack = [];
++var documentLockStacks = new WeakMap();
++function getDocumentLockStack(ownerDocument) {
++    if (!ownerDocument) return [];
++    var stack = documentLockStacks.get(ownerDocument);
++    if (!stack) { stack = []; documentLockStacks.set(ownerDocument, stack); }
++    return stack;
++}
+ function RemoveScrollSideCar(props) {
++    var ownerDocument = props.ownerDocument || (props.lockRef.current && props.lockRef.current.ownerDocument) || globalThis.document;
++    var ownerWindow = (ownerDocument && ownerDocument.defaultView) || globalThis;
++    var lockStack = getDocumentLockStack(ownerDocument);
+     var shouldPreventQueue = React.useRef([]);
+     var touchStartRef = React.useRef([0, 0]);
+     var activeAxis = React.useRef();
+@@ -32,16 +41,16 @@
+     }, [props]);
+     React.useEffect(function () {
+         if (props.inert) {
+-            document.body.classList.add("block-interactivity-".concat(id));
++            ownerDocument.body.classList.add("block-interactivity-".concat(id));
+             var allow_1 = tslib_1.__spreadArray([props.lockRef.current], (props.shards || []).map(extractRef), true).filter(Boolean);
+             allow_1.forEach(function (el) { return el.classList.add("allow-interactivity-".concat(id)); });
+             return function () {
+-                document.body.classList.remove("block-interactivity-".concat(id));
++                ownerDocument.body.classList.remove("block-interactivity-".concat(id));
+                 allow_1.forEach(function (el) { return el.classList.remove("allow-interactivity-".concat(id)); });
+             };
+         }
+         return;
+-    }, [props.inert, props.lockRef.current, props.shards]);
++    }, [props.inert, props.lockRef.current, props.shards, ownerDocument]);
+     var shouldCancelEvent = React.useCallback(function (event, parent) {
+         if (('touches' in event && event.touches.length === 2) || (event.type === 'wheel' && event.ctrlKey)) {
+             return !lastProps.current.allowPinchZoom;
+@@ -58,7 +67,7 @@
+             return false;
+         }
+         // allow drag selection (iOS); check if selection's anchorNode is the same as target or contains target
+-        var selection = window.getSelection();
++        var selection = (event.target.ownerDocument.defaultView || ownerWindow).getSelection();
+         var anchorNode = selection && selection.anchorNode;
+         var isTouchingSelection = anchorNode ? anchorNode === target || anchorNode.contains(target) : false;
+         if (isTouchingSelection) {
+@@ -87,7 +96,7 @@
+         }
+         var cancelingAxis = activeAxis.current || currentAxis;
+         return (0, handleScroll_1.handleScroll)(cancelingAxis, parent, event, cancelingAxis === 'h' ? deltaX : deltaY, true);
+-    }, []);
++    }, [ownerWindow]);
+     var shouldPrevent = React.useCallback(function (_event) {
+         var event = _event;
+         if (!lockStack.length || lockStack[lockStack.length - 1] !== Style) {
+@@ -116,24 +125,24 @@
+                 }
+             }
+         }
+-    }, []);
++    }, [lockStack, shouldCancelEvent, Style]);
+     var shouldCancel = React.useCallback(function (name, delta, target, should) {
+         var event = { name: name, delta: delta, target: target, should: should, shadowParent: getOutermostShadowParent(target) };
+         shouldPreventQueue.current.push(event);
+-        setTimeout(function () {
++        ownerWindow.setTimeout(function () {
+             shouldPreventQueue.current = shouldPreventQueue.current.filter(function (e) { return e !== event; });
+         }, 1);
+-    }, []);
++    }, [ownerWindow]);
+     var scrollTouchStart = React.useCallback(function (event) {
+         touchStartRef.current = (0, exports.getTouchXY)(event);
+         activeAxis.current = undefined;
+     }, []);
+     var scrollWheel = React.useCallback(function (event) {
+         shouldCancel(event.type, (0, exports.getDeltaXY)(event), event.target, shouldCancelEvent(event, props.lockRef.current));
+-    }, []);
++    }, [shouldCancel, shouldCancelEvent, props.lockRef]);
+     var scrollTouchMove = React.useCallback(function (event) {
+         shouldCancel(event.type, (0, exports.getTouchXY)(event), event.target, shouldCancelEvent(event, props.lockRef.current));
+-    }, []);
++    }, [shouldCancel, shouldCancelEvent, props.lockRef]);
+     React.useEffect(function () {
+         lockStack.push(Style);
+         props.setCallbacks({
+@@ -141,26 +150,27 @@
+             onWheelCapture: scrollWheel,
+             onTouchMoveCapture: scrollTouchMove,
+         });
+-        document.addEventListener('wheel', shouldPrevent, aggresiveCapture_1.nonPassive);
+-        document.addEventListener('touchmove', shouldPrevent, aggresiveCapture_1.nonPassive);
+-        document.addEventListener('touchstart', scrollTouchStart, aggresiveCapture_1.nonPassive);
++        ownerDocument.addEventListener('wheel', shouldPrevent, aggresiveCapture_1.nonPassive);
++        ownerDocument.addEventListener('touchmove', shouldPrevent, aggresiveCapture_1.nonPassive);
++        ownerDocument.addEventListener('touchstart', scrollTouchStart, aggresiveCapture_1.nonPassive);
+         return function () {
+-            lockStack = lockStack.filter(function (inst) { return inst !== Style; });
+-            document.removeEventListener('wheel', shouldPrevent, aggresiveCapture_1.nonPassive);
+-            document.removeEventListener('touchmove', shouldPrevent, aggresiveCapture_1.nonPassive);
+-            document.removeEventListener('touchstart', scrollTouchStart, aggresiveCapture_1.nonPassive);
++            var index = lockStack.indexOf(Style);
++            if (index !== -1) lockStack.splice(index, 1);
++            ownerDocument.removeEventListener('wheel', shouldPrevent, aggresiveCapture_1.nonPassive);
++            ownerDocument.removeEventListener('touchmove', shouldPrevent, aggresiveCapture_1.nonPassive);
++            ownerDocument.removeEventListener('touchstart', scrollTouchStart, aggresiveCapture_1.nonPassive);
+         };
+-    }, []);
++    }, [ownerDocument, lockStack, Style, shouldPrevent, scrollTouchStart, scrollWheel, scrollTouchMove]);
+     var removeScrollBar = props.removeScrollBar, inert = props.inert;
+     return (React.createElement(React.Fragment, null,
+-        inert ? React.createElement(Style, { styles: generateStyle(id) }) : null,
+-        removeScrollBar ? React.createElement(react_remove_scroll_bar_1.RemoveScrollBar, { noRelative: props.noRelative, gapMode: props.gapMode }) : null));
++        inert ? React.createElement(Style, { styles: generateStyle(id), ownerDocument: ownerDocument }) : null,
++        removeScrollBar ? React.createElement(react_remove_scroll_bar_1.RemoveScrollBar, { noRelative: props.noRelative, gapMode: props.gapMode, ownerDocument: ownerDocument }) : null));
+ }
+ exports.RemoveScrollSideCar = RemoveScrollSideCar;
+ function getOutermostShadowParent(node) {
+     var shadowParent = null;
+     while (node !== null) {
+-        if (node instanceof ShadowRoot) {
++        if (node.nodeType === 11 && node.host) {
+             shadowParent = node.host;
+             node = node.host;
+         }
+diff --git a/dist/es5/UI.js b/dist/es5/UI.js
+--- a/dist/es5/UI.js
++++ b/dist/es5/UI.js
+@@ -14,17 +14,19 @@
+  */
+ var RemoveScroll = React.forwardRef(function (props, parentRef) {
+     var ref = React.useRef(null);
++    var nodeState = React.useState(null), node = nodeState[0], setNode = nodeState[1];
++    var ownerDocument = props.ownerDocument || (node && node.ownerDocument);
+     var _a = React.useState({
+         onScrollCapture: nothing,
+         onWheelCapture: nothing,
+         onTouchMoveCapture: nothing,
+     }), callbacks = _a[0], setCallbacks = _a[1];
+-    var forwardProps = props.forwardProps, children = props.children, className = props.className, removeScrollBar = props.removeScrollBar, enabled = props.enabled, shards = props.shards, sideCar = props.sideCar, noRelative = props.noRelative, noIsolation = props.noIsolation, inert = props.inert, allowPinchZoom = props.allowPinchZoom, _b = props.as, Container = _b === void 0 ? 'div' : _b, gapMode = props.gapMode, rest = tslib_1.__rest(props, ["forwardProps", "children", "className", "removeScrollBar", "enabled", "shards", "sideCar", "noRelative", "noIsolation", "inert", "allowPinchZoom", "as", "gapMode"]);
++    var forwardProps = props.forwardProps, children = props.children, className = props.className, removeScrollBar = props.removeScrollBar, enabled = props.enabled, shards = props.shards, sideCar = props.sideCar, noRelative = props.noRelative, noIsolation = props.noIsolation, inert = props.inert, allowPinchZoom = props.allowPinchZoom, _b = props.as, Container = _b === void 0 ? 'div' : _b, gapMode = props.gapMode, rest = tslib_1.__rest(props, ["forwardProps", "children", "className", "removeScrollBar", "enabled", "shards", "sideCar", "noRelative", "noIsolation", "inert", "allowPinchZoom", "as", "gapMode", "ownerDocument"]);
+     var SideCar = sideCar;
+-    var containerRef = (0, use_callback_ref_1.useMergeRefs)([ref, parentRef]);
++    var containerRef = (0, use_callback_ref_1.useMergeRefs)([ref, parentRef, setNode]);
+     var containerProps = tslib_1.__assign(tslib_1.__assign({}, rest), callbacks);
+     return (React.createElement(React.Fragment, null,
+-        enabled && (React.createElement(SideCar, { sideCar: medium_1.effectCar, removeScrollBar: removeScrollBar, shards: shards, noRelative: noRelative, noIsolation: noIsolation, inert: inert, setCallbacks: setCallbacks, allowPinchZoom: !!allowPinchZoom, lockRef: ref, gapMode: gapMode })),
++        enabled && ownerDocument && (React.createElement(SideCar, { sideCar: medium_1.effectCar, removeScrollBar: removeScrollBar, shards: shards, noRelative: noRelative, noIsolation: noIsolation, inert: inert, setCallbacks: setCallbacks, allowPinchZoom: !!allowPinchZoom, lockRef: ref, gapMode: gapMode, ownerDocument: ownerDocument })),
+         forwardProps ? (React.cloneElement(React.Children.only(children), tslib_1.__assign(tslib_1.__assign({}, containerProps), { ref: containerRef }))) : (React.createElement(Container, tslib_1.__assign({}, containerProps, { className: className, ref: containerRef }), children))));
+ });
+ exports.RemoveScroll = RemoveScroll;
+diff --git a/dist/es5/handleScroll.js b/dist/es5/handleScroll.js
+--- a/dist/es5/handleScroll.js
++++ b/dist/es5/handleScroll.js
+@@ -6,10 +6,10 @@
+     return node.tagName === 'TEXTAREA';
+ };
+ var elementCanBeScrolled = function (node, overflow) {
+-    if (!(node instanceof Element)) {
++    if (!(node && node.nodeType === 1)) {
+         return false;
+     }
+-    var styles = window.getComputedStyle(node);
++    var styles = (node.ownerDocument.defaultView || globalThis).getComputedStyle(node);
+     return (
+     // not-not-scrollable
+     styles[overflow] !== 'hidden' &&
+@@ -23,7 +23,7 @@
+     var current = node;
+     do {
+         // Skip over shadow root
+-        if (typeof ShadowRoot !== 'undefined' && current instanceof ShadowRoot) {
++        if (current.nodeType === 11 && current.host) {
+             current = current.host;
+         }
+         var isScrollable = elementCouldBeScrolled(axis, current);
+@@ -69,7 +69,7 @@
+     return axis === 'h' && direction === 'rtl' ? -1 : 1;
+ };
+ var handleScroll = function (axis, endTarget, event, sourceDelta, noOverscroll) {
+-    var directionFactor = getDirectionFactor(axis, window.getComputedStyle(endTarget).direction);
++    var directionFactor = getDirectionFactor(axis, (endTarget.ownerDocument.defaultView || globalThis).getComputedStyle(endTarget).direction);
+     var delta = directionFactor * sourceDelta;
+     // find scrollable target
+     var target = event.target;
+@@ -93,10 +93,10 @@
+         var parent_1 = target.parentNode;
+         // we will "bubble" from ShadowDom in case we are, or just to the parent in normal case
+         // this is the same logic used in focus-lock
+-        target = (parent_1 && parent_1.nodeType === Node.DOCUMENT_FRAGMENT_NODE ? parent_1.host : parent_1);
++        target = (parent_1 && parent_1.nodeType === 11 ? parent_1.host : parent_1);
+     } while (
+     // portaled content
+-    (!targetInLock && target !== document.body) ||
++    (!targetInLock && target !== endTarget.ownerDocument.body) ||
+         // self content
+         (targetInLock && (endTarget.contains(target) || endTarget === target)));
+     // handle epsilon around 0 (non standard zoom levels)
+diff --git a/dist/es5/types.d.ts b/dist/es5/types.d.ts
+--- a/dist/es5/types.d.ts
++++ b/dist/es5/types.d.ts
+@@ -29,6 +29,8 @@
+     children: React.ReactElement;
+ }
+ export interface IRemoveScrollSelfProps {
++    /** Actual document; defaults to the lock node ownerDocument. */
++    ownerDocument?: Document;
+     ref?: Ref<HTMLElement>;
+     /**
+      * prevents 'position="relative"' being set on body
+@@ -82,6 +84,7 @@
+     sideCar: React.FC<any>;
+ };
+ export interface IRemoveScrollEffectProps {
++    ownerDocument?: Document;
+     noRelative?: boolean;
+     noIsolation?: boolean;
+     removeScrollBar?: boolean;

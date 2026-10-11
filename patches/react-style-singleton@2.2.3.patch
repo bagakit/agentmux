@@ -1,0 +1,403 @@
+diff --git a/dist/es2015/component.d.ts b/dist/es2015/component.d.ts
+--- a/dist/es2015/component.d.ts
++++ b/dist/es2015/component.d.ts
+@@ -1,5 +1,6 @@
+ import * as React from 'react';
+ declare type Props = {
++    ownerDocument?: Document;
+     /**
+      * styles to apply
+      */
+diff --git a/dist/es2015/component.js b/dist/es2015/component.js
+--- a/dist/es2015/component.js
++++ b/dist/es2015/component.js
+@@ -8,8 +8,8 @@
+ export var styleSingleton = function () {
+     var useStyle = styleHookSingleton();
+     var Sheet = function (_a) {
+-        var styles = _a.styles, dynamic = _a.dynamic;
+-        useStyle(styles, dynamic);
++        var styles = _a.styles, dynamic = _a.dynamic, ownerDocument = _a.ownerDocument;
++        useStyle(styles, dynamic, ownerDocument);
+         return null;
+     };
+     return Sheet;
+diff --git a/dist/es2015/hook.d.ts b/dist/es2015/hook.d.ts
+--- a/dist/es2015/hook.d.ts
++++ b/dist/es2015/hook.d.ts
+@@ -9,7 +9,7 @@
+ /**
+  * indication that styles should be reapplied on change
+  */
+-isDynamic?: boolean) => void;
++isDynamic?: boolean, ownerDocument?: Document) => void;
+ /**
+  * creates a hook to control style singleton
+  * @see {@link styleSingleton} for a safer component version
+diff --git a/dist/es2015/hook.js b/dist/es2015/hook.js
+--- a/dist/es2015/hook.js
++++ b/dist/es2015/hook.js
+@@ -11,12 +11,12 @@
+  */
+ export var styleHookSingleton = function () {
+     var sheet = stylesheetSingleton();
+-    return function (styles, isDynamic) {
++    return function (styles, isDynamic, ownerDocument) {
+         React.useEffect(function () {
+-            sheet.add(styles);
++            sheet.add(styles, ownerDocument);
+             return function () {
+-                sheet.remove();
++                sheet.remove(ownerDocument);
+             };
+-        }, [styles && isDynamic]);
++        }, [styles && isDynamic, ownerDocument]);
+     };
+ };
+diff --git a/dist/es2015/singleton.d.ts b/dist/es2015/singleton.d.ts
+--- a/dist/es2015/singleton.d.ts
++++ b/dist/es2015/singleton.d.ts
+@@ -1,4 +1,4 @@
+ export declare const stylesheetSingleton: () => {
+-    add: (style: string) => void;
+-    remove: () => void;
++    add: (style: string, ownerDocument?: Document) => void;
++    remove: (ownerDocument?: Document) => void;
+ };
+diff --git a/dist/es2015/singleton.js b/dist/es2015/singleton.js
+--- a/dist/es2015/singleton.js
++++ b/dist/es2015/singleton.js
+@@ -1,8 +1,8 @@
+ import { getNonce } from 'get-nonce';
+-function makeStyleTag() {
+-    if (!document)
++function makeStyleTag(ownerDocument) {
++    if (!ownerDocument)
+         return null;
+-    var tag = document.createElement('style');
++    var tag = ownerDocument.createElement('style');
+     tag.type = 'text/css';
+     var nonce = getNonce();
+     if (nonce) {
+@@ -17,31 +17,35 @@
+         tag.styleSheet.cssText = css;
+     }
+     else {
+-        tag.appendChild(document.createTextNode(css));
++        tag.appendChild(tag.ownerDocument.createTextNode(css));
+     }
+ }
+ function insertStyleTag(tag) {
+-    var head = document.head || document.getElementsByTagName('head')[0];
++    var head = tag.ownerDocument.head || tag.ownerDocument.getElementsByTagName('head')[0];
+     head.appendChild(tag);
+ }
+ export var stylesheetSingleton = function () {
+-    var counter = 0;
+-    var stylesheet = null;
++    var documents = new WeakMap();
+     return {
+-        add: function (style) {
+-            if (counter == 0) {
+-                if ((stylesheet = makeStyleTag())) {
+-                    injectStyles(stylesheet, style);
+-                    insertStyleTag(stylesheet);
+-                }
++        add: function (style, ownerDocument) {
++            ownerDocument = ownerDocument || globalThis.document;
++            if (!ownerDocument) return;
++            var sheet = documents.get(ownerDocument);
++            if (!sheet) { sheet = { counter: 0, stylesheet: null }; documents.set(ownerDocument, sheet); }
++            if (sheet.counter === 0 && (sheet.stylesheet = makeStyleTag(ownerDocument))) {
++                injectStyles(sheet.stylesheet, style);
++                insertStyleTag(sheet.stylesheet);
+             }
+-            counter++;
++            sheet.counter++;
+         },
+-        remove: function () {
+-            counter--;
+-            if (!counter && stylesheet) {
+-                stylesheet.parentNode && stylesheet.parentNode.removeChild(stylesheet);
+-                stylesheet = null;
++        remove: function (ownerDocument) {
++            ownerDocument = ownerDocument || globalThis.document;
++            var sheet = ownerDocument && documents.get(ownerDocument);
++            if (!sheet) return;
++            sheet.counter--;
++            if (!sheet.counter) {
++                if (sheet.stylesheet) sheet.stylesheet.remove();
++                documents.delete(ownerDocument);
+             }
+         },
+     };
+diff --git a/dist/es2019/component.d.ts b/dist/es2019/component.d.ts
+--- a/dist/es2019/component.d.ts
++++ b/dist/es2019/component.d.ts
+@@ -1,5 +1,6 @@
+ import * as React from 'react';
+ declare type Props = {
++    ownerDocument?: Document;
+     /**
+      * styles to apply
+      */
+diff --git a/dist/es2019/component.js b/dist/es2019/component.js
+--- a/dist/es2019/component.js
++++ b/dist/es2019/component.js
+@@ -7,8 +7,8 @@
+  */
+ export const styleSingleton = () => {
+     const useStyle = styleHookSingleton();
+-    const Sheet = ({ styles, dynamic }) => {
+-        useStyle(styles, dynamic);
++    const Sheet = ({ styles, dynamic, ownerDocument }) => {
++        useStyle(styles, dynamic, ownerDocument);
+         return null;
+     };
+     return Sheet;
+diff --git a/dist/es2019/hook.d.ts b/dist/es2019/hook.d.ts
+--- a/dist/es2019/hook.d.ts
++++ b/dist/es2019/hook.d.ts
+@@ -9,7 +9,7 @@
+ /**
+  * indication that styles should be reapplied on change
+  */
+-isDynamic?: boolean) => void;
++isDynamic?: boolean, ownerDocument?: Document) => void;
+ /**
+  * creates a hook to control style singleton
+  * @see {@link styleSingleton} for a safer component version
+diff --git a/dist/es2019/hook.js b/dist/es2019/hook.js
+--- a/dist/es2019/hook.js
++++ b/dist/es2019/hook.js
+@@ -11,12 +11,12 @@
+  */
+ export const styleHookSingleton = () => {
+     const sheet = stylesheetSingleton();
+-    return (styles, isDynamic) => {
++    return (styles, isDynamic, ownerDocument) => {
+         React.useEffect(() => {
+-            sheet.add(styles);
++            sheet.add(styles, ownerDocument);
+             return () => {
+-                sheet.remove();
++                sheet.remove(ownerDocument);
+             };
+-        }, [styles && isDynamic]);
++        }, [styles && isDynamic, ownerDocument]);
+     };
+ };
+diff --git a/dist/es2019/singleton.d.ts b/dist/es2019/singleton.d.ts
+--- a/dist/es2019/singleton.d.ts
++++ b/dist/es2019/singleton.d.ts
+@@ -1,4 +1,4 @@
+ export declare const stylesheetSingleton: () => {
+-    add: (style: string) => void;
+-    remove: () => void;
++    add: (style: string, ownerDocument?: Document) => void;
++    remove: (ownerDocument?: Document) => void;
+ };
+diff --git a/dist/es2019/singleton.js b/dist/es2019/singleton.js
+--- a/dist/es2019/singleton.js
++++ b/dist/es2019/singleton.js
+@@ -1,8 +1,8 @@
+ import { getNonce } from 'get-nonce';
+-function makeStyleTag() {
+-    if (!document)
++function makeStyleTag(ownerDocument) {
++    if (!ownerDocument)
+         return null;
+-    const tag = document.createElement('style');
++    const tag = ownerDocument.createElement('style');
+     tag.type = 'text/css';
+     const nonce = getNonce();
+     if (nonce) {
+@@ -17,31 +17,35 @@
+         tag.styleSheet.cssText = css;
+     }
+     else {
+-        tag.appendChild(document.createTextNode(css));
++        tag.appendChild(tag.ownerDocument.createTextNode(css));
+     }
+ }
+ function insertStyleTag(tag) {
+-    const head = document.head || document.getElementsByTagName('head')[0];
++    const head = tag.ownerDocument.head || tag.ownerDocument.getElementsByTagName('head')[0];
+     head.appendChild(tag);
+ }
+-export const stylesheetSingleton = () => {
+-    let counter = 0;
+-    let stylesheet = null;
++export var stylesheetSingleton = function () {
++    var documents = new WeakMap();
+     return {
+-        add: (style) => {
+-            if (counter == 0) {
+-                if ((stylesheet = makeStyleTag())) {
+-                    injectStyles(stylesheet, style);
+-                    insertStyleTag(stylesheet);
+-                }
++        add: function (style, ownerDocument) {
++            ownerDocument = ownerDocument || globalThis.document;
++            if (!ownerDocument) return;
++            var sheet = documents.get(ownerDocument);
++            if (!sheet) { sheet = { counter: 0, stylesheet: null }; documents.set(ownerDocument, sheet); }
++            if (sheet.counter === 0 && (sheet.stylesheet = makeStyleTag(ownerDocument))) {
++                injectStyles(sheet.stylesheet, style);
++                insertStyleTag(sheet.stylesheet);
+             }
+-            counter++;
++            sheet.counter++;
+         },
+-        remove: () => {
+-            counter--;
+-            if (!counter && stylesheet) {
+-                stylesheet.parentNode && stylesheet.parentNode.removeChild(stylesheet);
+-                stylesheet = null;
++        remove: function (ownerDocument) {
++            ownerDocument = ownerDocument || globalThis.document;
++            var sheet = ownerDocument && documents.get(ownerDocument);
++            if (!sheet) return;
++            sheet.counter--;
++            if (!sheet.counter) {
++                if (sheet.stylesheet) sheet.stylesheet.remove();
++                documents.delete(ownerDocument);
+             }
+         },
+     };
+diff --git a/dist/es5/component.d.ts b/dist/es5/component.d.ts
+--- a/dist/es5/component.d.ts
++++ b/dist/es5/component.d.ts
+@@ -1,5 +1,6 @@
+ import * as React from 'react';
+ declare type Props = {
++    ownerDocument?: Document;
+     /**
+      * styles to apply
+      */
+diff --git a/dist/es5/component.js b/dist/es5/component.js
+--- a/dist/es5/component.js
++++ b/dist/es5/component.js
+@@ -11,8 +11,8 @@
+ var styleSingleton = function () {
+     var useStyle = (0, hook_1.styleHookSingleton)();
+     var Sheet = function (_a) {
+-        var styles = _a.styles, dynamic = _a.dynamic;
+-        useStyle(styles, dynamic);
++        var styles = _a.styles, dynamic = _a.dynamic, ownerDocument = _a.ownerDocument;
++        useStyle(styles, dynamic, ownerDocument);
+         return null;
+     };
+     return Sheet;
+diff --git a/dist/es5/hook.d.ts b/dist/es5/hook.d.ts
+--- a/dist/es5/hook.d.ts
++++ b/dist/es5/hook.d.ts
+@@ -9,7 +9,7 @@
+ /**
+  * indication that styles should be reapplied on change
+  */
+-isDynamic?: boolean) => void;
++isDynamic?: boolean, ownerDocument?: Document) => void;
+ /**
+  * creates a hook to control style singleton
+  * @see {@link styleSingleton} for a safer component version
+diff --git a/dist/es5/hook.js b/dist/es5/hook.js
+--- a/dist/es5/hook.js
++++ b/dist/es5/hook.js
+@@ -15,13 +15,13 @@
+  */
+ var styleHookSingleton = function () {
+     var sheet = (0, singleton_1.stylesheetSingleton)();
+-    return function (styles, isDynamic) {
++    return function (styles, isDynamic, ownerDocument) {
+         React.useEffect(function () {
+-            sheet.add(styles);
++            sheet.add(styles, ownerDocument);
+             return function () {
+-                sheet.remove();
++                sheet.remove(ownerDocument);
+             };
+-        }, [styles && isDynamic]);
++        }, [styles && isDynamic, ownerDocument]);
+     };
+ };
+ exports.styleHookSingleton = styleHookSingleton;
+diff --git a/dist/es5/singleton.d.ts b/dist/es5/singleton.d.ts
+--- a/dist/es5/singleton.d.ts
++++ b/dist/es5/singleton.d.ts
+@@ -1,4 +1,4 @@
+ export declare const stylesheetSingleton: () => {
+-    add: (style: string) => void;
+-    remove: () => void;
++    add: (style: string, ownerDocument?: Document) => void;
++    remove: (ownerDocument?: Document) => void;
+ };
+diff --git a/dist/es5/singleton.js b/dist/es5/singleton.js
+--- a/dist/es5/singleton.js
++++ b/dist/es5/singleton.js
+@@ -2,10 +2,10 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.stylesheetSingleton = void 0;
+ var get_nonce_1 = require("get-nonce");
+-function makeStyleTag() {
+-    if (!document)
++function makeStyleTag(ownerDocument) {
++    if (!ownerDocument)
+         return null;
+-    var tag = document.createElement('style');
++    var tag = ownerDocument.createElement('style');
+     tag.type = 'text/css';
+     var nonce = (0, get_nonce_1.getNonce)();
+     if (nonce) {
+@@ -20,31 +20,35 @@
+         tag.styleSheet.cssText = css;
+     }
+     else {
+-        tag.appendChild(document.createTextNode(css));
++        tag.appendChild(tag.ownerDocument.createTextNode(css));
+     }
+ }
+ function insertStyleTag(tag) {
+-    var head = document.head || document.getElementsByTagName('head')[0];
++    var head = tag.ownerDocument.head || tag.ownerDocument.getElementsByTagName('head')[0];
+     head.appendChild(tag);
+ }
+ var stylesheetSingleton = function () {
+-    var counter = 0;
+-    var stylesheet = null;
++    var documents = new WeakMap();
+     return {
+-        add: function (style) {
+-            if (counter == 0) {
+-                if ((stylesheet = makeStyleTag())) {
+-                    injectStyles(stylesheet, style);
+-                    insertStyleTag(stylesheet);
+-                }
++        add: function (style, ownerDocument) {
++            ownerDocument = ownerDocument || globalThis.document;
++            if (!ownerDocument) return;
++            var sheet = documents.get(ownerDocument);
++            if (!sheet) { sheet = { counter: 0, stylesheet: null }; documents.set(ownerDocument, sheet); }
++            if (sheet.counter === 0 && (sheet.stylesheet = makeStyleTag(ownerDocument))) {
++                injectStyles(sheet.stylesheet, style);
++                insertStyleTag(sheet.stylesheet);
+             }
+-            counter++;
++            sheet.counter++;
+         },
+-        remove: function () {
+-            counter--;
+-            if (!counter && stylesheet) {
+-                stylesheet.parentNode && stylesheet.parentNode.removeChild(stylesheet);
+-                stylesheet = null;
++        remove: function (ownerDocument) {
++            ownerDocument = ownerDocument || globalThis.document;
++            var sheet = ownerDocument && documents.get(ownerDocument);
++            if (!sheet) return;
++            sheet.counter--;
++            if (!sheet.counter) {
++                if (sheet.stylesheet) sheet.stylesheet.remove();
++                documents.delete(ownerDocument);
+             }
+         },
+     };

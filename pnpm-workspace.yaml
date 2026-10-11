@@ -29,3 +29,8 @@ patchedDependencies:
   '@xterm/xterm@6.1.0-beta.303': patches/@xterm__xterm@6.1.0-beta.303.patch
   node-diff3@3.2.1: patches/node-diff3@3.2.1.patch
   electron-vite@5.0.0: patches/electron-vite@5.0.0.patch
+  '@radix-ui/react-focus-scope@1.1.16': patches/@radix-ui__react-focus-scope@1.1.16.patch
+  '@radix-ui/react-dismissable-layer@1.1.19': patches/@radix-ui__react-dismissable-layer@1.1.19.patch
+  react-remove-scroll@2.7.2: patches/react-remove-scroll@2.7.2.patch
+  react-remove-scroll-bar@2.3.8: patches/react-remove-scroll-bar@2.3.8.patch
+  react-style-singleton@2.2.3: patches/react-style-singleton@2.2.3.patch
