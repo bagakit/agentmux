@@ -1,6 +1,11 @@
 import { randomBytes } from 'node:crypto'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 
+/** Source identity shared by native input planning and original-claim adoption. */
+export function nativeInputSourceId(source: { providerId: string; nativeSessionId: string }): string {
+  return JSON.stringify([source.providerId, source.nativeSessionId])
+}
+
 /** Frozen in the original claim before dispatch. Correlation is never an idempotency key or acceptance. */
 export function createNativeInputCorrelation(key: AgentPromptInputKey): string {
   return `amux-input-v1.${Buffer.from(JSON.stringify({ key: validateAgentPromptInputKey(key), nonce: randomBytes(24).toString('base64url') })).toString('base64url')}`
