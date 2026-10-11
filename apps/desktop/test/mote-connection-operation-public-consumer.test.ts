@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fork } from 'node:child_process'
@@ -11,24 +11,21 @@ import { afterEach, expect, it, vi } from 'vitest'
 const { defaultHttpInstance }: { defaultHttpInstance: { request(input: unknown): Promise<unknown> } } = createRequire(
   resolve('packages/connectors/package.json')
 )('@larksuiteoapi/node-sdk')
-import { AGENTMUX_RPC_NATIVE_METHODS, AgentMuxRpcService, parseMoteConnectionOperation, parseMoteConnectionResult } from '@agentmux/core'
+import { AGENTMUX_RPC_NATIVE_METHODS, AgentMuxRpcService, connectAgentMuxRpc, parseMoteConnectionOperation, parseMoteConnectionResult } from '@agentmux/core'
 import { AGENTMUX_CLI_COMMANDS } from '../../../packages/core/src/agentmux-cli-commands.js'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
-import { moteConnectionOwner } from './fixtures/mote-connection-owner.js'
+import { confirmAndCreateMote, moteChildDecision, moteConnectionOwner } from './fixtures/mote-connection-owner.js'
 import { imagePng } from './fixtures/mote-identity-image.js'
+import { moteEnrollmentWeb } from './fixtures/mote-enrollment-web.js'
 
 const clean: Array<() => void | Promise<void>> = []
 afterEach(async () => {
-  for (const close of clean.splice(0).reverse()) await close()
-  vi.restoreAllMocks()
-  vi.unstubAllGlobals()
+  const errors: unknown[] = []
+  try { for (const close of clean.splice(0).reverse()) { try { await close() } catch (error) { errors.push(error) } } }
+  finally { try { vi.restoreAllMocks() } catch (error) { errors.push(error) }; try { vi.unstubAllGlobals() } catch (error) { errors.push(error) } }
+  if (errors.length) throw new AggregateError(errors, 'Mote public consumer cleanup failed')
 })
-async function record(name: string, value: unknown) {
-  const directory = resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/mote-bot-identities-plan/T-030-live')
-  await mkdir(directory, { recursive: true })
-  await writeFile(join(directory, name + '.json'), JSON.stringify(value, null, 2) + '\n')
-}
 async function fixture(options: Parameters<typeof moteConnectionOwner>[1] = { generic: true }) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'mote-bot-')))
   clean.push(() => rm(root, { recursive: true, force: true }))
@@ -49,7 +46,7 @@ const cli = (f: Awaited<ReturnType<typeof fixture>>, action: string, input: unkn
       'mote',
       'connection',
       action,
-      ...(['create', 'sync', 'ls'].includes(action)
+      ...(['create', 'sync', 'ls', 'advance'].includes(action)
         ? ['--input', '-']
         : ['--operation-id', String((input as { operationId: string }).operationId)])
     ],
@@ -74,36 +71,19 @@ it('discovers exactly the five parent operations on the original public registry
 it('creates from original Main saved files and PNG through default Host, official SDK and compiled CLI with separate receipts', async () => {
   const http: Array<{ method?: string; url?: string; data?: Record<string, unknown> }> = [],
     effects: Array<{ kind: string; preclaimed: boolean }> = []
-  let f!: Awaited<ReturnType<typeof fixture>>,
-    clock = Date.now()
-  vi.spyOn(Date, 'now').mockImplementation(() => clock)
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (_url: unknown, init: RequestInit) => {
-      const p = new URLSearchParams(String(init.body)),
-        kind = p.get('action')!
+  let f!: Awaited<ReturnType<typeof fixture>>
+  const native = moteEnrollmentWeb({ appId: () => 'cli_profile', observe: () => {
       const saved = f.connections.database!.prepare('SELECT record_json FROM connection_enrollment').get()!
       const row = JSON.parse(String(saved.record_json)),
-        attempt = f.connections.database!.prepare('SELECT state FROM connection_enrollment_attempt WHERE attempt_id=?').get(row.attemptId)
-      effects.push({ kind, preclaimed: attempt?.state === 'claimed' })
+        attempt = f.connections.database!.prepare('SELECT state,kind FROM connection_enrollment_attempt WHERE attempt_id=?').get(row.attemptId)!
+      effects.push({ kind: String(attempt.kind), preclaimed: attempt.state === 'claimed' })
       const parent = JSON.parse(
         String(f.connections.database!.prepare('SELECT record_json FROM mote_connection_operation').get()!.record_json)
       )
       expect(parent.baseline.document.revision).toMatch(/^sha256:/)
       expect(parent.enrollmentInput.operationId).toBe(row.operation.operationId)
-      return Response.json(
-        kind === 'begin'
-          ? {
-              device_code: 'private-original-device',
-              user_code: 'PUBLIC',
-              verification_uri_complete: 'https://open.feishu.cn/page/cli?user_code=PUBLIC',
-              interval: 1,
-              expires_in: 600
-            }
-          : { client_id: 'cli_profile', client_secret: 'private-original-secret', user_info: { tenant_brand: 'feishu' } }
-      )
-    })
-  )
+  } })
+  vi.stubGlobal('fetch', vi.fn(native.fetch))
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(async (raw) => {
     const r = raw as (typeof http)[number]
     if (r.url?.includes('/auth/v3/'))
@@ -145,15 +125,25 @@ it('creates from original Main saved files and PNG through default Host, officia
   const input = await f.input()
   expect(body(await cli(f, 'ls', { target: f.target() })).operations).toEqual([])
   const pending = body(await cli(f, 'create', input))
-  expect(pending.enrollment.authorization).toBe('pending')
+  expect(pending.enrollment.authentication.stage).toBe('waiting')
   expect(pending.defaultSave).toBeNull()
   expect(pending.profile).toBeNull()
-  const qr = new URL(pending.enrollment.challenge.verificationUrl)
-  expect(qr.searchParams.get('name')).toBe('Saved public name')
-  expect(qr.searchParams.get('desc')).toBe('Saved public summary.')
+  let child = await f.client.call('connection.enrollment.inspect', { operationId: pending.enrollmentOperationId })
+  expect(child.challenge?.qrPayload).toContain('private-mote-qr-1')
+  expect(JSON.stringify(pending)).not.toContain('private-mote-qr-1')
   expect(pending.snapshot.avatarSha256).toBe(createHash('sha256').update(imagePng()).digest('hex'))
-  clock = pending.enrollment.challenge.nextPollAt + 1
-  const complete = body(await cli(f, 'advance', { operationId: input.operationId }))
+  for (let step = 0; step < 8 && child.operation!.authentication!.stage !== 'account'; step++) {
+    body(await cli(f, 'advance', await moteChildDecision(f, input.operationId, 'continue-authentication')))
+    child = await f.client.call('connection.enrollment.inspect', { operationId: pending.enrollmentOperationId })
+  }
+  expect(child.account).toMatchObject({ userId: 'mote-user-1', tenantId: 'mote-tenant' }); expect(native.creates).toBe(0)
+  body(await cli(f, 'advance', await moteChildDecision(f, input.operationId, 'confirm-account')))
+  expect(native.creates).toBe(0)
+  const complete = body(await cli(f, 'advance', await moteChildDecision(f, input.operationId, 'create')))
+  const nativeUpload = native.calls.find(call => call.target.pathname === '/developers/v1/app/upload/image')!.input.body as FormData
+  expect(Buffer.from(await (nativeUpload.get('file') as File).arrayBuffer())).toEqual(imagePng())
+  const nativeCreate = JSON.parse(String(native.calls.find(call => call.target.pathname === '/developers/v1/app/create')!.input.body))
+  expect(nativeCreate).toMatchObject({ name: 'Saved public name', desc: 'Saved public summary.' })
   expect(Buffer.from(http.find((r) => r.url?.endsWith('/app_avatar/upload'))!.data!.avatar as Buffer)).toEqual(imagePng())
   expect(complete).toMatchObject({
     operationId: input.operationId,
@@ -162,7 +152,7 @@ it('creates from original Main saved files and PNG through default Host, officia
     enrollment: { configuration: 'configured' },
     profile: { upload: { state: 'confirmed' }, patch: { state: 'confirmed' }, publication: 'platform-review-required' }
   })
-  expect(effects).toEqual(['begin', 'poll', 'upload', 'patch'].map((kind) => ({ kind, preclaimed: true })))
+  expect(effects).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential', 'upload', 'patch'].map((kind) => ({ kind, preclaimed: true })))
   expect(http.find((r) => r.method === 'PATCH')!.data).toMatchObject({
     i18ns: [
       { i18n_key: 'en_us', name: 'Keep English' },
@@ -173,15 +163,6 @@ it('creates from original Main saved files and PNG through default Host, officia
   expect(JSON.stringify(complete)).not.toContain('private-original')
   expect(JSON.stringify(complete)).not.toContain('data:image')
   expect(http.some((r) => r.url?.includes('/publish'))).toBe(false)
-  await record('default-host-receipts', {
-    input,
-    pending,
-    complete,
-    effects,
-    uploadedSha256: createHash('sha256')
-      .update(Buffer.from(http.find((r) => r.url?.endsWith('/app_avatar/upload'))!.data!.avatar as Buffer))
-      .digest('hex')
-  })
   const source = vi.spyOn(f.source, 'read'),
     pref = vi.spyOn(f.preferences, 'read'),
     before = effects.length
@@ -197,18 +178,17 @@ it('retains immutable child identity and snapshot when the original saved topic 
     input = await f.input(),
     pending = await f.client.call('space.mote.connection.create', input)
   await writeFile(join(f.motes[0]!.directory, 'topic.md'), '# Later title\nLater public summary\n')
-  const done = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  const done = await confirmAndCreateMote(f, input.operationId)
   expect(done.snapshot).toEqual(pending.snapshot)
   expect(done.enrollmentOperationId).toBe(pending.enrollmentOperationId)
   expect(done.profileOperationId).toBe(pending.profileOperationId)
   expect(done.profile!.desired.name).toBe('Saved public name')
-  expect(f.counts).toEqual({ begin: 1, poll: 1, upload: 1, patch: 1 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
   await expect(f.client.call('space.mote.connection.create', { ...input, avatar: 'omit' })).rejects.toMatchObject({
     code: 'CONNECTION_OPERATION_CONFLICT'
   })
-  const original = await f.client.call('connection.enrollment.inspect', { operationId: done.enrollmentOperationId! })
-  const { operationId, connectionId, adapterId, domain, label } = original.operation!
-  await expect(f.client.call('connection.enrollment.begin', { operationId, connectionId, adapterId, domain, label })).rejects.toMatchObject(
+  const original = JSON.parse(String(f.connections.database!.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(input.operationId)!.record_json)).enrollmentInput
+  await expect(f.client.call('connection.enrollment.begin', { ...original, preset: { ...original.preset, name: 'Different frozen intent' } })).rejects.toMatchObject(
     { code: 'CONNECTION_OPERATION_CONFLICT' }
   )
 }, 30_000)
@@ -241,13 +221,14 @@ it('keeps structural original identities independent of JSON property order', as
   expect((await f.client.call('space.mote.connection.ls', { target: reordered.source.target })).operations).toEqual([pending])
   const actor = JSON.parse(String(f.connections.database!.prepare('SELECT record_json FROM mote_connection_operation').get()!.record_json))
     .actor as { kind: 'user'; id: string }
+  await confirmAndCreateMote(f, input.operationId)
   const done = await f.parent.advance({ operationId: input.operationId }, { actor: { id: actor.id, kind: actor.kind } })
   expect(done.defaultLink.state).toBe('saved')
   expect(done.profile!.patch.state).toBe('confirmed')
   expect(f.counts.begin).toBe(1)
 }, 30_000)
 
-it('uses exact target, topic revision and saved PNG; omit never requires an avatar fallback', async () => {
+it('uses exact target, topic revision and saved PNG; an existing bot can sync with an explicit omitted avatar', async () => {
   const f = await fixture(),
     input = await f.input()
   await expect(
@@ -269,9 +250,13 @@ it('uses exact target, topic revision and saved PNG; omit never requires an avat
     })
   ).rejects.toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
   expect(f.counts.begin).toBe(0)
+  await expect(f.client.call('space.mote.connection.create', { ...input, avatar: 'omit', source: { ...input.source, expectedAvatarRevision: null } })).rejects.toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
+  expect(f.counts.begin).toBe(0)
+  await f.client.call('space.mote.connection.create', input)
+  const saved = await confirmAndCreateMote(f, input.operationId)
   const readAvatar = vi.spyOn(f.avatars, 'call')
-  const pending = await f.client.call('space.mote.connection.create', {
-    ...input,
+  const pending = await f.client.call('space.mote.connection.sync', {
+    operationId: 'original-omit-sync', connection: saved.connection!, expectedConnectionRevision: 1,
     avatar: 'omit',
     source: { ...input.source, expectedAvatarRevision: null }
   })
@@ -280,10 +265,13 @@ it('uses exact target, topic revision and saved PNG; omit never requires an avat
   expect(f.counts.begin).toBe(1)
 }, 30_000)
 
-it('keeps unavailable or hash-corrupted saved avatars local and allows an explicit omit request', async () => {
+it('keeps unavailable or hash-corrupted saved avatars local and preserves explicit omit sync for the healthy saved bot', async () => {
   const f = await fixture(),
     input = await f.input(),
     mote = f.motes[0]!
+  const healthyInput = { ...input, operationId: 'healthy-saved-bot' }
+  await f.client.call('space.mote.connection.create', healthyInput)
+  const healthy = await confirmAndCreateMote(f, healthyInput.operationId), before = f.writes
   const path = join(mote.directory, '.agentmux', 'avatars', mote.avatar.fileName)
   await writeFile(path, Buffer.concat([imagePng(), Buffer.from([0])]))
   let refused: unknown = null
@@ -301,14 +289,16 @@ it('keeps unavailable or hash-corrupted saved avatars local and allows an explic
     refused = error
   }
   expect(refused).toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
-  expect(f.counts.begin).toBe(0)
-  const omitted = await f.client.call('space.mote.connection.create', {
-    ...input,
+  expect(f.counts.begin).toBe(1)
+  const omitted = await f.client.call('space.mote.connection.sync', {
+    operationId: 'healthy-omit-sync', connection: healthy.connection!, expectedConnectionRevision: 1,
     avatar: 'omit',
     source: { ...input.source, expectedAvatarRevision: null }
   })
   expect(omitted.snapshot.avatarSha256).toBeNull()
   expect(f.counts.begin).toBe(1)
+  expect(f.writes).toBe(before)
+  expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(healthy.connection)
 }, 30_000)
 
 it('does not make a slow original setup the guard for another Mote or a local read', async () => {
@@ -337,9 +327,9 @@ it('does not make a slow original setup the guard for another Mote or a local re
   const local = await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })
   expect(local.operation!.operationId).toBe(input.operationId)
   const other = await f.client.call('space.mote.connection.create', await f.input('other-independent', 1))
-  expect(other.enrollment!.authorization).toBe('pending')
+  expect(other.enrollment!.authentication!.stage).toBe('waiting')
   release()
-  expect((await late).enrollment!.authorization).toBe('pending')
+  expect((await late).enrollment!.authentication!.stage).toBe('waiting')
   expect(f.counts.begin).toBe(2)
 }, 30_000)
 
@@ -383,7 +373,7 @@ it('keeps later default B when original A completes, while still configuring and
     operationId: 'later-default'
   })
   expect(later.status, JSON.stringify(later)).toBe('saved')
-  const result = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  const result = await confirmAndCreateMote(f, input.operationId)
   expect(result.enrollmentOperationId).toBe(first.enrollmentOperationId)
   expect(result.defaultLink).toMatchObject({ state: 'conflict', current: { connection } })
   expect(result.defaultSave!.observedReceipt!.status).toBe('refused-before-write')
@@ -399,8 +389,8 @@ it('keeps default association available when the same healthy app has a later co
     advance = port.advance.bind(port)
   vi.spyOn(port, 'advance').mockImplementation(async (...args) => {
     const receipt = await advance(...args)
-    if (receipt.configured) {
-      const record = receipt.configured.connection
+    if (receipt.operation?.configured) {
+      const record = receipt.operation.configured.connection
       await f.connections.connections.configure({
         operationId: 'later-configuration',
         expectedRevision: record.revision,
@@ -409,12 +399,12 @@ it('keeps default association available when the same healthy app has a later co
     }
     return receipt
   })
-  const done = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  const done = await confirmAndCreateMote(f, input.operationId)
   expect(done.defaultLink.state).toBe('saved')
   expect(done.defaultSave!.observedReceipt!.status).toBe('saved')
   expect(done.profile).toBeNull()
   expect(done.issue).toBe('connection-revised')
-  expect(f.counts).toEqual({ begin: 1, poll: 1, upload: 0, patch: 0 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(done.connection)
 }, 30_000)
 
@@ -422,11 +412,11 @@ it('keeps a saved default independent of an unknown profile PATCH and never repl
   const f = await fixture({ generic: true, profileUnknown: true }),
     input = await f.input()
   await f.client.call('space.mote.connection.create', input)
-  const done = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  const done = await confirmAndCreateMote(f, input.operationId)
   expect(done.defaultLink.state).toBe('saved')
   expect(done.profile!.patch.state).toBe('unknown')
   expect((await f.client.call('space.mote.connection.advance', { operationId: input.operationId })).profile!.patch.state).toBe('unknown')
-  expect(f.counts).toEqual({ begin: 1, poll: 1, upload: 1, patch: 1 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(done.connection)
 }, 30_000)
 
@@ -434,13 +424,13 @@ it('keeps an original lost File acknowledgement unknown and allows explicit reas
   const f = await fixture({ generic: true, loseFileAck: true }),
     input = await f.input()
   await f.client.call('space.mote.connection.create', input)
-  const uncertain = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  const uncertain = await confirmAndCreateMote(f, input.operationId)
   expect(uncertain.defaultLink).toMatchObject({ state: 'unknown', current: { connection: uncertain.connection } })
   expect(uncertain.defaultSave!.observedReceipt!.status).toBe('unconfirmed')
   const writes = f.writes
   await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
   expect(f.writes).toBe(writes)
-  expect(f.counts).toEqual({ begin: 1, poll: 1, upload: 1, patch: 1 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
   const current = await f.preferences.read({ kind: 'connection', target: f.target() })
   expect(
     (
@@ -459,15 +449,15 @@ it('keeps an original lost File acknowledgement unknown and allows explicit reas
 }, 30_000)
 
 it('does not replay unknown platform steps and keeps independent intents and ordinary files available', async () => {
-  const f = await fixture({ generic: true, pollUnknown: true }),
+  const f = await fixture({ generic: true, authenticationUnknown: true }),
     a = await f.input('one-original')
   await f.client.call('space.mote.connection.create', a)
-  const unknown = await f.client.call('space.mote.connection.advance', { operationId: a.operationId })
-  expect(unknown.enrollment!.authorization).toBe('unknown')
+  const unknown = await f.client.call('space.mote.connection.advance', await moteChildDecision(f, a.operationId, 'continue-authentication'))
+  expect(unknown.enrollment!.authentication!.stage).toBe('unknown')
   await f.client.call('space.mote.connection.advance', { operationId: a.operationId })
-  expect(f.counts.poll).toBe(1)
+  expect(f.counts.authentication).toBe(1)
   const b = await f.client.call('space.mote.connection.create', await f.input('independent-original', 1))
-  expect(b.enrollment!.authorization).toBe('pending')
+  expect(b.enrollment!.authentication!.stage).toBe('waiting')
   expect(f.counts.begin).toBe(2)
   expect((await f.publicFiles.read({ ...f.target(), path: 'topic.md' })).result.status).toBe('read')
 }, 30_000)
@@ -476,7 +466,7 @@ it('syncs the same exact saved app without another enrollment or default write',
   const f = await fixture(),
     input = await f.input()
   await f.client.call('space.mote.connection.create', input)
-  const created = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  const created = await confirmAndCreateMote(f, input.operationId)
   const writes = f.writes,
     sync = {
       operationId: 'sync-original',
@@ -490,7 +480,7 @@ it('syncs the same exact saved app without another enrollment or default write',
   expect(synced.defaultLink.state).toBe('not-requested')
   expect(synced.defaultSave).toBeNull()
   expect(synced.profile.patch.state).toBe('confirmed')
-  expect(f.counts).toEqual({ begin: 1, poll: 1, upload: 2, patch: 2 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 2, patch: 2 })
   expect(f.writes).toBe(writes)
   await expect(
     f.client.call('space.mote.connection.sync', {
@@ -510,7 +500,7 @@ it('requires transport authority and correlates original child receipts without 
   await expect(service.call('space.mote.connection.create', input, {})).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   expect((await cli(f, 'create', { ...input, actor: { kind: 'user', id: 'invented' } })).code).not.toBe(0)
   await f.client.call('space.mote.connection.create', input)
-  const done = await f.client.call('space.mote.connection.advance', { operationId: input.operationId })
+  const done = await confirmAndCreateMote(f, input.operationId)
   await expect(
     service.call('space.mote.connection.advance', { operationId: input.operationId }, { principal: { kind: 'device', id: 'other-device' } })
   ).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
@@ -522,7 +512,7 @@ it('requires transport authority and correlates original child receipts without 
       { operationId: input.operationId }
     )
   ).toThrow()
-  expect(f.counts).toEqual({ begin: 1, poll: 1, upload: 1, patch: 1 })
+  expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 1, patch: 1 })
 }, 30_000)
 
 it('preserves original connections when optional parent schema fails, and refuses after its owner closes', async () => {
@@ -641,7 +631,7 @@ it('recovers the same parent after a real child is killed after Files commit and
         'mote',
         'connection',
         action,
-        ...(['create', 'ls'].includes(action) ? ['--input', '-'] : ['--operation-id', request.operationId])
+        ...(['create', 'ls', 'advance'].includes(action) ? ['--input', '-'] : ['--operation-id', request.operationId])
       ],
       objectCliEnvironment(root),
       JSON.stringify(input)
@@ -652,7 +642,11 @@ it('recovers the same parent after a real child is killed after Files commit and
         if ((value as { kind: string }).kind === 'file-published') resolve()
       })
     )
-  const advancing = call('advance', { operationId: request.operationId })
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(root, 'owner.sock') } })
+  clean.push(() => client.dispose())
+  body(await call('advance', await moteChildDecision({ client }, request.operationId, 'continue-authentication')))
+  body(await call('advance', await moteChildDecision({ client }, request.operationId, 'confirm-account')))
+  const advancing = call('advance', await moteChildDecision({ client }, request.operationId, 'create'))
   await reached
   const before = await readFile(join(root, 'file-effects'), 'utf8')
   expect(before.trim().split('\n').map(line => JSON.parse(line))).toEqual([{status:'written'}])
@@ -674,25 +668,5 @@ it('recovers the same parent after a real child is killed after Files commit and
   expect(recovered.profile.patch.state).toBe('confirmed')
   expect(body(await call('ls', { target: request.source.target })).operations).toEqual([recovered])
   expect(await readFile(join(root, 'file-effects'), 'utf8')).toBe(before)
-  expect((await readFile(join(root, 'platform-effects'), 'utf8')).trim().split('\n')).toEqual(['begin', 'poll', 'upload', 'patch'])
-  const childProgram = await readFile(program)
-  await record('child-program-binding', {
-    sha256: createHash('sha256').update(childProgram).digest('hex'),
-    bytes: childProgram.length,
-    node: process.version
-  })
-  await writeFile(
-    resolve('.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/mote-bot-identities-plan/T-030-live/child-owner.mjs'),
-    childProgram
-  )
-  await record('process-recovery-receipts', {
-    originalPid: first.pid,
-    originalExitSignal: first.signalCode,
-    request,
-    pending,
-    reopened,
-    recovered,
-    fileEffects: before,
-    platformEffects: await readFile(join(root, 'platform-effects'), 'utf8')
-  })
+  expect((await readFile(join(root, 'platform-effects'), 'utf8')).trim().split('\n')).toEqual(['begin', 'authentication', 'creationUpload', 'create', 'credential', 'upload', 'patch'])
 }, 60_000)

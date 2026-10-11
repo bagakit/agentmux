@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
 import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import iconUrl from '../resources/icon-512.png'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap } from '@agentmux/core/connections'
@@ -13,13 +15,13 @@ import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingre
 import { defaultFeishuSdkTransport, feishuConfig, feishuPayload } from '../../../packages/connectors/test/fixtures/feishu.js'
 import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
-const dom = composerDOM(), privateDevice = 'private-setup-device', credential = 'private-setup-credential'
+const dom = composerDOM(), privateCode = 'private-setup-sign-in-code', credential = 'private-setup-credential'
 let original: Awaited<ReturnType<typeof ingressFixture>>
 let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>, reopen: () => void
 let forward: typeof api.connections.call
 let calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
-let platformCalls: string[], authorize: boolean, clock: number
+let platformCalls: string[]
 let trusted: ReturnType<typeof vi.fn>
 
 async function openOwner(receiver = true) {
@@ -34,16 +36,29 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   original = await ingressFixture(true, feishuConfig)
   sdk = defaultFeishuSdkTransport()
-  calls = []; platformCalls = []; authorize = false; clock = Date.now()
-  const actualNow = Date.now.bind(Date), anchor = clock
-  vi.spyOn(Date, 'now').mockImplementation(() => actualNow() + clock - anchor)
+  calls = []; platformCalls = []
+  const image = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-    expect(String(url)).toBe('https://accounts.feishu.cn/oauth/v1/app/registration')
-    const body = new URLSearchParams(String(init?.body)), action = body.get('action')!
-    platformCalls.push(action)
-    if (action === 'begin') return Response.json({ device_code: privateDevice, user_code: 'SETUP-CODE', verification_uri: 'https://open.feishu.cn/page/cli', interval: 1, expires_in: 600 })
-    expect(action).toBe('poll'); expect(body.get('device_code')).toBe(privateDevice)
-    return Response.json(authorize ? { client_id: feishuConfig.application.appId, client_secret: credential, user_info: { tenant_brand: 'feishu' } } : { error: 'authorization_pending' })
+    if (String(url) === iconUrl) return new Response(new Uint8Array(image))
+    const target = new URL(String(url))
+    platformCalls.push(target.pathname)
+    expect(init?.redirect).toBe('manual')
+    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') {
+      const response = Response.json({ code: 0, data: { step_info: { token: privateCode } } }, { headers: { 'x-flow-key': 'private-setup-flow' } })
+      response.headers.append('set-cookie', 'session=private-setup-cookie; Domain=.feishu.cn; Path=/; Secure; HttpOnly')
+      return response
+    }
+    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
+    if (target.href === 'https://accounts.feishu.cn/cross') return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
+    if (target.href === 'https://ask.feishu.cn/') return new Response('No account authority here')
+    if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: 'setup-user', tenantId: 'setup-enterprise', name: 'Setup owner' })};window.csrfToken="private-setup-csrf";</script>`, { headers: { 'content-type': 'text/html' } })
+    expect(target.origin).toBe('https://open.feishu.cn')
+    expect(new Headers(init?.headers).get('x-csrf-token')).toBe('private-setup-csrf')
+    expect(new Headers(init?.headers).get('cookie')).toContain('session=private-setup-cookie')
+    if (target.pathname === '/developers/v1/app/upload/image') return Response.json({ code: 0, data: { url: 'https://images.example.test/setup-bot.png' } })
+    if (target.pathname === '/developers/v1/app/create') return Response.json({ code: 0, data: { ClientID: feishuConfig.application.appId } })
+    if (target.pathname === '/developers/v1/secret/' + feishuConfig.application.appId) return Response.json({ code: 0, data: { secret: credential } })
+    throw new Error('Unexpected continuation Web request')
   }))
   await openOwner()
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
@@ -92,13 +107,16 @@ function stages() {
 }
 async function createAndSave() {
   await click('[data-enrollment-create]')
-  await vi.waitFor(async () => { await act(async () => {}); expect((await services.connections.enrollment!.list({})).operations).toHaveLength(1); expect(dom.container.querySelector('[data-enrollment-advance]')).not.toBeNull() })
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-action="confirm-account"]')).not.toBeNull() }, { timeout: 10_000 })
   const operation = (await services.connections.enrollment!.list({})).operations[0]!
-  authorize = true; clock = operation.challenge!.nextPollAt + 1
-  await click('[data-enrollment-advance]')
-  await vi.waitFor(async () => { await act(async () => {}); expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation?.configuration).toBe('configured') })
-  return (await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation!
+  await click('[data-enrollment-action="confirm-account"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-action="create"]')).not.toBeNull())
+  expect(platformCalls.filter(path => path === '/developers/v1/app/create')).toHaveLength(0)
+  await click('[data-enrollment-action="create"]')
+  await vi.waitFor(async () => { await act(async () => {}); expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configuration).toBe('configured') })
+  return (await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation!
 }
+
 async function seed(connectionId: string, appId = feishuConfig.application.appId, enabled = true) {
   const stored = await services.secrets.store({ operationId: connectionId + ':credential', secret: credential })
   return (await services.connections.configure({ operationId: connectionId + ':save', expectedRevision: null,
@@ -114,7 +132,7 @@ function deferred() { let release!: () => void; const gate = new Promise<void>(r
 function expectNoAdditionalWrites() {
   const methods = calls.map(call => call.method)
   expect(methods.length).toBeGreaterThan(0)
-  expect(methods.filter(method => !['connection.ls', 'connection.inspect', 'connection.test', 'connection.enrollment.ls', 'connection.service.get', 'connection.setup.ls'].includes(method))).toEqual([])
+  expect(methods.filter(method => !['connection.ls', 'connection.inspect', 'connection.test', 'connection.enrollment.ls', 'connection.enrollment.inspect', 'connection.service.get', 'connection.setup.ls'].includes(method))).toEqual([])
 }
 
 it('continues the original creation through current Host reads, explicit checks and the original SDK receiver without navigating away', async () => {
@@ -136,12 +154,12 @@ it('continues the original creation through current Host reads, explicit checks 
   expect((await services.ingress!.list({ connectionId: operation.connectionId })).ingresses).toHaveLength(1)
   await click('[data-connection-check]')
   await vi.waitFor(() => expect(stages()).toEqual({ authentication: 'ready', transport: 'ready', intake: 'ready', delivery: 'unknown' }))
-  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
-  expect(platformCalls).toEqual(['begin', 'poll'])
+  expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
+  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/app/create', '/developers/v1/secret/' + feishuConfig.application.appId])
   expect(trusted.mock.calls.map(call => call[0])).toContain('connections:call')
   expect(calls.filter(call => call.method.startsWith('connection.room.') || call.method.startsWith('connection.binding.') || call.method.startsWith('connection.profile.'))).toEqual([])
   expect(api.connections.storeCredential).not.toHaveBeenCalled()
-  expect(JSON.stringify(calls)).not.toContain(privateDevice); expect(JSON.stringify(calls)).not.toContain(credential)
+  expect(JSON.stringify(calls.filter(call => call.method === 'connection.enrollment.ls'))).not.toContain(privateCode); expect(JSON.stringify(calls)).not.toContain(credential)
 })
 
 it('continues an existing bot save in place and keeps accepted credentials separate from unconfirmed transport, intake and delivery', async () => {
@@ -180,7 +198,7 @@ it('keeps the saved creation and usable check when a current lookup or explicit 
   await vi.waitFor(() => expect(result()?.textContent).toContain('could not'))
   const pane = dom.container.querySelector('[data-bot-enrollment]')!
   expect(pane.getAttribute('data-enrollment-operation')).toBe(operation.operationId)
-  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
+  expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
   expect((await services.connections.list()).connections).toHaveLength(1)
   calls = []; failRead = false
   await click('[data-connection-check]')
@@ -194,8 +212,8 @@ it('keeps the saved creation and usable check when a current lookup or explicit 
   await vi.waitFor(() => expect(stages().transport).toBe('ready'))
   expect(result()?.textContent).not.toContain('Controlled check reply gap')
   expectNoAdditionalWrites()
-  expect(platformCalls).toEqual(['begin', 'poll'])
-  expect((await services.connections.enrollment!.inspect({ operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
+  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/app/create', '/developers/v1/secret/' + feishuConfig.application.appId])
+  expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
 })
 
 it('does not let an earlier application check take over the next selected application or block its check', async () => {

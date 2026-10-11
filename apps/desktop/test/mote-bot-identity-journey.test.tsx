@@ -10,19 +10,31 @@ beforeEach(async () => { f = await moteBotUi() })
 afterEach(async () => { await f?.close() })
 async function text(value: string) { await vi.waitFor(async () => { await f.settle(); expect(document.body.textContent).toContain(value) }, { timeout: 4000 }) }
 const original = () => f.parentCalls.mock.calls.find(([m]) => m === 'space.mote.connection.create')![1] as any
-async function create() { await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote'); await text('Scan and confirm') }
+async function create() { await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote'); await text('Scan to sign in') }
+async function confirmAndCreate() {
+  const parent = (await f.client.call('space.mote.connection.inspect', { operationId: original().operationId })).operation!
+  let view = await f.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId! })
+  for (let step = 0; step < 8 && view.operation?.authentication?.stage !== 'account'; step++) {
+    if (view.challenge && view.challenge.nextPollAt > Date.now()) await new Promise(resolve => setTimeout(resolve, view.challenge!.nextPollAt - Date.now()))
+    await f.click('Check sign-in')
+    view = await f.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId! })
+  }
+  expect(view.account).not.toBeNull(); expect(f.creationCount).toBe(0)
+  await f.click('Confirm this account'); expect(f.creationCount).toBe(0)
+  await f.click('Create this bot')
+}
 
 it('creates from the saved public profile through original IPC/Core/Main/default Host and keeps every result separate', async () => {
   await create()
-  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Scan and confirm in Feishu')
+  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Sign in to Feishu')
   expect(document.body.textContent).not.toContain('DO-NOT-PUBLISH-DISPLAY')
-  expect(f.beginCount).toBe(1); expect(f.pollCount).toBe(0)
+  expect(f.beginCount).toBe(1); expect(f.authenticationCount).toBe(0); expect(f.creationCount).toBe(0)
   const input = original()
   expect(useAppStore.getState().moteBotRequests[input.operationId]?.input).toEqual(input)
   expect(input.source.target).toEqual(f.target())
   expect(input.avatar).toBe('include-saved')
   expect((await f.cli('ls', { target: f.target() })).operations[0].operationId).toBe(input.operationId)
-  f.afterPollInterval(); await f.click('Check Feishu confirmation')
+  await confirmAndCreate()
   await text('Original save confirmed'); await text('Profile written. Check and publish it on the platform.')
   const saved = (await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation!
   expect(saved.defaultSave?.observedReceipt?.status).toBe('saved')
@@ -37,13 +49,13 @@ it('creates from the saved public profile through original IPC/Core/Main/default
 it('names the original advertised platform in its confirmation surface', async () => {
   await f.close(); f = await moteBotUi({ generic: true })
   await create()
-  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Scan and confirm in Signed profile')
+  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Sign in to Signed profile')
   expect([...document.querySelectorAll('button')].some(node => node.textContent === 'Check Signed profile confirmation')).toBe(true)
-  expect(f.counts.begin).toBe(1); expect(f.counts.poll).toBe(0)
+  expect(f.counts.begin).toBe(1); expect(f.counts.authentication).toBe(0); expect(f.counts.create).toBe(0)
 })
 
 it.each(['missing', 'unobserved'] as const)('shows a %s saved bot before disclosure and opens recovery without replacing its original reference', async condition => {
-  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save confirmed')
+  await create(); await confirmAndCreate(); await text('Original save confirmed')
   const before = await f.preferences.read({ kind: 'connection', target: f.target() })
   const writes = f.writes, forward = f.connectionCalls.getMockImplementation()!
   f.connectionCalls.mockImplementation(async (method, input) => {
@@ -79,8 +91,8 @@ it('retains original create before a lost Renderer reply, discovers the same par
   const input = original(); expect(useAppStore.getState().moteBotRequests[input.operationId]?.input).toEqual(input)
   await f.click('Close bot choice'); await f.remount()
   await f.click('Previous bot operations');
-  await act(async () => (document.querySelector('[data-mote-bot-operation="' + input.operationId + '"]') as HTMLElement).click()); await text('Scan and confirm')
-  expect(f.beginCount).toBe(1); expect(f.pollCount).toBe(0)
+  await act(async () => (document.querySelector('[data-mote-bot-operation="' + input.operationId + '"]') as HTMLElement).click()); await text('Scan to sign in')
+  expect(f.beginCount).toBe(1); expect(f.authenticationCount).toBe(0)
   expect(f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.create')).toHaveLength(1)
 })
 
@@ -97,7 +109,7 @@ it('keeps an unresolved raw request discoverable when both the create reply and 
   await text('This setup is not confirmed'); const input = original()
   await vi.waitFor(async () => expect((await f.client.call('space.mote.connection.inspect', {operationId: input.operationId})).operation, 'The original public owner must record the same operation before testing Renderer reply loss').not.toBeNull())
   await f.click('Close bot choice'); await f.remount()
-  await f.click('Previous bot operations'); await f.click('Unconfirmed bot setup · Creation'); await text('Scan and confirm')
+  await f.click('Previous bot operations'); await f.click('Unconfirmed bot setup · Creation'); await text('Scan to sign in')
   expect(f.beginCount).toBe(1); expect(useAppStore.getState().moteBotRequests[input.operationId]?.input).toEqual(input)
 })
 
@@ -111,7 +123,7 @@ it('does not let a late Mote A create result populate Mote B and allows an indep
   await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote')
   await vi.waitFor(() => expect(release).toBeTypeOf('function'))
   const a = original().operationId
-  await f.render(1); await f.open(1); await text('Saved public name'); await f.click('Create a bot for this Mote'); await text('Scan and confirm')
+  await f.render(1); await f.open(1); await text('Saved public name'); await f.click('Create a bot for this Mote'); await text('Scan to sign in')
   const b = (f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.create').at(-1)![1] as any).operationId
   expect(b).not.toBe(a); expect(f.beginCount).toBe(2)
   await act(async () => release()); await f.settle()
@@ -120,7 +132,7 @@ it('does not let a late Mote A create result populate Mote B and allows an indep
 })
 
 it('synchronizes only the exact selected bot and preserves an unknown patch without another upload or write', async () => {
-  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save confirmed')
+  await create(); await confirmAndCreate(); await text('Original save confirmed')
   await f.click('Back to bot profile'); await text('Sync Mote profile')
   f.setUnknownPatch(); await f.click('Sync Mote profile'); await text('The profile write is not confirmed')
   const inputs = f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.sync')
@@ -129,12 +141,12 @@ it('synchronizes only the exact selected bot and preserves an unknown patch with
   const before = f.calls.filter(r => r.method === 'PATCH').length
   await f.click('Check saved progress'); await text('The profile write is not confirmed')
   expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(before)
-  expect(f.registration.mock.calls).toHaveLength(2)
+  expect(f.registration.mock.calls).toHaveLength(8)
 })
 
 it('keeps a lost default ACK separate from the current file and allows a new association of the same created app', async () => {
   await f.close(); f = await moteBotUi({ loseFileAck: true })
-  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save not confirmed')
+  await create(); await confirmAndCreate(); await text('Original save not confirmed')
   const id = original().operationId
   const parent = (await f.client.call('space.mote.connection.inspect', { operationId: id })).operation!
   expect(parent.defaultSave?.observedReceipt?.status).toBe('unconfirmed')
@@ -147,7 +159,7 @@ it('keeps a lost default ACK separate from the current file and allows a new ass
 })
 
 it('changes the default through the original choice writer and reads the same exact file with the compiled CLI', async () => {
-  await create(); f.afterPollInterval(); await f.click('Check Feishu confirmation'); await text('Original save confirmed')
+  await create(); await confirmAndCreate(); await text('Original save confirmed')
   await f.click('Back to bot profile'); await f.click('Change bot')
   await f.click('Mote chat bot')
   const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent?.includes('No default bot'))!
@@ -161,7 +173,7 @@ it('changes the default through the original choice writer and reads the same ex
 
 it('keeps another original operation readable while an older query response is waiting', async () => {
   await create(); const a = original().operationId
-  await f.click('Create another bot'); await f.click('Start a separate setup'); await f.click('Create a bot for this Mote'); await text('Scan and confirm')
+  await f.click('Create another bot'); await f.click('Start a separate setup'); await f.click('Create a bot for this Mote'); await text('Scan to sign in')
   const b = (f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.create').at(-1)![1] as any).operationId
   let release!: () => void
   f.parentCalls.mockImplementation(async (method, input) => {
@@ -195,7 +207,7 @@ it('does not dispatch the same creation form twice when its original response is
   await vi.waitFor(() => expect(release).toBeTypeOf('function'))
   expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.create')).toHaveLength(1)
   expect(f.beginCount).toBe(1)
-  await act(async () => release()); await text('Scan and confirm')
+  await act(async () => release()); await text('Scan to sign in')
 })
 
 it('keeps the original Mote Profile caller and source preview while leaving the discussion and original input drafts intact', async () => {
@@ -219,7 +231,7 @@ it('retains a known not-dispatched request when local persistence is unavailable
   const raw = Object.values(useAppStore.getState().moteBotRequests)[0]!
   expect(raw.phase).toBe('not-dispatched'); expect(f.beginCount).toBe(0)
   store.mockRestore()
-  await f.click('Continue this request'); await text('Scan and confirm')
+  await f.click('Continue this request'); await text('Scan to sign in')
   expect(f.beginCount).toBe(1)
   expect(original().operationId).toBe(raw.input.operationId)
 })

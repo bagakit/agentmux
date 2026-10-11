@@ -20,6 +20,9 @@ import { directoryIdentity, homeZoneId } from '../../src/shared/space-addresses.
 import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics.js'
 import { controlledNativeImage, imageInput } from './mote-identity-image.js'
 import type { ConnectionAdapter } from '@agentmux/connectors'
+import type { ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-values.mjs'
+
 
 export async function moteConnectionOwner(
   root: string,
@@ -27,7 +30,7 @@ export async function moteConnectionOwner(
     generic?: boolean
     loseFileAck?: boolean
     afterFileWrite?(): Promise<void>
-    pollUnknown?: boolean
+    authenticationUnknown?: boolean
     profileUnknown?: boolean
   } = {}
 ) {
@@ -141,7 +144,7 @@ export async function moteConnectionOwner(
     }
   })
   const avatars = new MoteAvatarControl(sources, writer)
-  const counts = { begin: 0, poll: 0, upload: 0, patch: 0 }
+  const counts = { begin: 0, authentication: 0, creationUpload: 0, create: 0, credential: 0, upload: 0, patch: 0 }
   const effect = async (kind: keyof typeof counts) => {
     counts[kind]++
     await appendFile(join(root, 'platform-effects'), kind + '\n')
@@ -159,24 +162,27 @@ export async function moteConnectionOwner(
       begin: async (input) => {
         await effect('begin')
         return {
-          kind: 'pending',
-          verificationUrl: 'https://signed.example/verify',
+          kind: 'authentication',
+          stage: 'waiting',
+          challenge: { qrPayload: 'original-signed-private-qr', expiresAt: null, nextPollAt: _historyFixtureEpoch(0, 0, 0) },
+          account: null,
           privateState: JSON.stringify({ operationId: input.operationId }),
-          expiresInMs: null,
-          pollIntervalMs: 0
         }
       },
-      poll: async (input) => {
+      advance: async (input) => {
         if (JSON.parse(input.privateState).operationId !== input.operationId) throw new Error('Wrong original challenge')
-        await effect('poll')
-        return options.pollUnknown
-          ? { kind: 'unknown' }
+        await effect('authentication')
+        return options.authenticationUnknown
+          ? { kind: 'unknown', diagnostic: { stage: 'adapter', code: 'receipt-unconfirmed' } }
           : {
-              kind: 'authorized',
-              application: { domain: input.domain, appId: 'app-' + input.connectionId },
-              secret: 'private-test-credential'
+              kind: 'authentication', stage: 'account', challenge: null,
+              account: { userId: 'original-user', tenantId: 'original-tenant' },
+              privateState: input.privateState
             }
-      }
+      },
+      upload: async input => { await effect('creationUpload'); return { kind: 'uploaded', privateState: input.privateState } },
+      create: async input => { await effect('create'); return { kind: 'created', application: { domain: input.domain, appId: 'app-' + input.connectionId }, privateState: input.privateState } },
+      credential: async input => { await effect('credential'); return { kind: 'credential', secret: 'private-test-credential', privateState: input.privateState } }
     },
     profile: {
       prepareUpload: (c, png) => ({ format: 'signed-image', body: JSON.stringify({ app: c.application, png }) }),
@@ -260,6 +266,8 @@ export async function moteConnectionOwner(
   })
   await server.start()
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  const service = await client.call('connection.service.get', {})
+  if (service.enabled) await client.call('connection.service.configure', { operationId: 'fixture-service-off', expectedRevision: service.revision, service: { enabled: false } })
   const target = (index = 0) => ({
     spaceId: motes[index]!.spaceId,
     zoneId: motes[index]!.zoneId,
@@ -304,11 +312,28 @@ export async function moteConnectionOwner(
       return writes
     },
     close: async () => {
-      await client.dispose()
-      await server.stop()
-      parent.close()
-      connections.close()
-      await files.dispose()
+      const errors: unknown[] = []
+      for (const close of [() => client.dispose(), () => server.stop(), () => parent.close(), () => connections.close(), () => files.dispose()]) { try { await close() } catch (error) { errors.push(error) } }
+      if (errors.length) throw new AggregateError(errors, 'Mote original owner cleanup failed')
     }
   }
+}
+
+/** Test intent consumes the actual original child action; it does not infer consent from a parent summary. */
+export async function moteChildDecision(owner: Pick<Awaited<ReturnType<typeof moteConnectionOwner>>, 'client'>, operationId: string, kind: ConnectionEnrollmentActionKind) {
+  const parent = (await owner.client.call('space.mote.connection.inspect', { operationId })).operation
+  if (!parent?.enrollmentOperationId) throw new Error('Original Mote enrollment is unavailable')
+  const view = await owner.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId })
+  const choices = view.actions.filter(action => action.kind === kind)
+  if (choices.length !== 1 || !view.operation) throw new Error('The exact original enrollment action is not offered: ' + kind)
+  if (kind === 'continue-authentication' && view.challenge && view.challenge.nextPollAt > Date.now()) await new Promise(resolve => setTimeout(resolve, view.challenge!.nextPollAt - Date.now()))
+  const action = choices[0]!
+  return { operationId, enrollment: { operationId: view.operation.operationId, ownRevision: action.ownRevision, decision: { actionId: action.actionId, kind } } }
+}
+
+export async function confirmAndCreateMote(owner: Pick<Awaited<ReturnType<typeof moteConnectionOwner>>, 'client'>, operationId: string) {
+  let parent = (await owner.client.call('space.mote.connection.inspect', { operationId })).operation
+  for (let step = 0; step < 8 && parent?.enrollment?.authentication?.stage !== 'account'; step++) parent = await owner.client.call('space.mote.connection.advance', await moteChildDecision(owner, operationId, 'continue-authentication'))
+  await owner.client.call('space.mote.connection.advance', await moteChildDecision(owner, operationId, 'confirm-account'))
+  return owner.client.call('space.mote.connection.advance', await moteChildDecision(owner, operationId, 'create'))
 }
