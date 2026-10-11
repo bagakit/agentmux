@@ -9728,7 +9728,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async saveBrowserBookmark(workspaceId, url, title) {
     // about:blank 不是一个能存的地方——存了它打开也是空页。当作「没什么可存」，不写文件也不报错。
-    if (!url || url === 'about:blank') throw new Error('This page has no address to bookmark yet')
+    if (!url || url === 'about:blank') throw Object.assign(new Error('This page has no address to bookmark yet'), { status: 'error' })
     const content = emitWebloc(url)
     const base = bookmarkFileNameFromTitle(title)
     // 撞名退避：`Name.webloc`、`Name 2.webloc`……。判据是 `files.write` 带 `expectedRevision: null`——
@@ -9737,7 +9737,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let lastReason = ''
     for (let n = 1; n <= 50; n++) {
       const path = n === 1 ? `${base}.webloc` : `${base} ${n}.webloc`
-      const result = await api.files.write(workspaceId, { path, content, expectedRevision: null })
+      let result: import('../../shared/contracts').WorkspaceFileWriteResult
+      try { result = await api.files.write(workspaceId, { path, content, expectedRevision: null }) }
+      catch (cause) {
+        throw Object.assign(new Error(presentError(cause), { cause }), { status: 'unknown', path },
+          cause !== null && typeof cause === 'object' && 'code' in cause ? { code: cause.code } : {})
+      }
       if (result.status === 'written') {
         // 让文件树/Topics/Board 看到新文件——与 createPath 用同一个失效计数器，不另起一套。
         set((current) => ({
@@ -9745,11 +9750,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }))
         return path
       }
-      if (result.status === 'error' || result.status === 'unknown') throw Object.assign(new Error(result.message), { code: result.code })
+      if (result.status === 'error' || result.status === 'unknown') throw Object.assign(new Error(result.message), { code: result.code, status: result.status, path })
       // conflict：这个名字被占了，试下一个。
       lastReason = `${path} already exists`
     }
-    throw new Error(`Could not save the bookmark: ${lastReason}`)
+    throw Object.assign(new Error(`Could not save the bookmark: ${lastReason}`), { status: 'error' })
   },
   async openHttpLink(origin, rawUrl, destination, presentation) {
     const opening = get(), expectedChoice = opening.workbenchSpaceSelection
