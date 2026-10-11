@@ -41,7 +41,7 @@ it('production Split opens without a click, preserves the editor caret and execu
   expect(document.activeElement).toBe(editor)
   await pointer(trigger, 'pointerdown')
   expect(menu()).not.toBeNull()
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) => /right/i.test(el.textContent ?? ''))!
+  const item = document.querySelector<HTMLElement>('[role="menuitem"][aria-label="Split Right"]')!
   expect(item).toBeDefined()
   await act(async () => item.click())
   expect(action).toHaveBeenCalledExactlyOnceWith('right')

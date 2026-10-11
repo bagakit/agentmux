@@ -77,7 +77,7 @@ function jsxAttributeExpression(
  * 所以这里的判据分两层，各自能被单独变异打红：
  *   - 取值层：清单与图标的取值本身（纯函数，跑得到）
  *   - 接线层：每个容器真的从共用模块取图标，而不是自己再写一张表
- * 接线层用 **import 关系**判，不用「字面量在不在场」——`not.toContain('ArrowLeft')` 这种判据
+ * 接线层用 **import 与 JSX 清单属性的 AST 关系**判，不用「字面量在不在场」——`not.toContain('ArrowLeft')` 这种判据
  * 会被「重新 import 一次 lucide 再写一张同名表」原样绕过（见 guard-criterion-must-be-import-relation）。
  */
 describe('分屏与重排菜单：一份清单、一份图标、四个容器', () => {
@@ -272,39 +272,53 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
    * 自检在前：若共用模块改名或搬家，这条守卫会静默恒绿（每个容器都「没 import 那个不存在的名字」
    * 也算不上违规）。所以先断言那个模块路径确实是我们在用的那个。
    */
-  const ICON_MODULE = './workbench-split-menu-icons'
-  const ICON_CONTAINERS = [
-    'PaneSplitMenu.tsx',
-    'RegionContextMenu.tsx',
-    'WorkbenchTabContextMenu.tsx'
+  const ROWS_MODULE = './WorkbenchLayoutMenuRows'
+  const ROW_CONSUMERS = [
+    ['PaneSplitMenu.tsx', 'entries'],
+    ['RegionContextMenu.tsx', 'entry.entries'],
+    ['WorkbenchTabContextMenu.tsx', 'layoutEntries']
   ] as const
 
-  it('自检：共用图标模块存在且导出三个取值口', () => {
-    const source = componentSource('workbench-split-menu-icons.ts')
-    for (const name of [
-      'workbenchSplitMenuIcon',
-      'workbenchSplitDirectionIcon',
-      'workbenchRegionPresetIcon'
-    ]) {
-      expect(source, `共用图标模块不再导出 ${name}，下面的接线守卫会变成恒绿`).toContain(
-        `export function ${name}`
-      )
+  it('共用行组件从原图标模块取得实际图标与稳定 key', () => {
+    const source = ts.createSourceFile('WorkbenchLayoutMenuRows.tsx', componentSource('WorkbenchLayoutMenuRows.tsx'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const imports = source.statements.filter(ts.isImportDeclaration)
+    const icons = imports.find(statement => ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text === './workbench-split-menu-icons')
+    expect(icons, '共用行组件必须消费原图标模块').toBeDefined()
+    const bindings = icons!.importClause?.namedBindings
+    expect(bindings && ts.isNamedImports(bindings) ? bindings.elements.map(element => element.name.text) : []).toEqual(['workbenchSplitMenuIcon', 'workbenchSplitMenuKey'])
+    const calls: string[] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression)) calls.push(node.expression.text)
+      ts.forEachChild(node, walk)
     }
+    walk(source)
+    expect(calls).toContain('workbenchSplitMenuIcon')
+    expect(calls).toContain('workbenchSplitMenuKey')
   })
 
-  it('每个菜单容器都从共用模块取图标，没有谁自己再建一张方向表', () => {
-    for (const container of ICON_CONTAINERS) {
-      const source = componentSource(container)
-      expect(source, `${container} 没有从 ${ICON_MODULE} 取图标`).toContain(ICON_MODULE)
-      expect(source, `${container} 不能持有第二份图形`).not.toMatch(/from\s*['"]lucide-react['"]/)
-      expect(source, `${container} 不能自行定义 split 语义目录`).not.toMatch(/semanticIconComponent\(['"]layout\.split-/)
+  it('各菜单把自己的原清单直接交给共用行组件', () => {
+    for (const [container, expectedEntries] of ROW_CONSUMERS) {
+      const text = componentSource(container)
+      const source = ts.createSourceFile(container, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const imported = source.statements.filter(ts.isImportDeclaration).find(statement =>
+        ts.isStringLiteral(statement.moduleSpecifier) && statement.moduleSpecifier.text === ROWS_MODULE)
+      expect(imported, `${container} 没有导入共用行组件`).toBeDefined()
+      const bindings = imported!.importClause?.namedBindings
+      expect(bindings && ts.isNamedImports(bindings) ? bindings.elements.map(element => element.name.text) : []).toContain('WorkbenchLayoutMenuRows')
+      const attribute = jsxAttributeExpression(text, container, 'WorkbenchLayoutMenuRows', 'entries')
+      expect(attribute, `${container} 没有消费共用行组件`).not.toBeNull()
+      expect(attribute!.text).toBe(expectedEntries)
+      expect(attribute!.kind).toBe(expectedEntries.includes('.') ? ts.SyntaxKind.PropertyAccessExpression : ts.SyntaxKind.Identifier)
+      expect(text, `${container} 不能持有第二份图形`).not.toMatch(/from\s*['"]lucide-react['"]/)
+      expect(text, `${container} 不能自行定义 split 语义目录`).not.toMatch(/semanticIconComponent\(['"]layout\.split-/)
     }
   })
 
   /**
-   * 「这个容器真的把清单画出来了」这一层在本仓渲不出来（Radix 的 Content 默认关闭且在 Portal 里，
-   * renderToStaticMarkup 拿不到）。所以判据落在容器**只有一次 map、没有自己的条件**上：
-   * 只要它是 `entries.map`，`{false && …}` 那类让整项永不渲染的形状就无处可写。
+   * 这里仅核对容器与原清单的源码接线；真实菜单挂载、可访问名称和选择回调由
+   * workbench-layout-menu-rows.test.tsx 的 DOM 消费测试验证，不以源码字符串代签。
+   * 保留的结构边界是容器消费原清单，没有自己的方向表；实际在场和可操作性
+   * 仍须由 DOM 用例执行，单独看见 map 并不能排除外层永假条件。
    *
    * 这条规矩是实测出来的，且我第一版就违反过：一格的右键菜单最初把分屏一节写成
    * `{splitMenu && splitMenu.length > 0 ? (` 的第二个 JSX 分支，改成 `false ?` 后整节永不渲染
@@ -337,14 +351,15 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
       writeClipboardText: async () => {},
       splitMenu
     }).entries
-    const splitEntries = withSplit.filter((entry) => entry.kind === 'split')
-    // 逐条都在，不是「有几条就算」——少一条就是那个方向的分屏在这个菜单上不存在。
+    const layoutGroups = withSplit.filter((entry) => entry.kind === 'layout')
+    expect(layoutGroups).toHaveLength(1)
+    expect(layoutGroups[0]!.entries).toBe(splitMenu)
+    const splitEntries = layoutGroups.flatMap((entry) => entry.entries)
+    // 原清单逐条保留，紧凑分组不改变方向、预设与重排的顺序。
     expect(splitEntries).toHaveLength(splitMenu.length)
-    expect(
-      splitEntries.map((entry) => (entry.kind === 'split' ? entry.entry : null))
-    ).toEqual([...splitMenu])
+    expect(splitEntries).toEqual([...splitMenu])
     // 排在地址项之后（布局是次要一组），且与地址项之间恰好隔一道线。
-    const firstSplitAt = withSplit.findIndex((entry) => entry.kind === 'split')
+    const firstSplitAt = withSplit.findIndex((entry) => entry.kind === 'layout')
     expect(firstSplitAt).toBeGreaterThan(0)
     expect(withSplit[firstSplitAt - 1]?.kind, '分屏一节前面缺一道分隔线').toBe('separator')
     const tail = withSplit.slice(firstSplitAt)
@@ -364,7 +379,7 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
     // 前提自检：地址项这一组照常在。下面两条都是「没有 X」，对空 entries 恒成立——菜单整个
     // 画不出来时它们会静静放行，而那比多一节分屏严重得多。
     expect(withoutSplit.some((entry) => entry.kind === 'action'), '前提自检：地址项仍在').toBe(true)
-    expect(withoutSplit.some((entry) => entry.kind === 'split')).toBe(false)
+    expect(withoutSplit.some((entry) => entry.kind === 'layout')).toBe(false)
     expect(withoutSplit.some((entry) => entry.kind === 'separator')).toBe(false)
   })
 
@@ -379,30 +394,24 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
       splitMenu: workbenchSplitMenuEntries({ regionCount: 2, split, arrange })
     }).entries
     // 前提自检：三种可点条目都真的到了这个容器里。缺一种时下面那个循环会静默跳过它。
-    const kinds = new Set(
-      entries.flatMap((entry) => (entry.kind === 'split' ? [entry.entry.kind] : []))
-    )
+    const layout = entries.flatMap((entry) => entry.kind === 'layout' ? entry.entries : [])
+    const kinds = new Set(layout.map((entry) => entry.kind))
     expect(kinds, '三种可点条目没有全部到达这个容器').toEqual(
       new Set(['split', 'preset', 'rearrange', 'separator'])
     )
-    for (const entry of entries) {
-      if (entry.kind !== 'split' || entry.entry.kind === 'separator') continue
+    for (const entry of layout) {
+      if (entry.kind === 'separator') continue
       split.mockClear()
       arrange.mockClear()
-      entry.entry.onSelect()
-      if (entry.entry.kind === 'split') {
-        expect(split, `"${entry.entry.label}" 在这个菜单里发错了方向`).toHaveBeenCalledWith(
-          entry.entry.direction
-        )
-      } else if (entry.entry.kind === 'preset') {
-        expect(arrange, `"${entry.entry.label}" 在这个菜单里发错了预设`).toHaveBeenCalledWith({
-          kind: 'preset',
-          preset: entry.entry.preset
-        })
+      entry.onSelect()
+      if (entry.kind === 'split') {
+        expect(split, `"${entry.label}" 在这个菜单里发错了方向`).toHaveBeenCalledExactlyOnceWith(entry.direction)
+        expect(arrange).not.toHaveBeenCalled()
       } else {
-        expect(arrange, `"${entry.entry.label}" 在这个菜单里发错了 mode`).toHaveBeenCalledWith(
-          entry.entry.mode
+        expect(arrange, `"${entry.label}" 在这个菜单里发错了重排`).toHaveBeenCalledExactlyOnceWith(
+          entry.kind === 'preset' ? { kind: 'preset', preset: entry.preset } : entry.mode
         )
+        expect(split).not.toHaveBeenCalled()
       }
     }
   })
@@ -425,7 +434,7 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
    *   - `splitMenu={undefined && workbenchSplitMenuEntries({…})}` → 15 条全绿（这是我真跑出的
    *     存活变异；`splitMenu?` 当时是可选的，所以连 tsc 都不报。属性已改必填，但那只挡住这一种拼法）
    *   - `splitMenu={[]}` → 类型完全合法，整节消失
-   * 两者的共同点是「属性在场、字符串在场、值不是那次调用」，所以判据落在**值表达式的种类**上，
+   * 两者的共同点是「属性在场、字符串在场、原清单未被消费」，所以判据落在**值表达式与生产者的 AST 接线**上，
    * 不落在文本上（记忆 guard-must-check-reachability-not-presence / guard-criterion-must-be-import-relation）。
    *
    * 自检在前：取不到那个属性（组件改名、调用点被删、属性改名）时，「它不是 `&&`」会恒真地通过。
@@ -433,26 +442,38 @@ describe('分屏与重排菜单：一份清单、一份图标、四个容器', (
    */
   const WORKBENCH = 'WorkspaceWorkbench.tsx'
 
-  it('一格的右键菜单真的接上了共用清单：属性值就是那次调用本身', () => {
-    const attribute = jsxAttributeExpression(
-      componentSource(WORKBENCH),
-      WORKBENCH,
-      'RegionContextMenu',
-      'splitMenu'
-    )
-    expect(attribute, `${WORKBENCH} 里的 <RegionContextMenu> 没有 splitMenu 属性——整节对用户不存在`)
-      .not.toBeNull()
-    // 值必须**就是**一次调用，不是把调用包在 `&&`／三元／数组字面量里的任何形状。
-    expect(
-      ts.SyntaxKind[attribute!.kind],
-      `splitMenu 的值不是一次调用而是 ${ts.SyntaxKind[attribute!.kind]}：\n${attribute!.text}`
-    ).toBe('CallExpression')
-    expect(attribute!.text.startsWith('workbenchSplitMenuEntries('), 'splitMenu 调的不是共用清单').toBe(
-      true
-    )
-    // #337 的要害：分屏必须落在**右键点中的那一格**。用 activeRegionId／activeSurface 推断出来的
-    // 格子在「想切旁边那一格」时就是错的，而那正是这个菜单存在的全部理由。
-    expect(attribute!.text, 'splitMenu 没有把右键点中的 regionId 交给分屏').toContain('node.regionId')
+  it('一格右键菜单消费原清单，Survey Browser 只保留原重排项', () => {
+    const text = componentSource(WORKBENCH)
+    const attribute = jsxAttributeExpression(text, WORKBENCH, 'RegionContextMenu', 'splitMenu')
+    expect(attribute, 'Region 菜单必须消费原布局清单').not.toBeNull()
+    expect(attribute!.kind).toBe(ts.SyntaxKind.ConditionalExpression)
+    const expression = ts.createSourceFile('consumed.tsx', 'const consumed = ' + attribute!.text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const statement = expression.statements[0]!
+    expect(ts.isVariableStatement(statement)).toBe(true)
+    if (!ts.isVariableStatement(statement)) return
+    const value = statement.declarationList.declarations[0]!.initializer!
+    expect(ts.isConditionalExpression(value)).toBe(true)
+    if (!ts.isConditionalExpression(value)) return
+    expect(value.condition.getText(expression)).toBe('surveyBrowser')
+    expect(value.whenFalse.getText(expression)).toBe('splitMenu')
+    expect(ts.isCallExpression(value.whenTrue)).toBe(true)
+    if (!ts.isCallExpression(value.whenTrue)) return
+    expect(value.whenTrue.expression.getText(expression)).toBe('splitMenu.filter')
+    expect(value.whenTrue.arguments[0]!.getText(expression)).toBe("entry => entry.kind === 'rearrange'")
+
+    const source = ts.createSourceFile(WORKBENCH, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const producers: ts.CallExpression[] = []
+    const walk = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'splitMenu' && node.initializer && ts.isCallExpression(node.initializer)) producers.push(node.initializer)
+      ts.forEachChild(node, walk)
+    }
+    walk(source)
+    expect(producers).toHaveLength(1)
+    expect(producers[0]!.expression.getText(source)).toBe('workbenchSplitMenuEntries')
+    const options = producers[0]!.arguments[0]!
+    expect(ts.isObjectLiteralExpression(options)).toBe(true)
+    expect(options.getText(source)).toContain('splitRegion(tab.workspaceId, tab.id, node.regionId, direction)')
+    expect(options.getText(source)).toContain('arrangeTabRegions(tab.workspaceId, tab.id, preset)')
   })
 
   it('Tab 右键菜单的重排真的接上了 store：不是一个什么都不做的回调', () => {
