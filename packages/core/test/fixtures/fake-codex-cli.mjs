@@ -97,6 +97,24 @@ if (process.env.AGENTMUX_FAKE_NATIVE_RECORD === '1' && process.env.AGENTMUX_FAKE
   process.once('exit', () => closeSync(nativeRecordDescriptor))
 }
 
+// Private restart proof only. Runtime observes an actual initialization exit;
+// the fixture record never grants retry authority or resolves old input delivery.
+const resumeFailure = process.env.AGENTMUX_FAKE_NATIVE_RESUME_FAILURE
+if (isResume && (resumeFailure === 'once' || resumeFailure === 'always')) {
+  const directory = process.env.AGENTMUX_FAKE_NATIVE_RESUME_FAILURE_DIRECTORY
+  if (!directory || nativeRecordDescriptor === undefined) throw new Error('Native resume failure requires a private record directory and retained conversation')
+  mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const witness = { nativeSessionId: nonFlags[resumeIndex + 1], argvPromptSha256: createHash('sha256').update(prompt).digest('hex'),
+    hasArgvPrompt: prompt.length > 0, exitCode: 7 }
+  let first = false
+  try { writeFileSync(join(directory, agentSessionId + '.json'), JSON.stringify(witness), { flag: 'wx', mode: 0o600 }); first = true }
+  catch (error) { if (error.code !== 'EEXIST') throw error }
+  if (first || resumeFailure === 'always') {
+    writeSync(nativeRecordDescriptor, `${JSON.stringify({ type: 'fixture_bootstrap_exit', payload: witness })}\n`)
+    process.exit(7)
+  }
+}
+
 /**
  * 往 AgentMux 的 hook ingress 投一条事件，直到它收下。
  *
