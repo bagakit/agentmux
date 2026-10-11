@@ -3,7 +3,7 @@ import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeDocument, TopicKnowl
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { scratchTopicLogicalPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
@@ -72,6 +72,13 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
   const [moveTarget, setMoveTarget] = useState<TopicMoveTarget | null>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const selectedRow = useRef<HTMLButtonElement>(null)
+  const detailReturnFocus = useRef<HTMLElement | null>(null)
+  useLayoutEffect(() => {
+    if (selected || selectedDocument || !detailReturnFocus.current) return
+    const target = detailReturnFocus.current
+    detailReturnFocus.current = null
+    if (target.isConnected) target.focus()
+  }, [selected, selectedDocument])
   useEffect(() => { setMoveTarget(null); setHistoryIssues([]) }, [topic?.id])
   useEffect(() => {
     if (!active) return
@@ -111,9 +118,8 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
     searchInput.current?.focus()
   }
   function closeDetail() {
-    const target = selectedRow.current ?? searchInput.current
+    detailReturnFocus.current = selectedRow.current ?? searchInput.current
     setSelected(null); setSelectedDocument(null)
-    target?.focus()
   }
   return <section className="topic-knowledge-panel" aria-label={`Knowledge in ${title}`}>
     <header className="topic-knowledge-panel__header"><span className="topic-knowledge-scope" title={topic ? [title, current.map(category => category.title).join(' · ') || 'Category not confirmed'].join(' · ') : 'Search across all Topics'}><TopicIcon size={13} aria-hidden="true" /><strong>{title}</strong></span>
