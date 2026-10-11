@@ -30,7 +30,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createPortal } from 'react-dom'
-import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { useWorkbenchActivityPresentation, useWorkbenchRegionLabels, useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
@@ -54,6 +54,7 @@ import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
 import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
+import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, workbenchBrowserWindowTarget, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
@@ -136,6 +137,7 @@ const FileSurfaceView = lazy(async () => {
 type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
+const EMPTY_VIEW_TARGETS: readonly WorkbenchViewTarget[] = []
 
 function useTabNoteName(tab: WorkbenchTab) {
   const surface = titleWorkbenchSurface(tab)
@@ -676,7 +678,7 @@ function SurfaceContent({
 
 type RegionSwapTargets = Parameters<typeof regionSwapMenuEntries>[0]['regions']
 
-function WorkbenchRegionTree(props: {
+const WorkbenchRegionTree = memo(function WorkbenchRegionTree(props: {
   tab: WorkbenchTab
   groupId: string | undefined
   surfaceVisible: boolean
@@ -699,7 +701,7 @@ function WorkbenchRegionTree(props: {
       <WorkbenchRegionLeaf key={regionId} {...props} node={{ type: 'leaf', regionId }} swapTargets={swapTargets}
         interactiveResize={props.interactiveResize || dragging} />)}
   </>
-}
+})
 
 function WorkbenchRegionNode({ node, nodePath, tab, surfaceVisible, onDragging }: {
   node: WorkbenchRegionLayoutNode
@@ -1690,6 +1692,9 @@ export function WorkspaceWorkbench({
   const tabs = useAppStore(useShallow((state) => projection
     ? Object.fromEntries([...projectedMemberIds ?? []].flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
     : workbenchDisplayTabs(state.tabs, workspaceId, residentLayout)))
+  // Page content keeps full Tab facts; only home references use the structural projection.
+  const homeTabs = useAppStore(useShallow(state =>
+    workbenchDisplayTabs(workbenchNavigationTabs(state.tabs), workspaceId, residentLayout)))
   const presentedAgentIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
     Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [tabs])
   const activityPresentable = useWorkbenchActivityPresentation(presentedAgentIds)
@@ -1781,7 +1786,7 @@ export function WorkspaceWorkbench({
     for (const group of residentLayout?.groups ?? []) for (const id of group.tabOrder) owners.set(id, group.id)
     return owners
   }, [residentLayout?.groups])
-  const homeReferences = useMemo(() => workbenchHomePresentationReferences(storedLayout, workspaceId, tabs), [storedLayout, workspaceId, tabs])
+  const homeReferences = useMemo(() => workbenchHomePresentationReferences(storedLayout, workspaceId, homeTabs), [storedLayout, workspaceId, homeTabs])
   const retainedOwners = useRef(new Map<string, string>())
   for (const [id, groupId] of ownerByTab) retainedOwners.current.set(id, groupId)
   for (const id of retainedOwners.current.keys()) if (!tabs[id]) retainedOwners.current.delete(id)
@@ -2041,7 +2046,7 @@ export function WorkspaceWorkbench({
         </div>
       </div>
       {viewOwnership === 'owner' && Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
-        const targets = viewTargets?.[tab.id] ?? []
+        const targets = viewTargets?.[tab.id] ?? EMPTY_VIEW_TARGETS
         const regions = Object.values(tab.regions)
         const repeatableContent = regions.length > 0 && regions.every(region => region.kind === 'browser' || region.kind === 'agent' && activityPresentable[region.sessionId])
         const activityOnly = regions.length > 0 && regions.every(region => region.kind === 'agent' && activityPresentable[region.sessionId])
