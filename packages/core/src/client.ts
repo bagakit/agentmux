@@ -2348,7 +2348,8 @@ export class AgentMuxClient {
       if (source.providerId !== session.providerId || source.nativeSessionId !== handle.sessionId) throw new AgentMuxError('The exact native record belongs to another original source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       if (!provider.readSessionHistoryRecord) throw new AgentMuxError('This Provider cannot locate the exact recorded version. The original source remains readable.', 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED')
       const contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
-      const item = await read(provider.readSessionHistoryRecord({ agentSessionId, source, recordId, signal: controller.signal,
+      const originalSource = { providerId: source.providerId, nativeSessionId: source.nativeSessionId }
+      const item = await read(provider.readSessionHistoryRecord({ agentSessionId, source: originalSource, recordId, signal: controller.signal,
         command: resolveAgentExecutable(options.commandOverride, provider.executable), args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }))
       await read(binding.assertCurrent())
