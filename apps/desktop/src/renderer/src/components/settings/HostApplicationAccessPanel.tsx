@@ -105,7 +105,8 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
     ++readEpoch.current
     const related = result.profile.source.hostId === host.id || result.profile.target.hostId === host.id
     setConfigurations(current => [...current.filter(item => item.profileId !== result.profileId), ...(related ? [result] : [])])
-    setSelected(related ? result.profileId : null); setDraft(current => current === captured ? null : current)
+    setSelected(related ? result.profileId : null); setDraft(current => current === captured ? null : current?.id === captured.id && current.revision === captured.revision
+      ? { ...current, revision: result.revision } : current)
   }
   async function compare(): Promise<void> {
     if (!configuration) return
