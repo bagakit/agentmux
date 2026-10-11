@@ -90,7 +90,7 @@ export function imageBytes(bytes: Uint8Array, maxBytes: number, declaredMime?: s
   if (!image || declaredMime !== undefined && declaredMime !== image.mimeType) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'The recorded bytes are not a supported PNG, JPEG, GIF or WebP image. Its reference is kept.')
   if (image.width < 1 || image.height < 1 || image.width > MAX_DIMENSION || image.height > MAX_DIMENSION || image.width * image.height > MAX_PIXELS)
     return unavailable('AGENT_SESSION_HISTORY_RESOURCE_DECODE_BUDGET', 'The recorded image exceeds the 16384 pixel side or 32 megapixel decode budget. Its reference is kept.')
-  return { status: 'read', mimeType: image.mimeType, dataBase64: encodeBase64(bytes), byteLength: bytes.length }
+  return { status: 'read', mimeType: image.mimeType, dataBase64: encodeBase64(bytes), byteLength: bytes.length, width: image.width, height: image.height }
 }
 
 /** Validate the Provider's complete exact resource without inventing a Core Session identity. */
@@ -109,14 +109,15 @@ export function parseProviderSessionHistoryResourceReadResult(value: unknown,
     exactString(result.code, 'Resource failure code', code)
     if (typeof result.message !== 'string') invalid('Resource failure requires its readable reason.', code)
   } else if (result.status === 'read') {
-    rpcRecord(result, ['status', 'mimeType', 'dataBase64', 'byteLength'], code)
+    rpcRecord(result, ['status', 'mimeType', 'dataBase64', 'byteLength', 'width', 'height'], code)
     if (typeof result.dataBase64 !== 'string' || result.dataBase64.length > Math.ceil((expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES) / 3) * 4 ||
       !Number.isSafeInteger(result.byteLength) || (result.byteLength as number) < 1) invalid('Resource bytes exceed their read budget.', code)
     let bytes: Uint8Array
     try { bytes = decodeBase64(result.dataBase64) }
     catch { invalid('Recorded resource bytes or MIME are invalid.', code) }
-    if (bytes.length !== result.byteLength || encodeBase64(bytes) !== result.dataBase64 ||
-      imageBytes(bytes, expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, String(result.mimeType)).status !== 'read') invalid('Recorded resource bytes or MIME are invalid.', code)
+    const checked = imageBytes(bytes, expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, String(result.mimeType))
+    if (bytes.length !== result.byteLength || encodeBase64(bytes) !== result.dataBase64 || checked.status !== 'read' ||
+      checked.width !== result.width || checked.height !== result.height) invalid('Recorded resource bytes, MIME or dimensions are invalid.', code)
   } else if (result.status === 'fragment') {
     rpcRecord(result, ['status', 'encoding', 'dataBase64', 'byteLength', 'offsetBytes', 'totalBytes', 'sha256', 'nextOffsetBytes', 'continuationReference'], code)
     if (result.continuationReference !== undefined) exactString(result.continuationReference, 'Renewed content authority', code, MAX_REFERENCE_CHARS)
