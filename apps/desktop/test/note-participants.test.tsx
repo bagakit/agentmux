@@ -79,8 +79,10 @@ it('places two participant groups below the title, reads the actual saved block 
   expect(heading.querySelector('.notebook-page-topline [aria-label="Page followers"]')).toBeNull()
   expect(row.previousElementSibling?.getAttribute('aria-label')).toBe('Page title')
   expect(row.querySelectorAll('.note-participants__trigger')).toHaveLength(2)
-  expect(row.querySelector('[aria-label="Page editors"] .note-participants__count')?.textContent).toBe('2')
-  expect(row.querySelector('[aria-label="Page followers"] .note-participants__count')?.textContent).toBe('1')
+  expect(row.querySelector('[aria-label="Page editors"]')?.getAttribute('aria-description')).toBe('2 editors')
+  expect(row.querySelector('.note-participants__count')).toBeNull()
+  expect(row.querySelector('[aria-label="Page followers"]')?.textContent).toBe('Followers')
+  expect(row.querySelector('.note-participants__overflow')).toBeNull()
   await act(async () => { originalEditor.view.focus(); originalEditor.commands.insertContentAt(1, 'Unsaved human input ') })
   await dom.click('[aria-label="Page editors"]')
   const roster = heading.querySelector('[aria-label="Note editors"]')!
@@ -134,7 +136,8 @@ it('bounds the header avatars but exposes every exact follower identity, and use
   const trigger = dom.container.querySelector('[aria-label="Page followers"]')!
   expect(trigger.querySelectorAll('.note-participants__avatar')).toHaveLength(3)
   expect(trigger.querySelector('.note-participants__overflow')?.textContent).toBe('+3')
-  expect(trigger.querySelector('.note-participants__count')?.textContent).toBe('6')
+  expect(trigger.getAttribute('aria-description')).toBe('6 followers')
+  expect(trigger.querySelector('.note-participants__count')).toBeNull()
   await dom.click('[aria-label="Page followers"]')
   const list = dom.container.querySelector('[aria-label="Note followers"]')!
   expect(list.querySelectorAll('li')).toHaveLength(6)
