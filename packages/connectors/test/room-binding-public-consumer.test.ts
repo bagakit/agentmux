@@ -30,7 +30,7 @@ describe('room binding real public consumers', () => {
     const f = await fixture(); f.input.externalConversationId = 'room/project-alpha'
     const saved = result(await f.cli(['bind', '--input', '-'], f.input))
     expect(saved).toMatchObject({ state: 'applied', binding: { revision: 1, executionHostId: 'local', agentSessionId: f.input.agentSessionId, externalConversationId: 'room/project-alpha', authorizedBy: { kind: 'user' } } })
-    expect(saved.binding.sourceCheckpoints).toEqual([await f.client.conversationCheckpoint(f.input.agentSessionId)])
+    expect(saved.binding.sourceCheckpoints).toEqual([await f.client.sessionHistoryCheckpoint(f.input.agentSessionId)])
     const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.socketPath } }); cleanup.push(() => sdk.dispose())
     expect((await sdk.call('connection.binding.inspect', { operationId: f.input.operationId })).operation).toEqual(saved)
     const found = result(await f.cli(['binding', 'ls', '--host', 'local', '--session', f.input.agentSessionId]))

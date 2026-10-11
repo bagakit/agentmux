@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
 import type { AgentSessionHistoryItem } from '@agentmux/core'
-import type { ConversationChangesPage, ConversationCheckpoint } from '@agentmux/core/conversation'
+import type { NativeConversationChangesPage, NativeConversationCheckpoint } from '@agentmux/core/conversation'
 import type { PublicationPreparer } from '../src/publication-wire.js'
 import { PublicationStore, type PublicationBoundary } from '../src/publication-store.js'
 
@@ -14,11 +14,11 @@ const adapter: PublicationPreparer = { adapterId: 'fixture', renderVersion: 'spe
       body: JSON.stringify({ audience: operation.target.externalConversationId, mapping: operation.mapping, payload: operation.payload }) } }) }
 const databases: DatabaseSync[] = [], directories: string[] = []
 afterEach(async () => { for (const db of databases.splice(0)) if (db.isOpen) db.close(); for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }) })
-const checkpoint = (cursor = 'original-cut'): ConversationCheckpoint => ({ agentSessionId: 'session-a', source: { providerId: 'claude', nativeSessionId: 'native-a' }, cursor })
+const checkpoint = (cursor = 'original-cut'): NativeConversationCheckpoint => ({ agentSessionId: 'session-a', source: { providerId: 'claude', nativeSessionId: 'native-a' }, cursor })
 const boundary: PublicationBoundary = { bindingId: 'binding-a', revision: 1, connectionId: 'connection-a', application: { domain: 'chat.example', appId: 'app-a' },
   executionHostId: 'host-a', agentSessionId: 'session-a', externalConversationId: 'room-a', sourceCheckpoints: [checkpoint()], scope: { input: 'mentions-and-replies', publication: 'future-native-user-facing' } }
 const speech = (id: string, text = 'Same original speech'): AgentSessionHistoryItem => ({ id, kind: 'assistant-message', contentParts: [{ kind: 'text', text }] })
-const page = (items: AgentSessionHistoryItem[], cursor = 'next-cut'): ConversationChangesPage => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId,
+const page = (items: AgentSessionHistoryItem[], cursor = 'next-cut'): NativeConversationChangesPage => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId,
   source: checkpoint().source, items, checkpoint: checkpoint(cursor), more: false })
 function store() { const database = new DatabaseSync(':memory:'); databases.push(database); const owner = new PublicationStore(database); owner.checkpoint(boundary, checkpoint()); return owner }
 

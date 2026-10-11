@@ -171,7 +171,7 @@ it('a slow Binding effect cannot occupy another Binding or the original Core rea
   await appendFile(f.transcript, row('parallel-speech'))
   await vi.waitFor(() => expect(f.services.publication!.store.list(parallel.binding)[0]?.state).toBe('confirmed'), { timeout: 5_000 })
   expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('dispatching')
-  const source = await f.client.readConversationChanges(f.binding.agentSessionId, { checkpoint: f.binding.sourceCheckpoints[0]! })
+  const source = await f.client.readSessionHistoryChanges(f.binding.agentSessionId, { checkpoint: f.binding.sourceCheckpoints[0]! })
   expect(source.items.map(item => item.id)).toEqual(['parallel-speech'])
   expect(f.client.connect).not.toHaveBeenCalled()
   finishSlow({ state: 'confirmed', mapping: { messageId: 'slow-message' } })

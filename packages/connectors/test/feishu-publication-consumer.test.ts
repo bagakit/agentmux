@@ -25,7 +25,7 @@ async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse |
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(remote.http.request)
   const services = await createDesktopConnections({ directory: join(original.root, 'feishu-bidirectional'),
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.conversationCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
     publication: createPublicationConversationPort(original.coreClients), ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'sender-credential', secret: 'fixture-credential' }), config = { ...feishuConfig, credentialRef: credential.credentialRef }

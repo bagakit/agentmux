@@ -78,7 +78,7 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
     })
     const services = await createDesktopConnections({ directory: join(original.root, 'connectors'),
       encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-      bindings: { spatial, checkpoint: async ref => ({ ...ref, checkpoint: await hosted.conversationCheckpoint(ref.agentSessionId) }) },
+      bindings: { spatial, checkpoint: async ref => ({ ...ref, checkpoint: await hosted.sessionHistoryCheckpoint(ref.agentSessionId) }) },
       publication: createPublicationConversationPort(clients), ingress: { core: hostId => coreAvailable ? ingressCore(hostId) : undefined } })
     cleanup.push(() => services.close())
     const business = new core.AgentMuxControlServer({ socketPath: desktopSocketPath, connections: services.connections, spatialState: spatial, coreClients: original.coreClients })

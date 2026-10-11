@@ -150,7 +150,7 @@ it('Desktop default registration receives an exact SDK reply after durable ACK t
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(sdk.http.request)
   const services = await createDesktopConnections({ directory: join(original.root, 'desktop-feishu'),
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.conversationCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
     ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'feishu-credential', secret: 'fixture-credential' })

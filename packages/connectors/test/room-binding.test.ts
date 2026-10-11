@@ -13,7 +13,7 @@ const reply = (uuid: string, text: string) => JSON.stringify({ sessionId: 'origi
 
 describe('original room binding and grants', () => {
   it('saves the exact first native cut and operation atomically, excluding old history without touching the Agent', async () => {
-    const f = await fixture(), initial = await f.client.conversationCheckpoint(f.input.agentSessionId)
+    const f = await fixture(), initial = await f.client.sessionHistoryCheckpoint(f.input.agentSessionId)
     const operation = await f.bindings.bind(f.input, context)
     expect(operation.state).toBe('applied'); if (operation.state !== 'applied') throw new Error('Binding not applied')
     expect(operation.binding).toMatchObject({ executionHostId: 'local', agentSessionId: f.input.agentSessionId, regionAnchor: f.input.regionAnchor, revision: 1, sourceCheckpoints: [initial], authorizedBy: context.actor })
@@ -22,7 +22,7 @@ describe('original room binding and grants', () => {
     await expect(f.bindings.bind({ ...f.input, externalConversationId: 'another-group' }, context)).rejects.toMatchObject({ code: 'ROOM_BINDING_OPERATION_CONFLICT' })
     await f.unchanged()
     await appendFile(f.transcript, reply('new-assistant', 'Future reply'))
-    const changes = await f.client.readConversationChanges(f.input.agentSessionId, { checkpoint: operation.binding.sourceCheckpoints[0]! })
+    const changes = await f.client.readSessionHistoryChanges(f.input.agentSessionId, { checkpoint: operation.binding.sourceCheckpoints[0]! })
     expect(changes.items).toHaveLength(1); expect(changes.items[0]?.id).toBe('new-assistant')
     expect(f.connections.database.prepare('SELECT COUNT(*) AS n FROM room_binding_revision').get()?.n).toBe(1)
   })
@@ -67,7 +67,7 @@ describe('original room binding and grants', () => {
     expect(f.bindings.readExact(f.input.bindingId, 1)).toEqual(first.state === 'applied' ? first.binding : null)
     expect((await f.bindings.inspect({ operationId: f.input.operationId })).operation).toEqual(first)
     if (relinked.state !== 'applied') throw new Error('Relink not applied')
-    expect((await f.client.readConversationChanges(f.input.agentSessionId, { checkpoint: relinked.binding.sourceCheckpoints[0]! })).items).toEqual([])
+    expect((await f.client.readSessionHistoryChanges(f.input.agentSessionId, { checkpoint: relinked.binding.sourceCheckpoints[0]! })).items).toEqual([])
     const script = `import {ConnectionHost,RoomBindingHost} from './packages/connectors/dist/index.js'; import {AgentMuxSpatialStateStore} from './packages/core/dist/spatial-state.js'; import {join} from 'node:path'; const root=process.argv[1];const c=new ConnectionHost({databasePath:join(root,'connections.sqlite'),secrets:{resolve:async()=>null}});const spatial=new AgentMuxSpatialStateStore(join(root,'spatial.json'));const b=new RoomBindingHost({connections:c,spatial,checkpoint:async()=>{throw new Error('Read cannot capture a fresh cut')}});console.log(JSON.stringify({original:await b.inspect({operationId:'bind-original'}),current:b.readCurrent('original-binding'),spatial:await spatial.read()}));c.close()`
     const restarted = JSON.parse((await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script, f.root])).stdout)
     expect(restarted.original.operation).toEqual(first); expect(restarted.current).toEqual(relinked.binding)

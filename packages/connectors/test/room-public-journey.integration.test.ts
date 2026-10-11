@@ -72,7 +72,7 @@ async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' | 'n
   const wire = signedRoomAdapter()
   const services = await createDesktopConnections({ directory: join(original.root, 'connectors'), adapters: [wire.adapter],
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-    bindings: { spatial, checkpoint: async ref => ({ ...ref, checkpoint: await (hosted ?? original.client).conversationCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial, checkpoint: async ref => ({ ...ref, checkpoint: await (hosted ?? original.client).sessionHistoryCheckpoint(ref.agentSessionId) }) },
     publication: createPublicationConversationPort(executionClients), ingress: { core: coreResolver } })
   cleanup.push(() => services.close())
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'journey.sock'), connections: services.connections, spatialState: spatial, coreClients: original.coreClients })
