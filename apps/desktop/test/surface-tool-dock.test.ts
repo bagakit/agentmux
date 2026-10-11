@@ -1,5 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
@@ -11,6 +13,7 @@ vi.hoisted(() => {
 })
 
 import type { SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts.js'
+import type { MoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
 import { canRenameFileExplorerNode } from '../src/renderer/src/components/FileExplorer.js'
 import {
   clampSidebarResizeWidth,
@@ -34,35 +37,17 @@ import {
   workspaceAgentSessions
 } from '../src/renderer/src/lib/surface-tool-dock.js'
 
-const topicsPanelSource = readFileSync(
-  new URL('../src/renderer/src/components/WorkspaceTopicsPanel.tsx', import.meta.url),
-  'utf8'
-)
-const topicPresenceSource = readFileSync(
-  new URL('../src/renderer/src/components/TopicPresence.tsx', import.meta.url),
-  'utf8'
-)
-const fileExplorerSource = readFileSync(
-  new URL('../src/renderer/src/components/FileExplorer.tsx', import.meta.url),
-  'utf8'
-)
-const topicContextMenuSource = readFileSync(
-  new URL('../src/renderer/src/components/TopicContextMenu.tsx', import.meta.url),
-  'utf8'
-)
-const branchesPanelSource = readFileSync(
-  new URL('../src/renderer/src/components/BranchesPanel.tsx', import.meta.url),
-  'utf8'
-)
-const selectorListSource = readFileSync(
-  new URL('../src/renderer/src/components/SelectorList.tsx', import.meta.url),
-  'utf8'
-)
-const surfaceToolDockSource = readFileSync(
-  new URL('../src/renderer/src/components/SurfaceToolDock.tsx', import.meta.url),
-  'utf8'
-)
-const stylesSource = allStyles()
+function componentSource(name: string): string {
+  return readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../src/renderer/src/components', name), 'utf8')
+}
+const topicsPanelSource = componentSource('WorkspaceTopicsPanel.tsx')
+const topicPresenceSource = componentSource('TopicPresence.tsx')
+const fileExplorerSource = componentSource('FileExplorer.tsx')
+const topicContextMenuSource = componentSource('TopicContextMenu.tsx')
+const branchesPanelSource = componentSource('BranchesPanel.tsx')
+const selectorListSource = componentSource('SelectorList.tsx')
+const surfaceToolDockSource = componentSource('SurfaceToolDock.tsx')
+const stylesSource = allStyles
 
 // --- AST helpers for the reveal-wording guard ---------------------------------
 // 取值再质询，不做「禁止拼法在场」的字符串扫描（[[forbidden-shape-guard-misfires]]）。
@@ -348,6 +333,17 @@ describe('shared surface tool dock resize', () => {
     expect(scratch.fileTreeDefaultSize).toBeLessThan(project.fileTreeDefaultSize)
   })
 
+  it('projects a confirmed original Mote scope without changing existing per-Workspace layout defaults', () => {
+    const scope: MoteWorkfaceScope = { workspace, rootPath: 'topic--launcher--scope', topic: {
+      id: 'launcher:scope', title: 'Partner', directoryPath: 'topic--launcher--scope', topicPath: 'topic--launcher--scope/topic.md', summary: '', collaborators: [] } }
+    for (const isScratch of [false, true]) {
+      expect(contentSlotPresentation(isScratch, scope)).toEqual({ ...contentSlotPresentation(isScratch), label: 'Files + Mote', showTopics: false })
+      expect(contentSlotPresentation(isScratch, null)).toEqual(contentSlotPresentation(isScratch))
+      expect(resolveWorkspaceTools({ workspaceTool: 'git', isScratch, moteScope: scope }))
+        .toEqual({ tools: ['files-branches', 'agents'], effective: 'files-branches' })
+    }
+  })
+
   it('collapses the Explorer by default only for Scratch (Topics is its primary view)', () => {
     // 两个方向都断言：单向断言会被把常量写死满足，而这条测试存在的意义就是抓那种写死。
     // Scratch 折叠只看 Topics；Project 展开因为 Branches 是它的次级视图。
@@ -434,10 +430,7 @@ describe('shared surface tool dock resize', () => {
     expect(topicsPanelSource).toContain('<TopicActionsMenu title={topic.title} {...menuActions} />')
 
     // TopicContextMenu 上的同一个动作：onSelect 走 onReveal 的那个 ContextMenu.Item。
-    const menuSource = readFileSync(
-      new URL('../src/renderer/src/components/TopicContextMenu.tsx', import.meta.url),
-      'utf8'
-    )
+    const menuSource = componentSource('TopicContextMenu.tsx')
     const menuItem = findContextMenuItemBySelectHandler(
       parseTsx('TopicContextMenu.tsx', menuSource),
       'onReveal'
@@ -527,7 +520,7 @@ describe('shared surface tool dock resize', () => {
   it('stacks the avatars instead of tiling them, with the rightmost on top', () => {
     // 用户要"会中参与者"那种沉陷效果。叠压是**相邻两枚之间**的关系——写在每一枚上会把整簇
     // 往左推、第一枚越过自己的左缘（这个错误在声明失效期间完全看不出来）。
-    const overlap = stylesSource.match(
+    const overlap = stylesSource().match(
       /\.selector-presence__slot \+ \.selector-presence__slot\s*\{([^}]*)\}/
     )?.[1] ?? ''
     expect(overlap.length).toBeGreaterThan(0)
@@ -597,8 +590,8 @@ describe('shared surface tool dock resize', () => {
     expect(topicsPanelSource).not.toContain('workspace-topic-agents')
     expect(topicsPanelSource).not.toContain('workspace-topic-title-line')
     // 而那些写法的 CSS 也要一起走，否则死规则会留在表里让人以为还有第二套。
-    expect(stylesSource).not.toContain('.branch-row__agents')
-    expect(stylesSource).not.toContain('.workspace-topic-title-line')
+    expect(stylesSource()).not.toContain('.branch-row__agents')
+    expect(stylesSource()).not.toContain('.workspace-topic-title-line')
   })
 
   it('caps the avatar cluster on both bars with one shared number', () => {
