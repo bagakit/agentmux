@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import {
   AgentMuxError,
+  readRoutedInputMailbox,
   createInputPerformanceRecorder, hostedCarrierPerformance,
   parseAgentNativeResumeSource,
   hostAgentCreationIntent,
@@ -1874,6 +1875,14 @@ export class RuntimeController {
   private assertInputControl(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): void {
     if (control.agentSessionId !== key.agentSessionId || control.run.runId !== key.expectedRun.runId) throw new AgentMuxError(
       'The original input control names another Session or Run.', 'STALE_AGENT_SESSION')
+  }
+  /** Read the original journal across its Runs; reading never starts or rejoins an input. */
+  async inputMailbox(control: SessionHistoryReference, options: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'> = {}) {
+    const client = this.configuredClient(control.hostId)
+    const { hostId: _route, ...page } = await readRoutedInputMailbox({ ...options, hostId: control.hostId, agentSessionId: control.agentSessionId },
+      input => client.readAgentInputMailbox(input))
+    if (this.configuredClient(control.hostId) !== client) throw new AgentMuxError('The original mailbox Host changed during reading. Its records are retained.', 'CONTROL_UNAVAILABLE')
+    return page
   }
   async inspectInput(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) {
     this.assertInputControl(control, key)

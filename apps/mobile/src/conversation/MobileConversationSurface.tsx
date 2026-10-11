@@ -609,7 +609,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   // Recent device intents remain editable memory; they are never promoted to native history or a delivery receipt.
   const historyLocalEntries = promptAttemptsForSession(attempts.current, agentSessionId)
     .filter(([, original]) => original.draft && session?.hostId && original.originalHostId === session.hostId)
-    .map(([key, original]) => ({ id: key + ':' + original.operationId, text: original.draft }))
+    .map(([key, original]) => ({ id: key + ':' + original.operationId, text: original.draft,
+      ...(original.manualInput && original.originalHostId ? { inputOrigin: { hostId: original.originalHostId, key: manualKey(original) } } : {}) }))
   const retainedAttempts = promptAttemptsForSession(attempts.current, agentSessionId).filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
   const renderPromptAttempt = ([key, original]: [string, PromptAttempt]) => {
     const waiting = original.inputReceipt?.control.waiting
@@ -744,7 +745,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               return appendNamedFileReference('', path, original.identity.name)
             }, { separate: true })
           }} />}
-          tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
+          tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
           refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
           onHistoryFill={fillHistoryMessage} onHistoryCopy={copyHistoryMessage} localEntries={historyLocalEntries}
           onHistoryFillLocal={entry => {

@@ -1748,6 +1748,11 @@ export async function registerIpc(args: {
     pauseUserProgress(session, 'Paused for your message.')
     return receipt
   }))
+  handleWithEvent('sessions:inputMailbox', async (event, session: import('../shared/contracts.js').SessionHistoryReference,
+    options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>) => {
+    requireTrustedSender('sessions:inputMailbox', event)
+    return await args.runtime.inputMailbox(session, options)
+  })
   handleWithEvent('sessions:inspectInput', async (event, session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) => sessionInputOperationResult(async () => {
     assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.inspectInput(session, key)

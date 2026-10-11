@@ -251,6 +251,12 @@ export function AgentSessionComposer({
         control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
+          ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
+            hostId: entry.directInputControl.hostId, key: entry.inputReceipt?.key ?? { kind: 'prompt' as const,
+              agentSessionId: entry.directInputControl.agentSessionId, expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId }
+          } } : entry.resumeInputIntent && entry.resumeInputReceipt?.key ? { inputOrigin: {
+            hostId: entry.resumeInputIntent.control.hostId, key: entry.resumeInputReceipt.key
+          } } : {}),
           text: entry.text,
           ...(entry.archived ? { archived: true as const } : {}),
           inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
