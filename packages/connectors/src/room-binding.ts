@@ -93,7 +93,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   grants(bindingId: string, revision: number): ConnectionGrant[] { return this.bindingGrants(this.readExact(bindingId, revision)).filter(grant => grant.bindingRevision === revision) }
   private bindingGrants(binding: RoomBinding | null): ConnectionGrant[] {
     if (!binding) return []
-    return this.safe(() => this.database.prepare('SELECT grant_id FROM room_grant_head WHERE binding_id=?').all(binding.bindingId).map(row => this.readGrant(String(row.grant_id))!).filter(grant => grant.bindingRevision === binding.revision))
+    return this.safe(() => this.database.prepare('SELECT grant_id FROM room_grant_head WHERE connection_id=? AND room_id=? AND binding_id=?').all(binding.connectionId, binding.externalConversationId, binding.bindingId).map(row => this.readGrant(String(row.grant_id))!).filter(grant => grant.bindingRevision === binding.revision))
   }
   private saved(operationId: string): Saved | null {
     const row = this.database.prepare('SELECT intent_json, result_json FROM room_binding_operation WHERE operation_id=?').get(operationId)

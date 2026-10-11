@@ -1,7 +1,8 @@
+import { AgentMuxError } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { DurableIngressCore } from './durable-ingress.js'
 
-type HostedInput = Pick<AgentMuxHostedClient, 'readAgentSessions' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation'>
+type HostedInput = Pick<AgentMuxHostedClient, 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting' | 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation'>
 /** Borrow the exact Host transport. Its semantic service must resolve original external authority in process. */
 export function createHostedIngressCorePort(clients: () => readonly { hostId: string; client: HostedInput }[]): (hostId: string) => DurableIngressCore | undefined {
   return hostId => {
@@ -15,7 +16,13 @@ export function createHostedIngressCorePort(clients: () => readonly { hostId: st
       onEvent: listener => client.onEvent(listener),
       respondAgentInteraction: input => client.respondAgentInteraction(input),
       inspectAgentInteractionOperation: input => client.inspectAgentInteractionOperation(input),
-      readAgentSessions: () => client.readAgentSessions(),
+      readAgentSession: async id => {
+        const session = await client.readAgentSession(id)
+        // The selected semantic endpoint owns local metadata; hostId is its configured route alias.
+        if (session && session.hostId !== 'local' && session.hostId !== hostId) throw new AgentMuxError(
+          'The original Session metadata belongs to another Host. Existing Runs are retained.', 'INGRESS_TARGET_UNCONFIRMED')
+        return session ? { ...session, hostId } : null
+      },
       inspectAgentInput: input => client.inspectAgentInput(input),
       submitAgentMessage: input => client.submitAgentMessage(input),
       rejoinAgentInputWaiting: input => client.rejoinAgentInputWaiting(input)

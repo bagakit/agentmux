@@ -28,7 +28,7 @@ export interface IngressAuthenticator {
   /** Read the exact parent after persistence/ACK, outside original Core input admission. */
   qualifyReply?(config: ConnectionConfig, event: Readonly<VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal): Promise<'reply' | 'message' | 'unknown'>
 }
-export type DurableIngressCore = Pick<AgentMuxClient, 'readAgentSessions' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation'>>
+export type DurableIngressCore = Pick<AgentMuxClient, 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation'>>
 export type DurableIngressOptions = {
   connections: ConnectionHost
   bindings: RoomBindingReadPort
@@ -241,9 +241,9 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     }
     const client = this.options.core(original.binding.executionHostId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
-    const exact = (await client.readAgentSessions()).filter(session => session.agentSessionId === original.binding.agentSessionId)
-    if (exact.length !== 1) fail('INGRESS_TARGET_UNCONFIRMED')
-    const expectedRun = { ...exact[0]!.run }
+    const exact = await client.readAgentSession(original.binding.agentSessionId)
+    if (!exact || exact.agentSessionId !== original.binding.agentSessionId || exact.hostId !== original.binding.executionHostId) fail('INGRESS_TARGET_UNCONFIRMED')
+    const expectedRun = { ...exact.run }
     const claimed = this.transaction(() => {
       const current = this.read(ingressId)!
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')

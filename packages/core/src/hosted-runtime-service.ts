@@ -11,7 +11,7 @@ import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, t
 import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxHostedBootstrap, type AgentMuxHostedInvocation,
   type AgentMuxHostedMethod, type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
-import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
+import { decodeHostedValue, encodeHostedValue, hostedTransfer, parseHostedAgentSessionRead, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'runtimeDiagnostics', 'runtimeResourceSnapshot',
@@ -20,7 +20,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor',
   'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
-  'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
+  'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'readDispatch', 'listDispatches'
 ])
@@ -238,6 +238,9 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    if (invocation.method === 'readAgentSession' && (invocation.args.length !== 1 ||
+        typeof invocation.args[0] !== 'string' || !/^[A-Za-z0-9_-]+$/u.test(invocation.args[0]))) throw new AgentMuxError(
+      'Session metadata reading accepts one complete original Session ID.', 'INVALID_CONTROL_REQUEST')
     const continuityControl = invocation.method === 'controlAgentContinuity'
     if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
     const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction'
@@ -345,7 +348,8 @@ export class AgentMuxHostedRuntimeService {
       context.signal?.throwIfAborted(); this.assertFence(p.fence)
     }
     await recordActivity('confirmed')
-    return { value: encodeHostedValue(value) }
+    return { value: encodeHostedValue(invocation.method === 'readAgentSession'
+      ? parseHostedAgentSessionRead(value, invocation.args[0]) : value) }
   }
   private async acquire(target: AgentMuxHostedAttachmentTarget, afterByte: number, view: 'raw' | 'terminal',
     refresh: boolean, operationId: string | undefined, destination: Reader, fence: AgentMuxRuntimeFence, signal?: AbortSignal) {
