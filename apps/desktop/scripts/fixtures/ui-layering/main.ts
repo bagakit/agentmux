@@ -440,6 +440,7 @@ async function verifyAvatar() {
   const originalBounds = window.getContentBounds(), originalBrowser = { id: page.webContents.id, url: page.webContents.getURL(),
     input: await page.webContents.executeJavaScript('document.querySelector("input").value'), clicks: await page.webContents.executeJavaScript('clicks') }
   const originalWork = (await facts()).workbench, fixture = await createAvatarLayeringSeed(root), samples: any[] = []
+  receipt.avatar = { target: fixture.seed.baseline.target, sourceInputs: fixture.seed.sourceInputs, samples }
   const avatar = () => read('layeringProbe.avatar.read()')
   const brief = (state: any) => ({ ...state, png: state.png ? { sha256: createHash('sha256').update(state.png).digest('hex'), bytes: state.png.length } : null })
   const projections = () => (overlays as any).projections as Map<string, { view: WebContentsView; region: NativeOverlayRegion; revision: number }>
@@ -489,7 +490,7 @@ async function verifyAvatar() {
     await writeFile(join(root, rendererFile), renderer.toPNG()); await writeFile(join(root, chromeFile), chrome.toPNG())
     const current: any = { label, state: brief(state), regionId: declaration.id, webContentsId: projection.view.webContents.id, revision: projection.revision,
       roi, rendererFile, chromeFile, rendererSHA256: createHash('sha256').update(renderer.toBitmap()).digest('hex'), chromeSHA256: createHash('sha256').update(chrome.toBitmap()).digest('hex') }
-    samples.push(current); receipt.avatar = { target: fixture.seed.baseline.target, sourceInputs: fixture.seed.sourceInputs, samples }
+    samples.push(current)
     assert.deepEqual(chrome.getSize(), renderer.getSize())
     assert.equal(current.chromeSHA256, current.rendererSHA256, 'The original Avatar native compositor pixels must match the latest real Renderer canvas, not an older bitmap')
     if (previous) {
