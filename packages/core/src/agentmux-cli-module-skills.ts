@@ -131,8 +131,15 @@ Renew explicitly abandons authentication within this intent, retaining old reque
 it never creates an application. Scan, phone confirmation and exact account/enterprise confirmation
 are separate stages. A confirmed management session does not establish app permission, tenant
 membership, configuration, publication or chat readiness. App eligibility, configuration and
-publication continuations remain unimplemented; this reference-native authentication does not
-qualify live platform login or the combined Settings journey.
+publication continuations remain separate. With --application-inspection, setup inspect can
+locally page original safe application observations and select an exact old --inspection-step;
+it never sends HTTP or repairs an ACK. Copy its offered inspect-application or
+recover-application-inspection action and use decision continue. New observation requires current
+confirmed stored auth; original actor local recovery needs only the frozen original child/input,
+even after renewal, revision or restart. Old private permission stays withheld and an unrecoverable
+old result never blocks a separate eligible new observation. Reported basic-info read permission
+is not actual app data, owning tenant or write authority. Configuration and publication remain
+unimplemented; this does not qualify live platform rights or the combined Settings journey.
 
 Configure or bind only within the user's authorized target. Inspect current values before
 changing them; use the current help's exact input and operation identities. A grant is an

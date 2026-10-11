@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupBegin, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
+import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 
 type Source = typeof api.connections.call
@@ -91,7 +92,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   }
   function advance(action: ConnectionSetupAction) {
     if (!operation) return
-    const input = { operationId: operation.operationId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: action.kind === 'confirm-account' ? 'confirm' : action.kind } } as const
+    const input = { operationId: operation.operationId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: connectionSetupDecisionForAction(action) } } as const
     submittedActions.current.add(action.actionId)
     void perform(input.operationId, () => source('connection.setup.advance', input), action.kind === 'continue' || action.kind === 'renew')
   }

@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAction, type ConnectionSetupBegin, type ConnectionSetupListing, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
+import { parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupBegin, type ConnectionSetupInspect, type ConnectionSetupListing, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
+import { SetupApplicationInspection } from './connection-setup-inspection.js'
 
 type Row = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
 type PrivateEnvelope = { operationId: string; connectionId: string; attemptId: string; challenge: ConnectionSetupView['challenge']; privateState: string }
@@ -21,13 +22,15 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private readonly nativeRequests = new Set<string>()
   private readonly unsettled = new Map<string, PrivateEnvelope>()
   private readonly unsettledAuthentication = new Map<string, AuthEnvelope>()
+  private readonly inspection: SetupApplicationInspection
   constructor(private readonly connections: ConnectionHost, private readonly secrets?: EnrollmentSecrets) {
     connections.database.exec('CREATE TABLE IF NOT EXISTS connection_setup_operation (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, operation_id TEXT UNIQUE NOT NULL, connection_id TEXT NOT NULL, actor_json TEXT NOT NULL, record_json TEXT NOT NULL, private_ref TEXT)')
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_by_connection ON connection_setup_operation(connection_id,ordinal)')
     connections.database.exec('CREATE TABLE IF NOT EXISTS connection_setup_auth_step (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, step_id TEXT UNIQUE NOT NULL, operation_id TEXT NOT NULL, action_id TEXT UNIQUE NOT NULL, input_json TEXT NOT NULL, record_json TEXT NOT NULL, private_ref TEXT)')
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_auth_by_operation ON connection_setup_auth_step(operation_id,ordinal)')
+    this.inspection = new SetupApplicationInspection({ connections, secrets, read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), snapshot: row => this.authenticationSnapshot(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
   }
-  close(): void { this.closed = true; this.nativeRequests.clear(); this.unsettled.clear(); this.unsettledAuthentication.clear() }
+  close(): void { this.closed = true; this.nativeRequests.clear(); this.unsettled.clear(); this.unsettledAuthentication.clear(); this.inspection.close() }
   private safe<T>(run: () => T): T {
     try { return run() } catch (error) {
       if (error instanceof AgentMuxError) throw error
@@ -61,14 +64,14 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       return { operationId, input, authentication, privateRef: row.private_ref === null ? null : String(row.private_ref) }
     })
   }
-  private actions(row: Row, stage: Authentication['stage'], account: AuthEnvelope['account']): ConnectionSetupAction[] {
+  private actions(row: Row, stage: Authentication['stage'], account: AuthEnvelope['account']): ConnectionSetupAuthenticationAction[] {
     const auth = row.operation.authentication
     if (auth?.request === 'dispatching' && this.nativeRequests.has(auth.stepId)) return []
     if (auth?.request === 'confirmed' && auth.secureStorage !== 'stored') {
       const step = this.authStep(row.operation.operationId)
       return step ? [{ actionId: step.input.decision.actionId, expectedRevision: step.input.expectedRevision, kind: step.input.decision.value === 'confirm' ? 'confirm-account' : step.input.decision.value }] : []
     }
-    const kinds: ConnectionSetupAction['kind'][] = stage === 'account' ? ['confirm-account', 'renew'] : ['waiting', 'scanned', 'handoff'].includes(stage) ? ['continue', 'renew'] : ['renew']
+    const kinds: ConnectionSetupAuthenticationAction['kind'][] = stage === 'account' ? ['confirm-account', 'renew'] : ['waiting', 'scanned', 'handoff'].includes(stage) ? ['continue', 'renew'] : ['renew']
     return kinds.map(kind => ({ kind, expectedRevision: row.operation.revision, actionId: 'setup:' + createHash('sha256').update(JSON.stringify({ intent: admitted(row.operation), actor: row.actor, application: row.operation.application, revision: row.operation.revision, attempt: auth?.attemptId ?? row.operation.request.attemptId, account: account ? { userId: account.userId, tenantId: account.tenantId } : null, kind })).digest('hex') }))
   }
   private authEnvelope(value: string | null, row: Row, step: AuthStep): AuthEnvelope | null {
@@ -149,6 +152,8 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     let row = this.read(input.operationId)
     if (!row) throw failure('The exact original management request is unknown.', 'UNKNOWN_CONNECTION_OPERATION')
     await this.authority(context, row)
+    const inspected = await this.inspection.advance(input, context)
+    if (inspected) return inspected
     if (!this.current(row)) throw failure('The exact saved bot revision changed. The original management intent is retained.', 'CONNECTION_REVISION_CONFLICT')
     const key = 'advance:' + input.decision.actionId
     let previous = this.authStep(input.operationId, input.decision.actionId)
@@ -366,10 +371,11 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       return this.view(row, context)
     } catch { return this.view(this.save(row, o => { o.secureStorage = 'unknown'; o.reason = 'challenge-unconfirmed' }), context) }
   }
-  async inspect(value: { operationId: string }, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+  async inspect(value: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const input = parseConnectionSetupParams('connection.setup.inspect', value), row = this.read(input.operationId)
     await this.authority(context, row)
-    return this.view(row, context)
+    const view = await this.view(row, context)
+    return row && input.applicationInspection ? this.inspection.attach(view, row, context, input.applicationInspection) : view
   }
   async list(value: { connectionId: string; cursor?: string; limit?: number }): Promise<ConnectionSetupListing> {
     const input = parseConnectionSetupParams('connection.setup.ls', value), limit = input.limit ?? 25
@@ -383,7 +389,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       const setup = current && this.connections.registeredAdapter(current.config.adapterId)?.setup
       const support: ConnectionSetupListing['support'] = current ? {
         connectionRevision: current.revision,
-        capabilities: setup?.domains.includes(current.config.application.domain) ? ['management-authentication'] : []
+        capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : [])]
       } : null
       const rows = this.connections.database.prepare('SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(input.connectionId, before, limit + 1)
       return { operations: rows.slice(0, limit).map(r => this.summary(this.read(String(r.operation_id))!)), next: rows.length > limit ? String(rows[limit - 1]!.ordinal) : null, support }
