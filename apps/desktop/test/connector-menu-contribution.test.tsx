@@ -67,7 +67,7 @@ async function settingsFromApp() {
   await waitFor(() => expect(document.querySelector('[data-connector-service]')).not.toBeNull())
 }
 async function toggle() { expect(master()).not.toBeNull(); await moteClick(master()) }
-async function save() { await f.button('Save Connector service') }
+async function save() { await f.button('Save changes') }
 async function cli(args: string[], input?: unknown) {
   const output = await runCompiledObjectCli(['--endpoint', 'unix:' + join(f.root, 'public.sock'), 'connection', 'service', ...args], objectCliEnvironment(f.root), input ? JSON.stringify(input) : undefined)
   expect(output.code, output.stdout + output.stderr).toBe(0)
@@ -140,7 +140,7 @@ it('keeps an unknown save as its exact original request across remount and curre
   await waitFor(() => expect(original(input.operationId).textContent).toContain('Original request confirmed: Off at revision 1'))
   expect(policy().dataset.connectorServiceState).toBe('on')
   expect(useAppStore.getState().connectorServiceObservation?.state).toEqual({ enabled: true, revision: 0 })
-  await f.button('Check current service'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
+  await f.button('Refresh status'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
   expect(original(input.operationId).textContent).toContain('Original request confirmed: Off at revision 1')
   await useAppStore.persist.rehydrate()
   expect(useAppStore.getState().connectorServiceIntents[input.operationId]?.input).toEqual(input)
@@ -179,13 +179,13 @@ it('requires an explicit fresh revision for a new choice after an unknown save w
   })
   await save(); await waitFor(() => expect(document.body.textContent).toContain('The save reply is unconfirmed'))
   const originalInput = structuredClone(writes()[0]!)
-  const saveButton = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Save Connector service')!
+  const saveButton = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Save changes')!
   expect(saveButton().disabled).toBe(true)
-  await f.button('Check current service'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
+  await f.button('Refresh status'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
   await toggle(); expect(master().checked).toBe(true)
   expect(saveButton().disabled).toBe(true)
   expect(writes()).toHaveLength(1)
-  await f.button('Use current revision for a new change'); expect(master().checked).toBe(true)
+  await f.button('Review latest setting'); expect(master().checked).toBe(true)
   await save(); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
   expect(writes()).toHaveLength(2)
   expect(writes()[1]).toMatchObject({ expectedRevision: 1, service: { enabled: true } })
@@ -216,7 +216,7 @@ it('does not let an earlier service read restore On after the service Off receip
     if (method === 'connection.service.get' && !held) { held = true; return await new Promise(resolve => { release = resolve }) as never }
     return await forward(method, input)
   })
-  await f.button('Check current service'); expect(held).toBe(true)
+  await f.button('Refresh status'); expect(held).toBe(true)
   await toggle(); await save(); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
   await act(async () => release(old)); await settleMoteApp()
   expect(policy().dataset.connectorServiceState).toBe('off')
@@ -258,7 +258,7 @@ it('keeps a later explicit selection when an earlier configure acknowledgement a
   await act(async () => release()); await settleMoteApp()
   await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
   expect(master().checked).toBe(true)
-  await f.button('Use current revision for a new change')
+  await f.button('Review latest setting')
   expect(master().checked).toBe(true)
   await save(); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
   expect(writes()).toHaveLength(2)
@@ -279,7 +279,7 @@ it('keeps the newer current revision when an older configure receipt is returned
   })
   await save(); await waitFor(() => expect(receipt).toBeDefined())
   await cli(['configure', '--input', '-'], { operationId: 'newer-independent-writer', expectedRevision: 1, service: { enabled: true } })
-  await f.button('Check current service'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
+  await f.button('Refresh status'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
   await act(async () => release()); await settleMoteApp()
   expect(policy().dataset.connectorServiceState).toBe('on')
   expect(useAppStore.getState().connectorServiceObservation?.state).toEqual({ enabled: true, revision: 2 })
@@ -348,7 +348,7 @@ it('keeps accurate unknown management and last-confirmed menu groups without cha
   expect(master()).toBeNull()
   expect(document.querySelectorAll('[data-connection]')).toHaveLength(2)
   expect(document.querySelector('[data-enrollment-new]')).not.toBeNull()
-  unavailable = false; await f.button('Check current service'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
+  unavailable = false; await f.button('Refresh status'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
   await closeSettings()
   for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()[0]!.textContent).toContain('Create group chat') }
   unavailable = true
