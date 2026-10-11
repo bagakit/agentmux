@@ -542,15 +542,27 @@ it('lazily discovers closed original backlinks and reads actual source text only
   expect(dom.container.textContent).toContain('5 incoming · 0 outgoing')
   expect(dom.container.textContent).toContain('1 written link query elsewhere has no confirmed destination')
   expect(vi.mocked(api.notebooks.content).mock.calls.length).toBeLessThanOrEqual(2)
+  const sourcePage = (await store.read()).pages['closed-source']!
+  await dom.click('[aria-label="Open source note: Original closed-source"]')
+  expect(open).toHaveBeenLastCalledWith(sourcePage)
+  expect(dom.container.querySelector<HTMLDetailsElement>('.note-links-coverage')?.open).toBe(false)
   await dom.click('.note-links-source-toggle')
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Original closed source links to'))
   expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
   expect(dom.container.querySelectorAll('.note-links-block')).toHaveLength(4)
   expect([...dom.container.querySelectorAll('.note-links-excerpt')].filter(item => item.textContent?.includes('Original closed source links to'))).toHaveLength(1)
+  expect([...dom.container.querySelectorAll<HTMLDetailsElement>('.note-links-occurrence details')].every(item => !item.open)).toBe(true)
+  const excerpt = [...dom.container.querySelectorAll<HTMLButtonElement>('button.note-links-excerpt')].find(item => item.textContent?.includes('Original closed source links to'))!
+  await act(async () => excerpt.click())
+  expect(open).toHaveBeenLastCalledWith(sourcePage, 'source-inline')
+  await dom.click('[aria-label="Open target page: Original target"]')
+  expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
   const toPage = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-actions button')].find(button => button.textContent === 'Open target page')!
+  await act(async () => toPage.closest('details')!.querySelector('summary')!.click())
   await act(async () => toPage.click())
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages.target, undefined)
   const exactSource = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-actions button')].filter(button => button.textContent === 'Open source block').at(-1)!
+  if (!exactSource.closest('details')!.open) await act(async () => exactSource.closest('details')!.querySelector('summary')!.click())
   await act(async () => exactSource.click())
   expect(open).toHaveBeenLastCalledWith((await store.read()).pages['closed-source'], 'source-inline')
   const only = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-controls button')].find(button => button.textContent === 'Selected block only')!
@@ -581,6 +593,8 @@ it('retains source occurrence evidence on a newer original and on failed refresh
   await dom.render(<NoteLinksPanel noteId="target" active={false} onOpen={() => {}} />)
   expect(pending?.aborted).toBe(true)
   expect(dom.container.querySelectorAll('.note-links-occurrence')).toHaveLength(5)
+  await dom.click('.note-links-toggle')
+  expect(dom.container.querySelector('.note-links-toggle')?.textContent).toContain('Needs refresh')
 })
 
 it('does not revive a cancelled Arrange when a later original graph adds another related Note', async () => {

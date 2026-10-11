@@ -6,6 +6,7 @@ import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatia
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceFiles } from '../../../src/main/workspace-files'
 import { NoteFileWriter } from '../../../src/main/note-file-writer'
+import { NoteTitleFileWriter } from '../../../src/main/note-title-file-writer'
 import { NotesStorageOwner } from '../../../src/main/notes-storage-owner'
 import { ConfigOwner } from '../../../src/main/config-owner'
 import { FileReadOwner } from '../../../src/main/file-read-owner'
@@ -36,7 +37,22 @@ export async function start(root: string, notify: (event: unknown) => void, opti
   const configOwner = new ConfigOwner({ read: () => config, save: async next => next, publish: next => { config = next } })
   const notes = new NotesStorageOwner(configOwner, spatial, snapshot => notify({ channel: 'notesStorage', value: snapshot }), storage)
   await notes.initialize()
-  const metadata = new AgentMuxNotebookStore(undefined, storage), files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }) as never)
+  const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }) as never)
+  const titleWorkspace = (resource: import('@agentmux/core').NoteResource) => config.workspaces.find(value => value.id === resource.workspaceId && value.hostId === resource.hostId && value.path === resource.workspacePath)
+  const metadata: AgentMuxNotebookStore = new AgentMuxNotebookStore(undefined, storage, { title: {
+    inspect: operationId => titleWriter.inspect(operationId),
+    write: intent => {
+      const original = titleWorkspace(intent.resource)
+      return original ? titleWriter.write(original, intent) : Promise.resolve({ status: 'unavailable' as const, operationId: intent.operationId, reason: 'The exact private original Workspace is unavailable.' })
+    },
+    current: async (noteId, resource) => {
+      const original = titleWorkspace(resource)
+      if (!original) return { status: 'unknown' as const, noteId, resource, reason: 'The exact private original Workspace is unavailable.' }
+      const observed = await titleWriter.current(original, noteId, resource)
+      return titleWorkspace(resource) ? observed : { status: 'unknown' as const, noteId, resource, reason: 'The original private Workspace changed during this title read.' }
+    }
+  } })
+  const titleWriter: NoteTitleFileWriter = new NoteTitleFileWriter(files, metadata)
   const writer = new NoteFileWriter(files, undefined, metadata), actor = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'local') }
   const write = (input: Parameters<NoteFileWriter['write']>[1]) => notes.write(workspace, input, owner => writer.write(owner, input, { actor }))
   const initial = options.notebook ? null : await writer.read(workspace, path)
