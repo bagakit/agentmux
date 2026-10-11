@@ -13,7 +13,7 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_RESU
 if (process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT) expect(Reflect.get(core, 'AGENTMUX_RESUME_CONTEXT_MUTANT')).toBe(process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
+async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-context-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'runtime'), state = join(root, 'state')
@@ -72,9 +72,11 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
   await vi.waitFor(async () => expect((await inner.kernel.status(ended.runId)).state.type).toBe('exited'), { timeout: 5000 })
   const original = { kind: 'agent' as const, agentSessionId: 'original-session', providerId, executorId: 'configured-native', hostId: 'local', workspacePath: root,
     run: { runId: ended.runId }, retiredRuns: [], hookBindingId: 'original-binding', hookToken: 'original-token', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1),
-    nativeHandle: { kind: 'provider' as const, providerId, sessionId: 'native-original' }, semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: _historyFixtureEpoch(0, 0, 1) } }
+    nativeHandle: { kind: 'provider' as const, providerId, sessionId: 'native-original', ...(options.originalPath ? { transcriptPath: join(root, 'native.json') } : {}) }, semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: _historyFixtureEpoch(0, 0, 1) } }
   await store.compareAndSwap(null, original); await inner.registry.load('local')
-  const result = await client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: 'automatic-root', trigger: 'startup', policy: { retryInitialDelayMs: 20, retryMaxDelayMs: 40 } })
+  const result = options.direct
+    ? { kind: 'resumed', session: await client.resumeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: 'automatic-root', prompt: 'Original explicit resume input' }) }
+    : await client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: 'automatic-root', trigger: 'startup', policy: { retryInitialDelayMs: 20, retryMaxDelayMs: 40 } })
   expect(result.kind).toBe('resumed')
   if (options.failFirst) await vi.waitFor(async () => expect((await store.readMetadata(original.agentSessionId))?.continuityOperations?.['automatic-root']?.supervision).toMatchObject({ attemptCount: 2, process: { state: 'running' } }))
   const current = client.agentSession(original.agentSessionId)
@@ -315,4 +317,26 @@ it('publishes original Hook evidence through Hosted and existing actual inspect 
   expect(refreshed.code, refreshed.stderr).toBe(0)
   expect(JSON.parse(refreshed.stdout).result.session.continuityOperations['automatic-root'].supervision).toMatchObject({ phase: 'cancelled', cancellation: { operationId: 'native-cancel', hookReceiptId: 'public-cancellation' } })
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+})
+
+
+it('reads the original explicit resume receipt after a verified first locator enrichment without replaying Start or input', async () => {
+  const f = await fixture({ witnessPath: true, direct: true }), before = await f.rootOf()
+  const request = { agentSessionId: f.original.agentSessionId, expectedRun: f.original.run, operationId: 'automatic-root', prompt: 'Original explicit resume input' }
+  expect((await f.post(resumed)).status).toBe(204)
+  expect((await f.saved()).nativeHandle).toHaveProperty('transcriptPath', join(f.root, 'native.json'))
+  await expect(f.client.resumeAgent(request)).resolves.toMatchObject({ run: f.current.run })
+  await expect(f.client.resumeAgent({ ...request, prompt: 'Another explicit input' })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  expect((await f.rootOf()).nativeTarget).toEqual(f.original.nativeHandle)
+  expect((await f.rootOf()).launchInput).toEqual(before.launchInput)
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.input).not.toHaveBeenCalled(); await raw(f)
+})
+
+it('refuses a changed known locator when reading an original explicit resume receipt while retaining its healthy Run', async () => {
+  const f = await fixture({ witnessPath: true, direct: true, originalPath: true }), before = await f.rootOf()
+  await f.inner.registry.update(f.current.agentSessionId, f.current.run, (saved: any) => ({ ...saved, nativeHandle: { ...saved.nativeHandle, transcriptPath: join(f.root, 'another-native.json') } }))
+  await expect(f.client.resumeAgent({ agentSessionId: f.original.agentSessionId, expectedRun: f.original.run, operationId: 'automatic-root', prompt: 'Original explicit resume input' })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+  expect((await f.rootOf()).nativeTarget).toEqual(before.nativeTarget)
+  expect((await f.rootOf()).launchInput).toEqual(before.launchInput)
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.input).not.toHaveBeenCalled(); await raw(f)
 })
