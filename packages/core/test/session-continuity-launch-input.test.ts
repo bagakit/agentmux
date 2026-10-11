@@ -7,8 +7,8 @@ import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
 import { composeAgentPrompt } from '../src/agent-outbound-message.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import type { AgentMuxContinuityInputRequest } from '../src/agent-session-continuity.js'
-import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -37,7 +37,10 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; lo
   core.hookServer.isRunning = () => true
   core.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'B'), endpoint: { url: 'http://127.0.0.1:0', token: 'token'.padEnd(43, 'T') }, bindRun: async () => {}, close: async () => {} })
   vi.spyOn(core.screenEvidence, 'wait').mockResolvedValue(1)
-  await core.registry.update('recipient', previousRun, (value: any) => ({ ...value, semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) } }))
+  await core.registry.update('recipient', previousRun, (value: AgentMuxStoredAgentSession) => {
+    const observedAt = Math.max(value.updatedAt + 1, Date.now())
+    return { ...value, updatedAt: observedAt, semanticStatus: { state: 'working', source: 'native-hook', observedAt } }
+  })
   const request = { agentSessionId: 'recipient', expectedRun: previousRun, operationId: 'original-resume', trigger: 'input' as const, input: fresh }
   const op = () => h.client.agentSession('recipient').continuityOperations?.[request.operationId]
   return { ...h, core, provider, request, op, started, currentRun, newRun }
@@ -79,17 +82,17 @@ it('reads the original launch key through the real public RPC input.inspect wire
   } finally { await rpc?.dispose(); await server.stop(); await h.close() }
 })
 
-it('binds selected automatic parts to one original launch carrier without an invented future Run in the frozen note', async () => {
+it('restores recent automatic work without carrying synthesized input in native resume argv', async () => {
   const h = await fixture()
   try {
     await h.client.ensureAgentContinuity({ ...h.request, input: undefined, trigger: 'startup' })
-    const op = h.op()!, packet = op.launchInput!, delivery = op.recoveryDelivery!
-    expect(packet.state).toBe('launch-carried'); expect(packet.prompt).not.toContain(h.newRun.runId)
-    expect(h.started[0].args).toContain(packet.prompt)
-    expect(delivery.context.newRun).toEqual(h.newRun)
-    expect(delivery).toMatchObject({ phase: 'accepted', key: packet.key, receipt: { status: 'launch-carried', key: packet.key } })
-    for (const part of [delivery.reminder, delivery.continuation]) expect(part).toMatchObject({ status: 'accepted', receiptRef: packet.key })
-    expect(composeAgentPrompt(delivery.continuation.text, delivery.reminder.text).text).toBe(packet.prompt)
+    const op = h.op()!
+    expect(op.newRun).toEqual(h.newRun)
+    expect(op.interruption).toMatchObject({ support: 'provider', state: 'unknown' })
+    expect(op.launchInput).toBeUndefined(); expect(op.recoveryDelivery).toBeUndefined()
+    expect(op.recoveryInputs).toEqual({ reminder: '', continuation: '' })
+    expect(h.started[0].args).toEqual(h.provider.buildResumeLaunch({ workspacePath: h.root,
+      nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-original' }, args: [], env: {} }).args)
     expect(h.core.kernel.input).not.toHaveBeenCalled()
   } finally { await h.close() }
 })

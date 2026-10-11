@@ -90,9 +90,10 @@ async function fixture(exitMode: 'immediate' | 'deferred' = 'immediate', options
   })
   const ended = await original.nativeStart({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
   await vi.waitFor(async () => expect((await original.inner.kernel.status(ended.runId)).state.type).toBe('exited'), { timeout: 5000 })
+  const activityAt = Date.now()
   const previous: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-session', providerId: provider.id, executorId: 'configured-resume',
-    hostId: 'local', workspacePath: root, run: { runId: ended.runId }, retiredRuns: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1),
-    hookBindingId: 'original-binding', hookToken: 'original-token', semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) }, nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } }
+    hostId: 'local', workspacePath: root, run: { runId: ended.runId }, retiredRuns: [], createdAt: activityAt, updatedAt: activityAt,
+    hookBindingId: 'original-binding', hookToken: 'original-token', semanticStatus: { state: 'working', source: 'native-hook', observedAt: activityAt }, nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } }
   await original.store.compareAndSwap(null, previous); await original.inner.registry.load('local')
   const request: AgentMuxAgentResumeInput = { agentSessionId: previous.agentSessionId, operationId: 'original-resume', prompt: 'the frozen original task' }
   const resume = (changes: Partial<AgentMuxAgentResumeInput> = {}, owner = original) => owner.client.resumeAgent({ ...request, ...changes })
@@ -125,7 +126,7 @@ it.each(['immediate', 'deferred'] as const)('supervises the original automatic i
   const current = f.client.agentSession(f.previous.agentSessionId), root = current.continuityOperations!['automatic-root']!
   expect(current.agentSessionId).toBe(f.previous.agentSessionId); expect(current.nativeHandle).toEqual(f.previous.nativeHandle)
   expect(root.supervision).toMatchObject({ attemptCount: 2, attemptLimit: 4, phase: 'observing' })
-  expect(f.start.mock.calls[0]![0].args.length).toBe(4); expect(f.start.mock.calls[1]![0].args.length).toBe(3)
+  expect(f.start.mock.calls[0]![0].args.length).toBe(3); expect(f.start.mock.calls[1]![0].args.length).toBe(3)
   expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
   await f.write(current)
 })
@@ -229,7 +230,7 @@ it('pauses at the frozen total attempt limit without resetting input or policy',
   const root = await phase(f, 'paused')
   expect(root.supervision).toMatchObject({ attemptCount: 3, attemptLimit: 3, reason: 'retry-budget-exhausted' })
   expect(root.policy.retryMaxAttempts).toBe(2); expect(f.start).toHaveBeenCalledTimes(3)
-  expect(root.launchInput!.state).toBe('launch-carried'); expect(f.start.mock.calls.slice(1).every((call: any[]) => call[0].args.length === 3)).toBe(true)
+  expect(root.launchInput).toBeUndefined(); expect(root.recoveryInputs).toEqual({ reminder: '', continuation: '' }); expect(f.start.mock.calls.slice(1).every((call: any[]) => call[0].args.length === 3)).toBe(true)
   expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
 it('freezes deterministic backoff before dispatch and keeps its original schedule on read-only refresh', async () => {
@@ -426,8 +427,8 @@ it('existing Hosted ensure and actual inspect/refresh CLI expose original proces
   const inspected = await runCompiledObjectCli(['agent', 'inspect', '--session', f.previous.agentSessionId], objectCliEnvironment(f.root))
   expect(inspected.code, inspected.stderr).toBe(0)
   const facts = JSON.parse(inspected.stdout).result.session, root = rootOf(facts)
-  expect(root.supervision).toMatchObject({ attemptCount: 2, attemptLimit: 4, phase: 'observing', process: { state: 'running' } })
-  expect(root.supervision!.contextEvidence).toBeUndefined(); expect(root.launchInput!.state).toBe('launch-carried')
+  expect(root.supervision, JSON.stringify(root.supervision)).toMatchObject({ attemptCount: 2, attemptLimit: 4, phase: 'observing', process: { state: 'running' } })
+  expect(root.supervision!.contextEvidence).toBeUndefined(); expect(root.launchInput).toBeUndefined(); expect(root.recoveryInputs).toEqual({ reminder: '', continuation: '' })
   expect(facts.continuity.intentOperationId).toBe('automatic-root'); expect(facts.continuity.launchInput).toBeUndefined()
   const refreshed = await runCompiledObjectCli(['agent', 'refresh', '--session', f.previous.agentSessionId], objectCliEnvironment(f.root))
   expect(refreshed.code, refreshed.stderr).toBe(0); expect(rootOf(JSON.parse(refreshed.stdout).result.session).supervision!.attemptCount).toBe(2)
