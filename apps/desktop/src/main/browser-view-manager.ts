@@ -1018,7 +1018,6 @@ export class BrowserViewManager {
       this.placeView(view, this.window)
       view.setVisible(false)
       this.attach(entry, view)
-      this.applyViewport(entry, view)
       this.emit(entry)
       if (this.demonstrations) void this.getDemonstration(id).catch(() => {
         if (!this.owns(entry, view) || this.demonstrationCapture?.entry === entry) return
