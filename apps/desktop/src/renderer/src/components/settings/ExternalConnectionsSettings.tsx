@@ -34,6 +34,7 @@ function ConnectionDiagnostics({ record }: { record: ConnectionRecord }) {
 
 export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
+  const [listIssue, setListIssue] = useState('')
   const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit'>('loading')
   const [saveNotice, setSaveNotice] = useState(''), [checking, setChecking] = useState<string | null>(null), [checks, setChecks] = useState<Record<string, { revision: number; text: string }>>({})
   const [selected, setSelected] = useState<ConnectionRecord | null>(null), [label, setLabel] = useState(''), [appId, setAppId] = useState(''), [domain, setDomain] = useState('open.feishu.cn'), [secret, setSecret] = useState(''), [enabled, setEnabled] = useState(true)
@@ -44,8 +45,8 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     const request = ++reading.current
     try {
       const result = await api.connections.call('connection.ls', {})
-      if (epoch === generation.current && request === reading.current) { setRecords(result.connections); setView(current => current === 'loading' ? result.connections.length ? 'library' : 'enrollment' : current) }
-    } catch (error) { if (epoch === generation.current && request === reading.current) setIssue(presentError(error)) }
+      if (epoch === generation.current && request === reading.current) { setRecords(result.connections); setListIssue(''); setView(current => current === 'loading' ? result.connections.length ? 'library' : 'enrollment' : current) }
+    } catch (error) { if (epoch === generation.current && request === reading.current) setListIssue(presentError(error)) }
   }
   useEffect(() => { const epoch = ++generation.current; if (active) void read(epoch); return () => { generation.current++ } }, [active])
   const enrolled = enrollment.operation?.configured
@@ -127,7 +128,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const feedback = current && checks[current.config.connectionId]?.revision === current.revision ? checks[current.config.connectionId]!.text : ''
   if (!active) return null
   return <div className="settings-pane-stack connector-onboarding" data-connector-settings>
-    {view === 'loading' ? <p className="settings-group-note" role="status">Reading saved applications… <button type="button" className="small-button" onClick={() => void read()}>Refresh</button></p> : null}
+    {view === 'loading' ? <p className="settings-group-note" role="status">{listIssue ? 'Your bot list could not be loaded.' : 'Reading saved applications…'} <button type="button" className="small-button" onClick={() => void read()}>Refresh</button></p> : null}
     {view === 'enrollment' ? <BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => saved(record, 'Application saved.')} /> : null}
     {view === 'library' ? <section className="connector-library" aria-label="Saved chat applications">
       <div className="settings-pane-toolbar"><strong>Bot applications</strong><button className="small-button" onClick={() => void read()}>Refresh</button><button data-enrollment-new className="primary-button" onClick={() => setView('enrollment')}>Add a bot</button><button data-enrollment-existing className="small-button" onClick={existing}>Connect an existing bot</button></div>
@@ -164,6 +165,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
         <ConnectionDiagnostics record={current} />
       </> : null}
     </section> : null}
+    {listIssue ? <div className="connector-list-feedback" data-connection-list-issue><p role="status" className="connector-check-feedback">Could not refresh your saved bots. This does not change any bot’s creation or connection result.</p>{view !== 'loading' ? <button type="button" className="small-button" onClick={() => void read()}>Refresh bot list</button> : null}<details className="connector-diagnostics"><summary>List error details</summary><p className="connector-enrollment__technical">{listIssue}</p></details></div> : null}
     {issue ? <p role="status" className="connector-issue">{issue}</p> : null}
   </div>
 }
