@@ -44,7 +44,7 @@ function systemMessage(payload: Record<string, unknown>): { kind: 'system-messag
   return { kind: 'system-message', title: kinds.includes('agents_md.instructions') ? 'System instructions' : 'Runtime context' }
 }
 
-function contentParts(content: unknown): NativeHistoryContentPart[] {
+function contentParts(content: unknown, userInput = false): NativeHistoryContentPart[] {
   if (isNativeText(content)) return [{ kind: 'text', text: content }]
   if (!Array.isArray(content)) return content === undefined ? [] : [{ kind: 'text', text: nativeJsonStringify(content) }]
   return content.map(value => {
@@ -53,17 +53,27 @@ function contentParts(content: unknown): NativeHistoryContentPart[] {
       return { kind: 'text', text: part.text }
     }
     if (part.type === 'input_image' && isNativeText(part.image_url)) return { kind: 'resource', resourceType: 'image', reference: part.image_url }
+    if (userInput) {
+      const reference = part.type === 'image' ? part.image_url : part.type === 'audio' ? part.audio_url : part.path
+      const resourceType = part.type === 'image' || part.type === 'local_image' ? 'image'
+        : part.type === 'audio' || part.type === 'local_audio' ? 'audio'
+        : part.type === 'skill' || part.type === 'mention' ? 'file' : undefined
+      if (resourceType && isNativeText(reference)) return { kind: 'resource', resourceType, reference,
+        ...(typeof part.name === 'string' ? { label: part.name } : {}) }
+    }
     return { kind: 'text', text: nativeJsonStringify(value) }
   })
 }
 
-function item(record: Record<string, unknown>, start: number, nativeSessionId: string, projectQuestion = true): NativeHistoryItem | null {
+function item(record: Record<string, unknown>, start: number, nativeSessionId: string, paginated: boolean, projectQuestion = true): NativeHistoryItem | null {
   const payload = object(record.payload), type = payload.type
   if (record.type === 'session_meta' || record.type === 'turn_context') return null
   const nativeItem = object(payload.item)
-  // Async questions have their own canonical AgentMessage event rather than a
-  // response_item message. Ordinary completed items remain independent activity;
-  // their response_item copies must not become duplicate speech.
+  // The declared paginated format records user speech as a completed TurnItem;
+  // ResponseItems retain model context. Legacy sources keep their own contract.
+  const canonicalUser = paginated && record.type === 'event_msg' && type === 'item_completed' &&
+    payload.thread_id === nativeSessionId && typeof payload.turn_id === 'string' && payload.turn_id.length > 0 &&
+    nativeItem.type === 'UserMessage' && typeof nativeItem.id === 'string' && nativeItem.id.length > 0 && Array.isArray(nativeItem.content)
   const asyncQuestion = record.type === 'event_msg' && type === 'item_completed' &&
     payload.thread_id === nativeSessionId && typeof payload.turn_id === 'string' && payload.turn_id.length > 0 &&
     nativeItem.type === 'AgentMessage' && nativeItem.delivery === 'async'
@@ -83,10 +93,14 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
       const part = object(value)
       return part.type === 'Text' ? { ...part, type: 'text' } : value
     }) : nativeItem.content)
+  } else if (canonicalUser) {
+    kind = 'user-message'
+    parts = contentParts(nativeItem.content, true)
   } else if (record.type === 'response_item' && type === 'message') {
     const system = systemMessage(payload)
     title = system?.title
-    kind = system?.kind ?? (payload.role === 'user' ? 'user-message' : payload.role === 'assistant' ? 'assistant-message' : 'activity')
+    kind = system?.kind ?? (payload.role === 'user' ? (paginated ? 'activity' : 'user-message') : payload.role === 'assistant' ? 'assistant-message' : 'activity')
+    if (!system && paginated && payload.role === 'user') title = 'Model context'
     parts = contentParts(payload.content)
   } else if (record.type === 'response_item' && type === 'reasoning') {
     parts = contentParts(payload.summary).map(part => part.kind === 'text' ? { kind: 'reasoning', text: part.text } : part)
@@ -104,9 +118,10 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   else parts = [{ kind: 'text', text: nativeJsonStringify(payload) }]
   // The saved rollout spells the native text part input_text. Reuse the same
   // complete-reply protocol as indexed history without changing original parts.
-  const questionAnswers = kind === 'user-message' ? codexQuestionAnswers(Array.isArray(payload.content)
-    ? payload.content.map(part => object(part).type === 'input_text' ? { ...object(part), type: 'text' } : part)
-    : payload.content) : undefined
+  const userContent = canonicalUser ? nativeItem.content : payload.content
+  const questionAnswers = kind === 'user-message' ? codexQuestionAnswers(Array.isArray(userContent)
+    ? userContent.map(part => object(part).type === 'input_text' ? { ...object(part), type: 'text' } : part)
+    : userContent) : undefined
   const timestamp = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN
   const id = typeof payload.id === 'string' && payload.id ? payload.id : `codex-record:${start}`
   const directTurnId = typeof payload.turn_id === 'string' && payload.turn_id.length > 0 ? payload.turn_id : undefined
@@ -171,7 +186,7 @@ function fitQuestionAnswerProjection(context: AgentProviderSessionHistoryContext
 
 /** One stable per-record decision keeps page, exact resource and changes parts identical. */
 async function materializeSavedItem(reader: NativeJsonlHistoryReader, context: AgentProviderSessionHistoryContext,
-  record: Record<string, unknown>, start: number, converted: NativeHistoryItem): Promise<AgentSessionHistoryItem> {
+  record: Record<string, unknown>, start: number, converted: NativeHistoryItem, paginated: boolean): Promise<AgentSessionHistoryItem> {
   const value = await reader.materializeItem(converted)
   if (!value.questionRequest) return value
   // Reuse the original changes envelope reserve; optional details must also fit
@@ -179,13 +194,13 @@ async function materializeSavedItem(reader: NativeJsonlHistoryReader, context: A
   const maximum = SESSION_HISTORY_MAX_PAGE_BYTES - NATIVE_CONVERSATION_CHANGES_PAGE_RESERVE_BYTES
   const bytes = (item: AgentSessionHistoryItem) => Buffer.byteLength(JSON.stringify({ source: context.source, items: [item], nextCursor: null }))
   if (bytes(value) <= maximum) return value
-  const original = await reader.materializeItem(item(record, start, context.source.nativeSessionId, false)!)
+  const original = await reader.materializeItem(item(record, start, context.source.nativeSessionId, paginated, false)!)
   const diagnosed = { ...original, questionDiagnostic: { code: requestBudgetDiagnostic.code,
     message: 'Structured question details exceed this record’s reading budget. The complete original native record remains readable and copyable.' } }
   return bytes(diagnosed) <= maximum ? diagnosed : original
 }
 
-async function open(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
+async function open(context: AgentProviderSessionHistoryContext): Promise<{ reader: NativeJsonlHistoryReader; paginated: boolean }> {
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
     const metadata = await reader.readFirst(), payload = object(metadata?.payload)
@@ -204,36 +219,39 @@ async function open(context: AgentProviderSessionHistoryContext): Promise<Native
       }
       if (!sameDirectory) throw new AgentMuxError('The saved Codex transcript belongs to another native conversation or directory.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     }
-    return reader
+    // The first metadata is canonical, including forks with copied later metadata.
+    // Reuse the identity read; tail pages need no additional scan or format cache.
+    const paginated = payload.history_mode === 'paginated'
+    return { reader, paginated }
   } catch (error) { await reader.close(); throw error }
 }
 
 /** Exact saved rollout is a native source, independent of the availability of an indexed CLI read helper. */
 export async function readCodexSavedSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {
-  const reader = await open(context)
+  const { reader, paginated } = await open(context)
   try {
     const items: Array<{ record: Record<string, unknown>; start: number; converted: NativeHistoryItem }> = []
     while (items.length < context.limit) {
       const entry = await reader.readPrevious()
       if (!entry) break
-      const converted = item(entry.value, entry.start, context.source.nativeSessionId)
+      const converted = item(entry.value, entry.start, context.source.nativeSessionId, paginated)
       if (converted) items.push({ record: entry.value, start: entry.start, converted })
     }
     const nextCursor = await reader.nextCursor()
-    const materialized = await Promise.all(items.reverse().map(value => materializeSavedItem(reader, context, value.record, value.start, value.converted)))
+    const materialized = await Promise.all(items.reverse().map(value => materializeSavedItem(reader, context, value.record, value.start, value.converted, paginated)))
     return { source: context.source, items: fitQuestionAnswerProjection(context, materialized, nextCursor),
       nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
   } finally { await reader.close() }
 }
 
 export async function readCodexSavedSessionHistoryRecord(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem> {
-  const reader = await open({ ...context, limit: 1 })
+  const { reader, paginated } = await open({ ...context, limit: 1 })
   try {
     for (let entry = await reader.readPrevious(); entry; entry = await reader.readPrevious()) {
-      const converted = item(entry.value, entry.start, context.source.nativeSessionId)
+      const converted = item(entry.value, entry.start, context.source.nativeSessionId, paginated)
       if (converted?.id === context.recordId && (context.turnId === undefined || converted.turnId === context.turnId)) {
         await reader.verifyUnchanged()
-        return fitQuestionAnswerProjection({ ...context, limit: 1 }, [await materializeSavedItem(reader, { ...context, limit: 1 }, entry.value, entry.start, converted)], null)[0]!
+        return fitQuestionAnswerProjection({ ...context, limit: 1 }, [await materializeSavedItem(reader, { ...context, limit: 1 }, entry.value, entry.start, converted, paginated)], null)[0]!
       }
     }
     throw new AgentMuxError('The original saved Codex record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
@@ -242,10 +260,10 @@ export async function readCodexSavedSessionHistoryRecord(context: AgentProviderS
 
 /** Resume the same saved rollout and original record converter after a durable cut. */
 export async function readCodexSavedConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
-  const reader = await open(context)
+  const { reader, paginated } = await open(context)
   try { return await readNativeConversationChanges(reader, context, async (record, start) => {
-    const converted = item(record, start, context.source.nativeSessionId)
-    return converted ? await materializeSavedItem(reader, context, record, start, converted) : null
+    const converted = item(record, start, context.source.nativeSessionId, paginated)
+    return converted ? await materializeSavedItem(reader, context, record, start, converted, paginated) : null
   }) }
   finally { await reader.close() }
 }
