@@ -1,4 +1,5 @@
 import { parseAgentExternalMessageAuthor } from './external-author.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { conversationProvenanceFields } from './conversation-provenance.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -184,6 +185,9 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     source.source !== 'user' || typeof source.content !== 'string' || !source.content)) {
     throw new AgentMuxError('Timeline user-content boundary is invalid.', 'INVALID_AGENT_TIMELINE')
   }
+  const inputRef = source.inputRef === undefined ? undefined : validateAgentPromptInputKey(source.inputRef)
+  if (inputRef && (source.kind !== 'user_message' || source.source !== 'user' || source.publicContent !== 'confirmed' || inputRef.agentSessionId !== source.agentSessionId))
+    throw new AgentMuxError('Timeline input identity does not describe its original public user submission.', 'INVALID_AGENT_TIMELINE')
   if (source.authorExternal !== undefined && (authorAgent.authorAgentSessionId !== undefined || source.authorHuman === true)) throw new AgentMuxError('External attribution cannot claim another author.', 'INVALID_AGENT_TIMELINE')
   if (source.activityState !== undefined && source.kind !== 'lifecycle') {
     throw new AgentMuxError('Activity state requires a lifecycle item.', 'INVALID_AGENT_TIMELINE')
@@ -199,6 +203,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     title: text(source.title, 'Timeline item title'),
     ...optionalField(source, 'content'),
     ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),
+    ...(inputRef ? { inputRef } : {}),
     ...authorAgent,
     ...(source.authorExternal === undefined ? {} : { authorExternal: parseAgentExternalMessageAuthor(source.authorExternal) }),
     ...(source.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(source.sourceDevice) }),

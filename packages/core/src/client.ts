@@ -6362,6 +6362,9 @@ export class AgentMuxClient {
     if (!sameRun(session.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
     }
+    const inputKey: AgentPromptInputKey = producer === 'prompt'
+      ? { kind: producer, agentSessionId: session.agentSessionId, expectedRun, submissionId: operationId }
+      : { kind: producer, agentSessionId: session.agentSessionId, expectedRun, messageId: operationId }
     const provider = this.providers.get(session.providerId)
     const condition = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition : admissionIntent
     const assertCurrentSubmission = (current: AgentMuxAgentSession): void => {
@@ -6419,8 +6422,7 @@ export class AgentMuxClient {
             } : message
             return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, ordinaryPlan, condition,
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertCurrentSubmission, transportQualification,
-              producer === 'prompt' ? { kind: producer, agentSessionId: current.agentSessionId, expectedRun, submissionId: operationId }
-                : { kind: producer, agentSessionId: current.agentSessionId, expectedRun, messageId: operationId },
+              inputKey,
               { ...(authority ? { authority } : {}), ...(inputControl ? { authorizeDispatch: inputControl.authorizeDispatch } : {}) })
           }, { kind: 'semantic', bytes: null }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation, release => { releasePreparationObservation = release }, transportQualification?.deadline)
           break
@@ -6454,7 +6456,7 @@ export class AgentMuxClient {
       }
       if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       stage('receipt')
-      await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
+      await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered, 'complete', inputKey)
     } finally { releasePreparationObservation?.() }
   }
 
@@ -7842,13 +7844,14 @@ export class AgentMuxClient {
     operationId: string,
     title: string,
     message: AgentPromptMessageContent,
-    status: 'complete' | 'failed' = 'complete'
+    status: 'complete' | 'failed' = 'complete',
+    inputRef?: AgentPromptInputKey
   ): Promise<void> {
     const now = Date.now()
     if (message.systemContext) await this.recordMessageAfterSideEffect(session, `system-context:${operationId}`,
       'AgentMux context', message.systemContext, now, 'agentmux', { status })
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
-      title, message.userContent, now, 'user', { status, publicContent: 'confirmed',
+      title, message.userContent, now, 'user', { status, publicContent: 'confirmed', ...(inputRef ? { inputRef } : {}),
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
         ...(message.authorHuman ? { authorHuman: true } : {}),
         ...(message.authorExternal ? { authorExternal: message.authorExternal } : {}),
@@ -7872,7 +7875,7 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed' } = {}
+    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; authorExternal?: import('./external-author.js').AgentExternalMessageAuthor; status?: 'complete' | 'failed'; publicContent?: 'confirmed'; inputRef?: AgentPromptInputKey } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -7888,6 +7891,7 @@ export class AgentMuxClient {
         title,
         content,
         ...(source === 'user' && delivery.publicContent ? { publicContent: delivery.publicContent } : {}),
+        ...(source === 'user' && delivery.inputRef ? { inputRef: delivery.inputRef } : {}),
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),
         ...(delivery.sourceChannel ? { sourceChannel: delivery.sourceChannel } : {}),
         ...(source === 'user' && delivery.authorExternal ? { authorExternal: delivery.authorExternal } : {}),
