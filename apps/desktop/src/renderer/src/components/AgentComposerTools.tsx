@@ -40,6 +40,11 @@ function ComposerChoiceMenu({ label, triggerLabel, icon, disabled, onOpenChange,
       aria-label={triggerLabel} onFocusCapture={event => {
         // Hover disclosure never focuses Content; explicit keyboard/click does.
         if (event.target === event.currentTarget) search.current?.focus({ preventScroll: true })
+      }} onCloseAutoFocus={event => {
+        // Insertion or an outside interaction may already have handed focus to its owner.
+        const content = event.target as HTMLElement, document = content.ownerDocument
+        const active = document.activeElement
+        if (active && active !== document.body && !content.contains(active)) event.preventDefault()
       }} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
       onKeyDownCapture={event => { if (isImeOwnedKeyboardEvent(event)) event.stopPropagation() }}
       onKeyDown={event => {
