@@ -43,8 +43,8 @@ async function finalizeInputs() {
   receipt.sourceUnchanged = true
 }
 async function owning() {
-  const variants = operation === '--applications-owning' ? ['application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
-  const messages = { 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
+  const variants = operation === '--applications-owning' ? ['application-source', 'application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
+  const messages = { 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
   const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
     { label: kind + '-mutant', mutant: kind, test: (kind === 'remote' ? 'catalog' : kind) + ':' }, { label: kind + '-restored', mutant: 'baseline', test: (kind === 'remote' ? 'catalog' : kind) + ':' }
@@ -189,7 +189,7 @@ async function capture() {
       assert.equal(bytes.readUInt32BE(16), frame.pngPixels.width); assert.equal(bytes.readUInt32BE(20), frame.pngPixels.height)
       receipt.supplementalImages.push({ path: frame.image, bytes: bytes.length, sha256: sha(bytes), width: frame.width, theme: frame.theme, scenario: frame.scenario })
     }
-    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, 25, 'Nonempty original management plus application editor, plan, unknown, verified and Retro scenes')
+    if (section === 'hosts') assert.equal(receipt.supplementalImages.length, 31, 'Nonempty original management plus application editor, plan, unknown, verified and Retro scenes')
     receipt.cssInputs = [...cssInputs].map(file => relative(root, file)).sort(); receipt.compiled = compiled
     receipt.aestheticReview = 'pending independent actual PNG review'
   } finally {

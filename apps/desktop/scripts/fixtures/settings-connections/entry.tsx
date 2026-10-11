@@ -80,8 +80,8 @@ const applications = { configurations: [] as ApplicationAccessConfiguration[], o
 api.applications.call = (async (method: string, input: Record<string, unknown>) => {
   calls.push({ kind: 'controlled-application-method', input: { method, ...structuredClone(input) } })
   if (method === 'settings.applications.ls') return {
-    configurations: applications.configurations.filter(item => !input.hostId || item.profile.target.hostId === input.hostId),
-    operations: applications.operations.filter(item => !input.hostId || item.target.hostId === input.hostId)
+    configurations: applications.configurations.filter(item => !input.hostId || item.profile.source.hostId === input.hostId || item.profile.target.hostId === input.hostId),
+    operations: applications.operations.filter(item => !input.hostId || item.source.hostId === input.hostId || item.target.hostId === input.hostId)
   }
   if (method === 'settings.applications.configure') {
     const next: ApplicationAccessConfiguration = { profileId: input.profileId as string, revision: 'controlled-rule-' + calls.length, profile: structuredClone(input.profile as ApplicationAccessProfile) }
