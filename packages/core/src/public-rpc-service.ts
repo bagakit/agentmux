@@ -467,6 +467,7 @@ export class AgentMuxRpcService {
         if (!setup) throw new AgentMuxError('Platform management confirmation is unavailable on this Host. Existing connections and Agents remain available.', 'CONTROL_UNAVAILABLE')
         const callContext = { ...administration, ...(context.signal ? { signal: context.signal } : {}) }
         const result = method === 'connection.setup.begin' ? await setup.begin(parseConnectionSetupParams(method, params), callContext)
+          : method === 'connection.setup.advance' ? await setup.advance(parseConnectionSetupParams(method, params), callContext)
           : method === 'connection.setup.ls' ? await setup.list(parseConnectionSetupParams(method, params))
           : await setup.inspect(parseConnectionSetupParams(method, params), callContext)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>

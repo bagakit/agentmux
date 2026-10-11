@@ -76,6 +76,7 @@ export async function createDesktopConnections(options: { directory: string; enc
       },
       setup: {
         begin: async (input, context) => (await ensure()).connections.setup!.begin(input, context),
+        advance: async (input, context) => (await ensure()).connections.setup!.advance(input, context),
         inspect: async (input, context) => (await ensure()).connections.setup!.inspect(input, context),
         list: async input => (await ensure()).connections.setup!.list(input)
       },
