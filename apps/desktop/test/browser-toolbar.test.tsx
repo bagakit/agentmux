@@ -78,6 +78,7 @@ const tab = {
   regionId: 'region-1',
   workspaceId: 'workspace-1',
   kind: 'browser' as const,
+  mode: 'normal' as const,
   // BrowserSnapshot 的必填位。这份替身早先只被当结构字面量用，缺它不报；T-004 的用例把它 spread
   // 进标注了 BrowserWorkbenchSurface 的位置，缺席才显形——缺的一直是这份替身，不是那几条用例。
   profileId: 'profile-1',
@@ -267,6 +268,9 @@ describe('Browser bar contract', () => {
       await act(async () => root.render(<BrowserPane tab={tab} visible />))
       const trigger = container.querySelector<HTMLButtonElement>('[aria-label="More browser tools"]')!
       await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+      const viewport = [...document.querySelectorAll<HTMLElement>('.browser-menu [role="menuitem"]')].find(node => node.textContent?.includes('Viewport'))
+      expect(viewport, 'the actual More menu must offer the Viewport submenu').toBeDefined()
+      await act(async () => { viewport!.focus(); viewport!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
       const item = [...document.querySelectorAll<HTMLElement>('.browser-menu [role="menuitemradio"]')].find(node => node.textContent?.includes('Mobile'))
       expect(item, 'the actual More menu must offer the Mobile viewport').toBeDefined()
       await act(async () => {

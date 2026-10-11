@@ -35,6 +35,7 @@ const config: AppConfig = {
 const tab = {
   id: 'browser-1', navigationId: 'navigation-1', browserId: 'browser-1', regionId: 'region-1',
   workspaceId: 'workspace-1', profileId: 'profile-1', kind: 'browser' as const,
+  mode: 'normal' as const,
   url: 'https://example.com/', title: 'Example', loading: false, canGoBack: true, canGoForward: true,
   viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null
 }
@@ -59,11 +60,12 @@ it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration 
   const back = vi.spyOn(api.browser, 'back').mockResolvedValue(tab)
   const devtools = vi.spyOn(api.browser, 'openDevTools').mockResolvedValue(undefined)
   const viewport = vi.spyOn(api.browser, 'setViewport').mockResolvedValue(tab)
+  const close = vi.fn()
   const container = document.createElement('div')
   document.body.appendChild(container)
   const root = createRoot(container)
   try {
-    await act(async () => root.render(<BrowserPane tab={tab} visible />))
+    await act(async () => root.render(<BrowserPane tab={tab} visible onRegionClose={close} />))
     for (const [label, verify] of [
       ['Back', () => expect(back).toHaveBeenCalledWith(tab.browserId)],
       ['Open DevTools', () => expect(devtools).toHaveBeenCalledWith(tab.browserId)],
@@ -76,7 +78,10 @@ it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration 
       verify()
     }
     let menu = await openMore(container)
-    const mobile = [...menu.querySelectorAll('[role="menuitemradio"]')].find(item => item.textContent?.includes('Mobile'))
+    const viewportMenu = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes('Viewport'))
+    expect(viewportMenu).not.toBeUndefined()
+    await act(async () => { viewportMenu!.focus(); viewportMenu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+    const mobile = [...document.querySelectorAll('.browser-viewport-menu [role="menuitemradio"]')].find(item => item.textContent?.includes('Mobile'))
     expect(mobile).not.toBeUndefined()
     await act(async () => mobile!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(viewport).toHaveBeenCalledWith(tab.browserId, 'mobile')
@@ -87,6 +92,10 @@ it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration 
     expect(fixture.state.executeControl.mock.calls).toHaveLength(1)
     expect(fixture.state.executeControl.mock.calls[0]![0]).toMatchObject({ operation: 'browser.history', browserId: tab.browserId })
     expect(container.querySelector('[aria-label="Human demonstration draft"]')).not.toBeNull()
+    const closeButton = container.querySelector<HTMLButtonElement>('.browser-toolbar > button[aria-label="Close split"]')!
+    expect(closeButton).not.toBeNull()
+    await act(async () => closeButton.click())
+    expect(close).toHaveBeenCalledExactlyOnceWith()
   } finally { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() }
 })
 
@@ -109,7 +118,7 @@ it('overflow preserves disabled page/navigation actions and configured tool excl
 it('links actual toolbar classes to nonempty narrow-pane rules and the sole style entry', async () => {
   fixture.state.config!.browser.toolbar.more = false
   const container = document.createElement('div')
-  container.innerHTML = renderToStaticMarkup(<BrowserPane tab={tab} visible />)
+  container.innerHTML = renderToStaticMarkup(<BrowserPane tab={tab} visible onRegionClose={() => {}} />)
   expect(container.querySelector('[aria-label="More browser tools"]')?.className).toBe('browser-toolbar__more--optional')
   const secondary = [...container.querySelectorAll('.browser-toolbar > .browser-toolbar__secondary')]
   expect(secondary.map(element => element.getAttribute('aria-label'))).toEqual(['Select element', 'Screenshot', 'Open DevTools', 'Viewport', 'Save this page as a bookmark'])
@@ -129,7 +138,19 @@ it('links actual toolbar classes to nonempty narrow-pane rules and the sole styl
   expect(narrow).toContain('.browser-toolbar > .browser-toolbar__more--optional { display: inline-flex; }')
   expect(narrow).toContain('.browser-toolbar > .browser-toolbar__navigation { display: none; }')
   expect(narrow).toContain('.browser-toolbar > .browser-toolbar__reload { display: none; }')
-  expect(source).toContain('{ padding-right: var(--region-close-clearance); }')
+  const close = container.querySelector('.browser-toolbar > button[aria-label="Close split"]')
+  expect(close).not.toBeNull()
+  expect(close).toBe(container.querySelector('.browser-toolbar')!.lastElementChild)
+  // Close now participates in the toolbar's flex flow. The old absolute-close
+  // padding declaration no longer owns this behavior. Native layout verifies
+  // actual normal/narrow geometry; this Source guard retains its real consumer.
+  const buttonRule = source.match(/(?:^|\n)\.browser-toolbar > button \{([^}]+)\}/)
+  expect(buttonRule).not.toBeNull()
+  const declarations = document.createElement('button').style
+  declarations.cssText = buttonRule![1]!
+  expect(declarations.flexShrink).toBe('0')
+  expect(parseFloat(declarations.width)).toBeGreaterThan(0)
+  expect(parseFloat(declarations.height)).toBeGreaterThan(0)
   expect(source).toContain('flex: 0 0 min(clamp(248px, 26%, 340px), 50%);')
   expect(source).toContain('.browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }')
 })
