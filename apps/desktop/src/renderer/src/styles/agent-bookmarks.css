@@ -3,7 +3,7 @@
 .agent-information-reader__update > button { border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
 .agent-bookmarks-issue { position: fixed; z-index: var(--layer-service); left: 12px; bottom: 38px; max-width: min(520px, calc(100vw - 24px)); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); box-shadow: var(--elev-2); }
 .agent-bookmarks-issue > button { margin-left: 8px; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
-.agent-information-reader[data-bookmark-key] { min-width: 0; min-height: 0; }
+.agent-information-reader[data-bookmark-key] { min-width: 0; min-height: 0; container: agent-bookmark / inline-size; }
 .agent-information-reader[data-bookmark-key] .agent-information-reader__header { cursor: grab; touch-action: none; }
 .agent-information-reader[data-bookmark-key] .agent-information-reader__header:active { cursor: grabbing; }
 .agent-bookmark__move { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 24px; border: 0; padding: 2px; background: transparent; color: var(--text-3); cursor: grab; }
@@ -32,3 +32,6 @@
 .agent-information-reader[data-bookmark-key] .agent-input-recall__thumbnail { flex-basis: 30px; }
 .agent-information-reader[data-bookmark-key] .agent-input-recall__original > header { gap: 6px; padding: 5px 10px; }
 .agent-information-reader[data-bookmark-key] .agent-input-recall__original-body { padding: 8px 10px; font-size: var(--fs-meta); line-height: 1.5; }
+@container agent-bookmark (max-width: 380px) {
+  .agent-information-reader[data-bookmark-key] .agent-information-reader__footer > .agent-information-reader__facts { flex: 1 0 100%; min-width: 0; }
+}
