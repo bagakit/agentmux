@@ -30,6 +30,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | exact artifact identity | manifest 唯一绑定随包 source commit/tree/protocol，build/runtime 复核 size/mode/SHA-256。核对随包产物与核对正在服务的 daemon 是两项事实。 |
 | exact endpoint owner | [runtime-paths.ts](../../packages/core/src/runtime-paths.ts) 提供与 artifact 无关的稳定宿主 namespace，endpoint 临时目录与用户目录下的 durable state 分开；升级不能另建 Runtime。已有服务按公开身份、协议与能力核验，业务 dispatch 在实际连接上匹配 expected Runtime identity。owner receipt 缺失只限制清理权限并明确告知，不能阻断兼容服务上的健康 Run。 |
 | checkout independence | `package-consumer.integration.test.ts` 在系统临时目录执行 `pnpm pack` 和 offline/no-save npm install；真实 package root 不在 checkout |
+| Connector adapter runtime | `node apps/desktop/scripts/verify-connector-adapter-package.mjs --mutations` 消费正式 Main 构建配置、原依赖组装与默认适配器，在无工作区依赖兜底的包布局验证延迟加载。预先取消的登录初始化须零网络返回；撤掉 SDK 交付接线须产生真实加载失败。该检查不代签扫码授权、应用创建或安装成功。 |
 | Renderer dependency singleton | `node apps/desktop/scripts/verify-renderer-react-singleton.mjs` 加载三个生产 Vite 配置，以同字节的不同物理依赖根覆盖绝对 alias 和外链组件；真实菜单、对话框及回调须可用。移除生产 dedupe 须复现 Radix 的空 Hook dispatcher；单独测试解析配置、版本相等、加载失败或超时不能代签这条行为。 |
 | one Run identity | 公共 `AgentMuxRunRef` 只有 CtxMux `runId`；重连后 RunId 与 PID 均不变 |
 | ordered byte replay | fixture 拆分一个四字节 emoji 的两次 write；Client 不产生 replacement character；从 byte 7 interior cursor 重连后得到连续 suffix |
