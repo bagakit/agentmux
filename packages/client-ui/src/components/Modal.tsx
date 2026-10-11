@@ -220,8 +220,10 @@ export const ModalContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
   const [behavior, setBehavior] = useState<HTMLAttributes<HTMLDivElement>>({})
   const child = props.asChild ? Children.only(props.children) as ReactElement<Record<string, unknown>> : null
   const childRef = child?.props.ref as Ref<HTMLDivElement> | undefined
-  const behaviorDocument = inheritedBoundary?.document ?? element?.ownerDocument
-  const documentLease = useRef({ document: behaviorDocument, generation: 0 })
+  const documentLease = useRef({ document: inheritedBoundary?.document ?? element?.ownerDocument, generation: 0 })
+  // Ref retirement is not a document transfer. Radix returns focus asynchronously
+  // after inline content has left the DOM, so retain its last actual lease document.
+  const behaviorDocument = inheritedBoundary?.document ?? element?.ownerDocument ?? documentLease.current.document
   if (documentLease.current.document !== behaviorDocument) documentLease.current = { document: behaviorDocument, generation: documentLease.current.generation + 1 }
   const latest = useRef({ failure: context?.failure, id: context?.id, document: behaviorDocument }); latest.current = { failure: context?.failure, id: context?.id, document: behaviorDocument }
   const rawLeaseProps = { ...props, children: undefined }
