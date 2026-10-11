@@ -30,6 +30,10 @@ export async function listProbeProcesses(groupId, temporaryRoot) {
 // PID. A child can become a zombie after the discovery snapshot; its command
 // becomes <defunct>, but it no longer needs a signal.
 export async function signalOwnedProbeProcess(pid, temporaryRoot, name, groupId) {
+  return await recheckOwnedProbeProcess(pid, temporaryRoot, name, groupId, Date.now() + 1_000)
+}
+
+async function recheckOwnedProbeProcess(pid, temporaryRoot, name, groupId, observationDeadline) {
   let stdout
   let observationError
   try {
@@ -62,6 +66,13 @@ export async function signalOwnedProbeProcess(pid, temporaryRoot, name, groupId)
   const state = /^\s*(\S+)/.exec(identityText)?.[1]
   if (state?.startsWith('Z')) return false
   const identity = /^\s*(\S+)\s+(.+)\s*$/.exec(identityText)
+  if ((!identity || !/^[RSDTIUWZ]/.test(identity[1])) && identityText.trim() && Date.now() < observationDeadline) {
+    // A process can be exiting between inventory and this exact PID read.
+    // Re-observe without a signal; only real absence, Zombie or a freshly
+    // verified original identity can settle this bounded cleanup observation.
+    await delay(50)
+    return await recheckOwnedProbeProcess(pid, temporaryRoot, name, groupId, observationDeadline)
+  }
   assert.ok(identity && /^[RSDTIUWZ]/.test(identity[1]),
     `Private process state could not be observed (state=${JSON.stringify(state ?? null)}, chars=${stdout.length})`)
   assert.ok(ownsProbePath(identity[2], temporaryRoot) || (groupId !== undefined && observedGroupId === groupId), 'Private process identity changed')
