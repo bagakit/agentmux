@@ -8,7 +8,7 @@ import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import type { ScratchTopicSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import type { SpatialWorkbench } from '../src/renderer/src/lib/space-agent-control'
+import { spatialCatalog, type SpatialWorkbench } from '../src/renderer/src/lib/space-agent-control'
 import { noteHistoryReadParams, confirmNoteHistoryTarget } from '../src/renderer/src/lib/note-history-target'
 import { composerConfig } from './helpers/composer-dom-fixture'
 
@@ -28,6 +28,17 @@ it('reads a nested Zone-relative path once and pins the complete resource only f
   const f = fixture(), params = noteHistoryReadParams(f.state, [], f.tab.id, 'original-region')
   expect(params).toEqual({ zoneId: f.zoneId, spaceId: f.spaceId, path: 'original.note.md', expectedResource: { hostId: 'local', workspaceId: 'workspace', workspacePath: f.workspace.path } })
   expect(confirmNoteHistoryTarget(params, 'original-note', f.result, 'folder/original.note.md')).toEqual({ target: { ...params, noteId: 'original-note', expectedResource: f.resource }, document: f.result.result.status === 'read' ? f.result.result.document : undefined })
+})
+
+it('reads an original Notebook Zone without treating its resource context as a display binding', () => {
+  const f = fixture()
+  f.state.spaceZoneBindings[f.zoneId] = { ...f.state.spaceZoneBindings[f.zoneId]!, relations: { [f.spaceId]: false } }
+  const before = structuredClone(f.state.spaceZoneBindings)
+  expect(spatialCatalog(f.state, []).bindings.filter(binding => binding.zoneId === f.zoneId)).toEqual([])
+  const params = noteHistoryReadParams(f.state, [], f.tab.id, 'original-region')
+  expect(params).toEqual({ zoneId: f.zoneId, path: 'original.note.md', expectedResource: { hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.workspace.path } })
+  expect(confirmNoteHistoryTarget(params, 'original-note', f.result, f.resource.path).target).toEqual({ ...params, noteId: 'original-note', expectedResource: f.resource })
+  expect(f.state.spaceZoneBindings).toEqual(before)
 })
 
 it('keeps Source-view history available for a valid original header with unsupported rich content', () => {
