@@ -14,6 +14,7 @@ import { formatRelativeAge } from '../lib/relative-age'
 import { filterLauncherResumeRows, launcherCandidateIdentity, launcherCandidateKey, launcherManagedCandidates, launcherNativeRecap, launcherSavedNativeRecap, launcherNativeResumeRows, launcherResumeRows, launcherResumeShortId, launcherTimelineRecap, type LauncherRecap, type LauncherResumeRow } from '../lib/launcher-resume'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { projectConversationRecords } from '@agentmux/core/conversation'
 import { AgentAvatar } from './AgentAvatar'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { SettingsNavigation } from './SettingsNavigation'
@@ -124,7 +125,8 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
     sessions: selectedSession ? [selectedSession] : savedSession ? [savedSession] : [],
     nativeRecaps: { [selectedSessionId]: reads[selectedSessionId]?.recap ?? previews[launcherPreviewKey(savedSelection)]?.recap }
   })[0] : savedSelection, [savedSelection, selectedSessionId, config, workspace, selectedTimeline, selectedName, selectedSession, savedSession, facts.timelines, reads, previews, topics])
-  const selectedTimelineRecap = selectedSessionId ? launcherTimelineRecap(selectedTimeline ?? facts.timelines[selectedSessionId]) : null
+  const recapTimeline = selectedSessionId ? selectedTimeline ?? facts.timelines[selectedSessionId] : undefined
+  const selectedTimelineRecap = recapTimeline ? launcherTimelineRecap(projectConversationRecords({ agentSessionId: recapTimeline.agentSessionId, timeline: recapTimeline })) : null
   const projectCount = rows.filter(row => row.inProject).length
   const selectedHostConfigured = Boolean(config?.hosts.some(host => host.id === selectedHostId))
   const selectedNativeRead = selectedKey && nativeReads[selectedKey]?.sourceKey === nativeSourceKey ? nativeReads[selectedKey] : undefined

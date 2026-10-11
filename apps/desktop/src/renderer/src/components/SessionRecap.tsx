@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
+import { projectConversationRecords } from '@agentmux/core/conversation'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { launcherNativeRecap, launcherTimelineRecap } from '../lib/launcher-resume'
@@ -30,7 +31,7 @@ export function SessionRecap({ session, visible, context = false }: { session: S
     return state.timelines[agentSessionId]
   })
   const captured = useMemo(() => timeline?.agentSessionId === agentSessionId
-    ? launcherTimelineRecap(timeline) : null, [timeline, agentSessionId])
+    ? launcherTimelineRecap(projectConversationRecords({ agentSessionId, timeline })) : null, [timeline, agentSessionId])
   const request = useRef<{ key: string; promise: Promise<AgentSessionHistoryPage> } | null>(null)
   const [read, setRead] = useState<RecapRead | null>(null)
   const capturedOnly = Boolean(captured && !context)

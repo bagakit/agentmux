@@ -97,7 +97,8 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
 export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
   const state = session.status.state, items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
-  const latestRecord = timeline ? projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline }).filter(record => record.role === 'message' || record.role === 'observation').at(-1) : undefined
+  const records = timeline ? projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline }) : []
+  const latestRecord = records.filter(record => record.role === 'message' || record.role === 'observation').at(-1)
   const result = (latestRecord?.role === 'observation' || latestRecord?.role === 'message' && latestRecord.author?.kind === 'agent') && latestRecord.rawId === latest?.id && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim() ? latestRecord : null
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
   const now = Date.now()
@@ -115,7 +116,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, activityEntryTime(session), now)
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
-  const recap = items.length ? launcherTimelineRecap(timeline) : null
+  const recap = items.length ? launcherTimelineRecap(records) : null
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
   if (bucket === 'idle' && (session.runUnobserved || session.processState === 'interrupted')) {
