@@ -50,8 +50,10 @@ describe('the executable owner uses the actual invocation context', () => {
     const launch = provider.buildLaunch.bind(provider), resume = provider.buildResumeLaunch.bind(provider)
     provider.buildLaunch = input => ({ ...launch(input), command: f.command, env: f.env })
     provider.buildResumeLaunch = input => ({ ...resume(input), command: f.command, env: f.env })
-    const created = await f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+    const creation = f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
       commandOverride: 'pre-plan-command', env: { PATH: '' }, injectAgentMuxGuide: false, prompt: 'actual plan task' })
+    await expect(creation).resolves.toMatchObject({ providerId: 'claude' })
+    const created = await creation
     expect((await f.receipt(created)).marker).toBe('configured-path')
     await until(() => f.client.agentSession(created.agentSessionId), value => Boolean(value.nativeHandle))
     await f.exit(created)
@@ -83,14 +85,18 @@ describe('the executable owner uses the actual invocation context', () => {
     faults.set(f.executable, operation)
     expect(await caller.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({
       installed: false, executableObservation: { executable: f.command, availability: 'check-failed', cause: { code: 'EIO' } } })
-    const created = await caller.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+    const creation = caller.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
       commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'original observed task' })
+    await expect(creation).resolves.toMatchObject({ providerId: 'claude' })
+    const created = await creation
     const first = await f.receipt(created)
     expect(first.sid).toBe(created.agentSessionId)
     await until(() => f.client.agentSession(created.agentSessionId), value => Boolean(value.nativeHandle))
     await f.exit(created)
-    const resumed = await caller.resumeAgent({ agentSessionId: created.agentSessionId, operationId: 'unconfirmed-direct',
+    const resumption = caller.resumeAgent({ agentSessionId: created.agentSessionId, operationId: 'unconfirmed-direct',
       commandOverride: f.command, env: f.env, prompt: 'same native task' })
+    await expect(resumption).resolves.toMatchObject({ agentSessionId: created.agentSessionId })
+    const resumed = await resumption
     expect((await f.receipt(resumed)).args).toContain(first.nativeId)
     await f.exit(resumed)
     const result = await caller.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: resumed.run,
