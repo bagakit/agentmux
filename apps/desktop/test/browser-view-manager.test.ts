@@ -2057,19 +2057,37 @@ describe('BrowserViewManager healthy page during failed candidate cleanup', () =
 
 it('native attachment lookup preserves the exact current view and window without reading page titles', async () => {
   const fixture = fakeWindow(), manager = browserManager(fixture.window)
+  for (let index = 0; index < 24; index++) await manager.create(`unrelated-native-owner-${index}`, 'https://example.org')
+  const originalAttachments = new Set(fixture.children)
   await manager.create('exact-native-owner', 'https://example.org')
-  const view = fixture.children[0]!
+  const view = fixture.children.find(view => !originalAttachments.has(view))!
+  const records = (manager as unknown as { entries: Map<string, { view: unknown }> }).entries
+  const unrelatedReads = vi.fn()
+  const restore = [...records.entries()].filter(([id]) => id !== 'exact-native-owner').map(([, entry]) => {
+    const descriptor = Object.getOwnPropertyDescriptor(entry, 'view')!
+    Object.defineProperty(entry, 'view', { configurable: true, get: () => { unrelatedReads(); return descriptor.value } })
+    return () => Object.defineProperty(entry, 'view', descriptor)
+  })
   const title = vi.spyOn(view.webContents, 'getTitle').mockImplementation(() => { throw new Error('A native attachment does not need its title') })
-  expect(manager.nativeOwnerForView(view as never)).toBeUndefined()
-  manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
-  expect(manager.nativeOwnerForView(view as never, fixture.window)).toMatchObject({ browserId: 'exact-native-owner', view })
-  expect(manager.nativeOwnerForView(view as never, fakeWindow().window)).toBeUndefined()
-  expect(manager.nativeOwnerForView({} as never, fixture.window)).toBeUndefined()
-  expect(title).not.toHaveBeenCalled()
-  manager.release('exact-native-owner')
-  expect(manager.nativeOwnerForView(view as never, fixture.window)).toBeUndefined()
-  title.mockRestore()
-  manager.dispose()
+  try {
+    expect(manager.nativeOwnerForView(view as never)).toBeUndefined()
+    manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
+    expect(manager.nativeOwnerForView(view as never, fixture.window)).toMatchObject({ browserId: 'exact-native-owner', view })
+    expect(manager.nativeOwnerForView(view as never, fakeWindow().window)).toBeUndefined()
+    expect(manager.nativeOwnerForView({} as never, fixture.window)).toBeUndefined()
+    expect(unrelatedReads, 'An exact physical attachment lookup must not read unrelated Browser entries').not.toHaveBeenCalled()
+    expect(title).not.toHaveBeenCalled()
+    await manager.release('exact-native-owner')
+    expect(manager.nativeOwnerForView(view as never, fixture.window)).toBeUndefined()
+    await manager.restore('exact-native-owner')
+    manager.setBounds('exact-native-owner', { x: 10, y: 20, width: 120, height: 80 })
+    expect(manager.nativeOwner('exact-native-owner', fixture.window)).toBeDefined()
+    expect(manager.nativeOwnerForView(view as never, fixture.window), 'An old physical attachment must not gain the restored Browser owner').toBeUndefined()
+  } finally {
+    restore.forEach(restore => restore())
+    title.mockRestore()
+    manager.dispose()
+  }
 })
 
 it('native chrome demand follows successful physical Browser owner bounds and releases without a second registry', async () => {
