@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { resolveOverlayContainer } from '../src/renderer/src/components/WindowOverlayHost'
 import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -90,17 +90,18 @@ it('pointer disclosure and choice never submit the executing form', async () => 
   expect(changed).toHaveBeenCalledExactlyOnceWith('c'); expect(submitted).not.toHaveBeenCalled()
 })
 
-it('a nested menu uses the original Dialog band and one Escape preserves its parent and focus', async () => {
+it('a nested menu uses the original modal slot and one Escape preserves its parent and focus', async () => {
   const dismissed = vi.fn()
   await act(async () => root.render(<Dialog.Root defaultOpen onOpenChange={open => { if (!open) dismissed() }}>
-    <Dialog.Portal container={resolveOverlayContainer()}><div className="window-overlay-host__entry" data-overlay-layer="dialog">
+    <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay />
       <Dialog.Content aria-describedby={undefined}><Dialog.Title>Original editor</Dialog.Title>
         <SelectionField label="Nested choice" value="b" options={choices} onValueChange={() => {}} />
-      </Dialog.Content></div></Dialog.Portal>
+      </Dialog.Content></Dialog.Portal>
   </Dialog.Root>)); await settle()
   const trigger = document.querySelector<HTMLButtonElement>('[aria-label="Nested choice"]')!
   await key(trigger, 'ArrowDown')
-  expect(document.querySelector('[role="menu"]')?.closest<HTMLElement>('[data-overlay-layer]')?.dataset.overlayLayer).toBe('dialog')
+  expect(document.querySelector('[role="menu"]')?.closest('[data-overlay-modal-slot]')).not.toBeNull()
+  expect(document.querySelector('[role="menu"]')?.closest('[data-overlay-modal-scope]')).toBe(document.querySelector('[role="dialog"]')?.closest('[data-overlay-modal-scope]'))
   await key(document.activeElement as HTMLElement, 'Escape')
   expect(document.querySelector('[role="menu"]')).toBeNull(); expect(document.querySelector('[role="dialog"]')).not.toBeNull()
   expect(dismissed).not.toHaveBeenCalled(); expect(document.activeElement).toBe(trigger)

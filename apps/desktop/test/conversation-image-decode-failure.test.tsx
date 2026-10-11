@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act, createElement, useLayoutEffect } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
