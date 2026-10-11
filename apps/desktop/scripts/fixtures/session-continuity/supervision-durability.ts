@@ -11,7 +11,7 @@ const view = (state: any) => ({ tabs: state.tabs, layouts: state.layouts, drafts
 const roots = (session: any): any[] => Object.values(session.continuityOperations ?? {}).filter((one: any) => one.supervision)
 
 /** Three actual App generations share the existing private Store and Native Runtime. */
-export async function verifySupervisionDurability({ store, spatial, win, client, ids, phase, privateRoot,
+export async function verifySupervisionDurability({ runtime, store, spatial, win, client, ids, phase, privateRoot,
   evidence, result, state, wait, delay, nodeExecutable }: any) {
   const evaluate = (source: string) => win.webContents.executeJavaScript(source)
   const read = async (name: string) => {
@@ -57,22 +57,43 @@ export async function verifySupervisionDurability({ store, spatial, win, client,
     await evaluate(`(()=>{const region=document.querySelector('[data-workbench-region-id="continuity-${name}"]');const button=region.querySelector('.continuity-supervision button[aria-label="View service notice: Recovery paused"]');if(!button)throw new Error('Actual paused recovery notice is absent');button.click()})()`)
     const label = action === 'continue' ? 'Continue recovery' : 'Cancel automatic recovery'
     await wait('actual recovery action visible', async () => evaluate(`[...document.querySelectorAll('button')].some(one=>one.textContent.trim()===${JSON.stringify(label)}&&!one.disabled)`))
-    await evaluate(`(()=>{const button=[...document.querySelectorAll('button')].find(one=>one.textContent.trim()===${JSON.stringify(label)}&&!one.disabled);if(!button)throw new Error('Original recovery action unavailable');button.click()})()`)
-    const operation = await wait('GUI control reaches the original durable owner', async () => {
-      const current = root(await read(name)), receipts: any[] = Object.values(current.supervision.controlOperations ?? {})
-      return receipts.find((one: any) => one.request.action === action)
-    })
+    if (action === 'continue') await evaluate(`(()=>{const input=document.querySelector('[data-workbench-region-id="continuity-${name}"] input[aria-label="Additional recovery attempts"]');if(!input)throw Error('Original attempt budget unavailable');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'1');input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+    const original = runtime.controlContinuity.bind(runtime)
+    let authored: any
+    runtime.controlContinuity = async (hostId: string, packet: any) => {
+      if (packet.agentSessionId === ids[name].sessionId && packet.action === action) {
+        const bucket = JSON.stringify([hostId, packet.agentSessionId]), pending = (await state()).continuityControlIntents
+        assert.deepEqual(pending[bucket][packet.operationId].request, packet, 'The actual Store authors the original packet before Main dispatch')
+        const persisted = await evaluate(`Object.values(localStorage).flatMap(value=>{try{return [JSON.parse(value)?.state?.continuityControlIntents]}catch{return []}}).filter(Boolean)`)
+        assert.ok(persisted.some((entries: any) => JSON.stringify(entries[bucket]?.[packet.operationId]?.request) === JSON.stringify(packet)),
+          'The production UI writer durably saves the packet before dispatch')
+        authored = { hostId, request: structuredClone(packet), persistedBeforeDispatch: true }
+      }
+      return await original(hostId, packet)
+    }
+    let operation: any
+    try {
+      await evaluate(`(()=>{const button=[...document.querySelectorAll('button')].find(one=>one.textContent.trim()===${JSON.stringify(label)}&&!one.disabled);if(!button)throw new Error('Original recovery action unavailable');button.click()})()`)
+      operation = await wait('GUI control reaches the original durable owner', async () => {
+        const current = root(await read(name)), receipts: any[] = Object.values(current.supervision.controlOperations ?? {})
+        return receipts.find((one: any) => one.request.action === action)
+      })
+    } finally { runtime.controlContinuity = original }
     assert.equal(operation.request.agentSessionId, ids[name].sessionId)
     assert.equal(operation.request.intentOperationId, root(await read(name)).operationId)
     assert.equal(operation.outcome, action === 'continue' ? 'continued' : 'cancelled')
     if (action === 'continue') assert.equal(operation.request.additionalAttempts, 1)
-    const call = result.calls.find((one: any) => one.operation === 'control-continuity' && one.finished &&
-      one.args.some((arg: any) => arg?.operationId === operation.request.operationId))
+    const call = await wait('actual Main control receipt returns', async () => result.calls.find((one: any) =>
+      one.operation === 'control-continuity' && one.finished && one.args.some((arg: any) => arg?.operationId === operation.request.operationId)))
     assert.ok(call, 'The actual Renderer -> Main control receipt is required')
     assert.deepEqual(call.result.result.receipt, operation)
-    const intents = (await state()).continuityControlIntents
-    assert.ok(intents && Object.values(intents).some((entries: any) => entries[operation.request.operationId]),
-      'The actual Renderer retains its immutable original control packet')
+    assert.deepEqual(authored.request, operation.request)
+    await wait('accepted control settles the authored pending record', async () => {
+      const intents = (await state()).continuityControlIntents
+      return !intents[JSON.stringify([authored.hostId, operation.request.agentSessionId])]?.[operation.request.operationId]
+    })
+    result.supervision.authoredControls ??= []
+    result.supervision.authoredControls.push(authored)
     result.supervision.controls.push(operation)
     return operation
   }
@@ -87,7 +108,8 @@ export async function verifySupervisionDurability({ store, spatial, win, client,
       assert.equal(operation.trigger, 'startup'); assert.equal(operation.supervision.attemptCount, 1)
       assert.equal(operation.supervision.attemptLimit, 1); assert.equal(operation.policy.retryMaxAttempts, 0)
       assert.equal(run?.state, 'exited'); assert.equal(run.exitCode, 7)
-      assert.equal(operation.launchInput?.state, 'launch-carried', 'Keep the truthful first input carrier after bootstrap exit')
+      if (name === 'working') assert.equal(operation.launchInput?.state, 'launch-carried', 'Keep the truthful first input carrier after bootstrap exit')
+      else assert.equal(operation.launchInput, undefined, 'An idle context-only recovery has no invented input')
       assert.notEqual(stopped.run.runId, ids[name].run.runId)
       result.supervision[name + 'FirstFailure'] = { root: operation, run }
     }
@@ -201,7 +223,7 @@ export async function verifySupervisionDurability({ store, spatial, win, client,
   const final = await state()
   assert.equal(final.focus?.execution?.sessionId, ids.healthy.sessionId, 'Actual Terminal focus passes through the production Store before persistence')
   const currentNative = { working: (await native('working')).bytes, idle: (await native('idle')).bytes }
-  if (previous) for (const key of ['tabs', 'layouts', 'drafts', 'activeWorkspaceId']) assert.deepEqual(view(final)[key], previous.view[key])
+  if (previous) for (const key of ['tabs', 'layouts', 'drafts', 'activeWorkspaceId'] as const) assert.deepEqual(view(final)[key], previous.view[key])
   const saved = { view: view(final), spatial: result.finalSpatial, healthy: identity, controls: result.supervision.controls,
     workingFirstRun: previous?.workingFirstRun ?? working.run, workingRun: working.run, idleRun: idle.run, workingRoot, idleRoot,
     native: previous?.native ?? currentNative }
