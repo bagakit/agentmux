@@ -47,6 +47,11 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       if (eligibility === 'private') { excluded.push(part); continue }
       if (eligibility !== 'public') { gap('public-content-unconfirmed'); continue }
     }
+    if (original.kind === 'captured' && slot.selector.kind === 'captured-field' && slot.selector.field === 'content') {
+      const eligibility = original.item.contentEligibility
+      if (eligibility === 'private') { excluded.push(part); continue }
+      if (eligibility === 'unconfirmed') { gap('public-content-unconfirmed'); continue }
+    }
     // Captured writers retain their own explicit public input contract. Native
     // parts above carry the original Provider purpose independently of display kind.
     if (original.kind === 'captured' && (original.item.kind === 'user_message' && original.item.publicContent !== 'confirmed' || original.item.kind === 'system_message' && original.item.source === 'agentmux')) { gap('public-content-unconfirmed'); continue }

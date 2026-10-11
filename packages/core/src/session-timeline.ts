@@ -183,6 +183,10 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
   if (source.authorHuman !== undefined && typeof source.authorHuman !== 'boolean') {
     throw new AgentMuxError('Timeline item authorHuman is invalid.', 'INVALID_AGENT_TIMELINE')
   }
+  const contentEligibility = source.contentEligibility
+  if (contentEligibility !== undefined && contentEligibility !== 'public' && contentEligibility !== 'private' && contentEligibility !== 'unconfirmed') {
+    throw new AgentMuxError('Timeline content purpose is invalid.', 'INVALID_AGENT_TIMELINE')
+  }
   const authorAgent = optionalField(source, 'authorAgentSessionId')
   if (source.publicContent !== undefined && (source.publicContent !== 'confirmed' || source.kind !== 'user_message' ||
     source.source !== 'user' || typeof source.content !== 'string' || !source.content)) {
@@ -205,6 +209,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     updatedAt,
     title: text(source.title, 'Timeline item title'),
     ...optionalField(source, 'content'),
+    ...(contentEligibility === undefined ? {} : { contentEligibility }),
     ...(source.publicContent === undefined ? {} : { publicContent: 'confirmed' as const }),
     ...(inputRef ? { inputRef } : {}),
     ...authorAgent,

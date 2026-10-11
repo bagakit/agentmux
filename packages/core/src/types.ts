@@ -1929,6 +1929,8 @@ export type AgentTimelineItem = {
   sourceDevice?: AgentOperationDevice
   sourceChannel?: AgentMessageChannel
   content?: string
+  /** Original purpose of content only; never author identity or sharing authority. */
+  contentEligibility?: AgentSessionHistoryContentEligibility
   /** Set by the original userContent writer, never inferred from legacy content or author. Not sharing authority. */
   publicContent?: 'confirmed'
   /** Original submitted Input identity; attribution or opaque item IDs never reconstruct it. */

@@ -193,6 +193,13 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     ...provider,
     normalizeHook(envelope, context) {
       const normalized = provider.normalizeHook(envelope, context)
+      if (normalized.eventName === 'StopFailure') {
+        // This callback does not identify the purpose of its last assistant text.
+        return { ...normalized, timeline: normalized.timeline.map(mutation =>
+          mutation.type !== 'update' && mutation.item.kind === 'assistant_message' && mutation.item.content !== undefined
+            ? { ...mutation, item: { ...mutation.item, contentEligibility: 'unconfirmed' as const } }
+            : mutation) }
+      }
       if (normalized.eventName === 'turn.complete' && normalized.semanticState === 'error' &&
         normalized.currentActivity?.state === 'idle') {
         return { ...normalized, status: { ...normalized.status,
