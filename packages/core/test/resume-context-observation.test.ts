@@ -13,7 +13,7 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_RESU
 if (process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT) expect(Reflect.get(core, 'AGENTMUX_RESUME_CONTEXT_MUTANT')).toBe(process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
+async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; witnessAlternative?: boolean; unresolvedSubject?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-context-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'runtime'), state = join(root, 'state')
@@ -44,8 +44,9 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
       queueMicrotask(() => { reused.kind = options.mutate === 'context-to-cancel' ? 'explicit-user-cancelled' : 'context-restored'; reused.nativeOperationId = 'mutated-operation'; reused.scope = 'recovery-intent' })
       return reused
     } }
+  if (options.unresolvedSubject) delete explicitHook.resolveSubject
   if (options.unsupported) delete explicitHook.continuity
-  const program = "const fs=require('node:fs');fs.writeFileSync('native.json',JSON.stringify({pid:process.pid,id:process.argv[1],children:['native-child']}));console.log('LAUNCH:'+JSON.stringify(process.argv.slice(1)));" + (options.failFirst ? "if(!fs.existsSync('failed')){fs.writeFileSync('failed','yes');process.exit(7)}" : '') + "process.stdin.setRawMode(true);process.stdin.on('data',d=>{if(d.toString()==='exit-failed')process.exit(7);process.stdout.write('INPUT:'+d.toString())});setInterval(()=>{},1000)"
+  const program = "const fs=require('node:fs');fs.writeFileSync('native.json',JSON.stringify({pid:process.pid,id:process.argv[1],children:['native-child'],locator:" + JSON.stringify(options.witnessAlternative ? 'observed-native.json' : 'native.json') + "}));fs.copyFileSync('native.json','observed-native.json');console.log('LAUNCH:'+JSON.stringify(process.argv.slice(1)));" + (options.failFirst ? "if(!fs.existsSync('failed')){fs.writeFileSync('failed','yes');process.exit(7)}" : '') + "process.stdin.setRawMode(true);process.stdin.on('data',d=>{if(d.toString()==='exit-failed')process.exit(7);process.stdout.write('INPUT:'+d.toString())});setInterval(()=>{},1000)"
   const provider = core.defineAgentProvider({ catalog: { id: providerId, label: 'Controlled native Hook process', executable: process.execPath,
     expectedProcess: 'node', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
     hookStrategy: { kind: 'native', installation: 'unmanaged' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' },
@@ -55,7 +56,7 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
     discoverNativeSession: async context => {
       const witness = JSON.parse(await readFile(join(root, 'native.json'), 'utf8'))
       if (witness.pid !== context.processId) return null
-      return { handle: { kind: 'provider', providerId, sessionId: witness.id, ...(options.witnessPath ? { transcriptPath: join(root, 'native.json') } : {}) }, childSessionIds: witness.children,
+      return { handle: { kind: 'provider', providerId, sessionId: witness.id, ...(options.witnessPath ? { transcriptPath: join(root, witness.locator) } : {}) }, childSessionIds: witness.children,
         async assertCurrent() { context.signal.throwIfAborted(); expect(JSON.parse(await readFile(join(root, 'native.json'), 'utf8'))).toEqual(witness) } }
     } })
   const store = new core.AgentMuxFileAgentSessionStore(join(root, 'sessions.sqlite')), client = new core.AgentMuxClient({ store, providers: [provider] }), inner = client as any
@@ -338,5 +339,33 @@ it('refuses a changed known locator when reading an original explicit resume rec
   await expect(f.client.resumeAgent({ agentSessionId: f.original.agentSessionId, expectedRun: f.original.run, operationId: 'automatic-root', prompt: 'Original explicit resume input' })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
   expect((await f.rootOf()).nativeTarget).toEqual(before.nativeTarget)
   expect((await f.rootOf()).launchInput).toEqual(before.launchInput)
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.input).not.toHaveBeenCalled(); await raw(f)
+})
+
+
+it.each(['codex', 'explicit'] as const)('preserves a known canonical locator when its exact Native witness reports another locator: %s', async shape => {
+  const f = await fixture({ originalPath: true, witnessPath: true, witnessAlternative: true, ...(shape === 'explicit' ? { shape, unresolvedSubject: true } : {}) })
+  const before = await f.rootOf(), prior = await f.saved()
+  expect((await f.post(shape === 'explicit' ? ready : resumed, 'conflicting-locator')).status).toBe(204)
+  const saved = await f.saved()
+  expect(saved.nativeHandle).toEqual(f.original.nativeHandle)
+  expect(saved.observedNativeHandle).toEqual({ ...f.original.nativeHandle, transcriptPath: join(f.root, 'observed-native.json') })
+  expect(saved.nativeSourceObservation).toMatchObject({ state: 'changed', run: f.current.run })
+  expect(saved.hookReceipt).toMatchObject({ id: 'conflicting-locator', subject: { kind: 'unknown' } })
+  expect(saved.semanticStatus).toEqual(prior.semanticStatus)
+  expect((await f.rootOf()).supervision!.contextEvidence).toBeUndefined()
+  expect((await f.rootOf()).nativeTarget).toEqual(before.nativeTarget)
+  expect(f.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')).toBe(true)
+  expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled(); await raw(f)
+})
+
+it.each([true, false])('retains a known locator and usable Hook context when a verified witness reports its same identity, with locator=%s', async witnessPath => {
+  const f = await fixture({ originalPath: true, witnessPath })
+  expect((await f.post(resumed, 'retained-locator')).status).toBe(204)
+  const saved = await f.saved()
+  expect(saved.nativeHandle).toEqual(f.original.nativeHandle)
+  expect(saved.observedNativeHandle).toBeUndefined(); expect(saved.nativeSourceObservation).toBeUndefined()
+  expect(saved.hookReceipt).toMatchObject({ id: 'retained-locator', subject: { kind: 'main' } })
+  await vi.waitFor(async () => expect((await f.rootOf()).supervision).toMatchObject({ phase: 'settled', reason: 'context-observed', contextEvidence: { nativeTarget: f.original.nativeHandle } }))
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.input).not.toHaveBeenCalled(); await raw(f)
 })
