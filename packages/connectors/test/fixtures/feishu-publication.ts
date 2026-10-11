@@ -25,18 +25,19 @@ export async function feishuPublicationHttp(override?: (call: FeishuHttpCall) =>
           if (original) { records.set(id, { ...original, deleted: true, body: undefined }); result = { status: 200, body: { code: 0, data: {} } } }
           else result = { status: 404, body: { code: 230050 } }
         } else {
-          const body = JSON.parse(call.body), content = JSON.parse(body.content).zh_cn
-          const native = { title: content.title, content: content.content.map((paragraph: Array<{ tag: string; text: string }>) => paragraph.map(node => ({ tag: node.tag, text: node.text, style: [] }))) }
+          const body = JSON.parse(call.body), content = JSON.parse(body.content)
+          const interactive = body.msg_type === 'interactive' || original?.msg_type === 'interactive'
+          const native = interactive ? content : { title: content.zh_cn.title, content: content.zh_cn.content.map((paragraph: Array<{ tag: string; text: string }>) => paragraph.map(node => ({ tag: node.tag, text: node.text, style: [] }))) }
           if (call.method === 'POST') {
             const known = uuids.get(body.uuid)
             if (known) result = { status: 200, body: { code: 0, data: records.get(known) } }
             else {
               const messageId = 'platform-message-' + ++next
-              const message = { message_id: messageId, chat_id: body.receive_id, thread_id: 'original-platform-thread', msg_type: 'post', deleted: false,
+              const message = { message_id: messageId, chat_id: body.receive_id, thread_id: 'original-platform-thread', msg_type: body.msg_type, deleted: false,
                 sender: { sender_type: 'app', id_type: 'app_id', id: feishuConfig.application.appId }, body: { content: JSON.stringify(native) } }
               records.set(messageId, message); uuids.set(body.uuid, messageId); result = { status: 200, body: { code: 0, data: message } }
             }
-          } else if (call.method === 'PUT' && original) {
+          } else if ((call.method === 'PUT' || call.method === 'PATCH') && original) {
             const updated = { ...original, body: { content: JSON.stringify(native) } }; records.set(id, updated)
             const { thread_id: _threadId, ...acknowledged } = updated
             result = { status: 200, body: { code: 0, data: acknowledged } }
