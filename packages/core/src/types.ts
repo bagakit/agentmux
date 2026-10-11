@@ -904,6 +904,8 @@ export type AgentSessionHistoryItem = {
 /** Native conversation pages are separate from captured AgentMux Timeline and Run byte Replay. */
 export type AgentSessionHistoryPage = {
   agentSessionId: string
+  /** Original Core namespace, supplied by the actual read owner, never a Provider/client alias. */
+  sourceHostId?: string
   source: AgentSessionHistorySource
   /** Each page is chronological; the first page contains the newest items. */
   items: AgentSessionHistoryItem[]
@@ -1976,6 +1978,8 @@ export type AgentCapturedTimelinePage = {
 
 export type AgentTimelineSnapshot = {
   agentSessionId: string
+  /** Original Core namespace; a Store-only snapshot may not establish it. */
+  sourceHostId?: string
   revision: number
   items: AgentTimelineItem[]
   stream?: AgentCapturedTimelineStream & { positions: Array<{ id: string; firstSequence: number; sequence: number; revision: string }> }

@@ -3,8 +3,14 @@ import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareCon
 import { classifyExecutable, executorUnavailableError, type AgentExecutableProbeContext } from './executable-probe.js'
 import { unconfirmedExecutableObservation } from './executable-observation.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
-import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
-import type { AgentConversationReadPage } from './conversation.js'
+import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage, type NativeConversationCheckpoint, type NativeConversationChangesPage } from './session-history-changes.js'
+import type { AgentSessionHistoryItem } from './types.js'
+import type { AgentConversationReadPage, ConversationRef } from './conversation.js'
+import { readAgentConversation as readUnifiedConversation, conversationCheckpoint as cutUnifiedConversation, readConversationChanges as readUnifiedChanges,
+  type ConversationReaderPort } from './conversation-reader.js'
+import { parseConversationRef, parseConversationWatchOpening, parseConversationObservation, parseConversationFrontier, parseConversationCheckpoint,
+  type ConversationTimelineReadInput, type ConversationReadOptions, type ConversationCheckpointPage, type ConversationChangesInput,
+  type ConversationChangesPage, type ConversationObservation, type ConversationObservationHandle } from './conversation-changes.js'
 import { SessionHistoryObservationPool } from './session-history-observation-pool.js'
 import { createInputPerformanceRecorder, hostedCarrierPerformance, readInputObservation, readInputObservationField, type InputObservationReference, type ClientPerformanceDiagnostics, type InputPerformanceHandle } from './performance-diagnostics.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'
@@ -250,6 +256,7 @@ function permissionNativeTurnEnd(session: AgentMuxStoredAgentSession, request: E
 }
 
 type NativeHistoryBinding = {
+  sourceHostId: string
   session: AgentSessionHistoryMetadata
   provider: AgentProvider
   executorOptions: Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'>
@@ -2275,8 +2282,8 @@ export class AgentMuxClient {
   }
 
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
-    await this.historyDescriptor(agentSessionId)
-    return await this.store.loadTimeline(agentSessionId)
+    const descriptor = await this.historyDescriptor(agentSessionId)
+    return { ...await this.store.loadTimeline(agentSessionId), sourceHostId: descriptor.hostId }
   }
 
   /** Query the original semantic Host's retained history; no Runtime connection or input authority. */
@@ -2289,9 +2296,115 @@ export class AgentMuxClient {
     return descriptor ? { ...page, hostId: input.hostId } : page
   }
 
-  /** The original bounded history owner, exposed through the common conversation contract. */
-  async readAgentConversation(input: AgentSessionHistoryReadInput, options: { signal?: AbortSignal } = {}): Promise<AgentConversationReadPage> {
-    return await this.readAgentSessionHistory(input, options)
+  /** One source-qualified timeline over the original native and captured owners. */
+  async readAgentConversation(input: ConversationTimelineReadInput, options: ConversationReadOptions = {}): Promise<AgentConversationReadPage> {
+    const owner = await this.conversationReader(input, options)
+    if (input.anchor) { parseConversationCheckpoint(input.anchor.frontier, input); parseConversationFrontier(input.anchor.frontier.frontier, owner.reference) }
+    const anchor = input.anchor ? { ...input.anchor, frontier: { ...input.anchor.frontier, ...owner.reference } } : undefined
+    const page = await readUnifiedConversation({ ...input, ...owner.reference, ...(anchor ? { anchor } : {}) }, owner.port)
+    return { ...page, hostId: input.hostId }
+  }
+
+  async conversationCheckpoint(input: ConversationRef, options: ConversationReadOptions = {}): Promise<ConversationCheckpointPage> {
+    const owner = await this.conversationReader(input, options)
+    const page = await cutUnifiedConversation(owner.reference, owner.port)
+    return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
+  }
+
+  async readConversationChanges(input: ConversationChangesInput, options: ConversationReadOptions = {}): Promise<ConversationChangesPage> {
+    const owner = await this.conversationReader(input, options)
+    parseConversationCheckpoint(input.checkpoint, input)
+    parseConversationFrontier(input.checkpoint.frontier, owner.reference)
+    const page = await readUnifiedChanges({ ...input, ...owner.reference, checkpoint: { ...input.checkpoint, ...owner.reference } }, owner.port)
+    return { ...page, hostId: input.hostId, checkpoint: { ...page.checkpoint, hostId: input.hostId } }
+  }
+
+  private async conversationReader(input: ConversationRef, options: ConversationReadOptions): Promise<{ reference: ConversationRef; port: ConversationReaderPort }> {
+    parseConversationRef({ hostId: input.hostId, agentSessionId: input.agentSessionId })
+    options.signal?.throwIfAborted()
+    const descriptor = await this.historyDescriptor(input.agentSessionId)
+    if (input.hostId !== 'local' && input.hostId !== descriptor.hostId) throw new AgentMuxError('The exact original conversation Host is unavailable.', 'UNKNOWN_AGENT_SESSION')
+    // Source references stay in this original Core namespace. A client route is
+    // external addressing context and never rewrites a source, cut or unit.
+    const reference = parseConversationRef({ hostId: descriptor.hostId, agentSessionId: input.agentSessionId })
+    return { reference, port: { descriptor, readHostId: input.hostId, ...(options.signal ? { signal: options.signal } : {}),
+      captured: query => this.store.readCapturedHistory(input.agentSessionId, query),
+      nativePage: cursor => this.sessionHistoryPage(input.agentSessionId, { limit: 1, ...(cursor === undefined ? {} : { cursor }), ...(options.signal ? { signal: options.signal } : {}) }),
+      nativeCheckpoint: () => this.sessionHistoryCheckpoint(input.agentSessionId, options.signal ? { signal: options.signal } : {}),
+      nativeChanges: checkpoint => this.readSessionHistoryChanges(input.agentSessionId, { checkpoint, limit: 1, ...(options.signal ? { signal: options.signal } : {}) }),
+      nativeRecord: (source, id) => this.readConversationNativeRecord(input.agentSessionId, source, id, options.signal) } }
+  }
+
+  /** Exact-record lookup reuses the original Provider binding, resource signer and read lifetime. */
+  private async readConversationNativeRecord(agentSessionId: string, source: AgentSessionHistorySource, recordId: string, signal?: AbortSignal): Promise<AgentSessionHistoryItem> {
+    if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
+    if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('Conversation reading is busy; retry this exact original record.', 'AGENT_SESSION_HISTORY_BUSY')
+    const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
+    const cancel = () => controller.abort(signal?.reason); signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      signal?.throwIfAborted()
+      const binding = await read(this.nativeHistoryBinding(agentSessionId, {}, controller.signal, 'read'))
+      const { session, provider, handle, executorOptions: options } = binding
+      if (source.providerId !== session.providerId || source.nativeSessionId !== handle.sessionId) throw new AgentMuxError('The exact native record belongs to another original source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      if (!provider.readSessionHistoryRecord) throw new AgentMuxError('This Provider cannot locate the exact recorded version. The original source remains readable.', 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED')
+      const contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
+      const item = await read(provider.readSessionHistoryRecord({ agentSessionId, source, recordId, signal: controller.signal,
+        command: resolveAgentExecutable(options.commandOverride, provider.executable), args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
+        ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }))
+      await read(binding.assertCurrent())
+      const record = normalizeSessionHistoryPage(source, { source, items: [item], nextCursor: null }, 1).items[0]!
+      if (record.id !== recordId) throw new AgentMuxError('The original lookup returned another native record.', 'CONTROL_PROTOCOL_ERROR')
+      return record
+    } finally { signal?.removeEventListener('abort', cancel); lifetime.close() }
+  }
+
+  /** Notifications only wake authoritative reads. Each native/captured source keeps its original scope. */
+  async observeConversation(input: ConversationRef, listener: (value: ConversationObservation) => void, options: ConversationReadOptions = {}): Promise<ConversationObservationHandle> {
+    const owner = await this.conversationReader(input, options), ref = owner.reference
+    const controller = new AbortController(), resources = this.historyObservationControllers.get(input.agentSessionId) ?? new Set<NativeHistoryObservationResource>()
+    const resource: NativeHistoryObservationResource = { controller, binding: null }
+    resources.add(resource); this.historyObservationControllers.set(input.agentSessionId, resources)
+    let native: AgentSessionHistoryObservationHandle | undefined, opening: import('./conversation-changes.js').ConversationWatchOpening | undefined
+    let pendingCaptured = false, unsubscribe = () => {}, nativeEnded = () => {}, disposed = false
+    const emit = (value: ConversationObservation): void => {
+      if (!opening || controller.signal.aborted) return
+      try { listener(parseConversationObservation({ ...value, hostId: input.hostId }, opening)) } catch { /* Read callbacks cannot gate the original Agent. */ }
+    }
+    const captured = () => {
+      if (!opening) { pendingCaptured = true; return }
+      const source = opening.scope.sources.find(s => s.kind === 'captured')
+      if (source) emit({ ...ref, sourceHostId: ref.hostId, source, kind: 'invalidated' })
+    }
+    const dispose = () => {
+      if (disposed) return
+      disposed = true; unsubscribe(); native?.closed?.removeEventListener('abort', nativeEnded); native?.dispose()
+      options.signal?.removeEventListener('abort', dispose); resources.delete(resource)
+      if (!resources.size) this.historyObservationControllers.delete(input.agentSessionId)
+      if (!controller.signal.aborted) controller.abort(new AgentMuxError('This conversation reader was released.', 'AGENT_SESSION_HISTORY_CANCELLED'))
+    }
+    controller.signal.addEventListener('abort', dispose, { once: true }); options.signal?.addEventListener('abort', dispose, { once: true })
+    unsubscribe = this.publisher.onTimelineEvent(input.agentSessionId, event => { if (event.type === 'agent-timeline') captured() })
+    try {
+      const cut = await cutUnifiedConversation(ref, owner.port)
+      opening = parseConversationWatchOpening({ ...input, sourceHostId: ref.hostId, scope: cut.scope, coverage: cut.coverage }, input)
+      const source = opening.scope.sources.find(s => s.kind === 'native')
+      if (source?.kind === 'native') {
+        try {
+          native = await this.observeSessionHistory(input.agentSessionId, observation => {
+            if (observation.source && (observation.source.providerId !== source.providerId || observation.source.nativeSessionId !== source.nativeSessionId)) return
+            emit({ ...ref, sourceHostId: ref.hostId, source, kind: observation.kind, ...(observation.kind === 'unavailable' ? { code: observation.code, message: observation.message } : {}) })
+          }, { signal: controller.signal })
+          nativeEnded = () => emit({ ...ref, sourceHostId: ref.hostId, source, kind: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', message: 'The original native observation ended; its scope is retained and captured changes remain readable.' })
+          native.closed?.addEventListener('abort', nativeEnded, { once: true })
+        } catch (error) {
+          controller.signal.throwIfAborted()
+          emit({ ...ref, sourceHostId: ref.hostId, source, kind: 'unavailable', code: error instanceof AgentMuxError ? error.code : 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE', message: error instanceof Error ? error.message : 'Native observation is unavailable; explicit reading remains available.' })
+        }
+      }
+      if (pendingCaptured) captured()
+      controller.signal.throwIfAborted()
+      return { ...opening, hostId: input.hostId, closed: controller.signal, dispose }
+    } catch (error) { dispose(); throw error }
   }
 
   /** Discover bounded retained sources without connecting to or controlling Runtime. */
@@ -2792,7 +2905,7 @@ export class AgentMuxClient {
       if (strictWitness) await strictWitness()
     }
     await assertCurrent()
-    return { session, provider, executorOptions, handle: acceptedHandle, get transient() { return transient }, matches, assertCurrent }
+    return { sourceHostId: descriptor.hostId, session, provider, executorOptions, handle: acceptedHandle, get transient() { return transient }, matches, assertCurrent }
   }
 
   /** Read existing Provider conversation history without controlling the Session's Run. */
@@ -2841,7 +2954,7 @@ export class AgentMuxClient {
       }))
       controller.signal.throwIfAborted()
       await read(binding.assertCurrent())
-      return { agentSessionId, ...normalizeSessionHistoryPage(source, page, limit) }
+      return { agentSessionId, sourceHostId: binding.sourceHostId, ...normalizeSessionHistoryPage(source, page, limit) }
     } finally {
       options.signal?.removeEventListener('abort', cancelled)
       lifetime.close()
@@ -2849,19 +2962,19 @@ export class AgentMuxClient {
   }
 
   /** A durable cut in the original Provider source. It excludes already recorded history. */
-  async conversationCheckpoint(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env'> = {}): Promise<ConversationCheckpoint> {
-    const page = await this.conversationChangesPage(agentSessionId, { ...options, tail: true })
+  async sessionHistoryCheckpoint(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env'> = {}): Promise<NativeConversationCheckpoint> {
+    const page = await this.nativeHistoryChangesPage(agentSessionId, { ...options, tail: true })
     return page.checkpoint
   }
 
   /** Resume after a persisted source cut; notifications only wake this authoritative read. */
-  async readConversationChanges(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit'> & { checkpoint: ConversationCheckpoint }): Promise<ConversationChangesPage> {
-    const checkpoint = parseConversationCheckpoint(options.checkpoint)
+  async readSessionHistoryChanges(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit'> & { checkpoint: NativeConversationCheckpoint }): Promise<NativeConversationChangesPage> {
+    const checkpoint = parseNativeConversationCheckpoint(options.checkpoint)
     if (checkpoint.agentSessionId !== agentSessionId) throw new AgentMuxError('The checkpoint belongs to another original Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    return this.conversationChangesPage(agentSessionId, { ...options, checkpoint })
+    return this.nativeHistoryChangesPage(agentSessionId, { ...options, checkpoint })
   }
 
-  private async conversationChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit'> & { checkpoint?: ConversationCheckpoint; tail?: true }): Promise<ConversationChangesPage> {
+  private async nativeHistoryChangesPage(agentSessionId: string, options: Pick<AgentSessionHistoryPageOptions, 'signal' | 'commandOverride' | 'args' | 'env' | 'limit'> & { checkpoint?: NativeConversationCheckpoint; tail?: true }): Promise<NativeConversationChangesPage> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     const limit = options.limit ?? 30
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError('Changes require a finite limit from 1 to 100.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
@@ -2883,7 +2996,7 @@ export class AgentMuxClient {
         ...(options.checkpoint ? { after: options.checkpoint.cursor } : {}), ...(options.tail ? { tail: true as const } : {}) }))
       await read(binding.assertCurrent())
       const checkpoint = { agentSessionId, source, cursor: page.cursor }, ref = { hostId: 'local', agentSessionId }
-      return parseConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
+      return parseNativeConversationChangesPage({ ...ref, source: page.source, items: page.items, checkpoint, more: page.more }, { ...ref, checkpoint: options.checkpoint ?? checkpoint, limit })
     } finally { options.signal?.removeEventListener('abort', cancel); lifetime.close() }
   }
 

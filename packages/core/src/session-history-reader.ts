@@ -77,7 +77,7 @@ export async function readAgentSessionHistory(client: Reader, input: AgentSessio
   }
   if (cursor.index > items.length || cursor.offset && cursor.index === items.length) return fail('History cursor exceeds its source.')
   const budgetBytes = input.maxBytes ?? 64 * 1024
-  const result: AgentSessionHistoryReadPage = { hostId: input.hostId, agentSessionId: input.agentSessionId,
+  const result: AgentSessionHistoryReadPage = { hostId: input.hostId, sourceHostId: descriptor.hostId, agentSessionId: input.agentSessionId,
     source: input.source, revision, availability: items.length ? 'available' : 'empty',
     order: input.source === 'captured' ? 'newest-first' : 'chronological-page', items: [], nextCursor: null, budgetBytes,
     ...(nativeSource ? { nativeSource } : {}), ...(capturedPage ? { capturedStream: capturedPage.stream } : {}) }

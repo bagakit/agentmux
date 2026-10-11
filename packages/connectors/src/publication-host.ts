@@ -1,5 +1,5 @@
 import { AgentMuxError, readSessionHistoryTextResource, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { parseConversationChangesPage, type ConversationChangesInput, type ConversationChangesPage, type ConversationRef } from '@agentmux/core/conversation'
+import { parseNativeConversationChangesPage, type NativeConversationChangesInput, type NativeConversationChangesPage, type ConversationRef } from '@agentmux/core/conversation'
 import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
@@ -8,7 +8,7 @@ import { PublicationStore, publicDelivery, type PublicationReceipt, type Publica
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
 export interface PublicationConversationPort {
-  changes(input: ConversationChangesInput, signal: AbortSignal): Promise<ConversationChangesPage>
+  changes(input: NativeConversationChangesInput, signal: AbortSignal): Promise<NativeConversationChangesPage>
   observe(reference: ConversationRef, listener: (value: AgentSessionHistoryObservation) => void, signal: AbortSignal): Promise<AgentSessionHistoryObservationHandle>
   resource(reference: ConversationRef, input: AgentSessionHistoryResourceRequest, signal: AbortSignal): Promise<AgentSessionHistoryResourceReadResult>
 }
@@ -124,8 +124,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
       let after = this.store.checkpoint(binding, initial)
       for (let reads = 0; reads < 8; reads++) {
         if (signal.aborted || !this.authorized(binding)) return
-        let page: ConversationChangesPage
-        try { page = parseConversationChangesPage(await this.options.conversation.changes({ ...reference, checkpoint: after, limit: 100 }, signal), { ...reference, checkpoint: after, limit: 100 }) }
+        let page: NativeConversationChangesPage
+        try { page = parseNativeConversationChangesPage(await this.options.conversation.changes({ ...reference, checkpoint: after, limit: 100 }, signal), { ...reference, checkpoint: after, limit: 100 }) }
         catch (error) {
           lane.observation = { state: 'unavailable', reason: error instanceof AgentMuxError && ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'AGENT_SESSION_HISTORY_CURSOR_INVALID', 'AGENT_CONVERSATION_SOURCE_CHANGED'].includes(error.code) ? 'source-gap' : 'source-unconfirmed' }
           return

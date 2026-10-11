@@ -3,7 +3,7 @@ import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
 import { parseRendererTraceInput } from './renderer-trace.js'
 import { parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { parseMoteConnectionParams } from './mote-connection-codec.js'
-import { parseConversationChangesInput } from './conversation-changes.js'
+import { parseConversationChangesInput, parseConversationTimelineReadInput } from './conversation-changes.js'
 import { parseAgentMuxSearchInput } from './search-codec.js'
 import { parseConnectionParams } from './connections-codec.js'
 import { parseNoteCorpusParams } from './note-corpus.js'
@@ -283,27 +283,29 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.conversation.landmark.apply', '--input FILE|-', 'Create, rename or remove one original named reading point with a durable metadata receipt.',
     { '--input': 'data' }, async f => parseConversationLandmarkWrite(await readControlJsonInput(value(f, '--input', true)!, 'Reading point')),
     'JSON requires hostId, agentSessionId, expectedRevision, operationId and change. create supplies point {id,name,reference}; rename supplies id/name; remove supplies id. The reference carries the exact original Host/Session and native provider/nativeSession/record or captured record source. Keep the original operationId and intent after an unknown receipt; list with that operationId before retrying. A revision conflict requires a refreshed list and an explicit new intent. This changes navigation metadata only and never sends input, starts a Run or guesses a chapter.'),
-  command('agent.conversation.checkpoint', '--host ID --session ID', 'Cut the original durable source without exporting previous records.',
+  command('agent.conversation.checkpoint', '--host ID --session ID', 'Cut the unified original source vector without exporting previous records.',
     { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
   command('agent.conversation.changes', '--input FILE|-', 'Resume bounded original changes from a saved source checkpoint.',
-    { '--input': 'data' }, async f => ({ ...parseConversationChangesInput(await readControlJsonInput(value(f, '--input', true)!, 'Conversation changes')) }), 'JSON requires hostId, agentSessionId, checkpoint and optional limit. Keep the returned checkpoint with the effects derived from its records. A source Gap retains the original boundary and requires explicit sharing review.'),
+    { '--input': 'data' }, async f => ({ ...parseConversationChangesInput(await readControlJsonInput(value(f, '--input', true)!, 'Conversation changes')) }), 'JSON requires hostId, agentSessionId, the original route-scoped checkpoint envelope (including its unchanged source frontier) and optional limit/maxBytes/cursor. Complete fragments before consuming units; retain the old checkpoint until the frozen batch finishes. Keep the returned checkpoint with the effects derived from its records. A source Gap retains the original boundary and requires explicit sharing review.'),
   { ...command('agent.conversation.watch', '--host ID --session ID', 'Follow relevant source invalidations; resume durable changes to recover notification gaps.',
     { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) }),
-    'Notifications only wake an authoritative changes read. Ctrl-C releases this reader, never the original Session or Run. Source replacement ends this observation; inspect and authorize the new source cut before publishing.'), stream: true },
+    'Notifications only wake an authoritative changes read. Ctrl-C releases this reader, never the original Session or Run. One unavailable source retains its scope while other source observations stay available. Inspect and authorize a new source cut before publishing.'), stream: true },
   command('agent.interaction.respond', '--input FILE|-', 'Answer the exact original typed request with a stable operation identity.',
     { '--input': 'data' }, async f => await readControlJsonInput(value(f, '--input', true)!, 'Interaction response') as Record<string, unknown>,
     'JSON requires agentSessionId, expectedRun, operationId, expectedRequest and response. expectedRequest is the original typed request from agent.inspect, including its content and evidence. Keep the operationId and answer unchanged after a lost receipt; inspect the original operation before any further action. External action attribution requires its original executing-Host authority; a wire identity grants no permission. Transport acceptance does not prove Native adoption or task completion. Requires a transport-approved user or device.'),
   command('agent.interaction.inspect', '--session ID --operation-id ID', 'Read the original durable response receipt without dispatching input.',
     { '--session': 'data', ...OP }, f => ({ agentSessionId: id(f, '--session', true), operationId: id(f, '--operation-id', true) }),
     'Available after the original question settles or its Run changes. A missing receipt is not proof that another operation did not answer; an unknown receipt must not be replayed with new identities. Reading never starts or stops a Run.'),
-  command('agent.conversation.inspect', '--host ID --session ID --source captured|native [--limit N] [--cursor CURSOR] [--max-bytes N]',
-    'Read the original bounded conversation with source-qualified records and retained byte fragments.',
-    { '--host': 'data', '--session': 'data', '--source': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {
-      const source = value(f, '--source', true)
-      if (source !== 'captured' && source !== 'native') invalid('--source requires captured or native.')
-      return { hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), source,
-        ...numbers(f, { '--limit': 'limit', '--max-bytes': 'maxBytes' }), ...fields(f, { '--cursor': 'cursor' }) }
-    }, 'hostId and agentSessionId identify the exact original conversation. The original envelope keeps its history cursor, source identity and complete item or byte fragment contract. A successful read does not prove an input was adopted or an external message delivered. Cancellation only releases this read.'),
+  command('agent.conversation.inspect', '(--host ID --session ID [--limit N] [--cursor CURSOR] [--max-bytes N]|--input FILE|-)',
+    'Read one unified source-qualified timeline, newest-first, with bounded complete units or exact byte fragments.',
+    { '--host': 'data', '--session': 'data', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value', '--input': 'data' }, async f => {
+      if (f.values.has('--input')) {
+        if (['--host', '--session', '--limit', '--cursor', '--max-bytes'].some(flag => f.values.has(flag))) invalid('--input cannot be combined with timeline flags.')
+        return parseConversationTimelineReadInput(await readControlJsonInput(value(f, '--input', true)!, 'Conversation timeline'))
+      }
+      return parseConversationTimelineReadInput({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true),
+        ...numbers(f, { '--limit': 'limit', '--max-bytes': 'maxBytes' }), ...fields(f, { '--cursor': 'cursor' }) })
+    }, 'Original raw records remain available through agent history --source native|captured. JSON --input also accepts an exact versioned anchor {record,revision,frontier}, where frontier is the original route-scoped checkpoint envelope. Keep the same anchor and cursor across fragments; do not interpret partial bytes as events. Missing sources retain explicit coverage. Reads never adopt input or prove delivery, and cancellation releases only this reader.'),
   command('agent.history', '--host ID --session ID --source captured|native [--kind user-message|text] [--query TEXT] [--scan-limit N] [--limit N] [--cursor CURSOR] [--max-bytes N]',
     'Read exact retained Session history without operating its Run.',
     { '--host': 'data', '--session': 'data', '--source': 'value', '--kind': 'value', '--query': 'data', '--scan-limit': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {

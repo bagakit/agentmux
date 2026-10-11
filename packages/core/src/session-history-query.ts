@@ -230,7 +230,7 @@ export async function readAgentSessionHistoryQuery(owner: Reader, input: AgentSe
   const position: Position = { page: original?.page ?? null, index: original?.index ?? 0 }
   const limit = input.limit ?? 30, scanLimit = input.scanLimit ?? 200, budgetBytes = input.maxBytes ?? 1024 * 1024
   const textMode = input.kind === 'text'
-  const result: AgentSessionHistoryReadPage = { hostId: input.hostId, agentSessionId: input.agentSessionId, source: input.source,
+  const result: AgentSessionHistoryReadPage = { hostId: input.hostId, sourceHostId: descriptor.hostId, agentSessionId: input.agentSessionId, source: input.source,
     kind: textMode ? 'text' : 'user-message', revision: view.revision, availability: 'empty', order: 'newest-first', items: [], ...(textMode ? {} : { userMessages: [] }),
     scan: { examined: 0, complete: false }, nextCursor: null, budgetBytes, ...(view.nativeSource ? { nativeSource: view.nativeSource } : {}),...(view.firstCaptured?{capturedStream:view.firstCaptured.stream}:{}) }
   const cursor = () => encode({ version: 1, readId: view!.id, scope, ...position })

@@ -1,86 +1,324 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { normalizeSessionHistoryPage, SESSION_HISTORY_MAX_PAGE_BYTES } from './session-history.js'
-import type { AgentProviderSessionHistoryContext, AgentSessionHistoryItem, AgentSessionHistorySource } from './types.js'
-import type { ConversationRef } from './conversation.js'
+import { normalizeSessionHistoryPage } from './session-history.js'
+import { normalizeAgentTimelineItem } from './session-timeline.js'
+import { parseConversationProvenance } from './conversation-provenance.js'
+import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationFacts, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces,
+  type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-timeline.js'
+import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
+import type { ConversationRef, ConversationItemRef } from './conversation.js'
+import type { JsonReadEntry } from './json-read-fragments.js'
+export { parseConversationRef } from './session-history-changes.js'
+export * from './session-history-changes.js'
 
-/** A read continuation in one exact original source; never an input or sharing capability. */
-export type ConversationCheckpoint = {
-  agentSessionId: string
-  source: AgentSessionHistorySource
-  cursor: string
-}
-export type ConversationCheckpointPage = ConversationRef & { checkpoint: ConversationCheckpoint }
-export type ConversationWatchOpening = ConversationRef & { source: AgentSessionHistorySource }
-export type ConversationObservation = ConversationRef & { observation: import('./types.js').AgentSessionHistoryObservation }
-export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number }
-export type ConversationChangesPage = ConversationRef & {
-  source: AgentSessionHistorySource
-  items: AgentSessionHistoryItem[]
-  checkpoint: ConversationCheckpoint
-  more: boolean
-}
-export type ProviderConversationChangesContext = Omit<AgentProviderSessionHistoryContext, 'cursor'> & { after?: string; tail?: true }
-export type ProviderConversationChangesPage = { source: AgentSessionHistorySource; items: AgentSessionHistoryItem[]; cursor: string; more: boolean }
+export const CONVERSATION_DEFAULT_READ_BYTES = 64 * 1024
+export const CONVERSATION_MAX_READ_BYTES = 4 * 1024 * 1024
+export const CONVERSATION_MAX_UNIT_BYTES = 32 * 1024 * 1024
+export type ConversationScope = { sources: readonly ConversationSourceRef[] }
+export type ConversationFrontier = ConversationRef & { scope: ConversationScope; cuts: readonly (
+  | { kind: 'native'; checkpoint: NativeConversationCheckpoint }
+  | { kind: 'captured'; epoch: string; sequence: number }
+)[] }
+export type ConversationCheckpoint = ConversationRef & { sourceHostId: string; frontier: ConversationFrontier }
+export type ConversationVersionedAnchor = { record: ConversationItemRef; revision: string; frontier: ConversationCheckpoint }
+export type ConversationTimelineReadInput = ConversationRef & { limit?: number; cursor?: string; maxBytes?: number; anchor?: ConversationVersionedAnchor }
+export type ConversationUnit = { event: ConversationEvent; records: readonly ConversationSourceRecord[] }
+export type ConversationUnitEntry = JsonReadEntry<ConversationUnit>
+export type AgentConversationReadPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; coverage: readonly ConversationSourceCoverage[];
+  order: ConversationTimeline['order'] & { direction: 'newest-first' }; items: readonly ConversationUnitEntry[]; nextCursor: string | null; budgetBytes: number }
+export type ConversationCheckpointPage = ConversationRef & { sourceHostId: string; scope: ConversationScope; checkpoint: ConversationCheckpoint; coverage: readonly ConversationSourceCoverage[] }
+export type ConversationChangesInput = ConversationRef & { checkpoint: ConversationCheckpoint; limit?: number; maxBytes?: number; cursor?: string }
+export type ConversationChangesPage = AgentConversationReadPage & { checkpoint: ConversationCheckpoint; more: boolean }
+export type ConversationWatchOpening = ConversationRef & { sourceHostId: string; scope: ConversationScope; coverage: readonly ConversationSourceCoverage[] }
+export type ConversationObservation = ConversationRef & { sourceHostId: string; source: ConversationSourceRef; kind: 'invalidated' | 'unavailable'; code?: string; message?: string }
+export type ConversationObservationHandle = ConversationWatchOpening & { closed: AbortSignal; dispose(): void }
+/** Cancellation owns this read lease, never the original Agent or its source namespace. */
+export type ConversationReadOptions = { signal?: AbortSignal }
 
-function rpcString(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value || value.length > 16_384) throw new AgentMuxError(`${label} requires bounded original identity.`, 'INVALID_CONTROL_REQUEST')
+const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength
+const bad = (message = 'Conversation data changed scope, version or shape.', code = 'CONTROL_PROTOCOL_ERROR'): never => { throw new AgentMuxError(message, code) }
+function text(value: unknown, maximum = 16_384): string {
+  if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value) || new TextEncoder().encode(value).length > maximum) return bad()
   return value
 }
-
-export function parseConversationRef(value: unknown): ConversationRef {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId'])
-  return { hostId: rpcString(p.hostId, 'Host ID'), agentSessionId: rpcString(p.agentSessionId, 'Session ID') }
+function message(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.includes('\0') || new TextEncoder().encode(value).length > 65_536) return bad()
+  return value
 }
-export function parseConversationCheckpoint(value: unknown): ConversationCheckpoint {
-  const p = rpcRecord(value, ['agentSessionId', 'source', 'cursor']), source = rpcRecord(p.source, ['providerId', 'nativeSessionId'])
-  return { agentSessionId: rpcString(p.agentSessionId, 'Session ID'),
-    source: { providerId: rpcString(source.providerId, 'Provider ID'), nativeSessionId: rpcString(source.nativeSessionId, 'Native Session ID') },
-    cursor: rpcString(p.cursor, 'Source cursor') }
+function integer(value: unknown, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isSafeInteger(value) || Number(value) < min || Number(value) > max) return bad()
+  return Number(value)
+}
+function same(a: unknown, b: unknown): boolean { return conversationRevision(a) === conversationRevision(b) }
+export function parseConversationSource(value: unknown): ConversationSourceRef {
+  const p = rpcRecord(value, ['kind', 'providerId', 'nativeSessionId', 'epoch'], 'CONTROL_PROTOCOL_ERROR')
+  if (p.kind === 'native') {
+    if (p.epoch !== undefined) return bad()
+    return { kind: 'native', providerId: text(p.providerId), nativeSessionId: text(p.nativeSessionId) }
+  }
+  if (p.kind === 'native-unavailable') {
+    if (p.epoch !== undefined || p.nativeSessionId !== undefined) return bad()
+    return { kind: 'native-unavailable', providerId: text(p.providerId) }
+  }
+  if (p.kind !== 'captured' || p.providerId !== undefined || p.nativeSessionId !== undefined) return bad()
+  return { kind: 'captured', ...(p.epoch === undefined ? {} : { epoch: text(p.epoch) }) }
+}
+function scope(value: unknown): ConversationScope {
+  const p = rpcRecord(value, ['sources'], 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(p.sources) || p.sources.length > 16) return bad()
+  const sources = p.sources.map(parseConversationSource)
+  if (new Set(sources.map(conversationSourceKey)).size !== sources.length) return bad()
+  return { sources }
+}
+export function parseConversationFrontier(value: unknown, expected?: ConversationRef): ConversationFrontier {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'scope', 'cuts'], 'CONTROL_PROTOCOL_ERROR')
+  const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId }), accepted = scope(p.scope)
+  if (expected && (ref.hostId !== expected.hostId || ref.agentSessionId !== expected.agentSessionId) || !Array.isArray(p.cuts) || p.cuts.length > accepted.sources.length) return bad()
+  const seen = new Set<string>()
+  const cuts = p.cuts.map(value => {
+    const cut = rpcRecord(value, ['kind', 'checkpoint', 'epoch', 'sequence'], 'CONTROL_PROTOCOL_ERROR')
+    let result: ConversationFrontier['cuts'][number], source: ConversationSourceRef
+    if (cut.kind === 'native') {
+      if (cut.epoch !== undefined || cut.sequence !== undefined) return bad()
+      const checkpoint = parseNativeConversationCheckpoint(cut.checkpoint)
+      if (checkpoint.agentSessionId !== ref.agentSessionId) return bad()
+      source = { kind: 'native', ...checkpoint.source }; result = { kind: 'native', checkpoint }
+    } else {
+      if (cut.kind !== 'captured' || cut.checkpoint !== undefined) return bad()
+      const epoch = text(cut.epoch), sequence = integer(cut.sequence)
+      source = { kind: 'captured', epoch }; result = { kind: 'captured', epoch, sequence }
+    }
+    const key = conversationSourceKey(source)
+    if (seen.has(key) || !accepted.sources.some(value => conversationSourceKey(value) === key)) return bad()
+    seen.add(key); return result
+  })
+  return { ...ref, scope: accepted, cuts }
+}
+/** Route context wraps the original source frontier; it never rewrites source references. */
+export function parseConversationCheckpoint(value: unknown, expected?: ConversationRef): ConversationCheckpoint {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'frontier'], 'CONTROL_PROTOCOL_ERROR')
+  const target = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId }), sourceHostId = text(p.sourceHostId)
+  if (expected && (target.hostId !== expected.hostId || target.agentSessionId !== expected.agentSessionId)) return bad()
+  return { ...target, sourceHostId, frontier: parseConversationFrontier(p.frontier, { hostId: sourceHostId, agentSessionId: target.agentSessionId }) }
+}
+function itemRef(value: unknown, ref: ConversationRef, accepted?: ConversationScope): ConversationItemRef {
+  const base = { hostId: ref.hostId, agentSessionId: ref.agentSessionId }
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'source'], 'CONTROL_PROTOCOL_ERROR')
+  if (p.hostId !== ref.hostId || p.agentSessionId !== ref.agentSessionId) return bad()
+  const s = rpcRecord(p.source, ['kind', 'providerId', 'nativeSessionId', 'recordId'], 'CONTROL_PROTOCOL_ERROR')
+  const recordId = text(s.recordId)
+  if (s.kind === 'native') {
+    const source = { kind: 'native' as const, providerId: text(s.providerId), nativeSessionId: text(s.nativeSessionId), recordId }
+    if (accepted && !accepted.sources.some(value => value.kind === 'native' && value.providerId === source.providerId && value.nativeSessionId === source.nativeSessionId)) return bad()
+    return { ...base, source }
+  }
+  if (s.kind !== 'captured' || s.providerId !== undefined || s.nativeSessionId !== undefined || accepted && !accepted.sources.some(value => value.kind === 'captured' && value.epoch !== undefined)) return bad()
+  return { ...base, source: { kind: 'captured', recordId } }
+}
+export function parseConversationVersionedAnchor(value: unknown, ref: ConversationRef): ConversationVersionedAnchor {
+  const p = rpcRecord(value, ['record', 'revision', 'frontier'], 'CONTROL_PROTOCOL_ERROR'), frontier = parseConversationCheckpoint(p.frontier, ref)
+  const revision = text(p.revision)
+  if (!/^[a-f0-9]{64}$/u.test(revision)) return bad()
+  return { record: itemRef(p.record, frontier.frontier, frontier.frontier.scope), revision, frontier }
+}
+function options(value: Record<string, unknown>): { limit?: number; maxBytes?: number; cursor?: string } {
+  return { ...(value.limit === undefined ? {} : { limit: integer(value.limit, 1, 100) }),
+    ...(value.maxBytes === undefined ? {} : { maxBytes: integer(value.maxBytes, 4096, CONVERSATION_MAX_READ_BYTES) }),
+    ...(value.cursor === undefined ? {} : { cursor: text(value.cursor, 131_072) }) }
+}
+export function parseConversationTimelineReadInput(value: unknown): ConversationTimelineReadInput {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor'])
+  const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
+  return { ...ref, ...options(p), ...(p.anchor === undefined ? {} : { anchor: parseConversationVersionedAnchor(p.anchor, ref) }) }
 }
 export function parseConversationChangesInput(value: unknown): ConversationChangesInput {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit'])
-  const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId }), checkpoint = parseConversationCheckpoint(p.checkpoint)
-  if (checkpoint.agentSessionId !== ref.agentSessionId || !Number.isSafeInteger(p.limit ?? 30) || Number(p.limit ?? 30) < 1 || Number(p.limit ?? 30) > 100) {
-    throw new AgentMuxError('Changes require the original Session checkpoint and a limit from 1 to 100.', 'INVALID_CONTROL_REQUEST')
-  }
-  return { ...ref, checkpoint, ...(p.limit === undefined ? {} : { limit: p.limit as number }) }
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes'])
+  const ref = parseConversationRef({ hostId: p.hostId, agentSessionId: p.agentSessionId })
+  const checkpoint = parseConversationCheckpoint(p.checkpoint, ref)
+  return { ...ref, checkpoint, ...options(p) }
 }
+function coverage(value: unknown, ref: ConversationRef, accepted: ConversationScope): ConversationSourceCoverage[] {
+  if (!Array.isArray(value) || value.length !== accepted.sources.length) return bad()
+  const seen = new Set<string>()
+  return value.map(value => {
+    const p = rpcRecord(value, ['source', 'origin', 'readExtent', 'earlier', 'current', 'gaps'], 'CONTROL_PROTOCOL_ERROR')
+    const source = parseConversationSource(p.source), key = conversationSourceKey(source), extent = rpcRecord(p.readExtent, ['from', 'through'], 'CONTROL_PROTOCOL_ERROR')
+    if (seen.has(key) || !accepted.sources.some(v => conversationSourceKey(v) === key) ||
+      !['beginning', 'retained-prefix', 'unknown'].includes(String(p.origin)) || !['complete', 'more', 'unknown-before'].includes(String(p.earlier)) ||
+      !['complete-through-cut', 'partial', 'unavailable', 'unsupported'].includes(String(p.current)) || !Array.isArray(p.gaps) || p.gaps.length > 100) return bad()
+    seen.add(key)
+    return { source, origin: p.origin as ConversationSourceCoverage['origin'],
+      readExtent: { ...(extent.from === undefined ? {} : { from: text(extent.from) }), through: text(extent.through) },
+      earlier: p.earlier as ConversationSourceCoverage['earlier'], current: p.current as ConversationSourceCoverage['current'],
+      gaps: p.gaps.map(value => { const gap = rpcRecord(value, ['code', 'message', 'record', 'continuation'], 'CONTROL_PROTOCOL_ERROR')
+        return { code: text(gap.code), message: message(gap.message), ...(gap.record === undefined ? {} : { record: itemRef(gap.record, ref) }), ...(gap.continuation === undefined ? {} : { continuation: text(gap.continuation, 131_072) }) } }) }
+  })
+}
+function selector(value: unknown): import('./conversation-timeline.js').ConversationSelector {
+  const p = rpcRecord(value, ['kind', 'partIndex', 'field'], 'CONTROL_PROTOCOL_ERROR')
+  if (p.kind === 'native-part' && p.field === undefined) return { kind: 'native-part', partIndex: integer(p.partIndex) }
+  if (p.kind !== 'captured-field' || p.partIndex !== undefined || !['content', 'toolInput', 'toolOutput'].includes(String(p.field))) return bad()
+  return { kind: 'captured-field', field: p.field as 'content' | 'toolInput' | 'toolOutput' }
+}
+function revision(value: unknown): string { const result = text(value); return /^[a-f0-9]{64}$/u.test(result) ? result : bad() }
+/** Validate complete units only. Fragments never acquire event semantics. */
+export function parseConversationUnit(value: unknown, ref: ConversationRef, accepted: ConversationScope): ConversationUnit {
+  if (bytes(value) > CONVERSATION_MAX_UNIT_BYTES) return bad()
+  const p = rpcRecord(value, ['event', 'records'], 'CONTROL_PROTOCOL_ERROR')
+  if (!Array.isArray(p.records) || !p.records.length || p.records.length > 200) return bad()
+  const records: ConversationSourceRecord[] = p.records.map(value => {
+    const r = rpcRecord(value, ['id', 'reference', 'revision', 'order', 'original'], 'CONTROL_PROTOCOL_ERROR')
+    const reference = itemRef(r.reference, ref, accepted), id = text(r.id, 131_072), version = revision(r.revision)
+    if (id !== conversationRecordId(reference)) return bad()
+    const original = rpcRecord(r.original, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'), order = rpcRecord(r.order, ['kind', 'source', 'pageWitness', 'indexInPage', 'epoch', 'firstSequence'], 'CONTROL_PROTOCOL_ERROR')
+    let result: ConversationSourceRecord
+    if (original.kind === 'native' && reference.source.kind === 'native' && order.kind === 'native-page') {
+      const s = parseConversationSource({ kind: 'native', ...rpcRecord(order.source) })
+      if (s.kind !== 'native' || s.providerId !== reference.source.providerId || s.nativeSessionId !== reference.source.nativeSessionId || order.epoch !== undefined || order.firstSequence !== undefined) return bad()
+      const item = normalizeSessionHistoryPage(s, { source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, items: [original.item], nextCursor: null }, 1).items[0]!
+      if (item.id !== reference.source.recordId || !same(original.item, item)) return bad()
+      result = { id, reference, revision: version, order: { kind: 'native-page', source: { providerId: s.providerId, nativeSessionId: s.nativeSessionId }, indexInPage: integer(order.indexInPage), ...(order.pageWitness === undefined ? {} : { pageWitness: text(order.pageWitness, 32_768) }) }, original: { kind: 'native', item } }
+    } else {
+      if (original.kind !== 'captured' || reference.source.kind !== 'captured' || order.kind !== 'captured-stream' || order.source !== undefined || order.pageWitness !== undefined || order.indexInPage !== undefined) return bad()
+      const epoch = text(order.epoch), item = normalizeAgentTimelineItem(original.item)
+      if (!accepted.sources.some(s => s.kind === 'captured' && s.epoch === epoch) || item.id !== reference.source.recordId || item.agentSessionId !== ref.agentSessionId || !same(original.item, item)) return bad()
+      result = { id, reference, revision: version, order: { kind: 'captured-stream', epoch, firstSequence: integer(order.firstSequence, 1) }, original: { kind: 'captured', item } }
+    }
+    if (conversationRevision(result.original.item) !== version) return bad('Original conversation record version changed.')
+    return result
+  })
+  const byId = new Map(records.map(record => [record.id, record]))
+  if (byId.size !== records.length) return bad()
+  const e = rpcRecord(p.event, ['id', 'revision', 'anchorId', 'reference', 'role', 'author', 'recordIds', 'content', 'relations', 'coalesces'], 'CONTROL_PROTOCOL_ERROR')
+  const reference = itemRef(e.reference, ref), id = text(e.id, 131_072)
+  if (id !== text(e.anchorId, 131_072) || id !== conversationRecordId(reference) || !Array.isArray(e.recordIds) || e.recordIds.length !== records.length ||
+    e.recordIds.some((v, i) => v !== records[i]!.id) || !Array.isArray(e.content) || !Array.isArray(e.relations) || e.relations.length > 100_000) return bad()
+  const nativeSource = accepted.sources.find(source => source.kind === 'native')
+  const targets = new Map(records.flatMap(record => {
+    const target = conversationSameEventTarget(record, nativeSource?.kind === 'native' ? nativeSource : undefined)
+    return target && conversationRecordId(target) !== record.id ? [[record.id, conversationRecordId(target)] as const] : []
+  }))
+  const anchors = conversationRecordAnchors(records, targets).anchors
+  if (records.some(record => record.id !== id && anchors.get(record.id) !== id)) return bad('Conversation event identity has no original canonical relation.')
+  const primary = byId.get(id) ?? records.find(record => record.original.kind === 'native') ?? records[0]!
+  if (e.role !== conversationRecordRole(primary) || !same(e.author, conversationEventAuthor(records, primary, ref.agentSessionId).author)) return bad()
+  const accounted = new Set<string>()
+  const content = e.content.map(value => {
+    const slot = rpcRecord(value, ['recordId', 'recordRevision', 'selector', 'placement'], 'CONTROL_PROTOCOL_ERROR'), recordId = text(slot.recordId, 131_072), record = byId.get(recordId), selected = selector(slot.selector)
+    if (!record || record.revision !== slot.recordRevision || !['body', 'detail'].includes(String(slot.placement)) ||
+      record.original.kind === 'native' && (selected.kind !== 'native-part' || selected.partIndex >= record.original.item.contentParts.length) ||
+      record.original.kind === 'captured' && (selected.kind !== 'captured-field' || record.original.item[selected.field] === undefined)) return bad()
+    const key = JSON.stringify([recordId, selected]); if (accounted.has(key)) return bad(); accounted.add(key)
+    return { recordId, recordRevision: record.revision, selector: selected, placement: slot.placement as 'body' | 'detail' }
+  })
+  const count = records.reduce((n, r) => { const original = r.original; return n + (original.kind === 'native' ? original.item.contentParts.length : (['content', 'toolInput', 'toolOutput'] as const).filter(f => original.item[f] !== undefined).length) }, 0)
+  if (accounted.size !== count) return bad('Conversation unit omitted original content slots.')
+  // Reuse the original typed provenance parser. These reading links do not confer
+  // execution/input authority and never infer an association from content or time.
+  const invocation = (value: unknown) => {
+    const p = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'subject', 'scope', 'callId'], 'CONTROL_PROTOCOL_ERROR')
+    if (p.hostId !== ref.hostId || p.agentSessionId !== ref.agentSessionId) return bad()
+    const original = { source: p.source, subject: p.subject, scope: p.scope, callId: p.callId }
+    const fact = parseConversationProvenance({ invocations: [{ selector: { kind: 'captured-field', field: 'content' }, invocation: original }] }).invocations![0]!.invocation
+    if (!same(original, fact)) return bad()
+    return { hostId: ref.hostId, agentSessionId: ref.agentSessionId, ...fact }
+  }
+  const partRef = (value: unknown) => {
+    const part = rpcRecord(value, ['record', 'recordRevision', 'selector'], 'CONTROL_PROTOCOL_ERROR')
+    const record = itemRef(part.record, ref), version = revision(part.recordRevision), selected = selector(part.selector)
+    const local = byId.get(conversationRecordId(record))
+    if (local && (local.revision !== version || !content.some(slot => slot.recordId === local.id && same(slot.selector, selected)))) return bad()
+    return { record, recordRevision: version, selector: selected }
+  }
+  const relations = e.relations.map(value => {
+    const r = rpcRecord(value)
+    if (r.kind === 'same-event') {
+      rpcRecord(value, ['kind', 'from', 'to'], 'CONTROL_PROTOCOL_ERROR')
+      const from = itemRef(r.from, ref), to = itemRef(r.to, ref), local = byId.get(conversationRecordId(from))
+      if (!local && !byId.has(conversationRecordId(to)) || local && !same(conversationSameEventTarget(local, nativeSource?.kind === 'native' ? nativeSource : undefined), to)) return bad()
+      return { kind: 'same-event' as const, from, to }
+    }
+    if (r.kind === 'same-invocation') {
+      rpcRecord(value, ['kind', 'from', 'to', 'invocation'], 'CONTROL_PROTOCOL_ERROR')
+      const from = partRef(r.from), to = partRef(r.to), original = invocation(r.invocation)
+      const local = [from, to].filter(part => byId.has(conversationRecordId(part.record)))
+      if (!local.length || local.some(part => !conversationInvocationFacts(byId.get(conversationRecordId(part.record))!).some(fact =>
+        same(fact.selector, part.selector) && same({ hostId: ref.hostId, agentSessionId: ref.agentSessionId, ...fact.invocation }, original)))) return bad()
+      return { kind: 'same-invocation' as const, from, to, invocation: original }
+    }
+    if (r.kind === 'answers') {
+      rpcRecord(value, ['kind', 'from', 'question'], 'CONTROL_PROTOCOL_ERROR')
+      const q = rpcRecord(r.question, ['agentSessionId', 'executionHostId', 'source', 'recordId', 'turnId', 'questionId'], 'CONTROL_PROTOCOL_ERROR')
+      if (q.executionHostId !== ref.hostId || q.agentSessionId !== ref.agentSessionId) return bad()
+      const source = rpcRecord(q.source, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
+      const from = itemRef(r.from, ref), question = { agentSessionId: ref.agentSessionId, executionHostId: ref.hostId,
+        source: { providerId: text(source.providerId), nativeSessionId: text(source.nativeSessionId) }, recordId: text(q.recordId),
+        questionId: text(q.questionId), ...(q.turnId === undefined ? {} : { turnId: text(q.turnId) }) }
+      const answer = byId.get(conversationRecordId(from)), request = byId.get(conversationRecordId({ ...ref, source: { kind: 'native', ...question.source, recordId: question.recordId } }))
+      if (from.source.kind !== 'native' || from.source.providerId !== question.source.providerId || from.source.nativeSessionId !== question.source.nativeSessionId || !answer && !request ||
+        answer && (answer.original.kind !== 'native' || !answer.original.item.questionAnswers?.some(value => value.questionId === question.questionId)) ||
+        request && (request.original.kind !== 'native' || request.original.item.turnId !== question.turnId || !request.original.item.questionRequest?.questions.some(value => value.id === question.questionId))) return bad()
+      return { kind: 'answers' as const, from, question }
+    }
+    if (r.kind === 'observes') {
+      rpcRecord(value, ['kind', 'from', 'target'], 'CONTROL_PROTOCOL_ERROR')
+      const rawTarget = rpcRecord(r.target), from = itemRef(r.from, ref), target = 'recordId' in rpcRecord(rawTarget.source) ? itemRef(rawTarget, ref) : invocation(rawTarget)
+      const observer = byId.get(conversationRecordId(from)), observed = 'recordId' in target.source ? byId.get(conversationRecordId(target as ConversationItemRef)) : undefined
+      if (!observer && !observed || observer && !same(observer.original.item.conversation?.observes, target)) return bad()
+      return { kind: 'observes' as const, from, target }
+    }
+    return bad()
+  })
+  const expectedContent = [primary, ...records.filter(record => record !== primary)].flatMap(record => {
+    const original = record.original
+    const selected = original.kind === 'native' ? original.item.contentParts.map((_, partIndex) => ({ kind: 'native-part' as const, partIndex }))
+      : (['content', 'toolInput', 'toolOutput'] as const).filter(field => original.item[field] !== undefined).map(field => ({ kind: 'captured-field' as const, field }))
+    return selected.map(selector => ({ recordId: record.id, recordRevision: record.revision, selector, placement: record === primary ? 'body' : 'detail' }))
+  })
+  if (!same(content, expectedContent)) return bad('Original conversation content order or placement changed.')
+  const expectedCoalesces = conversationEventCoalesces(records, id, nativeSource?.kind === 'native' ? nativeSource : undefined)
+  if (!same(e.coalesces, expectedCoalesces.length ? expectedCoalesces : undefined) ||
+    expectedCoalesces.some(coalesce => !relations.some(relation => same(relation, coalesce.relation)))) return bad('Conversation coalesce does not name its original contribution.')
+  const event = { id, anchorId: id, reference, role: e.role as ConversationEvent['role'], author: e.author as ConversationEvent['author'], recordIds: records.map(r => r.id), content,
+    relations, ...(e.coalesces === undefined ? {} : { coalesces: e.coalesces as NonNullable<ConversationEvent['coalesces']> }) }
+  const version = revision(e.revision)
+  if (conversationRevision({ policy: 1, versions: records.map(record => [record.id, record.revision]), event }) !== version) return bad('Conversation event version changed.')
+  return { event: { ...event, revision: version }, records }
+}
+function basePage(value: unknown, input: ConversationTimelineReadInput, changes = false): AgentConversationReadPage {
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage', 'order', 'items', 'nextCursor', 'budgetBytes', ...(changes ? ['checkpoint', 'more'] : [])], 'CONTROL_PROTOCOL_ERROR')
+  if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || p.budgetBytes !== (input.maxBytes ?? CONVERSATION_DEFAULT_READ_BYTES) || bytes(value) > Number(p.budgetBytes) || !Array.isArray(p.items) || p.items.length > (input.limit ?? 30)) return bad()
+  const accepted = scope(p.scope), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, order = rpcRecord(p.order, ['basis', 'crossSource', 'direction'], 'CONTROL_PROTOCOL_ERROR')
+  if (order.direction !== 'newest-first' || order.basis !== 'source-and-relations' || !['partial', 'confirmed'].includes(String(order.crossSource))) return bad()
+  const items = p.items.map(value => {
+    const entry = rpcRecord(value, ['kind', 'item', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
+    if (entry.kind === 'item') { rpcRecord(value, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR'); return { kind: 'item' as const, item: parseConversationUnit(entry.item, source, accepted) } }
+    rpcRecord(value, ['kind', 'itemId', 'encoding', 'sha256', 'offsetBytes', 'totalBytes', 'dataBase64'], 'CONTROL_PROTOCOL_ERROR')
+    if (entry.kind !== 'fragment' || entry.encoding !== 'json-utf8-base64' || typeof entry.dataBase64 !== 'string' || !entry.dataBase64 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(entry.dataBase64)) return bad()
+    const offsetBytes = integer(entry.offsetBytes), totalBytes = integer(entry.totalBytes, 1, CONVERSATION_MAX_UNIT_BYTES)
+    if (offsetBytes >= totalBytes) return bad()
+    return { kind: 'fragment' as const, itemId: text(entry.itemId, 131_072), encoding: 'json-utf8-base64' as const, sha256: revision(entry.sha256), offsetBytes, totalBytes, dataBase64: entry.dataBase64 }
+  })
+  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted), order: order as AgentConversationReadPage['order'], items, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, 131_072), budgetBytes: Number(p.budgetBytes) }
+}
+export function parseConversationReadPage(value: unknown, input: ConversationTimelineReadInput): AgentConversationReadPage { return basePage(value, input) }
 export function parseConversationChangesPage(value: unknown, input: ConversationChangesInput): ConversationChangesPage {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'items', 'checkpoint', 'more'], 'CONTROL_PROTOCOL_ERROR')
-  const checkpoint = parseConversationCheckpoint(p.checkpoint)
-  if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || checkpoint.agentSessionId !== input.agentSessionId ||
-      checkpoint.source.providerId !== input.checkpoint.source.providerId || checkpoint.source.nativeSessionId !== input.checkpoint.source.nativeSessionId || typeof p.more !== 'boolean') {
-    throw new AgentMuxError('Conversation changes belong to another source or original Session.', 'CONTROL_PROTOCOL_ERROR')
-  }
-  const page = normalizeSessionHistoryPage(input.checkpoint.source, { source: p.source, items: p.items, nextCursor: null }, input.limit ?? 30)
-  const result = { hostId: input.hostId, agentSessionId: input.agentSessionId, source: page.source, items: page.items, checkpoint, more: p.more }
-  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > SESSION_HISTORY_MAX_PAGE_BYTES) throw new AgentMuxError('Conversation changes exceed the bounded wire page.', 'CONTROL_PROTOCOL_ERROR')
-  return result
+  const result = basePage(value, input, true), p = rpcRecord(value), checkpoint = parseConversationCheckpoint(p.checkpoint, input)
+  if (input.checkpoint.sourceHostId !== result.sourceHostId || checkpoint.sourceHostId !== result.sourceHostId || !same(result.scope, input.checkpoint.frontier.scope) || !same(result.scope, checkpoint.frontier.scope) || typeof p.more !== 'boolean') return bad()
+  return { ...result, checkpoint, more: p.more }
 }
-
 export function parseConversationCheckpointPage(value: unknown, input: ConversationRef): ConversationCheckpointPage {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'checkpoint'], 'CONTROL_PROTOCOL_ERROR'), checkpoint = parseConversationCheckpoint(p.checkpoint)
-  if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || checkpoint.agentSessionId !== input.agentSessionId)
-    throw new AgentMuxError('Conversation checkpoint belongs to another original Session.', 'CONTROL_PROTOCOL_ERROR')
-  return { ...input, checkpoint }
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'checkpoint', 'coverage'], 'CONTROL_PROTOCOL_ERROR'), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }, checkpoint = parseConversationCheckpoint(p.checkpoint, input), accepted = scope(p.scope)
+  if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || checkpoint.sourceHostId !== source.hostId || !same(accepted, checkpoint.frontier.scope) || bytes(value) > CONVERSATION_MAX_READ_BYTES) return bad()
+  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: source.hostId, scope: accepted, checkpoint, coverage: coverage(p.coverage, source, accepted) }
 }
 export function parseConversationWatchOpening(value: unknown, input: ConversationRef): ConversationWatchOpening {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'source'], 'CONTROL_PROTOCOL_ERROR'), source = rpcRecord(p.source, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
-  if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || typeof source.providerId !== 'string' || !source.providerId || typeof source.nativeSessionId !== 'string' || !source.nativeSessionId)
-    throw new AgentMuxError('Conversation observation belongs to another original source.', 'CONTROL_PROTOCOL_ERROR')
-  return { ...input, source: { providerId: source.providerId, nativeSessionId: source.nativeSessionId } }
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'scope', 'coverage'], 'CONTROL_PROTOCOL_ERROR'), accepted = scope(p.scope), source = { hostId: text(p.sourceHostId), agentSessionId: input.agentSessionId }
+  if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId || bytes(value) > CONVERSATION_MAX_READ_BYTES) return bad()
+  return { hostId: input.hostId, agentSessionId: input.agentSessionId, sourceHostId: source.hostId, scope: accepted, coverage: coverage(p.coverage, source, accepted) }
 }
 export function parseConversationObservation(value: unknown, opening: ConversationWatchOpening): ConversationObservation {
-  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'observation'], 'CONTROL_PROTOCOL_ERROR'), observation = rpcRecord(p.observation, ['agentSessionId', 'kind', 'source', 'code', 'message'], 'CONTROL_PROTOCOL_ERROR')
-  if (p.hostId !== opening.hostId || p.agentSessionId !== opening.agentSessionId || observation.agentSessionId !== opening.agentSessionId || !['invalidated', 'unavailable'].includes(String(observation.kind)))
-    throw new AgentMuxError('Conversation notification belongs to another original Session.', 'CONTROL_PROTOCOL_ERROR')
-  if (observation.source !== undefined) {
-    const source = rpcRecord(observation.source, ['providerId', 'nativeSessionId'], 'CONTROL_PROTOCOL_ERROR')
-    if (source.providerId !== opening.source.providerId || source.nativeSessionId !== opening.source.nativeSessionId)
-      throw new AgentMuxError('Conversation notification belongs to another native source.', 'CONTROL_PROTOCOL_ERROR')
-  }
-  if (observation.kind === 'invalidated' && observation.source === undefined || observation.kind === 'unavailable' && (typeof observation.code !== 'string' || !observation.code || typeof observation.message !== 'string'))
-    throw new AgentMuxError('Conversation notification lacks its source or unavailable reason.', 'CONTROL_PROTOCOL_ERROR')
-  return { hostId: opening.hostId, agentSessionId: opening.agentSessionId, observation: observation as ConversationObservation['observation'] }
+  const p = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'source', 'kind', 'code', 'message'], 'CONTROL_PROTOCOL_ERROR'), source = parseConversationSource(p.source)
+  if (p.hostId !== opening.hostId || p.agentSessionId !== opening.agentSessionId || p.sourceHostId !== opening.sourceHostId || !opening.scope.sources.some(s => conversationSourceKey(s) === conversationSourceKey(source)) || !['invalidated', 'unavailable'].includes(String(p.kind)) || bytes(value) > CONVERSATION_MAX_READ_BYTES || p.kind === 'unavailable' && (p.code === undefined || p.message === undefined)) return bad()
+  return { hostId: opening.hostId, agentSessionId: opening.agentSessionId, sourceHostId: opening.sourceHostId, source, kind: p.kind as ConversationObservation['kind'], ...(p.code === undefined ? {} : { code: text(p.code) }), ...(p.message === undefined ? {} : { message: message(p.message) }) }
 }

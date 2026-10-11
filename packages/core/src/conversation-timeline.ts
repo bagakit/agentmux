@@ -31,7 +31,8 @@ export type ConversationSourceOrder =
   | { kind: 'native-page'; source: AgentSessionHistorySource; pageWitness?: string; indexInPage: number }
   | { kind: 'captured-stream'; epoch: string; firstSequence: number }
   | { kind: 'captured-window'; revision: number; indexInWindow: number }
-export type ConversationSourceRef = ({ kind: 'native' } & AgentSessionHistorySource) | { kind: 'captured'; epoch?: string }
+export type ConversationSourceRef = ({ kind: 'native' } & AgentSessionHistorySource)
+  | { kind: 'native-unavailable'; providerId: string } | { kind: 'captured'; epoch?: string }
 export type ConversationSourceCoverage = {
   source: ConversationSourceRef
   origin: 'beginning' | 'retained-prefix' | 'unknown'
@@ -133,36 +134,82 @@ function time(record: ConversationSourceRecord): number | undefined {
   const value = record.original.kind === 'native' ? record.original.item.startedAt : record.original.item.createdAt
   return value !== undefined && Number.isFinite(value) && Math.abs(value) <= 8.64e15 ? value : undefined
 }
-function sourceKey(source: ConversationSourceRef): string { return JSON.stringify(source.kind === 'native' ? ['native', source.providerId, source.nativeSessionId] : ['captured', source.epoch ?? null]) }
+export function conversationSourceKey(source: ConversationSourceRef): string { return JSON.stringify(source.kind === 'native' ? ['native', source.providerId, source.nativeSessionId]
+  : source.kind === 'native-unavailable' ? ['native-unavailable', source.providerId] : ['captured', source.epoch ?? null]) }
+const sourceKey = conversationSourceKey
 function sameSource(a: AgentSessionHistorySource, b: AgentSessionHistorySource): boolean { return a.providerId === b.providerId && a.nativeSessionId === b.nativeSessionId }
 function sourceOf(record: ConversationSourceRecord): ConversationSourceRef {
   return record.original.kind === 'native' ? { kind: 'native', ...(record.order as Extract<ConversationSourceOrder, { kind: 'native-page' }>).source }
     : { kind: 'captured', ...(record.order.kind === 'captured-stream' ? { epoch: record.order.epoch } : {}) }
 }
-/** Keeps both original source sequences, including backward/missing clocks. Time only selects the next incomparable source head. */
+/** Select the next original tail. A clock only ranks incomparable sources. */
+export function conversationTailComesAfter(a: ConversationSourceRecord, b: ConversationSourceRecord): boolean {
+  const at = time(a), bt = time(b)
+  return at !== undefined && bt !== undefined && at !== bt ? at > bt : sourceKey(sourceOf(a)) > sourceKey(sourceOf(b))
+}
+/** Prefix extension cannot reorder an already accepted suffix, even with backward clocks. */
 function mergeSources(native: ConversationSourceRecord[], captured: ConversationSourceRecord[]): ConversationSourceRecord[] {
-  const result: ConversationSourceRecord[] = []
-  let n = 0, c = 0
-  while (n < native.length || c < captured.length) {
-    if (n === native.length) { result.push(captured[c++]!); continue }
-    if (c === captured.length) { result.push(native[n++]!); continue }
-    const a = native[n]!, b = captured[c]!, at = time(a), bt = time(b)
-    const before = at !== undefined && bt !== undefined && at !== bt ? at < bt : sourceKey(sourceOf(a)) < sourceKey(sourceOf(b))
-    result.push(before ? native[n++]! : captured[c++]!)
+  const reversed: ConversationSourceRecord[] = []
+  let n = native.length - 1, c = captured.length - 1
+  while (n >= 0 || c >= 0) {
+    if (n < 0) { reversed.push(captured[c--]!); continue }
+    if (c < 0) { reversed.push(native[n--]!); continue }
+    reversed.push(conversationTailComesAfter(native[n]!, captured[c]!) ? native[n--]! : captured[c--]!)
   }
-  return result
+  return reversed.reverse()
 }
 function validSelector(record: ConversationSourceRecord, selector: ConversationSelector): boolean {
   return record.original.kind === 'native' ? selector.kind === 'native-part' && Number.isSafeInteger(selector.partIndex) && selector.partIndex >= 0 && selector.partIndex < record.original.item.contentParts.length
     : selector.kind === 'captured-field' && record.original.item[selector.field] !== undefined
 }
 
-function invocationFacts(record: ConversationSourceRecord): readonly { selector: ConversationSelector; invocation: ConversationInvocation }[] {
+/** Exact invocation facts on existing content slots, shared by projection and wire validation. */
+export function conversationInvocationFacts(record: ConversationSourceRecord): readonly { selector: ConversationSelector; invocation: ConversationInvocation }[] {
   const provenance = record.original.item.conversation
-  if (record.original.kind !== 'native' || !provenance?.nativeInvocationScope) return provenance?.invocations ?? []
-  const scope = provenance.nativeInvocationScope
-  return record.original.item.contentParts.flatMap((part, partIndex) => (part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId
-    ? [{ selector: { kind: 'native-part' as const, partIndex }, invocation: { ...scope, callId: part.callId } }] : [])
+  const facts = record.original.kind !== 'native' || !provenance?.nativeInvocationScope ? provenance?.invocations ?? []
+    : record.original.item.contentParts.flatMap((part, partIndex) => (part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId
+      ? [{ selector: { kind: 'native-part' as const, partIndex }, invocation: { ...provenance.nativeInvocationScope!, callId: part.callId } }] : [])
+  return facts.filter(fact => {
+    if (!validSelector(record, fact.selector)) return false
+    if (record.original.kind !== 'native' || fact.selector.kind !== 'native-part') return true
+    const part = record.original.item.contentParts[fact.selector.partIndex]!
+    return (part.kind === 'tool-call' || part.kind === 'tool-result') && part.callId === fact.invocation.callId
+  })
+}
+
+/** A canonical reading target is an exact same-source fact, never an event/version claim. */
+export function conversationSameEventTarget(record: ConversationSourceRecord, nativeSource?: AgentSessionHistorySource): ConversationItemRef | undefined {
+  const target = record.original.item.conversation?.sameEvent, reference = record.reference
+  return target && reference && target.hostId === reference.hostId && target.agentSessionId === reference.agentSessionId && target.source.kind === 'native' &&
+    (!nativeSource || sameSource(target.source, nativeSource)) ? target : undefined
+}
+/** Explicit identity coalesces name the exact original contributing edge. */
+export function conversationEventCoalesces(records: readonly ConversationSourceRecord[], anchorId: string, nativeSource?: AgentSessionHistorySource): NonNullable<ConversationEvent['coalesces']> {
+  return records.flatMap(record => {
+    const target = conversationSameEventTarget(record, nativeSource)
+    return record.id !== anchorId && target && conversationRecordId(target) !== record.id
+      ? [{ fromEventIds: [record.id], relation: { kind: 'same-event' as const, from: record.reference!, to: target } }] : []
+  })
+}
+/** Resolve only original accepted edges. A cycle retains each original record identity. */
+export function conversationRecordAnchors(records: readonly ConversationSourceRecord[], targets: ReadonlyMap<string, string>): { anchors: ReadonlyMap<string, string>; cyclicRecordIds: readonly string[] } {
+  const anchors = new Map<string, string>(), cyclic = new Set<string>()
+  for (const record of records) {
+    if (anchors.has(record.id)) continue
+    const path: string[] = [], visited = new Set<string>(); let id = record.id
+    while (targets.has(id) && !anchors.has(id)) {
+      if (visited.has(id)) {
+        for (const key of path) { anchors.set(key, key); cyclic.add(key) }
+        break
+      }
+      visited.add(id); path.push(id); id = targets.get(id)!
+    }
+    if (anchors.has(record.id)) continue
+    const canonical = anchors.get(id) ?? id
+    for (const key of path) anchors.set(key, canonical)
+    anchors.set(record.id, canonical)
+  }
+  return { anchors, cyclicRecordIds: [...cyclic] }
 }
 
 /** One semantic owner over already accepted facts. No IO, state, control authority or transcript copy. */
@@ -170,16 +217,20 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
   const { agentSessionId, executionHostId } = input
   const page = input.historyPage?.agentSessionId === agentSessionId ? input.historyPage : undefined
   const timeline = input.timeline?.agentSessionId === agentSessionId ? input.timeline : undefined
-  const reference: ConversationRef | null = executionHostId ? { hostId: executionHostId, agentSessionId } : null
+  const nativeHost = page?.sourceHostId ?? executionHostId, capturedHost = timeline?.sourceHostId ?? executionHostId
+  const conflictingHosts = page !== undefined && timeline !== undefined && nativeHost !== undefined && capturedHost !== undefined && nativeHost !== capturedHost
+  const sourceHost = page ? nativeHost : capturedHost
+  const reference: ConversationRef | null = sourceHost && !conflictingHosts ? { hostId: sourceHost, agentSessionId } : null
   const capturedPositions = new Map(timeline?.stream?.positions.map(position => [position.id, position]) ?? [])
   const unique = (rows: ConversationSourceRecord[]) => [...new Map(rows.map(row => [row.id, row])).values()]
   const make = (original: ConversationSourceRecord['original'], order: ConversationSourceOrder): ConversationSourceRecord => {
     const source: ConversationItemRef['source'] = original.kind === 'native'
       ? { kind: 'native', ...page!.source, recordId: original.item.id } : { kind: 'captured', recordId: original.item.id }
-    const id = conversationRecordId({ ...(executionHostId ? { hostId: executionHostId } : {}), agentSessionId, source })
+    const hostId = original.kind === 'native' ? nativeHost : capturedHost
+    const id = conversationRecordId({ ...(hostId ? { hostId } : {}), agentSessionId, source })
     const position = original.kind === 'captured' ? capturedPositions.get(original.item.id) : undefined
     const sourceOrder = position && timeline?.stream ? { kind: 'captured-stream' as const, epoch: timeline.stream.epoch, firstSequence: position.firstSequence } : order
-    return { id, reference: reference ? { ...reference, source } : null, revision: position?.revision ?? conversationRevision(original.item), order: input.sourceOrders?.get(id) ?? sourceOrder, original }
+    return { id, reference: hostId ? { hostId, agentSessionId, source } : null, revision: position?.revision ?? conversationRevision(original.item), order: input.sourceOrders?.get(id) ?? sourceOrder, original }
   }
   const native = unique(page?.items.map((item, indexInPage) => make({ kind: 'native', item }, { kind: 'native-page', source: page.source, indexInPage })) ?? [])
   const captured = unique(timeline?.items.flatMap((item, indexInWindow) => item.agentSessionId === agentSessionId ? [make({ kind: 'captured', item }, { kind: 'captured-window', revision: timeline.revision, indexInWindow })] : []) ?? [])
@@ -201,11 +252,12 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
     if (row) { row.current = 'partial'; row.gaps = [...row.gaps, { code, message, ...(target ? { record: target } : {}) }] }
   }
   const relations: ConversationRelation[] = [], edges = new Map<string, { target: string; relation: Extract<ConversationRelation, { kind: 'same-event' }> }>()
+  if (conflictingHosts) for (const record of records) gap(record, 'CONVERSATION_SOURCE_HOST_CONFLICT', 'These accepted sources have different original Host namespaces. Original records remain independently readable; they do not authorize a cross-Host association.', record.reference ?? undefined)
   for (const record of records) {
     const provenance = record.original.item.conversation
     const target = provenance?.sameEvent
     if (target && record.reference) {
-      if (target.hostId !== executionHostId || target.agentSessionId !== agentSessionId || target.source.kind !== 'native' || page && !sameSource(target.source, page.source)) {
+      if (!conversationSameEventTarget(record, page?.source)) {
         gap(record, 'CONVERSATION_RELATION_SCOPE', 'The recorded canonical target is outside this accepted source scope.', target)
       } else {
         const relation = { kind: 'same-event' as const, from: record.reference, to: target }
@@ -213,32 +265,22 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
         if (!byId.has(conversationRecordId(target))) gap(record, 'CONVERSATION_ANCHOR_UNREAD', 'The canonical record is unread; accepted contribution content remains readable.', target)
       }
     }
-    if (provenance?.observes && record.reference && provenance.observes.hostId === executionHostId && provenance.observes.agentSessionId === agentSessionId) relations.push({ kind: 'observes', from: record.reference, target: provenance.observes })
-  }
-  const anchors = new Map<string, string>()
-  const anchor = (record: ConversationSourceRecord): string => {
-    if (anchors.has(record.id)) return anchors.get(record.id)!
-    const path: string[] = [], visited = new Set<string>(); let id = record.id
-    while (edges.has(id) && !anchors.has(id)) {
-      if (visited.has(id)) {
-        for (const key of path) { anchors.set(key, key); const original = byId.get(key); if (original) gap(original, 'CONVERSATION_RELATION_CYCLE', 'Conflicting event relations retain the original independent record.') }
-        return record.id
-      }
-      visited.add(id); path.push(id); id = edges.get(id)!.target
+    if (provenance?.observes && record.reference && provenance.observes.hostId === record.reference.hostId && provenance.observes.agentSessionId === agentSessionId) {
+      relations.push({ kind: 'observes', from: record.reference, target: provenance.observes })
+      if (!byId.has(conversationRecordId(provenance.observes))) gap(record, 'CONVERSATION_OBSERVED_TARGET_UNREAD', 'The exact observed target is unread; this original observation remains independently readable.', provenance.observes)
     }
-    const canonical = anchors.get(id) ?? id
-    for (const key of path) anchors.set(key, canonical)
-    anchors.set(record.id, canonical)
-    return canonical
   }
+  const readQuestions = new Set(native.flatMap(record => record.original.kind === 'native' ? record.original.item.questionRequest?.questions.map(question => question.id) ?? [] : []))
+  for (const record of native) if (record.original.kind === 'native' && record.original.item.questionAnswers?.some(answer => !readQuestions.has(answer.questionId))) {
+    gap(record, 'CONVERSATION_QUESTION_TARGET_UNREAD', 'This original answer names a question whose request record is unread; its question IDs and original content are retained without guessing a record reference.', record.reference ?? undefined)
+  }
+  const resolved = conversationRecordAnchors(records, new Map([...edges].map(([id, edge]) => [id, edge.target])))
+  for (const id of resolved.cyclicRecordIds) { const original = byId.get(id); if (original) gap(original, 'CONVERSATION_RELATION_CYCLE', 'Conflicting event relations retain the original independent record.') }
+  const anchor = (record: ConversationSourceRecord): string => resolved.anchors.get(record.id)!
   const invocations = new Map<string, { record: ConversationSourceRecord; selector: ConversationSelector; invocation: ConversationInvocationRef }[]>()
-  for (const record of records) if (record.reference) for (const fact of invocationFacts(record)) {
-    if (!validSelector(record, fact.selector) || page && !sameSource(fact.invocation.source, page.source)) continue
-    if (record.original.kind === 'native' && fact.selector.kind === 'native-part') {
-      const part = record.original.item.contentParts[fact.selector.partIndex]!
-      if ((part.kind !== 'tool-call' && part.kind !== 'tool-result') || part.callId !== fact.invocation.callId) continue
-    }
-    const invocation = { ...reference!, ...fact.invocation }, key = JSON.stringify(canonical(invocation))
+  for (const record of records) if (record.reference) for (const fact of conversationInvocationFacts(record)) {
+    if (page && !sameSource(fact.invocation.source, page.source)) continue
+    const invocation = { hostId: record.reference.hostId, agentSessionId, ...fact.invocation }, key = JSON.stringify(canonical(invocation))
     const group = invocations.get(key) ?? []; group.push({ record, selector: fact.selector, invocation }); invocations.set(key, group)
   }
   // A star records the same exact invocation equivalence without quadratic pair expansion.
@@ -250,13 +292,13 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
         to: { record: b.record.reference!, recordRevision: b.record.revision, selector: b.selector }, invocation: a.invocation })
     }
   }
-  if (page && reference) for (const question of projectConversationQuestions({ agentSessionId, executionHostId, historyPage: page })) for (const value of question.questions) if (value.answer) relations.push({ kind: 'answers',
-    from: { ...reference, source: { kind: 'native', ...value.answer.source, recordId: value.answer.recordId } }, question: value.reference })
+  if (page && nativeHost) for (const question of projectConversationQuestions({ agentSessionId, executionHostId: nativeHost, historyPage: page })) for (const value of question.questions) if (value.answer) relations.push({ kind: 'answers',
+    from: { hostId: nativeHost, agentSessionId, source: { kind: 'native', ...value.answer.source, recordId: value.answer.recordId } }, question: value.reference })
   const relationsByRecord = new Map<string, Set<ConversationRelation>>()
   for (const relation of relations) {
     const from = 'record' in relation.from ? relation.from.record : relation.from
     const targets = relation.kind === 'same-event' ? [relation.to] : relation.kind === 'same-invocation' ? [relation.to.record]
-      : relation.kind === 'answers' ? [{ hostId: executionHostId!, agentSessionId, source: { kind: 'native' as const, ...relation.question.source, recordId: relation.question.recordId } }]
+      : relation.kind === 'answers' ? [{ hostId: relation.question.executionHostId!, agentSessionId, source: { kind: 'native' as const, ...relation.question.source, recordId: relation.question.recordId } }]
       : 'recordId' in relation.target.source ? [relation.target as ConversationItemRef] : []
     for (const ref of [from, ...targets]) {
       const key = conversationRecordId(ref), group = relationsByRecord.get(key) ?? new Set<ConversationRelation>()
@@ -310,7 +352,7 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
 
     const primary = byId.get(id) ?? group.find(record => record.original.kind === 'native') ?? group[0]!
     const related = [...new Set(group.flatMap(record => [...(relationsByRecord.get(record.id) ?? [])]))]
-    const coalesces = group.flatMap(record => record.id !== id && edges.has(record.id) ? [{ fromEventIds: [record.id], relation: edges.get(record.id)!.relation }] : [])
+    const coalesces = conversationEventCoalesces(group, id, page?.source)
     const body = [primary, ...group.filter(record => record !== primary)]
     const content = body.flatMap(record => selectors(record).map(selector => ({ recordId: record.id, recordRevision: record.revision, selector, placement: record === primary ? 'body' as const : 'detail' as const })))
     const attribution = conversationEventAuthor(group, primary, agentSessionId)

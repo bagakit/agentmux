@@ -31,6 +31,7 @@ export type AgentSessionHistoryReadEntry =
   | { kind: 'fragment'; itemId: string; encoding: 'json-utf8-base64'; sha256: string;
       offsetBytes: number; totalBytes: number; dataBase64: string }
 export type AgentSessionHistoryReadPage = AgentSessionContextReference & {
+  sourceHostId?: string
   source: 'captured' | 'native'; revision: string; availability: 'available' | 'empty'; order: 'newest-first' | 'chronological-page';
   items: AgentSessionHistoryReadEntry[]; nextCursor: string | null; budgetBytes: number
   nativeSource?: AgentSessionHistorySource
@@ -73,8 +74,9 @@ export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSes
   if (input.kind === 'text') return parseTextHistoryPage(value, input)
   if (isUserMessageHistoryRead(input)) return parseUserMessageHistoryPage(value, input)
   const bad = (): never => fail('History result is malformed, over budget or belongs to another source.', 'CONTROL_PROTOCOL_ERROR')
-  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'revision', 'availability', 'order', 'items', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
+  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'source', 'revision', 'availability', 'order', 'items', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
   validateCapturedStream(page, input)
+  if (page.sourceHostId !== undefined && !text(page.sourceHostId)) return fail('Original history source Host is malformed.', 'CONTROL_PROTOCOL_ERROR')
   if (page.hostId !== input.hostId || page.agentSessionId !== input.agentSessionId || page.source !== input.source ||
     typeof page.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(page.revision) ||
     !['available', 'empty'].includes(String(page.availability)) ||
@@ -122,8 +124,9 @@ function sameOriginal(left: unknown, right: unknown): boolean {
 
 function parseTextHistoryPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {
   const bad = (): never => fail('Text history result is malformed or belongs to another query source.', 'CONTROL_PROTOCOL_ERROR')
-  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
+  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
   validateCapturedStream(page, input)
+  if (page.sourceHostId !== undefined && !text(page.sourceHostId)) return fail('Original history source Host is malformed.', 'CONTROL_PROTOCOL_ERROR')
   const scan = rpcRecord(page.scan, ['examined', 'complete'], 'CONTROL_PROTOCOL_ERROR')
   if (page.hostId !== input.hostId || page.agentSessionId !== input.agentSessionId || page.source !== input.source || page.kind !== 'text' ||
     typeof page.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(page.revision) || page.order !== 'newest-first' ||
@@ -161,8 +164,9 @@ function parseTextHistoryPage(value: unknown, input: AgentSessionHistoryReadInpu
 
 export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionHistoryReadInput): AgentSessionHistoryReadPage {
   const bad = (): never => fail('User-message history result is malformed or belongs to another query source.', 'CONTROL_PROTOCOL_ERROR')
-  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'userMessages', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
+  const page = rpcRecord(value, ['hostId', 'agentSessionId', 'sourceHostId', 'source', 'kind', 'revision', 'availability', 'order', 'items', 'userMessages', 'scan', 'nextCursor', 'budgetBytes', 'nativeSource', 'capturedStream'], 'CONTROL_PROTOCOL_ERROR')
   validateCapturedStream(page, input)
+  if (page.sourceHostId !== undefined && !text(page.sourceHostId)) return fail('Original history source Host is malformed.', 'CONTROL_PROTOCOL_ERROR')
   const scan = rpcRecord(page.scan, ['examined', 'complete'], 'CONTROL_PROTOCOL_ERROR')
   if (page.hostId !== input.hostId || page.agentSessionId !== input.agentSessionId || page.source !== input.source || page.kind !== 'user-message' ||
     typeof page.revision !== 'string' || !/^[a-f0-9]{64}$/u.test(page.revision) || page.order !== 'newest-first' || !Array.isArray(page.items) || page.items.length ||

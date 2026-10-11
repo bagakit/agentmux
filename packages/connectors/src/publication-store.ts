@@ -3,7 +3,7 @@ import { parsePreparedPublication, type PreparedPublication, type PublicationPre
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError, type AgentSessionHistoryItem } from '@agentmux/core'
 import { parseConnectionDelivery, parseConnectionDeliveryReceipt, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
-import { parseConversationChangesPage, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
+import { parseNativeConversationChangesPage, type NativeConversationChangesPage, type NativeConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
 export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'scope'>
@@ -47,7 +47,7 @@ export type PublicationPageOptions = {
 const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item)
 const digest = (value: unknown) => createHash('sha256').update(encode(value)).digest('base64url')
-const sourceKey = (source: ConversationCheckpoint['source']) => encode([source.providerId, source.nativeSessionId])
+const sourceKey = (source: NativeConversationCheckpoint['source']) => encode([source.providerId, source.nativeSessionId])
 const scopeKey = (boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) => [boundary.bindingId, boundary.revision] as const
 const ref = (boundary: PublicationBoundary): ConversationRef => ({ hostId: boundary.executionHostId, agentSessionId: boundary.agentSessionId })
 const same = (a: unknown, b: unknown) => encode(a) === encode(b)
@@ -142,7 +142,7 @@ export class PublicationStore {
       .all(boundary.bindingId, boundary.revision, Number(cursor?.ordinal ?? 0), limit).map(row => this.read(row)!)
   }
   /** The initial durable cut is supplied by Binding. It never reads or exports private earlier records. */
-  checkpoint(boundary: PublicationBoundary, initial: ConversationCheckpoint): ConversationCheckpoint {
+  checkpoint(boundary: PublicationBoundary, initial: NativeConversationCheckpoint): NativeConversationCheckpoint {
     if (initial.agentSessionId !== boundary.agentSessionId || !boundary.sourceCheckpoints.some(value => same(value, initial)))
       throw new AgentMuxError('The publication cut must belong to the original Binding source.', 'PUBLICATION_SOURCE_CONFLICT')
     const query = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?')
@@ -155,8 +155,8 @@ export class PublicationStore {
     return JSON.parse(row.checkpoint_json as string)
   }
   /** Selection happens before BEGIN; all required effects, explicit skips and the next cut commit together. */
-  commitPage(boundary: PublicationBoundary, after: ConversationCheckpoint, value: ConversationChangesPage, authorized: () => boolean, options: PublicationPageOptions = {}): void {
-    const page = parseConversationChangesPage(value, { ...ref(boundary), checkpoint: after, limit: 100 })
+  commitPage(boundary: PublicationBoundary, after: NativeConversationCheckpoint, value: NativeConversationChangesPage, authorized: () => boolean, options: PublicationPageOptions = {}): void {
+    const page = parseNativeConversationChangesPage(value, { ...ref(boundary), checkpoint: after, limit: 100 })
     const decisions = page.items.map(item => {
       const decision = decide({ ...item, contentParts: item.contentParts.map((part, index) =>
         part.kind === 'resource' && part.content?.kind === 'text' ? options.resolvedText?.get(item.id)?.get(index) ?? part : part) }, boundary.scope.publication)

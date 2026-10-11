@@ -36,6 +36,7 @@ function reportConsole(error: unknown): void {
 export class AgentMuxClientEventPublisher {
   private readonly listeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
   private readonly statusListeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
+  private readonly timelineListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
   private publishingDiagnostic = false
 
   /** Low-frequency owner facts; these listeners never join ordered-byte dispatch. */
@@ -55,15 +56,24 @@ export class AgentMuxClientEventPublisher {
     return () => { this.listeners.delete(listener) }
   }
 
+  /** Original committed timeline invalidations, scoped before dispatch to unrelated Consumers. */
+  onTimelineEvent<Result>(agentSessionId: string, listener: AgentMuxClientEventListener<Result>): () => void {
+    const listeners = this.timelineListeners.get(agentSessionId) ?? new Map()
+    listeners.set(listener, {}); this.timelineListeners.set(agentSessionId, listeners)
+    return () => { listeners.delete(listener); if (!listeners.size) this.timelineListeners.delete(agentSessionId) }
+  }
+
   dispose(): void {
     this.listeners.clear()
     this.statusListeners.clear()
+    this.timelineListeners.clear()
   }
 
   publish(event: AgentMuxClientEvent): void {
     const listeners = event.type === 'agent-error' || event.type === 'connection-state' || event.type === 'agent-session'
       ? [...this.listeners, ...this.statusListeners] : [...this.listeners]
     this.deliver(event, listeners)
+    if (event.type === 'agent-timeline') this.deliver(event, [...(this.timelineListeners.get(event.agentSessionId) ?? [])])
   }
 
   private deliver(event: AgentMuxClientEvent, listeners: Array<[(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions]>): void {
@@ -84,6 +94,7 @@ export class AgentMuxClientEventPublisher {
       if (!failure) continue
       this.listeners.delete(listener)
       this.statusListeners.delete(listener)
+      if (event.type === 'agent-timeline') { const scoped = this.timelineListeners.get(event.agentSessionId); scoped?.delete(listener); if (!scoped?.size) this.timelineListeners.delete(event.agentSessionId) }
       failures.push(failure)
       // Report directly to this Consumer even when it is the only subscriber. Reporting
       // itself cannot take over publication or create an unhandled rejected Promise.
