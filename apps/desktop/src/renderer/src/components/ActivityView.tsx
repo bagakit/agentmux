@@ -1033,7 +1033,15 @@ export function ActivityView({
     </div>
   ) : null
 
-  const renderSurface = (content: JSX.Element | ((findTrigger: ReactNode) => JSX.Element)): JSX.Element => {
+  const renderReadingHeader = (tools: ReactNode, rulerContent?: ReactNode): JSX.Element => (
+    <div key="reading-header" className="activity-feed__reading-header" data-has-ruler={rulerContent ? 'true' : undefined}>
+      {rulerContent ?? emptyReadStatus}
+      {readingEntry}
+      {!rulerContent ? <div className="reading-find__floating-trigger">{tools}</div> : null}
+    </div>
+  )
+
+  const renderSurface = (content: (findTrigger: ReactNode) => JSX.Element): JSX.Element => {
     return <ReadingFind className="activity-feed-frame"
     active={readingEnabled} source={JSON.stringify([executionHostId, sessionId, conversationReading?.identity])}
     label="loaded conversation" bodySelector=".log-turn__body, .log-row__prose, .log-row__payload, .log-row__output, .log-diff__body" scrollSelector=".activity-feed"
@@ -1041,54 +1049,51 @@ export function ActivityView({
       followRef.current = { ...followRef.current, following: false }
       if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
     }}>
-    {typeof content === 'function' ? findTrigger => <>{content(findTrigger)}{latestControl}</> : <>{content}{latestControl}</>}
+    {findTrigger => <>{content(findTrigger)}{latestControl}</>}
   </ReadingFind>
   }
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
-    return renderSurface(
+    return renderSurface(findTrigger => (
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
         {readNotice}
-        {readingEntry}
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
-        {emptyReadStatus}
+        {renderReadingHeader(findTrigger)}
         <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
         </div>
       </div>
-    )
+    ))
   }
   if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, hasItems ? items : [])) {
-    return renderSurface(
+    return renderSurface(findTrigger => (
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
         {readNotice}
-        {readingEntry}
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
-        {emptyReadStatus}
+        {renderReadingHeader(findTrigger)}
         {!readPending && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
           {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
         </div> : null}
       </div>
-    )
+    ))
   }
   // 正在想、但首行还没落地：显示"在进行"而不是空状态。一个正在工作的东西显示成空，
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
   if (!hasUserMessages && !hasItems && !hasNativeRecords) {
-    return renderSurface(
+    return renderSurface(findTrigger => (
       <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
         {readNotice}
-        {readingEntry}
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
-        {emptyReadStatus}
+        {renderReadingHeader(findTrigger)}
         <WorkingIndicator active={activitySemantic === 'active'} />
       </div>
-    )
+    ))
   }
 
   const placedByRecord = new Map(placed.flatMap(segment => segment.entry.kind === 'item' && segment.entry.record ? [[segment.entry.record.id, segment] as const] : []))
@@ -1198,7 +1203,7 @@ export function ActivityView({
           This executor does not provide structured activity. Terminal remains available.
         </div>
       ) : null}
-      {ruler.items.length > 0 ? <Ruler visible={readingEnabled}
+      {renderReadingHeader(<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>, ruler.items.length > 0 ? <Ruler visible={readingEnabled}
         items={ruler.items}
         scale={scale}
         selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
@@ -1220,8 +1225,7 @@ export function ActivityView({
               onSelect={index => selectRulerRecord(ruler.items[index]!)} onPeek={onPeek} onPeekEnd={onPeekEnd} />
           ) : null
         }
-      /> : <><div className="reading-find__floating-trigger">{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</div>{emptyReadStatus}</>}
-      {readingEntry}
+      /> : undefined)}
       {holdCapturedLayout ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}
       <div ref={logRef}>
       <ConversationView
