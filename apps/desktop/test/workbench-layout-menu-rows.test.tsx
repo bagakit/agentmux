@@ -37,7 +37,8 @@ async function click(target: HTMLElement) { await act(async () => target.click()
 const menu = () => document.querySelector<HTMLElement>('[role="menu"]')!
 const action = (name: string) => document.querySelector<HTMLElement>(`[role="menuitem"][aria-label="${name}"]`)!
 const namedItem = (name: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === name)!
-const caption = () => document.querySelector('.workbench-layout-menu__hint')!
+const row = (name: string) => document.querySelector<HTMLElement>(`.workbench-menu-row[role="group"][aria-label="${name}"]`)!
+const rowLabel = (name: string) => row(name).querySelector('.workbench-menu-row__label-text')!
 
 async function splitMenu(regionCount = 2) {
   const split = vi.fn(), arrange = vi.fn()
@@ -52,11 +53,21 @@ it('the original Split consumer exposes every eligible command in two labelled i
   const rows = [...document.querySelectorAll('.workbench-menu-row')]
   expect(rows).toHaveLength(2)
   expect(rows.map(row => row.querySelector('.workbench-menu-row__label')?.textContent)).toEqual(['New region', 'Layout'])
+  expect(rows.map(row => row.getAttribute('aria-label'))).toEqual(['New region', 'Layout'])
+  expect(rows.every(row => row.querySelector('.workbench-menu-row__label')?.getAttribute('aria-hidden') === 'true')).toBe(true)
   const expected = workbenchSplitMenuEntries({ regionCount: 2, split: vi.fn(), arrange: vi.fn() })
     .filter(entry => entry.kind !== 'separator').map(entry => entry.label)
   expect(expected).toHaveLength(10)
   expect([...menu().querySelectorAll('[role="menuitem"]')].map(item => item.getAttribute('aria-label'))).toEqual(expected)
-  expect(document.querySelectorAll('.workbench-layout-menu__hint')).toHaveLength(1)
+  const control = document.querySelector('.workbench-layout-menu')!
+  expect([...control.children].map(child => child.getAttribute('role'))).toEqual(['group', 'group'])
+  expect(control.querySelector('.workbench-layout-menu__hint, footer')).toBeNull()
+  expect(control.textContent).not.toContain('Choose a direction')
+  expect(control.textContent).not.toContain('Choose a layout')
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  const glyphs = [...control.querySelectorAll('[role="menuitem"] > svg')]
+  expect(glyphs).toHaveLength(10)
+  expect(glyphs.every(glyph => glyph.getAttribute('width') === '16' && glyph.getAttribute('height') === '16')).toBe(true)
 })
 
 it('pointer selection executes the exact original direction once and dismisses', async () => {
@@ -84,7 +95,8 @@ it('hover names an icon without stealing the existing editor caret', async () =>
   editor.focus()
   await pointer(container.querySelector('[aria-label="Choose split direction"]')!, 'pointerover')
   await pointer(action('Split Down'), 'pointermove')
-  expect(caption().textContent).toBe('Split Down')
+  expect(rowLabel('New region').textContent).toBe('Split Down')
+  expect(rowLabel('Layout').textContent).toBe('Layout')
   expect(document.activeElement).toBe(editor)
   expect(split).not.toHaveBeenCalled()
 })
@@ -92,10 +104,10 @@ it('hover names an icon without stealing the existing editor caret', async () =>
 it('row arrows, original menu navigation and full focus names work before one keyboard execution', async () => {
   const { split } = await splitMenu()
   await act(async () => action('Split Left').focus())
-  expect(caption().textContent).toBe('Split Left')
+  expect(rowLabel('New region').textContent).toBe('Split Left')
   await key(action('Split Left'), 'ArrowRight')
   expect(document.activeElement).toBe(action('Split Right'))
-  expect(caption().textContent).toBe('Split Right')
+  expect(rowLabel('New region').textContent).toBe('Split Right')
   await key(action('Split Right'), 'ArrowLeft')
   expect(document.activeElement).toBe(action('Split Left'))
   await key(action('Split Left'), 'ArrowDown')
@@ -103,6 +115,36 @@ it('row arrows, original menu navigation and full focus names work before one ke
   await key(action('Split Right'), 'Enter')
   expect(split).toHaveBeenCalledExactlyOnceWith('right')
   expect(menu()).toBeNull()
+})
+
+it('a focused action keeps its row description above hover and restores the row label after blur and leave', async () => {
+  const split = vi.fn(), arrange = vi.fn()
+  await render(<><input aria-label="Original editor" /><PaneSplitMenu regionCount={2} onSplit={split} onArrange={arrange} /></>)
+  const editor = container.querySelector('input')!
+  editor.focus()
+  await pointer(container.querySelector('[aria-label="Choose split direction"]')!, 'pointerover')
+  await act(async () => action('Split Left').focus())
+  await pointer(action('Split Down'), 'pointermove')
+  expect(document.activeElement).toBe(action('Split Left'))
+  expect(rowLabel('New region').textContent).toBe('Split Left')
+  expect(row('New region').getAttribute('aria-label')).toBe('New region')
+  expect(action('Split Left').getAttribute('aria-label')).toBe('Split Left')
+  await pointer(row('New region'), 'pointerout', row('Layout'))
+  expect(rowLabel('New region').textContent).toBe('Split Left')
+  await act(async () => menu().focus())
+  expect(document.activeElement).toBe(menu())
+  expect(rowLabel('New region').textContent).toBe('New region')
+  expect(rowLabel('Layout').textContent).toBe('Layout')
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  expect(split).not.toHaveBeenCalled()
+  expect(arrange).not.toHaveBeenCalled()
+  await pointer(action('Split Down'), 'pointermove')
+  expect(rowLabel('New region').textContent).toBe('Split Down')
+  await key(menu(), 'Escape')
+  expect(menu()).toBeNull()
+  expect(document.querySelector('[role="tooltip"]')).toBeNull()
+  await act(async () => editor.focus())
+  expect(document.activeElement).toBe(editor)
 })
 
 it('IME-owned arrows keep the original item and never invoke a command', async () => {
@@ -212,7 +254,14 @@ it('Tab group movement keeps its distinct action and a row-edge Left returns to 
   await key(trigger, 'ArrowRight')
   const first = action('Move Tab to New Group Left')
   expect(first).not.toBeNull()
+  const moveControl = first.closest('.workbench-layout-menu')!
+  expect(moveControl.querySelectorAll('.workbench-menu-row')).toHaveLength(1)
+  expect(row('Move tab').querySelectorAll('[role="menuitem"]')).toHaveLength(4)
+  expect(row('Move tab').getAttribute('aria-label')).toBe('Move tab')
+  expect(moveControl.querySelector('.workbench-layout-menu__hint, footer')).toBeNull()
   await act(async () => first.focus())
+  expect(rowLabel('Move tab').textContent).toBe('Move Tab to New Group Left')
+  expect(row('Move tab').getAttribute('aria-label')).toBe('Move tab')
   await key(first, 'ArrowLeft')
   expect(action('Move Tab to New Group Left')).toBeNull()
   await key(trigger, 'ArrowRight')
