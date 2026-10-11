@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { conversationProvenanceFields } from './conversation-provenance.js'
 import type {
   AgentProviderSessionHistoryPage,
   AgentSessionHistoryContentPart,
@@ -159,6 +160,15 @@ export function sessionHistoryWithoutMetrics<T extends { items: readonly unknown
   }) } as T
 }
 
+function withoutConversationProvenance<T extends { items: readonly unknown[] }>(page: T): T {
+  if (!page.items.some(value => value && typeof value === 'object' && ((value as Record<string, unknown>).conversation !== undefined || (value as Record<string, unknown>).conversationDiagnostic !== undefined))) return page
+  return { ...page, items: page.items.map(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+    const { conversation: _conversation, conversationDiagnostic: _diagnostic, ...original } = value as Record<string, unknown>
+    return original
+  }) } as T
+}
+
 export function normalizeSessionHistoryPage(
   source: AgentSessionHistorySource,
   value: unknown,
@@ -173,7 +183,7 @@ export function normalizeSessionHistoryPage(
     (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor))) return invalid()
   // Invalid optional size metadata must not prevent an otherwise valid history page from being read.
   const { sourceSizeBytes: _sourceSizeBytes, ...pageBody } = page
-  const originalBody = { ...pageBody, items: page.items }, originalPage = sessionHistoryWithoutMetrics(originalBody)
+  const originalBody = { ...pageBody, items: page.items }, originalPage = sessionHistoryWithoutMetrics(withoutConversationProvenance(originalBody))
   if (new TextEncoder().encode(JSON.stringify(originalPage)).byteLength > SESSION_HISTORY_MAX_PAGE_BYTES) {
     throw new AgentMuxError('Native history page exceeds its byte budget.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
   }
@@ -238,6 +248,7 @@ export function normalizeSessionHistoryPage(
     const questionDiagnostic = item.questionDiagnostic === undefined ? undefined : object(item.questionDiagnostic)
     if (questionDiagnostic && item.kind !== 'assistant-message' && item.kind !== 'user-message') return invalid()
     return { id, kind: item.kind, contentParts,
+      ...conversationProvenanceFields(item),
       ...normalizeSessionHistoryMetrics(item),
       ...(item.messagePhase === undefined ? {} : { messagePhase: choice(item.messagePhase, ['progress', 'final']) }),
       ...(item.questionRequest === undefined ? {} : { questionRequest: questionRequest(item.questionRequest) }),
@@ -255,9 +266,10 @@ export function normalizeSessionHistoryPage(
   if (originalPage !== originalBody) {
     let pageBytes = new TextEncoder().encode(JSON.stringify({ ...pageBody, items })).byteLength
     for (let index = items.length - 1; index >= 0 && pageBytes > SESSION_HISTORY_MAX_PAGE_BYTES; index--) {
-      const item = items[index]!, { metrics: _metrics, metricsDiagnostic: _diagnostic, ...original } = item
+      const item = items[index]!, { metrics: _metrics, metricsDiagnostic: _diagnostic, conversation: _conversation, conversationDiagnostic: _conversationDiagnostic, ...original } = item
       pageBytes -= new TextEncoder().encode(JSON.stringify(item)).byteLength - new TextEncoder().encode(JSON.stringify(original)).byteLength
       items[index] = original
+      if (_conversation || _conversationDiagnostic) console.warn('Optional native conversation provenance did not fit the page budget; original record retained.', { source, recordId: item.id })
       if (_metrics || _diagnostic) console.warn('Optional native history metrics did not fit the page budget; original record retained.', { source, recordId: item.id })
     }
   }

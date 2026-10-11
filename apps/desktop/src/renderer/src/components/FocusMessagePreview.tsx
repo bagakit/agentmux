@@ -69,7 +69,7 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
   const branch = sender?.workspace?.branch ?? hierarchy?.worktrees.find(item => item.hostId === sender?.hostId && item.path === sender.workspacePath)?.branch
   const project = lane?.projectWorkspaceId ? lane.labels[0] : sender?.workspace?.name
   const targetName = recipient?.name ?? recipientName ?? message?.agentSessionId ?? 'Context'
-  const roleName = system ? 'System message' : speaker?.role === 'human' ? 'Human message' : agent ? reply ? 'Agent reply' : 'Agent input' : 'Prompt · Sender not recorded'
+  const roleName = message?.role === 'observation' ? 'Reply observation' : system ? 'System message' : speaker?.role === 'external' ? 'External message' : speaker?.role === 'human' ? 'Human message' : agent ? reply ? 'Agent reply' : 'Agent input' : 'Prompt · Sender not recorded'
   const executionHostId = message?.executionHostId, agentSessionId = message?.agentSessionId
   const readHistoryResource = useCallback(async (input: AgentSessionHistoryResourceRequest) => {
     if (!executionHostId || !agentSessionId) throw new Error('The original conversation Host is unknown. Its recorded text remains readable; reopen its original source to read this resource.')
@@ -171,16 +171,16 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
       <div className="recent-focus__input-list" aria-label="Available conversation records">{reader.messages.map(item => {
         const itemSpeaker = item.speaker!
         const itemIdentity = describeSpeaker(itemSpeaker)
-        const authorLabel = itemSpeaker.role === 'system' ? `System message from ${itemSpeaker.id}` : itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `${item.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} from ${itemIdentity.name} · Sender ${itemSpeaker.id}` : 'Input, sender not recorded'
+        const authorLabel = item.role === 'observation' ? 'Reply observation' : itemSpeaker.role === 'external' ? `External message from ${itemIdentity.name}` : itemSpeaker.role === 'system' ? `System message from ${itemSpeaker.id}` : itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `${item.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} from ${itemIdentity.name} · Sender ${itemSpeaker.id}` : 'Input, sender not recorded'
         const excerpt = item.content || (item.kind === 'system-message' ? 'System message with resources' : 'Input with resources')
-        return <button type="button" key={item.id} data-input-message-id={item.input?.id} data-input-source={item.input?.source.kind} data-conversation-record-id={item.id} data-record-kind={item.kind} data-record-source={item.source.kind} data-record-raw-id={item.rawId} data-conversation-item-ref={conversationItemRef(item) ? JSON.stringify(conversationItemRef(item)) : undefined} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${excerpt}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
+        return <button type="button" key={item.id} data-input-message-id={item.input?.id} data-input-source={item.input?.source.kind} data-conversation-record-id={item.id} data-conversation-role={item.role} data-record-kind={item.kind} data-record-source={item.source.kind} data-record-raw-id={item.rawId} data-conversation-item-ref={conversationItemRef(item) ? JSON.stringify(conversationItemRef(item)) : undefined} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${excerpt}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
           <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} mote={itemIdentity.mote} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{excerpt}</span><small title={describeConversationRecordSource(item).title}>{describeConversationRecordSource(item).caption} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
         </button>
       })}</div>
       {!reader.loading && reader.messages.length === 0 ? <p>No conversation records read in this view. Coverage may be incomplete.</p> : null}
     </div> : null}
     {message ? !interactive ? <>
-      <p className="recent-focus__message-caption">{system ? 'System record in ' : reply ? 'Reply in ' : <><ThemeConversationOutgoingIcon size={11} role="img" aria-hidden="false" aria-label="To" /> </>}{targetName}</p>
+      <p className="recent-focus__message-caption">{message.role === 'observation' ? 'Reply observation in ' : system ? 'System record in ' : reply ? 'Reply in ' : <><ThemeConversationOutgoingIcon size={11} role="img" aria-hidden="false" aria-label="To" /> </>}{targetName}</p>
       <p className="recent-focus__message-excerpt">{message.content.trim() || (resources.length ? resources.join(' · ') : system ? 'System message has no recorded text' : 'Input has no recorded text')}</p>
       <footer className="recent-focus__message-meta"><span title={describeConversationRecordSource(message).title}>{describeConversationRecordSource(message).caption}</span><time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? time.dateClock(message.recordedAt) : 'Record time unknown'}</time></footer>
       <span className="recent-focus__message-hint">Click or press Enter to keep reading</span>
@@ -192,7 +192,7 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
       <dt>Current topic</dt><dd>{topic && !topic.readError ? topic.title || 'Untitled topic' : 'Not recorded'}</dd>
     </dl>{sender ? <p className="recent-focus__sender-work">Current: {sender.stateLabel} · {sender.detail}</p> : null}
       <p className="recent-focus__sender-run">Sender Run not recorded · Execution relationship unknown</p></details> : null}
-    <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind}><ConversationMessage messageId={message.input?.id ?? message.id}
+    <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind} data-conversation-role={message.role}><ConversationMessage messageId={message.input?.id ?? message.id}
       speaker={speaker!} recordedIdentity
       describeSpeaker={describeSpeaker} {...(message.input ? { inputSource: message.input.source } : {})} conversationSessionId={message.agentSessionId}
       {...(conversationItemRef(message) ? { itemRef: conversationItemRef(message)! } : {})}
@@ -205,12 +205,12 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
       {...(message.original.kind === 'native' && message.original.item.messagePhase ? { messagePhase: message.original.item.messagePhase } : {})}
       {...(message.original.kind === 'captured' ? { status: message.original.item.status } : completedNativeReply(message.original.item) ? { status: 'complete' } : {})}
       {...(message.executionHostId ? { executionHostId: message.executionHostId } : {})}
-      name={described!.name} content={message.contentParts}
+      name={described!.name} {...(message.role === 'observation' ? { recordTitle: 'Reply observation' } : {})} content={message.contentParts}
       {...(message.original.kind === 'native' && message.original.item.questionAnswers ? { questionAnswers: message.original.item.questionAnswers } : {})}
       {...(message.original.kind === 'native' && message.original.item.questionDiagnostic ? { questionDiagnostic: message.original.item.questionDiagnostic } : {})}
       timeFormatter={time.clock}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}
-      workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} /></div>
+      workspaceRoot={recipient?.workspacePath ?? workspaceRoot ?? ''} readPastedImage={readPastedImage} />{message.records && message.records.length > 1 ? <details><summary>Contributing source records</summary>{message.records.map(record => <pre key={record.id} data-original-contribution={record.id}>{JSON.stringify(record.original.item, null, 2)}</pre>)}</details> : null}</div>
     <footer className="recent-focus__navigation">
     {agent ? <button type="button" className="recent-focus__sender-link" disabled={!sender} onClick={() => navigate(sender)}>View sender<ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button> : null}
     <button type="button" disabled={!recipient && !onReveal} onClick={() => { void reveal() }}>Return to Context</button>

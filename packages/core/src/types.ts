@@ -879,6 +879,9 @@ export type AgentSessionHistoryMetrics = {
 
 export type AgentSessionHistoryItem = {
   id: string
+  /** Read-only typed source relationships, interpreted at the original Provider boundary. */
+  conversation?: import('./conversation-timeline.js').ConversationRecordProvenance
+  conversationDiagnostic?: { code: string; message: string; original?: unknown }
   turnId?: string
   /** System messages describe read-only native history; they grant no input, identity or permission authority. */
   kind: 'user-message' | 'assistant-message' | 'system-message' | 'activity'
@@ -1878,6 +1881,9 @@ export type AgentWorkHistoryProjection = {
 
 export type AgentTimelineItem = {
   id: string
+  /** Original typed provenance, never reconstructed from display text or opaque item IDs. */
+  conversation?: import('./conversation-timeline.js').ConversationRecordProvenance
+  conversationDiagnostic?: { code: string; message: string; original?: unknown }
   agentSessionId: string
   kind: AgentTimelineItemKind
   status: AgentTimelineItemStatus
@@ -1937,10 +1943,42 @@ export type AgentTimelineMutation =
       eventName?: string
     }
 
+/** Original captured stream position; neither a message count nor a delivery receipt. */
+export type AgentCapturedTimelineStream = {
+  epoch: string
+  sequence: number
+  revision: number
+  origin: 'beginning' | 'retained-prefix' | 'unknown'
+  gaps: Array<{ code: string; message: string }>
+}
+export type AgentCapturedTimelineRecord = {
+  item: AgentTimelineItem
+  firstSequence: number
+  sequence: number
+  revision: string
+}
+export type AgentCapturedTimelineRead = {
+  epoch?: string
+  throughSequence?: number
+  beforeFirstSequence?: number
+  afterSequence?: number
+  recordId?: string
+  recordRevision?: string
+  limit?: number
+}
+export type AgentCapturedTimelinePage = {
+  agentSessionId: string
+  stream: AgentCapturedTimelineStream
+  records: AgentCapturedTimelineRecord[]
+  nextBeforeFirstSequence: number | null
+  more: boolean
+}
+
 export type AgentTimelineSnapshot = {
   agentSessionId: string
   revision: number
   items: AgentTimelineItem[]
+  stream?: AgentCapturedTimelineStream & { positions: Array<{ id: string; firstSequence: number; sequence: number; revision: string }> }
 }
 
 export type AgentTimelineCommit = {

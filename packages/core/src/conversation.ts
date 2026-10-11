@@ -1,5 +1,6 @@
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from './types.js'
 import { projectSessionUserMessages } from './session-user-messages.js'
+import { projectConversationTimeline, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationProjectionInput } from './conversation-timeline.js'
 
 export type AgentConversationRecordSource =
   | (AgentSessionHistorySource & { kind: 'native'; recordId: string })
@@ -16,7 +17,10 @@ export type AgentConversationRecord = {
   content: string
   contentParts: readonly AgentSessionHistoryContentPart[]
   recordedAt?: number
-  author?: AgentSessionUserMessage['author'] | { kind: 'system'; providerId: string }
+  author?: ConversationAuthor
+  role?: ConversationEvent['role']
+  event?: ConversationEvent
+  records?: readonly ConversationSourceRecord[]
   input?: AgentSessionUserMessage
   original: { kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'captured'; item: AgentTimelineItem }
 }
@@ -26,44 +30,37 @@ function recordedTime(at: number | undefined): { recordedAt?: number } {
   return at !== undefined && Number.isFinite(at) && Math.abs(at) <= 8.64e15 ? { recordedAt: at } : {}
 }
 
-/** Source order and source-scoped IDs; no reader, body/time matching or record cache. */
-export function projectConversationRecords({ agentSessionId, executionHostId, historyPage, timeline }: {
-  agentSessionId: string
-  executionHostId?: string | undefined
-  historyPage?: AgentSessionHistoryPage | undefined
-  timeline?: AgentTimelineSnapshot | undefined
-}): AgentConversationRecord[] {
-  const inputs = projectSessionUserMessages({ agentSessionId, historyPage, timeline })
-  const nativeInputs = new Map(inputs.filter(input => input.source.kind === 'native').map(input => [input.rawId, input]))
-  const capturedInputs = new Map(inputs.filter(input => input.source.kind === 'captured').map(input => [input.rawId, input]))
-  const records: AgentConversationRecord[] = [], seen = new Set<string>()
-  if (historyPage?.agentSessionId === agentSessionId) for (const item of historyPage.items) {
-    const source: AgentConversationRecordSource = { kind: 'native', ...historyPage.source, recordId: item.id }
-    const id = JSON.stringify([executionHostId ?? null, agentSessionId, 'native', source.providerId, source.nativeSessionId, item.id])
-    if (seen.has(id)) continue
-    seen.add(id)
-    const input = item.kind === 'user-message' ? nativeInputs.get(item.id) : undefined
-    const author = input?.author ?? (item.kind === 'assistant-message' ? { kind: 'agent' as const, agentSessionId }
-      : item.kind === 'system-message' ? { kind: 'system' as const, providerId: historyPage.source.providerId } : undefined)
-    records.push({ id, rawId: item.id, agentSessionId, ...(executionHostId ? { executionHostId } : {}), kind: item.kind, source,
-      content: input?.content ?? item.contentParts.filter(part => part.kind === 'text').map(part => part.text).join('\n'),
-      contentParts: item.contentParts,
-      ...recordedTime(item.startedAt),
-      ...(author ? { author } : {}), ...(input ? { input } : {}), original: { kind: 'native', item } })
-  }
-  if (timeline?.agentSessionId === agentSessionId) for (const item of timeline.items) {
-    if (item.agentSessionId !== agentSessionId || item.kind !== 'user_message' && item.kind !== 'assistant_message') continue
-    const id = JSON.stringify([executionHostId ?? null, agentSessionId, 'captured', item.id])
-    if (seen.has(id)) continue
-    seen.add(id)
-    const input = item.kind === 'user_message' ? capturedInputs.get(item.id) : undefined
-    records.push({ id, rawId: item.id, agentSessionId, ...(executionHostId ? { executionHostId } : {}), kind: item.kind === 'user_message' ? 'user-message' : 'assistant-message',
-      source: { kind: 'captured', recordId: item.id }, content: item.content ?? '',
-      contentParts: input?.contentParts ?? [{ kind: 'text', text: item.content ?? '' }], ...recordedTime(item.createdAt),
-      author: input?.author ?? { kind: 'agent', agentSessionId },
-      ...(input ? { input } : {}), original: { kind: 'captured', item } })
-  }
-  return records
+/** Source-record adapter over the one Core timeline. Existing row and input keys remain original. */
+export function projectConversationRecords(input: ConversationProjectionInput): AgentConversationRecord[] {
+  const timeline = projectConversationTimeline(input)
+  const users = projectSessionUserMessages(input)
+  const inputs = new Map(users.map(value => [JSON.stringify([value.source.kind, value.rawId]), value]))
+  const records = new Map(timeline.records.map(record => [record.id, record]))
+  return timeline.events.map(event => {
+    // A canonical anchor may be unread. The complete accepted contribution is still readable.
+    const record = records.get(event.anchorId) ?? records.get(event.content[0]?.recordId ?? '') ?? records.get(event.recordIds[0]!)!
+    const original = record.original, item = original.item
+    const source: AgentConversationRecordSource = original.kind === 'native'
+      ? { kind: 'native', ...input.historyPage!.source, recordId: item.id } : { kind: 'captured', recordId: item.id }
+    const user = inputs.get(JSON.stringify([source.kind, item.id]))
+    const kind: AgentSessionHistoryItem['kind'] = original.kind === 'native' ? original.item.kind
+      : original.item.kind === 'user_message' ? 'user-message' : original.item.kind === 'assistant_message' ? 'assistant-message'
+      : original.item.kind === 'system_message' ? 'system-message' : 'activity'
+    const projectedParts: readonly AgentSessionHistoryContentPart[] = event.content.flatMap(slot => {
+      if (slot.placement !== 'body') return []
+      const owner = records.get(slot.recordId)
+      if (!owner || owner.revision !== slot.recordRevision) return []
+      if (owner.original.kind === 'native' && slot.selector.kind === 'native-part') return [owner.original.item.contentParts[slot.selector.partIndex]!]
+      if (owner.original.kind === 'captured' && slot.selector.kind === 'captured-field') return [{ kind: 'text' as const, text: owner.original.item[slot.selector.field]! }]
+      return []
+    })
+    const contentParts = original.kind === 'native' && projectedParts.length === original.item.contentParts.length
+      && projectedParts.every((part, index) => part === original.item.contentParts[index]) ? original.item.contentParts : projectedParts
+    return { id: event.id, rawId: item.id, agentSessionId: input.agentSessionId, ...(input.executionHostId ? { executionHostId: input.executionHostId } : {}), kind, source,
+      content: user?.content ?? contentParts.flatMap(part => part.kind === 'text' ? [part.text] : []).join('\n'), contentParts,
+      ...recordedTime(original.kind === 'native' ? original.item.startedAt : original.item.createdAt), author: event.author,
+      ...(user ? { input: user } : {}), original, role: event.role, event, records: event.recordIds.map(id => records.get(id)!) }
+  })
 }
 
 /** A reference to the original Session, never a new conversation lifecycle. */
@@ -87,3 +84,6 @@ export * from './conversation-changes.js'
 export * from './conversation-questions.js'
 
 export * from './conversation-landmarks.js'
+
+export * from './conversation-timeline.js'
+export * from './conversation-author.js'

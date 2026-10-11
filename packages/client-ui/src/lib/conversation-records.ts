@@ -14,9 +14,8 @@ export function projectConversationRecords(input: {
   timeline?: AgentTimelineSnapshot | undefined
 }): ConversationRecord[] {
   return projectCoreRecords(input).map(record => {
-    const speaker = record.input ? speakerOfUserMessage(record.input)
-      : record.author?.kind === 'agent' ? { role: 'agent' as const, id: record.author.agentSessionId }
-      : record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId } : undefined
+    const speaker = record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId ?? 'agentmux' }
+      : record.author ? speakerOfUserMessage({ author: record.author }) : undefined
     return { ...record, ...(speaker ? { speaker } : {}) }
   })
 }
