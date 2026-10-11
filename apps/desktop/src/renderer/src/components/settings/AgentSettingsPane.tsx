@@ -159,11 +159,14 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     [config.executors]
   )
   const detectionHost = config.hosts.find((host) => host.id === hostId)
-  const executors = useMemo(() => Object.entries(drafts).map(([id, draft]) => ({
-    id,
-    draft,
-    detection: currentExecutorDetection(detections[executorDetectionKey(hostId, id)], id, draft, detectionHost)
-  })), [detectionHost, detections, drafts, hostId])
+  const executors = useMemo(() => Object.entries(drafts).map(([id, draft]) => {
+    let env: Record<string, string>
+    try { env = parseEnv(draft.env) }
+    catch { return { id, draft, detection: undefined } }
+    return { id, draft, detection: currentExecutorDetection(
+      detections[executorDetectionKey(hostId, id)], id, { ...draft, env }, detectionHost
+    ) }
+  }), [detectionHost, detections, drafts, hostId])
   const checking = executors.some((executor) => executor.detection?.state === 'checking')
   function filterExecutors(query: string): void {
     // Search chooses a stable set of editors. Renaming a found executor must not hide it mid-input.
