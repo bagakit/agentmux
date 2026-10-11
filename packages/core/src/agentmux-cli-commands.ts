@@ -26,6 +26,7 @@ import { parseSettingsCommand } from './settings-cli.js'
 import { parseFileReadCommand, readFileWriteBase } from './agentmux-cli-files.js'
 import { parseGitParams, parseGitOpenParams } from './public-rpc-git.js'
 import { parseAppWindowParams } from './public-rpc-windows.js'
+import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { parseFileHistoryParams, parseFileRestoreParams, parseFileUndoParams, parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
@@ -605,7 +606,14 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       ...fields(f, { '--host': 'hostId', '--participant': 'participantSessionId', '--after-source-message': 'afterSourceMessageId' }), ...numbers(f, { '--limit': 'limit' }) }),
     'Managed Agents list their own participation. Continue with the returned nextSourceMessageId at the same original Host. Unavailable is not an empty directory; no Run or input is changed.'),
   command('message.dispatch.report', '--source-message ID --reply-message ID --kind KIND', 'Record an actual reply under the original participant and thread rules.', { '--source-message': 'data', '--reply-message': 'data', '--kind': 'value' }, f => ({ sourceMessageId: id(f, '--source-message'), replyMessageId: id(f, '--reply-message'), kind: value(f, '--kind', true) })),
-  empty('app.inspect', 'Inspect actual Desktop selection, presentation and input facts.'),
+  command('app.inspect', '[--input FILE|-]', 'Inspect actual Desktop selection, or an exact mounted conversation consumer without activating it.',
+    { '--input': 'data' }, async f => {
+      const path = value(f, '--input')
+      if (path === undefined) return {}
+      const input = await readControlJsonInput(path, 'Client observation')
+      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => key !== 'conversation')) invalid('Client observation JSON requires only conversation.')
+      return { conversation: parseConversationConsumerQuery((input as Record<string, unknown>).conversation) }
+    }, 'Without --input, returns the original workbench observation. JSON conversation requires hostId and agentSessionId; optional expectedRunId, consumerId and source-qualified records inspect only already-mounted readers. Accepted and held frames, coverage, watch and exact membership remain separate facts. Inspection never opens, reads, retries, follows, sends or changes a Session/Run; absent consumers do not prove the Agent is unavailable.'),
   command('app.window.ls', '[--operation-id ID]', 'Observe native windows and optionally the exact original presentation operation.',
     { '--operation-id': 'data' }, f => parseAppWindowParams('app.window.ls', fields(f, { '--operation-id': 'operationId' })) as Record<string, unknown>,
     'Window and document identities belong to the client. A recorded operation describes its original action, not current focus, input readiness or Run status. Unknown and unavailable observations retain original workfaces.'),
