@@ -4,11 +4,11 @@ import { ConversationOriginalRecords } from './ConversationOriginalRecords.js'
 import { useConversationRecordLayout } from '../lib/use-conversation-record-layout.js'
 import type { AgentCapabilities, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { ConversationRecord } from '../lib/conversation-records.js'
-import { memo, useMemo, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
 import { type DescribeSpeaker } from '../lib/conversation-speaker.js'
-import { CapturedConversationMessage } from './CapturedConversationMessage.js'
+import { CapturedConversationMessage, type SubmissionDisclosure } from './CapturedConversationMessage.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
 import { ConversationRecordSequence, type ConversationProcessProps, type ConversationProcessRenderer, type ConversationRecordRenderer, type ConversationRecordBoundary, type ConversationRecordInsertion } from './ConversationRecordSequence.js'
@@ -17,7 +17,7 @@ import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyn
 import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionReplyState } from '../lib/conversation-question-reply.js'
 import { projectConversationQuestions } from '@agentmux/core/conversation'
 import { completedNativeReply } from '../lib/conversation-files.js'
-import { conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
+import { conversationItemRef, conversationRecordId, type ConversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
@@ -39,7 +39,9 @@ type Props = ReadingProps & {
   originalRecords?: readonly ConversationRecord[]
   coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage']
   onLocateRecord?: import('react').ComponentProps<typeof ConversationCoverage>['onLocate']
-  renderCapturedRecord?: (record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure']) => ReactNode
+  renderCapturedRecord?: (record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure'], submissionDisclosure?: SubmissionDisclosure) => ReactNode
+  /** Original reader failure retains the full submitted input; does not change input qualification. */
+  expandSubmissions?: boolean
   /** Already accepted same-source facts; does not change this page or acquire read demand. */
   questionAnswerContext?: AgentSessionHistoryPage | null
   sessionId: string
@@ -58,12 +60,28 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
+  page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
 }: Props) {
   const projection = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
     coverage: coverage ?? acceptedRecords[0]?.coverage ?? [] }), [acceptedRecords, acceptedOriginals, coverage])
   const layout = useConversationRecordLayout(projection.records, projection.originalRecords, JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch]))
   const describedRecords = layout.records
+  const choiceScope = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
+  // Only local disclosure choices survive coalescence; no message or relation facts are retained here.
+  const [submissionChoices, setSubmissionChoices] = useState<{ scope: string; values: ReadonlyMap<string, boolean> }>({ scope: choiceScope, values: new Map() })
+  const choices = submissionChoices.scope === choiceScope ? submissionChoices.values : new Map<string, boolean>()
+  useEffect(() => {
+    const retained = new Set(projection.originalRecords.flatMap(record => record.records?.map(source => source.id) ?? [record.id]))
+    setSubmissionChoices(previous => {
+      if (previous.scope !== choiceScope) return { scope: choiceScope, values: new Map() }
+      if ([...previous.values.keys()].every(id => retained.has(id))) return previous
+      return { scope: choiceScope, values: new Map([...previous.values].filter(([id]) => retained.has(id))) }
+    })
+  }, [choiceScope, projection.originalRecords])
+  const expandedSubmissions = useMemo(() => new Set([...choices].filter(([, open]) => open).map(([id]) => id)), [choices])
+  const unavailable = projection.coverage.some(row => row.source.kind === 'native' && (row.current === 'unavailable' || row.current === 'unsupported'))
+  const unreadRecords = new Set(projection.coverage.flatMap(row => row.gaps.flatMap(gap => gap.record &&
+    (gap.code === 'CONVERSATION_ANCHOR_UNREAD' || gap.code === 'CONVERSATION_OBSERVED_TARGET_UNREAD') ? [conversationRecordId(gap.record)] : [])))
   if (page && page.agentSessionId !== sessionId) return null
   if (describedRecords.length === 0 && !insertions?.length && projection.coverage.length === 0) return null
   const descriptions = new Map(describedRecords.filter(record => record.original.kind === 'native').map(record => [record.rawId, record]))
@@ -80,15 +98,28 @@ export const ConversationView = memo(function ConversationView({
     if (record.original.kind === 'native') { beforeRecordId = record.rawId; continue }
     capturedInsertions.push({ key: record.presentationKey ?? record.id, ...(beforeRecordId === undefined ? {} : { beforeRecordId }),
       role: record.role === 'process' ? 'process' : 'message', recordIds: [record.rawId],
-      content: disclosure => <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(record, disclosure)}{renderOriginals(record)}</div> })
+      content: disclosure => <div data-conversation-layout-key={record.presentationKey ?? record.id}>{renderCaptured(record, disclosure, true)}{renderOriginals(record)}</div> })
   }
   capturedInsertions.reverse()
   const orderedInsertions = [...(insertions ?? []), ...capturedInsertions]
 
-  function renderCaptured(record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure']): ReactNode {
-    return renderCapturedRecord ? renderCapturedRecord(record, disclosure) : record.role === 'process' || record.role === 'interaction'
+  function renderCaptured(record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure'], feed = false): ReactNode {
+    const keys = new Set([record.event?.anchorId, ...(record.records?.map(source => source.id) ?? [])])
+    const unread = [...keys].some(key => key !== undefined && unreadRecords.has(key))
+    const choiceKey = record.records?.find(source => source.original.item === record.original.item)?.id ?? record.id
+    const submissionDisclosure: SubmissionDisclosure | undefined = feed ? {
+      compact: Boolean(page?.items.length) && !expandSubmissions && !unavailable && !unread,
+      ...(choices.has(choiceKey) ? { open: choices.get(choiceKey)! } : {}),
+      onOpenChange: open => setSubmissionChoices(previous => {
+        const values = previous.scope === choiceScope ? previous.values : new Map<string, boolean>()
+        if (values.get(choiceKey) === open && previous.scope === choiceScope) return previous
+        return { scope: choiceScope, values: new Map(values).set(choiceKey, open) }
+      })
+    } : undefined
+    return renderCapturedRecord ? renderCapturedRecord(record, disclosure, submissionDisclosure) : record.role === 'process' || record.role === 'interaction'
       ? <CapturedProcessRecord record={record} {...(disclosure ? { disclosure } : {})} located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)} /> : <CapturedConversationMessage
         item={record.original.kind === 'captured' ? record.original.item : neverCaptured()} record={record}
+        {...(submissionDisclosure ? { submissionDisclosure } : {})}
         {...(record.role === 'observation' ? { replyObservation: { compact: true } } : {})}
         {...(record.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})}
         {...(record.speaker ? { speaker: record.speaker } : {})}
@@ -99,7 +130,7 @@ export const ConversationView = memo(function ConversationView({
   }
   function renderOriginals(record: ConversationRecord): ReactNode {
     const contributors = record.records?.filter(source => source.original.item !== record.original.item).flatMap(source => originals.has(source.id) ? [originals.get(source.id)!] : []) ?? []
-    return contributors.length ? <ConversationOriginalRecords records={contributors} renderRecord={renderOriginal} sessionId={sessionId} {...(locatedMessageKey === undefined ? {} : { locatedMessageKey })} /> : null
+    return contributors.length ? <ConversationOriginalRecords records={contributors} expandedRecords={expandedSubmissions} renderRecord={renderOriginal} sessionId={sessionId} {...(locatedMessageKey === undefined ? {} : { locatedMessageKey })} /> : null
   }
   function renderOriginal(record: ConversationRecord): ReactNode {
     return record.original.kind === 'native' ? renderNativeRecord(record.original.item, undefined, record) : renderCaptured(record)

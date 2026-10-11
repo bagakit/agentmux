@@ -2,18 +2,32 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 
 /** Local reading only. The caller keys this owner to the original record and content. */
-export function ConversationMessageDisclosure({ preview, reveal, children }: {
+export function ConversationMessageDisclosure({ preview, reveal, children, summary, expanded = false, open: controlledOpen, onOpenChange }: {
   preview: string
   reveal: boolean
   children: ReactNode
+  summary?: ReactNode
+  expanded?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState(reveal)
-  useEffect(() => { if (reveal) setOpen(true) }, [reveal])
-  return <details className="message-disclosure" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
+  const [choice, setChoice] = useState<boolean | undefined>(reveal ? true : undefined)
+  const [presented, setPresented] = useState(reveal || expanded || controlledOpen === true)
+  const open = reveal || (controlledOpen ?? choice ?? expanded)
+  useEffect(() => { if (open) setPresented(true) }, [open])
+  useEffect(() => { if (reveal) { setChoice(true); setPresented(true); onOpenChange?.(true) } }, [reveal])
+  return <details className="message-disclosure" data-submission={summary ? true : undefined} open={open} onToggle={event => {
+    const next = event.currentTarget.open
+    // Synchronizing the open attribute also emits toggle; only a changed DOM choice is user intent.
+    if (next === open) return
+    setChoice(next); if (next) setPresented(true)
+    onOpenChange?.(next)
+  }}>
     <summary>
-      {!open ? <span className="message-disclosure__preview">{preview}…</span> : null}
-      <span className="message-disclosure__action"><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />{open ? 'Collapse message' : 'Show full message'}</span>
+      {summary}
+      {!open && preview ? <span className="message-disclosure__preview">{preview}{summary ? '' : '…'}</span> : null}
+      <span className="message-disclosure__action"><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />{summary ? open ? '收起原文' : '展开原文' : open ? 'Collapse message' : 'Show full message'}</span>
     </summary>
-    {open ? children : null}
+    {summary ? <div hidden={!open} inert={!open}>{open || presented ? children : null}</div> : open ? children : null}
   </details>
 }
