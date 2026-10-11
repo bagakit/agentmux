@@ -8,7 +8,7 @@ type Parent = { operation: ConnectionSetupOperation; actor: ConnectionEnrollment
 type Snapshot = { stepId: string; attemptId: string; stage: string; privateState: string }
 type Child = { receipt: ConnectionSetupInspectionReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null }
 type Envelope = { binding: string; stepId: string; applicationInfoReadPermission?: 'confirmed' | 'unknown'; readResult?: ConnectionSetupReadSummary; privateState: string }
-export type SetupConfigurationSource = { receipt: ConnectionSetupInspectionReceipt & { subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions' }; authenticationStepId: string; attemptId: string; privateState: string; originalReadState: string }
+export type SetupConfigurationSource = { receipt: ConnectionSetupInspectionReceipt & { subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog' }; authenticationStepId: string; attemptId: string; privateState: string; originalReadState: string }
 type Owner = {
   connections: ConnectionHost; secrets: EnrollmentSecrets | undefined
   read(id: string): Parent | null
@@ -91,7 +91,7 @@ export class SetupApplicationInspection {
       return snapshot?.stage === 'confirmed' && fresh && this.currentAuthentication(fresh) && fresh.operation.authentication?.stepId === snapshot.stepId ? snapshot : null
     } catch { return null }
   }
-  private latestConfigurationRead(row: Parent, subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions'): Child | null {
+  private latestConfigurationRead(row: Parent, subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog'): Child | null {
     return this.safe(() => {
       const record = this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect') IS NULL AND json_extract(record_json,'$.receipt.subject')=? ORDER BY ordinal DESC LIMIT 1").get(row.operation.operationId, subject)
       return record ? this.decode(record) : null
@@ -103,7 +103,7 @@ export class SetupApplicationInspection {
     return this.currentAuthentication(row) && row.operation.authentication?.stepId === source.authenticationStepId && latest?.receipt.stepId === source.receipt.stepId && latest.receipt.request === 'confirmed' && latest.receipt.secureStorage === 'stored'
   }
   /** Original authenticated raw read, retained only inside the Host/adapter boundary. */
-  async configurationSource(row: Parent, subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions'): Promise<SetupConfigurationSource | null> {
+  async configurationSource(row: Parent, subject: 'bot-settings' | 'event-settings' | 'permission-catalog' | 'application-permissions' | 'event-catalog'): Promise<SetupConfigurationSource | null> {
     const authentication = await this.source(row), child = this.latestConfigurationRead(row, subject)
     if (!authentication || child?.receipt.subject !== subject || child.authenticationStepId !== authentication.stepId || child.receipt.request !== 'confirmed' || child.receipt.secureStorage !== 'stored' || !child.privateRef) return null
     try {

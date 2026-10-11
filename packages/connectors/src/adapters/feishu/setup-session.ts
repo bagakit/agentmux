@@ -3,6 +3,8 @@ import type { SetupAdapterInput, SetupChallengeReceipt, SetupAuthenticationRecei
 import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, type NativeAccountInitialState, type NativeAccountState } from './native-account.js'
 import { supportedScopeId } from './setup-permissions.js'
 import { enrollmentAccountSession } from './enrollment.js'
+import { feishuMessageReceptionIntent } from './setup-message-reception.js'
+import { FEISHU_MESSAGE_EVENT } from './message.js'
 
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const opaque = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && !/[\u0000-\u001f\u007f\s]/u.test(v)
@@ -98,7 +100,7 @@ export async function inspectFeishuApplication(input: SetupAdapterInput & { priv
 
 /** A current read is one native subject; catalogs and UI-defaulted objects are excluded. */
 export async function readFeishuApplication(input: SetupAdapterInput & { privateState: string; subject: ConnectionSetupReadSubject }, signal?: AbortSignal): Promise<SetupReadReceipt> {
-  const paths = { 'application-details': '/developers/v1/app/', 'event-settings': '/developers/v1/event/', 'callback-settings': '/developers/v1/callback/', 'bot-settings': '/developers/v1/robot/', 'permission-catalog': '/developers/v1/scope/all/', 'application-permissions': '/developers/v1/scope/applied/' } as const
+  const paths = { 'application-details': '/developers/v1/app/', 'event-settings': '/developers/v1/event/', 'callback-settings': '/developers/v1/callback/', 'bot-settings': '/developers/v1/robot/', 'permission-catalog': '/developers/v1/scope/all/', 'application-permissions': '/developers/v1/scope/applied/', 'event-catalog': '/developers/v1/event/all/' } as const
   if (!Object.hasOwn(paths, input.subject)) return { kind: 'unknown' }
   const data = await applicationData(input, paths[input.subject], input.subject === 'event-settings' ? { needEventDetail: true } : {}, signal)
   if (!data) return { kind: 'unknown' }
@@ -118,4 +120,11 @@ export async function addFeishuApplicationPermissions(input: SetupAdapterInput &
   if (!envelope) return { kind: 'unknown' }
   const data = record(envelope.data)
   return { kind: 'accepted', privateState: JSON.stringify(envelope), requiresDataRangeConfiguration: typeof data?.needConfigurePrivilege === 'boolean' ? data.needConfigurePrivilege : null }
+}
+
+/** Add only the receiver's exact App event, explicitly carrying the checked native mode. */
+export async function addFeishuMessageReception(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
+  if (input.privateIntent !== feishuMessageReceptionIntent()) return { kind: 'unknown' }
+  const envelope = await applicationEnvelope(input, '/developers/v1/event/update/', { events: [], appEvents: [FEISHU_MESSAGE_EVENT], userEvents: [], operation: 'add', eventMode: 4 }, signal)
+  return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
 }
