@@ -1,3 +1,4 @@
+import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { TextInput } from '@agentmux/client-ui/input'
 import { ConversationMessage } from '@agentmux/client-ui'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
@@ -382,7 +383,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
                   <strong>{row.name}</strong>{active ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
                   <time dateTime={new Date(candidate.updatedAt).toISOString()} title={new Date(candidate.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - candidate.updatedAt, ' ago')}</time></span>
                 <span className="launcher-resume__row-recap" title={row.recap ? `${row.recap.source}: ${row.recap.displayText ?? row.recap.text}` : preview?.error}>
-                  {row.recap ? <><span>{row.recap.source === 'Last assistant message' ? 'Reply' : row.recap.source === 'Last prompt' ? 'Input' : row.recap.source === 'Last reply observation' ? 'Reply observation' : 'Saved conversation excerpt'} · </span>{row.recap.displayText ?? row.recap.text}</>
+                  {row.recap ? <><span>{row.recap.source === 'Last assistant message' ? 'Reply' : row.recap.source === 'Last prompt' ? 'Input' : row.recap.source === 'Last reply observation' ? COLLECTED_REPLY_TITLE : 'Saved conversation excerpt'} · </span>{row.recap.displayText ?? row.recap.text}</>
                     : preview?.state === 'error' ? 'Preview could not be read'
                     : preview?.state === 'ready' ? 'No text on this page'
                     : preview?.state === 'loading' ? 'Reading preview…' : 'Preview not read yet'}

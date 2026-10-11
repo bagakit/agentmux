@@ -1,4 +1,5 @@
 import type { ConversationRecord } from '../lib/conversation-records.js'
+import { COLLECTED_REPLY_TITLE } from '../lib/conversation-sources.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import type { AgentTimelineItem } from '@agentmux/core'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
@@ -49,7 +50,7 @@ function ReplyObservation({ item, observation, compact, reveal, children, source
   const preview = (item.content ?? '').replace(/\s+/gu, ' ').trim().slice(0, 180)
   return <div className={observation ? 'conversation-reply-observation' : undefined} data-captured-reply-observation={observation ? item.id : undefined} tabIndex={-1}
     data-message-source-key={observation ? conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id }) : undefined}>
-    {observation ? <RecordedToolRow className="log-row" observation={{ id: item.id, title: '回复观察', source: sources ? <ConversationSourceLabels sources={sources} /> : item.source, persistentSource: true, status: item.status,
+    {observation ? <RecordedToolRow className="log-row" observation={{ id: item.id, title: COLLECTED_REPLY_TITLE, source: sources ? <ConversationSourceLabels sources={sources} /> : item.source, persistentSource: true, status: item.status,
       recordedTime: describeActivityRecordTime(item.createdAt, item.createdAt, Number.NaN) }}
       icon={<SemanticIcon name="conversation.assistant-message" size={12} />} expanded={expanded} controls={bodyId}
       onToggle={() => { setChoice(!expanded); if (!expanded) setReadOnce(true) }} /> : null}

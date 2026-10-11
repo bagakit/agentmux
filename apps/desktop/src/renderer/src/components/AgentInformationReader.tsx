@@ -1,3 +1,4 @@
+import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { useAgentBookmarkWindow } from '../lib/use-agent-bookmark-window'
 import { useAgentBookmarkReading } from '../lib/agent-bookmark-reading'
 import { agentBookmarks } from '../lib/agent-bookmarks'
@@ -61,7 +62,7 @@ const HeldReading = memo(function HeldReading({ request, enabled, available, fol
     {!context.recap && request.contentChanged ? <small className="agent-information-reader__change">Card content changed · Reading kept</small> : null}
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin}`}>
-        {context.recap.source === 'Last reply observation' ? 'Reply observation' : context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}
+        {context.recap.source === 'Last reply observation' ? COLLECTED_REPLY_TITLE : context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}
         <span>{request.contentChanged ? 'Card content changed · Reading kept' : (context.recap.reading?.truncated ?? true) ? 'Excerpt at opening' : 'Observed at opening'}</span>
       </small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} active={enabled} />

@@ -394,3 +394,7 @@
 .conversation-tool-trace__row > .conversation-source-labels { flex-shrink: 1; }
 
 .log-turn[data-trace-only='true'] > .log-turn__meta { display: none; }
+
+.agent-question__draft, .conversation-reply-observation__notice { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; margin: var(--sp-2) 0; overflow-wrap: anywhere; }
+
+.conversation-reply-observation__notice { grid-column: 2; grid-row: 4; min-width: 0; }

@@ -412,6 +412,7 @@ export function ConversationMessage({
           declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : null}{messageDetails}</ConversationInputDetails> : null}
       </div>
       {!detailsOnlyMetadata ? metadata : null}
+      {sources?.collectedReply ? <p className="conversation-reply-observation__notice">{sources.collectedReply}</p> : null}
       {sources && detailsOnlyMetadata ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} unconfirmed={sources.unconfirmed} /></div> : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"

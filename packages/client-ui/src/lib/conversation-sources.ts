@@ -2,12 +2,13 @@ import type { AgentMuxEvidenceSource } from '@agentmux/core'
 import { conversationRecordId, type ConversationContentRef, type ConversationEvent, type ConversationInvocationRef, type ConversationSelector, type ConversationSourceRecord, type ConversationTimeline } from '@agentmux/core/conversation'
 
 export const NATIVE_CONVERSATION_SOURCE = '原生对话'
+export const COLLECTED_REPLY_TITLE = '采集到的回复'
 const capturedLabels = {
   'native-hook': 'Hook', 'native-transcript': '原生记录观察', 'terminal-output': '终端输出观察',
   'run-process': '进程观察', acp: 'ACP', user: 'AgentMux 提交记录', agentmux: 'AgentMux'
 } satisfies Record<AgentMuxEvidenceSource, string>
 export type ConversationSourceDisplay = { labels: readonly { id: string; label: string; title: string }[]; unread?: boolean }
-export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; unconfirmed: boolean }
+export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; unconfirmed: boolean; collectedReply?: string }
 type Slot = ConversationEvent['content'][number]
 const selectorKey = (selector: ConversationSelector) => selector.kind === 'native-part' ? ['native-part', selector.partIndex] : ['captured-field', selector.field]
 const contentKey = (ref: ConversationContentRef) => JSON.stringify([conversationRecordId(ref.record), ref.recordRevision, selectorKey(ref.selector)])
@@ -29,7 +30,22 @@ function display(records: readonly ConversationSourceRecord[], unread = false): 
 export function conversationSourcePresenter(timeline: ConversationTimeline) {
   const inventory = new Map(timeline.records.map(record => [record.id, record]))
   const invocationParts = new Map<string, Map<string, ConversationContentRef>>()
-  for (const relation of new Set(timeline.events.flatMap(event => event.relations))) if (relation.kind === 'same-invocation') {
+  const targetRelations = new Map<string, Set<string>>()
+  const gapCodes = new Map<string, Set<string>>()
+  for (const row of timeline.coverage) for (const gap of row.gaps) if (gap.record) {
+    const id = conversationRecordId(gap.record), codes = gapCodes.get(id) ?? new Set<string>()
+    codes.add(gap.code); gapCodes.set(id, codes)
+  }
+  for (const relation of new Set(timeline.events.flatMap(event => event.relations))) {
+    if (relation.kind === 'same-event' || relation.kind === 'observes') {
+      const target = relation.kind === 'same-event' ? relation.to : relation.target
+      if ('kind' in target.source) {
+        const from = conversationRecordId(relation.from), to = conversationRecordId({ ...target, source: target.source })
+        const targets = targetRelations.get(from) ?? new Set<string>()
+        targets.add(to); targetRelations.set(from, targets)
+      }
+    }
+    if (relation.kind !== 'same-invocation') continue
     const key = invocationKey(relation.invocation), group = invocationParts.get(key) ?? new Map<string, ConversationContentRef>()
     for (const part of [relation.from, relation.to]) group.set(contentKey(part), part)
     invocationParts.set(key, group)
@@ -60,7 +76,7 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
     if (!owner.reference) return display([owner])
     return byContent.get(contentKey({ record: owner.reference, recordRevision: owner.revision, selector: slot.selector })) ?? display([owner])
   }
-  return (record: { records?: readonly ConversationSourceRecord[]; event?: ConversationEvent }): ConversationSources => {
+  return (record: { records?: readonly ConversationSourceRecord[]; event?: ConversationEvent; role?: ConversationEvent['role'] }): ConversationSources => {
     const originals = record.records ?? [], primary = originals.find(item => item.id === record.event?.anchorId) ?? originals[0]
     const slots: readonly Slot[] = record.event ? record.event.content.filter(slot => slot.placement === 'body') : primary
       ? primary.original.kind === 'native' ? primary.original.item.contentParts.map((_, partIndex) => ({ recordId: primary.id, recordRevision: primary.revision, selector: { kind: 'native-part' as const, partIndex }, placement: 'body' as const }))
@@ -68,7 +84,16 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
     const fields: ConversationSources['fields'] = {}
     if (primary?.original.kind === 'captured') for (const field of ['content', 'toolInput', 'toolOutput'] as const) if (primary.original.item[field] !== undefined)
       fields[field] = slotDisplay({ recordId: primary.id, recordRevision: primary.revision, selector: { kind: 'captured-field', field }, placement: 'body' })
-    return { main: display(originals), parts: slots.map(slotDisplay), fields,
-      unconfirmed: Boolean(record.event && originals.length === 1 && timeline.order.crossSource === 'partial') }
+    const main = display(originals)
+    const unreadTarget = originals.some(original => [...(targetRelations.get(original.id) ?? [])].some(target => {
+      const codes = gapCodes.get(target)
+      return codes?.has('CONVERSATION_ANCHOR_UNREAD') || codes?.has('CONVERSATION_OBSERVED_TARGET_UNREAD')
+    }))
+    const relationConflict = originals.some(original => gapCodes.get(original.id)?.has('CONVERSATION_RELATION_CYCLE'))
+    const unconfirmed = Boolean(record.event && originals.length === 1 && timeline.order.crossSource === 'partial')
+    const collectedReply = record.role === 'observation' ? `由 ${main.labels.map(source => source.label).join('、') || '原来源'} 采集的回复内容。${unreadTarget ? '对应的原始记录尚未读到。' : relationConflict ? '记录的对应关系存在冲突。' : ''}` : undefined
+    return { main, parts: slots.map(slotDisplay), fields,
+      ...(collectedReply ? { collectedReply } : {}),
+      unconfirmed }
   }
 }
