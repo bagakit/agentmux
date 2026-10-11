@@ -1,101 +1,26 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { chmod } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxClient, terminalEnvironment } from '../src/client.js'
-import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
-import { AgentMuxControlServer } from '../src/public-rpc-server.js'
-import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import { connectHostedAgentMux } from '../src/hosted-client.js'
-import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
-import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
+import { terminalEnvironment } from '../src/client.js'
 import { classifyExecutable } from '../src/executable-probe.js'
-import type { AgentMuxAgentSession, AgentProviderNativeSessionDiscoveryContext } from '../src/types.js'
+import { cleanupExecutableNativeFixtures, executableNativeFixture, until } from './helpers/executable-native-fixture.js'
 
-const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.unstubAllEnvs() })
-async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolean): Promise<T> {
-  let value!: T
-  await vi.waitFor(async () => { value = await read(); expect(accept(value)).toBe(true) }, { timeout: 10_000 })
-  return value
-}
-async function end(child: ChildProcess): Promise<void> {
-  if (child.exitCode === null && child.signalCode === null) { const done = once(child, 'exit'); child.kill('SIGTERM'); await done }
-}
-async function fixture(shape: 'configured-path' | 'workspace-relative') {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'exctx-'))), runtime = join(root, 'r'), state = join(root, 's')
-  await Promise.all([mkdir(runtime), mkdir(state), mkdir(join(root, 'bin')), mkdir(join(root, 'receipts'))])
-  const daemon = spawn(resolve(import.meta.dirname, '../vendor/ctxmux', `${process.platform}-${process.arch}`, 'bin/ctxmuxd'),
-    ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'],
-    { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
-  cleanups.push(async () => { await end(daemon); await rm(root, { recursive: true, force: true }) })
-  await new Promise<void>((yes, no) => {
-    const timer = setTimeout(() => no(new Error('Private Native readiness unavailable')), 15_000)
-    daemon.stdio[3]!.once('data', () => { clearTimeout(timer); yes() })
-    daemon.once('error', error => { clearTimeout(timer); no(error) })
-    daemon.once('exit', code => { clearTimeout(timer); no(new Error('Private Native exited ' + code)) })
-  })
-  for (const key of Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_'))) vi.stubEnv(key, undefined)
-  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', runtime); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', state)
-  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
-  const executable = join(root, 'bin', 'context-runner')
-  await writeFile(executable, `#!${process.execPath}
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-writeFileSync(join(process.env.CONTEXT_RECEIPTS, process.pid + '.json'), JSON.stringify({
-  pid:process.pid, cwd:process.cwd(), args:process.argv.slice(2), marker:process.env.CONTEXT_MARKER,
-  sid:process.env.AGENTMUX_AGENT_SESSION_ID, nativeId:'native-' + process.env.AGENTMUX_AGENT_SESSION_ID
-}))
-setInterval(()=>{},1000)
-`)
-  await chmod(executable, 0o755)
-  const command = shape === 'configured-path' ? 'context-runner' : './bin/context-runner'
-  const env = { PATH: join(root, 'bin'), CONTEXT_RECEIPTS: join(root, 'receipts'), CONTEXT_MARKER: shape }
-  const { planManagedHooks: _hooks, inspectHookActivation: _activation, terminalPromptRender: _render, discoverNativeSession: _discover, observeSessionStatus: _status, ...base } = new AgentProviderRegistry().get('claude')
-  const provider = { ...base, catalog: { ...base.catalog, hookStrategy: { kind: 'none' as const } },
-    async discoverNativeSession(context: AgentProviderNativeSessionDiscoveryContext) {
-      const path = join(root, 'receipts', context.processId + '.json')
-      let value: { pid: number; nativeId: string }
-      try { value = JSON.parse(await readFile(path, 'utf8')) } catch { return null }
-      if (value.pid !== context.processId) return null
-      const assertCurrent = async () => { process.kill(value.pid, 0); expect(JSON.parse(await readFile(path, 'utf8'))).toMatchObject(value) }
-      return { handle: { kind: 'provider' as const, providerId: base.id, sessionId: value.nativeId }, assertCurrent }
-    }
+const faults = vi.hoisted(() => new Map<string, 'stat' | 'access'>())
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  const check = (path: unknown, operation: 'stat' | 'access') => {
+    if (faults.get(String(path)) === operation) throw Object.assign(new Error('Original executable observation failed'), { code: 'EIO' })
   }
-  const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(join(root, 'sessions.json')), providers: [provider] })
-  cleanups.unshift(async () => {
-    try { for (const session of client.agentSessions()) if ((await client.statusAgent(session.agentSessionId)).run.state === 'running') await client.stopAgent(session.agentSessionId, session.run) }
-    finally { await client.dispose() }
-  })
-  await client.connect()
-  async function receipt(session: AgentMuxAgentSession) {
-    const status = await client.statusAgent(session.agentSessionId)
-    return await until(async () => { try { return JSON.parse(await readFile(join(root, 'receipts', status.run.pid + '.json'), 'utf8')) } catch { return null } }, Boolean) as {
-      pid: number; cwd: string; args: string[]; marker: string; sid: string; nativeId: string
-    }
+  return { ...actual,
+    stat: async (...args: Parameters<typeof actual.stat>) => { check(args[0], 'stat'); return await actual.stat(...args) },
+    access: async (...args: Parameters<typeof actual.access>) => { check(args[0], 'access'); return await actual.access(...args) }
   }
-  async function exit(session: AgentMuxAgentSession) {
-    const status = await client.statusAgent(session.agentSessionId); process.kill(status.run.pid!, 'SIGTERM')
-    await until(() => client.statusAgent(session.agentSessionId), value => value.run.state === 'exited')
-  }
-  async function hosted() {
-    const service = new AgentMuxHostedRuntimeService(client, null, () => hostedTestOwner(client))
-    const server = new AgentMuxControlServer({ coreClients: () => [{ hostId: 'local', client }], hostedRuntime: () => service }, join(root, 'p.sock'))
-    await server.start()
-    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
-    const value = await connectHostedAgentMux({ rpc })
-    cleanups.unshift(async () => { await value.dispose(); await rpc.dispose(); await server.stop(); await service.dispose() })
-    return value
-  }
-  return { root, client, executable, command, env, receipt, exit, hosted }
-}
+})
+afterEach(async () => { faults.clear(); await cleanupExecutableNativeFixtures(); vi.restoreAllMocks() })
 
 describe('the executable owner uses the actual invocation context', () => {
   it.each(['configured-path', 'workspace-relative'] as const)('%s reaches real Native create, direct resume and continuity', async shape => {
-    const f = await fixture(shape), caller = await f.hosted(), originalPath = process.env.PATH, originalCwd = process.cwd()
+    const f = await executableNativeFixture(shape), caller = await f.hosted(), originalPath = process.env.PATH, originalCwd = process.cwd()
     expect(await caller.probeExecutorAvailability('claude', f.command, { workspacePath: f.root, env: terminalEnvironment(f.env) })).toMatchObject({ availability: 'available' })
     const created = await caller.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
       commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'original task' })
@@ -121,7 +46,7 @@ describe('the executable owner uses the actual invocation context', () => {
     expect(process.env.PATH).toBe(originalPath); expect(process.cwd()).toBe(originalCwd)
   }, 45_000)
   it('checks the Provider plan command and environment instead of the pre-plan request', async () => {
-    const f = await fixture('configured-path'), provider = f.client.providers.get('claude')
+    const f = await executableNativeFixture('configured-path'), provider = f.client.providers.get('claude')
     const launch = provider.buildLaunch.bind(provider), resume = provider.buildResumeLaunch.bind(provider)
     provider.buildLaunch = input => ({ ...launch(input), command: f.command, env: f.env })
     provider.buildResumeLaunch = input => ({ ...resume(input), command: f.command, env: f.env })
@@ -140,7 +65,7 @@ describe('the executable owner uses the actual invocation context', () => {
     expect((await f.receipt(f.client.agentSession(created.agentSessionId))).marker).toBe('configured-path')
   }, 30_000)
   it('keeps missing, uncertain workspace, directories and unavailable observations distinct', async () => {
-    const f = await fixture('configured-path')
+    const f = await executableNativeFixture('configured-path')
     await expect(f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
       commandOverride: './absent', env: f.env, injectAgentMuxGuide: false })).rejects.toMatchObject({ code: 'AGENT_NOT_FOUND' })
     expect(f.client.agentSessions()).toEqual([])
@@ -151,5 +76,106 @@ describe('the executable owner uses the actual invocation context', () => {
     await chmod(f.executable, 0o644)
     expect(await classifyExecutable(f.executable, { workspacePath: f.root, env: f.env })).toMatchObject({
       availability: 'check-failed', cause: { code: 'EACCES' } })
+  }, 30_000)
+  it.each(['stat', 'access'] as const)('%s observation failure preserves real Native create and original resume', async operation => {
+    const f = await executableNativeFixture('configured-path'), caller = await f.hosted()
+    const start = vi.spyOn(Reflect.get(f.client, 'kernel'), 'start')
+    faults.set(f.executable, operation)
+    expect(await caller.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({
+      installed: false, executableObservation: { executable: f.command, availability: 'check-failed', cause: { code: 'EIO' } } })
+    const created = await caller.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+      commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'original observed task' })
+    const first = await f.receipt(created)
+    expect(first.sid).toBe(created.agentSessionId)
+    await until(() => f.client.agentSession(created.agentSessionId), value => Boolean(value.nativeHandle))
+    await f.exit(created)
+    const resumed = await caller.resumeAgent({ agentSessionId: created.agentSessionId, operationId: 'unconfirmed-direct',
+      commandOverride: f.command, env: f.env, prompt: 'same native task' })
+    expect((await f.receipt(resumed)).args).toContain(first.nativeId)
+    await f.exit(resumed)
+    const result = await caller.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: resumed.run,
+      operationId: 'unconfirmed-continuity', commandOverride: f.command, env: f.env, trigger: operation === 'stat' ? 'manual' : 'input',
+      ...(operation === 'access' ? { input: { submissionId: 'original-fresh-input', prompt: 'fresh user task' } } : {}) })
+    expect(result.kind).toBe('resumed')
+    const current = f.client.agentSession(created.agentSessionId)
+    expect((await f.receipt(current)).args).toContain(first.nativeId)
+    expect(start).toHaveBeenCalledTimes(3)
+    expect(await caller.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({ installed: false })
+    faults.clear()
+    expect(await caller.probeExecutorAvailability('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({ availability: 'available' })
+    expect((await caller.statusAgent(created.agentSessionId)).run.state).toBe('running')
+  }, 45_000)
+  it('does not reinterpret a Provider refusal or unsupported native resume as a failed filesystem check', async () => {
+    const f = await executableNativeFixture('configured-path'), provider = f.client.providers.get('claude')
+    const created = await f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+      commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'retained original' })
+    await f.receipt(created)
+    await until(() => f.client.agentSession(created.agentSessionId), value => Boolean(value.nativeHandle))
+    await f.exit(created)
+    const start = vi.spyOn(Reflect.get(f.client, 'kernel'), 'start'), original = provider.probeCapabilities.bind(provider)
+    faults.set(f.executable, 'stat')
+    provider.probeCapabilities = async (probe, commandOverride) => ({ providerId: provider.id, executable: commandOverride!,
+      installed: await probe.hasExecutable(commandOverride!), capabilities: { ...provider.catalog.capabilities } })
+    await expect(f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+      commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'unsupported create' })).rejects.toMatchObject({ code: 'AGENT_NOT_FOUND', detail: 'provider-unavailable' })
+    await expect(f.client.resumeAgent({ agentSessionId: created.agentSessionId, operationId: 'provider-refused',
+      commandOverride: f.command, env: f.env, prompt: 'unsupported resume' })).rejects.toMatchObject({ code: 'AGENT_NOT_FOUND' })
+    expect(await f.client.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: created.run,
+      operationId: 'provider-refused-continuity', commandOverride: f.command, env: f.env, trigger: 'manual' })).toMatchObject({ kind: 'unavailable', reason: 'provider-unavailable' })
+    faults.set(join(f.root, 'bin', 'another-command'), 'stat')
+    provider.probeCapabilities = async probe => ({ providerId: provider.id, executable: f.command, installed: false,
+      executableObservation: await probe.observeExecutable!('another-command'), capabilities: { ...provider.catalog.capabilities } })
+    await expect(f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+      commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'wrong executable observation' })).rejects.toMatchObject({ code: 'AGENT_NOT_FOUND' })
+    provider.probeCapabilities = async (probe, commandOverride) => {
+      const capability = await original(probe, commandOverride)
+      return { ...capability, capabilities: { ...capability.capabilities, providerResume: false } }
+    }
+    expect(await f.client.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: created.run,
+      operationId: 'native-resume-unsupported', commandOverride: f.command, env: f.env, trigger: 'manual' })).toMatchObject({ kind: 'unavailable', reason: 'provider-unavailable' })
+    provider.probeCapabilities = async () => { throw new Error('Provider capability contract unavailable') }
+    expect(await f.client.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: created.run,
+      operationId: 'provider-probe-unconfirmed', commandOverride: f.command, env: f.env, trigger: 'manual' })).toMatchObject({ kind: 'pending', reason: 'provider-unverified' })
+    expect(start).not.toHaveBeenCalled()
+  }, 30_000)
+  it('does not elevate a same-command observation invented outside this probe', async () => {
+    const f = await executableNativeFixture('configured-path'), provider = f.client.providers.get('claude')
+    const start = vi.spyOn(Reflect.get(f.client, 'kernel'), 'start')
+    provider.probeCapabilities = async () => ({ providerId: provider.id, executable: f.command, installed: false,
+      executableObservation: { executable: f.command, availability: 'check-failed', cause: { code: 'EIO', message: 'Invented filesystem observation' } },
+      capabilities: { ...provider.catalog.capabilities } })
+    expect(await f.client.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({ installed: false })
+    expect((await f.client.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).executableObservation).toBeUndefined()
+    await expect(f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+      commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'unsupported original task' })).rejects.toMatchObject({ code: 'AGENT_NOT_FOUND', detail: 'provider-unavailable' })
+    provider.probeCapabilities = async probe => {
+      const observation = await probe.observeExecutable!(f.command)
+      expect(observation.availability).toBe('available')
+      Object.assign(observation, { availability: 'check-failed', cause: { code: 'EIO', message: 'Changed callback result' } })
+      return { providerId: provider.id, executable: f.command, installed: false, executableObservation: observation,
+        capabilities: { ...provider.catalog.capabilities } }
+    }
+    expect((await f.client.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).executableObservation).toBeUndefined()
+    await expect(f.client.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+      commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'independently unsupported task' })).rejects.toMatchObject({ code: 'AGENT_NOT_FOUND', detail: 'provider-unavailable' })
+    expect(start).not.toHaveBeenCalled()
+  }, 30_000)
+  it('keeps Provider diagnostic wording independent of real Native execution', async () => {
+    const f = await executableNativeFixture('configured-path'), provider = f.client.providers.get('claude')
+    const original = provider.probeCapabilities.bind(provider)
+    faults.set(f.executable, 'stat')
+    provider.probeCapabilities = async (probe, commandOverride) => {
+      const capability = await original(probe, commandOverride), observation = capability.executableObservation
+      if (observation?.availability !== 'check-failed') throw new Error('Expected original failed filesystem observation')
+      return { ...capability, executableObservation: { ...observation,
+        cause: { ...observation.cause, message: 'Provider diagnostic wording was reformatted' } } }
+    }
+    const caller = await f.hosted()
+    expect(await caller.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({ installed: false,
+      executableObservation: { executable: f.command, availability: 'check-failed', cause: { code: 'EIO', message: 'Original executable observation failed' } } })
+    const created = await caller.createAgent({ providerId: 'claude', executorId: 'fixture', workspacePath: f.root,
+      commandOverride: f.command, env: f.env, injectAgentMuxGuide: false, prompt: 'original wording-independent task' })
+    expect((await f.receipt(created)).sid).toBe(created.agentSessionId)
+    expect((await caller.statusAgent(created.agentSessionId)).run.state).toBe('running')
   }, 30_000)
 })

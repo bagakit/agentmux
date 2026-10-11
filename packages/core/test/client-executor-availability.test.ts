@@ -24,8 +24,7 @@ vi.mock('node:fs/promises', async (original) => {
 //   - check-failed：命令是相对名、PATH 又是空的 → 一个候选都算不出 → 我们没查成（环境退化）。
 //   - missing：配置的可执行文件未找到，不能推断软件未安装。
 //   - available：解析到的路径上有可执行文件。
-// 这正是那次「PATH 退化被误报成 Not Installed」要防的分岔。启动闸仍是 `=== 'available'`，check-failed
-// 一样拒绝启动，无回归——那条由 hasExecutable 保证，本文件只钉发现侧的三态区分。
+// 发现保留三态；准确命令的检查失败不封闭原 Native 执行，真实执行反例另见 executable-launch-context。
 
 const roots: string[] = []
 afterEach(async () => {
@@ -146,7 +145,7 @@ describe('AgentMuxClient.probeExecutorAvailability', () => {
 /**
  * 闸门侧的另一半。上面那组钉的是**发现**面（probeExecutorAvailability 三态齐全），而误报发生在
  * **启动/resume** 面：那两处此前各写一句逐字相同的「not installed on this host」，把 check-failed
- * 也说成没装。闸门该不该拒绝不是本组要改的（非 available 一律拒绝，无回归）；本组钉的是**理由**。
+ * 也说成没装。准确文件缺失仍拒绝，检查失败继续原启动；本组核对理由与原流程入口。
  *
  * 为什么判 message 而不是 error code：Electron 的 `ipcRenderer.invoke` 丢掉 `.code`/`.detail`，只把
  * message 送到渲染端，所以 message 就是用户能看到的全部。判 code 会在这条路上全程恒真。
@@ -194,12 +193,12 @@ describe('启动闸拒绝时的理由：查不成 ≠ 没装', () => {
     }
   })
 
-  it('keeps a failed executable read and a confirmed directory distinct in launch rejection messages', async () => {
+  it('continues beyond a failed executable read while rejecting a confirmed directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'agentmux-gate-cause-')); roots.push(root)
     const bin = join(root, 'executable'); await writeFile(bin, '#!/bin/sh\n'); await chmod(bin, 0o755)
     faults.set(bin, { operation: 'access', code: 'EIO', message: 'controlled launch verification failure' })
     const unknown = await launchError(bin)
-    expect(unknown.message).toContain('EIO: controlled launch verification failure')
+    expect(unknown.message).toBe('Owned probe fixture stops before Hook or Runtime setup')
     expect(unknown.message).not.toMatch(/not installed|no candidate path|PATH/)
     const notFile = await launchError(root)
     expect(notFile.message).toContain('is a directory; expected a regular executable file')
