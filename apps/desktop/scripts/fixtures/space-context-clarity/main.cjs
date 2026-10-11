@@ -7,7 +7,7 @@ const [url, privateRoot, evidence, mode] = process.argv.slice(2)
 app.setPath('userData', join(privateRoot, 'profile'))
 app.setPath('sessionData', join(privateRoot, 'session'))
 app.commandLine.appendSwitch('disable-background-timer-throttling')
-const actual = { passed: false, mode, frames: [], operations: [], errors: [], loaded: [], transport: [] }
+const actual = { passed: false, mode, frames: [], operations: [], detailChecks: [], errors: [], loaded: [], transport: [] }
 const visible = `element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden'`
 const knowledge = '.topic-knowledge-panel'
 const discovery = '.topic-knowledge-notice[aria-label="Knowledge discovery incomplete"]'
@@ -31,11 +31,11 @@ async function settle() {
   await evaluate('document.fonts.ready.then(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))')
   await delay(120)
 }
-async function point(selector) {
+async function point(selector, scroll = true) {
   const target = await evaluate(`(() => {
     const element = ${first(selector)}
     if (!element) return null
-    element.scrollIntoView({ block: 'nearest' })
+    ${scroll ? "element.scrollIntoView({ block: 'nearest' })" : ''}
     const box = element.getBoundingClientRect(), x = box.x + box.width / 2, y = box.y + box.height / 2
     return { x, y, hit: element.contains(document.elementFromPoint(x, y)), title: element.title, text: element.textContent }
   })()`)
@@ -45,8 +45,8 @@ async function point(selector) {
 async function mouse(type, target, options = {}) {
   await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: target.x, y: target.y, ...options })
 }
-async function click(selector) {
-  const target = await point(selector)
+async function click(selector, scroll = true) {
+  const target = await point(selector, scroll)
   await mouse('mouseMoved', target)
   await mouse('mousePressed', target, { button: 'left', clickCount: 1 })
   await mouse('mouseReleased', target, { button: 'left', clickCount: 1 })
@@ -125,6 +125,83 @@ async function toggleFiles(expand) {
   const selector = '[aria-label="' + (expand ? 'Show file tree' : 'Hide file tree') + '"]'
   if (await evaluate(nodes(selector) + '.length')) await click(selector)
 }
+async function detailGeometry() {
+  return await evaluate(`(() => {
+    const surface = ${first(knowledge)}, entry = ${first('.topic-knowledge-entry')}
+    if (!surface || !entry) return null
+    const header = entry.querySelector(':scope > header'), close = entry.querySelector('[aria-label="Close knowledge detail"]')
+    const body = entry.querySelector('.topic-knowledge-entry__body')
+    const bounds = element => { const rect = element.getBoundingClientRect();
+      return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height } }
+    const intersect = (rect, clip, horizontal = true, vertical = true) => {
+      const left = horizontal ? Math.max(rect.left, clip.left) : rect.left, right = horizontal ? Math.min(rect.right, clip.right) : rect.right
+      const top = vertical ? Math.max(rect.top, clip.top) : rect.top, bottom = vertical ? Math.min(rect.bottom, clip.bottom) : rect.bottom
+      return { left, top, right, bottom, width: Math.max(0, right - left), height: Math.max(0, bottom - top) }
+    }
+    function clipping(element) {
+      let rect = intersect(bounds(surface), { left: 0, top: 0, right: innerWidth, bottom: innerHeight })
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor), horizontal = /auto|scroll|hidden|clip/.test(style.overflowX), vertical = /auto|scroll|hidden|clip/.test(style.overflowY)
+        if (horizontal || vertical) rect = intersect(rect, bounds(ancestor), horizontal, vertical)
+      }
+      return rect
+    }
+    function measure(element) {
+      if (!element) return null
+      const rect = bounds(element), intersection = intersect(rect, clipping(element))
+      const x = intersection.left + intersection.width / 2, y = intersection.top + intersection.height / 2
+      return { rect, intersection, hit: intersection.width > 0 && intersection.height > 0 && element.contains(document.elementFromPoint(x, y)), x, y }
+    }
+    let readable = null
+    if (body) for (const paragraph of body.querySelectorAll('p')) {
+      const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT)
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        if (!text.textContent.trim()) continue
+        const range = document.createRange(); range.selectNodeContents(text)
+        const clip = intersect(bounds(body), clipping(body))
+        for (const line of range.getClientRects()) {
+          const intersection = intersect(line, clip), x = intersection.left + intersection.width / 2, y = intersection.top + intersection.height / 2
+          if (intersection.width >= 16 && intersection.height >= line.height - 1 && body.contains(document.elementFromPoint(x, y))) {
+            readable = { text: text.textContent, line: { left: line.left, top: line.top, width: line.width, height: line.height }, intersection }; break
+          }
+        }
+        if (readable) break
+      }
+      if (readable) break
+    }
+    const readers = [entry, body].filter(element => element && /auto|scroll/.test(getComputedStyle(element).overflowY) && element.scrollHeight > element.clientHeight + 1)
+      .map(element => ({ selector: element === entry ? '.topic-knowledge-entry' : '.topic-knowledge-entry__body',
+        scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }))
+    return { surface: bounds(surface), header: measure(header), close: measure(close), body: measure(body),
+      resultLabel: measure(surface.querySelector('.topic-knowledge-results__label')),
+      resultText: surface.querySelector('.topic-knowledge-results__label')?.textContent, readable, readers }
+  })()`)
+}
+async function checkDetail(name) {
+  const geometry = await detailGeometry()
+  assert.ok(geometry, 'Original detail is present')
+  for (const part of ['header', 'close', 'resultLabel']) {
+    const measured = geometry[part]
+    assert.ok(measured?.hit, 'Actual clipped detail ' + part + ' is hittable')
+    assert.ok(measured.intersection.height >= measured.rect.height - 1 && measured.intersection.width >= measured.rect.width - 1,
+      'Original detail ' + part + ' is within its real clipping viewport')
+  }
+  assert.ok(geometry.body?.hit && geometry.body.intersection.height >= 16, 'Original body has a real readable viewport')
+  assert.ok(geometry.readable?.text.trim(), 'A full original paragraph text line is actually visible, not merely in the DOM')
+  assert.ok(geometry.readers.length <= 1, 'Detail has one vertical reading scroller, not nested scroll owners')
+  actual.detailChecks.push({ name, geometry })
+  return geometry
+}
+async function closeOriginalDetail(name, keepDiagnostics = false) {
+  await click('[aria-label="Close knowledge detail"]', false)
+  await waitFor('document.activeElement === window.__spaceContextOriginalRow', 'Close commit restores focus to the same original result row')
+  assert.equal(await evaluate(nodes('.topic-knowledge-entry') + '.length'), 0)
+  assert.equal(await evaluate(nodes('.topic-knowledge-row') + '.length'), 100)
+  await point('.topic-knowledge-row', false)
+  if (keepDiagnostics) assert.equal(await evaluate(first(discovery) + '.open && ' + first(unavailable) + '.open'), true)
+  actual.detailChecks.push({ name, closed: true, originalRowFocused: true, diagnosticsKeptOpen: keepDiagnostics,
+    facts: await facts() })
+}
 
 app.whenReady().then(async () => {
   app.dock?.hide()
@@ -145,9 +222,10 @@ app.whenReady().then(async () => {
   await fileRoot(identities.first.directoryPath)
   await click('[aria-label="Show Knowledge"]')
   await label('100 items shown')
-  for (const [width, theme] of [[300, 'dark'], [236, 'dark'], [300, 'light'], [236, 'light']]) {
+  for (const [width, theme] of (mode === 'details-only' ? [[300, 'dark']] : [[300, 'dark'], [236, 'dark'], [300, 'light'], [236, 'light']])) {
     await size(width, theme); await frame('knowledge-' + width + '-' + theme)
   }
+  if (mode !== 'details-only') {
   await size(236, 'dark')
   await click('[aria-label="Refresh knowledge"]')
   for (let attempt = 0; attempt < 15 && !await evaluate('document.activeElement?.matches(' + JSON.stringify(discovery + ' > summary') + ')'); attempt++) await key('Tab')
@@ -158,13 +236,16 @@ app.whenReady().then(async () => {
   for (const field of ['code', 'message', 'source', 'recovery']) assert.ok(raw.includes(identities.partial[field]), 'Original issue field: ' + field)
   await frame('discovery-details-keyboard')
   await click(discovery + ' > summary')
+  }
+  await evaluate('window.__spaceContextOriginalRow = ' + first('.topic-knowledge-row') + '; true')
   await click('.topic-knowledge-row')
   await waitFor(nodes('.topic-knowledge-entry') + '.length === 1')
+  await checkDetail('normal-detail-open')
   await frame('original-knowledge-detail')
-  await click('[aria-label="Close knowledge detail"]')
+  await closeOriginalDetail('normal-detail-close')
   await refresh('mixed', '100 items shown')
   assert.equal(await evaluate(nodes(unavailable) + '.length'), 1)
-  await frame('partial-and-error')
+  if (mode !== 'details-only') await frame('partial-and-error')
   await toggleFiles(false)
   await size(236, 'dark', 420)
   const currentHeight = await evaluate(first(knowledge) + '.getBoundingClientRect().height')
@@ -182,10 +263,43 @@ app.whenReady().then(async () => {
   actual.operations.push({ kind: 'native-wheel', selector: '.topic-knowledge-status', deltaY: 300,
     before: scrollBefore, after: await evaluate(first('.topic-knowledge-status') + '.scrollTop'), target })
   await waitFor(first('.topic-knowledge-status') + '.scrollTop > ' + scrollBefore, 'Real status-group scroll')
-  await click('.topic-knowledge-row')
+  if (mode === 'details-only') {
+    await query('alpha')
+    await label('100 results shown')
+  }
+  await evaluate('window.__spaceContextOriginalRow = ' + first('.topic-knowledge-row') + '; true')
+  await click('.topic-knowledge-row', false)
   await waitFor(nodes('.topic-knowledge-entry') + '.length === 1')
+  if (mode === 'details-only') {
+    const originalBody = await evaluate(first('.topic-knowledge-entry') + '.innerText')
+    await evaluate('window.spaceContextFixture.observation("failed")')
+    await query('beta')
+    await waitFor(first('.topic-knowledge-results__label') + '?.textContent.startsWith("Last confirmed:")')
+    const confirmedLabel = await evaluate(first('.topic-knowledge-results__label') + '.textContent')
+    assert.ok(confirmedLabel.includes('alpha') && confirmedLabel.includes(identities.first.title) && !confirmedLabel.includes('beta'))
+    assert.equal(await evaluate(first('.topic-knowledge-entry') + '.innerText'), originalBody)
+  }
+  assert.equal(await evaluate(first(discovery) + '.open && ' + first(unavailable) + '.open'), true)
+  const detail = await checkDetail('short-detail-open')
   await frame('short-mixed-details')
-  await click('[aria-label="Close knowledge detail"]')
+  if (detail.readers.length) {
+    const reader = detail.readers[0], target = detail.body
+    await mouse('mouseMoved', target)
+    await mouse('mouseWheel', target, { deltaX: 0, deltaY: 80 })
+    await settle()
+    await waitFor(first(reader.selector) + '.scrollTop > ' + reader.scrollTop, 'Original detail scrolls through its own real reader')
+    actual.detailChecks.push({ name: 'short-detail-body-read', reader: reader.selector,
+      before: reader.scrollTop, after: await evaluate(first(reader.selector) + '.scrollTop'), geometry: await detailGeometry() })
+    const readerTarget = await point(reader.selector, false)
+    await mouse('mouseMoved', readerTarget)
+    await mouse('mouseWheel', readerTarget, { deltaX: 0, deltaY: -10000 })
+    await settle()
+    await waitFor(first(reader.selector) + '.scrollTop === 0', 'Native reader scroll returns to original close control')
+  }
+  await checkDetail('short-detail-return-to-close')
+  await closeOriginalDetail('short-detail-close', true)
+  if (mode === 'details-only') await frame('short-mixed-closed')
+  if (mode !== 'details-only') {
   await size(300, 'light')
   await refresh('empty', 'Search incomplete')
   const emptyText = await evaluate(first(knowledge) + '.innerText')
@@ -258,6 +372,7 @@ app.whenReady().then(async () => {
   await waitFor('window.spaceContextFixture.facts().tool === "git" && window.spaceContextFixture.facts().view === "branches"')
   await waitFor(nodes('.branch-row__open') + '.length === 1')
   await frame('folder-git')
+  }
   }
   actual.final = await facts()
   actual.transport = await evaluate('window.spaceContextFixture.transport()')
