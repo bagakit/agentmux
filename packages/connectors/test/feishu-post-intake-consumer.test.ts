@@ -91,8 +91,27 @@ async function fixture() {
 
 it('default Host accepts complete native post text through SDK proof, durable ACK and Core, reuses the group origin and exposes the original reply through compiled CLI', async () => {
   const f = await fixture(), original = payload('rich-original', { ...post, content_v2: post.content })
-  await f.sdk.receive(original)
+  const appGrant = await f.services.connections.bindings!.grant({ operationId: 'grant-application-sender', bindingId: f.binding.bindingId,
+    expectedBindingRevision: f.binding.revision, grantId: 'application-sender-input', expectedRevision: null,
+    actor: { application: feishuConfig.application, idType: 'open_id', userId: botOpenId }, capabilities: ['input'], state: 'active' },
+  { actor: { kind: 'user', id: 'original-user' } })
+  expect(appGrant.state).toBe('applied')
+  const echo = payload('application-echo', { ...post, content_v2: post.content })
+  // An explicit grant and equal body do not turn the original typed application sender into a user.
+  echo.event.sender.sender_type = 'app'
+  echo.event.sender.sender_id.open_id = botOpenId
+  await f.sdk.receive(echo)
   expect(f.sdk.ack()).toEqual([{ code: 200 }])
+  const afterEcho = await f.cli(['ingress', 'ls', '--connection', feishuConfig.connectionId])
+  const echoDelivery = await f.cli(['delivery', 'ls', '--connection', feishuConfig.connectionId, '--binding', f.binding.bindingId, '--binding-revision', String(f.binding.revision)])
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  expect(afterEcho.ingresses).toEqual([])
+  expect(echoDelivery.deliveries).toEqual([])
+  expect(echoDelivery.coverage.origins).toEqual([])
+  expect((await f.client.sessionTimeline(f.session.agentSessionId)).items.filter(item => item.inputRef?.kind === 'message')).toEqual([])
+  expect(f.remote.messageCalls()).toEqual([])
+  await f.sdk.receive(original)
+  expect(f.sdk.ack()).toEqual([{ code: 200 }, { code: 200 }])
   const persisted = f.services.database!.prepare('SELECT raw_payload FROM connection_ingress_event WHERE event_id=?').get(original.header.event_id)!
   expect(JSON.parse(String(persisted.raw_payload))).toEqual(original)
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
