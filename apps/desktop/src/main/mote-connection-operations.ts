@@ -8,6 +8,7 @@ import {
   type MoteConnectionCreate,
   type MoteConnectionSync,
   type MoteConnectionOperation,
+  type MoteConnectionAdvanceInput,
   type MoteConnectionListInput
 } from '@agentmux/core'
 import {
@@ -20,6 +21,8 @@ import {
 } from '@agentmux/core/mote-preferences'
 import {
   parseConnectionEnrollmentResult,
+  parseConnectionEnrollmentParams,
+  type ConnectionEnrollmentAdvanceInput,
   parseConnectionProfileResult,
   type ConnectionEnrollmentCallContext,
   type ConnectionEnrollmentBeginInput,
@@ -42,8 +45,10 @@ type Row = {
   defaultPhase: 'pending' | 'dispatching' | 'settled'
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
-const sameActor = (a: ConnectionEnrollmentCallContext['actor'], b: ConnectionEnrollmentCallContext['actor']) =>
-  a.kind === b.kind && a.id === b.id
+const sameActor = (
+  a: ConnectionEnrollmentCallContext['actor'],
+  b: ConnectionEnrollmentCallContext['actor']
+) => a.kind === b.kind && a.id === b.id
 const failure = (code = 'MOTE_CONNECTION_STORAGE_UNCONFIRMED') =>
   new AgentMuxError(
     'This original Mote robot setup is unconfirmed. Keep its operation and inspect it; existing files, robots and conversations remain available.',
@@ -112,12 +117,14 @@ export class MoteConnectionOperations implements MoteConnectionPort {
   }
   private read(id: string): Row | null {
     return this.safe(() => {
-      const value = this.database!.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(id)
+      const value = this.database!.prepare(
+        'SELECT record_json FROM mote_connection_operation WHERE operation_id=?'
+      ).get(id)
       return value ? (JSON.parse(String(value.record_json)) as Row) : null
     })
   }
   private save(row: Row): void {
-    parseMoteConnectionOperation(row.operation)
+    this.project(row)
     this.database!.prepare('UPDATE mote_connection_operation SET record_json=? WHERE operation_id=?').run(
       JSON.stringify(row),
       row.operation.operationId
@@ -134,6 +141,8 @@ export class MoteConnectionOperations implements MoteConnectionPort {
   }
   private project(row: Row): MoteConnectionOperation {
     const op = structuredClone(row.operation)
+    // Original child summaries may contain retired private challenge material. Read without rewriting it.
+    if (op.enrollment) delete (op.enrollment as unknown as Record<string, unknown>).challenge
     if (row.defaultPhase === 'dispatching') {
       op.defaultLink.state = 'unknown'
       op.issue = 'default-unconfirmed'
@@ -149,7 +158,11 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     context.signal?.throwIfAborted()
   }
   private context(context: ConnectionEnrollmentCallContext): ConnectionEnrollmentCallContext {
-    return { ...context, actor: { kind: context.actor.kind, id: context.actor.id }, assertCurrent: () => this.authority(context) }
+    return {
+      ...context,
+      actor: { kind: context.actor.kind, id: context.actor.id },
+      assertCurrent: () => this.authority(context)
+    }
   }
   async inspect(value: { operationId: string }) {
     const input = parseMoteConnectionParams('space.mote.connection.inspect', value)
@@ -161,7 +174,11 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     const input = parseMoteConnectionParams('space.mote.connection.ls', value)
     await this.db()
     const before = input.cursor === undefined ? Number.MAX_SAFE_INTEGER : Number(input.cursor)
-    if (!Number.isSafeInteger(before) || before < 1 || (input.cursor !== undefined && !/^[1-9][0-9]*$/u.test(input.cursor)))
+    if (
+      !Number.isSafeInteger(before) ||
+      before < 1 ||
+      (input.cursor !== undefined && !/^[1-9][0-9]*$/u.test(input.cursor))
+    )
       throw failure('INVALID_MOTE_CONNECTION_DATA')
     return this.safe(() => {
       const limit = input.limit ?? 25,
@@ -180,24 +197,33 @@ export class MoteConnectionOperations implements MoteConnectionPort {
   async sync(value: MoteConnectionSync, context: ConnectionEnrollmentCallContext) {
     return this.admit('sync', parseMoteConnectionParams('space.mote.connection.sync', value), context)
   }
-  private async admit(action: 'create' | 'sync', input: Input, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation> {
+  private async admit(
+    action: 'create' | 'sync',
+    input: Input,
+    context: ConnectionEnrollmentCallContext
+  ): Promise<MoteConnectionOperation> {
     await this.authority(context)
     await this.db()
     let row = this.read(input.operationId)
     if (row) {
-      if (!same(row.input, input) || row.operation.action !== action) throw failure('CONNECTION_OPERATION_CONFLICT')
+      if (!same(row.input, input) || row.operation.action !== action)
+        throw failure('CONNECTION_OPERATION_CONFLICT')
       await this.authority(context, row)
       return this.project(row)
     }
     const source = await this.ports.source.read(input.source, input.avatar)
     const baseline =
       action === 'create'
-        ? moteConnectionBaseline(await this.ports.preferences.read({ kind: 'connection', target: input.source.target }))
+        ? moteConnectionBaseline(
+            await this.ports.preferences.read({ kind: 'connection', target: input.source.target })
+          )
         : null
     if (action === 'create' && !baseline) throw failure('MOTE_CONNECTION_SOURCE_UNCONFIRMED')
     if (action === 'sync') {
       const sync = input as MoteConnectionSync,
-        current = (await this.ports.connections.connections.inspect({ connectionId: sync.connection.connectionId })).connection
+        current = (
+          await this.ports.connections.connections.inspect({ connectionId: sync.connection.connectionId })
+        ).connection
       if (
         !current ||
         current.revision !== sync.expectedConnectionRevision ||
@@ -205,19 +231,26 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       )
         throw failure('CONNECTION_REVISION_CONFLICT')
     }
+    if (action === 'create' && !source.pngDataUrl) throw failure('MOTE_CONNECTION_SOURCE_UNCONFIRMED')
     // Async reads do not claim cross-owner atomicity. Recheck the exact saved source before admitting an effect boundary.
-    if (!same(source, await this.ports.source.read(input.source, input.avatar))) throw failure('MOTE_CONNECTION_SOURCE_UNCONFIRMED')
+    if (!same(source, await this.ports.source.read(input.source, input.avatar)))
+      throw failure('MOTE_CONNECTION_SOURCE_UNCONFIRMED')
     await this.authority(context)
     row = this.txn(() => {
       const old = this.read(input.operationId)
       if (old) {
-        if (!same(old.input, input) || !sameActor(old.actor, context.actor) || old.operation.action !== action)
+        if (
+          !same(old.input, input) ||
+          !sameActor(old.actor, context.actor) ||
+          old.operation.action !== action
+        )
           throw failure('CONNECTION_OPERATION_CONFLICT')
         return old
       }
       const enrollmentOperationId = action === 'create' ? randomUUID() : null,
         profileOperationId = randomUUID(),
-        connectionId = action === 'create' ? randomUUID() : (input as MoteConnectionSync).connection.connectionId
+        connectionId =
+          action === 'create' ? randomUUID() : (input as MoteConnectionSync).connection.connectionId
       const operation: MoteConnectionOperation = {
         operationId: input.operationId,
         action,
@@ -240,7 +273,11 @@ export class MoteConnectionOperations implements MoteConnectionPort {
               adapterId: (input as MoteConnectionCreate).adapterId,
               domain: (input as MoteConnectionCreate).domain,
               label: source.name,
-              preset: { name: source.name, ...(source.description === null ? {} : { description: source.description }) }
+              preset: {
+                name: source.name,
+                ...(source.description === null ? {} : { description: source.description }),
+                avatar: { pngDataUrl: source.pngDataUrl! }
+              }
             }
           : null
       const row: Row = {
@@ -255,27 +292,30 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         defaultPhase: 'pending'
       }
       parseMoteConnectionOperation(operation)
-      this.database!.prepare('INSERT INTO mote_connection_operation(operation_id,target_json,record_json) VALUES(?,?,?)').run(
-        input.operationId,
-        JSON.stringify(input.source.target),
-        JSON.stringify(row)
-      )
+      this.database!.prepare(
+        'INSERT INTO mote_connection_operation(operation_id,target_json,record_json) VALUES(?,?,?)'
+      ).run(input.operationId, JSON.stringify(input.source.target), JSON.stringify(row))
       return row
     })
     return this.runJoined(row.operation.operationId, context, false)
   }
-  async advance(value: { operationId: string }, context: ConnectionEnrollmentCallContext) {
+  async advance(value: MoteConnectionAdvanceInput, context: ConnectionEnrollmentCallContext) {
     const input = parseMoteConnectionParams('space.mote.connection.advance', value)
     await this.db()
     const row = this.read(input.operationId)
     if (!row) throw failure('UNKNOWN_MOTE_CONNECTION_OPERATION')
     await this.authority(context, row)
-    return this.runJoined(input.operationId, context, true)
+    return this.runJoined(input.operationId, context, true, input.enrollment)
   }
-  private async runJoined(id: string, context: ConnectionEnrollmentCallContext, advance: boolean): Promise<MoteConnectionOperation> {
+  private async runJoined(
+    id: string,
+    context: ConnectionEnrollmentCallContext,
+    advance: boolean,
+    enrollment?: ConnectionEnrollmentAdvanceInput
+  ): Promise<MoteConnectionOperation> {
     const active = this.active.get(id)
     if (active) return this.project(this.read(id)!)
-    const work = this.run(id, context, advance)
+    const work = this.run(id, context, advance, enrollment)
     this.active.set(id, work)
     try {
       return await work
@@ -283,29 +323,48 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       if (this.active.get(id) === work) this.active.delete(id)
     }
   }
-  private async run(id: string, context: ConnectionEnrollmentCallContext, advance: boolean): Promise<MoteConnectionOperation> {
+  private async run(
+    id: string,
+    context: ConnectionEnrollmentCallContext,
+    advance: boolean,
+    enrollment?: ConnectionEnrollmentAdvanceInput
+  ): Promise<MoteConnectionOperation> {
     let row = this.read(id)!,
       childContext = this.context(context)
     await this.authority(context, row)
     if (row.enrollmentInput) {
       const port = this.ports.connections.connections.enrollment!
       try {
-        const original = await port.inspect({ operationId: row.enrollmentInput.operationId })
-        const value =
-          !original.operation || original.operation.authorization === 'not-started'
-            ? await port.begin(row.enrollmentInput, childContext)
-            : advance
-              ? await port.advance({ operationId: row.enrollmentInput.operationId }, childContext)
-              : original.operation
-        const receipt = parseConnectionEnrollmentResult('connection.enrollment.begin', value, row.enrollmentInput)
+        const childId = row.enrollmentInput.operationId
+        if (enrollment && enrollment.operationId !== childId) throw failure('CONNECTION_OPERATION_CONFLICT')
+        const original = await port.inspect({ operationId: childId }, childContext)
+        let receipt = original.operation
+        if (!receipt) {
+          // An old raw request without the new frozen asset remains readable; it cannot start a new route.
+          const input = parseConnectionEnrollmentParams('connection.enrollment.begin', row.enrollmentInput)
+          receipt = parseConnectionEnrollmentResult(
+            'connection.enrollment.begin',
+            await port.begin(input, childContext),
+            input
+          ).operation
+        } else if (enrollment) {
+          receipt = parseConnectionEnrollmentResult(
+            'connection.enrollment.advance',
+            await port.advance(enrollment, childContext),
+            enrollment
+          ).operation
+        }
+        if (!receipt) throw failure('UNKNOWN_CONNECTION_ENROLLMENT')
+        const accepted = receipt
         row = this.update(id, (current) => {
-          if (current.operation.enrollment && current.operation.enrollment.revision > receipt.revision) return
-          current.operation.enrollment = receipt
+          if (current.operation.enrollment && current.operation.enrollment.revision > accepted.revision)
+            return
+          current.operation.enrollment = accepted
           if (current.operation.issue === 'child-unconfirmed') current.operation.issue = null
-          if (receipt.configuration === 'configured' && receipt.configured)
+          if (accepted.configuration === 'configured' && accepted.configured)
             current.operation.connection = {
-              connectionId: receipt.connectionId,
-              application: receipt.configured.connection.config.application
+              connectionId: accepted.connectionId,
+              application: accepted.configured.connection.config.application
             }
         })
       } catch {
@@ -331,7 +390,9 @@ export class MoteConnectionOperations implements MoteConnectionPort {
           expectedConnectionRevision: expected,
           desired: {
             name: r.operation.snapshot.name,
-            ...(r.operation.snapshot.description === null ? {} : { description: r.operation.snapshot.description }),
+            ...(r.operation.snapshot.description === null
+              ? {}
+              : { description: r.operation.snapshot.description }),
             ...(r.pngDataUrl ? { avatar: { pngDataUrl: r.pngDataUrl } } : {})
           }
         }
@@ -360,7 +421,10 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       if (claimed) {
         try {
           const input = row.operation.defaultSave!.params
-          const receipt = parseMotePreferencesSaveResult(await this.ports.preferences.save(input, childContext), input)
+          const receipt = parseMotePreferencesSaveResult(
+            await this.ports.preferences.save(input, childContext),
+            input
+          )
           row = this.update(id, (r) => {
             r.operation.defaultSave!.observedReceipt = receipt as MoteConnectionPreferencesSaveResult
             r.defaultPhase = 'settled'
@@ -387,10 +451,15 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     // Observing current values cannot manufacture an ACK or release a previously dispatched File save.
     if (row.operation.defaultSave && (advance || row.defaultPhase !== 'pending')) {
       try {
-        const current = moteConnectionBaseline(await this.ports.preferences.read({ kind: 'connection', target: row.input.source.target }))
+        const current = moteConnectionBaseline(
+          await this.ports.preferences.read({ kind: 'connection', target: row.input.source.target })
+        )
         if (current)
           row = this.update(id, (r) => {
-            r.operation.defaultLink.current = { connection: current.values.connection, fileRevision: current.document?.revision ?? null }
+            r.operation.defaultLink.current = {
+              connection: current.values.connection,
+              fileRevision: current.document?.revision ?? null
+            }
           })
       } catch {
         /* Keep the original File save and child receipts. */
@@ -414,7 +483,9 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       row = this.update(id, (r) => {
         if (!r.operation.issue)
           r.operation.issue =
-            error instanceof AgentMuxError && error.code === 'CONNECTION_REVISION_CONFLICT' ? 'connection-revised' : 'child-unconfirmed'
+            error instanceof AgentMuxError && error.code === 'CONNECTION_REVISION_CONFLICT'
+              ? 'connection-revised'
+              : 'child-unconfirmed'
       })
     }
     return this.project(row)

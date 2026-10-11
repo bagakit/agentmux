@@ -21,14 +21,19 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const [saveNotice, setSaveNotice] = useState('')
   const [selected, setSelected] = useState<ConnectionRecord | null>(null), [label, setLabel] = useState(''), [appId, setAppId] = useState(''), [domain, setDomain] = useState('open.feishu.cn'), [secret, setSecret] = useState(''), [enabled, setEnabled] = useState(true)
   const [saveAbsent, setSaveAbsent] = useState(false)
-  const enrollment = useBotEnrollment(active)
+  const enrollment = useBotEnrollment(active && view === 'enrollment')
   const pending = useRef<ConnectionConfigureInput | null>(null), generation = useRef(0), reading = useRef(0), writing = useRef(false)
   const read = async (epoch = generation.current) => {
     const request = ++reading.current
     try {
       const result = await api.connections.call('connection.ls', {})
       if (epoch === generation.current && request === reading.current) { setRecords(result.connections); setListIssue(''); setView(current => current === 'loading' ? result.connections.length ? 'library' : 'enrollment' : current) }
-    } catch (error) { if (epoch === generation.current && request === reading.current) setListIssue(presentError(error)) }
+    } catch (error) {
+      if (epoch === generation.current && request === reading.current) {
+        setListIssue(presentError(error))
+        setView(current => current === 'loading' ? 'enrollment' : current)
+      }
+    }
   }
   useEffect(() => { const epoch = ++generation.current; if (active) void read(epoch); return () => { generation.current++ } }, [active])
   const enrolled = enrollment.operation?.configured
@@ -96,7 +101,10 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
   if (!active) return null
   return <div className="settings-pane-stack connector-onboarding" data-connector-settings>
-    {view === 'loading' ? <p className="settings-group-note" role="status">{listIssue ? 'Your bot list could not be loaded.' : 'Reading saved applications…'} <button type="button" className="small-button" onClick={() => void read()}>Refresh</button></p> : null}
+    {view === 'loading' ? <section className="connector-setup">
+      <p className="settings-group-note" role="status">Reading saved applications…</p>
+      <div className="connector-editor-actions"><button type="button" className="primary-button" onClick={() => setView('enrollment')}>Set up a bot</button><button type="button" className="small-button" onClick={existing}>Connect an existing bot</button></div>
+    </section> : null}
     {view === 'enrollment' ? <BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => saved(record, 'Application saved.')} /> : null}
     {view === 'library' ? <section className="connector-library" aria-label="Saved chat applications">
       <div className="settings-pane-toolbar"><strong>Bot applications</strong><button className="small-button" onClick={() => void read()}>Refresh</button><button data-enrollment-new className="primary-button" onClick={() => setView('enrollment')}>Add a bot</button><button data-enrollment-existing className="small-button" onClick={existing}>Connect an existing bot</button></div>

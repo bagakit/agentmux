@@ -100,7 +100,7 @@ export class ConnectionHost implements ConnectionPort {
       } catch { throw new AgentMuxError('Original management request storage is unavailable. Existing bots and Agents remain available; restore storage and inspect the same request.', 'CONNECTION_SETUP_UNCONFIRMED') }
     }
     this.setup = { begin: (input, context) => setup().begin(input, context), advance: (input, context) => setup().advance(input, context), inspect: (input, context) => setup().inspect(input, context), list: input => setup().list(input) }
-    this.enrollment = { begin: async (input, context) => enrollment().begin(input, context), advance: async (input, context) => enrollment().advance(input, context), inspect: async input => enrollment().inspect(input), list: async input => enrollment().list(input) }
+    this.enrollment = { begin: async (input, context) => enrollment().begin(input, context), advance: async (input, context) => enrollment().advance(input, context), inspect: async (input, context) => enrollment().inspect(input, context), list: async input => enrollment().list(input) }
   }
   private read(connectionId: string, includeReceiver = true): ConnectionRecord | null {
     const row = this.database.prepare('SELECT config_json, revision FROM connection_configuration WHERE connection_id = ?').get(connectionId)
