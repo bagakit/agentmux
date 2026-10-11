@@ -86,6 +86,8 @@ flowchart LR
 
 显式 `native-conversation` 意图仍进入原输入 journal／admission，由 [`prompt-submission`](../../packages/core/src/prompt-submission.ts) 在首次派发前保存准确 InputKey、Run、目标和 client correlation；同 key 的未知结果只读原回执，不重新发送。Provider 的原生接纳与原生记录采用分别成立，普通终端发送不改默认目标。外部输入沿原 Binding 的显式 `inputTarget` 进入同一准入链，不从发布 frontier 推导写授权。
 
+默认 `agent.send` 的语义 message key 在首次准入时可由同一输入 owner 选择原 actor 原生通道；目标是 Core 已确认保存的原 Provider source，不是 TUI 当前选择。原进程／FD 采集与保存 ACK 提供来源，已有 binding 如存在须属于同 Run，当前来源有缺口则保留原终端通路；不新增 binding producer。准备后的 CAS 重核前序、原来源和 actor；冻结后不升级旧 PTY 计划、不重发未知原生请求。Provider planner 与采用校验复用同一机器来源 tuple，原精确条件不改成另一种调用者意图。公共 RPC／CLI 复用原消息入口，不增加另一个 reader、journal 或客户端 matcher。
+
 当前 Codex 原 actor 写通道由 [`codex-native-input`](../../packages/core/src/providers/codex-native-input.ts) 在原 executable probe 之后、Runtime prepare 之前，对已实证的 create 形状选择受管启动。原 ctxmux Run 内的 helper 启动原 app-server 与唯一创建初始 thread 的 TUI；认证 token 与原 Provider invocation 只保存在原 StoredSession 的私有 lifecycle 字段，公开 Session 不展开它们。每次原生派发核对同一 Run 的进程 birth、监听者、认证及准确 thread。未资格 argv、版本、resume/fork 保原启动计划；受管计划冻结后失败明确保留原失败和恢复身份，不转成另一 actor。旧 Run 不迁移，原 Hook 安装及终端输入仍走原 owner。
 
 外部入站 `DurableIngressHost.deliver` 调用原 `submitAgentMessage`，与本地输入复用原 `DurableAgentMuxMessageQueue`／input journal 及准入 owner。[`readAgentInputMailbox`](../../packages/core/src/client.ts) 沿同一 journal 既有 recipient/intent-sequence 索引有界读取 controlled input 与只读 submission 引用，SDK、`agent.input.ls` RPC／CLI 和 Hosted 消费同一严格结果合同；字节分片复用原 `JsonReadEntry`。新 claim CAS／typed launch commit 记录首次准确 key，旧 claim／unknown launch 不回填；每条 admission 仍从原 owner 读取，失败保该条原内容与缺口。
