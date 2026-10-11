@@ -23,8 +23,6 @@ export function MoteBotSetup({
   onChoose,
   onCurrent,
   createOnOpen = false,
-  profileRevision = 0,
-  onPrepareAvatar,
   onCreateIntentConsumed
 }: {
   target: MotePreferencesTarget | null
@@ -34,8 +32,6 @@ export function MoteBotSetup({
   onChoose(): void
   onCurrent(): void
   createOnOpen?: boolean
-  profileRevision?: number
-  onPrepareAvatar?: (() => void) | undefined
   onCreateIntentConsumed?: (() => void) | undefined
 }) {
   const setup = useMoteBotSetup(target, topicId),
@@ -75,7 +71,6 @@ export function MoteBotSetup({
   const resumeId =
     unfinished?.operationId ??
     setup.requests.find((item) => !ids.has(item.input.operationId))?.input.operationId
-  useEffect(() => { if (profileRevision) void setup.refreshSource() }, [profileRevision])
   useEffect(() => {
     if (!shortcut.current || !setup.historyReady || setup.loading || !setup.profile || !capability) return
     shortcut.current = false
@@ -187,7 +182,7 @@ export function MoteBotSetup({
             <>
               <div className="mote-bot-profile">
                 {setup.profile.image ? (
-                  <img width={48} height={48} src={setup.profile.image} alt="Saved Mote avatar" />
+                  <img width={48} height={48} src={setup.profile.image} alt="Current Mote avatar" />
                 ) : null}
                 <div>
                   <span className="mote-details__hint">From the saved Mote profile</span>
@@ -208,12 +203,12 @@ export function MoteBotSetup({
                     checked={avatar}
                     onChange={(event) => setAvatar(event.target.checked)}
                   />
-                  Use the saved avatar
+                  Use this Mote’s avatar
                 </label>
               ) : !setup.profile.image && record && !replacing ? (
                 <p className="mote-details__hint">
                   {setup.profile.avatarIssue ??
-                    'No saved image avatar. The bot’s avatar will be kept.'}
+                    'The current Mote avatar could not be read. The bot’s avatar will be kept.'}
                 </p>
               ) : null}
             </>
@@ -270,8 +265,6 @@ export function MoteBotSetup({
                   >
                     Resume original setup
                   </button>
-                ) : setup.profile && !setup.profile.image && onPrepareAvatar ? (
-                  <button type="button" className="primary-button" onClick={onPrepareAvatar}>Prepare avatar</button>
                 ) : (
                   <button
                     type="button"
@@ -299,7 +292,7 @@ export function MoteBotSetup({
               ) : null}
             </>
           )}
-          {!setup.profile?.image && setup.profile && (!record || replacing) ? <p className="mote-details__hint">{setup.profile.avatarIssue ?? 'Save an image avatar for this Mote before creating its identity.'}</p> : null}
+          {!setup.profile?.image && setup.profile && (!record || replacing) ? <p className="mote-details__hint">{setup.profile.avatarIssue ?? 'The current Mote avatar could not be read. Refresh this profile to try again.'}</p> : null}
           <button type="button" className="connector-enrollment__text-action" onClick={() => { void setup.refreshSource(); void setup.list() }}>
             Refresh saved profile
           </button>

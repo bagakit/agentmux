@@ -51,9 +51,10 @@ export async function readSavedMoteBotProfile(
       input
     )
     image = saved.image?.dataUrl ?? null
-    revision = image ? saved.revision : null
-  } catch {
-    avatarIssue = 'The saved avatar could not be read. You can continue without changing the bot’s avatar.'
+    revision = saved.revision
+    if (!image) avatarIssue = saved.issues.join(' ') || 'The current Mote avatar could not be read. Refresh this profile to try again.'
+  } catch (error) {
+    avatarIssue = 'The current Mote avatar could not be read. Refresh this profile to try again. ' + presentError(error)
   }
   return {
     name: copy.title,
