@@ -1,4 +1,5 @@
 import { isConnectionSetupMethod, parseConnectionSetupParams } from './connection-setup-codec.js'
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { ConversationLandmarkStore } from './conversation-landmark-store.js'
@@ -87,7 +88,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
+  'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
@@ -196,6 +197,7 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
+  'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
   'agent.refresh': ['agentSessionId'],
   'agent.native.confirm': ['agentSessionId', 'expectedRun', 'expectedNativeHandle', 'candidateNativeHandle', 'expectedObservationAt', 'operationId'],
   'agent.native.ls': ['hostId', 'executorId', 'workspacePath'],
@@ -1291,6 +1293,33 @@ export class AgentMuxRpcService {
         context.signal?.throwIfAborted()
         result = await readAgentContext(scope.client, input, descriptor)
         break
+      }
+      case 'agent.continuity.control': {
+        const input = parseAgentContinuityControlInput(p)
+        // An exact endpoint/caller fixes its semantic owner even after retirement.
+        // Aggregate routing uses retained exact identity, never prefix selection.
+        const scopes = caller ? [caller] : await this.clients()
+        let selected = scopes.length === 1 ? scopes[0] : undefined
+        if (!selected) {
+          const observations = await Promise.allSettled(scopes.map(async scope => ({ scope,
+            sources: await scope.client.sessionHistorySources({ agentSessionId: input.agentSessionId }) })))
+          if (observations.some(one => one.status === 'rejected')) throw new AgentMuxError(
+            'The original recovery control route is unconfirmed. Keep its complete packet and operation ID.', 'RUNTIME_UNAVAILABLE')
+          const owners = observations.flatMap(one => one.status === 'fulfilled' && one.value.sources.some(source =>
+            source.agentSessionId === input.agentSessionId) ? [one.value.scope] : [])
+          if (owners.length !== 1) throw new AgentMuxError('The exact original recovery control owner is unavailable or ambiguous.',
+            owners.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
+          selected = owners[0]!
+        }
+        context.signal?.throwIfAborted()
+        const result = selected.client.forwardRpc
+          ? await selected.client.forwardRpc('agent.continuity.control', input, await this.inputForwardContext(context))
+          : await selected.client.controlAgentContinuity(input, { ...this.inputCallContext(context),
+            ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) })
+        const verified = parseAgentContinuityControlResult(result, input)
+        if ((verified.state === 'active' ? verified.session.hostId : verified.retirement.hostId) !== 'local') throw new AgentMuxError(
+          'The recovery control returned another original Host.', 'CONTROL_PROTOCOL_ERROR')
+        return verified as AgentMuxRpcResult<M>
       }
       case 'agent.refresh': {
         const agentSessionId = rpcString(p.agentSessionId, 'Complete original Session ID')

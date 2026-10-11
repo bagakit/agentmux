@@ -1,3 +1,4 @@
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseConversationCheckpoint, parseConversationChangesPage } from './conversation-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
 import { dequal } from 'dequal'
@@ -202,6 +203,7 @@ export async function connectHostedAgentMux(options: {
       invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, { signal: observationSignal(signal) })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
+    if (method === 'controlAgentContinuity') return parseAgentContinuityControlResult(decoded, parseAgentContinuityControlInput(wireArgs[0]))
     if (method === 'sessionHistoryResource') {
       const request = parseSessionHistoryResourceOptions(wireArgs[1])
       if (typeof wireArgs[0] !== 'string' || !decoded || typeof decoded !== 'object' || Array.isArray(decoded))

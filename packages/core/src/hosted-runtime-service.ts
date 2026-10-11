@@ -14,6 +14,7 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_RUNTIME_METHODS, AGENTMUX_HOST
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
 
 const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
+  'controlAgentContinuity',
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor',
@@ -236,6 +237,8 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    const continuityControl = invocation.method === 'controlAgentContinuity'
+    if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
     const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction'
     if (controlledInput && invocation.args.length !== 1) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
@@ -268,7 +271,7 @@ export class AgentMuxHostedRuntimeService {
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
-    const modifying = /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
+    const modifying = continuityControl || /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
     // Match the public human question-reply owner. Only transport-approved
     // user/device intent supplies human authorship; a wire claim cannot name an Agent.
@@ -321,7 +324,10 @@ export class AgentMuxHostedRuntimeService {
         return { identity, assertCurrent: (intent: import('./client.js').AgentMuxAgentInteractionInput) => port.assertInteractionCurrent!(structuredClone(identity), structuredClone(intent)) }
       })()
 
-      const pending = operation.apply(this.client, controlledInput ? [...invocation.args, {
+      const pending = operation.apply(this.client, continuityControl ? [...invocation.args, {
+        ...(context.signal ? { requestSignal: context.signal } : {}),
+        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
+      }] : controlledInput ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
         ...(externalAuthor ? { externalAuthor } : {}),
