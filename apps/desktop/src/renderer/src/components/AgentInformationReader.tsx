@@ -1,3 +1,4 @@
+import { useAgentBookmarkWindow } from '../lib/use-agent-bookmark-window'
 import { useAgentBookmarkReading } from '../lib/agent-bookmark-reading'
 import { agentBookmarks } from '../lib/agent-bookmarks'
 import { WorkbenchDocumentContext } from '../lib/workbench-document'
@@ -78,12 +79,20 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   const request = useAgentBookmarkReading(opening, visible)
   const context = request.context
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
+  const bookmarkWindow = useAgentBookmarkWindow(request.bookmark, panel, reading, document)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const back = useRef<HTMLButtonElement>(null), returnToReading = useRef(false)
   const reflowAnchor = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
   const heldReadingSurface = useRef<HTMLElement | null>(null)
   const heldSelection = useRef<Range | null>(null), laterSelection = useRef(false)
   const [tab, setTab] = useState<AgentInformationTab | null>(null)
+  const consumedFocus = useRef<object | undefined>(undefined)
+  useLayoutEffect(() => {
+    if (!visible || !opening.focusReading || consumedFocus.current === opening.focusReading) return
+    consumedFocus.current = opening.focusReading
+    const surface = tab ? back.current : reading.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reading.current
+    surface?.focus({ preventScroll: true })
+  }, [opening.focusReading, document, visible, tab])
   useEffect(() => { if (!visible) agentInformationPreview.dismiss(request.token) }, [visible, request.token])
   const transferredFocus = useRef<HTMLElement | null>(null)
   const transferredSelection = useRef<{ start: Node; startOffset: number; end: Node; endOffset: number } | null>(null)
@@ -259,11 +268,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         if (request.enterReading && document.activeElement === request.anchor && !request.anchor.closest('[inert]')) reading.current?.focus({ preventScroll: true })
       }
     }
-    if (request.bookmark) {
-      const bounds = request.bookmark.bounds
-      Object.assign(surface.style, { left: `${bounds.x}px`, top: `${bounds.y}px`, width: `${bounds.width}px`, height: `${bounds.height}px`, visibility: 'visible' })
-      return () => { current = false; cancelDeparture() }
-    }
+    if (request.bookmark) return
     if (request.pinned || !request.anchor.isConnected || request.anchor.closest('[inert]')) {
       const contain = () => {
         const bounds = surface.getBoundingClientRect()
@@ -307,7 +312,8 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       if (event.relatedTarget && (event.relatedTarget as Node).nodeType && (panel.current?.contains(event.relatedTarget as Node) || event.relatedTarget === request.anchor)) return
       leave()
     }}>
-    <header className="agent-information-reader__header">
+    <header className="agent-information-reader__header" {...bookmarkWindow.header}>
+      {request.bookmark ? <button type="button" data-bookmark-move className="agent-bookmark__move" aria-label="Move Agent bookmark" title="Drag to move · Arrow keys move · Shift+Arrow keys resize" onKeyDown={bookmarkWindow.moveKey}>⠿</button> : null}
       <span className="agent-information-reader__identity">{request.identity?.tabs.length
         ? <WorkbenchTopology tabs={request.identity.tabs} interactive={false} enabled={false} />
         : <AgentAvatar executorId={context.executorId} label={context.name} state={currentContext.state} providerId={context.providerId ?? undefined} size={24} visible={false} />}</span>
@@ -328,11 +334,13 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         <AgentInformationDetails context={context} goalLinks={request.goalLinks} usage={usage} control={visible && sameSource ? request.control : undefined} tab={tab} onTab={setTab} source={source} />
       </div> : null}
     </div>
+    {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag or use Arrow keys to resize" {...bookmarkWindow.resize}>⌟</button> : null}
     <footer className="agent-information-reader__footer" onPointerDown={event => { if (event.button === 0) event.preventDefault() }}>
       <button type="button" className="agent-information-reader__facts" onClick={() => tab ? showReading() : showMetadata('usage')}
         aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
         <InfoIcon size={14} aria-hidden="true" /><AgentInformationSummary usage={usage} goalLinks={request.goalLinks} />
       </button>
+      {request.bookmark ? <button type="button" className="agent-bookmark__reset" onClick={bookmarkWindow.reset} title="Reset bookmark position and size" aria-label="Reset bookmark position and size">↺</button> : null}
       <button type="button" className="agent-information-reader__pin" aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Remove bookmark · P' : 'Pin Agent bookmark · P'}>
         <PinIcon size={13} aria-hidden="true" />{request.pinned ? 'Bookmarked' : 'Pin'}
       </button>
