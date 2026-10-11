@@ -797,7 +797,10 @@ export class BrowserViewManager {
       this.removePresentationLease(lease)
     }
     for (const [id, capture] of this.presentationCaptures) {
-      if (capture.document === document) this.presentationCaptures.delete(id)
+      if (capture.document !== document) continue
+      this.presentationCaptures.delete(id)
+      if (capture.entry.captureId === id) capture.entry.captureId = null
+      this.publishNativeCoverage(capture.entry)
     }
   }
 
