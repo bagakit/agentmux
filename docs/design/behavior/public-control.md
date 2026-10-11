@@ -154,7 +154,7 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 | `message` | `inbox check/ack`；`dispatch open/report/inspect` |
 | `app` | `inspect`、`snapshot`、`search`、`focus` |
 | `mote` | `playbook pmo` |
-| `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/test`；`workspaces register`；`browser-links ls/forget` |
+| `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/inspect/test`；`workspaces register`；`browser-links ls/forget` |
 | `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
 | `device` | 本机用户管理：`ls`、`link`、`revoke`；已认证加密设备仅以 `hello` 命名自身。授权与撤销沿[手机版 Relay 连接](#手机版-relay-连接) |
 | `toolkit` | `ls`、`inspect`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |

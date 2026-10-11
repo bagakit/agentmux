@@ -1,6 +1,6 @@
 # Remote 管理 PRD
 
-本文是 AgentMux 远程管理的产品需求与行为 SSOT。它回答用户如何理解远端环境、找到正在工作的 Agent、判断观测缺口并完成准确的管理动作；Session 恢复、权限、消息和资源测量仍由各自原 owner 定义。本文描述目标要求，不声明新管理页面、监控采集或公共接口已经实现和验收。
+本文是 AgentMux 远程管理的产品需求与行为 SSOT。它回答用户如何理解远端环境、找到正在工作的 Agent、判断观测缺口并完成准确的管理动作；Session 恢复、权限、消息和资源测量仍由各自原 owner 定义。当前源码入口见[公共能力与当前实现基线](#公共能力与当前实现基线)，源码存在不代签安装包或某台远端的运行能力。
 
 [交互合同入口](../agentmux-desktop-interaction.md) · [Remote 呈现](../presentation/settings-and-observation.md#remote-管理拓扑) · [设置共同合同](settings-and-observation.md#设置页的信息架构)
 
@@ -125,13 +125,13 @@ GUI、CLI 和其他客户端消费相同业务 owner。已有公开能力足够�
 
 | 已有基础 | 来源 | 已有范围与仍缺的闭环 |
 | --- | --- | --- |
-| 环境配置与现管理界面 | [HostConfig](../../../apps/desktop/src/shared/contracts.ts)、[HostSettingsPane](../../../apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx) | 本地 / SSH、地址与覆盖、Runtime 绑定、草稿、关联项目和检查；当前是资源库与编辑面，尚非本 PRD 的拓扑管理台 |
+| 环境配置与管理工作台 | [HostConfig](../../../apps/desktop/src/shared/contracts.ts)、[HostSettingsPane](../../../apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | Remote 入口、拓扑 / 等价列表共用原选择和草稿；本地 / SSH、关联项目、原 Session 导航、执行器、检查及连接管理沿原 owner |
 | Host 读取与 Test | [settings-hosts-control](../../../apps/desktop/src/main/settings-hosts-control.ts)、[公共 RPC](../../../packages/core/src/public-rpc.ts) | 已公开清单及测试；Test 结果为完整输入、outcome 与人读 detail，不能解析 detail 猜结构化版本、PID 或实时连接 |
 | Session 与项目投影 | [SessionSnapshot / WorkspaceRecord](../../../apps/desktop/src/shared/contracts.ts)、[HostProjectsPane](../../../apps/desktop/src/renderer/src/components/settings/HostProjectsPane.tsx) | 原 Host / Session / Workspace 引用与已有状态可复用；引用数量与当前运行数量须分口径，读取缺口不能补成零 |
 | Host 执行器和来源信任 | [public-rpc-host-settings](../../../packages/core/src/public-rpc-host-settings.ts)、[executor-contract](../../../packages/core/src/executor-contract.ts)、[HostCreationTrustPanel](../../../apps/desktop/src/renderer/src/components/settings/HostCreationTrustPanel.tsx) | 已有准确 Host 的发现、注册、可信来源读取与真人批准入口；不由拓扑另建配置或审批系统 |
-| Core / ctxmux 只读事实 | [Core 公共类型](../../../packages/core/src/types.ts)、[Hosted SDK](../../../packages/core/src/hosted-client-contract.ts) | SDK 提供结构化 runtimeIdentity、runtimeDiagnostics、runtimeResourceSnapshot；这些方法的存在不代表当前 Settings 已接到按 Host 的统一监控视图 |
-| Core 维护与原结果查询 | [remote-core-upgrade](../../../packages/core/src/remote-core-upgrade.ts)、[HostUpgradePanel](../../../apps/desktop/src/renderer/src/components/settings/HostUpgradePanel.tsx) | 可复用现检查、升级、原 operation 查询及诊断；新管理台需保持原操作状态、完整原因和资格，不另写流程 |
-| 无限画布 | [Desktop 依赖](../../../apps/desktop/package.json) | 已有 `@xyflow/react`；依赖存在仅证明可复用基础，不证明拓扑产品、准确事实或窄窗体验已完成 |
+| 所选 Host 的只读运行观察 | [分源观察](../../../packages/core/src/host-runtime-observation.ts)、[公共 Host 方法](../../../packages/core/src/public-rpc-host-settings.ts)、[HostRuntimePanel](../../../apps/desktop/src/renderer/src/components/settings/HostRuntimePanel.tsx) | 原 runtimeIdentity、runtimeDiagnostics、runtimeResourceSnapshot 由公共服务按准确 Host 组合；GUI 与 `settings hosts inspect` 消费同一结果。只观察当前已连接来源，缺失按来源报告，不冷启动 Native |
+| Core 维护与原结果查询 | [remote-core-upgrade](../../../packages/core/src/remote-core-upgrade.ts)、[HostUpgradePanel](../../../apps/desktop/src/renderer/src/components/settings/HostUpgradePanel.tsx) | 管理台复用原检查、升级、operation 查询及诊断，保留已访问维护面及未决回执，不另写流程 |
+| 无限画布 | [Desktop 依赖](../../../apps/desktop/package.json)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | 复用 `@xyflow/react`，缩放 / 平移仅改变投影；窄窗自动使用同对象列表，不新增持久画布配置 |
 
 现有公开 Host 清单、测试和维护不等于完整配置 CRUD CLI；这项缺口由后续连接管理执行计划按原贡献约定判断。远端主机 CPU / RSS / 磁盘、网络跳点、RTT / 丢包、采集趋势与统一远端健康监控，目前不能仅凭上述源码声称已有；未来新增需从准确原 Host / Runtime 的公开事实取得，不能在 Renderer 私有 shell 探测或借展示解析补齐。
 
