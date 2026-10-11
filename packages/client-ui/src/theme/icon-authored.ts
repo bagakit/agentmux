@@ -20,10 +20,10 @@ type AuthoredIconDefinition = {
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
   "goal-consensus": {
-    shapes: [["path",{"d":"M4 2h4a2 2 0 0 1 2 2v7l-3-3H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2ZM16 3h4a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2h-3l-3 2V5a2 2 0 0 1 2-2Z"}],["path",{"d":"M9.5 13h5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 8 20.5v-6A1.5 1.5 0 0 1 9.5 13Z"}],["path",{"d":"M10.5 19h3"}],["path",{"d":"M10.5 16h3","pathLength":"1","data-semantic-icon-part":"agreement-line"}]],
+    shapes: [["path",{"d":"M2.5 8 6.5 4l5 2-3.5 3a2.1 2.1 0 0 0 3 3M14 9l6.5 5-3.5 3.5a3 3 0 0 1-4 0l-6-5.5-4.5 4.5"}],["path",{"d":"m11.5 6 5-2 5 4-4 4"}],["path",{"d":"m11 12 3-3","pathLength":"1","data-semantic-icon-part":"agreement-line"}]],
     design: {
-      rest: "两枚错位的完整对话气泡围绕同一约定页，表达双方共同讨论的方向；不是完成勾或普通靶心",
-      motion: {"kind": "once", "animation": "feedback", "description": "仅约定页内一条线短描一次，两侧对话与纸框固定", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航、旧确认和结果验收不触发。"}
+      rest: "双方腕口与内部握合折线形成共同约定，开放负空间在小尺寸保留一体轮廓；不是爱心、完成勾或普通靶心",
+      motion: {"kind": "once", "animation": "feedback", "description": "仅内部握合短线描入一次，双方腕口与外轮廓固定", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航、旧确认和结果验收不触发。"}
     }
   },
   "survey-explore": {
