@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
-import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
+import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupView } from '@agentmux/core/connections'
 import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
@@ -59,7 +59,7 @@ beforeEach(async () => {
     if (target.pathname === '/developers/v1/app_version/create/' + APP) return accept ? Response.json({ code: 0, data: { versionId: VERSION } }) : new Response('Unconfirmed', { status: 502 })
     if (target.pathname === '/developers/v1/publish/commit/' + APP + '/' + VERSION) { submitted = true; return Response.json({ code: 0, data: { urlConflict: false, avatar: 'original-avatar', isOk: true } }) }
     if (target.pathname === '/developers/v1/robot/' + APP) return Response.json({ code: 0, data: { enable: bot } })
-    if (target.pathname === '/developers/v1/robot/switch/' + APP) { bot = true; return Response.json({ code: 0, data: {} }) }
+    if (target.pathname === '/developers/v1/robot/switch/' + APP) { bot = true; return accept ? Response.json({ code: 0, data: {} }) : new Response('Unconfirmed', { status: 502 }) }
     if (target.pathname === '/developers/v1/event/' + APP) return Response.json({ code: 0, data: { eventMode: mode, appEventDetails: reception ? [{ items: [{ id: 'im.message.receive_v1' }] }] : [] } })
     if (target.pathname === '/developers/v1/event/switch/' + APP) { mode = 4; return Response.json({ code: 0, data: {} }) }
     if (target.pathname === '/developers/v1/event/all/' + APP) return Response.json({ code: 0, data: { events: [{ items: [{ id: 'im.message.receive_v1', supportIdentityTypes: [2] }] }] } })
@@ -78,7 +78,14 @@ afterEach(async () => {
   if (errors.length) throw new AggregateError(errors, 'Publication Settings cleanup failed')
 })
 afterAll(() => vi.unstubAllGlobals())
-async function ready(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 12_000 }) }
+async function ready(check: () => void) {
+  const deadline = Date.now() + 12_000
+  for (;;) {
+    // Keep asynchronous IPC and React updates inside the same actual readiness turn.
+    await act(async () => { await new Promise<void>(resolve => setTimeout(resolve, 0)) })
+    try { check(); return } catch (error) { if (Date.now() >= deadline) throw error }
+  }
+}
 async function click(selector: string) {
   let button: HTMLButtonElement | null = null
   await ready(() => { button = dom.container.querySelector(selector); expect(button, selector).not.toBeNull(); expect(button!.disabled, selector).toBe(false) })
@@ -88,6 +95,263 @@ async function click(selector: string) {
   await act(async () => button!.click())
 }
 const writes = () => native.filter(call => ['/robot/switch/', '/event/switch/', '/scope/update/', '/event/update/', '/app_version/create/', '/publish/commit/'].some(path => call.path.includes(path)))
+async function idle() { await ready(() => expect(document.querySelector('[data-management-setup] > .connector-enrollment__action')?.getAttribute('aria-busy')).toBe('false')) }
+function firstLayerPrimaries() { return [...document.querySelectorAll('[data-management-setup] .primary-button')].filter(button => !button.closest('details:not([open])')) }
+function current() { return calls.filter(call => (call.result as ConnectionSetupView)?.applicationConfiguration).at(-1)?.result as ConnectionSetupView }
+async function open() {
+  await app.mount()
+  await click('[aria-label="Settings"]'); await click('nav [data-settings-target="chat-connections"]')
+  await click('[data-connection="settings-publication-bot"] button'); await click('[data-management-open]'); await click('[data-management-start]')
+  await ready(() => expect(dom.container.querySelector('[data-management-confirm]')).not.toBeNull())
+  await click('[data-management-confirm]')
+  await ready(() => expect(dom.container.querySelector('[data-guided-primary]')).not.toBeNull())
+}
+
+async function fill(label: string, value: string) {
+  let element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null = null
+  await ready(() => { element = dom.container.querySelector('[aria-label="' + label + '"]'); expect(element, label).not.toBeNull(); expect(element!.disabled, label).toBe(false) })
+  const input = element!
+  await act(async () => {
+    const prototype = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }))
+  })
+}
+async function reviewCreationSources() {
+  const feature = () => { const configuration = current()?.applicationConfiguration; return configuration && 'sources' in configuration && 'features' in configuration.sources ? configuration.sources.features?.stepId : undefined }
+  const before = feature()
+  await click('[data-publication-review]')
+  await ready(() => {
+    expect(feature()).toBeDefined(); expect(feature()).not.toBe(before)
+    expect(current().applicationInspection?.selected?.subject).toBe('publication-features')
+    expect(dom.container.querySelector<HTMLButtonElement>('[data-publication-review]')?.disabled).toBe(false)
+  })
+}
+async function reviewCreation() {
+  await fill('Publication version', '1.1.0'); await fill('Publication release notes', 'Original user-authored release notes')
+  await reviewCreationSources()
+  await ready(() => expect(dom.container.querySelector('[aria-label="Publication review reason"]')).not.toBeNull())
+  await fill('Publication review reason', 'Explain the application permission change')
+  await reviewCreationSources()
+  await ready(() => expect(dom.container.querySelector('[data-publication-confirm]')).not.toBeNull())
+}
+
+it('the actual App keeps one guided task, reads only this bot and explicitly confirms each necessary write before publication', async () => {
+  await open(); expect(writes()).toEqual([])
+  await click('[data-guided-primary]')
+  await idle()
+  expect(dom.container.querySelector('[data-guided-primary]')?.textContent).toBe('Turn on bot messages')
+  expect(firstLayerPrimaries()).toHaveLength(1)
+  expect(native.filter(call => call.path.startsWith('/developers/'))).toEqual([{ path: '/developers/v1/robot/' + APP, body: {} }])
+  expect(writes()).toEqual([])
+  await click('[data-guided-primary]')
+  await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
+  expect(writes()).toHaveLength(1)
+  await click('[data-guided-primary]')
+  await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Use persistent connection'))
+  expect(writes()).toHaveLength(1)
+  await click('[data-guided-primary]')
+  await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
+  await click('[data-guided-primary]')
+  await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Request required permissions'))
+  expect(writes()).toHaveLength(2)
+  await click('[data-guided-primary]')
+  await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
+  await click('[data-guided-primary]')
+  await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Add message reception'))
+  expect(writes()).toHaveLength(3)
+  await click('[data-guided-primary]')
+  await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
+  await click('[data-guided-primary]')
+  await ready(() => expect(document.querySelector('[aria-label="Publication version"]')).not.toBeNull())
+  expect(writes()).toHaveLength(4)
+  await reviewCreation(); await click('[data-publication-confirm]')
+  await ready(() => expect(document.querySelector('[data-publication-review-created]')).not.toBeNull())
+  await click('[data-publication-review-created]')
+  await ready(() => expect(document.querySelector('[data-publication-confirm]')).not.toBeNull())
+  await click('[data-publication-confirm]')
+  await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Check version status'))
+  expect(writes()).toHaveLength(6)
+  await click('[data-guided-primary]')
+  await ready(() => expect(document.querySelector('[data-guided-task]')?.textContent).toContain('Waiting for platform review'))
+  expect(writes()).toHaveLength(6); expect(app.launch).not.toHaveBeenCalled()
+}, 30_000)
+
+it('a failed settings check stops its finite reads, removes prior authority and retries the same setup without calling the failure a sign-in result', async () => {
+  await open(); bot = true
+  const call = vi.mocked(api.connections.call).getMockImplementation()!
+  let failed = false
+  vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
+    if (!failed && method === 'connection.setup.inspect' && 'applicationConfiguration' in input && input.applicationConfiguration?.effect === 'use-persistent-connection') { failed = true; throw Error('Current settings check interrupted') }
+    return call(method, input)
+  })
+  await click('[data-guided-primary]'); await idle()
+  expect(document.querySelector('.connector-management .connector-editor-title')?.textContent).toBe('Setup check interrupted')
+  expect(document.querySelector('[data-guided-primary]')).toBeNull()
+  expect(document.querySelector('.connector-management__account')).toBeNull()
+  expect(document.querySelector('[data-management-inspect]')?.textContent).toBe('Retry setup check')
+  expect(native.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/robot/' + APP])
+  expect(writes()).toEqual([])
+  const operationId = calls.find(call => call.method === 'connection.setup.begin')!.input as ConnectionParamsMap['connection.setup.begin']
+  await click('[data-management-inspect]'); await idle()
+  expect(current().operation?.operationId).toBe(operationId.operationId)
+  expect(document.querySelector('[data-guided-primary]')).not.toBeNull()
+  expect(writes()).toEqual([])
+}, 30_000)
+
+it.each(['close', 'another-bot'] as const)('a late settings result after %s cannot publish old account actions or continue the finite reads', async change => {
+  if (change === 'another-bot') {
+    const record = (await services.connections.list()).connections[0]!
+    await services.connections.configure({ operationId: 'guided-cancel-another-bot', expectedRevision: null, connection: { ...record.config, connectionId: 'another-bot', label: 'Another bot' } })
+  }
+  await open(); bot = true
+  const call = vi.mocked(api.connections.call).getMockImplementation()!
+  let release!: () => void, pending: Promise<unknown> | undefined
+  const barrier = new Promise<void>(resolve => { release = resolve })
+  vi.mocked(api.connections.call).mockImplementation((method, input) => {
+    const request = (async () => {
+      const result = await call(method, input)
+      if (method === 'connection.setup.advance' && 'applicationInspection' in result && result.applicationInspection?.selected?.subject === 'bot-settings') await barrier
+      return result
+    })()
+    if (method === 'connection.setup.advance') pending = request
+    return request
+  })
+  try {
+    await click('[data-guided-primary]')
+    await ready(() => expect(native.some(call => call.path === '/developers/v1/robot/' + APP)).toBe(true))
+    expect(pending).toBeDefined()
+    if (change === 'close') await click('[aria-label="Close settings"]')
+    else {
+      await click('[data-management-back]')
+      const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'All applications')!
+      await act(async () => all.click())
+      await click('[data-connection="another-bot"] button')
+    }
+    await act(async () => { release(); await pending })
+    expect(document.querySelector('.connector-management__account')).toBeNull()
+    expect(document.querySelector('[data-guided-primary]')).toBeNull()
+    expect(native.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/robot/' + APP])
+    expect(writes()).toEqual([])
+    expect(app.launch).not.toHaveBeenCalled()
+  } finally { release() }
+}, 30_000)
+
+it('an accepted settings write with a lost local ACK presents one saving task and recovers the exact result without native replay', async () => {
+  await open(); await click('[data-guided-primary]'); await idle()
+  const store = DesktopConnectorSecrets.prototype.store; let lost = false
+  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (this: DesktopConnectorSecrets, input) {
+    const result = await store.call(this, input)
+    if (!lost && input.operationId.startsWith('connection-setup-effect:')) { lost = true; throw Error('Local ACK interrupted after Vault commit') }
+    return result
+  })
+  await click('[data-guided-primary]'); await idle()
+  expect(current().applicationConfiguration!.selected?.request).toBe('confirmed')
+  expect(current().applicationConfiguration!.selected?.secureStorage).toBe('unknown')
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Finish saving original result')
+  expect(firstLayerPrimaries()).toHaveLength(1)
+  const original = current().applicationConfiguration!.selected!, before = [...native]
+  await click('[data-guided-primary]'); await idle()
+  expect(current().applicationConfiguration!.selected).toEqual({ ...original, secureStorage: 'stored' })
+  expect(native).toEqual(before)
+  expect(writes()).toHaveLength(1)
+}, 30_000)
+
+it('a completed permission-directory check with lost local ACK is saved before any other native check', async () => {
+  await open(); bot = true; mode = 4
+  const store = DesktopConnectorSecrets.prototype.store; let lost = false
+  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (this: DesktopConnectorSecrets, input) {
+    const result = await store.call(this, input)
+    if (!lost && input.operationId.startsWith('connection-setup-inspection:') && native.at(-1)?.path === '/developers/v1/scope/all/' + APP) { lost = true; throw Error('Read ACK interrupted after Vault commit') }
+    return result
+  })
+  await click('[data-guided-primary]'); await idle()
+  const original = current().applicationInspection!.selected!, before = [...native]
+  expect(original.subject).toBe('permission-catalog')
+  expect(original.request).toBe('confirmed'); expect(original.secureStorage).toBe('unknown')
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Finish saving original result')
+  expect(firstLayerPrimaries()).toHaveLength(1)
+  await click('[data-guided-primary]'); await idle()
+  expect(current().applicationInspection!.selected).toEqual({ ...original, secureStorage: 'stored' })
+  expect(native).toEqual(before)
+  expect(writes()).toEqual([])
+}, 30_000)
+
+it('an unconfirmed native delivery read names the failed check and allows a fresh explicit read without acknowledging the old result', async () => {
+  await open(); bot = true
+  const fetch = globalThis.fetch; let fail = true
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const path = new URL(String(url)).pathname
+    if (fail && path === '/developers/v1/event/' + APP) { fail = false; native.push({ path, body: JSON.parse(String(init?.body ?? '{}')) }); return new Response('Current delivery read unconfirmed', { status: 502 }) }
+    return fetch(url, init)
+  }))
+  await click('[data-guided-primary]'); await idle()
+  const original = current().applicationInspection!.selected!
+  expect(original.subject).toBe('event-settings'); expect(original.request).toBe('unknown')
+  expect(document.querySelector('[data-guided-task] strong')?.textContent).toBe('Delivery check not confirmed')
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Retry settings check')
+  expect(document.querySelector('[data-management-inspect]')).toBeNull()
+  expect(writes()).toEqual([])
+  await click('[data-guided-primary]'); await idle()
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Use persistent connection')
+  expect(current().applicationInspection!.observations.find(receipt => receipt.stepId === original.stepId)?.request).toBe('unknown')
+  expect(current().applicationInspection!.selected?.stepId).not.toBe(original.stepId)
+  expect(writes()).toEqual([])
+}, 30_000)
+
+it('the original permission response requiring a data range keeps an explicit console task even after fresh applied permissions are visible', async () => {
+  await open(); bot = true; mode = 4
+  const fetch = globalThis.fetch
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const result = await fetch(url, init)
+    return new URL(String(url)).pathname === '/developers/v1/scope/update/' + APP ? Response.json({ code: 0, data: { needConfigurePrivilege: true } }) : result
+  }))
+  const external = vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
+  await click('[data-guided-primary]'); await idle()
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Request required permissions')
+  await click('[data-guided-primary]'); await idle()
+  const original = current().applicationConfiguration!.selected!
+  expect(original.effect === 'add-application-permissions' && original.requiresDataRangeConfiguration).toBe(true)
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Open developer console')
+  expect(document.querySelector('[data-guided-task]')?.textContent).toContain('original permission request')
+  await click('[data-guided-primary]')
+  expect(external).toHaveBeenCalledExactlyOnceWith('https://open.feishu.cn/app')
+  const details = document.querySelector<HTMLDetailsElement>('[data-guided-management]')!
+  await act(async () => details.querySelector<HTMLElement>('summary')!.click())
+  await ready(() => expect(document.querySelector('[data-guided-primary]')).toBeNull())
+  await click('[data-permission-review]'); await idle()
+  expect(current().applicationConfiguration!.capability).toBe('enabled')
+  expect(current().applicationConfiguration!.selected?.stepId).toBe(original.stepId)
+  const selected = current().applicationConfiguration!.selected
+  expect(selected?.effect === 'add-application-permissions' && selected.requiresDataRangeConfiguration).toBe(true)
+  await act(async () => details.querySelector<HTMLElement>('summary')!.click())
+  await ready(() => expect(document.querySelector('[data-guided-primary]')).not.toBeNull())
+  await click('[data-guided-primary]'); await idle()
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Open developer console')
+  expect(native.some(call => call.path.includes('/event/all/') || call.path.includes('/app_version/'))).toBe(false)
+  expect(writes()).toHaveLength(1)
+  expect(document.querySelector<HTMLButtonElement>('[data-connector-return-agent]')?.disabled).toBe(false)
+  expect(app.launch).not.toHaveBeenCalled()
+}, 30_000)
+
+it('an unknown write keeps the exact original result primary and never turns a fresh current setting into permission to replay it', async () => {
+  await open(); await click('[data-guided-primary]'); await idle()
+  accept = false
+  await click('[data-guided-primary]'); await idle()
+  const original = current().applicationConfiguration!.selected!, before = [...native]
+  expect(original.request).toBe('unknown')
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Check original request')
+  expect(firstLayerPrimaries()).toHaveLength(1)
+  await click('[data-guided-primary]'); await idle()
+  expect(current().applicationConfiguration!.selected?.stepId).toBe(original.stepId)
+  expect(native).toEqual(before)
+  const details = document.querySelector<HTMLDetailsElement>('[data-guided-management]')!
+  await act(async () => details.querySelector<HTMLElement>('summary')!.click())
+  await ready(() => expect(document.querySelector('[data-guided-primary]')).toBeNull())
+  expect(document.querySelector('[aria-label="Bot setup step"]')).not.toBeNull()
+  expect(writes()).toHaveLength(1); expect(app.launch).not.toHaveBeenCalled()
+}, 30_000)
+
 async function enableMenu(dialog: boolean, connectionId = 'settings-publication-bot', beforeSettings?: () => void, selectBot = true) {
   const policy = await services.connections.service!.get()
   await services.connections.service!.configure({ operationId: 'guided-menu-policy', expectedRevision: policy.revision, service: { enabled: true } })
