@@ -1,3 +1,4 @@
+import { appendFile } from 'node:fs/promises'
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -68,6 +69,69 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+it('acknowledges stopped tracks on capture revocation without touching a later capture', async () => {
+  const track = new EventTarget() as EventTarget & { id: string; kind: string; readyState: string; stop: ReturnType<typeof vi.fn> }
+  Object.assign(track, { id: 'original-track', kind: 'video', readyState: 'live', stop: vi.fn(() => { track.readyState = 'ended' }) })
+  const stream = new MediaStream([track as unknown as MediaStreamTrack])
+  const next = new EventTarget() as typeof track
+  Object.assign(next, { id: 'next-track', kind: 'video', readyState: 'live', stop: vi.fn(() => { next.readyState = 'ended' }) })
+  const nextStream = new MediaStream([next as unknown as MediaStreamTrack])
+  // HappyDOM's MediaStream omits this standard device API. Supply only that
+  // IO method from its own actual stored tracks; retain its native DOM identity.
+  Object.defineProperty(stream, 'getTracks', { value: () => stream.getVideoTracks() })
+  Object.defineProperty(nextStream, 'getTracks', { value: () => nextStream.getVideoTracks() })
+  // This is the original mounted Stage and media hook. Only device IO is a
+  // fixture; HappyDOM owns the MediaStream and the video's srcObject setter.
+  function CaptureConsumer() {
+    const media = useBrowserPresentationCapture('browser')
+    return createElement('div', { 'data-capture-phase': media.capturePhase },
+      createElement(BrowserPresentationStage, { browserId: 'browser', navigationId: 'nav', presentation: make('focus'), inputSelected: false, blocked: false, media }))
+  }
+  const ready = async (captureId: string, media: MediaStream, trackId: string) => {
+    await vi.waitFor(async () => {
+      await act(async () => {})
+      expect(bridge.ackPresentationCapture).toHaveBeenCalledWith(captureId, { outcome: 'ready', trackIds: [trackId] })
+      expect(container.querySelector('[data-capture-phase]')?.getAttribute('data-capture-phase')).toBe('ready')
+      expect(container.querySelector('video')?.srcObject).toBe(media)
+    }, { timeout: 3000, interval: 10 })
+  }
+  let originalReady = false, laterReady = false, retiredAck = false, staleEventIgnored = false
+  try {
+    capture.mockResolvedValue(stream)
+    await act(async () => root.render(createElement(CaptureConsumer)))
+    // Production mounts after document load and one task. Deliver that DOM
+    // lifecycle within act before expecting any lease or media acknowledgements.
+    await act(async () => { window.dispatchEvent(new Event('load')); await new Promise(resolve => setTimeout(resolve, 0)) })
+    await ready('capture', stream, track.id); originalReady = true
+    bridge.ackPresentationCapture.mockClear()
+    await act(async () => events({ type: 'capture-revoked', browserId: 'browser', captureId: 'capture', reason: 'no-visible-presentations' }))
+    expect(track.stop).toHaveBeenCalledOnce()
+    retiredAck = bridge.ackPresentationCapture.mock.calls.length === 1 && bridge.ackPresentationCapture.mock.calls[0]?.[1]?.outcome === 'stopped'
+    expect(bridge.ackPresentationCapture.mock.calls, 'ready capture retirement must acknowledge its actual stopped tracks').toEqual([['capture', { outcome: 'stopped', trackIds: [track.id] }]])
+    expect(container.querySelector('video')).toBeNull()
+
+    bridge.armPresentationCapture.mockResolvedValue({ captureId: 'next-capture', browserId: 'browser' })
+    capture.mockResolvedValue(nextStream)
+    width += 1
+    await act(async () => window.dispatchEvent(new Event('resize')))
+    await ready('next-capture', nextStream, next.id); laterReady = true
+    bridge.ackPresentationCapture.mockClear()
+    await act(async () => events({ type: 'capture-revoked', browserId: 'browser', captureId: 'capture', reason: 'no-visible-presentations' }))
+    expect(next.stop).not.toHaveBeenCalled()
+    expect(bridge.ackPresentationCapture).not.toHaveBeenCalled()
+    expect(container.querySelector('video')?.srcObject).toBe(nextStream)
+    expect(container.querySelector('[data-capture-phase]')?.getAttribute('data-capture-phase')).toBe('ready')
+    staleEventIgnored = true
+  } finally {
+    if (process.env.AGENTMUX_CAPTURE_RETIREMENT_FACTS) await appendFile(process.env.AGENTMUX_CAPTURE_RETIREMENT_FACTS, JSON.stringify({
+      originalReady, laterReady, retiredAck, staleEventIgnored, originalStopCalls: track.stop.mock.calls.length,
+      laterStopCalls: next.stop.mock.calls.length, documentState: document.readyState,
+      registerCalls: bridge.registerPresentation.mock.calls.length, armCalls: bridge.armPresentationCapture.mock.calls.length,
+      deviceCalls: capture.mock.calls.length, phase: container.querySelector('[data-capture-phase]')?.getAttribute('data-capture-phase'),
+      originalStreamOwnedByHappyDOM: stream instanceof MediaStream, nextStreamOwnedByHappyDOM: nextStream instanceof MediaStream
+    }) + '\n')
+  }
+})
 it('selects the existing lease on same-geometry intent change despite capture failure', async () => {
   await render(false); expect(bridge.activatePresentation).not.toHaveBeenCalled(); expect(capture).toHaveBeenCalledTimes(1)
   const nativeStage = container.querySelector('[data-native-browser-stage]')
