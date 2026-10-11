@@ -12,15 +12,15 @@ export function NoteConflictReview({ tabId, regionId, workspaceId, path, active 
 }) {
   const key = documentKey(workspaceId, path), issue = useAppStore(state => state.documentIssues[key])
   const draft = useAppStore(state => state.documents[key]?.content), pending = useAppStore(state => state.documents[key]?.noteEditing?.input)
-  const [open, setOpen] = useState(false), [pair, setPair] = useState<'incoming' | 'local' | 'both'>('both')
+  const [pair, setPair] = useState<'incoming' | 'local' | 'both'>('both')
   if (issue?.kind !== 'changed' || !issue.noteMerge || draft === undefined) return null
   const merge = issue.noteMerge
   const proposed = merge.earlierInput ? merge.proposedContent : draft
   const original = pair === 'both' ? issue.observed.content : merge.baseContent
   const modified = pair === 'incoming' ? issue.observed.content : proposed
-  return <details className="note-version-history" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>Compare conflicting changes</summary>
-    {open && active ? <div className="note-version-history__body">
+  return <section className="note-version-history" aria-label="Conflicting changes">
+    <h3>Conflicting changes</h3>
+    {active ? <div className="note-version-history__body">
       <p role="status">{merge.reason}</p>
       {merge.earlierInput ? <p>This comparison shows an earlier conflicting input. Later inputs are kept in the editor and the retained drafts.</p> : null}
       {issue.operationIssue ? <p role="status">{issue.operationIssue.message}</p> : null}
@@ -36,8 +36,8 @@ export function NoteConflictReview({ tabId, regionId, workspaceId, path, active 
       <div className="note-version-history__heading">
         {pending ? <button type="button" className="note-text-button" onClick={() => void useAppStore.getState().retryNoteInput(tabId, regionId)}>Retry merging input</button> : null}
         <button type="button" className="note-text-button" onClick={() => void useAppStore.getState().reloadDocument(tabId, regionId)}>Use incoming; keep this draft</button>
-        <p>Continue editing to resolve the difference, or explicitly overwrite from the file toolbar.</p>
+        <p>Continue editing to resolve the difference, or explicitly replace the saved file with your draft below.</p>
       </div>
     </div> : null}
-  </details>
+  </section>
 }

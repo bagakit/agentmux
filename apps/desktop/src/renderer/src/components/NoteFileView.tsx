@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import type { FileDocument } from '../../../shared/contracts'
 import { serializeNoteDocument, type NoteBlockTarget } from '../../../shared/note-document'
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
@@ -26,7 +26,7 @@ function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () 
 }
 
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
-export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty, onCheckOriginal, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, history }: {
+export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, revealBlock, onRevealed, focusRequest, canFocus, onFocused, restoredBlock, onSelectedBlock, resource, onOpenPage, dirty, onCheckOriginal, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }: {
   resource?: NoteResource; document: FileDocument; knowledge: NoteKnowledge; onChange: (raw: string, editorBefore?: string) => void; onSave: () => void
   onOpen: (source: NoteSource, blockId: string) => void; revealBlock?: NoteBlockTarget; onRevealed?: () => void
   focusRequest?: number; canFocus?: () => boolean; onFocused?: (nonce: number) => void
@@ -36,7 +36,6 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   onCompositionChange?: (composing: boolean) => void
   onSnapshotIssue?: (displayedRaw: string, incomingRaw: string, reason: string) => void
   onKeepDisplayedDraft?: (displayedRaw: string, incomingRaw: string) => void
-  history?: (active: boolean) => ReactNode
 }) {
   const catalog = useNotebookLibrary(state => state.state)
   const presentation = useWorkbenchBrowserPresentation()
@@ -138,12 +137,9 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     (link, target) => link.referenceId ? handle?.bindLink(link, target) ?? false : true,
     sourceIdentity)
   if (read.status === 'invalid') return <div><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
-    <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>{history?.(presentation.active)}</div>
-  const attribution = document.noteWriteAttribution?.status === 'unconfirmed' ? document.noteWriteAttribution
-    : document.noteProvenance?.status === 'unconfirmed' ? document.noteProvenance : null
+    <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div></div>
   const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active && !canvasOpen} />
   return <div className="note-file-view">
-    {attribution ? <div className="note-knowledge-notice" role="status">{document.noteWriteAttribution?.status === 'unconfirmed' ? 'From the last confirmed save: ' : ''}Block authorship is unconfirmed: {attribution.reason} Your Note remains readable and editable. {onCheckOriginal ? <button className="small-button" onClick={onCheckOriginal}>Check original file</button> : null}</div> : null}
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
     {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!}
       {...(read.note.title === undefined ? {} : { sourceTitle: read.note.title })} {...(dirty === undefined ? {} : { sourceDirty: dirty })} {...(onCheckOriginal ? { onCheckOriginal } : {})} /> : null}
@@ -155,7 +151,6 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
         options={[{ value: 'note', label: 'Note', ariaLabel: 'Note view' }, { value: 'graph', label: 'Graph', ariaLabel: 'Graph view' }]} />
       {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
     </div> : null}
-    {history?.(presentation.active && !canvasOpen)}
     {canvasOpen ? <div className="note-association-canvas"><NoteCanvas scope={{ kind: 'note', noteId: read.note.noteId }} active={presentation.active} onOpen={openCanvasPage} /></div> : null}
     <div hidden={canvasOpen} inert={canvasOpen} className="note-original-editor">
     <WorkbenchPresentationContext.Provider value={canvasOpen ? { ...presentation, active: false } : presentation}>

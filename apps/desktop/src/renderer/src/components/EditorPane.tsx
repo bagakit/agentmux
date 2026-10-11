@@ -1,4 +1,8 @@
-import { RetainedDocumentDraftNotice } from './RetainedDocumentDraftNotice'
+import * as Dialog from '@radix-ui/react-dialog'
+import { workspaceFileFormat } from '../../../shared/workspace-file-format'
+import { NoteRecoveryDrawer, NoteRecoverySummary, type NoteRecoverySection } from './NoteRecoveryDrawer'
+import { WorkbenchPresentationContext, useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
+import { RetainedDocumentDraftNotice, useNoteConversionObservation } from './RetainedDocumentDraftNotice'
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../lib/api'
@@ -88,8 +92,7 @@ export function EditorPane({
   visible = true,
   preview,
   onTogglePreview,
-  extraActions,
-  previewHasNoteAttribution = false
+  extraActions
 }: {
   tabId: string
   surface: FileWorkbenchSurface
@@ -98,13 +101,27 @@ export function EditorPane({
   preview?: ReactNode
   onTogglePreview?: () => void
   extraActions?: ReactNode
-  previewHasNoteAttribution?: boolean
 }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const noteName = useNoteFileName(surface.workspaceId, surface.path)
+  const note = workspaceFileFormat(surface.path).sourcePreview === 'note'
+  const presentation = useWorkbenchBrowserPresentation()
+  const frame = useRef<HTMLElement | null>(null)
+  const observation = useNoteConversionObservation(surface, note && visible && !released && presentation.active)
+  const [drawer, setDrawer] = useState<{ key: string; section: NoteRecoverySection } | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const opener = useRef<{ element: HTMLElement; key: string } | null>(null)
+  const drawerOpen = note && visible && !released && drawer?.key === key
+  function openActivity(section: NoteRecoverySection, element: HTMLElement) {
+    opener.current = { element, key }
+    setExpanded(false); setDrawer({ key, section })
+  }
+  useEffect(() => { setDrawer(null); setExpanded(false) }, [key])
+
   const document = useAppStore((state) => {
     return state.documents[key] ?? null
   })
+  const keptCount = useAppStore(state => state.retainedDocumentDrafts[key]?.length ?? 0)
   const dirty = useAppStore((state) => {
     return Boolean(state.dirtyDocuments[key])
   })
@@ -139,6 +156,9 @@ export function EditorPane({
   const monacoTheme = useMonacoTheme()
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const sourceViewState = useRef<FileEditorViewState | null>(null)
+  const [sourceShown, setSourceShown] = useState<string | null>(null)
+  useEffect(() => { if (note && visible && regionMode === 'edit') setSourceShown(key) }, [note, visible, regionMode, key])
+
   const [formatResult, setFormatResult] = useState<FileFormatResult | { status: 'formatting'; message: string } | null>(null)
   const formatRequest = useRef(0)
   useEffect(() => {
@@ -185,39 +205,9 @@ export function EditorPane({
   const pendingNote = document.noteEditing?.attempt, noteReceipt = document.noteEditing?.receipt
   const historyIssue = noteReceipt?.noteHistory?.status === 'unconfirmed' ? noteReceipt.noteHistory : null
   const titleIssue = noteReceipt?.noteTitleProjection?.status === 'unconfirmed' ? noteReceipt.noteTitleProjection : null
-  return (
-    <section
-      className={`editor-pane ${onTogglePreview || extraActions ? 'editor-pane--format' : ''}`}
-      data-file-state={issue?.kind ?? (saving ? 'saving' : dirty ? 'dirty' : 'clean')}
-    >
-      <header className="editor-header">
-        <FilePathLabel path={document.path} label={previewing ? noteName : undefined} />
-        <div className="editor-header__actions">
-          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionRevealIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
-          {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
-            : conflict ? <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
-              : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>
-                : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">Retry</span></button>
-                : saving ? <span className="editor-header__status" role="status" aria-label="Saving file">Saving…</span>
-                  : dirty ? <button className="small-button" title="Save file" aria-label="Save file" onClick={() => void save(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">Save</span></button>
-                    : <span className="editor-header__status" role="status" aria-label="File saved">Saved</span>}
-          <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><ThemeActionMoreIcon size={14} /></button></DropdownMenu.Trigger>
-            <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
-              {regionMode === 'edit' && canFormatFile(document.path) ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={formatDraft}><ThemeObjectSourceCodeIcon size={13} /><span>{formatResult?.status === 'formatting' ? 'Cancel formatting' : 'Format document'}</span></DropdownMenu.Item> : null}
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><ThemeActionWrapTextIcon size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
-              {regionMode === 'edit' ? <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={minimap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleMinimap()}><ThemeObjectMapIcon size={13} /><span>Minimap</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem> : null}
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><ThemeGitCompareIcon size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
-              {conflict ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving} onSelect={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} />Reload from disk</DropdownMenu.Item> : null}
-              {extraActions ? <><DropdownMenu.Separator className="tab-context-menu__separator" />{extraActions}</> : null}
-            </DropdownMenu.Content></DropdownMenu.Portal>
-          </DropdownMenu.Root>
-        </div>
-      </header>
-      <div className="editor-file-notices">
-        {!previewHasNoteAttribution && document.noteProvenance?.status === 'unconfirmed' && document.noteWriteAttribution?.status !== 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship is unconfirmed: {document.noteProvenance.reason} Your Note remains readable and editable. <button className="small-button" onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original file</button></div> : null}
-        {!previewHasNoteAttribution && document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship from the last confirmed save is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
-        {formatResult?.message ? <div className="editor-file-notice" role={formatResult.status === 'failed' ? 'alert' : 'status'}>{formatResult.message}</div> : null}
-        <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
+  const recoveryNotices = <>
+        {document.noteProvenance?.status === 'unconfirmed' && document.noteWriteAttribution?.status !== 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship is unconfirmed: {document.noteProvenance.reason} Your Note remains readable and editable. <button className="small-button" onClick={() => void refresh(surface.workspaceId, surface.path)}>Check original file</button></div> : null}
+        {document.noteWriteAttribution?.status === 'unconfirmed' ? <div className="editor-file-notice" role="status">Block authorship from the last confirmed save is unconfirmed: {document.noteWriteAttribution.reason} Your Note remains editable; a later save with a confirmed author records its changed blocks.</div> : null}
         {pendingNote ? <div className="editor-file-notice" role="status"><span>{pendingNote.phase === 'written'
           ? pendingNote.canonical !== undefined && document.noteEditing?.input?.phase === 'conflict' ? 'The saved result is confirmed. Resolve the retained input before applying it to this draft.' : 'The Note was saved. Its canonical content still needs confirmation; your draft and original request are retained.'
           : pendingNote.phase === 'sending' ? 'Saving the original Note. Your later input stays in this draft.'
@@ -244,16 +234,67 @@ export function EditorPane({
             </span>
           </div>
         ) : null}
+
+  </>
+  return (
+    <Dialog.Root modal={false} open={drawerOpen} onOpenChange={open => { if (!open) { setDrawer(null); setExpanded(false) } }}>
+    <section ref={frame}
+      className={`editor-pane ${note ? 'note-document-frame' : ''} ${onTogglePreview || extraActions ? 'editor-pane--format' : ''}`}
+      data-file-state={issue?.kind ?? (saving ? 'saving' : dirty ? 'dirty' : 'clean')}
+    >
+      <header className="editor-header">
+        <FilePathLabel path={document.path} label={previewing ? noteName : undefined} />
+        <div className="editor-header__actions">
+          {note ? <button type="button" className="small-button" aria-label="Open versions and recovery" aria-expanded={drawerOpen} onClick={event => drawerOpen ? setDrawer(null) : openActivity('versions', event.currentTarget)}>History{keptCount ? ` · ${keptCount} kept` : ''}</button> : null}
+          {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <ThemeObjectSourceCodeIcon size={13} /> : <ThemeActionRevealIcon size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
+          {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
+            : conflict ? note ? <button type="button" className="small-button" onClick={event => openActivity('drafts', event.currentTarget)}>Review changes</button> : <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
+              : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>
+                : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} /><span className="editor-header__label">Retry</span></button>
+                : saving ? <span className="editor-header__status" role="status" aria-label="Saving file">Saving…</span>
+                  : dirty ? <button className="small-button" title="Save file" aria-label="Save file" onClick={() => void save(tabId, surface.regionId)}><ThemeActionSaveIcon size={13} /><span className="editor-header__label">Save</span></button>
+                    : <span className="editor-header__status" role="status" aria-label="File saved">Saved</span>}
+          <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><ThemeActionMoreIcon size={14} /></button></DropdownMenu.Trigger>
+            <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
+              {regionMode === 'edit' && canFormatFile(document.path) ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={formatDraft}><ThemeObjectSourceCodeIcon size={13} /><span>{formatResult?.status === 'formatting' ? 'Cancel formatting' : 'Format document'}</span></DropdownMenu.Item> : null}
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><ThemeActionWrapTextIcon size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              {regionMode === 'edit' ? <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={minimap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleMinimap()}><ThemeObjectMapIcon size={13} /><span>Minimap</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem> : null}
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><ThemeGitCompareIcon size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="file-menu-check"><ThemeStatusSelectedIcon size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              {conflict ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving} onSelect={() => void reload(tabId, surface.regionId)}><ThemeActionRefreshIcon size={13} />Reload from disk</DropdownMenu.Item> : null}
+              {extraActions ? <><DropdownMenu.Separator className="tab-context-menu__separator" />{extraActions}</> : null}
+            </DropdownMenu.Content></DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        </div>
+      </header>
+      <div className="editor-file-notices">
+        {formatResult?.message ? <div className="editor-file-notice" role={formatResult.status === 'failed' ? 'alert' : 'status'}>{formatResult.message}</div> : null}
+        {note ? <NoteRecoverySummary surface={surface} observation={observation} onView={element => openActivity('drafts', element)} /> : <>{recoveryNotices}<RetainedDocumentDraftNotice tabId={tabId} surface={surface} /></>}
       </div>
-      <div className="editor-canvas">
+      <div className="editor-workspace">
+      <div className="editor-canvas" inert={drawerOpen && expanded}>
         <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" title="Loading editor" detail="Preparing the editor" />}>
-        {previewing ? preview : regionMode === 'diff' ? (
+        {note ? <>
+          <div className="note-document-projection" hidden={!previewing} inert={!previewing}>
+            <WorkbenchPresentationContext.Provider value={{ ...presentation, active: presentation.active && visible && previewing }}>{preview}</WorkbenchPresentationContext.Provider>
+          </div>
+          <div className="note-document-projection" hidden={regionMode !== 'edit'} inert={regionMode !== 'edit'}>
+            {regionMode === 'edit' || sourceShown === key ? <FileSourceEditor key={key} tabId={tabId} surface={surface} visible={visible && regionMode === 'edit'} viewState={sourceViewState} /> : null}
+          </div>
+          {regionMode === 'diff' ? <GitDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} theme={monacoTheme} /> : null}
+        </> : previewing ? preview : regionMode === 'diff' ? (
           <GitDiffCanvas diff={regionDiff} wordWrap={wordWrap} language={detectLanguage(document.path)} theme={monacoTheme} />
         ) : (
           <FileSourceEditor tabId={tabId} surface={surface} visible={visible} viewState={sourceViewState} />
         )}
         </Suspense>
       </div>
+      {note ? <NoteRecoveryDrawer tabId={tabId} surface={surface} active={drawerOpen && presentation.active} section={drawer?.section ?? 'versions'}
+        onSection={section => setDrawer({ key, section })} expanded={expanded} onExpand={() => setExpanded(value => !value)} observation={observation}
+        onCloseAutoFocus={event => { event.preventDefault(); if (visible && presentation.active && opener.current?.key === key && opener.current.element.isConnected && frame.current?.contains(opener.current.element)) opener.current.element.focus() }}>
+        {recoveryNotices}
+      </NoteRecoveryDrawer> : null}
+      </div>
     </section>
+    </Dialog.Root>
   )
 }
