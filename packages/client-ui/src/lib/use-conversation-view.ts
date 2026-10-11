@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, type ConversationWindowAssembly,
   type ConversationWindowSnapshot, type ConversationTimelineReadInput, type ConversationChangesInput,
   type ConversationObservationHandle, type ConversationRef } from '@agentmux/core/conversation'
@@ -24,9 +24,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
   options: { identity?: string; beforeCommit?(snapshot: ConversationWindowSnapshot, operation: Operation): boolean } = {}) {
   const key = reference ? JSON.stringify([reference.hostId, reference.agentSessionId, options.identity]) : ''
   const [state, setState] = useState<ViewState>(empty)
+  const snapshot = state.snapshot && reference && state.snapshot.hostId === reference.hostId && state.snapshot.agentSessionId === reference.agentSessionId ? state.snapshot : null
+  const committed = useRef({ state, key, snapshot, active })
+  useLayoutEffect(() => { committed.current = { state, key, snapshot, active } }, [state, key, snapshot, active])
   const owner = useRef<{ key: string; controller: AbortController; snapshot: ConversationWindowSnapshot | null;
     request: AbortController | null; handle: ConversationObservationHandle | null; observed: ConversationWindowSnapshot | null; inFlight: Promise<void> | null; timer: ReturnType<typeof setTimeout> | null;
-    retryTimer: ReturnType<typeof setTimeout> | null; retryDelay: number; historical: boolean; dirty: boolean; held: boolean } | null>(null)
+    retryTimer: ReturnType<typeof setTimeout> | null; retryDelay: number; historical: boolean; dirty: boolean; held: boolean;
+    binding: ConversationWindowSnapshot | null; invalidations: number; unavailable: number } | null>(null)
   const retained = useRef<{ client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean } | null>(null)
   const beforeCommit = useRef(options.beforeCommit); beforeCommit.current = options.beforeCommit
   const operation = useRef<(kind: Operation, selection?: Selection) => Promise<void>>(async () => {})
@@ -40,7 +44,8 @@ export function useConversationView(client: ConversationViewClient | null, refer
     const current = { key, controller: new AbortController(), snapshot: parked?.snapshot ?? null as ConversationWindowSnapshot | null,
       request: null as AbortController | null, handle: null as ConversationObservationHandle | null, observed: null as ConversationWindowSnapshot | null, inFlight: null as Promise<void> | null,
       timer: null as ReturnType<typeof setTimeout> | null, retryTimer: null as ReturnType<typeof setTimeout> | null, retryDelay: 100,
-      historical: parked?.historical ?? false, dirty: false, held: false }
+      historical: parked?.historical ?? false, dirty: false, held: false,
+      binding: null as ConversationWindowSnapshot | null, invalidations: 0, unavailable: 0 }
     owner.current = current
     setState(value => value.snapshot?.hostId === reference.hostId && value.snapshot.agentSessionId === reference.agentSessionId
       ? { ...value, loading: true, error: null } : { ...empty(), loading: true })
@@ -64,14 +69,18 @@ export function useConversationView(client: ConversationViewClient | null, refer
     const bind = async (snapshot: ConversationWindowSnapshot, isCurrent: () => boolean) => {
       if (current.handle && !current.handle.closed.aborted && current.observed?.window.id === snapshot.window.id) return
       const oldHandle = current.handle, oldSnapshot = current.observed
-      const handle = await client.observeConversation({ ...ref, view: snapshot.window.view! }, observation => {
+      current.binding = snapshot
+      let handle: ConversationObservationHandle
+      try { handle = await client.observeConversation({ ...ref, view: snapshot.window.view! }, observation => {
         if (!alive()) return
+        if (observation.kind === 'unavailable') current.unavailable++
+        else current.invalidations++
         if (observation.kind === 'unavailable') setState(value => ({ ...value, observationError: Object.assign(new Error(observation.message), { code: observation.code }) }))
         else {
           setState(value => ({ ...value, observationError: null, newerAvailable: current.historical || current.held || value.newerAvailable }))
           schedule()
         }
-      }, { signal })
+      }, { signal }) } finally { if (current.binding === snapshot) current.binding = null }
       if (!isCurrent()) { handle.dispose(); if (snapshot.window.id !== current.snapshot?.window.id) release(snapshot); return }
       if (handle.sourceHostId !== snapshot.sourceHostId || handle.scope.sources.length !== snapshot.scope.sources.length ||
         handle.scope.sources.some(source => !snapshot.scope.sources.some(original => conversationSourceKey(source) === conversationSourceKey(original)))) {
@@ -195,6 +204,16 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const resume = useCallback(() => operation.current(owner.current?.snapshot ? 'resume' : 'latest'), [])
   const settle = useCallback(async () => { const current = owner.current; await current?.inFlight; return owner.current === current ? current?.snapshot ?? null : null }, [])
   const changes = useCallback(() => operation.current('changes'), [])
+  /** Instantaneous pointers to this mounted consumer; no read, retry or copied frame store. */
+  const inspect = useCallback(() => {
+    const accepted = committed.current, current = owner.current?.key === accepted.key ? owner.current : null
+    return { ...accepted.state, snapshot: accepted.snapshot, loading: accepted.active && accepted.state.loading,
+      error: accepted.state.error ?? accepted.state.sourceError,
+      pending: current?.held ? current.snapshot : null,
+      dirty: current?.dirty ?? null, inFlight: Boolean(current?.inFlight),
+      watch: { binding: Boolean(current?.binding), bound: Boolean(current?.handle), closed: current?.handle?.closed.aborted ?? null,
+        windowId: current?.observed?.window.id ?? null, invalidations: current?.invalidations ?? 0, unavailable: current?.unavailable ?? 0 } }
+  }, [])
   const retry = useCallback(() => operation.current(retryOperation.current.kind, retryOperation.current.selection), [])
   const acceptHeld = useCallback(() => {
     const current = owner.current
@@ -204,7 +223,6 @@ export function useConversationView(client: ConversationViewClient | null, refer
       newerAvailable: current.historical || current.dirty ? value.newerAvailable : false }))
     if (current.dirty && !current.historical) void operation.current('changes')
   }, [])
-  const snapshot = state.snapshot && reference && state.snapshot.hostId === reference.hostId && state.snapshot.agentSessionId === reference.agentSessionId ? state.snapshot : null
   const reading = useMemo(() => snapshot ? projectConversationWindow(snapshot) : null, [snapshot])
-  return { ...state, error: state.error ?? state.sourceError, snapshot, reading, loading: active && state.loading, hasMore: Boolean(snapshot?.window.navigation.older), hasNewer: Boolean(snapshot?.window.navigation.newer), earlier, newer, refresh, resume, settle, changes, retry, acceptHeld, selectSource, reveal }
+  return { ...state, error: state.error ?? state.sourceError, snapshot, reading, loading: active && state.loading, hasMore: Boolean(snapshot?.window.navigation.older), hasNewer: Boolean(snapshot?.window.navigation.newer), earlier, newer, refresh, resume, settle, changes, retry, inspect, acceptHeld, selectSource, reveal }
 }

@@ -10,6 +10,7 @@ import type {
   DesktopControlResponse
 } from '../../../shared/contracts'
 import { addressingRecovery } from './agent-address'
+import { inspectConversationConsumers } from './conversation-consumer-observation'
 
 function cancellationError(code: AgentMuxControlErrorCode, message: string): Error & { code: AgentMuxControlErrorCode } {
   return Object.assign(new Error(message), { code })
@@ -159,7 +160,9 @@ export function createRendererControlApi(
         }
         const controller = new AbortController()
         controllers.set(request.requestId, controller)
-        void Promise.resolve().then(() => listener(request, controller.signal)).then(
+        void Promise.resolve().then(() => request.operation === 'inspect.client' && request.conversation
+          ? { operation: 'inspect.client' as const, observation: inspectConversationConsumers(request.conversation) }
+          : listener(request, controller.signal)).then(
           (result) => settle(request.requestId, controller, { requestId: request.requestId, ok: true, result }),
           (error) => settle(request.requestId, controller, { requestId: request.requestId, ok: false, error: responseError(error) })
         )

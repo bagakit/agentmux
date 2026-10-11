@@ -65,12 +65,16 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {})}
       openHttpLink={openProseLink}
       {...(onAnnotate ? { onSelectAnnotation: selectAnnotation } : {})}
-      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})} />
+      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined,
+        consumer: { ...activity.conversationReading.consumer, regionId, presentationId: workbenchSessionStageHostId(target, regionId),
+          visible, activityShown: eligible, viewMode: 'activity' } } } : {})} />
   }
   const reading = activity?.conversationReading ?? presented.current.content?.props.conversationReading
   if (presented.current.content) presented.current.content = retainActivityControls(presented.current.content, {
     activitySemantic: activity?.activitySemantic ?? 'unknown',
-    ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})
+    ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: false, onClose: undefined,
+      consumer: { ...reading.consumer, regionId, presentationId: workbenchSessionStageHostId(target, regionId),
+        visible, activityShown: eligible, viewMode: 'activity' } } } : {})
   })
   const content = presented.current.content
   const hostId = workbenchSessionStageHostId(target, regionId)

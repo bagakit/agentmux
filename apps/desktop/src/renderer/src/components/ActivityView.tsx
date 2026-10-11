@@ -12,7 +12,7 @@ import { ReadingFind } from '@agentmux/client-ui/components/ReadingFind'
 import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation-trace-disclosure'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -60,6 +60,10 @@ import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeP
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest, RevealConversationItem } from '../lib/mailbox-message-navigation'
+import { registerConversationConsumer, conversationFrameObservation, conversationRenderedObservation, conversationInspectionError } from '../lib/conversation-consumer-observation'
+import { workbenchDocumentIdentity } from '../lib/workbench-window-registry'
+import type { ConversationConsumerQuery } from '@agentmux/core/control'
+import type { ConversationConsumerSample } from '../../../shared/conversation-consumer-observation'
 
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
@@ -452,6 +456,35 @@ export function ActivityView({
   const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
   const items = readingWindow.captured ?? []
   const readingEnabled = conversationReading?.enabled !== false
+  const consumerId = useId()
+  const inspectConsumer = useRef<((query: ConversationConsumerQuery) => ConversationConsumerSample | null) | null>(null)
+  useLayoutEffect(() => {
+    inspectConsumer.current = query => {
+      const reading = conversationReading
+      if (!reading || query.hostId !== reading.reference.hostId || query.agentSessionId !== reading.reference.agentSessionId) return null
+      const value = readingWindow.inspect(), context = reading.consumer
+      const rect = feedEl?.getBoundingClientRect(), runId = context?.runId ?? null
+      return { consumerId, reference: { hostId: reading.reference.hostId, agentSessionId: reading.reference.agentSessionId }, runId,
+        matchesExpectedRun: query.expectedRunId === undefined || runId === null ? null : query.expectedRunId === runId,
+        readingIdentity: reading.identity,
+        location: { regionId: context?.regionId ?? null, presentationId: context?.presentationId ?? null,
+          document: feedEl ? workbenchDocumentIdentity(feedEl.ownerDocument) : null },
+        gates: { enabled: reading.enabled, visible: context?.visible ?? null, parked: context?.parked ?? null,
+          activityShown: context?.activityShown ?? null, viewMode: context?.viewMode ?? null },
+        viewport: { connected: Boolean(feedEl?.isConnected), hidden: Boolean(feedEl?.closest('[hidden], [inert]')),
+          width: Math.max(0, rect?.width ?? 0), height: Math.max(0, rect?.height ?? 0) },
+        loading: value.loading, held: value.held, historical: value.historical, newerAvailable: value.newerAvailable,
+        dirty: value.dirty, inFlight: value.inFlight, watch: value.watch,
+        error: conversationInspectionError(value.error), sourceError: conversationInspectionError(value.sourceError),
+        observationError: conversationInspectionError(value.observationError),
+        accepted: conversationFrameObservation(value.snapshot, query.records), pending: conversationFrameObservation(value.pending, query.records),
+        rendered: conversationRenderedObservation(feedEl, sessionId, query.records, value.snapshot?.sourceHostId) }
+    }
+  })
+  useLayoutEffect(() => {
+    if (!conversationReading) return
+    return registerConversationConsumer(consumerId, query => inspectConsumer.current?.(query) ?? null)
+  }, [consumerId, Boolean(conversationReading)])
   useLayoutEffect(() => {
     if (earlierCommitPending.current) {
       earlierCommitPending.current = false
