@@ -1,6 +1,6 @@
 import type { AgentSessionHistoryItem } from '@agentmux/core'
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { projectConversationRecordSequence } from '../lib/conversation-record-sequence.js'
+import { projectConversationRecordSequence, type ConversationSequenceInsertion } from '../lib/conversation-record-sequence.js'
 import { projectConversationMetrics, type ConversationMetricsObservation } from '../lib/conversation-metrics.js'
 import { ConversationMetrics } from './ConversationMetrics.js'
 
@@ -14,6 +14,8 @@ export type ConversationProcessProps = {
   id: string
   items: readonly AgentSessionHistoryItem[]
   renderRecord: ConversationRecordRenderer
+  /** One ordered process, with opaque foreign entries kept at their original renderer. */
+  entries?: readonly ({ kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'insertion'; key: string; content: ReactNode; role?: 'anchor' })[]
   metrics?: ConversationMetricsObservation
   /** Reading choices survive a process being split by another source's input. */
   disclosure?: {
@@ -28,9 +30,7 @@ export type ConversationProcessProps = {
 export type ConversationProcessRenderer = (props: ConversationProcessProps) => ReactNode
 export type ConversationRecordBoundary = { beforeRecordId: string; content: ReactNode }
 /** Already read records from another source; keys retain that original source identity. */
-export type ConversationRecordInsertion = {
-  key: string
-  beforeRecordId?: string
+export type ConversationRecordInsertion = ConversationSequenceInsertion & {
   /** Original IDs for process disclosure only; record bodies remain at their owner. */
   recordIds?: readonly string[]
   content: ReactNode | ((disclosure: NonNullable<ConversationProcessProps['disclosure']>) => ReactNode)
@@ -48,8 +48,8 @@ export function ConversationRecordSequence({
   insertions?: readonly ConversationRecordInsertion[]
   nativeSourceKey?: string
 }) {
-  const committed = useRef<{ source: string; groups: Map<string, string>; positions: Omit<ConversationRecordInsertion, 'content'>[] }>({
-    source: sourceKey, groups: new Map(), positions: []
+  const committed = useRef<{ source: string; groups: Map<string, string>; insertionGroups: Map<string, string>; positions: Omit<ConversationRecordInsertion, 'content'>[] }>({
+    source: sourceKey, groups: new Map(), insertionGroups: new Map(), positions: []
   })
   const groupNodes = useRef(new Map<string, HTMLDivElement>())
   const [, selectionChanged] = useState(0)
@@ -65,7 +65,7 @@ export function ConversationRecordSequence({
     })
   }
   const previous = committed.current.source === sourceKey ? committed.current.groups : new Map<string, string>()
-  const recordIds = new Set(items.map(item => item.id))
+  const previousInsertions = committed.current.source === sourceKey ? committed.current.insertionGroups : new Map<string, string>()
   const choiceKey = (kind: 'native' | 'insertion', id: string) => JSON.stringify([kind, id])
   const choiceIds = new Set([...items.map(item => choiceKey('native', item.id)), ...insertions.flatMap(entry => (entry.recordIds ?? []).map(id => choiceKey('insertion', id)))])
   const disclosureFor = (ids: readonly string[], kind: 'native' | 'insertion'): NonNullable<ConversationProcessProps['disclosure']> => {
@@ -77,14 +77,14 @@ export function ConversationRecordSequence({
       onStepsPresented: presented => disclose(presented.map(id => choiceKey(kind, id)), false, 'steps', true) }
   }
   let acceptedInsertions = insertions
-  let projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId,
-    new Set(insertions.flatMap(entry => entry.beforeRecordId ? [entry.beforeRecordId] : [])))
+  let projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId, insertions, previousInsertions)
   // An arriving cross-source input can split an expanded process parent. Defer only
   // its placement metadata while a Range uses that parent; bodies stay at their owner.
   const document = groupNodes.current.values().next().value?.ownerDocument
   const selection = document?.defaultView?.getSelection()
   let held = false
   const splitGroups = new Set([...previous].flatMap(([record, group]) => projection.groups.has(record) && projection.groups.get(record) !== group ? [group] : []))
+  for (const [key, group] of previousInsertions) if (projection.insertionGroups.has(key) && projection.insertionGroups.get(key) !== group) splitGroups.add(group)
   if (selection && !selection.isCollapsed && selection.rangeCount) for (const [id, node] of groupNodes.current) {
     if (!splitGroups.has(id)) continue
     try { if (selection.getRangeAt(0).intersectsNode(node)) { held = true; break } }
@@ -98,8 +98,7 @@ export function ConversationRecordSequence({
       const { beforeRecordId: _, ...rest } = entry
       return [{ ...rest, ...(position.beforeRecordId === undefined ? {} : { beforeRecordId: position.beforeRecordId }) }]
     })
-    projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId,
-      new Set(acceptedInsertions.flatMap(entry => entry.beforeRecordId ? [entry.beforeRecordId] : [])))
+    projection = projectConversationRecordSequence(items, sourceKey, previous, recordBoundary?.beforeRecordId, acceptedInsertions, previousInsertions)
   }
   useEffect(() => {
     if (!held || !document) return
@@ -113,7 +112,7 @@ export function ConversationRecordSequence({
     {showMetrics && metrics.has(item.id) ? <ConversationMetrics observation={metrics.get(item.id)!} /> : null}
     {showDiagnostic && item.metricsDiagnostic ? <p className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null}
   </Fragment>
-  useLayoutEffect(() => { committed.current = { source: sourceKey, groups: projection.groups,
+  useLayoutEffect(() => { committed.current = { source: sourceKey, groups: projection.groups, insertionGroups: projection.insertionGroups,
     positions: acceptedInsertions.map(({ key, beforeRecordId }) => ({ key, ...(beforeRecordId === undefined ? {} : { beforeRecordId }) })) } })
   useLayoutEffect(() => {
     setDisclosure(previous => {
@@ -123,25 +122,31 @@ export function ConversationRecordSequence({
       return groups.size === previous.groups.size && steps.size === previous.steps.size ? previous : { source: sourceKey, groups, steps }
     })
   }, [items, sourceKey, insertions])
-  const insertBefore = new Map<string | undefined, ConversationRecordInsertion[]>()
-  for (const entry of acceptedInsertions) {
-    const before = entry.beforeRecordId && recordIds.has(entry.beforeRecordId) ? entry.beforeRecordId : undefined
-    const bucket = insertBefore.get(before) ?? []
-    bucket.push(entry); insertBefore.set(before, bucket)
+  const insertionByKey = new Map(acceptedInsertions.map(entry => [entry.key, entry]))
+  const renderInserted = (key: string) => {
+    const entry = insertionByKey.get(key)!
+    return <Fragment key={JSON.stringify(['insertion', key])}>{typeof entry.content === 'function' ? entry.content(disclosureFor(entry.recordIds ?? [], 'insertion')) : entry.content}</Fragment>
   }
-  const renderInserted = (id?: string) => (insertBefore.get(id) ?? []).map(entry => <Fragment key={JSON.stringify(['insertion', entry.key])}>{typeof entry.content === 'function' ? entry.content(disclosureFor(entry.recordIds ?? [], 'insertion')) : entry.content}</Fragment>)
-  return <>{held ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}{projection.rows.flatMap(row => [
-    ...('item' in row ? renderInserted(row.item.id) : row.kind === 'process' ? renderInserted(row.items[0]?.id) : []),
+  return <>{held ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}{projection.rows.map(row =>
     row.kind === 'record' ? renderOne(row.item)
+    : row.kind === 'insertion' ? renderInserted(row.insertion.key)
     : row.kind === 'boundary' ? <Fragment key={JSON.stringify([sourceKey, 'boundary'])}>{recordBoundary?.content}</Fragment>
-    : renderProcess ? <div key={row.id} ref={node => { if (node) groupNodes.current.set(row.id, node); else groupNodes.current.delete(row.id) }}
+    : renderProcess ? <Fragment key={row.id}><div ref={node => { if (node) groupNodes.current.set(row.id, node); else groupNodes.current.delete(row.id) }}
       className="conversation-record-process" data-native-source={nativeSourceKey} data-native-record-ids={JSON.stringify(row.items.map(item => item.id))}>
       {(() => {
+        const entries = row.entries.filter(entry => entry.kind !== 'insertion' || entry.insertion.role !== 'anchor')
+        const keys = entries.flatMap(entry => entry.kind === 'native' ? [choiceKey('native', entry.item.id)]
+          : (insertionByKey.get(entry.insertion.key)?.recordIds ?? []).map(id => choiceKey('insertion', id)))
+        const expanded = keys.map(key => choices.groups.get(key)).find(value => value !== undefined)
         const observed = row.items.flatMap(item => metrics.has(item.id) ? [metrics.get(item.id)!] : [])
-        const summary = observed.length === 1 ? observed[0] : undefined
+        const summary = observed.length === 1 && entries.every(entry => entry.kind === 'native') ? observed[0] : undefined
         return renderProcess({ id: row.id, items: row.items, renderRecord: (item, wrapBody) => renderOne(item, wrapBody, false, !summary),
-          disclosure: disclosureFor(row.items.map(item => item.id), 'native'),
+          entries: row.entries.map(entry => entry.kind === 'native' ? entry : { kind: 'insertion', key: entry.insertion.key, content: renderInserted(entry.insertion.key),
+            ...(entry.insertion.role === 'anchor' ? { role: 'anchor' as const } : {}) }),
+          disclosure: { ...disclosureFor(row.items.map(item => item.id), 'native'), ...(expanded === undefined ? {} : { expanded }),
+            onExpandedChange: open => disclose(keys, open, 'groups') },
           ...(summary ? { metrics: summary } : {}) })
       })()}
-    </div> : row.items.map(item => renderOne(item))])}{renderInserted()}</>
+    </div></Fragment>
+    : <Fragment key={row.id}>{row.entries.map(entry => entry.kind === 'native' ? renderOne(entry.item) : renderInserted(entry.insertion.key))}</Fragment>)}</>
 }
