@@ -75,6 +75,14 @@ Work、Survey、Recall 与左下 Mote 面板的导航范围，以及明确跨上
 
 
 
+### 对话消费者的只读观察
+
+`app.inspect` 可带 `conversation` 查询，CLI 以 `app inspect --input` 消费同一参数：准确 Host／Session、可选预期 Run／consumer，以及带来源身份的原记录引用。不带查询继续返回原客户端观察；带查询返回独立的 `agentmux.conversation-consumer-observation.v1`，只读取已挂载消费者。没有消费者返回空集合，身份或文档来源未知保持 unknown，不冒充 Session 不存在或记录缺失。
+
+观察沿现有 Main／Renderer 通道返回已加载 owner、实际 DOM 所属窗口与文档代次、原消费者的读取资格、已接受和因阅读保护暂缓提交的窗口、checkpoint／来源覆盖、在途与订阅状态，以及准确记录是否在原窗口中。挂载消息卡、正文是否被折叠／隐藏，以及原记录展开控件分别表达；正文未隐藏不证明处于屏幕可视范围或像素已经绘制。记录成员关系不证明原生采用、消息送达或正文已完整读到。
+
+查询不挂载、激活、重读、刷新或重试，不解除阅读保护，不改变焦点、草稿、Run 或输入资格。只保留挂载回调，不复制正文、窗口、来源账本或持久状态；DOM 扫描只随被查询消费者及准确引用发生，不新增 Reader、轮询或无关 Session 的工作。对话读取与重试行为仍由[同一对话阅读面](conversation-mode.md#连续统一的对话列表)约束。
+
 ## Browser 通用能力协议与 CLI/Skill 接入
 
 选型论证、现状缺口与竖切顺序见
