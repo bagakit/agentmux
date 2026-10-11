@@ -650,7 +650,7 @@ export function normalizeNativeHook(
   )
   // Authentication binds the Core Session/Run. A different native identity still needs an
   // explicit Provider membership/transition rule; absence of a witness never grants one.
-  const protectedTargetMismatch = context.protectedNativeTarget === true && knownLocatorChanged && !childSubject
+  const protectedTargetMismatch = context.protectedNativeTarget === true && (context.nativeTargetMismatch === true || knownLocatorChanged && !childSubject)
   const nativeSessionMatches = !protectedTargetMismatch && (declaredSubject
     ? declaredSubject.kind === 'main' || declaredSubject.kind === 'child'
     : specification.matchesNativeSession?.(eventName, rawPayload, context) ?? !knownLocatorChanged)

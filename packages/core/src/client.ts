@@ -8545,7 +8545,9 @@ export class AgentMuxClient {
     if (this.endedRuns.has(envelope.runId)) return
     // Source change is an observation, never permission to apply the new conversation's semantics to the old binding.
     const protectedTarget = session.nativeHandle !== undefined
-    const witnessTargetMismatch = witness.handle && session.nativeHandle && witness.handle.sessionId !== session.nativeHandle.sessionId
+    // Partial process witnesses may omit a retained locator; an explicit contradiction cannot replace it.
+    const witnessTargetMismatch = witness.handle && session.nativeHandle &&
+      !matchesProviderNativeSessionTarget(session.nativeHandle, witness.handle) && !matchesProviderNativeSessionTarget(witness.handle, session.nativeHandle)
     if (witnessTargetMismatch || witness.reason === 'native-witness-unavailable' || witness.reason === 'native-main-ambiguous') {
       const state = witnessTargetMismatch ? 'changed' as const : witness.reason === 'native-main-ambiguous' ? 'ambiguous' as const : 'unknown' as const
       let next: AgentMuxStoredAgentSession
@@ -8572,7 +8574,8 @@ export class AgentMuxClient {
       if (witness.reason === 'native-witness-unavailable' || witness.reason === 'native-main-ambiguous') this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
         code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'Native Hook identity could not be confirmed from this Run. The Run and input remain available; Refresh the native Session observation to retry.',
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: next.nativeSourceObservation!.observedAt } })
-      return
+      // A conflicting locator still has an authenticated Hook envelope; retain its neutral receipt.
+      if (!witnessTargetMismatch || witness.handle?.sessionId !== session.nativeHandle?.sessionId) return
     }
     const context: AgentProviderHookNormalizationContext = Object.freeze({
       ...(session.nativeHandle ? { nativeHandle: Object.freeze({ ...session.nativeHandle }) } : {}),
@@ -8582,7 +8585,7 @@ export class AgentMuxClient {
       ...(protectedTarget ? { protectedNativeTarget: true } : {}),
       ...(witness.childSessionIds ? { processNativeChildSessionIds: witness.childSessionIds } : {}),
       ...(witness.handle && !(protectedTarget && witnessTargetMismatch) ? { processNativeHandle: Object.freeze({ ...witness.handle }) } : {}),
-      ...(protectedTarget && witnessTargetMismatch ? { nativeIdentityReason: 'resume-target-mismatch' } : witness.reason ? { nativeIdentityReason: witness.reason } : {})
+      ...(protectedTarget && witnessTargetMismatch ? { nativeTargetMismatch: true as const, nativeIdentityReason: 'resume-target-mismatch' } : witness.reason ? { nativeIdentityReason: witness.reason } : {})
     })
     const childrenWereActive = agentHasActiveSubagents(session.run.runId)
     const normalized = provider.normalizeHook(envelope, context)
@@ -8762,6 +8765,7 @@ export class AgentMuxClient {
       }
       if (witness.handle && canPromoteLocator && normalized.nativeHandle) delete currentBase.observedNativeHandle
       if (witness.handle && normalized.mainSubject) delete currentBase.nativeSourceObservation
+      const promotedHandle = witness.handle ?? normalized.nativeHandle
       const next: AgentMuxStoredAgentSession = {
         ...currentBase,
         updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
@@ -8795,9 +8799,9 @@ export class AgentMuxClient {
           currentActivityRevision: (current.semanticStatus?.currentActivityRevision ?? 0) + 1 } } : {}),
         ...(witness.handle && witnessTargetMismatch && !(canPromoteLocator && normalized.nativeHandle) ? { observedNativeHandle: witness.handle } : {}),
         ...(normalized.nativeHandle && canPromoteLocator ? {
-          nativeHandle: witness.handle ?? { ...normalized.nativeHandle,
-            ...(normalized.nativeHandle.kind === 'provider' && current.nativeHandle?.kind === 'provider' &&
-              normalized.nativeHandle.sessionId === current.nativeHandle.sessionId && normalized.nativeHandle.transcriptPath === undefined &&
+          nativeHandle: { ...promotedHandle!,
+            ...(promotedHandle?.kind === 'provider' && current.nativeHandle?.kind === 'provider' &&
+              matchesProviderNativeSessionTarget(promotedHandle, current.nativeHandle) && promotedHandle.transcriptPath === undefined &&
               current.nativeHandle.transcriptPath ? { transcriptPath: current.nativeHandle.transcriptPath } : {}) },
           nativeBinding: { source: current.nativeBinding?.source ?? (witness.handle ? 'process-witness' as const : 'native-hook' as const), run: { ...current.run }, observedAt: normalized.status.observedAt }
         } : {}),
@@ -8989,9 +8993,9 @@ export class AgentMuxClient {
       // A fresh verified source may reobserve an exhausted read-only observer, never add retry budget.
       this.continuitySupervisor.observe(next, true)
     }
-    if (witness.handle && next.nativeHandle && witness.handle.sessionId !== next.nativeHandle.sessionId) this.publisher.publish({
+    if (witnessTargetMismatch) this.publisher.publish({
       type: 'agent-error', agentSessionId: next.agentSessionId,
-      code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'The current process native identity differs from the retained conversation target. The target was preserved; confirm the original native Session before continuing it. The current Run and input remain available.',
+      code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'The current process native source differs from the retained conversation target. The target was preserved; confirm the original native Session before continuing it. The current Run and input remain available.',
       evidence: { source: 'agentmux', run: { ...next.run }, observedAt: persistedReceipt.observedAt }
     })
     else if (normalized.subject?.reason === 'resume-target-mismatch' || normalized.subject?.reason === 'native-session-mismatch') this.publisher.publish({

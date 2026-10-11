@@ -91,6 +91,8 @@ export type AgentProviderHookNormalizationContext = Readonly<{
   protectedNativeTarget?: boolean
   processNativeHandle?: Readonly<AgentNativeSessionHandle>
   processNativeChildSessionIds?: readonly string[]
+  /** Core witness fact; a diagnostic reason does not authorize semantic attribution. */
+  nativeTargetMismatch?: true
   nativeIdentityReason?: string
 }>
 
