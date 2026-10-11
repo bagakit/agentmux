@@ -57,7 +57,8 @@ it('does not launch maintenance for a hidden connection editor after returning t
   config = { ...config, hosts: config.hosts.map(host => host.id === 'a' ? { ...host, hostname: 'replacement.invalid' } : host) }
   await render(request)
   expect(call).toHaveBeenCalledTimes(1)
-  await dom.click('[data-resource-row="a"]')
+  await dom.click('[aria-label="List"]')
+  await dom.click('[data-host-disclosure="a"] [data-host-panel="connection"]')
   expect(call).toHaveBeenCalledTimes(2)
   expect(call.mock.calls[1]![0]).toMatchObject({ id: 'a', hostname: 'replacement.invalid' })
 })
@@ -68,7 +69,7 @@ it('automatically checks a newly added SSH connection only after its exact input
   const onSave = vi.fn(async (hosts: AppConfig['hosts']) => { config = { ...config, hosts } })
   const show = () => dom.render(<HostSettingsPane config={config} active onSave={onSave} />)
   await show()
-  await dom.click('.settings-pane-toolbar button')
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent?.includes('Add SSH host'))!.click())
   const id = dom.container.querySelector('[data-resource-editor]')!.getAttribute('data-resource-editor')!
   await fill(dom.container.querySelectorAll<HTMLInputElement>('.host-edit-grid--basic input')[1]!, 'new-saved.invalid')
   expect(call).not.toHaveBeenCalled()

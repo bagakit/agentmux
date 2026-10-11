@@ -6,14 +6,14 @@ import { tmpdir } from 'node:os'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
-import { aliases, desktopRequire, installedDependency, root } from './fixtures/settings-connections/environment.mjs'
+import { aliases, desktopRequire, installedDependency, browserInstalledDependency, root } from './fixtures/settings-connections/environment.mjs'
 
 const fixture = resolve(root, 'apps/desktop/scripts/fixtures/settings-connections')
 const packet = resolve(root, ".bagakit/design/settings-connections-fixture")
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const argv = process.argv.slice(2), operation = argv[0]
 const section = operation === '--capture' ? argv[1] : 'connections'
-assert.ok(['--owning', '--callers', '--capture', '--visual', '--preflight'].includes(operation), 'Explicit finite operation')
+assert.ok(['--owning', '--callers', '--capture', '--visual', '--preflight', '--remote-owning'].includes(operation), 'Explicit finite operation')
 if (operation === '--capture') assert.ok(section === 'hosts' || section === 'devices')
 const evidence = resolve(packet, ("" + (operation.slice(2)) + "-" + (section) + "-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(evidence, { recursive: true })
@@ -31,9 +31,9 @@ async function bind(file) {
 }
 async function bindBase() {
   for (const file of [fileURLToPath(import.meta.url), resolve(root, 'apps/desktop/scripts/probe-process.mjs'),
-    resolve(root, 'apps/desktop/test/settings-connections.test.tsx'), resolve(root, 'vitest.setup.ts'), resolve(root, 'pnpm-lock.yaml'),
+    ...['settings-connections', 'host-settings-navigation', 'remote-management'].map(name => resolve(root, `apps/desktop/test/${name}.test.tsx`)), resolve(root, 'vitest.setup.ts'), resolve(root, 'pnpm-lock.yaml'),
     resolve(root, 'apps/desktop/package.json'), resolve(root, 'packages/core/package.json'), resolve(root, 'packages/client-ui/package.json'),
-    resolve(root, 'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs'), ...['environment.mjs', 'vitest.config.mts', 'entry.tsx', 'data.ts', 'main.cjs', 'index.html'].map(name => resolve(fixture, name))]) await bind(file)
+    resolve(root, 'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs'), ...['environment.mjs', 'vitest.config.mts', 'entry.tsx', 'data.ts', 'main.cjs', 'hosts-main.cjs', 'native-input.cjs', 'remote-management.md', 'index.html'].map(name => resolve(fixture, name))]) await bind(file)
 }
 async function finalizeInputs() {
   for (const input of inputs.values()) assert.equal(sha(await readFile(resolve(root, input.path))), input.sha256, 'Exact Source readback: ' + input.path)
@@ -43,8 +43,8 @@ async function finalizeInputs() {
   receipt.sourceUnchanged = true
 }
 async function owning() {
-  const variants = ['catalog', 'single', 'drafts']
-  const messages = { catalog: 'Connections group owns exactly hosts and devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
+  const variants = operation === '--remote-owning' ? ['graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
+  const messages = { graph: 'Topology activation selects its exact Host detail', catalog: 'Connections group owns exactly hosts and devices', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
   const modes = [{ label: 'baseline', mutant: 'baseline' }, ...variants.flatMap(kind => [
     { label: kind + '-mutant', mutant: kind, test: kind + ':' }, { label: kind + '-restored', mutant: 'baseline', test: kind + ':' }
@@ -106,7 +106,7 @@ async function owning() {
 async function callers() {
   const ts = desktopRequire('typescript'), base = 'apps/desktop/src/renderer/src/', c = base + 'components/'
   const files = ['settings/modules/hosts.tsx', 'settings/modules/devices.tsx', 'settings/settings-modules.ts', 'settings/HostSettingsPane.tsx',
-    'settings/HostConnectionLibrary.tsx', 'settings/HostLinkedProjects.tsx', 'settings/DeviceManagementSettings.tsx', 'SettingsPanel.tsx', 'settings/SettingsOverviewPane.tsx'].map(path => c + path)
+    'settings/HostConnectionLibrary.tsx', 'settings/HostProjectsPane.tsx', 'settings/HostTopology.tsx', 'settings/HostWorkSummary.tsx', 'settings/DeviceManagementSettings.tsx', 'SettingsPanel.tsx', 'settings/SettingsOverviewPane.tsx'].map(path => c + path)
   files.push(base + 'App.tsx', base + 'store.ts')
   const occurrences = []
   for (const path of files) {
@@ -126,10 +126,10 @@ async function callers() {
   const requirements = [['HostSettingsPane', c + 'settings/modules/hosts.tsx'], ['api.config.save', c + 'settings/modules/hosts.tsx'],
     ['devicesSettingsModule', c + 'settings/settings-modules.ts'], ['createSettingsCatalog', c + 'settings/settings-modules.ts'],
     ['DeviceManagementSettings', c + 'settings/modules/devices.tsx'], ['HostConnectionLibrary', c + 'settings/HostSettingsPane.tsx'],
-    ['HostLinkedProjects', c + 'settings/HostSettingsPane.tsx'], ['useResourceDrafts', c + 'settings/HostSettingsPane.tsx'],
+    ['HostProjectsPane', c + 'settings/HostSettingsPane.tsx'], ['HostTopology', c + 'settings/HostSettingsPane.tsx'], ['HostSessionSummary', c + 'settings/HostSettingsPane.tsx'], ['HostExecutorsSummary', c + 'settings/HostSettingsPane.tsx'], ['useAppStore.getState().selectSession', c + 'settings/HostSettingsPane.tsx'], ['refresh', c + 'settings/HostWorkSummary.tsx'], ['api.executors.detect', base + 'store.ts'], ['api.executors.discover', base + 'store.ts'], ['useResourceDrafts', c + 'settings/HostSettingsPane.tsx'],
     ['settingsNavGroups', c + 'SettingsPanel.tsx'], ['visibleSettingsSections', c + 'SettingsPanel.tsx'],
     ['SettingsOverviewPane', c + 'SettingsPanel.tsx'], ['item.savedSummary', c + 'settings/SettingsOverviewPane.tsx'], ['SettingsPanel', base + 'App.tsx'],
-    ['api.hosts.check', base + 'store.ts'], ...['ls', 'invite', 'approve', 'reject', 'revoke'].map(method => ['api.deviceManagement.' + method, c + 'settings/DeviceManagementSettings.tsx'])]
+    ['api.hosts.check', base + 'store.ts'], ...['ls', 'link', 'revoke'].map(method => ['api.deviceManagement.' + method, c + 'settings/DeviceManagementSettings.tsx'])]
   receipt.callers = requirements.map(([symbol, path]) => {
     const matches = occurrences.filter(item => item.symbol === symbol && item.path === path)
     assert.ok(matches.length > 0, 'Nonempty production consumer outside definitions/imports/fixture: ' + symbol + ' in ' + path)
@@ -142,8 +142,8 @@ async function callers() {
   await bind(index); await bind(css)
   assert.equal((await readFile(index, 'utf8')).split("@import './settings-connections.css';").length, 2, 'Exactly one actual CSS composition import')
   const style = await readFile(css, 'utf8')
-  assert.ok(style.includes('.settings-host-branch') && style.includes('.settings-host-page') && style.includes('.settings-host-projects'), 'Owning new CSS has actual nonempty navigation and project rules')
-  receipt.styleConsumer = { index: relative(root, index), owner: relative(root, css), consumers: [c + 'settings/HostConnectionLibrary.tsx', c + 'settings/HostLinkedProjects.tsx'] }
+  assert.ok(style.includes('.settings-host-branch') && style.includes('.settings-host-page') && style.includes('.settings-host-page'), 'Owning new CSS has actual nonempty navigation and project rules')
+  receipt.styleConsumer = { index: relative(root, index), owner: relative(root, css), consumers: [c + 'settings/HostConnectionLibrary.tsx', c + 'settings/HostProjectsPane.tsx', 'settings/HostTopology.tsx'] }
 }
 
 async function capture() {
@@ -151,9 +151,9 @@ async function capture() {
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-connections-')), output = resolve(evidence, 'compiled')
   const cssInputs = new Set()
   try {
-    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: aliases }, esbuild: { jsx: 'automatic' },
+    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, resolve: { alias: aliases }, esbuild: { jsx: 'automatic' },
       define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
-      plugins: [{ name: 'actual-settings-connections-source', enforce: 'pre', resolveId: installedDependency,
+      plugins: [{ name: 'actual-settings-connections-source', enforce: 'pre', resolveId: browserInstalledDependency,
         async transform(_code, id) { const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/')) await bind(file) } }],
       css: { postcss: { plugins: [{ postcssPlugin: 'bound-production-cascade', Once(tree) {
         tree.walk(node => { const file = node.source?.input?.file; if (file?.startsWith(root + '/') && !file.includes('/node_modules/')) cssInputs.add(file) })
@@ -172,7 +172,7 @@ async function capture() {
     await walk(output); assert.ok(compiled.length > 0); assert.ok(compiled.some(file => file.path.endsWith('.css')))
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
     const log = []
-    receipt.execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, 'main.cjs'), resolve(output, 'index.html'), privateRoot, evidence, section], {
+    receipt.execution = await runProbeProcess(desktopRequire('electron'), [resolve(fixture, section === 'hosts' ? 'hosts-main.cjs' : 'main.cjs'), resolve(output, 'index.html'), privateRoot, evidence, section], {
       temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120_000, onLine: line => { log.push(line) } })
     await writeFile(resolve(evidence, 'process.log'), log.join('\n') + '\n')
     receipt.render = JSON.parse(await readFile(resolve(evidence, 'render.json'), 'utf8'))
@@ -217,7 +217,7 @@ async function visual() {
 
 try {
   await bindBase()
-  if (operation === '--owning' || operation === '--preflight') await owning()
+  if (operation === '--owning' || operation === '--preflight' || operation === '--remote-owning') await owning()
   else if (operation === '--callers') await callers()
   else if (operation === '--capture') await capture()
   else await visual()

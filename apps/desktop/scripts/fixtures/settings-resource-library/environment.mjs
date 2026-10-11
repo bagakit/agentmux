@@ -1,4 +1,4 @@
-import { createRequire } from 'node:module'
+import { builtinModules, createRequire } from 'node:module'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
@@ -8,7 +8,7 @@ const common = resolve(root, execFileSync('git', ['rev-parse', '--git-common-dir
 export const installedRoot = dirname(common)
 export const desktopRequire = createRequire(resolve(installedRoot, 'apps/desktop/package.json'))
 export const aliases = []
-for (const name of ['core', 'demand', 'layout']) {
+for (const name of ['core', 'demand', 'layout', 'identity']) {
   const directory = resolve(root, 'packages', name)
   const exports = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8')).exports
   for (const [key, value] of Object.entries(exports)) {
@@ -37,7 +37,7 @@ for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'reac
 
 /** Resolve installed dependencies without rebuilding or modifying any shared workspace. */
 export function installedDependency(source, importer) {
-  if (source.startsWith('.') || source.startsWith('/') || source.startsWith('\0') || source.startsWith('@agentmux/') || source === 'vitest' || source.startsWith('node:')) return
+  if (builtinModules.includes(source) || source.startsWith('.') || source.startsWith('/') || source.startsWith('\0') || source.startsWith('@agentmux/') || source === 'vitest' || source.startsWith('node:')) return
   const packageName = importer?.startsWith(root + '/packages/') ? relative(resolve(root, 'packages'), importer).split('/')[0] : null
   const question = source.indexOf('?'), bare = question < 0 ? source : source.slice(0, question), query = question < 0 ? '' : source.slice(question)
   if (packageName) {

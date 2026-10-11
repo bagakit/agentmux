@@ -47,7 +47,12 @@ async function fill(node: HTMLInputElement, value: string) {
     node.dispatchEvent(new Event('input', { bubbles: true }))
   })
 }
+async function showList() {
+  const button = pane().querySelector<HTMLButtonElement>('[aria-label="List"]')
+  if (button?.getAttribute('aria-pressed') !== 'true') await act(async () => button?.click())
+}
 async function select(id: string, panel = 'connection') {
+  await showList()
   const node = pane().querySelector<HTMLButtonElement>(`[data-host-disclosure="${id}"] [data-host-panel="${panel}"]`)!
   expect(node).not.toBeNull(); await act(async () => node.click())
 }
@@ -68,7 +73,7 @@ describe('Connections settings', () => {
     expect(visibleSettingsSections('手机').map(item => item.id)).toContain('devices')
     expect(visibleSettingsSections('ssh').map(item => item.id)).toContain('hosts')
     expect(new Set(settingsModules.map(item => item.id)).size).toBe(settingsModules.length)
-    expect(devicesSettingsModule.savedSummary()).toBe('Pairing & access')
+    expect(devicesSettingsModule.savedSummary()).toBe('Phone connections and device access')
     await dom.render(<Shell section="overview" />)
     expect(dom.container.querySelector('#settings-overview-connections')).not.toBeNull()
     expect(dom.container.querySelector('[data-settings-section="devices"]')).not.toBeNull()
@@ -76,7 +81,7 @@ describe('Connections settings', () => {
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
   it('single: mounts only the exact current connection fields and Projects uses its own committed Host form', async () => {
-    await dom.render(<LiveHost />)
+    await dom.render(<LiveHost />); await showList()
     expect(pane().querySelectorAll('[data-host-disclosure]')).toHaveLength(24)
     expect(pane().querySelectorAll('.host-connection-fields'), 'Only the selected Host has an editable connection subtree').toHaveLength(0)
     await select(H)
@@ -140,22 +145,22 @@ describe('Connections settings', () => {
     await dom.click('.settings-resource-back')
     expect(search().value).toBe(''); expect(document.activeElement).toBe(pane().querySelector(`[data-host-disclosure="${H}"] [data-host-panel="connection"]`))
   })
-  it('visited Host instance and draft survive devices while hidden reads stop and short invitations clear', async () => {
-    vi.spyOn(api.deviceManagement, 'invite').mockResolvedValue(structuredClone(deviceInvitation))
+  it('visited Host instance and draft survive devices while hidden device reads stop', async () => {
+    vi.spyOn(api.deviceManagement, 'link').mockResolvedValue(structuredClone(deviceInvitation))
     await dom.render(<Shell section="hosts" />); await select(H); await toggleAdvanced(true); await fill(name(), 'Across device section')
     const originalPane = pane(), originalField = name(), originalDisclosure = editor().querySelector('.host-edit-disclosure')
     await dom.click('[data-settings-target="devices"]')
     expect(api.deviceManagement.ls).toHaveBeenCalledExactlyOnceWith({})
     expect(pane()).toBe(originalPane); expect(originalPane.hidden).toBe(true); expect(originalField.isConnected).toBe(true)
-    const invite = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="devices"] button')].find(node => node.textContent?.includes('生成短时邀请'))!
+    const invite = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-settings-pane="devices"] button')].find(node => node.textContent?.includes('Copy connection link'))!
     await act(async () => invite.click())
-    expect(api.deviceManagement.invite).toHaveBeenCalledExactlyOnceWith({})
-    expect(dom.container.querySelector('[aria-label="短时设备邀请"]')).not.toBeNull()
+    expect(api.deviceManagement.link).toHaveBeenCalledExactlyOnceWith({})
+    expect(dom.container.querySelector('[aria-label="Phone connection link"]')).not.toBeNull()
     await dom.click('[data-settings-target="hosts"]')
     expect(pane()).toBe(originalPane); expect(name()).toBe(originalField); expect(name().value).toBe('Across device section')
     expect(editor().querySelector('.host-edit-disclosure')).toBe(originalDisclosure)
     expect((originalDisclosure as HTMLDetailsElement).open).toBe(true)
-    expect(dom.container.querySelector('[aria-label="短时设备邀请"]')).toBeNull()
+    expect(dom.container.querySelector('[aria-label="Phone connection link"]')).toBeNull()
     const reads = vi.mocked(api.deviceManagement.ls).mock.calls.length
     await fill(field('Host or SSH alias'), 'hidden-device-no-read')
     await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, terminalFontSize: 17 } } })))
@@ -163,8 +168,7 @@ describe('Connections settings', () => {
     expect(api.deviceManagement.ls).toHaveBeenCalledTimes(reads)
     await dom.click('[data-settings-target="devices"]')
     expect(api.deviceManagement.ls).toHaveBeenCalledTimes(reads + 1)
-    expect(dom.container.querySelector('[aria-label="短时设备邀请"]')).toBeNull()
-    expect(api.deviceManagement.invite).toHaveBeenCalledTimes(1)
+    expect(api.deviceManagement.link).toHaveBeenCalledTimes(1)
   })
   it('captures complete Host Test and never reuses Ready after a later input', async () => {
     await dom.render(<LiveHost />); await select(H); await toggleAdvanced(true)
@@ -197,10 +201,10 @@ describe('Connections settings', () => {
     expect(spy.mock.calls.at(-1)![1]!.hosts.find(host => host.id === H)).toMatchObject({ user: 'external-clean' })
     await fill(name(), 'Local conflict'); current = await api.config.get()
     await act(async () => realSave({ ...current, hosts: current.hosts.map(host => host.id === H ? { ...host, label: 'External conflict' } : host) }, current)); await save()
-    expect(name().value).toBe('Local conflict'); expect(pane().querySelector('[role="alert"]')!.textContent).toContain(`hosts.${H}.label`)
+    expect(name().value).toBe('Local conflict'); expect(pane().querySelector('[data-settings-save-bar] [role="alert"]')!.textContent).toContain(`hosts.${H}.label`)
     current = await api.config.get()
     await act(async () => realSave({ ...current, hosts: current.hosts.filter(host => host.id !== H) }, current)); await save()
-    expect(name().value).toBe('Local conflict'); expect(pane().querySelector('[role="alert"]')!.textContent).toContain(`hosts.${H}`)
+    expect(name().value).toBe('Local conflict'); expect(pane().querySelector('[data-settings-save-bar] [role="alert"]')!.textContent).toContain(`hosts.${H}`)
   })
   it('preserves exact workspace removal confirmation, cancel and Session reference protection', async () => {
     await dom.render(<LiveHost />); await select(H)
@@ -229,6 +233,7 @@ describe('Connections settings', () => {
     expect((await api.config.get()).workspaces.map(workspace => workspace.id)).toEqual(['project-c'])
     const last = config.hosts.find(host => host.id === J)!
     await dom.render(<HostSettingsPane config={{ ...config, hosts: [last], workspaces: [] }} active={true} onSave={async () => {}} />)
+    await showList(); await select(last.id)
     const lastRemove = pane().querySelector<HTMLButtonElement>('[aria-label="Remove Development"]')!
     lastRemove.focus(); expect(document.activeElement).toBe(lastRemove)
     await dom.click('[aria-label="Remove Development"]')
