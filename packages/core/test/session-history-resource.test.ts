@@ -154,6 +154,8 @@ describe('exact native recorded image through the original public Core owner',()
   const result=response.value
   expect(result.result.status).toBe('read')
   expect(parseSessionHistoryResourceResult(result,input)).toEqual(result)
+  expect(result.result).toMatchObject({status:'read',width:1,height:1})
+  for(const patch of [{width:2},{height:2},{width:undefined}]) expect(()=>parseSessionHistoryResourceResult({...result,result:{...result.result,...patch}},input)).toThrow()
   const {hostId,...sdkResult}=result
   expect(parseSessionHistoryResourceReadResult(sdkResult,'image-session',h.request)).toEqual(sdkResult)
   expect(()=>parseSessionHistoryResourceReadResult(result,'image-session',h.request)).toThrow()
