@@ -92,7 +92,7 @@ flowchart LR
 
 Desktop 的 [`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 与 [`AgentSessionComposer`](../../apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx)、Mobile 的 [`MobileMailbox`](../../apps/mobile/src/conversation/MobileMailbox.tsx) 通过共同 [`useAgentInputMailbox`](../../packages/client-ui/src/lib/use-agent-input-mailbox.ts) 消费这份原日志。Desktop 沿原 Host 路由和 typed IPC 调用，Mobile 使用原 Hosted 读口；完整条目通过严格分片校验后才进入当前读窗。共同 [`InputMailboxRecords`](../../packages/client-ui/src/components/InputMailboxRecords.tsx) 保留准确作者、正文、原回执与当前读取失败，原本地未发意图和可编辑控件仍归原输入 owner。信箱的来源历史与登记行按原显示时刻共同排序，只有准确原 input key 相同才连接已有本地操作，不按正文或时间认定原生采用。
 
-当前 PTY 发送受据及 `inputRef` 尚不构成原生采用，不能由界面收起卡片来补造关联。准确原生采用仍须核对原提交及原生记录，原 actor 写通道不授予历史 reader 控制权。
+PTY 字节回执及 `inputRef` 本身不构成原生采用。原 Provider saved-history owner 保留 canonical user item 的准确 client correlation、语义 item ID 与来源；[`native-input-adoption`](../../packages/core/src/native-input-adoption.ts) 沿原历史页、changes 和 exact-record 读取入口核对原持久 claim，不派发输入或改写回执。共同 timeline 与严格 codec 复用同一采用边规则，临时 Reader 仅保有界原引用反证；后到歧义撤销归并，溢出明确未知。客户端和 connector 直接消费原生主消息及完整提交贡献，不解码 token 或匹配正文。原 actor 写通道不授予历史 reader 控制权，公开内容及原投递授权仍逐原 part 判断。
 
 具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
 
