@@ -1,3 +1,5 @@
+import { parseRendererAllocationsResult } from './renderer-allocations.js'
+import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
@@ -306,6 +308,15 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
         if (request.operation === 'demand.continuation-action' && (loop.loopId !== request.loopId || loop.lastMutation?.operationId !== request.requestId || loop.lastMutation?.action !== request.action || loop.lastMutation?.expectedRevision !== request.expectedRevision || loop.revision !== request.expectedRevision + 1)) fail()
         if (request.operation === 'demand.start' && request.continuation && (loop.agentSessionId !== request.sessionId || loop.creationOperationId !== request.requestId || loop.taskSource?.kind !== 'goal' || loop.taskSource.alignmentRevision !== request.continuation.alignmentRevision || loop.intervalMs !== request.continuation.intervalMs)) fail()
       }
+      break
+    case 'metrics.allocations.capture':
+      parseRendererAllocationsResult(actual.capture, request)
+      break
+    case 'metrics.scene.capture':
+      parseRendererSceneCaptureResult(actual.capture, request)
+      break
+    case 'metrics.scene.inspect':
+      parseRendererSceneInspection(actual.inspection, request)
       break
     case 'metrics.memory.inspect':
       parseRendererMemoryResult(actual.observation, request)

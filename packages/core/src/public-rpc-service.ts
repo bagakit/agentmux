@@ -1,3 +1,5 @@
+import { parseRendererAllocationsResult } from './renderer-allocations.js'
+import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult, type ApplicationAccessPort, type ApplicationAccessMethod } from './application-access.js'
 import { isDeepStrictEqual } from 'node:util'
 import { isConnectionSetupMethod, parseConnectionSetupParams } from './connection-setup-codec.js'
@@ -1090,6 +1092,9 @@ export class AgentMuxRpcService {
         }
       }
       result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal, nameContext)
+        : request.operation === 'metrics.allocations.capture' ? { operation: 'metrics.allocations.capture', capture: await this.captureAllocations({ target: request.target, durationMs: request.durationMs }, context.signal) }
+        : request.operation === 'metrics.scene.capture' ? { operation: 'metrics.scene.capture', capture: await this.captureScene({ target: request.target }, context.signal) }
+        : request.operation === 'metrics.scene.inspect' ? { operation: 'metrics.scene.inspect', inspection: await this.inspectScene(request.captureId === undefined ? {} : { captureId: request.captureId }, context.signal) }
         : request.operation === 'metrics.memory.inspect' ? { operation: 'metrics.memory.inspect', observation: await this.inspectMemory({ target: request.target }, context.signal) }
         : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
@@ -1659,6 +1664,18 @@ export class AgentMuxRpcService {
     if (operation !== request.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
     const result = parseToolkitResult(request.operation, body)
     assertToolkitResultTarget(request, result); return result
+  }
+  private async captureAllocations(input: import('./renderer-allocations.js').RendererAllocationsInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.captureAllocations) throw new AgentMuxError('Allocation sampling is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererAllocationsResult(await this.ports.metrics.captureAllocations(input, signal), input)
+  }
+  private async captureScene(input: import('./renderer-performance-scene.js').RendererSceneCaptureInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.captureScene) throw new AgentMuxError('Scene capture is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererSceneCaptureResult(await this.ports.metrics.captureScene(input, signal), input)
+  }
+  private async inspectScene(input: import('./renderer-performance-scene.js').RendererSceneInspectInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.inspectScene) throw new AgentMuxError('Scene inspection is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererSceneInspection(await this.ports.metrics.inspectScene(input, signal), input)
   }
   private async inspectMemory(input: import('./renderer-memory.js').RendererMemoryInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.inspectMemory) throw new AgentMuxError('Renderer memory details are unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')

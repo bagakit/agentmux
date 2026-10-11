@@ -1,3 +1,4 @@
+import { readPerformanceSceneEvidence } from './performance-scene-evidence.js'
 import { toolkitFailureEvidenceReader } from './toolkit-failure-evidence-reader.js'
 import { rpcControlRequest } from './rpc-business-codec.js'
 import { AgentMuxError } from './errors.js'
@@ -14,6 +15,7 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
     ...(ports.deliveryAttempts ? [{ domain: 'delivery.client' as const, target: 'log-id' as const, raw: true, read: 'supported' as const }] : []),
     ...(ports.coreClients ? [{ domain: 'delivery.core' as const, target: 'log-id' as const, raw: true, read: 'supported' as const }] : []),
     ...(ports.toolkit ? [{ domain: 'toolkit.performance-failure' as const, target: 'execution-id' as const, raw: true, read: 'supported' as const }] : []),
+    ...(ports.metrics?.inspectScene ? [{ domain: 'performance.scene' as const, target: 'capture-id' as const, raw: false, read: 'supported' as const }] : []),
     ...(ports.moteContext ? [{ domain: 'mote.context.client' as const, target: 'mote-context' as const, raw: true, read: 'supported' as const }] : []),
     { domain: 'native-recorder-failure', target: 'session-run', raw: false, read: 'not-exposed' },
   ]
@@ -27,6 +29,11 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
   const reader: DiagnosticEvidenceReader<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData> = { async read(target, bounds) {
     const missing = (code: Parameters<typeof unavailableDiagnosticEvidence>[1]) => unavailableDiagnosticEvidence<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData>(target, code)
     if (caller && target.hostId !== caller.hostId) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_FORBIDDEN')
+    if (target.domain === 'performance.scene') {
+      if (!ports.metrics?.inspectScene) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')
+      if (target.hostId !== 'local') return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
+      return readPerformanceSceneEvidence(target, (input, signal) => ports.metrics!.inspectScene!(input, signal), bounds)
+    }
     if (target.domain === 'mote.context.client') {
       const port = ports.moteContext
       if (!port) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_UNSUPPORTED')
