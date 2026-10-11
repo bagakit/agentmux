@@ -48,7 +48,8 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   expect(delivery).toContain('native launch argument receipt confirms Runtime carriage only; Provider consumption requires separate evidence')
   expect(delivery).toContain('ordinary User role and open one turn')
   expect(delivery).toContain('delivery does not mean the model completed the task')
-  expect(delivery).toContain('Selected content accompanies the original Provider native recovery/input plan')
+  expect(delivery).toContain('Only the initial recovery input carries the selected reminder and continuation')
+  expect(delivery).toContain('Later supervised retries restore context only; they resend neither these parts nor any earlier input')
   expect(delivery).not.toContain('follows confirmed native resume')
   expect(delivery).not.toContain('current input readiness')
   const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
@@ -60,6 +61,35 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   expect(useAppStore.getState().config?.continuity).toEqual({ activeRecoveryDelayMs: 2125 })
   expect(dom.container.querySelector('[data-settings-save-bar]')?.textContent).toContain('Changes saved')
   expect(dom.container.textContent).toContain('Custom saved value')
+})
+
+it('retry choices are discoverable, strictly authored and separate from rechecks without Session side effects', async () => {
+  const recover = vi.spyOn(api.sessions, 'recover'), stop = vi.spyOn(api.sessions, 'stop'), submit = vi.spyOn(api.sessions, 'submitPrompt')
+  const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
+    const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
+    useAppStore.setState({ config: saved }); return saved
+  })
+  await dom.render(<SettingsPanel onClose={() => {}} />)
+  const search = dom.container.querySelector<HTMLInputElement>('input[placeholder="Search settings"]')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Additional retries')
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await dom.click('[data-settings-search-result="continuity:retryMaxAttempts"]')
+  expect(field('First retry base delay').value).toBe('1'); expect(field('Maximum retry base delay').value).toBe('30')
+  expect(field('Additional retries').value).toBe('3'); expect(field('Recheck count').value).toBe('3')
+  expect(useAppStore.getState().config?.continuity).toBeUndefined()
+  const section = dom.container.querySelector('[data-continuity-retry-settings]')!
+  expect(section.textContent).toContain('Zero disables automatic retries')
+  expect(section.textContent).toContain('at most one second and at most one quarter')
+  expect(section.textContent).toContain('without resending earlier input')
+  await input('First retry base delay', '2.125'); await input('Maximum retry base delay', '1')
+  expect(dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')?.disabled).toBe(true)
+  expect(field('First retry base delay').value).toBe('2.125'); expect(saveSpy).not.toHaveBeenCalled()
+  await input('Maximum retry base delay', '45.625'); await input('Additional retries', '0'); await save()
+  expect(useAppStore.getState().config?.continuity).toEqual({ retryInitialDelayMs: 2125, retryMaxDelayMs: 45625, retryMaxAttempts: 0 })
+  expect(field('Recheck count').value).toBe('3')
+  expect(recover).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled()
 })
 
 it('reminder and continuation remain independent with complete effective preview and preserved custom text', async () => {
