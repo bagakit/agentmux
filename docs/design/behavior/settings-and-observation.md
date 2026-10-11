@@ -65,7 +65,7 @@ Focus 入口与注意力明细使用共享状态语汇、对象数量和可访�
 
 ## Status Bar CPU/Memory 资源面板
 
-- Performance 在准确当前窗口提供显式短时函数采样与 timeline 入口，委托同一公共 metrics owner；打开面板或下钻不会自动采集。结果保留原目标、实际区间、completed／failed／unknown 与清理事实，不自动重采未知操作。原始材料可显式导出；模块热度仅由实际 V8 sample 与 timeDeltas 聚合 self-time，调用栈火焰图保留原树及样本权重，不冒充 React 组件精确成本、全部 native CPU 或泄漏结论。缺样本、无法安全分析或目标失配时具名说明，其他观察与健康工作面仍可用。
+- Performance 在准确当前窗口提供显式短时函数采样与 timeline 入口，委托同一公共 metrics owner；打开面板或下钻不会自动采集。结果保留原目标、实际区间、completed／failed／unknown 与清理事实，不自动重采未知操作。当前观察面分别保留最近一份已完成的函数采样与最新采集回执；后续失败或未知采集不抹掉已可用的 profile，二者各自标明原归属并导出，不建立跨重启历史。原始材料可显式导出；模块热度仅由实际 V8 sample 与 timeDeltas 聚合 self-time，调用栈火焰图保留原树及样本权重，不冒充 React 组件精确成本、全部 native CPU 或泄漏结论。缺样本、无法安全分析或目标失配时具名说明，其他观察与健康工作面仍可用。
 
 - Renderer 诊断须区分进程占用、V8 函数样本、交互阶段与 Chromium timeline；缺失阶段保持未知。同一次 Tab 点击以原有界记录保存事件与 handler 的单调起点、原选择动作结束及是否正常返回、选中确认的实际来源；动作正常返回不等于选择成功，layout effect、局部 frame 和输入 gate 不冒充 compositor 呈现或业务输入 ACK。只观察原动作，不改变资格、异常、焦点、身份、工作面或已保留输入。
 - 显式短时 timeline 沿原公共 metrics owner 和准确 Renderer 五字段目标取得原生调试会话，采集 Style/Layout、Paint、调度与合成等已启用类别的原事件，保留实际参与进程、原时间单位、采集窗口、丢失与停止／释放事实。它的范围是 Chromium timeline，不保证全部 Host、全部 App 子进程或 native 栈；跨进程与业务事件仅按原时间基准及明确来源关联，时间重叠不等于因果。
