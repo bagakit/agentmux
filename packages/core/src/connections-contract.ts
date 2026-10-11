@@ -24,13 +24,13 @@ export type ConnectionOperation = { operationId: string; status: 'configured'; c
 export type ConnectionInspectInput = { connectionId: string; operationId?: never } | { operationId: string; connectionId?: never }
 export type ConnectionInspectResult = { connection: ConnectionRecord | null; operation: ConnectionOperation | null }
 export type ConnectionMethod = keyof ConnectionParamsMap
-export type ConnectionParamsMap = import('./connection-service-contract.js').ConnectionServiceParamsMap & import('./connection-profile-contract.js').ConnectionProfileParamsMap & import('./connection-enrollment-contract.js').ConnectionEnrollmentParamsMap & import('./room-discovery-contract.js').RoomDiscoveryParamsMap & import('./room-provisioning-contract.js').RoomProvisioningParamsMap & import('./room-binding-contract.js').RoomBindingParamsMap & import('./connection-delivery-contract.js').ConnectionDeliveryParamsMap & import('./ingress-contract.js').ConnectionIngressParamsMap & {
+export type ConnectionParamsMap = import('./connection-setup-contract.js').ConnectionSetupParamsMap & import('./connection-service-contract.js').ConnectionServiceParamsMap & import('./connection-profile-contract.js').ConnectionProfileParamsMap & import('./connection-enrollment-contract.js').ConnectionEnrollmentParamsMap & import('./room-discovery-contract.js').RoomDiscoveryParamsMap & import('./room-provisioning-contract.js').RoomProvisioningParamsMap & import('./room-binding-contract.js').RoomBindingParamsMap & import('./connection-delivery-contract.js').ConnectionDeliveryParamsMap & import('./ingress-contract.js').ConnectionIngressParamsMap & {
   'connection.ls': Record<string, never>
   'connection.inspect': ConnectionInspectInput
   'connection.configure': ConnectionConfigureInput
   'connection.test': { connectionId: string }
 }
-export type ConnectionResultMap = import('./connection-service-contract.js').ConnectionServiceResultMap & import('./connection-profile-contract.js').ConnectionProfileResultMap & import('./connection-enrollment-contract.js').ConnectionEnrollmentResultMap & import('./room-discovery-contract.js').RoomDiscoveryResultMap & import('./room-provisioning-contract.js').RoomProvisioningResultMap & import('./room-binding-contract.js').RoomBindingResultMap & import('./connection-delivery-contract.js').ConnectionDeliveryResultMap & import('./ingress-contract.js').ConnectionIngressResultMap & {
+export type ConnectionResultMap = import('./connection-setup-contract.js').ConnectionSetupResultMap & import('./connection-service-contract.js').ConnectionServiceResultMap & import('./connection-profile-contract.js').ConnectionProfileResultMap & import('./connection-enrollment-contract.js').ConnectionEnrollmentResultMap & import('./room-discovery-contract.js').RoomDiscoveryResultMap & import('./room-provisioning-contract.js').RoomProvisioningResultMap & import('./room-binding-contract.js').RoomBindingResultMap & import('./connection-delivery-contract.js').ConnectionDeliveryResultMap & import('./ingress-contract.js').ConnectionIngressResultMap & {
   'connection.ls': { connections: ConnectionRecord[] }
   'connection.inspect': ConnectionInspectResult
   'connection.configure': ConnectionOperation
@@ -38,6 +38,7 @@ export type ConnectionResultMap = import('./connection-service-contract.js').Con
 }
 /** Borrow the Host's original connection owner. Core never constructs adapters or stores credentials. */
 export interface ConnectionPort {
+  setup?: import('./connection-setup-contract.js').ConnectionSetupPort
   service?: import('./connection-service-contract.js').ConnectionServicePort
   profile?: import('./connection-profile-contract.js').ConnectionProfilePort
   enrollment?: import('./connection-enrollment-contract.js').ConnectionEnrollmentPort

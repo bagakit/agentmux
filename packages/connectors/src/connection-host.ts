@@ -1,3 +1,4 @@
+import { ConnectionSetupHost } from './connection-setup.js'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -18,6 +19,7 @@ export interface WritableSecretPort extends SecretPort {
 export interface ConnectionAdapter {
   readonly adapterId: string
   readonly profile?: import('./connection-profile-adapter.js').ConnectionProfileAdapter
+  readonly setup?: import('./connection-setup-adapter.js').ConnectionSetupAdapter
   readonly enrollment?: import('./connection-enrollment-adapter.js').ConnectionEnrollmentAdapter
   readonly publication?: import('./publication-adapter.js').PublicationAdapter
   readonly rooms?: import('./room-provisioning-adapter.js').RoomProvisioningAdapter
@@ -38,6 +40,7 @@ export class ConnectionHost implements ConnectionPort {
   readonly service: ConnectionServicePort
   private serviceSchemaReady = false
   profile?: import('@agentmux/core/connections').ConnectionProfilePort
+  setup?: import('@agentmux/core/connections').ConnectionSetupPort
   enrollment?: import('@agentmux/core/connections').ConnectionEnrollmentPort
   rooms?: import('@agentmux/core/connections').RoomPort
   bindings?: import('@agentmux/core/connections').RoomBindingsPort
@@ -49,6 +52,7 @@ export class ConnectionHost implements ConnectionPort {
   private readonly observations = new Map<string, { revision: number; value: ConnectionObservation }>()
   private readonly closeRoomDiscovery: () => void
   private profileHost: ConnectionProfileHost | undefined
+  private setupHost: ConnectionSetupHost | undefined
   private enrollmentHost: ConnectionEnrollmentHost | undefined
   private closed = false
   constructor(private readonly options: ConnectionHostOptions) {
@@ -87,6 +91,15 @@ export class ConnectionHost implements ConnectionPort {
         throw new AgentMuxError('Application enrollment storage is unavailable. Existing connections remain available; retry this original enrollment after restoring storage access.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
       }
     }
+    const setup = (): ConnectionSetupHost => {
+      if (this.closed) throw new AgentMuxError('The original management owner is closed. Inspect the same request on its Host.', 'CONNECTION_SETUP_UNCONFIRMED')
+      if (this.setupHost) return this.setupHost
+      const secrets = options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
+      try {
+        return this.setupHost = new ConnectionSetupHost(this, typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets : undefined)
+      } catch { throw new AgentMuxError('Original management request storage is unavailable. Existing bots and Agents remain available; restore storage and inspect the same request.', 'CONNECTION_SETUP_UNCONFIRMED') }
+    }
+    this.setup = { begin: (input, context) => setup().begin(input, context), inspect: (input, context) => setup().inspect(input, context), list: input => setup().list(input) }
     this.enrollment = { begin: async (input, context) => enrollment().begin(input, context), advance: async (input, context) => enrollment().advance(input, context), inspect: async input => enrollment().inspect(input), list: async input => enrollment().list(input) }
   }
   private read(connectionId: string, includeReceiver = true): ConnectionRecord | null {
@@ -240,5 +253,5 @@ export class ConnectionHost implements ConnectionPort {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
-  close(): void { this.closed = true; this.profileHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
+  close(): void { this.closed = true; this.profileHost?.close(); this.setupHost?.close(); this.enrollmentHost?.close(); this.closeRoomDiscovery(); if (!this.options.database) this.database.close() }
 }
