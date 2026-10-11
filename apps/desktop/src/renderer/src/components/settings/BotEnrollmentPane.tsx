@@ -30,7 +30,7 @@ function checkedSetupMessage(operation: ConnectionEnrollmentOperation): string {
   if (operation.authentication?.stage === 'account')
     return 'Review this account. Confirming it does not create an application.'
   if (operation.authentication?.stage === 'confirmed' && !operation.application)
-    return 'The account is confirmed. Create is a separate explicit action.'
+    return ''
   if (operation.authentication && ['waiting', 'scanned', 'handoff'].includes(operation.authentication.stage))
     return 'Sign-in is still in progress. Your original request is kept.'
   if (operation.application)
