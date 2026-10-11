@@ -6,8 +6,8 @@ import { markWindowOverlayDismissal } from '../components/WindowOverlayHost'
 /** Preferred bounds remain durable; viewport fitting only keeps their presentation reachable. */
 export function fitAgentBookmark(bounds: AgentBookmarkBounds, width: number, height: number): AgentBookmarkBounds {
   const availableWidth = Math.max(1, width - 16), availableHeight = Math.max(1, height - 16)
-  const w = Math.min(availableWidth, Math.max(Math.min(320, availableWidth), bounds.width))
-  const h = Math.min(availableHeight, Math.max(Math.min(260, availableHeight), bounds.height))
+  const w = Math.min(availableWidth, Math.max(1, bounds.width))
+  const h = Math.min(availableHeight, Math.max(1, bounds.height))
   return { x: Math.max(8, Math.min(bounds.x, width - w - 8)), y: Math.max(8, Math.min(bounds.y, height - h - 8)), width: w, height: h }
 }
 type Gesture = {
@@ -26,6 +26,9 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
     return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
   }
   function reader() { return reading.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reading.current }
+  function resized(bounds: AgentBookmarkBounds, dx: number, dy: number) {
+    return { ...bounds, width: Math.max(320, bounds.width + dx), height: Math.max(180, bounds.height + dy) }
+  }
   function rememberReading(event?: Event) {
     const surface = reader(), saved = viewportAnchor.current
     if (!surface || event && (event.target !== surface || saved && (saved.width !== view.innerWidth || saved.height !== view.innerHeight))) return
@@ -83,12 +86,13 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
       if (!g || event.pointerId !== g.pointerId) return
       const dx = event.clientX - g.x, dy = event.clientY - g.y
       g.current = fitAgentBookmark(g.mode === 'move' ? { ...g.start, x: g.start.x + dx, y: g.start.y + dy }
-        : { ...g.start, width: g.start.width + dx, height: g.start.height + dy }, view.innerWidth, view.innerHeight)
+        : resized(g.start, dx, dy), view.innerWidth, view.innerHeight)
       apply(g.current)
       if (g.reading) restoreReadingAnchor(g.reading, g.anchor)
     },
     onPointerUp(event: ReactPointerEvent<HTMLElement>) { if (event.pointerId === gesture.current?.pointerId) end(true) },
-    onPointerCancel() { end(false) }, onLostPointerCapture() { end(false) }
+    onPointerCancel(event: ReactPointerEvent<HTMLElement>) { if (event.pointerId === gesture.current?.pointerId) end(false) },
+    onLostPointerCapture(event: ReactPointerEvent<HTMLElement>) { if (event.pointerId === gesture.current?.pointerId) end(false) }
   }
   function keyboard(event: ReactKeyboardEvent<HTMLElement>, resize = false) {
     if (!bookmark || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
@@ -98,7 +102,7 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
     const dx = event.key === 'ArrowLeft' ? -16 : event.key === 'ArrowRight' ? 16 : 0
     const dy = event.key === 'ArrowUp' ? -16 : event.key === 'ArrowDown' ? 16 : 0
     const surface = reader(), anchor = surface ? captureReadingAnchor(surface) : null
-    const next = fitAgentBookmark(resize || event.shiftKey ? { ...bounds, width: bounds.width + dx, height: bounds.height + dy }
+    const next = fitAgentBookmark(resize || event.shiftKey ? resized(bounds, dx, dy)
       : { ...bounds, x: bounds.x + dx, y: bounds.y + dy }, view.innerWidth, view.innerHeight)
     apply(next)
     if (surface) restoreReadingAnchor(surface, anchor)
