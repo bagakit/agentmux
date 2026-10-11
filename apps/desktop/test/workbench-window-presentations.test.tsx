@@ -1,7 +1,7 @@
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { createRequire } from 'node:module'
 // @vitest-environment happy-dom
-import { act, createElement, Fragment, useState } from 'react'
+import { act, createElement, Fragment, useLayoutEffect, useState } from 'react'
 import { expect, it, vi } from 'vitest'
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 import { createClientUiRoot } from './helpers/client-ui-render'
@@ -19,12 +19,16 @@ it('rebinds a nested original workface document when its parent Tab crosses nati
   const reference = { displayWorkspaceId: 'original-workspace', groupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }
   const target = { kind: 'tab' as const, displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
   const seen: Array<{ document: Document; scope: typeof mainScope | null; identity: object }> = []
+  const committed: typeof seen = []
   function OriginalContent() {
     const owner = useWorkbenchDocument(), scope = useWorkbenchWindowDocument(), [identity] = useState({})
     seen.push({ document: owner, scope, identity })
+    useLayoutEffect(() => { committed.push({ document: owner, scope, identity }) }, [owner, scope, identity])
     return createElement('input', { defaultValue: 'Original unsent content' })
   }
   const root = createClientUiRoot(container)
+  const frames: FrameRequestCallback[] = []
+  const holdFrame = vi.spyOn(child.defaultView!, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length })
   try {
     await act(async () => root.render(<Fragment>
       <div id="original-tab-home" />
@@ -37,17 +41,59 @@ it('rebinds a nested original workface document when its parent Tab crosses nati
     </Fragment>))
     const original = container.querySelector('input')!, identity = seen.at(-1)!.identity
     expect(original).not.toBeNull(); expect(seen.at(-1)!.scope).toEqual(mainScope)
-    let moving!: Promise<void>
-    await act(() => { moving = placeWorkbenchWindow(target, { destination, window: childScope }) })
-    await act(async () => { await moving })
+    let moving!: Promise<void>, acknowledged: typeof seen[number] | undefined
+    await act(() => { moving = placeWorkbenchWindow(target, { destination, window: childScope }); void moving.then(() => { acknowledged = committed.at(-1) }) })
+    await act(async () => {})
+    expect(acknowledged, 'actual document context commits before placement ACK, even without a paint frame').toEqual({ document: child, scope: childScope, identity })
+    expect(frames, 'placement confirmation does not require a target-document paint frame').toHaveLength(0)
+    await moving
     expect(child.querySelector('input')).toBe(original)
     expect(original.value).toBe('Original unsent content')
     expect(seen.at(-1)!.identity).toBe(identity)
     expect(seen.at(-1)!.document === child).toBe(true)
     expect(seen.at(-1)!.scope).toEqual(childScope)
   } finally {
+    holdFrame.mockRestore()
     await act(async () => root.unmount())
     releaseChild(); releaseMain(); container.remove(); frame.remove(); vi.unstubAllGlobals()
+  }
+})
+
+it('confirms the exact returned original host after commit without a Main paint frame', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'), destination = document.createElement('div')
+  document.body.append(container, destination)
+  const reference = { displayWorkspaceId: 'return-workspace', groupId: 'return-group', tabId: 'return-tab', regionId: 'return-region' }
+  const target = { kind: 'tab' as const, displayWorkspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId }
+  const scope = { windowId: 'return-window', documentGeneration: 'return-document' }
+  const root = createClientUiRoot(container)
+  let frame: { mockRestore(): void } | undefined
+  try {
+    await act(async () => root.render(<>
+      <div id="return-home" />
+      <StableWorkbenchView homeId="return-home" targetId={null} primaryTabId={reference.tabId} reference={reference} active visible retainedRegionId={null}>
+        <input defaultValue="Original unsent return draft" />
+      </StableWorkbenchView>
+    </>))
+    const original = container.querySelector('input')!, host = original.closest('.retained-workbench-view')!
+    let moving!: Promise<void>
+    await act(() => { moving = placeWorkbenchWindow(target, { destination, window: scope }) })
+    await act(async () => { await moving })
+    expect(destination.querySelector('input')).toBe(original)
+    const frames: FrameRequestCallback[] = []
+    frame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length })
+    let confirmed = false, returning!: Promise<void>
+    await act(() => { returning = placeWorkbenchWindow(target, null); void returning.then(() => { confirmed = true }) })
+    await act(async () => {})
+    expect(container.querySelector('#return-home .retained-workbench-view')).toBe(host)
+    expect(container.querySelector('input')).toBe(original)
+    expect(original.value).toBe('Original unsent return draft')
+    expect(confirmed, 'the exact original return settles after DOM placement without waiting for paint').toBe(true)
+    expect(frames).toHaveLength(0)
+    await returning
+  } finally {
+    frame?.mockRestore(); await act(async () => root.unmount())
+    container.remove(); destination.remove(); vi.unstubAllGlobals()
   }
 })
 
