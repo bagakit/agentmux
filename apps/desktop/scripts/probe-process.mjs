@@ -109,7 +109,7 @@ export async function stopProbeProcesses(groupId, temporaryRoot, graceMs = 1_000
 // This receipt belongs only to the ChildProcess spawned here. It says nothing
 // about independently owned Runtime resources or descendants. A signal is not exit.
 export async function runProbeProcess(executable, args, {
-  cwd, env, timeoutMs, onLine = () => {}, graceMs = 1_000
+  cwd, env, timeoutMs, onLine = () => {}, onSpawn = () => {}, graceMs = 1_000
 }) {
   const child = spawn(executable, args, { cwd, env, detached: true, stdio: ['ignore', 'inherit', 'pipe'] })
   const outcome = { originalPid: child.pid ?? null, exitCode: null, originalExitCode: null,
@@ -179,6 +179,12 @@ export async function runProbeProcess(executable, args, {
       // Explicit private-fixture notification from this child's own stderr;
       // its human-readable payload neither selects nor authorizes another process.
       if (line.startsWith('file_editing_probe_failed=')) stopOriginal()
+    })
+    // The original exit/error observers already exist if the receipt sink fails.
+    child.once('spawn', () => {
+      if (settled) return
+      try { onSpawn({ originalPid: outcome.originalPid }) }
+      catch (error) { primary ??= error; stopOriginal() }
     })
   })
 }
