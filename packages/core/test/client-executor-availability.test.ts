@@ -178,17 +178,15 @@ describe('启动闸拒绝时的理由：查不成 ≠ 没装', () => {
     expect(error.message).not.toContain('not installed')
   })
 
-  it('PATH 退化、根本没查成 → 不许说「没装」，要说查不成并指向环境', async () => {
+  it('checks the managed launch PATH even when the inherited PATH is empty', async () => {
     const previousPath = process.env.PATH
     process.env.PATH = ''
     try {
-      // 相对名 + 空 PATH → 零候选 → check-failed。这正是实战里那次误报的输入形态。
+      // Actual launch still supplies its managed CLI directory. This is a confirmed
+      // missing command in that PATH, while a context-free empty PATH stays unknown above.
       const error = await launchError('codex')
-      // 承重的一半：不能再谎称没装。把 executorUnavailableError 里的三态分支折掉（两支都返回
-      // 「not installed」），这条红。
       expect(error.message).not.toContain('is not installed on this host')
-      // 另一半：说出来的话要真的指向「我们没查成 + 去看环境」，而不是换一句同样无用的措辞。
-      expect(error.message).toMatch(/could not verify/i)
+      expect(error.message).toMatch(/Configured executable.*codex.*was not found/i)
       expect(error.message).toMatch(/PATH/)
     } finally {
       if (previousPath === undefined) delete process.env.PATH
