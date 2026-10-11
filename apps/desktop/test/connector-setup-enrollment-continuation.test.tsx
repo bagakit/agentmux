@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
-import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupBegin, ConnectionSetupView } from '@agentmux/core/connections'
+import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupBegin, ConnectionSetupView, ConnectionEnrollmentView, ConnectionEnrollmentAdvanceInput } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
@@ -19,9 +19,10 @@ const dom = composerDOM(), APP = 'cli_settings_continuation', USER = 'settings-c
 let root: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
 let closeSettings: () => void, reopen: () => void, native: string[], calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
 let afterCall: ((method: ConnectionMethod, result: unknown) => Promise<void>) | undefined, forward: typeof api.connections.call
+let pendingPolls: number[]
 const releases: Array<() => void> = []
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'settings-continuation-')); native = []; calls = []; afterCall = undefined
+  root = await mkdtemp(join(tmpdir(), 'settings-continuation-')); native = []; calls = []; afterCall = undefined; pendingPolls = []
   const asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
@@ -32,7 +33,17 @@ beforeEach(async () => {
       response.headers.append('set-cookie', 'session=settings-continuation-private-cookie; Domain=.feishu.cn; Path=/; Secure')
       return response
     }
-    if (target.pathname === '/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
+    if (target.pathname === '/accounts/qrlogin/polling') {
+      const headers = new Headers(options?.headers)
+      expect(headers.get('x-flow-key')).toBe('settings-continuation-private-flow')
+      expect(headers.get('cookie')).toContain('session=settings-continuation-private-cookie')
+      const previous = calls.findLast(call => ['connection.enrollment.begin', 'connection.enrollment.advance'].includes(call.method))?.result as ConnectionEnrollmentView | undefined
+      if (previous?.challenge) expect(Date.now()).toBeGreaterThanOrEqual(previous.challenge.nextPollAt)
+      const status = pendingPolls.shift()
+      return Response.json({ code: 0, data: status === undefined
+        ? { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } }
+        : { next_step: 'qr_login_polling', step_info: { status } } })
+    }
     if (target.href === 'https://accounts.feishu.cn/cross') return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
     if (target.href === 'https://ask.feishu.cn/') return new Response('Landing is not account identity')
     if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};window.csrfToken="settings-continuation-private-csrf";</script>`, { headers: { 'content-type': 'text/html' } })
@@ -94,6 +105,38 @@ async function savedCreation() {
   expect(calls.filter(call => call.method === 'connection.setup.begin')).toEqual([])
   return { original, before: [...native] }
 }
+
+it('keeps the original QR through repeated waiting and scanning, then automatically reaches account review', async () => {
+  pendingPolls = [1, 1, 2]
+  await dom.render(<MountedSettings />); await click('[data-enrollment-create]')
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-code] svg')).not.toBeNull() })
+  const qr = dom.container.querySelector('[data-enrollment-code] svg')!, original = calls.find(call => call.method === 'connection.enrollment.begin')!.result as ConnectionEnrollmentView
+  const progress = () => calls.filter(call => call.method === 'connection.enrollment.advance').map(call => call.result as ConnectionEnrollmentView)
+  for (const [index, stage] of ['waiting', 'waiting', 'scanned'].entries()) {
+    await vi.waitFor(async () => { await act(async () => {}); expect(progress().length).toBeGreaterThan(index) }, { timeout: 4000 })
+    expect(progress()[index]).toMatchObject({ operation: { operationId: original.operation!.operationId, authentication: { stage, attemptId: original.operation!.authentication!.attemptId } }, challenge: { qrPayload: original.challenge!.qrPayload } })
+    expect(dom.container.querySelector('[data-enrollment-code] svg')).toBe(qr)
+    expect(progress()[index]!.actions.some(action => action.kind === 'continue-authentication')).toBe(true)
+  }
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-action="confirm-account"]')).not.toBeNull() }, { timeout: 5000 })
+  expect(progress().map(view => view.operation!.authentication!.stage)).toEqual(['waiting', 'waiting', 'scanned', 'handoff', 'handoff', 'handoff', 'account'])
+  expect(progress().every(view => view.operation!.authentication!.attemptId === original.operation!.authentication!.attemptId)).toBe(true)
+  expect(progress().slice(3).every(view => view.challenge === null)).toBe(true)
+  expect(dom.container.querySelector('[data-enrollment-code]')).toBeNull()
+  expect(dom.container.textContent).toContain(USER); expect(dom.container.textContent).toContain(TENANT)
+  expect(native).toEqual(['/accounts/qrlogin/init', ...Array(4).fill('/accounts/qrlogin/polling'), '/cross', '/', '/app'])
+  expect(calls.filter(call => call.method === 'connection.enrollment.begin')).toHaveLength(1)
+  const advances = calls.filter(call => call.method === 'connection.enrollment.advance')
+  for (const [index, call] of advances.entries()) {
+    const previous = index ? progress()[index - 1]! : original, input = call.input as ConnectionEnrollmentAdvanceInput
+    const offered = previous.actions.find(action => action.kind === 'continue-authentication')!
+    expect(input.operationId).toBe(original.operation!.operationId)
+    expect(input.ownRevision).toBe(previous.operation!.revision)
+    expect(input.decision).toEqual({ actionId: offered.actionId, kind: offered.kind })
+  }
+  expect(dom.draft('agent-1')).toBe('Keep my draft')
+  expect((await services.connections.enrollment!.list({})).operations[0]!.application).toBeNull()
+}, 20_000)
 
 it('saved Settings creation explicitly continues the same bot with its original account, then separately confirms and reads it', async () => {
   const { original, before } = await savedCreation()

@@ -31,6 +31,24 @@ function authentication(receipt: EnrollmentAuthenticationReceipt) {
   if (receipt.kind !== 'authentication') throw new Error('Original account progress was not confirmed')
   return receipt
 }
+it.each([
+  ['unknown-step', 'another-step', 1, null],
+  ['unknown-status', 'qr_login_polling', 3, null],
+  ['init-status-on-poll', 'qr_login_polling', 0, null],
+  ['unconfirmed-expiry-marker', 'qr_login_polling', 5, null],
+  ['original-waiting', null, 1, 'waiting'],
+  ['original-scanned', null, 2, 'scanned'],
+  ['original-expired', null, 5, 'expired']
+] as const)('keeps exact pending protocol boundaries: %s', async (_name, nextStep, status, stage) => {
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-pending-qr' } } }, { headers: { 'x-flow-key': 'private-pending-flow' } }),
+    Response.json({ code: 0, data: { next_step: nextStep, step_info: { status } } })
+  )
+  const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
+  const result = await adapter.advance({ ...original, privateState: initial.privateState })
+  expect(result).toMatchObject(stage ? { kind: 'authentication', stage, challenge: stage === 'expired' ? null : { qrPayload: initial.challenge!.qrPayload }, account: null } : { kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed' } })
+  expect(network.calls).toHaveLength(2)
+})
 function uploaded(receipt: EnrollmentUploadReceipt) {
   expect(receipt.kind).toBe('uploaded')
   if (receipt.kind !== 'uploaded') throw new Error('Original icon upload was not confirmed')
