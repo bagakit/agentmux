@@ -243,6 +243,14 @@ export class NativeOverlaySurfaces {
     // Reapply the current rectangle for any pending native layout. Equal bounds do not
     // guarantee compositor invalidation or prove that the first frame is available.
     projection.view.setBounds(projection.view.getBounds())
+    // Constructor preferences do not synchronize a newly attached native drawable.
+    // Its offscreen scheduler must run before image.decode() can complete; waiting
+    // until publication would make first-frame readiness depend on itself.
+    if (!projection.throttlingSynchronized) {
+      projection.paintStage = 'Chrome scheduling'
+      projection.view.webContents.setBackgroundThrottling(false)
+      projection.throttlingSynchronized = true
+    }
     if (projection.region.scrim !== undefined) {
       const bounds = projection.region.bounds
       // A single nonzero-fill path paints the union once, including overlapping pages.
@@ -298,12 +306,6 @@ export class NativeOverlaySurfaces {
   private finishLoadedPaint(projection: Projection, revision: number, arrange = true): void {
     if (!this.current(projection) || revision !== projection.revision) return
     projection.view.setBounds(projection.region.bounds)
-    // Synchronize once on the actual attached owner, after document and image preparation.
-    // Further paints reuse the same native attachment and its original input route.
-    if (!projection.throttlingSynchronized) {
-      projection.view.webContents.setBackgroundThrottling(false)
-      projection.throttlingSynchronized = true
-    }
     if (arrange) this.arrangeLayers()
   }
 
