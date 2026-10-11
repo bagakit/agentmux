@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useState, type ReactNode } from 'react'
+import { NoteViewToolbarContext } from '../src/renderer/src/lib/note-view-toolbar'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { Editor } from '@tiptap/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -30,9 +31,15 @@ function documentFor(text = 'Original body'): FileDocument { const content = ser
 function written(text: string): FileDocument { const doc = documentFor(text), receipt: NoteWrittenReceipt = { status: 'written', revision: doc.revision }; return { ...doc, noteEditing: { baseline: { content: doc.content, revision: doc.revision }, receipt } } }
 function feedback() { return dom.container.querySelector('.note-file-identity-icon [data-icon-animation="feedback"]') }
 const icons = () => dom.container.querySelectorAll('.note-file-identity-icon svg[data-semantic-icon="object.note"]')
+function OriginalFrame({ children }: { children: ReactNode }) {
+  const [element, setElement] = useState<HTMLDivElement | null>(null)
+  return <NoteViewToolbarContext.Provider value={element ? { element, documentKey: key } : null}>
+    <div className="note-view-controls" ref={setElement} />{children}
+  </NoteViewToolbarContext.Provider>
+}
 async function view(document: FileDocument, options: { dirty?: boolean; active?: boolean; resource?: typeof resource } = {}) {
-  await dom.render(<WorkbenchPresentationContext.Provider value={{ ...presentation, active: options.active ?? true }}><NoteFileView document={document} resource={options.resource ?? resource} dirty={options.dirty ?? false}
-    knowledge={noteKnowledge([{ document, location: { workspaceId: resource.workspaceId, path: document.path } }], 'partial')} onSave={onSave} onChange={onChange} onOpen={onOpen} /></WorkbenchPresentationContext.Provider>)
+  await dom.render(<OriginalFrame><WorkbenchPresentationContext.Provider value={{ ...presentation, active: options.active ?? true }}><NoteFileView document={document} resource={options.resource ?? resource} dirty={options.dirty ?? false}
+    knowledge={noteKnowledge([{ document, location: { workspaceId: resource.workspaceId, path: document.path } }], 'partial')} onSave={onSave} onChange={onChange} onOpen={onOpen} /></WorkbenchPresentationContext.Provider></OriginalFrame>)
 }
 async function end() { await act(async () => feedback()!.dispatchEvent(new Event('animationend', { bubbles: true }))) }
 beforeEach(() => {
@@ -125,7 +132,7 @@ it('registered Notes keep exactly one original note identity in the existing too
   const catalog = emptyNotebookState(); catalog.pages['note-original'] = { noteId: 'note-original', title: 'Registered original', notebookId: 'quick-notes', parentNoteId: null, resource, sources: [], topics: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 2) }
   useNotebookLibrary.setState({ state: catalog }); await view(documentFor()); expect(icons()).toHaveLength(1)
   expect(dom.container.querySelectorAll('.notebook-page-heading .note-file-identity-icon')).toHaveLength(0)
-  expect(dom.container.querySelectorAll('.note-view-toolbar .note-file-identity-icon')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('.note-view-controls .note-file-identity-icon')).toHaveLength(1)
   const fresh = { ...written('Registered fresh'), noteWriteAttribution: { status: 'unconfirmed' as const, reason: 'Metadata observation retained' } }
   await view(fresh); expect(feedback()).not.toBeNull(); expect(dom.container.textContent).toContain('Metadata observation retained'); expect(icons()).toHaveLength(1)
   expect(onSave).not.toHaveBeenCalled()
