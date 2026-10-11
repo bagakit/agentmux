@@ -4,6 +4,9 @@ import { relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../../..')
 const mutants: Record<string, [string, string, string]> = {
+  'skip-bypass-create': ['codex-native-input.ts', 'if (arg === BYPASS_PERMISSIONS) {\n      if (bypass) return null', 'if (arg === BYPASS_PERMISSIONS) {\n      return null'],
+  'keep-bypass-token': ['codex-native-input.ts', "resume.approvalPolicy = 'never'; removed.add(i)", "resume.approvalPolicy = 'never'"],
+  'wrong-bypass-policy': ['codex-native-input.ts', "resume.sandbox = 'danger-full-access'; resume.approvalPolicy = 'never'", "resume.sandbox = 'read-only'; resume.approvalPolicy = 'on-request'"],
   'create-only': ['codex-native-input.ts', "context.kind === 'fork'", "context.kind !== 'create'"],
   'keep-policy-argv': ['codex-native-input.ts', 'args.filter((_, i) => !removed.has(i))', '[...args]'],
   'forget-resume-policy': ['codex-managed-run.ts', '{ ...expected, excludeTurns: true }', '{ threadId: expected.threadId, excludeTurns: true }'],
