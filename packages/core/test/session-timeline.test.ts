@@ -1,6 +1,7 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { chmodSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { DatabaseSync } from 'node:sqlite'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -382,7 +383,7 @@ describe('Agent Session Timeline', () => {
     const store = new AgentMuxMemoryAgentSessionStore()
     await store.compareAndSwap(null, session('session-1', 'run-1'))
 
-    await expect(store.loadTimeline('session-1')).resolves.toEqual({
+    await expect(store.loadTimeline('session-1')).resolves.toMatchObject({
       agentSessionId: 'session-1',
       revision: 0,
       items: []
@@ -479,19 +480,13 @@ describe('Agent Session Timeline', () => {
       items: [{ id: 'assistant-2', agentSessionId: 'session-2', content: 'Separate' }]
     })
 
+    const original = await restarted.readCapturedHistory('session-1')
     await restarted.compareAndSwap(firstSession, null)
-    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline('session-1')).resolves.toEqual({
-      agentSessionId: 'session-1',
-      revision: 0,
-      items: []
-    })
-
+    const retained = await new AgentMuxFileAgentSessionStore(path).loadTimeline('session-1')
+    expect(retained).toMatchObject({ agentSessionId: 'session-1', revision: 1,
+      items: [{ id: 'assistant-1', content: 'Hello' }], stream: { epoch: original.stream.epoch } })
     await restarted.compareAndSwap(null, session('session-1', 'run-3'))
-    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline('session-1')).resolves.toEqual({
-      agentSessionId: 'session-1',
-      revision: 0,
-      items: []
-    })
+    expect(await restarted.readCapturedHistory('session-1')).toEqual(original)
   })
 
   it('keeps one Agent Session Timeline across a committed Run replacement', async () => {
@@ -546,34 +541,22 @@ describe('Agent Session Timeline', () => {
       })
   })
 
-  it('keeps Session commits authoritative when Timeline cleanup fails and recovers the orphan', async () => {
-    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-cleanup-"))
+  it('keeps Session commits and original SQL facts independent of a read-only legacy directory', async () => {
+    const root = await mkdtemp(fixturePath('tmp/agentmux-timeline-cleanup-'))
     roots.push(root)
-    const path = join(root, 'agent-sessions.json')
-    const timelineDirectory = join(root, 'agent-timelines')
-    const current = session('session-1', 'run-1')
-    const store = new AgentMuxFileAgentSessionStore(path)
+    const path = join(root, 'agent-sessions.json'), legacy = join(root, 'agent-timelines')
+    const current = session('session-1', 'run-1'), store = new AgentMuxFileAgentSessionStore(path)
     await store.compareAndSwap(null, current)
     await store.applyTimelineMutation(assistantAppend())
-
-    await chmod(timelineDirectory, 0o500)
+    const original = await store.readCapturedHistory('session-1')
+    await mkdir(legacy, { recursive: true }); await chmod(legacy, 0o500)
     try {
       await expect(store.compareAndSwap(current, null)).resolves.toBeUndefined()
-      await expect(store.compareAndSwap(null, session('session-1', 'run-2')))
-        .rejects.toMatchObject({ code: 'EACCES' })
-      const document = JSON.parse(await readFile(path, 'utf8')) as { sessions: unknown[] }
-      expect(document.sessions).toEqual([])
-    } finally {
-      await chmod(timelineDirectory, 0o700)
-    }
-
-    const restarted = new AgentMuxFileAgentSessionStore(path)
-    await expect(restarted.load()).resolves.toEqual([])
-    await expect(restarted.loadTimeline('session-1')).resolves.toEqual({
-      agentSessionId: 'session-1',
-      revision: 0,
-      items: []
-    })
+      expect(await store.load()).toEqual([])
+      expect(await store.readCapturedHistory('session-1')).toEqual(original)
+      await store.compareAndSwap(null, session('session-1', 'run-2'))
+      expect(await store.readCapturedHistory('session-1')).toEqual(original)
+    } finally { await chmod(legacy, 0o700) }
   })
 
   it('does not hide a malformed Timeline that belongs to a live Session', async () => {
@@ -583,10 +566,9 @@ describe('Agent Session Timeline', () => {
     const timelineDirectory = join(root, 'agent-timelines')
     const store = new AgentMuxFileAgentSessionStore(path)
     await store.compareAndSwap(null, session('session-1', 'run-1'))
-    await store.applyTimelineMutation(assistantAppend())
-    const [timelineFilename] = await readdir(timelineDirectory)
-    expect(timelineFilename).toBeDefined()
-    await writeFile(join(timelineDirectory, timelineFilename!), '{}\n')
+    await mkdir(timelineDirectory, { recursive: true })
+    const filename = createHash('sha256').update('session-1').digest('base64url') + '.jsonl'
+    await writeFile(join(timelineDirectory, filename), '{}\n')
 
     const restarted = new AgentMuxFileAgentSessionStore(path)
     await expect(restarted.load()).resolves.toHaveLength(1)
@@ -598,23 +580,12 @@ describe('Agent Session Timeline', () => {
     const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-revision-limit-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
-    const timelineDirectory = join(root, 'agent-timelines')
     const store = new AgentMuxFileAgentSessionStore(path)
     await store.compareAndSwap(null, session('session-1', 'run-1'))
     await store.applyTimelineMutation(assistantAppend())
-    const [timelineFilename] = await readdir(timelineDirectory)
-    expect(timelineFilename).toBeDefined()
-    const timelinePath = join(timelineDirectory, timelineFilename!)
-    const timeline = JSON.parse(await readFile(timelinePath, 'utf8')) as {
-      revision: number
-      items: unknown[]
-    }
-    await writeFile(timelinePath, `${JSON.stringify({
-      version: 3,
-      agentSessionId: 'session-1',
-      revision: Number.MAX_SAFE_INTEGER,
-      items: timeline.items
-    })}\n`)
+    const database = new DatabaseSync(path)
+    try { database.prepare('UPDATE captured_streams SET revision=? WHERE session_id=?').run(Number.MAX_SAFE_INTEGER, 'session-1') }
+    finally { database.close() }
 
     const restarted = new AgentMuxFileAgentSessionStore(path)
     await expect(restarted.applyTimelineMutation(assistantAppend())).resolves.toMatchObject({
@@ -634,42 +605,6 @@ describe('Agent Session Timeline', () => {
     })
   })
 
-  it('returns a committed receipt and poisons later writes when lock cleanup fails', async () => {
-    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-lock-release-"))
-    roots.push(root)
-    const path = join(root, 'agent-sessions.json')
-    const store = new AgentMuxFileAgentSessionStore(path)
-    await store.compareAndSwap(null, session('session-1', 'run-1'))
-    await mkdir(join(root, 'agent-timelines'), { mode: 0o700 })
-    const mutation = assistantAppend()
-    Object.defineProperty(mutation, 'agentSessionId', {
-      enumerable: true,
-      get() {
-        chmodSync(root, 0o500)
-        return 'session-1'
-      }
-    })
-    const warning = new Promise<Error>((resolve) => {
-      process.once('warning', resolve)
-    })
-
-    try {
-      await expect(store.applyTimelineMutation(mutation)).resolves.toMatchObject({
-        agentSessionId: 'session-1',
-        revision: 1,
-        changed: true
-      })
-    } finally {
-      await chmod(root, 0o700)
-    }
-    await expect(warning).resolves.toMatchObject({
-      name: 'Warning',
-      code: 'AGENT_SESSION_STORE_LOCK_RELEASE_FAILED'
-    })
-    await expect(store.applyTimelineMutation(assistantAppend()))
-      .rejects.toMatchObject({ code: 'AGENT_SESSION_STORE_LOCK_RELEASE_FAILED' })
-    await unlink(`${path}.lock`)
-    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline('session-1'))
-      .resolves.toMatchObject({ revision: 1, items: [{ id: 'assistant-1' }] })
-  })
+  // Exact original flock cleanup/retry is covered with a real post-COMMIT close failure
+  // in captured-history-durability.test.ts; a failed observation cannot poison a healthy Store.
 })

@@ -64,13 +64,15 @@ it.each(['captured', 'native'] as const)('keeps oversized %s content completely 
   expect(older.nextCursor).toBeNull()
   await f.unchanged()
 })
-it('rejects source revision drift instead of losing or repeating captured entries', async () => {
+it('retains a frozen captured cut across append without skipping older original content', async () => {
   const f = await fixture()
   const first = await core.readAgentSessionHistory(f.client, { ...f.reference, source: 'captured', limit: 1 })
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId, item: {
     id: 'later', agentSessionId: f.session.agentSessionId, kind: 'user_message', status: 'complete', source: 'user', title: 'Later', createdAt: 200, updatedAt: 200, content: 'Later' } })
-  await expect(core.readAgentSessionHistory(f.client, { ...f.reference, source: 'captured', limit: 1, cursor: first.nextCursor! }))
-    .rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  const second = await core.readAgentSessionHistory(f.client, { ...f.reference, source: 'captured', limit: 1, cursor: first.nextCursor! })
+  expect(second.items).toMatchObject([{ kind: 'item', item: { id: 'captured-0', content: 'Older captured work' } }])
+  expect(second.revision).toBe(first.revision)
+  expect(second.capturedStream).toEqual(first.capturedStream)
 })
 it('rejects mismatched or oversized public results at the consumer seam', async () => {
   const f = await fixture()
