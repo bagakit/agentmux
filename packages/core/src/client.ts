@@ -1976,6 +1976,20 @@ export class AgentMuxClient {
     }
   }
 
+  /** Exact durable identity, without inventory, adoption or a Run probe. */
+  async readAgentSession(agentSessionId: string): Promise<AgentMuxAgentSession | null> {
+    safeId(agentSessionId, 'Agent Session id')
+    let canonical!: AgentMuxStoredAgentSession | null
+    await this.registry.readMetadata(agentSessionId, session => { canonical = session })
+    if (canonical) {
+      if (canonical.agentSessionId !== agentSessionId) throw new AgentMuxError(
+        'The original Session metadata belongs to another identity. Existing Runs are retained.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+      return this.projectSession(await this.registry.readStartedResume(canonical))
+    }
+    const started = this.registry.has(agentSessionId) ? this.registry.get(agentSessionId) : undefined
+    return started?.creation?.persistence === 'unconfirmed' ? this.projectSession(started) : null
+  }
+
   /** Current durable identities, without replacing the active registry or probing Runs. */
   async readAgentSessions(): Promise<AgentMuxAgentSession[]> {
     const durable = await Promise.all((await loadAgentSessionMetadata(this.store)).map(session => this.registry.readStartedResume(session)))

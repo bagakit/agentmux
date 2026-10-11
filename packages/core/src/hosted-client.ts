@@ -14,7 +14,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentM
   type AgentMuxHostedBootstrap, type AgentMuxHostedMethod, type AgentMuxHostedInvocation,
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc, type AgentMuxHostedSubscribeRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
-import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection } from './hosted-value.js'
+import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection } from './hosted-value.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
@@ -205,6 +205,7 @@ export async function connectHostedAgentMux(options: {
       invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, { signal: observationSignal(signal) })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
+    if (method === 'readAgentSession') return parseHostedAgentSessionRead(decoded, wireArgs[0] as string)
     if (method === 'controlAgentContinuity') return parseAgentContinuityControlResult(decoded, parseAgentContinuityControlInput(wireArgs[0]))
     if (method === 'sessionHistoryResource') {
       const request = parseSessionHistoryResourceOptions(wireArgs[1])
@@ -748,6 +749,8 @@ export async function connectHostedAgentMux(options: {
     if (method === 'readRunReplay') return await watchAttachment({ kind: 'terminal-run', runId: (args[0] as AgentMuxRunRef).runId },
       (args[1] as number | undefined) ?? 0, (args[2] as 'raw' | 'terminal' | undefined) ?? 'raw', false, undefined, `replay:${randomClientRequestId()}`, true)
     const value = await invoke(method, args)
+    // An exact durable read observes its owner without updating the Hosted cache.
+    if (method === 'readAgentSession') return value
     if (value && typeof value === 'object') {
       const result = value as { agentSessionId?: string; session?: AgentMuxAgentSession }
       const updated = result.agentSessionId ? value as AgentMuxAgentSession : result.session

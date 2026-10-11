@@ -195,6 +195,23 @@ export function parseHostedBootstrap(value: unknown): import('./hosted-client-co
   if (p.connection !== null) parseHostedNativeConnection(p.connection)
   return p as unknown as import('./hosted-client-contract.js').AgentMuxHostedBootstrap
 }
+/** Bind an exact metadata reply to its request; the Core owns the public Session projection. */
+export function parseHostedAgentSessionRead(value: unknown, agentSessionId: string): import('./types.js').AgentMuxAgentSession | null {
+  if (value === null) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError(
+    'The original Session metadata reply is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  const session = value as Record<string, unknown>
+  if (session.kind !== 'agent' || session.agentSessionId !== agentSessionId ||
+      ['hookBindingId', 'hookToken', 'nativeTurnEnds', 'interactionOperations', 'continuityExecutors', 'activityCommit', 'futurePromptIntents'].some(key => Object.hasOwn(session, key))) throw new AgentMuxError(
+    'The Session metadata reply does not match its original public identity.', 'CONTROL_PROTOCOL_ERROR')
+  for (const key of ['hostId', 'providerId', 'executorId', 'workspacePath']) wireString(session[key])
+  wireString(wireRecord(session.run, ['runId']).runId)
+  if (!Array.isArray(session.retiredRuns)) throw new AgentMuxError('Session Run references are malformed.', 'CONTROL_PROTOCOL_ERROR')
+  for (const run of session.retiredRuns) wireString(wireRecord(run, ['runId']).runId)
+  if ([session.createdAt, session.updatedAt].some(value => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new AgentMuxError(
+    'Session metadata observation times are malformed.', 'CONTROL_PROTOCOL_ERROR')
+  return value as import('./types.js').AgentMuxAgentSession
+}
 /** Only an exact typed Core/Native observation may change the current Native input identity. */
 export function parseHostedNativeConnection(value: unknown): Extract<import('./types.js').AgentMuxClientEvent, { type: 'connection-state' }> {
   const connection = wireRecord(value, ['type', 'state', 'observationOrigin', 'diagnostic', 'evidence'])
