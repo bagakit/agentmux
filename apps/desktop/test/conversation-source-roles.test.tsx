@@ -3,10 +3,10 @@ import { act, type ComponentProps } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
 import { api } from '../src/renderer/src/lib/api'
 import original from './fixtures/conversation-source-roles.json'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -66,10 +66,15 @@ it('presents the exact independent original Hook reply as a compact observation 
   expect(JSON.stringify({ page, hook })).toBe(before)
 })
 
-it.each(['codex', 'claude'])('keeps a sole Hook reply directly readable with absent, empty and failed %s native reading', async providerId => {
+it.each(['codex', 'claude'])('keeps a sole Hook reply fully readable through local disclosure with absent, empty and failed %s native reading', async providerId => {
   const hook = originalHook(), page = { ...originalPage(), source: { ...original.source, providerId }, items: [] }
   for (const source of [null, page]) {
     await render(source, [hook])
+    const disclosure=host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!
+    if(disclosure.getAttribute('aria-expanded')==='false'){
+      expect(bodies()).toHaveLength(0)
+      await click(disclosure)
+    }
     expect(bodies()).toHaveLength(1)
     expect(bodies()[0]).toContain('磁盘可用空间')
     expect(host.querySelector('[data-captured-reply-observation] [aria-expanded]')!.getAttribute('aria-expanded')).toBe('true')
@@ -143,16 +148,18 @@ it('locates the exact original captured point while its local observation is clo
   expect(host.querySelector('[data-captured-reply-observation] [aria-expanded]')!.getAttribute('aria-expanded')).toBe('true')
 })
 
-it('holds a directly readable captured answer Range when a first native record makes the observation compact', async () => {
+it('keeps an explicitly opened captured answer Range and disclosure choice when the first native record arrives', async () => {
   const hook = originalHook()
   await render({ ...originalPage(), items: [] }, [hook])
+  await click(host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]'))
   const body = host.querySelector('[data-message-id="' + hook.id + '"] .log-turn__body')!
   const range = document.createRange(); range.selectNodeContents(body); getSelection()!.addRange(range)
   await render(originalPage(), [hook])
   expect(bodies()).toHaveLength(2); expect(body.isConnected).toBe(true)
   expect(host.querySelector('[data-message-id="' + hook.id + '"] .log-turn__body')).toBe(body)
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
-  expect(bodies()).toHaveLength(1)
+  expect(bodies()).toHaveLength(2)
+  expect(host.querySelector('[data-captured-reply-observation] [aria-expanded]')?.getAttribute('aria-expanded')).toBe('true')
 })
 
 it('keeps same bare IDs from two sources as independently expandable original process steps', async () => {

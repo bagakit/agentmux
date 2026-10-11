@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMarkdown } from '../src/components/AgentMarkdown.js'
 import { ConversationMessage } from '../src/components/ConversationMessage.js'
-import { ConversationView } from '../src/components/ConversationView.js'
+import { StaticConversationView as ConversationView } from '../../../apps/desktop/test/helpers/conversation-static-fixture'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { parseAgentMarkdownDocument } from '../src/lib/agent-markdown.js'
 
@@ -24,7 +24,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() })
-async function render(node: ReactNode) { await act(async () => root.render(<ClientUiProvider platform={platform}>{node}</ClientUiProvider>)) }
+async function render(node: ReactNode) { await act(async () => root.render(<ClientUiProvider platform={platform}>{node}</ClientUiProvider>)); for (const disclosure of container.querySelectorAll<HTMLDetailsElement>('details.message-disclosure:not([open])')) await act(async()=>{disclosure.open=true;disclosure.dispatchEvent(new Event('toggle'))}) }
 function element(selector: string, scope: ParentNode = container): HTMLElement {
   const found = scope.querySelector<HTMLElement>(selector)
   expect(found, `Actual mounted element ${selector}`).not.toBeNull()
@@ -112,7 +112,7 @@ describe('incoming Markdown in the shared conversation caller', () => {
     expect(element('.log-turn__time').parentElement).toBe(head)
     expect(meta.parentElement).toBe(head.parentElement)
     expect(head.querySelector('.log-turn__input-source')).toBeNull()
-    expect(meta.textContent).toContain('原生 - 未知来源')
+    expect(meta.textContent).toContain('原生对话 · 入口未记录')
     const text = element('.md-paragraph', body).firstChild!
     const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 3)
     const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)

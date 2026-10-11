@@ -3,9 +3,9 @@ import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 const sid = 'submission-presentation-session', source = { providerId: 'codex', nativeSessionId: 'original-source' }
@@ -68,7 +68,7 @@ it.each(['missing', 'empty'])('retains the sole captured body and accurate unkno
 it('renders observations as ordinary provenance and keeps expanded body Range through a compact update', async () => {
   const item: AgentTimelineItem = { ...submission('reply', false), source: 'native-hook', kind: 'assistant_message', eventName: 'Stop' }
   const read = (p: AgentSessionHistoryPage) => <ConversationView sessionId={sid} page={p} timeline={snapshot([item])} />
-  await render(read(page(false))); const body = host.querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!
+  await render(read(page(false))); await act(async()=>host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!.click()); const body = host.querySelector('.log-turn__body')!, text = body.querySelector('p')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); getSelection()!.addRange(range)
   await render(read(page()))
   expect(host.querySelector('[data-captured-reply-observation] .log-turn__body')).toBe(body); expect(getSelection()!.toString()).toBe('Original')

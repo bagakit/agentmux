@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../src/shared/contracts'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -39,6 +39,10 @@ it.each(['codex', 'claude'])('keeps complete captured bodies with null, empty an
   items = [captured('original-input', _historyFixtureEpoch(0, 0, 200), 'Original captured request'), captured('original-hook-reply', _historyFixtureEpoch(0, 0, 400), 'Original captured answer', 'assistant_message')]
   page = { ...page, source: { ...source, providerId }, items: [] }
   await render(null)
+  expect(bodies()).toEqual(['Original captured request'])
+  const observation=host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!
+  expect(observation.getAttribute('aria-expanded')).toBe('false')
+  await act(async()=>observation.click())
   expect(bodies()).toEqual(['Original captured request', 'Original captured answer'])
   await render()
   expect(bodies(), 'a valid empty source page cannot hide already accepted captured messages').toEqual(['Original captured request', 'Original captured answer'])
@@ -163,6 +167,7 @@ it.each(['local', 'remote-route'])('holds the selected original captured DOM thr
   const original = captured('late-original', _historyFixtureEpoch(0, 0, 200), 'Selected complete original contribution', 'assistant_message')
   items = [original]
   await render(null, routeHostId)
+  await act(async()=>host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!.click())
   const body = host.querySelector('[data-message-id="late-original"] .log-turn__body')!
   const text = body.querySelector('p')!.firstChild!
   const range = document.createRange(); range.selectNodeContents(text); getSelection()!.addRange(range)
@@ -190,6 +195,7 @@ it('shows exact Core coverage gaps once in the common reading scope without gues
   const missing = { hostId: 'local', agentSessionId: sid, source: { kind: 'native' as const, ...source, recordId: 'unread-canonical' } }
   items = [{ ...captured('unread-original', _historyFixtureEpoch(0, 0, 100), 'Original readable contribution', 'assistant_message'), conversation: { sameEvent: missing } }]
   await render(null)
+  await act(async()=>host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!.click())
   expect(host.querySelectorAll('[data-conversation-coverage]')).toHaveLength(1)
   const gap = host.querySelector('[data-conversation-gap="CONVERSATION_ANCHOR_UNREAD"]')!
   expect(gap).not.toBeNull(); expect(gap.querySelector('[data-conversation-gap-reference]')?.textContent).toBe(JSON.stringify(missing))

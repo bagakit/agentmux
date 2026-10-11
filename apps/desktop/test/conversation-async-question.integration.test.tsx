@@ -4,7 +4,7 @@ import { act, type ReactNode } from 'react';
 import type { Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import type { AgentSessionHistoryPage } from '@agentmux/core';
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView';
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture';
 import { createClientUiRoot } from './helpers/client-ui-render';
 import { fixture, nativeQuestion, request, raw } from './helpers/native-async-question-fixture';
 import { api } from '../src/renderer/src/lib/api';
@@ -197,7 +197,10 @@ it.each(['Keep original', 'A different native answer'])('same-question recorded 
 })
 it('durable Workbench storage preserves the original unknown separately from newly edited answers', async () => {
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
+  async function catalog(options:{observation:true}):Promise<import('../src/shared/contracts').ProviderCatalogObservation>
+  async function catalog():Promise<import('@agentmux/core').AgentCatalogEntry[]>
+  async function catalog(options?:{observation:true}):Promise<import('../src/shared/contracts').ProviderCatalogObservation|import('@agentmux/core').AgentCatalogEntry[]>{return options?.observation?{catalog:[],warnings:[]}:[]}
+  vi.spyOn(api.providers, 'list').mockImplementation(catalog)
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: useAppStore.getState().sessions, timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()

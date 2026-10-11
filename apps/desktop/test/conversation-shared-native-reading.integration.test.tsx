@@ -13,7 +13,8 @@ import { AgentMuxClient, AgentMuxFileAgentSessionStore } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
+import { ActivityView as ReaderActivityView } from '../src/renderer/src/components/ActivityView'
 import { parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
 import { api } from '../src/renderer/src/lib/api'
 
@@ -86,12 +87,13 @@ async function settledHistory(): Promise<void> {
 }
 
 describe('shared native presentation preserves the existing reading owner', () => {
-  it('a real public native user trace keeps its raw record and canonical disclosure identity when its source refreshes', async () => {
+  it('an explicitly read public native user trace keeps its raw record and canonical disclosure identity when its source refreshes', async () => {
     const f = await fixture(); const pages: AgentSessionHistoryPage[] = []; const pending: Promise<AgentSessionHistoryPage>[] = []
     const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => {
       expect(control).toEqual(f.control); const read = f.page(); pending.push(read); const result = await read; pages.push(result); return result
     })
-    await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
+    const acceptedPage = await api.sessions.historyPage(f.control)
+    await act(async () => root.render(<ActivityView nativeHistoryPage={acceptedPage} {...activityReadingProps({ control: f.control, label: "Recipient", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
     await act(async () => { await Promise.all(pending) })
     await settledHistory()
     expect(pages.map(page => page.items.map(item => item.id))).toEqual([[f.rawId]])
@@ -123,9 +125,10 @@ describe('shared native presentation preserves the existing reading owner', () =
     const timeline: AgentTimelineItem[] = [{ id: 'captured-timeline-before-native', agentSessionId: f.control.agentSessionId,
       kind: 'assistant_message', source: 'native-hook', status: 'complete', createdAt: 1000, updatedAt: 1000,
       title: 'Assistant', content: 'Earlier timeline turn' }]
-    const render = async (native = messages) => act(async () => root.render(<ActivityView sessionId={f.control.agentSessionId}
-      items={timeline} userMessages={native} capability="complete-events" displayState="done" />))
-    await render([])
+    const render = async (native: AgentSessionHistoryPage | null = first) => act(async () => root.render(<ActivityView sessionId={f.control.agentSessionId}
+      items={timeline} nativeHistoryPage={native} capability="complete-events" displayState="done" />))
+    await render(null)
+    await act(async()=>host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!.click())
     const feed = host.querySelector<HTMLDivElement>('.activity-feed')!
     let height = 1000; let top = 600; const clientHeight = 400
     Object.defineProperties(feed, {
@@ -138,17 +141,17 @@ describe('shared native presentation preserves the existing reading owner', () =
     tail.getBoundingClientRect = () => ({ x: 0, y: height - top, top: height - top, bottom: height - top, left: 0, right: 800, width: 800, height: 0, toJSON() {} })
     await act(async () => feed.dispatchEvent(new Event('scroll')))
     height = 1200
-    await render(messages)
+    await render(first)
     expect(feed.scrollTop).toBe(800)
     expect([...host.querySelectorAll('.log-turn__body p')].map(body => body.textContent)).toEqual(['Earlier timeline turn', 'Native tail initial'])
     const id = messages[0]!.id
     const longerText = 'Native tail initial with more actual producer text'
     await f.writeInput(longerText)
-    const grown = projectSessionUserMessages({ agentSessionId: f.control.agentSessionId, historyPage: await f.page() })
+    const grownPage=await f.page(),grown = projectSessionUserMessages({ agentSessionId: f.control.agentSessionId, historyPage: grownPage })
     expect(grown.map(message => [message.id, message.rawId])).toEqual([[id, f.rawId]])
     expect(grown[0]!.content.length).toBeGreaterThan(messages[0]!.content.length)
     height = 1600
-    await render(grown)
+    await render(grownPage)
     console.log('SHARED_READING_NATIVE_TAIL_GROWTH', JSON.stringify({ actualBodies: [...host.querySelectorAll('.log-turn__body p')].map(body => body.textContent), sameNativeId: id, scrollTop: feed.scrollTop, scrollHeight: feed.scrollHeight, clientHeight: feed.clientHeight }))
     expect([...host.querySelectorAll('.log-turn__body p')].map(body => body.textContent)).toEqual(['Earlier timeline turn', longerText])
     expect(feed.scrollTop).toBe(1200)
@@ -156,10 +159,10 @@ describe('shared native presentation preserves the existing reading owner', () =
     await act(async () => feed.dispatchEvent(new Event('scroll')))
     expect(host.querySelector('.activity-feed__jump')).not.toBeNull()
     await f.writeInput(longerText + ' while reading earlier')
-    const detached = projectSessionUserMessages({ agentSessionId: f.control.agentSessionId, historyPage: await f.page() })
+    const detachedPage=await f.page(),detached = projectSessionUserMessages({ agentSessionId: f.control.agentSessionId, historyPage: detachedPage })
     expect(detached.map(message => message.id)).toEqual([id])
     height = 2000
-    await render(detached)
+    await render(detachedPage)
     expect(feed.scrollTop).toBe(100)
     expect(host.querySelector('.activity-feed__jump')).not.toBeNull()
   })
@@ -180,13 +183,14 @@ describe('shared native presentation preserves the existing reading owner', () =
       const capture = (event: ErrorEvent): void => { errors.push(String(event.error?.message ?? event.message)); event.preventDefault() }
       window.addEventListener('error', capture)
       try {
-        await act(async () => root.render(<ActivityView sessionId={f.control.agentSessionId} items={timeline} userMessages={messages}
+        await act(async () => root.render(<ActivityView sessionId={f.control.agentSessionId} items={timeline} nativeHistoryPage={page}
           capability="complete-events" displayState="done" onContinue={onContinue} />))
+        for(const disclosure of host.querySelectorAll<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded=false]'))await act(async()=>disclosure.click())
         const turns = [...host.querySelectorAll<HTMLElement>('.log-turn')]
         expect(turns.map(turn => turn.querySelector('.log-turn__body p')?.textContent)).toEqual([
-          collision ? 'Earlier captured input' : 'Earlier agent answer', 'Do not leak this future answer', 'Native tail initial'
+          collision ? 'Earlier captured input' : 'Earlier agent answer', 'Native tail initial', 'Do not leak this future answer'
         ])
-        const selected = turns[2]!
+        const selected = host.querySelector<HTMLElement>('[data-native-record-id] .log-turn')!
         expect(selected.dataset.speakerRole).toBe('human')
         const button = selected.querySelector<HTMLButtonElement>('.log-turn__continue')!
         expect(button.textContent).toBe('Continue from here')
@@ -194,7 +198,7 @@ describe('shared native presentation preserves the existing reading owner', () =
         console.log('SHARED_READING_CONTINUE_NATIVE_ACTUAL', JSON.stringify({ collision, nativeStableId: messages[0]!.id,
           nativeRawId: f.rawId, timelineIds: timeline.map(item => item.id), prompts: onContinue.mock.calls, errors }))
         expect(onContinue).toHaveBeenCalledExactlyOnceWith(
-          `Continue this conversation from the selected point.\n\nInput: ${messages[0]!.content}`
+          `Continue this conversation from the selected point.\n\nInput: Tool result\nPrivate native tool result\n${messages[0]!.content}`
         )
         expect(errors).toEqual([])
         expect(onContinue.mock.calls[0]![0]).not.toContain('Do not leak this future answer')
@@ -217,10 +221,15 @@ it('the original Desktop window pages retained captured records beyond the recen
   for (const item of original) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item })
   const snapshot = await f.client.sessionTimeline(sid), native = await f.page(false)
   expect(snapshot.items.length).toBeLessThan(original.length)
-  vi.spyOn(api.sessions, 'historyPage').mockImplementation(() => f.page(false))
-  const reads = vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, options) => f.client.readAgentSessionHistory({
-    hostId: reference.hostId, agentSessionId: reference.agentSessionId, ...options }))
-  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control })} items={snapshot.items} timelineSnapshot={snapshot} nativeHistoryPage={native} />))
+  const reads=vi.spyOn(f.client,'readAgentConversation')
+  vi.spyOn(api.conversation,'readAgentConversation').mockImplementation(f.client.readAgentConversation.bind(f.client))
+  vi.spyOn(api.conversation,'readConversationChanges').mockImplementation(f.client.readConversationChanges.bind(f.client))
+  vi.spyOn(api.conversation,'observeConversation').mockImplementation(f.client.observeConversation.bind(f.client))
+  vi.spyOn(api.conversation,'releaseConversationView').mockImplementation(f.client.releaseConversationView.bind(f.client))
+  const rawReads=[vi.spyOn(api.sessions,'historyPage'),vi.spyOn(api.sessions,'readHistory'),vi.spyOn(api.sessions,'timeline')]
+  await act(async () => root.render(<ReaderActivityView {...activityReadingProps({ control: f.control })} />))
+  for(let turn=0;turn<200&&!host.querySelector('[data-message-id^="captured:captured-original:"]');turn++)
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10))})
   for (let turn = 0; turn < 12 && !host.querySelector('[data-message-id="captured:captured-original:0"]'); turn++) {
     const earlier = [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')
     expect(earlier).toBeDefined()
@@ -234,7 +243,8 @@ it('the original Desktop window pages retained captured records beyond the recen
   await act(async () => large.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(createHash('sha256').update(copy.mock.calls.at(-1)?.[0] ?? '').digest('hex')).toBe(createHash('sha256').update(original[1]!.content!).digest('hex'))
   expect(reads.mock.calls.length).toBeGreaterThan(7)
-  expect(reads.mock.calls.every(([reference, input]) => reference.agentSessionId === sid && input.source === 'captured' && input.limit === 100)).toBe(true)
-  expect(reads.mock.calls.some(([, input]) => !!input.cursor)).toBe(true)
+  expect(reads.mock.calls.every(([input]) => input.agentSessionId===sid && input.hostId===f.control.hostId && input.limit===100)).toBe(true)
+  expect(reads.mock.calls.some(([input])=>!!input.cursor)).toBe(true)
+  expect(rawReads.map(spy=>spy.mock.calls.length)).toEqual([0,0,0])
   expect((await f.store.readMetadata(sid))!.run.runId).toBe(f.control.run.runId)
 }, 60000)

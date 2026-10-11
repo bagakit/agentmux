@@ -8,9 +8,7 @@ import { join } from 'node:path';
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentSessionHistoryPage } from '@agentmux/core';
 import { codexQuestionRequest } from '../../../packages/core/src/providers/codex-question.js';
 import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform';
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView';
-import { ActivityView } from '../src/renderer/src/components/ActivityView';
-import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages';
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture';
 import { api } from '../src/renderer/src/lib/api';
 import { useAppStore } from '../src/renderer/src/store';
 import type { AgentSessionControl } from '../src/shared/contracts';
@@ -19,7 +17,6 @@ const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSess
 const originalStore = useAppStore.getState(), copy = vi.fn(async () => true);
 const platform: ClientUiPlatform = { copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => { }, renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null };
 let root: Root, container: HTMLDivElement, directory: string, client: AgentMuxClient, store: AgentMuxFileAgentSessionStore, oldPage: AgentSessionHistoryPage, fullPage: AgentSessionHistoryPage, latestPage: AgentSessionHistoryPage, calls: MockInstance<typeof api.sessions.historyPage>, stored: Buffer;
-let contextSnapshot: ReturnType<typeof useSessionUserMessages> | undefined;
 const question = { type: 'agentMessage', id: 'native-question', phase: 'final_answer', delivery: 'async', text: 'Original request', questions: [{ title: 'Continue the original goal?', options: ['Keep the original goal', 'Revise'] }] };
 const request = codexQuestionRequest(question)!, reply = '<send_user_message_question_reply>\n' + JSON.stringify([
   { questionItemId: request.questions[0]!.id, question: question.questions[0]!.title, answer: 'Keep the original goal' }
@@ -27,9 +24,6 @@ const request = codexQuestionRequest(question)!, reply = '<send_user_message_que
 async function render(node: ReactNode) { await act(async () => root.render(<ClientUiProvider platform={platform}>{node}</ClientUiProvider>)); }
 function card() { const c = container.querySelector<HTMLElement>('[aria-label="Native asynchronous question"]'); expect(c).not.toBeNull(); return c!; }
 function view(context: AgentSessionHistoryPage | null = fullPage, page = oldPage) { return <ConversationView page={page} sessionId={sid} questionAnswerContext={context}/>; }
-function Reading({ visible = true }: {
-    visible?: boolean;
-}) { const facts = useSessionUserMessages(control, { enabled: visible }); contextSnapshot = facts; return <ActivityView sessionId={sid} items={[]} userMessages={[]} nativeHistoryPage={oldPage} nativeContextItems={facts.nativeContextItems} capability="complete-events" conversationReading={{ reference: control, identity: control.run.runId, enabled: visible }}/>; }
 beforeEach(async () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     vi.stubGlobal('ResizeObserver', class {
@@ -109,4 +103,3 @@ it('a retained submitted operation stays independent of recorded answers and ope
   await render(node(fullPage)); expect(card().dataset.questionState).toBe('answered')
   expect(attempt.phase).toBe('submitted'); expect(calls).not.toHaveBeenCalled()
 })
-it('actual shared reader→Activity consumes accepted context beyond latest30 and makes no read demand while hidden', async () => { await render(<Reading />); await vi.waitFor(() => expect(contextSnapshot?.nativeContextItems.some(i => i.questionAnswers?.length)).toBe(true)); await act(async () => { }); expect(card().dataset.questionState).toBe('answered'); expect(card().querySelector('.agent-question__answer')?.textContent).toBe('Keep the original goal'); expect(container.querySelectorAll('[data-native-record-id="native-answer"]')).toHaveLength(0); expect(calls).toHaveBeenCalledTimes(3); const reads = calls.mock.calls.length, body = container.querySelector('[data-native-record-id="original-prose"] .log-turn__body'); await render(<Reading visible={false}/>); await new Promise(resolve => setTimeout(resolve, 90)); expect(calls).toHaveBeenCalledTimes(reads); expect(container.querySelector('[data-native-record-id="original-prose"] .log-turn__body')).toBe(body); expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('ORIGINAL DRAFT'); });

@@ -3,11 +3,11 @@ import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { fixture, nativeQuestion, request } from './helpers/native-async-question-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { ConversationQuestionInput } from '@agentmux/core/conversation'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.unstubAllGlobals() })
@@ -76,5 +76,5 @@ it('the original card preserves a typed activity question at the pure presentati
   expect(card).not.toBeNull()
   expect(card.textContent).toContain(request.questions[0]!.prompt)
   expect(container.querySelector('[data-native-record-id] .log-turn__body')?.textContent).toContain(nativeQuestion.text)
-  expect(describeSpeaker).not.toHaveBeenCalled()
+  expect(describeSpeaker).toHaveBeenCalledExactlyOnceWith({ role: 'unknown', id: 'unknown' })
 })

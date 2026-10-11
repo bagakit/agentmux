@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 

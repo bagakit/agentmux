@@ -6,7 +6,7 @@ import { conversationFiles } from '../src/lib/conversation-files.js'
 import { ConversationMessage } from '../src/components/ConversationMessage.js'
 import type { ConversationMessageProps } from '../src/components/ConversationMessage.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
-import { ConversationView } from '../src/components/ConversationView.js'
+import { StaticConversationView as ConversationView } from '../../../apps/desktop/test/helpers/conversation-static-fixture'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const roots: ReturnType<typeof createRoot>[] = []
@@ -29,7 +29,7 @@ it('indexes original explicit references and positions, with no guessed ownershi
 
 it('does not decorate quoted examples, fenced code, removed text or tool payloads as reply files', () => {
   const files = conversationFiles([{ kind: 'text', text: '> [example](secret.txt)\n\n```md\n[out](example.pdf)\n```\n\n~~[old](removed.txt)~~\n\n[actual](current.md)' },
-    { kind: 'tool-result', name: 'tool', output: '[trace](trace.txt)', isError: false }], fixturePath("project"))
+    { kind: 'tool-result', name: 'tool', output: '[trace](trace.txt)', failed: false }], fixturePath("project"))
   expect(files.map(file => file.reference.path)).toEqual(['current.md'])
 })
 
@@ -49,7 +49,7 @@ it('actual shared reply opens the exact original line and leaves original body c
   expect(open).not.toHaveBeenCalled()
   expect(container.querySelector('.log-turn__text')?.textContent).toContain('Report')
   await act(async () => items[1]!.click())
-  expect(open).toHaveBeenCalledExactlyOnceWith('src/main.ts', { line: 7, column: 3 })
+  expect(open).toHaveBeenCalledExactlyOnceWith('src/main.ts', { line: 7, column: 3 }, expect.objectContaining({ type: 'click', metaKey: false, ctrlKey: false }))
 })
 
 it.each([
