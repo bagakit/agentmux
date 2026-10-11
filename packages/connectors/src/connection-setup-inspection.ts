@@ -1,13 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionSetupInspectionReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupInspect, type ConnectionSetupInspectionAction, type ConnectionSetupInspectionReceipt, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
+import { CONNECTION_SETUP_READ_ACTIONS, parseConnectionSetupReadSummary, parseConnectionSetupInspectionReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupInspect, type ConnectionSetupInspectionAction, type ConnectionSetupInspectionReceipt, type ConnectionSetupOperation, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 
 type Parent = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
 type Snapshot = { stepId: string; attemptId: string; stage: string; privateState: string }
 type Child = { receipt: ConnectionSetupInspectionReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null }
-type Envelope = { binding: string; stepId: string; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string }
+type Envelope = { binding: string; stepId: string; applicationInfoReadPermission?: 'confirmed' | 'unknown'; readResult?: ConnectionSetupReadSummary; privateState: string }
 type Owner = {
   connections: ConnectionHost; secrets: EnrollmentSecrets | undefined
   read(id: string): Parent | null
@@ -17,6 +17,7 @@ type Owner = {
   touch(row: Parent): void
   view(row: Parent, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
 }
+const readSubjects = Object.keys(CONNECTION_SETUP_READ_ACTIONS) as ConnectionSetupReadSubject[]
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const failure = (message: string, code = 'CONNECTION_SETUP_UNCONFIRMED') => new AgentMuxError(message, code)
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -60,22 +61,27 @@ export class SetupApplicationInspection {
   }
   private binding(row: Parent, child: Child): string {
     const o = row.operation
-    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, adapterId: o.adapterId, application: o.application, goal: o.goal, actor: row.actor, authenticationStepId: child.authenticationStepId })
+    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, adapterId: o.adapterId, application: o.application, goal: o.goal, actor: row.actor, authenticationStepId: child.authenticationStepId, ...(child.receipt.subject ? { subject: child.receipt.subject } : {}) })
   }
   private envelope(value: string | null, row: Parent, child: Child): Envelope | null {
     try {
       if (value === null) return null
       const p = JSON.parse(value) as Envelope
-      return p.binding === this.binding(row, child) && p.stepId === child.receipt.stepId && ['confirmed', 'unknown'].includes(p.applicationInfoReadPermission) && typeof p.privateState === 'string' ? p : null
+      if (p.binding !== this.binding(row, child) || p.stepId !== child.receipt.stepId || typeof p.privateState !== 'string') return null
+      if (child.receipt.subject) {
+        const summary = parseConnectionSetupReadSummary(p.readResult)
+        return summary.subject === child.receipt.subject && p.applicationInfoReadPermission === undefined ? { ...p, readResult: summary } : null
+      }
+      return p.readResult === undefined && ['confirmed', 'unknown'].includes(p.applicationInfoReadPermission ?? '') ? p : null
     } catch { return null }
   }
   private currentAuthentication(row: Parent): boolean {
     const a = row.operation.authentication
     return this.owner.current(row) && a?.stage === 'confirmed' && a.request === 'confirmed' && a.secureStorage === 'stored'
   }
-  private eligible(row: Parent): boolean {
+  private eligible(row: Parent, subject?: ConnectionSetupReadSubject): boolean {
     const adapter = this.owner.connections.registeredAdapter(row.operation.adapterId)?.setup?.applicationInspection
-    return this.currentAuthentication(row) && Boolean(adapter?.domains.includes(row.operation.application.domain))
+    return this.currentAuthentication(row) && Boolean(adapter?.domains.includes(row.operation.application.domain)) && (!subject || typeof adapter?.read === 'function')
   }
   private async source(row: Parent): Promise<Snapshot | null> {
     if (!this.currentAuthentication(row)) return null
@@ -84,8 +90,8 @@ export class SetupApplicationInspection {
       return snapshot?.stage === 'confirmed' && fresh && this.currentAuthentication(fresh) && fresh.operation.authentication?.stepId === snapshot.stepId ? snapshot : null
     } catch { return null }
   }
-  private newAction(row: Parent): ConnectionSetupInspectionAction {
-    return { kind: 'inspect-application', expectedRevision: row.operation.revision, actionId: 'setup-inspect:' + digest({ binding: row.operation, actor: row.actor, previous: this.find(row.operation.operationId)?.receipt.stepId ?? null }) }
+  private newAction(row: Parent, subject?: ConnectionSetupReadSubject): ConnectionSetupInspectionAction {
+    return { kind: subject ? CONNECTION_SETUP_READ_ACTIONS[subject] : 'inspect-application', expectedRevision: row.operation.revision, actionId: (subject ? 'setup-read:' : 'setup-inspect:') + digest({ binding: row.operation, actor: row.actor, previous: this.find(row.operation.operationId)?.receipt.stepId ?? null, ...(subject ? { subject } : {}) }) }
   }
   async view(row: Parent, context: ConnectionEnrollmentCallContext, selector: NonNullable<ConnectionSetupInspect['applicationInspection']> = {}): Promise<NonNullable<ConnectionSetupView['applicationInspection']>> {
     await this.owner.authority(context, row)
@@ -94,18 +100,25 @@ export class SetupApplicationInspection {
     const page = this.safe(() => this.owner.connections.database.prepare('SELECT * FROM connection_setup_inspection WHERE operation_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(row.operation.operationId, before, limit + 1))
     const selected = this.find(row.operation.operationId, selector.selectedStepId ? { stepId: selector.selectedStepId } : undefined)
     let permission: 'confirmed' | 'unknown' = 'unknown'
+    let readResult: ConnectionSetupReadSummary | undefined
     const source = await this.source(row)
     if (source && selected?.authenticationStepId === source.stepId && selected.receipt.request === 'confirmed' && selected.receipt.secureStorage === 'stored' && selected.privateRef) {
-      try { permission = this.envelope(await this.owner.secrets?.resolve(selected.privateRef) ?? null, row, selected)?.applicationInfoReadPermission ?? 'unknown' } catch { /* Preserve the original safe receipt. */ }
+      try {
+        const result = this.envelope(await this.owner.secrets?.resolve(selected.privateRef) ?? null, row, selected)
+        permission = result?.applicationInfoReadPermission ?? 'unknown'; readResult = result?.readResult
+      } catch { /* Preserve the original safe receipt. */ }
     }
     await this.owner.authority(context, row)
     const fresh = this.owner.read(row.operation.operationId)!
     const current = source && this.currentAuthentication(fresh) && fresh.operation.authentication?.stepId === source.stepId
-    if (!current) permission = 'unknown'
+    if (!current) { permission = 'unknown'; readResult = undefined }
     const actions: ConnectionSetupInspectionAction[] = []
     if (selected?.receipt.request === 'confirmed' && selected.receipt.secureStorage !== 'stored') actions.push({ kind: 'recover-application-inspection', actionId: selected.recoveryActionId, expectedRevision: selected.receipt.input.expectedRevision })
-    if (current && this.eligible(fresh)) actions.push(this.newAction(fresh))
-    return { observations: page.slice(0, limit).map(r => this.summary(this.decode(r))), next: page.length > limit ? String(page[limit - 1]!.ordinal) : null, selected: selected ? this.summary(selected) : null, applicationInfoReadPermission: permission, actions }
+    if (current && this.eligible(fresh)) {
+      actions.push(this.newAction(fresh))
+      for (const subject of readSubjects) if (this.eligible(fresh, subject)) actions.push(this.newAction(fresh, subject))
+    }
+    return { observations: page.slice(0, limit).map(r => this.summary(this.decode(r))), next: page.length > limit ? String(page[limit - 1]!.ordinal) : null, selected: selected ? this.summary(selected) : null, applicationInfoReadPermission: permission, ...(readResult ? { readResult } : {}), actions }
   }
   async attach(base: ConnectionSetupView, row: Parent, context: ConnectionEnrollmentCallContext, selector: NonNullable<ConnectionSetupInspect['applicationInspection']>): Promise<ConnectionSetupView> {
     const inspection = await this.view(row, context, selector)
@@ -113,7 +126,7 @@ export class SetupApplicationInspection {
     const auth = base.operation?.authentication
     if (auth?.stepId !== fresh.operation.authentication?.stepId || auth?.stage !== 'confirmed' || auth.request !== 'confirmed' || auth.secureStorage !== 'stored') inspection.actions = inspection.actions.filter(action => action.kind === 'recover-application-inspection')
     // Joining two local reads must not attach a new account's permission to an old account view.
-    if (!child || base.operation?.authentication?.stepId !== child.authenticationStepId || !this.currentAuthentication(fresh) || fresh.operation.authentication?.stepId !== child.authenticationStepId) inspection.applicationInfoReadPermission = 'unknown'
+    if (!child || base.operation?.authentication?.stepId !== child.authenticationStepId || !this.currentAuthentication(fresh) || fresh.operation.authentication?.stepId !== child.authenticationStepId) { inspection.applicationInfoReadPermission = 'unknown'; delete inspection.readResult }
     return { ...base, applicationInspection: inspection }
   }
   private update(child: Child, change: Partial<Pick<ConnectionSetupInspectionReceipt, 'request' | 'secureStorage'>>, privateRef = child.privateRef): Child {
@@ -161,14 +174,15 @@ export class SetupApplicationInspection {
     }
     // Original local recovery precedes all current-auth, revision and adapter predicates.
     if (original) return repeat(original)
-    const action = this.newAction(row)
+    const subject = readSubjects.find(subject => this.newAction(row, subject).actionId === input.decision.actionId)
+    const action = this.newAction(row, subject)
     if (input.decision.actionId !== action.actionId) return null
     if (input.expectedRevision !== action.expectedRevision || input.decision.value !== 'continue') throw failure('This offered application observation action is stale.', 'CONNECTION_SETUP_ACTION_STALE')
     const source = await this.source(row)
     await this.owner.authority(context, row)
     original = this.find(input.operationId, { actionId: input.decision.actionId })
     if (original) return repeat(original)
-    if (!source || !this.eligible(this.owner.read(input.operationId)!)) throw failure('The exact current confirmed management snapshot is unconfirmed. Retain the original observation; existing bots and local recovery remain available.')
+    if (!source || !this.eligible(this.owner.read(input.operationId)!, subject)) throw failure('The exact current confirmed management snapshot is unconfirmed. Retain the original observation; existing bots and local recovery remain available.')
     const db = this.owner.connections.database
     const admission = this.safe(() => {
       db.exec('BEGIN IMMEDIATE')
@@ -176,8 +190,8 @@ export class SetupApplicationInspection {
         const existing = this.find(input.operationId, { actionId: input.decision.actionId })
         if (existing) { db.exec('COMMIT'); return { child: existing, claimed: false } }
         const fresh = this.owner.read(input.operationId)!
-        if (!this.eligible(fresh) || fresh.operation.authentication?.stepId !== source.stepId || fresh.operation.revision !== input.expectedRevision || this.newAction(fresh).actionId !== input.decision.actionId) throw failure('The original observation target or authentication changed.', 'CONNECTION_SETUP_ACTION_STALE')
-        const receipt: ConnectionSetupInspectionReceipt = { stepId: randomUUID(), input, request: 'dispatching', secureStorage: 'not-started' }
+        if (!this.eligible(fresh, subject) || fresh.operation.authentication?.stepId !== source.stepId || fresh.operation.revision !== input.expectedRevision || this.newAction(fresh, subject).actionId !== input.decision.actionId) throw failure('The original observation target or authentication changed.', 'CONNECTION_SETUP_ACTION_STALE')
+        const receipt: ConnectionSetupInspectionReceipt = { stepId: randomUUID(), input, request: 'dispatching', secureStorage: 'not-started', ...(subject ? { subject } : {}) }
         const child: Child = { receipt, authenticationStepId: source.stepId, recoveryActionId: 'setup-inspection-recover:' + digest(receipt), privateRef: null }
         db.prepare('INSERT INTO connection_setup_inspection(step_id,operation_id,action_id,recovery_action_id,record_json) VALUES(?,?,?,?,?)').run(receipt.stepId, input.operationId, input.decision.actionId, child.recoveryActionId, JSON.stringify({ receipt, authenticationStepId: child.authenticationStepId, recoveryActionId: child.recoveryActionId }))
         this.owner.touch(fresh); db.exec('COMMIT'); return { child, claimed: true }
@@ -194,9 +208,18 @@ export class SetupApplicationInspection {
     try {
       await this.owner.authority(context, row)
       const fresh = this.owner.read(input.operationId)!, adapter = this.owner.connections.registeredAdapter(row.operation.adapterId)?.setup?.applicationInspection
-      if (this.eligible(fresh) && fresh.operation.authentication?.stepId === source.stepId && adapter) {
-        const receipt = await adapter.inspect({ operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState }, context.signal)
-        if (receipt.kind === 'observed' && ['confirmed', 'unknown'].includes(receipt.applicationInfoReadPermission) && typeof receipt.privateState === 'string') value = { binding: this.binding(row, child), stepId: child.receipt.stepId, applicationInfoReadPermission: receipt.applicationInfoReadPermission, privateState: receipt.privateState }
+      if (this.eligible(fresh, child.receipt.subject) && fresh.operation.authentication?.stepId === source.stepId && adapter) {
+        const target = { operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState }
+        if (child.receipt.subject && adapter.read) {
+          const receipt = await adapter.read({ ...target, subject: child.receipt.subject }, context.signal)
+          if (receipt.kind === 'observed' && typeof receipt.privateState === 'string') {
+            const readResult = parseConnectionSetupReadSummary(receipt.readResult)
+            if (readResult.subject === child.receipt.subject) value = { binding: this.binding(row, child), stepId: child.receipt.stepId, readResult, privateState: receipt.privateState }
+          }
+        } else if (!child.receipt.subject) {
+          const receipt = await adapter.inspect(target, context.signal)
+          if (receipt.kind === 'observed' && ['confirmed', 'unknown'].includes(receipt.applicationInfoReadPermission) && typeof receipt.privateState === 'string') value = { binding: this.binding(row, child), stepId: child.receipt.stepId, applicationInfoReadPermission: receipt.applicationInfoReadPermission, privateState: receipt.privateState }
+        }
       }
     } catch { /* Keep this exact preclaim unknown. No native replay or health inference. */ }
     if (this.closed) return { operation: row.operation, challenge: null, reason: 'challenge-unavailable', receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: 'unknown' } }

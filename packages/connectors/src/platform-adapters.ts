@@ -24,7 +24,8 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       advance: async (input, signal) => (await feishu()).setup.advance(input, signal),
       applicationInspection: {
         domains: ['open.feishu.cn'],
-        inspect: async (input, signal) => (await feishu()).setup.applicationInspection!.inspect(input, signal)
+        inspect: async (input, signal) => (await feishu()).setup.applicationInspection!.inspect(input, signal),
+        read: async (input, signal) => (await feishu()).setup.applicationInspection!.read!(input, signal)
       }
     },
     enrollment: {
