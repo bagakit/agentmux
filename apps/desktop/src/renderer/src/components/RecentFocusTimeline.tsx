@@ -864,13 +864,13 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const readingScope = JSON.stringify([inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId, historical ? 'snapshot' : 'latest', readonlyReading])
   const nativeWindow = useFocusInputWindow(inputReference, readingScope, mode !== 'collapsed' && documentVisible, historical, preview?.message, readonlyReading, inputTimeline)
   const readSources = useMemo(() => [...nativeWindow.window.partitions.values()].filter(part => part.reference && (part.page || part.timeline || part.work)).map(part => ({
-    reference: part.reference!, messages: part.messages, work: part.work, capturedError: part.capturedError
+    reference: part.reference!, messages: part.messages, conversationRead: !!(part.page || part.timeline), work: part.work, capturedError: part.capturedError
   })), [nativeWindow.window.partitions])
   const readMessagesByReference = useMemo(() => {
     const result = new Map<string, readonly ConversationRecord[]>()
     for (const source of readSources) {
       const key = JSON.stringify([source.reference.hostId, source.reference.agentSessionId])
-      if (!source.messages.length) continue
+      if (!source.messages.length && !source.conversationRead) continue
       const ids = new Set<string>()
       result.set(key, [...(result.get(key) ?? []), ...source.messages].filter(item => { if (ids.has(item.id)) return false; ids.add(item.id); return true }))
     }
