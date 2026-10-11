@@ -14,6 +14,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
+import { markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -25,6 +26,8 @@ let originalStore: Buffer, stored: AgentMuxStoredAgentSession
 let requests: { cursor?: string; limit?: number }[], reads: Promise<AgentSessionHistoryPage>[], observation: Parameters<typeof api.sessions.observeHistory>[1] | null
 let controls: ReturnType<typeof vi.spyOn>[]
 let commits: boolean[]
+let extent: number, viewportHeight: number, physicalTop: number
+let resizeObservers: { targets: Set<Element>; invoke: () => void }[]
 function record(n: number) {
  const role = n % 2 === 0 ? 'user' : 'assistant'
  return { uuid: `original-${n}`, type: role, sessionId: native, timestamp: new Date(_hygiene_fixtureTime(-37225600000) + n * 7200000).toISOString(),
@@ -44,17 +47,63 @@ async function publish(from: number, count = 100) {
 }
 function ids() { return [...container.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(node => node.dataset.nativeRecordId!) }
 function viewport() { const node = container.querySelector<HTMLElement>('.activity-feed')!; expect(node).not.toBeNull(); return node }
-async function followAt(top: number) {
- const feed = viewport(); Object.defineProperties(feed, { scrollHeight: { configurable: true, value: 1500 }, clientHeight: { configurable: true, value: 600 } })
- feed.scrollTop = top; await act(async () => feed.dispatchEvent(new Event('scroll')))
+function installGeometry() {
+ const feed = viewport()
+ Object.defineProperties(feed, {
+  scrollHeight: { configurable: true, get: () => extent },
+  clientHeight: { configurable: true, get: () => viewportHeight },
+  scrollTop: { configurable: true, get: () => Math.max(0, Math.min(physicalTop, extent - viewportHeight)),
+   set: value => { physicalTop = Math.max(0, Math.min(Number(value), extent - viewportHeight)) } }
+ })
+ return feed
 }
+async function followAt(top: number) {
+ const feed = installGeometry(); feed.scrollTop = top
+ await act(async () => feed.dispatchEvent(new Event('scroll')))
+}
+async function resizeReadingViewport() {
+ const callbacks = resizeObservers.filter(observer => observer.targets.has(viewport()))
+ expect(callbacks.length, 'the actual reading observer must watch this viewport').toBeGreaterThan(0)
+ await act(async () => { for (const observer of callbacks) observer.invoke() })
+}
+function tailDistance() { const feed = viewport(); return feed.scrollHeight - feed.clientHeight - feed.scrollTop }
+async function restoreCurrentTail() {
+ const feed = viewport(); feed.scrollTop = extent - viewportHeight; markProgrammaticReadingScroll(feed)
+ await act(async () => feed.dispatchEvent(new Event('scroll')))
+}
+async function shortenNativeTail() {
+ const rows = (await readFile(transcript, 'utf8')).trimEnd().split('\n').map(line => JSON.parse(line))
+ rows.at(-1).message.content = [{ type: 'text', text: 'Shorter actual source reply' }]
+ await writeFile(transcript, rows.map(row => JSON.stringify(row)).join('\n') + '\n')
+ await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+ expect(container.textContent).toContain('Shorter actual source reply')
+}
+
+async function collapseLastTraceAtTail() {
+ await followAt(900)
+ const details = container.querySelector<HTMLDetailsElement>('[data-native-record-id="original-59"] details')!
+ expect(details).not.toBeNull()
+ await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) }); await flush(); await followAt(900)
+ const collapse = container.querySelector<HTMLButtonElement>('[aria-label="收起已展开的过程详情"]')!
+ expect(collapse).not.toBeNull(); expect(collapse.getAttribute('aria-disabled')).not.toBe('true')
+ await act(async () => collapse.click()); await flush()
+ return details
+}
+
 function currentButton() { return container.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]') }
 function rect(top: number, height: number): DOMRect {
  return { x: 0, y: top, top, bottom: top + height, left: 0, right: 800, width: 800, height, toJSON() {} }
 }
 beforeEach(async () => {
  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
- vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+ resizeObservers = []
+ vi.stubGlobal('ResizeObserver', class {
+  targets = new Set<Element>()
+  constructor(callback: ResizeObserverCallback) { resizeObservers.push({ targets: this.targets, invoke: () => callback([], this as unknown as ResizeObserver) }) }
+  observe(target: Element) { this.targets.add(target) }
+  unobserve(target: Element) { this.targets.delete(target) }
+  disconnect() { this.targets.clear() }
+ })
  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
  Element.prototype.scrollIntoView = vi.fn()
  directory = await mkdtemp(join(tmpdir(), 'conversation-latest-auto-')); transcript = join(directory, 'native.jsonl')
@@ -66,7 +115,7 @@ beforeEach(async () => {
  await store.compareAndSwap(null, stored); originalStore = await readFile(join(directory, 'sessions.json'))
  client = new AgentMuxClient({ store }); const kernel = Reflect.get(client, 'kernel')
  controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw Error('Reading cannot control Runtime ' + name) }))
- requests = []; reads = []; observation = null; commits = []
+ requests = []; reads = []; observation = null; commits = []; extent = 1500; viewportHeight = 600; physicalTop = 0
  vi.spyOn(api.sessions, 'historyPage').mockImplementation((reference, options) => {
   expect(reference).toMatchObject({ hostId: 'local', agentSessionId: sid }); requests.push(options ?? {})
   const read = client.sessionHistoryPage(reference.agentSessionId, options); reads.push(read); return read
@@ -76,8 +125,8 @@ beforeEach(async () => {
  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
   const feed = container.querySelector<HTMLElement>('.activity-feed'), top = feed?.scrollTop ?? 0
-  if (this.matches('.activity-feed')) return rect(0, 600)
-  if (this.matches('[data-conversation-native-tail], [data-conversation-reading-tail], [data-conversation-reading-space]')) return rect(1500 - top, 0)
+  if (this.matches('.activity-feed')) return rect(0, viewportHeight)
+  if (this.matches('[data-conversation-native-tail], [data-conversation-reading-tail], [data-conversation-reading-space]')) return rect(extent - top, 0)
   if (this.matches('[data-native-record-id]')) return rect([...container.querySelectorAll('[data-native-record-id]')].indexOf(this) * 25 - top, 25)
   return rect(0, 0)
  })
@@ -243,4 +292,56 @@ it('retaining earlier records does not turn a return to the loaded current tail 
  await act(async () => button!.click()); await flush()
  expect(requests, 'the retained earlier boundary is navigation history, not a reason to refetch current').toHaveLength(before)
  expect(ids()).toHaveLength(150); expect(viewport().scrollTop).toBe(900); expect(currentButton()).toBeNull()
+})
+
+
+it('hides the affordance when collapsing an expanded trace finishes at the loaded current tail', async () => {
+ await render(); const details = await collapseLastTraceAtTail()
+ expect(tailDistance()).toBe(0); expect(details.open).toBe(false); expect(currentButton()).toBeNull()
+})
+
+it('a plain browser layout clamp hides the affordance through its ordinary scroll event', async () => {
+ await render(); await followAt(900); await followAt(600); expect(currentButton()).not.toBeNull()
+ extent = 900; await act(async () => viewport().dispatchEvent(new Event('scroll')))
+ expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull()
+})
+
+it.each([{ name: 'content shrink', extent: 900, viewport: 600 }, { name: 'viewport growth', extent: 1500, viewport: 1200 }])
+ ('hides the affordance after $name clamps an upward reader to the tail during native restoration', async shape => {
+ await render(); await followAt(900); await followAt(600); expect(currentButton()).not.toBeNull()
+ extent = shape.extent; viewportHeight = shape.viewport; await shortenNativeTail()
+ await act(async () => viewport().dispatchEvent(new Event('scroll')))
+ expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull()
+})
+
+it('hides the affordance after programmatic restoration reaches the loaded current tail', async () => {
+ await render(); await followAt(900); await followAt(300); expect(currentButton()).not.toBeNull()
+ const before = requests.length; await restoreCurrentTail()
+ expect(tailDistance()).toBe(0); expect(requests).toHaveLength(before); expect(currentButton()).toBeNull()
+})
+
+it('actual ResizeObserver callbacks hide at the tail without scroll or page changes and never grant follow after growth', async () => {
+ await render(); await followAt(900); await followAt(600); expect(currentButton()).not.toBeNull()
+ const originalIds = ids(), before = requests.length
+ extent = 900; await resizeReadingViewport()
+ expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull(); expect(requests).toHaveLength(before); expect(ids()).toEqual(originalIds)
+ extent = 1500; await resizeReadingViewport()
+ expect(viewport().scrollTop).toBe(600); expect(tailDistance()).toBeGreaterThan(64); expect(currentButton()).not.toBeNull()
+ expect(requests).toHaveLength(before)
+ await publish(60, 2)
+ expect(ids().at(-1)).toBe('original-61'); expect(viewport().scrollTop, 'geometry updates do not resume the original detached follow intent').toBe(600)
+ expect(currentButton()).not.toBeNull()
+})
+
+it('keeps the return path for a real no-overlap gap at a detached loaded tail and resumes only on a user return', async () => {
+ await render(); await collapseLastTraceAtTail()
+ expect(tailDistance()).toBe(0); expect(currentButton()).toBeNull()
+ const before = requests.filter(input => input.limit === 100).length
+ await publish(60)
+ expect(ids().at(-1)).toBe('original-59'); expect(tailDistance()).toBe(0)
+ expect(currentButton(), 'the actual current source is now outside this retained loaded window').not.toBeNull()
+ expect(requests.filter(input => input.limit === 100)).toHaveLength(before)
+ await followAt(700); await followAt(900); await flush()
+ expect(ids().at(-1)).toBe('original-159'); expect(currentButton()).toBeNull()
+ expect(requests.filter(input => input.limit === 100)).toHaveLength(before + 1)
 })
