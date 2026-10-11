@@ -114,6 +114,12 @@ configure disables or enables new automatic traffic without rewriting applicatio
 Retain the exact operationId, expectedRevision and service input after an unknown configure reply;
 service inspect reads that receipt, while get reports current policy and cannot acknowledge it.
 Management, original receipts and healthy local Agent input remain available while service is off.
+For an exact saved bot, connection setup begin requests one original management QR challenge.
+Setup inspect is a local read of that actor-owned active challenge; setup ls returns safe summaries.
+Keep the original input after an unknown init; repeat begin only for original lookup or secure
+handoff recovery, never a second native request. Scan material belongs on its exact confirmation
+surface, not ordinary logs. Init ACK, secure storage and login are separate; setup confirmation,
+app eligibility, configuration and publication remain unproved, and no setup advance is registered.
 
 Configure or bind only within the user's authorized target. Inspect current values before
 changing them; use the current help's exact input and operation identities. A grant is an
