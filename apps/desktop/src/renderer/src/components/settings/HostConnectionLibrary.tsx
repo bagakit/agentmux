@@ -6,10 +6,12 @@ const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
+const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 
 
-export type HostConnectionPanel = 'connection' | 'projects'
+export type HostConnectionPanel = 'overview' | 'projects' | 'agents' | 'connection'
 type HostRow = { id: string; name: string; detail: string; mark: ReactNode; status: ReactNode; projectCount: number }
 
 /** Disclosure navigation only; the original Host pane owns every draft and operation. */
@@ -62,13 +64,13 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
           <span className="settings-resource-row__status">{item.status}</span>
         </summary>
         <div className="settings-host-branch__pages">
-          {(['connection', 'projects'] as const).map((page) => {
+          {(['overview', 'projects', 'agents', 'connection'] as const).map((page) => {
             const selected = selectedId === item.id && panel === page
             return <button type="button" key={page} data-host-panel={page}
               {...(page === 'connection' ? { 'data-resource-row': item.id } : {})}
               aria-current={selected ? 'page' : undefined} className="settings-host-page" onClick={() => onSelect(item.id, page)}>
-              {page === 'connection' ? <ThemeActionAdjustIcon size={13} aria-hidden="true" /> : <ThemeObjectFolderOpenIcon size={13} aria-hidden="true" />}
-              <span>{page === 'connection' ? 'Connection' : 'Projects'}</span>
+              {page === 'connection' ? <ThemeActionAdjustIcon size={13} aria-hidden="true" /> : page === 'projects' ? <ThemeObjectFolderOpenIcon size={13} aria-hidden="true" /> : page === 'agents' ? <ThemeObjectAgentIcon size={13} aria-hidden="true" /> : <ThemeObjectTopologyIcon size={13} aria-hidden="true" />}
+              <span>{{ overview: 'Overview', projects: 'Projects', agents: 'Agents', connection: 'Connection' }[page]}</span>
               {page === 'projects' ? <small>{item.projectCount}</small> : null}
               {selected ? <ThemeStatusSelectedIcon size={12} aria-hidden="true" /> : null}
             </button>

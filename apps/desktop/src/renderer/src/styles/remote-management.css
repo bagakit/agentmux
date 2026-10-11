@@ -1,0 +1,103 @@
+/* One Host workbench: graph/list are alternative projections, details keep the original owners. */
+.settings-page[data-settings-page='hosts'] .settings-content__header { width: 100%; }
+.settings-content__scroll[data-settings-pane='hosts'] { padding-inline: var(--sp-7); }
+.remote-management { gap: var(--sp-4); }
+.remote-management__toolbar { flex-wrap: wrap; gap: var(--sp-3); min-height: 32px; }
+.remote-management__toolbar > .remote-management__scope { display: flex; flex-direction: row; align-items: baseline; gap: var(--sp-2); margin-right: auto; color: var(--text-2); font-size: var(--fs-meta); }
+.remote-management__scope > strong { color: var(--text); font-size: 20px; font-weight: 550; font-variant-numeric: tabular-nums; }
+.remote-management__scope small { margin-left: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.remote-management__search { max-width: 260px; flex: 1 1 170px; min-width: 0; height: 30px; padding-inline: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.remote-management__search input { min-width: 0; width: 100%; height: 28px; min-height: 0; padding: 0; font-size: var(--fs-meta); }
+.remote-management__toolbar > .remote-management__modes { display: flex; flex-direction: row; align-items: center; flex: none; gap: 2px; padding: 2px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.remote-management__modes button { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 26px; padding: var(--sp-1) var(--sp-3); color: var(--text-3); border: 0; border-radius: var(--radius-sm); background: transparent; font: var(--fs-meta)/1.5 var(--font-sans); cursor: pointer; }
+.remote-management__modes button[aria-pressed='true'] { color: var(--text); background: var(--surface-3); box-shadow: var(--hl); }
+.remote-management__modes button:focus-visible, .remote-detail-tabs button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.remote-management__filter { flex: none; margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.remote-management__body { gap: var(--sp-6); }
+.remote-management[data-remote-mode='topology'] .remote-management__body { grid-template-columns: minmax(0, 1fr) minmax(310px, 38%); gap: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); overflow: hidden; }
+.remote-management[data-remote-mode='topology'] .settings-resource-editor { padding: var(--sp-5) var(--sp-5) var(--sp-7); background: var(--surface-1); border-left: 1px solid var(--line-soft); }
+.remote-management .host-settings-card { background: transparent; }
+.remote-management .settings-resource-editor__header { padding-top: 0; }
+.remote-management .settings-resource-editor__header > div { flex: 1; min-width: 0; }
+.remote-management .settings-resource-editor__header > div > strong { display: block; font-size: 18px; line-height: 1.4; font-weight: 550; }
+.remote-management .settings-resource-editor__header > div > small { display: block; margin-top: var(--sp-1); }
+.remote-management .host-card__icon { align-self: flex-start; margin-top: 5px; }
+.remote-management .settings-resource-editor__header .check-pill { font-size: 10px; }
+.remote-detail-tabs { display: flex; align-items: center; gap: var(--sp-4); overflow-x: auto; margin: var(--sp-2) 0 var(--sp-6); border-bottom: 1px solid var(--line-soft); }
+.remote-detail-tabs button { flex: none; min-height: 34px; padding: var(--sp-2) 0; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; }
+.remote-detail-tabs button[aria-current='page'] { color: var(--text); border-bottom-color: var(--green); font-weight: 550; }
+.remote-overview { display: grid; gap: var(--sp-6); }
+.remote-overview__facts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); margin: 0; }
+.remote-overview__facts dt, .remote-overview__identity > span { color: var(--text-3); font-size: var(--fs-meta); }
+.remote-overview__facts dd { display: flex; align-items: baseline; gap: var(--sp-2); margin: var(--sp-2) 0 0; font-size: 24px; font-variant-numeric: tabular-nums; font-weight: 500; color: var(--text); }
+.remote-overview__facts dd small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.remote-overview__identity { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2); padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); font-size: var(--fs-meta); }
+.remote-overview__identity > strong { font-weight: 500; color: var(--text-2); }
+.remote-overview__identity time, .remote-overview__identity p { grid-column: 1 / -1; margin: 0; color: var(--text-3); line-height: 1.6; overflow-wrap: anywhere; }
+.remote-overview__technical { color: var(--text-3); font-size: var(--fs-meta); }
+.remote-overview__technical summary { cursor: pointer; padding-block: var(--sp-2); }
+.remote-overview__technical dl { display: grid; gap: var(--sp-3); margin-bottom: 0; }
+.remote-overview__technical dt { color: var(--text-3); }
+.remote-overview__technical dd { margin: var(--sp-1) 0 0; color: var(--text-2); overflow-wrap: anywhere; user-select: text; }
+.remote-work { min-width: 0; }
+.remote-work > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); margin-bottom: var(--sp-3); font-size: var(--fs-body); }
+.remote-work > header strong { font-weight: 550; }
+.remote-work > header small { color: var(--text-3); font-size: var(--fs-micro); }
+.remote-work__rows { min-width: 0; }
+.remote-work__row { display: flex; align-items: center; gap: var(--sp-3); width: 100%; padding: var(--sp-4) 0; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-sans); text-align: left; }
+button.remote-work__row { cursor: pointer; }
+button.remote-work__row:hover { color: var(--text); }
+button.remote-work__row:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+.remote-work__row > svg, .remote-work__row > .agent-avatar { flex: none; }
+.remote-work__row > span:not(.agent-avatar):not(.remote-work__state) { flex: 1; min-width: 0; display: grid; gap: var(--sp-1); }
+.remote-work__row strong { color: var(--text); font-weight: 500; overflow-wrap: anywhere; }
+.remote-work__row small, .remote-work__row code { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.remote-work__state { flex: none; max-width: 11ch; color: var(--text-3); font-size: var(--fs-micro); text-align: right; }
+.remote-work__empty, .remote-work__notice { margin: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.65; overflow-wrap: anywhere; }
+.remote-work__notice { color: var(--text-2); }
+.remote-work > .small-button { margin-top: var(--sp-5); }
+.remote-topology { position: relative; min-width: 0; min-height: 340px; height: 100%; background: var(--bg); isolation: isolate; }
+.remote-topology .react-flow { --xy-background-pattern-dots-color: var(--line); --xy-edge-stroke: var(--line); --xy-edge-stroke-default: var(--line); --xy-edge-label-color: var(--text-3); --xy-edge-label-background-color: var(--bg); --xy-handle-background-color: var(--text-3); --xy-handle-border-color: var(--bg); }
+.remote-topology .react-flow__edge-path { stroke: color-mix(in srgb, var(--green) 27%, var(--line)); }
+.remote-topology .react-flow__edge-text { font-size: 10px; fill: var(--text-3); }
+.remote-topology .react-flow__edge-textbg { fill: var(--bg); }
+.remote-topology .react-flow__node { cursor: default; }
+.remote-topology .react-flow__handle { width: 4px; height: 4px; min-width: 4px; min-height: 4px; }
+.remote-topology__caption { position: absolute; z-index: 1; top: var(--sp-5); left: var(--sp-5); display: grid; gap: var(--sp-2); pointer-events: none; }
+.remote-topology__caption > span { color: var(--text-3); font-size: 10px; letter-spacing: .12em; font-weight: 550; }
+.remote-topology__caption > small { color: var(--text-3); font-size: var(--fs-micro); }
+.remote-entry-node { position: relative; width: 166px; padding: var(--sp-5); display: grid; gap: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text); }
+.remote-entry-node > svg { color: var(--green); margin-bottom: var(--sp-2); }
+.remote-entry-node > strong { font-size: 15px; font-weight: 550; }
+.remote-entry-node > span { color: var(--text-3); font-size: 11px; }
+.remote-host-node { pointer-events: auto; width: 226px; min-height: 110px; padding: 13px 15px; display: grid; gap: 5px; color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); box-shadow: 0 2px 8px #0000000a; text-align: left; cursor: pointer; font-family: var(--font-sans); }
+.remote-host-node:hover { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
+.remote-host-node[data-current-host='true'] { border-color: var(--green); background: color-mix(in srgb, var(--green) 7%, var(--surface-1)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--green) 20%, transparent); }
+.remote-host-node:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+.remote-host-node__kind { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 10px; letter-spacing: .06em; }
+.remote-host-node > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 550; }
+.remote-host-node__address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: 11px; }
+.remote-host-node__footer { display: flex; align-items: center; gap: 5px; padding-top: 6px; color: var(--text-3); font-size: 10px; white-space: nowrap; }
+.remote-host-node__footer > span:last-child { margin-left: auto; }
+.remote-check-dot { flex: none; width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); }
+.remote-check-dot--ready { background: var(--green); }
+.remote-check-dot--error { background: var(--amber); }
+.remote-topology__controls { position: absolute; z-index: 2; bottom: var(--sp-5); left: var(--sp-5); display: flex; gap: 2px; padding: 3px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.remote-topology__controls .icon-button { width: 28px; height: 28px; }
+.remote-topology__hint { position: absolute; z-index: 1; right: var(--sp-4); bottom: var(--sp-4); max-width: 28ch; margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.5; text-align: right; pointer-events: none; }
+.remote-topology__empty { position: absolute; top: 45%; left: 15%; right: 15%; color: var(--text-3); text-align: center; font-size: var(--fs-body); pointer-events: none; }
+.remote-management[data-remote-wide='false'] .remote-management__body { grid-template-columns: minmax(0, 1fr); gap: 0; }
+.remote-management[data-remote-wide='false'][data-resource-view='library'] .settings-resource-editor { display: none; }
+.remote-management[data-remote-wide='false'][data-resource-view='editor'] .settings-host-library { display: none; }
+.remote-management[data-remote-wide='false'] .settings-resource-back { display: inline-flex; margin-bottom: var(--sp-4); }
+@container settings-resource (width < 500px) {
+  .remote-management__scope small { display: none; }
+  .remote-management__toolbar > .small-button { margin-left: auto; }
+  .remote-overview__facts dd { flex-wrap: wrap; font-size: 22px; }
+  .remote-overview__facts dd small { font-size: 10px; }
+  .remote-detail-tabs { gap: var(--sp-4); }
+}
+
+.remote-overview__check-details { grid-column: 1 / -1; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.remote-overview__check-details summary { width: fit-content; padding-block: var(--sp-1); cursor: pointer; }
+.remote-overview__check-details p { margin: var(--sp-2) 0 0; line-height: 1.6; overflow-wrap: anywhere; user-select: text; }

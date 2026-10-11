@@ -1,0 +1,92 @@
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
+import { Background, BackgroundVariant, Handle, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { HostConfig } from '../../../../shared/contracts'
+import type { HostCheckState } from '../../store'
+import { hostCheckLabel } from '../../lib/host-check'
+import { HostIcon } from '../HostBadge'
+import '@xyflow/react/dist/base.css'
+
+const TopologyIcon = semanticIconComponent('object.topology')
+const ZoomInIcon = semanticIconComponent('action.zoom-in')
+const ZoomOutIcon = semanticIconComponent('action.zoom-out')
+const FitIcon = semanticIconComponent('layout.expand')
+
+export type HostTopologyItem = {
+  host: HostConfig
+  check: HostCheckState | undefined
+  projectCount: number
+  sessionCount: number
+}
+type HostNodeData = HostTopologyItem & { selected: boolean; onSelect: (id: string) => void }
+type HostNode = Node<HostNodeData, 'host'>
+type EntryNode = Node<{ label: string }, 'entry'>
+type TopologyNode = HostNode | EntryNode
+
+const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<HostNode>) {
+  const { host, check } = data
+  return <>
+    <Handle type="target" position={Position.Left} isConnectable={false} />
+    <button type="button" className="remote-host-node nodrag nopan" data-host-node={host.id} data-current-host={data.selected}
+      data-check-state={check?.state ?? 'idle'} aria-pressed={data.selected} onClick={() => data.onSelect(host.id)}
+      title={`${host.label} · ${host.id}`}>
+      <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={15} />{host.kind === 'local' ? 'LOCAL' : 'SSH HOST'}</span>
+      <strong>{host.label}</strong>
+      <span className="remote-host-node__address">{host.kind === 'local' ? 'Local environment' : host.hostname || 'Address required'}</span>
+      <span className="remote-host-node__footer"><span className={`remote-check-dot remote-check-dot--${check?.state ?? 'idle'}`} />
+        <span>{hostCheckLabel(check ?? { state: 'idle' })}</span><span>{data.projectCount} projects · {data.sessionCount} sessions</span></span>
+    </button>
+  </>
+})
+function ManagementEntry({ data }: NodeProps<EntryNode>) {
+  return <div className="remote-entry-node"><TopologyIcon size={22} /><strong>{data.label}</strong><span>Environment connections</span>
+    <Handle type="source" position={Position.Right} isConnectable={false} /></div>
+}
+const nodeTypes = { host: HostTopologyNode, entry: ManagementEntry }
+
+/** A projection of configured routes. The graph owns viewport geometry, never Host or Runtime truth. */
+export const HostTopology = memo(function HostTopology({ items, selectedId, onSelect }: {
+  items: readonly HostTopologyItem[]
+  selectedId: string | null
+  onSelect: (id: string) => void
+}) {
+  const instance = useRef<ReactFlowInstance<TopologyNode, Edge> | null>(null)
+  const topologyKey = JSON.stringify(items.map(item => item.host.id))
+  const routeKey = JSON.stringify(items.map(item => [item.host.id, item.host.kind]))
+  const firstNodes = useMemo(() => {
+    const selected = items.findIndex(item => item.host.id === selectedId)
+    const start = Math.max(0, Math.min(selected - 1, items.length - 3))
+    return [...(start === 0 ? [{ id: 'entry' }] : []), ...items.slice(start, start + 3).map(item => ({ id: `host:${item.host.id}` }))]
+  }, [topologyKey])
+  const nodes: TopologyNode[] = useMemo(() => [
+    { id: 'entry', type: 'entry', position: { x: 0, y: Math.min(1, Math.max(0, items.length - 1)) * 146 }, data: { label: 'AgentMux' }, selectable: false },
+    ...items.map((item, index): HostNode => ({ id: `host:${item.host.id}`, type: 'host',
+      position: { x: 310, y: index * 146 }, data: { ...item, selected: item.host.id === selectedId, onSelect } }))
+  ], [items, selectedId, onSelect])
+  const edges = useMemo<Edge[]>(() => items.map(item => ({ id: `route:${item.host.id}`, source: 'entry', target: `host:${item.host.id}`,
+    type: 'smoothstep', label: item.host.kind === 'ssh' ? 'SSH route' : 'Local route', selectable: false })), [routeKey])
+  const fit = useCallback(() => { void instance.current?.fitView({ padding: .2, maxZoom: 1 }) }, [])
+  // A new route/filter can change geometry. Checks, counters and selected state cannot reset the reader's viewport.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => { void instance.current?.fitView({ nodes: firstNodes, padding: .2, minZoom: .55, maxZoom: 1 }) })
+    return () => cancelAnimationFrame(frame)
+  }, [topologyKey])
+
+  return <div className="remote-topology" aria-label="Configured environment topology" data-host-topology>
+    <div className="remote-topology__caption"><span>CONNECTION MAP</span><small>Configured routes · not network paths</small></div>
+    <ReactFlow<TopologyNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes}
+      onInit={value => { instance.current = value }} fitView fitViewOptions={{ nodes: firstNodes, padding: .2, minZoom: .55, maxZoom: 1 }}
+      nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false}
+      elementsSelectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.1} maxZoom={1.4}
+      defaultEdgeOptions={{ style: { strokeWidth: 1.25 } }} proOptions={{ hideAttribution: true }}>
+      <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
+    </ReactFlow>
+    {items.length === 0 ? <p className="remote-topology__empty">No environments match this search.</p> : null}
+    <div className="remote-topology__controls" aria-label="Topology viewport">
+      <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => void instance.current?.zoomIn()}><ZoomInIcon size={15} /></button>
+      <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => void instance.current?.zoomOut()}><ZoomOutIcon size={15} /></button>
+      <button type="button" className="icon-button" aria-label="Fit all environments" onClick={fit}><FitIcon size={15} /></button>
+    </div>
+    <p className="remote-topology__hint">Pan to explore · use the list to scan every environment</p>
+  </div>
+})
