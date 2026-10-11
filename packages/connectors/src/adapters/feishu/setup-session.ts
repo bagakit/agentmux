@@ -71,6 +71,19 @@ export async function enableFeishuMessaging(input: SetupAdapterInput & { private
   return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
 }
 
+/** Only known native modes can qualify a scalar transition; missing or future modes stay unknown. */
+export async function feishuEventTransportCapability(originalReadState: string): Promise<'enabled' | 'disabled' | 'unknown'> {
+  try {
+    const data = record(JSON.parse(originalReadState))
+    return data?.eventMode === 4 ? 'enabled' : [1, 2, 3].includes(data?.eventMode as number) ? 'disabled' : 'unknown'
+  } catch { return 'unknown' }
+}
+
+export async function useFeishuPersistentConnection(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
+  const envelope = await applicationEnvelope(input, '/developers/v1/event/switch/', { eventMode: 4 }, signal)
+  return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
+}
+
 /** One exact console permission read, not an app-data read or a configuration grant. */
 export async function inspectFeishuApplication(input: SetupAdapterInput & { privateState: string }, signal?: AbortSignal): Promise<SetupInspectionReceipt> {
   const data = await applicationData(input, '/developers/v1/app_role/permission/', {}, signal)
