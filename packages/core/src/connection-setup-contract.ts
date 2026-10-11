@@ -7,6 +7,9 @@ export type ConnectionSetupBegin = { operationId: string; connectionId: string; 
 export type ConnectionSetupInput = { operationId: string }
 export type ConnectionSetupAdvance = ConnectionSetupInput & { expectedRevision: number; decision: { actionId: string; value: 'continue' | 'confirm' | 'renew' } }
 export type ConnectionSetupList = { connectionId: string; cursor?: string; limit?: number }
+/** Local implementation discovery for this exact revision, never platform authority or readiness. */
+export type ConnectionSetupSupport = { connectionRevision: number; capabilities: Array<'management-authentication'> }
+export type ConnectionSetupListing = { operations: ConnectionSetupOperation[]; next: string | null; support: ConnectionSetupSupport | null }
 export type ConnectionSetupReason = 'adapter-unavailable' | 'secure-storage-unavailable' | 'request-unconfirmed' | 'challenge-unconfirmed'
 export type ConnectionSetupAuthenticationStage = 'waiting' | 'scanned' | 'handoff' | 'account' | 'confirmed' | 'expired' | 'unknown'
 export type ConnectionSetupAccount = { userId: string; tenantId: string; userName?: string; tenantName?: string }
@@ -43,8 +46,8 @@ export interface ConnectionSetupPort {
   begin(input: ConnectionSetupBegin, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
   advance(input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
   inspect(input: ConnectionSetupInput, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
-  list(input: ConnectionSetupList): Promise<{ operations: ConnectionSetupOperation[]; next: string | null }>
+  list(input: ConnectionSetupList): Promise<ConnectionSetupListing>
 }
 export type ConnectionSetupParamsMap = { 'connection.setup.begin': ConnectionSetupBegin; 'connection.setup.advance': ConnectionSetupAdvance; 'connection.setup.inspect': ConnectionSetupInput; 'connection.setup.ls': ConnectionSetupList }
-export type ConnectionSetupResultMap = { 'connection.setup.begin': ConnectionSetupView; 'connection.setup.advance': ConnectionSetupView; 'connection.setup.inspect': ConnectionSetupView; 'connection.setup.ls': { operations: ConnectionSetupOperation[]; next: string | null } }
+export type ConnectionSetupResultMap = { 'connection.setup.begin': ConnectionSetupView; 'connection.setup.advance': ConnectionSetupView; 'connection.setup.inspect': ConnectionSetupView; 'connection.setup.ls': ConnectionSetupListing }
 export type ConnectionSetupMethod = keyof ConnectionSetupParamsMap

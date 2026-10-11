@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAction, type ConnectionSetupBegin, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
+import { parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAction, type ConnectionSetupBegin, type ConnectionSetupListing, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 
@@ -371,7 +371,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     await this.authority(context, row)
     return this.view(row, context)
   }
-  async list(value: { connectionId: string; cursor?: string; limit?: number }) {
+  async list(value: { connectionId: string; cursor?: string; limit?: number }): Promise<ConnectionSetupListing> {
     const input = parseConnectionSetupParams('connection.setup.ls', value), limit = input.limit ?? 25
     let before = Number.MAX_SAFE_INTEGER
     if (input.cursor !== undefined) {
@@ -379,8 +379,14 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
       before = Number(input.cursor)
     }
     return this.safe(() => {
+      const current = this.connections.readConfiguration(input.connectionId)
+      const setup = current && this.connections.registeredAdapter(current.config.adapterId)?.setup
+      const support: ConnectionSetupListing['support'] = current ? {
+        connectionRevision: current.revision,
+        capabilities: setup?.domains.includes(current.config.application.domain) ? ['management-authentication'] : []
+      } : null
       const rows = this.connections.database.prepare('SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(input.connectionId, before, limit + 1)
-      return { operations: rows.slice(0, limit).map(r => this.summary(this.read(String(r.operation_id))!)), next: rows.length > limit ? String(rows[limit - 1]!.ordinal) : null }
+      return { operations: rows.slice(0, limit).map(r => this.summary(this.read(String(r.operation_id))!)), next: rows.length > limit ? String(rows[limit - 1]!.ordinal) : null, support }
     })
   }
 }

@@ -119,7 +119,9 @@ Retain the exact operationId, expectedRevision and service input after an unknow
 service inspect reads that receipt, while get reports current policy and cannot acknowledge it.
 Management, original receipts and healthy local Agent input remain available while service is off.
 For an exact saved bot, connection setup begin requests one original management QR challenge.
-Setup inspect is a local read of that actor-owned active challenge; setup ls returns safe summaries.
+Setup inspect is a local read of that actor-owned active challenge; setup ls returns safe summaries
+and local implementation support bound to the current bot revision. Support is not login,
+application authority, grants, publication or connection readiness; a paused bot retains management discovery.
 Keep the original input after an unknown init; repeat begin only for original lookup or secure
 handoff recovery, never a second native request. Scan material belongs on its exact confirmation
 surface, not ordinary logs. Setup advance uses the exact actionId and expectedRevision from
