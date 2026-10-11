@@ -177,20 +177,21 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     </button>)}</div>
       </Dialog.Content></DocumentOverlayPortal>
     </Dialog.Root>
-    <NoteFileView {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={(raw, before) => update(tabId, raw, before ?? document.content, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage} onCompositionChange={compositionChanged}
+    <NoteFileView sourceCoverage={
+      <details className="note-directory-sources" aria-label="Note sources"><summary>Source coverage <span>{!directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
+        : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : directoryFacts.status === 'partial' ? 'Partial' : null}</span></summary>
+        <button type="button" className="note-text-button" disabled={directoryFacts?.status === 'reading'} onClick={() => void useAppStore.getState().refreshNoteDirectorySources(tabId, surface.regionId)}>Refresh directory</button>
+        {directoryFacts && directoryFacts.status !== 'reading' && directoryFacts.status !== 'unknown' && <p className="note-scope">{directoryFacts.confirmedPaths.length} confirmed in this directory{directoryFacts.status === 'partial' ? ' · partial' : ''}</p>}
+        <p className="note-scope">This checks the original Note directory. Other directories may contain more sources.</p>
+        {directoryFacts?.unreadPaths.length ? <div className="note-scope"><strong>Not yet read</strong>{directoryFacts.unreadPaths.map(path => <div className="note-unread-source" key={path}><span>{path}</span>
+          <button type="button" className="note-text-button" aria-label={`Open Note source ${surface.workspaceId} · ${path}`} onClick={() => void openUnread(path)}>Open</button></div>)}</div> : null}
+        {directoryFacts?.unconfirmedPaths.length ? <div className="note-scope"><strong>Unconfirmed sources</strong>{directoryFacts.unconfirmedPaths.map(path => <div key={path}>{path}</div>)}</div> : null}
+      </details>
+    } {...(originalResource ? { resource: { hostId: originalResource.hostId, workspaceId: originalResource.id, workspacePath: originalResource.path, path: surface.path } } : {})} document={document} dirty={dirty} knowledge={knowledge} onCheckOriginal={() => void useAppStore.getState().refreshDocument(surface.workspaceId, surface.path)} onChange={(raw, before) => update(tabId, raw, before ?? document.content, surface.regionId)} onSave={onSave} onOpen={onOpen} onOpenPage={openPage} onCompositionChange={compositionChanged}
       onSnapshotIssue={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'retain') }}
       onKeepDisplayedDraft={(displayed, incoming) => { if (originalResource) useAppStore.getState().retainNoteEditorDraft(tabId, surface.regionId, displayed, incoming, { hostId: originalResource.hostId, path: originalResource.path }, 'keep-displayed') }}
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />
-    <details className="note-directory-sources" aria-label="Note sources"><summary>Source coverage <span>{!directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
-      : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : directoryFacts.status === 'partial' ? 'Partial' : null}</span></summary>
-      <button type="button" className="note-text-button" disabled={directoryFacts?.status === 'reading'} onClick={() => void useAppStore.getState().refreshNoteDirectorySources(tabId, surface.regionId)}>Refresh directory</button>
-      {directoryFacts && directoryFacts.status !== 'reading' && directoryFacts.status !== 'unknown' && <p className="note-scope">{directoryFacts.confirmedPaths.length} confirmed in this directory{directoryFacts.status === 'partial' ? ' · partial' : ''}</p>}
-      <p className="note-scope">This checks the original Note directory. Other directories may contain more sources.</p>
-      {directoryFacts?.unreadPaths.length ? <div className="note-scope"><strong>Not yet read</strong>{directoryFacts.unreadPaths.map(path => <div className="note-unread-source" key={path}><span>{path}</span>
-        <button type="button" className="note-text-button" aria-label={`Open Note source ${surface.workspaceId} · ${path}`} onClick={() => void openUnread(path)}>Open</button></div>)}</div> : null}
-      {directoryFacts?.unconfirmedPaths.length ? <div className="note-scope"><strong>Unconfirmed sources</strong>{directoryFacts.unconfirmedPaths.map(path => <div key={path}>{path}</div>)}</div> : null}
-    </details>
   </div>
 }

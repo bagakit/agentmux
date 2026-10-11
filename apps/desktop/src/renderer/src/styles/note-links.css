@@ -1,8 +1,8 @@
-.note-links { width: 100%; max-width: var(--note-content-width, 760px); margin: var(--sp-7) auto 0; padding: 0 var(--sp-8) var(--sp-3); color: var(--text-2); font: 12px/1.6 var(--font-sans); }
+.note-links { flex: 1 1 140px; min-width: 0; margin: 0; padding: 0; color: var(--text-2); font: 12px/1.6 var(--font-sans); }
 .note-links button { font: inherit; cursor: pointer; }
 .note-links button:focus-visible, .note-links summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
-.note-links-toggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 38px; border: 0; border-top: 1px solid var(--line-soft); padding: 10px 0 4px; background: transparent; color: var(--text-2); text-align: left; }
-.note-links-toggle > strong { font-size: 13px; font-weight: 500; }
+.note-links-toggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 28px; border: 0; padding: 4px 0; background: transparent; color: var(--text-2); text-align: left; }
+.note-links-toggle > strong { font-size: 12px; font-weight: 500; }
 .note-links-toggle > svg, .note-links-source-toggle > svg { flex: none; color: var(--text-3); }
 .note-links-toggle > svg:first-child, .note-links-source-toggle > svg:first-child { transition: transform 120ms ease; }
 .note-links-toggle[aria-expanded="true"] > svg:first-child, .note-links-source-toggle[aria-expanded="true"] > svg:first-child { transform: rotate(90deg); }
@@ -45,5 +45,5 @@ button.note-links-excerpt:hover { color: var(--text); text-decoration: underline
 .note-links-actions button { min-height: 28px; border: 0; padding: 3px 0; background: transparent; color: var(--blue); font-size: 11px; }
 .note-links-source-details { margin-top: 9px; }
 .note-links-coverage { margin-top: 8px; }
-@container (max-width: 420px) { .note-links { padding-right: var(--sp-4); padding-left: var(--sp-4); } .note-links-source-body { padding-left: 20px; } }
+@container (max-width: 420px) { .note-links-source-body { padding-left: 20px; } }
 @media (prefers-reduced-motion: reduce) { .note-links-toggle > svg:first-child, .note-links-source-toggle > svg:first-child { transition: none; } }
