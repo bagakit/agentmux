@@ -201,6 +201,10 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     const selector = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationInspection : undefined
     if (selector?.selectedStepId && selected && selector.selectedStepId !== selected.stepId) fail()
     if (method === 'connection.setup.advance' && (!result.receipt || !selected || selected.stepId !== result.receipt.stepId)) fail()
+    if (method === 'connection.setup.advance') {
+      const versionId = (input as ConnectionSetupParamsMap['connection.setup.advance']).versionId
+      if ((versionId !== undefined || selected?.subject === 'publication-version') && (selected?.subject !== 'publication-version' || selected.versionId !== versionId)) fail()
+    }
     const copy = selected && observations.find(o => o.stepId === selected.stepId)
     if (copy && JSON.stringify(copy) !== JSON.stringify(selected)) fail()
     const actions = (s.actions as unknown[]).map(value => {

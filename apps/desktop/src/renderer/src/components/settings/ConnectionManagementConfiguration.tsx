@@ -7,7 +7,10 @@ import type { ConnectionManagementModel } from './useConnectionManagementSetup'
 const subjects: Record<ConnectionSetupReadSubject, string> = {
   'application-details': 'Application details', 'bot-settings': 'Bot message setting',
   'permission-catalog': 'Permission directory', 'application-permissions': 'Requested application permissions',
-  'event-catalog': 'Event directory', 'event-settings': 'Event settings', 'callback-settings': 'Callback settings'
+  'event-catalog': 'Event directory', 'event-settings': 'Event settings', 'callback-settings': 'Callback settings',
+  'publication-pending': 'Pending application changes', 'publication-versions': 'Application versions',
+  'publication-visibility': 'Current application audience', 'publication-sharing': 'External sharing',
+  'publication-features': 'Application features', 'publication-version': 'Selected application version'
 }
 const resultLabel = (request: string, storage: string) => request === 'confirmed'
   ? storage === 'stored' ? 'Result saved' : 'Result needs saving' : request === 'dispatching' ? 'In progress' : 'Result not confirmed'
