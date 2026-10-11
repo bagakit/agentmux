@@ -1,10 +1,11 @@
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { conversationRecordAuthor, conversationRecordId, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
+import type { PublicationImage, ResolvedPublicationPart } from './publication-image.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
 export type PublicationContentPlan = {
   text: string
-  pieces: Array<{ part: ConversationContentRef; text: string; contentEligibility?: 'public'; relay?: ConnectionDeliveryRelay['sources'][number] }>
+  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; contentEligibility?: 'public'; relay?: ConnectionDeliveryRelay['sources'][number] }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
   gaps: ConnectionDeliveryGap[]
@@ -14,7 +15,7 @@ export type PublicationContentPlan = {
   complete: boolean
 }
 export type PublicationContentOptions = {
-  resolved: ReadonlyMap<string, AgentSessionHistoryContentPart>
+  resolved: ReadonlyMap<string, ResolvedPublicationPart>
   origin(recordId: string): ConnectionOriginRepresentation['origin'] | undefined
   selected?: ConversationContentRef
 }
@@ -60,6 +61,8 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       const raw = original.item.contentParts[slot.selector.partIndex]!, body = options.resolved.get(key) ?? raw
       if (narrow && body.kind !== 'text' && !(body.kind === 'resource' && body.content?.kind === 'text')) { excluded.push(part); continue }
       phase ??= original.item.messagePhase
+      if (body.kind === 'image-unavailable') { gap('resource-unavailable'); continue }
+      if (body.kind === 'image') { pieces.push({ part, text: '', image: body.image, contentEligibility: 'public' }); continue }
       switch (body.kind) {
         case 'text': value = body.text; break
         case 'reasoning': value = body.redacted ? '[Reasoning redacted by original source]' : body.text; break

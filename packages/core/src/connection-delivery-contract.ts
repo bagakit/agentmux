@@ -63,6 +63,8 @@ export type ConnectionDelivery = {
   receipt?: ConnectionDeliveryReceipt
   event?: ConnectionDeliveryEvent
   relay?: ConnectionDeliveryRelay
+  /** Resource upload is distinct from the original chat-message effect. No bytes or platform asset key are exposed. */
+  resourceUpload?: { kind: 'image'; part: ConversationContentRef; attempt: number; state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' }
 }
 /** Current process service window for the requested Binding scope; never platform delivery or Agent health. */
 export type ConnectionDeliveryObservation = {
@@ -82,7 +84,7 @@ export type ConnectionDeliveryResultMap = {
   'connection.delivery.retry': { delivery: ConnectionDelivery }
 }
 export type ConnectionDeliveryMethod = keyof ConnectionDeliveryParamsMap
-/** Borrow the exact Host owner. Only it can authorize an explicit same-ID retry after known non-application. */
+/** Borrow the exact Host owner. Retry keeps the same message identity: known non-application, or an upload whose message was never attempted. */
 export interface ConnectionDeliveryPort {
   inspect(input: ConnectionDeliveryOperationInput): Promise<ConnectionDeliveryResultMap['connection.delivery.inspect']>
   list(input: ConnectionDeliveryListInput): Promise<ConnectionDeliveryResultMap['connection.delivery.ls']>

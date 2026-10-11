@@ -1,9 +1,10 @@
-import { AgentMuxError, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
+import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
+import { publicationImage, type ImageUploadReceipt, type ResolvedPublicationPart } from './publication-image.js'
 import { publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation } from './publication-store.js'
 
@@ -146,7 +147,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
         continue
       }
       const ordered = [...consumed.snapshot.units].reverse() // The Core wire explicitly declares newest-first.
-      const resolvedText = await this.resolve(reference, ordered, signal, binding)
+      const resolvedText = await this.resolve(reference, ordered, signal, binding, adapter)
       this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watchViewId !== lane.viewId) lane.dirty = true
@@ -157,13 +158,29 @@ export class PublicationHost implements ConnectionDeliveryPort {
     lane.observation = this.store.coverage(binding).state === 'incomplete' ? { state: 'unavailable', reason: 'content-unconfirmed' }
       : lane.watch ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
   }
-  private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding): Promise<Map<string, AgentSessionHistoryContentPart>> {
-    const result = new Map<string, AgentSessionHistoryContentPart>()
+  private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding, adapter: PublicationAdapter): Promise<Map<string, ResolvedPublicationPart>> {
+    const result = new Map<string, ResolvedPublicationPart>()
     for (const unit of units) for (const slot of unit.event.content) {
       const record = unit.records.find(record => record.id === slot.recordId)!
       if (record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
       const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
-      if (part.contentEligibility !== 'public' || part.kind !== 'resource' || part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
+      if (part.contentEligibility !== 'public' || part.kind !== 'resource') continue
+      if (part.resourceType === 'image' && binding.scope.publication === 'future-shared-conversation' && adapter.images) {
+        result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), { kind: 'image-unavailable' })
+        try {
+          const input = { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id,
+            ...(item.turnId ? { turnId: item.turnId } : {}), partIndex: slot.selector.partIndex, expectedReference: part.reference, maxBytes: adapter.images.maxBytes }
+          const response = await this.options.conversation.resource(reference, input, signal)
+          if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign image resource Session')
+          const { agentSessionId: _session, ...original } = response
+          const read = parseProviderSessionHistoryResourceReadResult(original, input).result
+          if (read.status !== 'read') continue
+          const image = publicationImage(read)
+          if (adapter.images.accepts(image)) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), { kind: 'image', image })
+        } catch { signal.throwIfAborted() /* This exact image stays a gap; independent text is retained. */ }
+        continue
+      }
+      if (part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
       try {
         const value = await readSessionHistoryTextResource(part, slot.selector.partIndex,
           { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}) },
@@ -206,13 +223,13 @@ export class PublicationHost implements ConnectionDeliveryPort {
           if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
           cursor = page.nextCursor
         }
-        for (const unit of units) this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes)
+        for (const unit of units) this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding, adapter), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes)
       } catch { signal.throwIfAborted() /* Original exact gap remains durable and other contents continue. */ }
     }
   }
   private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
-    const accepted = new Map<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, AgentSessionHistoryContentPart> }>()
+    const accepted = new Map<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, ResolvedPublicationPart> }>()
     const qualified = new Set<string>() // One frozen representation is verified once in this bounded drain.
     for (let count = 0; count < 16; count++) {
       if (signal.aborted || !this.authorized(binding)) return
@@ -234,7 +251,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
       const frozen = JSON.stringify([original.projectionId, original.sourceRevision])
       const relevant = qualified.has(frozen) ? [] : this.store.pendingNativeRecords(original)
-      if (!qualified.has(frozen) && original.payload.kind === 'speech' && original.effect === 'upsert' && (relevant.length || (original.sourceRecords ?? [original.reference]).some(record => record.source.kind === 'native'))) {
+      if (!qualified.has(frozen) && ['speech', 'image'].includes(original.payload.kind) && original.effect === 'upsert' && (relevant.length || (original.sourceRecords ?? [original.reference]).some(record => record.source.kind === 'native'))) {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
           for (const record of relevant) {
@@ -250,7 +267,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
               if (consumed.kind === 'complete') {
                 const unit = consumed.snapshot.units.find(unit => unit.records.some(value => conversationRecordId(value.reference!) === key))
                 if (!unit) throw Error('The exact pending native record is unavailable')
-                accepted.set(key, { unit, frontier: page.window.checkpoint, resolved: await this.resolve(reference, [unit], signal, binding) }); complete = true; break
+                accepted.set(key, { unit, frontier: page.window.checkpoint, resolved: await this.resolve(reference, [unit], signal, binding, adapter) }); complete = true; break
               }
               pending = consumed.pending
               if (!page.items.length || !page.nextCursor || cursor === page.nextCursor || pending.bytes + (pending.fragment?.receivedBytes ?? 0) <= before) throw Error('The exact pending record made no progress')
@@ -262,6 +279,29 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (qualification === 'cancelled') continue
         if (qualification !== 'qualified') return { state: 'unavailable', reason: 'source-unconfirmed' }
         qualified.add(frozen)
+      }
+      if (original.payload.kind === 'image' && original.effect === 'upsert' && !original.prepared) {
+        const last = original.uploads?.at(-1)
+        if (last?.state === 'dispatching') { this.store.settleImageUpload(original.operationId, original.uploads!.length, { state: 'unknown' }); continue }
+        if (last?.state !== 'confirmed') {
+          if (!adapter.images || !adapter.images.accepts(original.payload.image)) return { state: 'unavailable', reason: 'adapter-unavailable' }
+          const upload = this.store.claimImageUpload(original.operationId, () => this.authorized(binding))
+          if (!upload || upload.payload.kind !== 'image') return
+          if (signal.aborted || !this.authorized(binding)) { this.store.settleImageUpload(upload.operationId, upload.uploads!.length, { state: 'unknown' }); return }
+          const uploadSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
+          let effect: Promise<ImageUploadReceipt>
+          try { effect = Promise.resolve(adapter.images.upload(upload.payload.image, upload.target, credential, uploadSignal)) }
+          catch { effect = Promise.reject(new Error('Unconfirmed original image upload.')) }
+          const settle = (receipt: ImageUploadReceipt) => { if (!this.closed) this.store.settleImageUpload(upload.operationId, upload.uploads!.length, receipt) }
+          effect.then(receipt => {
+            try { settle(receipt) } catch { try { settle({ state: 'unknown' }) } catch { /* Preserve the same unconfirmed upload attempt. */ } }
+            this.wake(lane)
+          }, () => {})
+          try { await this.until(effect, uploadSignal) } catch { try { settle({ state: 'unknown' }) } catch { /* Preserve its authoritative receipt or unconfirmed storage. */ } }
+          if (signal.aborted || !this.authorized(binding)) return
+          original = this.store.inspect(upload.operationId)!
+          if (original.uploads?.at(-1)?.state !== 'confirmed') continue
+        }
       }
       if (original.payload.kind === 'permission' && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
       const claimed = this.store.claimNext(binding, () => this.authorized(binding) && (original!.payload.kind !== 'permission' || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
@@ -281,8 +321,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
       catch { try { settle({ state: 'unknown', reason: 'effect-unconfirmed' }) } catch { /* Retain already confirmed outcome or unconfirmed storage. */ } return { state: 'unknown', reason: 'effect-unconfirmed' } }
       const state = this.store.inspect(claimed.operationId)?.state
       if (state !== 'confirmed') return { state: 'unknown', reason: 'effect-unconfirmed' }
-      if (count === 15) lane.dirty = true
     }
+    lane.dirty = true // More retained work may remain after any bounded outcome.
   }
   private until<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     if (signal.aborted) return Promise.reject(new Error('External effect observation ended.'))

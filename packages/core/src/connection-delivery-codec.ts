@@ -95,7 +95,7 @@ export function parseConnectionDeliveryReceipt(value: unknown): ConnectionDelive
   return { state: p.state as 'unknown' | 'not-applied', reason: reason(p.reason) as ConnectionDeliveryReceiptReason }
 }
 export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
-  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event', 'relay'])
+  const p = object(value, ['operationId', 'projectionId', 'sourceRevision', 'bindingId', 'bindingRevision', 'reference', 'target', 'effect', 'fragment', 'state', 'predecessorOperationId', 'mapping', 'reason', 'receipt', 'event', 'relay', 'resourceUpload'])
   const target = object(p.target, ['connectionId', 'application', 'externalConversationId']), app = object(target.application, ['domain', 'appId']), fragment = object(p.fragment, ['ordinal', 'count'])
   const domain = text(app.domain), ordinal = integer(fragment.ordinal, 0), count = integer(fragment.count, 0)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain) || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text(app.appId))) fail()
@@ -109,9 +109,18 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   const operationId = text(p.operationId), predecessorOperationId = p.predecessorOperationId === undefined ? undefined : text(p.predecessorOperationId)
   if (predecessorOperationId === operationId) fail()
   const original = reference(p.reference)
+  let resourceUpload: ConnectionDelivery['resourceUpload']
+  if (p.resourceUpload !== undefined) {
+    const upload = object(p.resourceUpload, ['kind', 'part', 'attempt', 'state']), selected = part(upload.part), attempt = integer(upload.attempt, 0)
+    if (p.effect !== 'upsert' || ['dispatching', 'unknown', 'confirmed'].includes(String(p.state)) && upload.state !== 'confirmed' || upload.kind !== 'image' || !['pending', 'dispatching', 'unknown', 'confirmed'].includes(String(upload.state)) ||
+      selected.record.source.kind !== 'native' || selected.selector.kind !== 'native-part' ||
+      selected.record.hostId !== original.hostId || selected.record.agentSessionId !== original.agentSessionId ||
+      (upload.state === 'pending' ? attempt !== 0 : attempt < 1)) fail()
+    resourceUpload = { kind: 'image', part: selected, attempt, state: upload.state as NonNullable<ConnectionDelivery['resourceUpload']>['state'] }
+  }
   return { operationId, projectionId: text(p.projectionId), sourceRevision: text(p.sourceRevision), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), reference: original,
     target: { connectionId: text(target.connectionId), application: { domain, appId: text(app.appId) }, externalConversationId: text(target.externalConversationId) }, effect: p.effect as ConnectionDelivery['effect'], fragment: { ordinal, count }, state: p.state as ConnectionDeliveryState,
-    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }), ...(p.relay === undefined ? {} : { relay: relay(p.relay, original) }) }
+    ...(predecessorOperationId === undefined ? {} : { predecessorOperationId }), ...(mapped === undefined ? {} : { mapping: mapped }), ...(why === undefined ? {} : { reason: why }), ...(receipt === undefined ? {} : { receipt }), ...(p.event === undefined ? {} : { event: event(p.event) }), ...(p.relay === undefined ? {} : { relay: relay(p.relay, original) }), ...(resourceUpload ? { resourceUpload } : {}) }
 }
 export function parseConnectionDeliveryObservation(value: unknown): ConnectionDeliveryObservation {
   const p = object(value, ['state', 'reason'])
