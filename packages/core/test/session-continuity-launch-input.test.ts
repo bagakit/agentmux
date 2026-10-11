@@ -365,3 +365,21 @@ it('uses the original submission ID and real terminal owner for post-launch-only
     expect(record?.launch).toBeUndefined(); expect(h.core.kernel.input).toHaveBeenCalledTimes(2)
   } finally { await h.close() }
 })
+
+it('lists only the newly accepted launch in the original mailbox without fabricating controlled waiting', async () => {
+  const h = await fixture()
+  try {
+    await h.client.ensureAgentContinuity(h.request)
+    const key = h.op()!.launchInput!.key!, page = await h.client.readAgentInputMailbox({ agentSessionId: 'recipient' })
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]).toMatchObject({ kind: 'item', item: { kind: 'submission', key,
+      record: { launch: { key, input: fresh, state: 'launch-carried', receipt: { kind: 'runtime-launch', run: h.newRun } } } } })
+    expect(await h.client.inspectAgentInput({ key })).toBeNull()
+    await expect(h.client.stopAgentInputWaiting({ ref: { key, waitGeneration: 1 }, cancelOperationId: 'not-a-wait' })).rejects.toMatchObject({ code: 'AGENT_INPUT_NOT_FOUND' })
+    const before = h.started.length
+    await h.client.ensureAgentContinuity(h.request)
+    expect(h.started).toHaveLength(before)
+    expect((await h.client.readAgentInputMailbox({ agentSessionId: 'recipient' })).items).toHaveLength(1)
+    expect(h.core.kernel.input).not.toHaveBeenCalled()
+  } finally { await h.close() }
+})
