@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true, "lib": ["ES2024", "DOM", "DOM.Iterable"] },
+  "include": ["agent-input-mailbox.test.ts", "vitest.input-mailbox.config.mts"]
+}
