@@ -127,6 +127,48 @@ it('retains real focused-option arrow/Enter/Escape ownership without taking ordi
   expect(document.activeElement).toBe(host.querySelector('.tiptap'))
   await key('Enter'); expect(queued).toHaveBeenCalledTimes(1)
 })
+it('prepares complete overflow reading only for the interacted original choice and preserves exact insertion', async () => {
+  const selected = { text: '/read-complete-name-tail', description: 'Read the entire original description tail', insertText: '/exact original' }
+  const { submitted, queued } = await mount('/re', { commands: [selected, { text: '/rest', description: 'Short' }] }, true)
+  await caretAtText('/re')
+  const [choice, other] = options(), lines = [...choice!.querySelectorAll<HTMLElement>('[data-choice-reading]')]
+  const otherReads = vi.spyOn(other!, 'querySelectorAll')
+  lines.forEach((line, index) => {
+    Object.defineProperty(line, 'clientWidth', { configurable: true, value: 100 })
+    Object.defineProperty(line.firstElementChild!, 'scrollWidth', { configurable: true, value: index ? 260 : 180 })
+  })
+  await act(async () => choice!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
+  expect(lines.map(line => line.hasAttribute('data-overflow'))).toEqual([true, true])
+  expect(lines.map(line => line.style.getPropertyValue('--choice-reading-offset'))).toEqual(['-80px', '-160px'])
+  expect(lines.map(line => line.style.getPropertyValue('--choice-reading-duration'))).toEqual(['2.5s', '5s'])
+  expect(choice!.title).toBe(''); expect(otherReads).not.toHaveBeenCalled()
+  expect(lines.map(line => line.textContent)).toEqual([selected.text, selected.description])
+  await act(async () => choice!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true })))
+  expect(choice!.title).toBe(selected.text + '\n' + selected.description)
+  await key('ArrowDown')
+  expect(document.activeElement).toBe(choice); expect(choice!.title).toBe('')
+  await key('Enter')
+  expect(draft()).toBe('/exact original ')
+  expect(submitted).not.toHaveBeenCalled(); expect(queued).not.toHaveBeenCalled()
+})
+it('keeps complete static disclosure for reduced motion and for short choice lines', async () => {
+  const selected = { text: '/read', description: 'Original disclosure' }
+  await mount('/re', { commands: [selected] }); await caretAtText('/re')
+  const choice = options()[0]!, lines = [...choice.querySelectorAll<HTMLElement>('[data-choice-reading]')]
+  const media = vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList)
+  for (const line of lines) {
+    Object.defineProperty(line, 'clientWidth', { configurable: true, value: 100 })
+    Object.defineProperty(line.firstElementChild!, 'scrollWidth', { configurable: true, value: 260 })
+  }
+  await act(async () => choice.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
+  expect(choice.title).toBe(selected.text + '\n' + selected.description)
+  media.mockReturnValue({ matches: false } as MediaQueryList)
+  for (const line of lines) Object.defineProperty(line.firstElementChild!, 'scrollWidth', { configurable: true, value: 80 })
+  await act(async () => choice.dispatchEvent(new PointerEvent('pointerout', { bubbles: true })))
+  await act(async () => choice.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
+  expect(lines.every(line => !line.hasAttribute('data-overflow'))).toBe(true)
+  expect(choice.title).toBe(selected.text + '\n' + selected.description)
+})
 it('navigates actual grouped rows and columns and scrolls only the choice list before inserting the exact item', async () => {
   const commands = Array.from({ length: 6 }, (_, index) => ({ id: `exact-${index}`, text: '/grid', label: `Choice ${index}`,
     description: `Original item ${index}`, group: index < 3 ? 'Shortcuts' : 'Agent commands', insertText: `/grid exact-${index}` }))
