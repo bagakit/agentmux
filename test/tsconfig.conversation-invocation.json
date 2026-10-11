@@ -1,0 +1,32 @@
+{
+  "extends": "../packages/client-ui/tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "react": [
+        "../packages/client-ui/node_modules/@types/react"
+      ],
+      "react/*": [
+        "../packages/client-ui/node_modules/@types/react/*"
+      ],
+      "react-dom/*": [
+        "../packages/client-ui/node_modules/@types/react-dom/*"
+      ],
+      "@agentmux/client-ui/conversation-sources": [
+        "../packages/client-ui/src/lib/conversation-sources.ts"
+      ],
+      "@agentmux/client-ui/components/ConversationToolTrace": [
+        "../packages/client-ui/src/components/ConversationToolTrace.tsx"
+      ]
+    }
+  },
+  "include": [
+    "conversation-unified-consumers.integration.test.tsx",
+    "vitest.conversation-invocation.config.mts"
+  ]
+}

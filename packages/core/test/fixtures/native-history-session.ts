@@ -11,7 +11,7 @@ import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 export async function nativeHistoryFixture(
   providerId: 'claude' | 'pi' | 'antigravity' | 'droid' | 'grok' | 'kimi',
   data: string | Buffer | ((root: string) => string),
-  options: { nativeSessionId?: string; relativePath?: string } = {}
+  options: { nativeSessionId?: string; relativePath?: string; agentSessionId?: string } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), `agentmux-${providerId}-history-`))
   const path = join(root, options.relativePath ?? 'native.jsonl')
@@ -19,7 +19,7 @@ export async function nativeHistoryFixture(
   await writeFile(path, typeof data === 'function' ? data(root) : data)
   const storePath = join(root, 'agent-sessions.json')
   const store = new AgentMuxFileAgentSessionStore(storePath)
-  const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'private-agent', providerId,
+  const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: options.agentSessionId ?? 'private-agent', providerId,
     executorId: providerId, hostId: 'local', workspacePath: root, run: { runId: 'unchanged-private-run' },
     retiredRuns: [], createdAt: 1, updatedAt: 1, hookBindingId: 'private-binding', hookToken: 'private-token',
     nativeHandle: { kind: 'provider', providerId, sessionId: options.nativeSessionId ?? 'native-main', transcriptPath: path } }

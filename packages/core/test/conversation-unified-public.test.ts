@@ -114,7 +114,9 @@ it('a transient native failure retains its exact source retry position without a
 
 it('complete unit fragments preserve all original Unicode bytes and hold changes cuts until assembly completes', async () => {
   const f = await fixture(), cut = await f.client.conversationCheckpoint(ref), body = ' original 中🙂\n'.repeat(1200)
-  await appendFile(f.path, jsonl([row('large', _historyFixtureEpoch(0, 0, 300), body)]))
+  const original = row('large', _historyFixtureEpoch(0, 0, 300), body)
+  original.message.content.push({ type: 'tool_use', id: 'fragmented-call', name: 'Read', input: { path: 'original' } } as never)
+  await appendFile(f.path, jsonl([original]))
   const input = { ...ref, checkpoint: cut.checkpoint, maxBytes: 12 * 1024 }
   const first = await f.client.readConversationChanges(input)
   expect(first.items[0]?.kind).toBe('fragment'); expect(first.checkpoint).toEqual(cut.checkpoint)
@@ -126,7 +128,10 @@ it('complete unit fragments preserve all original Unicode bytes and hold changes
     page = await f.client.readConversationChanges({ ...input, cursor: page.nextCursor })
   }
   expect(pending).toBeUndefined(); expect(units).toHaveLength(1)
-  expect(units[0]!.records[0]!.original).toMatchObject({ kind: 'native', item: { contentParts: [{ kind: 'text', text: body }] } })
+  expect(units[0]!.records[0]!.original).toMatchObject({ kind: 'native', item: { contentParts: [{ kind: 'text', text: body }, {kind:'tool-call',callId:'fragmented-call'}] } })
+  expect(units[0]!.event.relations).toContainEqual(expect.objectContaining({kind:'invocation-member', part:expect.objectContaining({selector:{kind:'native-part',partIndex:1}})}))
+  const projected = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage: await f.client.sessionHistoryPage(ref.agentSessionId) })
+  expect(units[0]!.event).toEqual(projected.events.find(event => event.reference?.source.recordId === 'large'))
   expect(page.checkpoint).not.toEqual(cut.checkpoint)
   expect((await f.client.readConversationChanges({ ...ref, checkpoint: page.checkpoint })).items).toEqual([])
 })
@@ -223,7 +228,7 @@ it('canonical question and recorded answer stay complete through public units wi
   }
 })
 
-it('real Claude invocation evidence preserves surrounding speech and exact part identities without promoting same-invocation to same-event', async () => {
+it('real Claude invocation evidence preserves surrounding speech and exact part identities without promoting invocation membership to same-event', async () => {
   const original = unifiedConversationOriginals(), source = original.source
   const f = await nativeHistoryFixture('claude', jsonl([original.claudeTool]), { nativeSessionId: source.nativeSessionId }); release.push(f.close)
   const item = { ...original.capturedTool, agentSessionId: ref.agentSessionId }
@@ -231,24 +236,54 @@ it('real Claude invocation evidence preserves surrounding speech and exact part 
   const historyPage = await f.client.sessionHistoryPage(ref.agentSessionId), timeline = await f.client.sessionTimeline(ref.agentSessionId)
   const projected = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage, timeline })
   expect(projected.events).toHaveLength(2)
-  expect(projected.events.flatMap(e => e.relations).filter(r => r.kind === 'same-invocation')).toHaveLength(2)
+  expect(projected.events.flatMap(e => e.relations).filter(r => r.kind === 'invocation-member')).toHaveLength(2)
   const originals = new Map(projected.records.map(record => [record.id, record]))
   for (const event of projected.events) {
     const unit = { event, records: event.recordIds.map(id => originals.get(id)!) }
     expect(parseConversationUnit(unit, ref, projected.scope).event).toEqual(event)
-    const forged = structuredClone(unit), relation = forged.event.relations.find(value => value.kind === 'same-invocation')!
-    if (relation.kind !== 'same-invocation') throw new Error('Original relation must name its invocation')
-    relation.invocation.callId = 'unrelated-invocation'
-    const { revision: _, ...changed } = forged.event
-    forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
-    expect(() => parseConversationUnit(forged, ref, projected.scope)).toThrow()
+    for (const damage of ['missing', 'duplicate', 'call', 'host', 'session', 'provider', 'native-session', 'subject', 'turn', 'selector', 'revision', 'external-part', 'legacy-pair']) {
+      const forged = structuredClone(unit), relation = forged.event.relations.find(value => value.kind === 'invocation-member')!
+      if (relation.kind !== 'invocation-member') throw new Error('Original relation must name its invocation')
+      if (damage === 'missing') forged.event.relations = forged.event.relations.filter(value => value !== relation)
+      if (damage === 'duplicate') forged.event.relations = [...forged.event.relations, relation]
+      if (damage === 'call') relation.invocation.callId = 'unrelated-invocation'
+      if (damage === 'host') relation.invocation.hostId = 'foreign-host'
+      if (damage === 'session') relation.invocation.agentSessionId = 'foreign-session'
+      if (damage === 'provider') relation.invocation.source.providerId = 'foreign-provider'
+      if (damage === 'native-session') relation.invocation.source.nativeSessionId = 'foreign-native'
+      if (damage === 'subject') relation.invocation.subject = { kind: 'child', nativeActorId: 'other-child' }
+      if (damage === 'turn') relation.invocation.scope = { kind: 'turn', nativeTurnId: 'other-turn' }
+      if (damage === 'selector') relation.part.selector = { kind: 'native-part', partIndex: 0 }
+      if (damage === 'revision') relation.part.recordRevision = '0'.repeat(64)
+      if (damage === 'external-part') relation.part.record.source.recordId = 'not-in-unit'
+      if (damage === 'legacy-pair') forged.event.relations = [{ kind: 'same-invocation', from: relation.part, to: relation.part, invocation: relation.invocation } as never]
+      const { revision: _, ...changed } = forged.event
+      forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
+      expect(() => parseConversationUnit(forged, ref, projected.scope), damage).toThrow()
+    }
   }
   expect(historyPage.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: 'Original surrounding speech' })
   const units = await collect(value => f.client.readAgentConversation(value))
   expect(units.units.flatMap(unit => unit.records).flatMap(record => record.original.kind === 'native' ? record.original.item.contentParts : [])).toEqual(historyPage.items[0]!.contentParts)
   expect(units.units.map(unit => unit.event.role).sort()).toEqual(['message', 'process'])
+  expect(units.units.map(unit => unit.event).reverse()).toEqual(projected.events)
   const foreign = { ...item, conversation: { invocations: item.conversation.invocations.map(fact => ({ ...fact, invocation: { ...fact.invocation, callId: 'other-call' } })) } }
-  expect(projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage, timeline: { ...timeline, items: [foreign] } }).events.flatMap(e => e.relations).filter(r => r.kind === 'same-invocation')).toEqual([])
+  expect(projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage, timeline: { ...timeline, items: [foreign] } }).events.flatMap(e => e.relations).filter(r => r.kind === 'invocation-member')).toHaveLength(2)
+  const wrongNative = structuredClone(historyPage)
+  wrongNative.items[0]!.conversation!.nativeInvocationScope!.source = { ...source, nativeSessionId: 'not-the-original-native-source' }
+  const isolated = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage: wrongNative })
+  expect(isolated.events[0]!.relations).toEqual([])
+  expect(isolated.records[0]!.original.item).toEqual(wrongNative.items[0])
+  const forged = { event: structuredClone(isolated.events[0]!), records: isolated.records }
+  const member = structuredClone(projected.events.flatMap(event => event.relations).find(relation => relation.kind === 'invocation-member' && relation.part.record.source.kind === 'native')!)
+  if (member.kind !== 'invocation-member') throw Error('The original native membership must be present')
+  member.part.recordRevision = isolated.records[0]!.revision
+  member.invocation.source = wrongNative.items[0]!.conversation!.nativeInvocationScope!.source
+  forged.event.relations = [member]
+  const { revision: _old, ...changed } = forged.event
+  forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
+  expect(() => parseConversationUnit(forged, ref, isolated.scope)).toThrow()
+
 })
 
 it('strict observation links retain the original typed target even when an unrelated target has a recomputed event revision', async () => {

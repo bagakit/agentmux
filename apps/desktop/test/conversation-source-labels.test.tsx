@@ -76,10 +76,33 @@ it.each(['shared','desktop'])('exact cross-event invocation labels apply only to
  expect(output.textContent).toContain('Original output');expect(labels(output)).not.toContain('native')
 })
 
-it.each(['turn','actor','source','host'])('equal bare call IDs do not spread labels across a different %s',async kind=>{
- const different=kind==='turn'?{scope:{kind:'turn' as const,nativeTurnId:'different-turn'}}:kind==='actor'?{subject:{kind:'child' as const,nativeActorId:'main'}}:kind==='source'?{source:{...source,nativeSessionId:'other-native'}}:{}
+it.each(['turn','actor','source','provider','host'])('equal bare call IDs do not spread labels across a different %s',async kind=>{
+ const different=kind==='turn'?{scope:{kind:'turn' as const,nativeTurnId:'different-turn'}}:kind==='actor'?{subject:{kind:'child' as const,nativeActorId:'main'}}:kind==='source'?{source:{...source,nativeSessionId:'other-native'}}:kind==='provider'?{source:{...source,providerId:'other-provider'}}:{}
  await render(<ConversationView sessionId={sid} executionHostId="remote-route" page={page([native('native',[call])])} timeline={timeline([hookTool(different)],kind==='host'?'other-source-host':'local')}/>)
  const trace=host.querySelector('.conversation-tool-trace')!;expect(labels(trace)).toEqual(['native'])
+})
+
+it('native invocation provenance cannot borrow a different native source even when that captured membership is accepted',async()=>{
+ const other={...source,nativeSessionId:'foreign-original'}, item=native('native',[call])
+ item.conversation.nativeInvocationScope.source=other
+ await render(<ConversationView sessionId={sid} page={page([item])} timeline={timeline([hookTool({source:other})])}/>)
+ expect(labels(host.querySelector('.conversation-tool-trace')!)).toEqual(['native'])
+ expect(host.querySelector('[data-conversation-source-unread]')).toBeNull()
+})
+
+it('a singleton trace keeps its own event version while a later accepted membership updates only the source display',async()=>{
+ const p=page([native('native',[call])]), empty=timeline([]), later=timeline([hookTool()])
+ const before=projectConversationReading({agentSessionId:sid,historyPage:p,timeline:empty})
+ const after=projectConversationReading({agentSessionId:sid,historyPage:p,timeline:later})
+ const own=(reading:typeof before)=>reading.timeline.events.find(event=>event.reference?.source.recordId==='native')!
+ expect(own(before).relations).toHaveLength(1)
+ expect(own(before).revision).toBe(own(after).revision)
+ await render(<ConversationView sessionId={sid} page={p} timeline={empty}/>)
+ expect(labels(host.querySelector('.conversation-tool-trace')!)).toEqual(['native'])
+ expect(host.querySelector('[data-conversation-source-unread]')).toBeNull()
+ await render(<ConversationView sessionId={sid} page={p} timeline={later}/>)
+ expect(new Set(labels(host.querySelector('.conversation-tool-trace')!))).toEqual(new Set(['native','native-hook']))
+ expect(after.timeline.events).toHaveLength(2)
 })
 
 it('a deferred resource trace keeps its original selector source after complete reconstruction without extra reads',async()=>{

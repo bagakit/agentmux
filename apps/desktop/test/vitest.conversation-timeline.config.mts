@@ -10,7 +10,7 @@ const mutations: Record<string, [string, string, string]> = {
   'ignore-human-author': ['conversation-author.ts', "if (item.authorHuman === true)", "if (false && item.authorHuman === true)"],
   'drop-mixed-part': ['conversation-timeline.ts', 'original.item.contentParts.map((_, partIndex)', 'original.item.contentParts.slice(1).map((_, partIndex)'],
   'invent-body-join': ['conversation-timeline.ts', 'const target = provenance?.sameEvent', "const target = provenance?.sameEvent ?? (record.original.kind === 'captured' ? native[0]?.reference ?? undefined : undefined)"],
-  'merge-invocation-parent': ['conversation-timeline.ts', "relations.push({ kind: 'same-invocation', from:", "edges.set(b.record.id, { target: a.record.id, relation: { kind: 'same-event', from: b.record.reference!, to: a.record.reference! } }); relations.push({ kind: 'same-invocation', from:"],
+  'merge-invocation-parent': ['conversation-timeline.ts', 'const anchor = (record: ConversationSourceRecord): string => resolved.anchors.get(record.id)!', "const anchor = (record: ConversationSourceRecord): string => { const member = conversationInvocationMembers(record)[0]; return member ? records.find(peer => conversationInvocationMembers(peer).some(value => conversationInvocationId(value.invocation) === conversationInvocationId(member.invocation)))!.id : resolved.anchors.get(record.id)! }"],
   'hide-unread-anchor': ['conversation.ts', 'timeline.events.map(event => {', 'timeline.events.filter(event => records.has(event.anchorId)).map(event => {']
 }
 export default defineConfig({ ...base, cacheDir: '.cache/conversation-timeline', plugins: [{ name: 'timeline-owned-counterexamples', enforce: 'pre', transform(source, id) {
