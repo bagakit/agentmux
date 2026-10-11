@@ -1,5 +1,5 @@
 import { readHistoryQuery } from './history-query-read.js'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionUserMessage } from '@agentmux/core'
 
 export type InputHistoryRead = (input: Omit<AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>,
@@ -8,10 +8,11 @@ export type InputHistorySource = 'captured' | 'native'
 type SourcePage = { source: InputHistorySource; messages: readonly AgentSessionUserMessage[]; cursor: string | null;
   complete: boolean; examined: number; loading: boolean; error: string | null; retry?: { cursor?: string } }
 const sources: readonly InputHistorySource[] = ['captured', 'native']
+const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
 const empty = (source: InputHistorySource): SourcePage => ({ source, messages: [], cursor: null, complete: false, examined: 0, loading: false, error: null })
 
 /** One visible reader's temporary query window. No transcript, delivery or draft state is owned here. */
-export function useAgentInputHistory({ scope, enabled, read, initialMessages = [] }: {
+export function useAgentInputHistory({ scope, enabled, read, initialMessages = EMPTY_MESSAGES }: {
   scope: string; enabled: boolean; read: InputHistoryRead; initialMessages?: readonly AgentSessionUserMessage[]
 }) {
   const [draftQuery, setDraftQuery] = useState('')
@@ -80,23 +81,26 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = [
   }, [scope, read, enabled, load])
   const valid = state.scope === scope && state.read === read
   const pages = valid ? state.pages : sources.map(empty)
-  const seen = new Set<string>()
-  const messages = pages.flatMap(page => page.messages).filter(message => {
-    if (seen.has(message.id)) return false
-    seen.add(message.id); return true
-  })
-  // The unfiltered current view also retains original live observations. Search pages
-  // stay bound to their query snapshots; neither path settles delivery records.
-  if (valid && state.query === '') {
-    const indices = new Map(messages.map((message, index) => [message.id, index]))
-    for (const message of initialMessages) {
-      const index = indices.get(message.id)
-      if (index !== undefined) messages[index] = message
-      else { indices.set(message.id, messages.length); messages.push(message) }
+  const messages = useMemo(() => {
+    const seen = new Set<string>()
+    const messages = pages.flatMap(page => page.messages).filter(message => {
+      if (seen.has(message.id)) return false
+      seen.add(message.id); return true
+    })
+    // The unfiltered current view also retains original live observations. Search pages
+    // stay bound to their query snapshots; neither path settles delivery records.
+    if (valid && state.query === '') {
+      const indices = new Map(messages.map((message, index) => [message.id, index]))
+      for (const message of initialMessages) {
+        const index = indices.get(message.id)
+        if (index !== undefined) messages[index] = message
+        else { indices.set(message.id, messages.length); messages.push(message) }
+      }
     }
-  }
-  messages.sort((a, b) => a.recordedAt === undefined ? b.recordedAt === undefined ? 0 : 1
-    : b.recordedAt === undefined ? -1 : b.recordedAt - a.recordedAt)
+    messages.sort((a, b) => a.recordedAt === undefined ? b.recordedAt === undefined ? 0 : 1
+      : b.recordedAt === undefined ? -1 : b.recordedAt - a.recordedAt)
+    return messages
+  }, [pages, valid, state.query, initialMessages])
   const loadMore = (source: InputHistorySource) => {
     const page = pages.find(page => page.source === source)
     if (!page || page.loading || (!page.error && !page.cursor)) return
