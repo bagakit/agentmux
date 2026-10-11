@@ -1,3 +1,4 @@
+import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
 import { scratchTopicsForWorkspace, scratchTopicKind } from '../lib/scratch-topic-snapshots'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
@@ -353,10 +354,12 @@ export function NewTabSurface({
     }, { separate: true })
   }
 
+  const dialogDocument = useWorkbenchWindowDocument() ?? undefined
+
   async function chooseComposerFiles(): Promise<void> {
     if (host?.kind !== 'local') { setFileReferencesOpen(true); return }
     await insertionRef.current?.insert(async () => {
-      const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
+      const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined, dialogDocument)
       if (!feedback.isCurrent()) return null
       return paths?.length ? appendSelectedFileReferences('', paths, workspace?.path) : null
     }, { separate: true })

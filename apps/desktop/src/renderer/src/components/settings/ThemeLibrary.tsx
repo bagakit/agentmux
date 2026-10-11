@@ -1,3 +1,4 @@
+import { useWorkbenchWindowDocument } from '../../lib/workbench-document'
 import { useEffect, useRef, useState } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { DEFAULT_THEME_ID, THEME_FILE_MAX_BYTES, getThemeCatalog, isBuiltinThemeId, parseThemeFile, previewTheme, themeValue, type ThemeCatalogItem, type ThemeDocument } from '@agentmux/client-ui/theme'
@@ -10,6 +11,7 @@ export function ThemeLibrary({ selected, appearance, active, editing, onCustomiz
   selected: ThemeCatalogItem | undefined; appearance: AppearanceConfig; active: boolean; editing: boolean
   onCustomize(): void; onSave: (next: AppearanceConfig, expected: AppearanceConfig) => Promise<void>
 }) {
+  const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const input = useRef<HTMLInputElement>(null)
   const [imported, setImported] = useState<{ document: ThemeDocument; raw: unknown; selectedId: string | undefined; copyId: string } | null>(null)
   const [preview, setPreview] = useState<'dark' | 'light' | null>(null)
@@ -50,7 +52,7 @@ export function ThemeLibrary({ selected, appearance, active, editing, onCustomiz
   async function download() {
     if (!selected) { setFeedback('Choose an available theme to export. Unsupported saved records remain retained.'); return }
     try {
-      const result = await api.ui.exportTheme({ id: selected.id, ...selected.value })
+      const result = await api.ui.exportTheme({ id: selected.id, ...selected.value }, dialogDocument)
       if (mounted.current) setFeedback(result.status === 'saved' ? `Exported complete theme to ${result.path}.` : result.status === 'cancelled' ? 'Export cancelled. Saved themes and files are unchanged.' : 'Download requested. Check your browser downloads for the complete theme file.')
     } catch (cause) { if (mounted.current) setFeedback(`Export failed: ${cause instanceof Error ? cause.message : String(cause)}. Saved themes are unchanged.`) }
   }

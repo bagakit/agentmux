@@ -194,8 +194,8 @@ const api: AgentMuxPreloadApi = {
   },
   workspaces: {
     appearance: (id: string) => ipcRenderer.invoke('workspaces:appearance', id),
-    chooseLocalFolder: () => ipcRenderer.invoke('workspaces:chooseLocalFolder'),
-    rebindLocalFolder: (workspaceId: string) => ipcRenderer.invoke('workspaces:rebindLocalFolder', workspaceId),
+    chooseLocalFolder: document => ipcRenderer.invoke('workspaces:chooseLocalFolder', document),
+    rebindLocalFolder: (workspaceId, document) => ipcRenderer.invoke('workspaces:rebindLocalFolder', workspaceId, document),
     add: (input: CreateWorkspaceInput) => ipcRenderer.invoke('workspaces:add', input),
     listBranches: (workspaceId: string) => ipcRenderer.invoke('workspaces:listBranches', workspaceId),
     openBranch: (workspaceId: string, branch: string) =>
@@ -410,8 +410,8 @@ const api: AgentMuxPreloadApi = {
     writeClipboardText: (text: string) => ipcRenderer.invoke('ui:writeClipboardText', text),
     writeClipboardImage: (image: BrowserPng) => ipcRenderer.invoke('ui:writeClipboardImage', image),
     openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url),
-    exportTheme: document => ipcRenderer.invoke('ui:exportTheme', document),
-    chooseFiles: (input?: { defaultPath?: string }) => ipcRenderer.invoke('ui:chooseFiles', input),
+    exportTheme: (document, window) => ipcRenderer.invoke('ui:exportTheme', document, window),
+    chooseFiles: (input, document) => ipcRenderer.invoke('ui:chooseFiles', input, document),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
     readPastedImage: (path: string) => ipcRenderer.invoke('ui:readPastedImage', path),
@@ -632,7 +632,7 @@ const api: AgentMuxPreloadApi = {
   },
   browser: {
     listRetainedUploads: () => ipcRenderer.invoke('browser:listRetainedUploads'),
-    discardRetainedUpload: selectionId => ipcRenderer.invoke('browser:discardRetainedUpload', selectionId),
+    discardRetainedUpload: (selectionId, document) => ipcRenderer.invoke('browser:discardRetainedUpload', selectionId, document),
     listTargets: workspaceId => ipcRenderer.invoke('browser:listTargets', workspaceId),
     createExternalPairing: workspaceId => ipcRenderer.invoke('browser:createExternalPairing', workspaceId),
     revealExternalExtension: () => ipcRenderer.invoke('browser:revealExternalExtension'),

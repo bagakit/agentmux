@@ -1,3 +1,4 @@
+import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -411,6 +412,7 @@ export function FileExplorer({
   /** undefined: own toolbar; null: shared header slot is not attached yet. */
   toolbarTarget?: HTMLElement | null | undefined
 }) {
+  const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const workspaceId = useAppStore((state) => requestedWorkspaceId ?? state.activeWorkspaceId)
   const workspace = useWorkspaceResource(workspaceId)
   const activePath = useAppStore((state) =>
@@ -862,7 +864,7 @@ export function FileExplorer({
     ) return
     setRelinking(true)
     try {
-      const updated = await api.workspaces.rebindLocalFolder(workspaceId)
+      const updated = await api.workspaces.rebindLocalFolder(workspaceId, dialogDocument)
       if (!updated) return
       const current = useAppStore.getState().config
       if (!current) return
