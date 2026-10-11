@@ -237,7 +237,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境连接与手机设备接入独立归入 Connections；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），Message Tool 独立归组（输入与 Mailbox、Prompts），资源配置随后（Agents、Workspaces），环境工作台归 Remote 独立分组，手机设备接入归 Connections；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
