@@ -136,7 +136,7 @@ async function run(label, mutation) {
   const receipt = JSON.parse(await readFile(join(directory, 'result.json'), 'utf8'))
   const row = { label, expected: mutation ? 'RED' : partial ? 'AVAILABLE_CHECKS' : 'COMPLETE', directory: relative(root, directory), passed: receipt.passed,
     availableChecksPassed: receipt.availableChecksPassed, completeGate: receipt.completeGate, uncovered: receipt.uncovered, caseCount: receipt.cases.length,
-    receiptSHA256: hash(await readFile(join(directory, 'result.json'))), failure: receipt.failure, changes, frames: receipt.frames, osFrames: receipt.osFrames }
+    receiptSHA256: hash(await readFile(join(directory, 'result.json'))), failure: receipt.failure, changes, frames: receipt.frames, chromeFrames: receipt.chromeFrames, osFrames: receipt.osFrames }
   results.push(row)
   if (!mutation) evidence.uncovered = [...new Set([...evidence.uncovered, ...(row.uncovered ?? [])])]
   if (mutation) {
@@ -157,6 +157,10 @@ async function run(label, mutation) {
       'stable-workbench-original-form-cross-document-roundtrip', 'same-runtime-two-document-modal-focus-and-single-dismissal',
       ...(process.platform === 'darwin' ? ['simple-fullscreen', 'simple-fullscreen-restored', ...(!withoutSystemFullscreen ? systemFullscreen : [])] : [])] : [])]
     for (const label of required) assert.ok(receipt.cases.some(row => row.label === label), 'Candidate must reach the actual nonempty required case: ' + label)
+    if (!mobileOnly && !fullscreenOnly) for (const label of ['normal-stop', 'nested-menu-tooltip', 'content-failure-retry', 'same-request-retry']) {
+      const frame = receipt.frames.find(row => row.label === label)
+      assert.ok(frame?.chrome?.some(owner => !owner.scrim && owner.paintedPixels > 0), 'The exact native Chrome compositor must supply painted pixels for: ' + label)
+    }
     if (withoutSystemFullscreen) {
       assert.ok(receipt.uncovered.includes('native-system-fullscreen'))
       assert.equal(receipt.systemFullscreen?.status, 'not-requested', 'Explicit partial mode must not resend the unconfirmed OS request')
@@ -200,6 +204,8 @@ finally {
     'Actual Workbench close → shared modal → native Chrome projection and trusted input. Preview Agent/Browser facts only; no user Session was stopped. Capture success does not sign aesthetic approval.', '',
     ...(candidateResult?.osFrames ?? []).map(frame => `- ${frame.label}: [OS window](candidate/${frame.file}) · [identity/owners](candidate/${frame.metadata})`),
     ...(!candidateResult?.osFrames?.length ? ['No actual OS window screenshot was captured. Do not sign compositor visual approval.'] : []), '',
+    'Actual Chrome WebContents compositor readbacks (capturePage may request a frame; these are not first-presentation or host-window composition proof):', '',
+    ...(candidateResult?.chromeFrames ?? []).map(frame => `- ${frame.label} · original View ${frame.before.webContentsId} / Window ${frame.before.windowId}: [Chrome pixels](candidate/${frame.file})`), '',
     'Review: Stop readability above scrim/Browser, action priority, narrow/short/125% fit, failure service window, retained content, nested control clarity. Record exact images opened, concrete issues and explicit delivery conclusion.', ''].join('\n'))
   console.log(JSON.stringify({ passed: evidence.passed, availableChecksPassed: evidence.availableChecksPassed, completeGate: evidence.completeGate,
     uncovered: evidence.uncovered, receipt: join(root, 'receipt.json'), failure: evidence.failure ?? null }))

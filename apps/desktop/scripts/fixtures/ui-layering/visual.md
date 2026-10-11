@@ -32,6 +32,8 @@ AGENTMUX_VISUAL_ORCA_CLI="$(command -v orca)" node apps/desktop/scripts/verify-u
 
 每场景保留完整 Renderer 图和 native page 图，它们各自不包含另一 WebContents，不能称为 OS 整窗图。设置 `AGENTMUX_VISUAL_ORCA_CLI` 后使用已读版本指南的 `computer-use` provider，按私有 Electron 精确 PID/窗口 ID 取得真实 OS 整窗图，同时保留捕获前后原生 owner 和 provider 回执。没有 OS 图时不能签发合成层级的视觉通过；不拼图冒充 OS 截图。
 
+每次 frame 还只读该准确 Window 的原 `NativeOverlaySurfaces` owner，逐个捕获已附着、可见、非准备态的真实 Chrome View。记录原 View／WebContents／Window／region／modal identity、前后 bounds、PNG 与 bitmap hash、alpha 像素统计，保存每张 compositor readback 图供独立评审；内容需有绘制像素，scrim 只覆盖未被其它 Chrome 遮住的 Browser 区域，允许其合法全透明。独立 BrowserWindow 从自己的 manager 取原对象，不借全局 main 的投影。`capturePage` 可能主动要求一帧，因此这些图只证明准确 View 可读回 compositor 像素，不能证明首次可见呈现或宿主整窗合成，不能代替 OS gate。原 onload、decode、RAF 或 DOM 都不替代这些像素证据。
+
 `receipt.json` 通过只证明行为断言。`review.md` 提供独立看图入口，评审者必须实际打开完整 OS 图，检查正常、busy、窄矮、缩放、失败服务窗、Retry 和嵌套菜单的可读性、动作主次、对齐与留白，并给出明确交付结论。采图不是审美通过。
 
 证明边界：此 probe 不操作安装版、不改变用户工作面、不证明真实 CLI 停止、物理键鼠、系统输入法或 durable 进程重启恢复。系统全屏证据仅覆盖这个精确私有 Window 的实际 macOS transition，不推断其他窗口或用户手势已覆盖。原工作面持久恢复仍需要同批真实持久空间与 Session 身份的重启证据，不能由本轮构造的隔离窗口代签。

@@ -21,7 +21,7 @@ const receipt: any = { passed: false, availableChecksPassed: false, completeGate
     ...(qaScope === 'mobile-only' ? ['desktop-native-window-matrix'] : qaScope === 'system-fullscreen-only' ? ['desktop-native-mobile-matrix'] : []),
     ...(!process.env.AGENTMUX_VISUAL_ORCA_CLI ? ['OS-composition'] : [])],
   ...(withoutSystemFullscreen ? { systemFullscreen: { status: 'not-requested', reason: 'explicit-without-system-fullscreen', includedInCompleteGate: false } } : {}),
-  cases: [], publications: [], frames: [], osFrames: [], warnings: [], userRunTouched: false }
+  cases: [], publications: [], frames: [], chromeFrames: [], osFrames: [], warnings: [], userRunTouched: false }
 function finishAvailableChecks() {
   receipt.availableChecksPassed = true
   if (!receipt.osFrames.length && !receipt.uncovered.includes('OS-composition')) receipt.uncovered.push('OS-composition')
@@ -81,12 +81,55 @@ async function key(key: string, virtual: number) {
   for (const type of ['keyDown', 'keyUp']) await window.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: virtual, ...(type === 'keyDown' && key === 'Enter' ? { text: '\r' } : {}) })
   await painted()
 }
+async function chromeFrames(label: string, target: BrowserWindow) {
+  const manager = target === window ? overlays : [...independentWindows.values()].find(entry => entry.window === target)?.overlays
+  assert.ok(manager, 'The exact captured Window must retain its original native overlay manager')
+  // This isolated fixture reads the sole existing owner, rather than inferring a
+  // projection from DOM, colours or the last publication's similar rectangles.
+  const projections = (manager as unknown as { projections: Map<string, { view: WebContentsView; region: NativeOverlayRegion }> }).projections
+  const result: any[] = []
+  for (const [regionId, projection] of projections) {
+    const view = projection.view, bounds = view.getBounds()
+    if (!target.contentView.children.includes(view) || !view.getVisible() || bounds.x < 0 || bounds.y < 0 || bounds.width <= 0 || bounds.height <= 0) continue
+    const identity = () => ({ regionId, webContentsId: view.webContents.id, windowId: target.id,
+      ownerWindowId: BrowserWindow.fromWebContents(view.webContents)?.id, visible: view.getVisible(), bounds: view.getBounds(), region: structuredClone(projection.region) })
+    const before = identity()
+    assert.equal(before.ownerWindowId, target.id, 'Chrome compositor readback belongs to the exact attached Window')
+    const pixels = await view.webContents.capturePage()
+    assert.equal(pixels.isEmpty(), false, 'The actual native Chrome compositor must return a nonempty image')
+    const size = pixels.getSize(), bitmap = pixels.toBitmap(), png = pixels.toPNG()
+    assert.ok(size.width > 0 && size.height > 0 && bitmap.length > 0 && bitmap.length % 4 === 0)
+    assert.deepEqual(png.subarray(0, 8), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    let paintedPixels = 0, opaquePixels = 0, minimumAlpha = 255, maximumAlpha = 0
+    for (let offset = 3; offset < bitmap.length; offset += 4) {
+      const alpha = bitmap[offset]!
+      if (alpha > 0) paintedPixels++
+      if (alpha === 255) opaquePixels++
+      minimumAlpha = Math.min(minimumAlpha, alpha); maximumAlpha = Math.max(maximumAlpha, alpha)
+    }
+    // A scrim is an SVG of only uncovered Browser pixels. Its authoritative
+    // declaration may legitimately yield a fully transparent compositor image.
+    const scrim = projection.region.scrim !== undefined
+    if (!scrim) assert.ok(paintedPixels > 0, 'The actual native Chrome content compositor must contain painted pixels')
+    assert.equal(projections.get(regionId), projection, 'Readback must retain the original physical projection owner')
+    assert.equal(target.contentView.children.includes(view), true)
+    const after = identity(); assert.deepEqual(after, before, 'Compositor readback preserves the original owner, geometry and declaration')
+    const file = `${label}-chrome-${view.webContents.id}-${projection.region.modal?.part ?? 'accessory'}.png`
+    await writeFile(join(root, file), png)
+    const captured = { label, file, before, after, size, scaleFactors: pixels.getScaleFactors(), sha256: createHash('sha256').update(png).digest('hex'),
+      bitmapSHA256: createHash('sha256').update(bitmap).digest('hex'), bitmapBytes: bitmap.length, pixelCount: bitmap.length / 4, paintedPixels, opaquePixels, minimumAlpha, maximumAlpha,
+      scrim, scope: 'Actual original Chrome WebContents compositor readback. capturePage may request a frame; this proves readable pixels, not first presentation or host-window OS composition.' }
+    result.push(captured); receipt.chromeFrames.push(captured)
+  }
+  return result
+}
 async function frame(label: string, target = window, nativePage: WebContentsView | null = page) {
   await painted()
   const renderer = label + '-renderer.png', native = label + '-native-page.png'
   await writeFile(join(root, renderer), (await target.webContents.capturePage()).toPNG())
   if (nativePage) await writeFile(join(root, native), (await nativePage.webContents.capturePage()).toPNG())
-  receipt.frames.push({ label, renderer, ...(nativePage ? { native } : {}), owners: owners(target, nativePage ?? page), fact: await target.webContents.executeJavaScript('layeringProbe.read()'), scope: nativePage ? 'Independent actual Renderer and native page images; never an OS composition.' : 'Actual Mobile browser Renderer. Original Desktop native page is retained hidden; never an OS composition.' })
+  const chrome = await chromeFrames(label, target)
+  receipt.frames.push({ label, renderer, ...(nativePage ? { native } : {}), chrome, owners: owners(target, nativePage ?? page), fact: await target.webContents.executeJavaScript('layeringProbe.read()'), scope: nativePage ? 'Independent actual Renderer, native page and original Chrome compositor readbacks; never an OS composition.' : 'Actual Mobile browser Renderer. Original Desktop native page is retained hidden; never an OS composition.' })
   if (process.env.AGENTMUX_VISUAL_ORCA_CLI && !receipt.osCaptureFailure) {
     const cli = process.env.AGENTMUX_VISUAL_ORCA_CLI, appSelector = `pid:${process.pid}`
     const call = async (args: string[]) => {
