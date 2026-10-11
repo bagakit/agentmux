@@ -155,7 +155,7 @@ it('stored legacy pending work keeps its original scope instead of inheriting a 
     executionHostId: 'local', agentSessionId: 'agent', externalConversationId: 'room', sourceCheckpoints: [checkpoint], scope: { input: 'mentions-and-replies', publication: original } }
   store.checkpoint(boundary, 'local')
   const after = store.checkpoint(boundary, 'local'), projected = publicationPage(boundary, { ...checkpoint, cursor: 'after-reply' },
-    [{ id: 'reply', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Retained original speech' }] }])
+    [{ id: 'reply', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Retained original speech', contentEligibility: 'public' }] }])
   store.commitPage(boundary, after, projected.page, () => true, projected)
   const saved = store.list(boundary)[0]!, { publicationScope: _scope, ...legacy } = saved
   database.prepare('UPDATE connector_publication_operation SET operation_json=? WHERE operation_id=?').run(JSON.stringify(legacy), saved.operationId)
@@ -173,8 +173,8 @@ it.each(['image', 'file'] as const)('broader sharing durably accounts an unsuppo
   const boundary: PublicationBoundary = { bindingId: 'binding', revision: 1, connectionId: 'connection', application: config.application,
     executionHostId: 'local', agentSessionId: 'agent', externalConversationId: 'room', sourceCheckpoints: [checkpoint], scope: { input: 'mentions-and-replies', publication: shared } }
   const after = store.checkpoint(boundary, 'local'), projected = publicationPage(boundary, { ...checkpoint, cursor: 'after-resource' },
-    [{ id: 'original-resource-message', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original description' },
-      { kind: 'resource', resourceType: kind, reference: 'original-opaque-read-reference' }] }])
+    [{ id: 'original-resource-message', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original description', contentEligibility: 'public' },
+      { kind: 'resource', resourceType: kind, reference: 'original-opaque-read-reference', contentEligibility: 'public' }] }])
   store.commitPage(boundary, after, projected.page, () => true, projected)
   expect(store.checkpoint(boundary, 'local')).toEqual(projected.page.checkpoint)
   expect(store.list(boundary)[0]).toMatchObject({ payload: { kind: 'speech', text: 'Original description' } })
