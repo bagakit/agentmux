@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityPolicy } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityPolicy } from '@agentmux/core'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { ContinuitySettingsPane } from '../src/renderer/src/components/settings/ContinuitySettingsPane'
 import { api } from '../src/renderer/src/lib/api'
@@ -29,7 +29,7 @@ beforeEach(() => useAppStore.setState({ config: structuredClone(composerConfig),
 it('the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const row = dom.container.querySelector<HTMLElement>('[data-settings-section="continuity"]')!
-  expect(row?.textContent).toContain('Session continuity'); expect(row?.textContent).toContain('Reminder on')
+  expect(row?.textContent).toContain('Execution'); expect(row?.textContent).toContain('Active fallback off')
   const search = dom.container.querySelector<HTMLInputElement>('input[placeholder="Search settings"]')!
   expect(search).not.toBeNull()
   await act(async () => {
@@ -38,20 +38,18 @@ it('the registered continuity module reaches Overview, search, narrow navigation
   })
   expect(dom.container.querySelector('[data-settings-target="continuity"]')).not.toBeNull()
   await dom.click('[data-settings-target="continuity"]')
-  expect(field('Recovery wait').value).toBe('0'); expect(field('Authoritative idle window').value).toBe('86400')
-  expect(dom.container.querySelector('[data-continuity-reminder-preview]')?.textContent).toBe(DEFAULT_AGENT_CONTINUITY_REMINDER)
+  expect(field('Recovery wait').value).toBe('0'); expect(field('Automatic recovery window').value).toBe('86400')
+  expect((field('Use active state when interruption detection is unsupported') as HTMLInputElement).checked).toBe(false)
+  expect((field('Continue interrupted work after recovery') as HTMLInputElement).checked).toBe(true)
+  expect(dom.container.querySelector('[data-continuity-continuation-preview]')?.textContent).toBe(DEFAULT_AGENT_CONTINUITY_CONTINUATION)
+  expect(dom.container.textContent).toContain('confirmed activity or idle start')
   const delivery = dom.container.querySelector('[aria-label="Recovery delivery preview"]')!.textContent
-  expect(delivery).toContain('platform note and joins the continuation prompt')
-  expect(delivery).toContain('Selected nonempty content is sent in one new input')
-  expect(delivery).toContain('If neither part has content, no input is sent')
-  expect(delivery).toContain('same original input key and actual transport or delivery receipt')
-  expect(delivery).toContain('native launch argument receipt confirms Runtime carriage only; Provider consumption requires separate evidence')
-  expect(delivery).toContain('ordinary User role and open one turn')
-  expect(delivery).toContain('delivery does not mean the model completed the task')
-  expect(delivery).toContain('Only the initial recovery input carries the selected reminder and continuation')
-  expect(delivery).toContain('Later supervised retries restore context only; they resend neither these parts nor any earlier input')
-  expect(delivery).not.toContain('follows confirmed native resume')
-  expect(delivery).not.toContain('current input readiness')
+  expect(delivery).toContain('after native recovery succeeds')
+  expect(delivery).toContain('may open one new model turn')
+  expect(delivery).toContain('Unknown earlier input is never replayed')
+  for (const label of ['Recovery reminder', 'Append to recovery reminder', 'Continuation prompt']) {
+    expect(dom.container.querySelector(`[aria-label="${label}"]`)).toBeNull()
+  }
   const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
     const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
     useAppStore.setState({ config: saved }); return saved
@@ -92,25 +90,32 @@ it('retry choices are discoverable, strictly authored and separate from rechecks
   expect(recover).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(submit).not.toHaveBeenCalled()
 })
 
-it('reminder and continuation remain independent with complete effective preview and preserved custom text', async () => {
-  const onSave = vi.fn(async (_value: AgentMuxContinuityPolicy, _expected: AgentMuxContinuityPolicy) => {})
-  await dom.render(<ContinuitySettingsPane preferences={undefined} onSave={onSave} />)
-  await input('Recovery reminder', 'default-plus-custom'); await input('Append to recovery reminder', 'Keep the original acceptance criteria.\nDo not repeat unknown input.')
-  expect(dom.container.querySelector('[data-continuity-reminder-preview]')?.textContent).toBe(DEFAULT_AGENT_CONTINUITY_REMINDER + '\n\nKeep the original acceptance criteria.\nDo not repeat unknown input.')
-  await dom.click('[aria-label="Continue interrupted work after recovery"]')
+it('unsupported-only active fallback is opt in and preserves retained input while continuation stays independent', async () => {
+  const retained = { reminderMode: 'default-plus-custom', reminderAppend: 'Keep the original acceptance criteria.\nDo not repeat unknown input.', continuationPrompt: 'An old authored continuation.' } as const
+  useAppStore.setState({ config: { ...composerConfig, continuity: retained } })
+  const saveSpy = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
+    const saved = applyConfigEdit(useAppStore.getState().config!, expected, next)
+    useAppStore.setState({ config: saved }); return saved
+  })
+  await dom.render(<SettingsPanel onClose={() => {}} initialSection="continuity" />)
+  const fallback = () => field('Use active state when interruption detection is unsupported') as HTMLInputElement
+  expect(fallback().checked).toBe(false)
+  expect(dom.container.querySelector('[data-settings-field="activeInterruptionFallback"]')?.textContent).toContain('Default: Off')
+  expect(dom.container.querySelector('[data-settings-field="activeInterruptionFallback"]')?.textContent).toContain('supports detection but reports an unknown result never uses this fallback')
+  expect(dom.container.querySelector('[data-continuity-continuation-preview]')?.textContent).toBe('<amux:continue />')
+  expect(dom.container.textContent).not.toContain(retained.continuationPrompt)
+  await dom.click('[aria-label="Use active state when interruption detection is unsupported"]')
+  expect(fallback().checked).toBe(true)
   await save()
-  expect(onSave.mock.calls[0]?.[0]).toMatchObject({ reminderMode: 'default-plus-custom', continuationEnabled: false, reminderAppend: 'Keep the original acceptance criteria.\nDo not repeat unknown input.' })
-  await dom.render(<ContinuitySettingsPane preferences={onSave.mock.calls[0]![0]} onSave={onSave} />)
-  await input('Recovery reminder', 'off')
-  expect(dom.container.querySelector('[data-continuity-reminder-preview]')?.textContent).toBe('No reminder will be sent.')
-  await dom.click('[aria-label="Continue interrupted work after recovery"]')
-  await input('Continuation prompt', ' \n '); await save()
-  expect(onSave.mock.calls.at(-1)?.[0]).toMatchObject({ reminderMode: 'off', continuationEnabled: true, continuationPrompt: ' \n ' })
-  await dom.render(<ContinuitySettingsPane preferences={onSave.mock.calls.at(-1)![0]} onSave={onSave} />)
-  expect(field('Continuation prompt').value).toBe(' \n ')
-  expect(dom.container.querySelector('[aria-label="Recovery delivery preview"]')?.textContent).toContain('If neither part has content, no input is sent')
-  await input('Recovery reminder', 'default-plus-custom')
-  expect(field('Append to recovery reminder').value).toContain('Keep the original acceptance')
+  expect(useAppStore.getState().config?.continuity).toEqual({ ...retained, activeInterruptionFallback: true })
+  expect(saveSpy.mock.calls[0]?.[1].continuity?.activeInterruptionFallback).toBe(false)
+  await dom.click('[aria-label="Continue interrupted work after recovery"]'); await save()
+  expect(useAppStore.getState().config?.continuity).toEqual({ ...retained, activeInterruptionFallback: true, continuationEnabled: false })
+  expect(fallback().checked).toBe(true)
+  expect(dom.container.querySelector('[data-continuity-continuation-preview]')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Recovery delivery preview"]')?.textContent).toContain('No continuation is sent after recovery')
+  await dom.click('[aria-label="Use active state when interruption detection is unsupported"]'); await save()
+  expect(useAppStore.getState().config?.continuity).toEqual({ ...retained, activeInterruptionFallback: false, continuationEnabled: false })
 })
 
 it('first concurrent fields merge through the real module adapter while pending input keeps its own next baseline', async () => {
@@ -124,13 +129,13 @@ it('first concurrent fields merge through the real module adapter while pending 
   await input('Recovery wait', '1.001'); await save()
   expect(saveSpy).toHaveBeenCalledOnce()
   await input('Recovery wait', '3.002')
-  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, continuity: { reminderMode: 'off' }, copyPathsAsAbsolute: true } })))
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, continuity: { activeInterruptionFallback: true }, copyPathsAsAbsolute: true } })))
   await act(async () => release())
-  expect(useAppStore.getState().config?.continuity).toEqual({ activeRecoveryDelayMs: 1001, reminderMode: 'off' })
+  expect(useAppStore.getState().config?.continuity).toEqual({ activeRecoveryDelayMs: 1001, activeInterruptionFallback: true })
   expect(field('Recovery wait').value).toBe('3.002')
   expect(dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')?.disabled).toBe(false)
   await save(); await act(async () => release())
-  expect(useAppStore.getState().config?.continuity).toEqual({ activeRecoveryDelayMs: 3002, reminderMode: 'off' })
+  expect(useAppStore.getState().config?.continuity).toEqual({ activeRecoveryDelayMs: 3002, activeInterruptionFallback: true })
   expect(useAppStore.getState().config?.copyPathsAsAbsolute).toBe(true)
   expect(saveSpy.mock.calls[1]?.[1].continuity?.activeRecoveryDelayMs).toBe(1001)
 })

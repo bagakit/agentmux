@@ -23,42 +23,47 @@ function settings(f: Awaited<ReturnType<typeof configOwnerFixture>>) {
   return async (args: string[]) => { const command = await parseSettingsCommand(args); return rpc.call(command.method, command.params, principal) }
 }
 const defaults = DEFAULT_AGENT_CONTINUITY_POLICY
-it('public RPC discovers the complete Core policy and keeps absent effective defaults absent', async () => {
+const retained = { reminderMode: 'default-plus-custom', reminderAppend: 'A retained recovery instruction.\n'.repeat(10000), continuationPrompt: 'An old continuation.' } as const
+const editableDefaults = Object.fromEntries(Object.entries(defaults).filter(([key]) => !Object.hasOwn(retained, key)))
+it('public RPC discovers the editable Core policy and keeps absent effective defaults absent', async () => {
   const f = await configOwnerFixture(), call = settings(f), bytes = await f.bytes()
   const inspection = call(['inspect', 'continuity'])
   await expect(inspection).resolves.toMatchObject({ partial: true })
   const result = await inspection
   expect(result.partial).toBe(true)
-  expect(Object.fromEntries(result.entries.map(entry => [entry.key.slice('continuity.'.length), entry.value]))).toEqual(defaults)
+  expect(Object.fromEntries(result.entries.map(entry => [entry.key.slice('continuity.'.length), entry.value]))).toEqual(editableDefaults)
+  expect(result.entries.find(entry => entry.key === 'continuity.activeInterruptionFallback')).toMatchObject({ value: false, default: false })
   expect(result.entries.length).toBeGreaterThan(0)
   for (const entry of result.entries) await call(['set', entry.key, String(entry.value)])
   expect(f.owner.current.continuity).toBeUndefined(); expect(await f.bytes()).toBe(bytes); expect(f.publish).not.toHaveBeenCalled()
 })
 it('all declared scalar types persist through the original owner with strict target and schema validation', async () => {
-  const f = await configOwnerFixture(), call = settings(f)
-  const choices = { activeRecovery: 'manual', activeRecoveryDelayMs: 1234, confirmedIdleWindowMs: 7200000, resumeAfterExit: false,
-    recheckIntervalMs: 250, recheckMaxAttempts: 9, retryInitialDelayMs: 2000, retryMaxDelayMs: 45000, retryMaxAttempts: 8, reminderMode: 'default-plus-custom', reminderAppend: 'Keep the original constraints.\nDo not repeat unknown input.',
-    continuationEnabled: false, continuationPrompt: 'Continue only the interrupted request.' }
+  const f = await configOwnerFixture({ continuity: retained }), call = settings(f)
+  const choices = { activeRecovery: 'manual', activeRecoveryDelayMs: 1234, confirmedIdleWindowMs: 7200000, resumeAfterExit: false, activeInterruptionFallback: true,
+    recheckIntervalMs: 250, recheckMaxAttempts: 9, retryInitialDelayMs: 2000, retryMaxDelayMs: 45000, retryMaxAttempts: 8, continuationEnabled: false }
   for (const [key, value] of Object.entries(choices)) {
     expect((await call(['set', `continuity.${key}`, String(value)])).entry.value).toBe(value)
     expect((await call(['inspect', `continuity.${key}`])).entries[0].value).toBe(value)
   }
-  expect((await new ConfigStore(f.store.filePath).get()).continuity).toEqual(choices)
+  expect((await new ConfigStore(f.store.filePath).get()).continuity).toEqual({ ...retained, ...choices })
   const bytes = await f.bytes()
   for (const value of ['-1', '1.5', 'NaN', 'Infinity', '', '0x10', '1e3', String(Number.MAX_SAFE_INTEGER + 1)]) {
     await expect(call(['set', 'continuity.activeRecoveryDelayMs', value])).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
   }
-  for (const [key, value] of [['activeRecovery', 'AUTO'], ['reminderMode', 'custom-only'], ['continuationEnabled', 'TRUE']]) {
+  for (const [key, value] of [['activeRecovery', 'AUTO'], ['activeInterruptionFallback', 'TRUE'], ['continuationEnabled', 'TRUE']]) {
     await expect(call(['set', `continuity.${key}`, value!])).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
   }
   await expect(call(['set', 'continuity.arbitrary.path', 'true'])).rejects.toMatchObject({ code: 'UNSUPPORTED_SETTING' })
-  for (const continuity of [{ arbitrary: true }, { activeRecoveryDelayMs: -1 }, { recheckMaxAttempts: 1.5 }, { continuationEnabled: 'true' }]) {
+  for (const continuity of [{ arbitrary: true }, { activeRecoveryDelayMs: -1 }, { recheckMaxAttempts: 1.5 }, { continuationEnabled: 'true' }, { activeInterruptionFallback: 'true' }]) {
     expect(() => f.store.validate({ ...f.owner.current, continuity } as never)).toThrow()
   }
   expect(await f.bytes()).toBe(bytes)
   await call(['set', 'continuity.activeRecoveryDelayMs', String(Number.MAX_SAFE_INTEGER)])
-  const long = 'A retained recovery instruction.\n'.repeat(10000)
-  await call(['set', 'continuity.reminderAppend', long]); expect((await f.disk()).continuity?.reminderAppend).toBe(long)
+  for (const key of Object.keys(retained)) {
+    await expect(call(['inspect', `continuity.${key}`])).rejects.toMatchObject({ code: 'UNSUPPORTED_SETTING' })
+    await expect(call(['set', `continuity.${key}`, 'replacement'])).rejects.toMatchObject({ code: 'UNSUPPORTED_SETTING' })
+  }
+  expect((await f.disk()).continuity).toMatchObject(retained)
 })
 it('retry settings reject invalid complete policies and preserve unrelated authored data', async () => {
   const f = await configOwnerFixture({ copyPathsAsAbsolute: true }), call = settings(f), bytes = await f.bytes()
@@ -85,10 +90,10 @@ it('concurrent first authored fields merge without materializing untouched defau
   const f = await configOwnerFixture(), before = structuredClone(f.owner.current)
   const edits = Promise.all([
     f.owner.edit({ ...before, continuity: { ...defaults } }, { ...before, continuity: { ...defaults, activeRecoveryDelayMs: 1000 } }),
-    f.owner.edit({ ...before, continuity: { ...defaults } }, { ...before, continuity: { ...defaults, reminderMode: 'off' } })
+    f.owner.edit({ ...before, continuity: { ...defaults } }, { ...before, continuity: { ...defaults, activeInterruptionFallback: true } })
   ])
   await expect(edits).resolves.toBeDefined()
-  expect(f.owner.current.continuity).toEqual({ activeRecoveryDelayMs: 1000, reminderMode: 'off' })
+  expect(f.owner.current.continuity).toEqual({ activeRecoveryDelayMs: 1000, activeInterruptionFallback: true })
   const bytes = await f.bytes()
   await expect(f.owner.edit({ ...before, continuity: { ...defaults } }, { ...before, continuity: { ...defaults, activeRecoveryDelayMs: 2000 } })).rejects.toMatchObject({ code: 'CONFIG_CONFLICT', field: 'continuity.activeRecoveryDelayMs' })
   expect(await f.bytes()).toBe(bytes)
@@ -97,14 +102,14 @@ it('RPC success waits for durable save and publication without issuing recovery 
   const f = await configOwnerFixture(), call = settings(f), gate = deferred<void>(), original = f.save.getMockImplementation()!
   f.save.mockImplementationOnce(async next => { await gate.promise; return original(next) })
   let replied = false
-  const pending = call(['set', 'continuity.continuationEnabled', 'false']).then(result => { replied = true; return result })
+  const pending = call(['set', 'continuity.activeInterruptionFallback', 'true']).then(result => { replied = true; return result })
   await new Promise(resolve => setTimeout(resolve, 30))
   expect(f.save).toHaveBeenCalledOnce(); expect(replied).toBe(false); expect(f.publish).not.toHaveBeenCalled()
-  gate.resolve(); expect((await pending).entry.value).toBe(false)
-  expect((await f.disk()).continuity).toEqual({ continuationEnabled: false })
+  gate.resolve(); expect((await pending).entry.value).toBe(true)
+  expect((await f.disk()).continuity).toEqual({ activeInterruptionFallback: true })
 })
 it('actual CLI executable writes and reads continuity through the owned public socket and durable Main handler', async () => {
-  const f = await configOwnerFixture(), directory = await mkdtemp(join(tmpdir(), 'amux-continuity-cli-'))
+  const f = await configOwnerFixture({ continuity: retained }), directory = await mkdtemp(join(tmpdir(), 'amux-continuity-cli-'))
   const server = new AgentMuxControlServer({ execute: request => {
     if (request.operation !== 'settings.get' && request.operation !== 'settings.set') throw new Error('Unexpected session side effect')
     return executeSettingsControl(request, f.owner)
@@ -114,17 +119,21 @@ it('actual CLI executable writes and reads continuity through the owned public s
   await server.start()
   try {
     const command = async (parts: string[]) => JSON.parse((await cli(process.execPath, [...args, ...parts], options)).stdout).result
-    expect((await command(['inspect', 'continuity'])).entries).toHaveLength(Object.keys(defaults).length)
-    expect((await command(['set', 'continuity.reminderMode', 'default-plus-custom'])).entry.value).toBe('default-plus-custom')
-    expect((await command(['set', 'continuity.reminderAppend', 'Keep the prior decisions.\nDo not replay unknown input.'])).entry.value).toContain('prior decisions')
+    expect((await command(['inspect', 'continuity'])).entries).toHaveLength(Object.keys(editableDefaults).length)
+    expect((await command(['inspect', 'continuity.activeInterruptionFallback'])).entries[0]).toMatchObject({ value: false, default: false })
+    expect((await command(['set', 'continuity.activeInterruptionFallback', 'true'])).entry.value).toBe(true)
     expect((await command(['set', 'continuity.activeRecoveryDelayMs', '1200'])).entry.value).toBe(1200)
     expect((await command(['set', 'continuity.retryMaxDelayMs', '45000'])).entry.value).toBe(45000)
     expect((await command(['set', 'continuity.retryInitialDelayMs', '2125'])).entry.value).toBe(2125)
     expect((await command(['set', 'continuity.retryMaxAttempts', '0'])).entry.value).toBe(0)
     expect((await command(['set', 'continuity.continuationEnabled', 'false'])).entry.value).toBe(false)
     expect((await command(['inspect', 'continuity.activeRecoveryDelayMs'])).entries[0].value).toBe(1200)
-    expect((await new ConfigStore(f.store.filePath).get()).continuity).toEqual({ reminderMode: 'default-plus-custom', reminderAppend: 'Keep the prior decisions.\nDo not replay unknown input.', activeRecoveryDelayMs: 1200, retryMaxDelayMs: 45000, retryInitialDelayMs: 2125, retryMaxAttempts: 0, continuationEnabled: false })
+    expect((await new ConfigStore(f.store.filePath).get()).continuity).toEqual({ ...retained, activeInterruptionFallback: true, activeRecoveryDelayMs: 1200, retryMaxDelayMs: 45000, retryInitialDelayMs: 2125, retryMaxAttempts: 0, continuationEnabled: false })
     await expect(command(['set', 'continuity.recheckMaxAttempts', '-1'])).rejects.toBeDefined()
+    await expect(command(['set', 'continuity.activeInterruptionFallback', 'yes'])).rejects.toBeDefined()
+    for (const key of Object.keys(retained)) await expect(command(['set', `continuity.${key}`, 'replacement'])).rejects.toBeDefined()
     await expect(command(['set', 'continuity.unknown', 'value'])).rejects.toBeDefined()
+    expect((await command(['set', 'continuity.activeInterruptionFallback', 'false'])).entry.value).toBe(false)
+    expect((await new ConfigStore(f.store.filePath).get()).continuity).toMatchObject({ ...retained, activeInterruptionFallback: false })
   } finally { await server.stop(); await rm(directory, { recursive: true, force: true }) }
 }, 60000)

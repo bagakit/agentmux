@@ -31,15 +31,18 @@ const sources = Object.fromEntries(await Promise.all(Object.entries(relative).ma
 const replace = (text, before, after) => { assert.equal(text.split(before).length, 2, 'Exactly one owning mutation anchor: ' + before); return text.replace(before, after) }
 const uiFile = 'apps/desktop/test/session-continuity-settings.test.tsx', controlFile = 'apps/desktop/test/session-continuity-settings-control.test.ts'
 const mutants = [
-  { id: 'retry-scalar', file: relative.settingsEntry, source: replace(sources.settingsEntry, "  numberSetting('retryInitialDelayMs'),\n", ''), test: 'public RPC discovers the complete Core policy and keeps absent effective defaults absent', suite: controlFile },
+  { id: 'fallback-default', file: relative.policy, source: replace(sources.policy, 'activeInterruptionFallback: false', 'activeInterruptionFallback: true'), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
+  { id: 'fallback-scalar', file: relative.settingsEntry, source: replace(sources.settingsEntry, "  booleanSetting('continuity.activeInterruptionFallback', defaults.activeInterruptionFallback,\n    config => normalizeAgentContinuityPolicy(config.continuity).activeInterruptionFallback, write('activeInterruptionFallback')),\n", ''), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
+  { id: 'fallback-editor-binding', file: relative.pane, source: replace(sources.pane, "draft.setField('activeInterruptionFallback', event.target.checked)", "draft.setField('activeInterruptionFallback', false)"), test: 'unsupported-only active fallback is opt in and preserves retained input while continuation stays independent', suite: uiFile },
+  { id: 'retry-scalar', file: relative.settingsEntry, source: replace(sources.settingsEntry, "  numberSetting('retryInitialDelayMs'),\n", ''), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
   { id: 'retry-complete-schema', file: relative.schema, source: replace(sources.schema, "try { normalizeAgentContinuityPolicy(authored as AppConfig['continuity']) }", 'try { void authored }'), test: 'retry settings reject invalid complete policies and preserve unrelated authored data', suite: controlFile },
   { id: 'retry-editor-binding', file: relative.pane, source: replace(sources.pane, 'retryInitialDelayMs: milliseconds(value.retryInitialDelayMs)', 'retryInitialDelayMs: milliseconds(value.retryMaxDelayMs)'), test: 'retry choices are discoverable, strictly authored and separate from rechecks without Session side effects', suite: uiFile },
   { id: 'registration', file: relative.registration, source: replace(sources.registration, '  continuitySettingsModule,\n', ''), test: 'the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', suite: uiFile },
-  { id: 'main-wiring', file: relative.main, source: replace(sources.main, '  ...continuitySettings,\n', ''), test: 'public RPC discovers the complete Core policy and keeps absent effective defaults absent', suite: controlFile },
+  { id: 'main-wiring', file: relative.main, source: replace(sources.main, '  ...continuitySettings,\n', ''), test: 'public RPC discovers the editable Core policy and keeps absent effective defaults absent', suite: controlFile },
   { id: 'authored-first-write', file: relative.authored, source: replace(sources.authored, " || path === 'continuity'", ''), test: 'concurrent first authored fields merge without materializing untouched defaults and conflicts keep disk intact', suite: controlFile },
   { id: 'expected-baseline', file: relative.adapter, source: replace(sources.adapter, '...current.continuity, ...expected', '...current.continuity, ...value'), test: 'the registered continuity module reaches Overview, search, narrow navigation and the real writable editor', suite: uiFile },
-  { id: 'complete-preview', file: relative.pane, source: replace(sources.pane, 'const reminder = resolveAgentContinuityReminder({ ...saved, reminderMode: draft.value.reminderMode, reminderAppend: draft.value.reminderAppend })', "const reminder = 'Incomplete recovery reminder'"), test: 'reminder and continuation remain independent with complete effective preview and preserved custom text', suite: uiFile },
-  { id: 'strict-schema', file: relative.schema, source: replace(sources.schema, 'continuationPrompt: z.string().optional()\n    }).strict().optional()', 'continuationPrompt: z.string().optional()\n    }).optional()'), test: 'all declared scalar types persist through the original owner with strict target and schema validation', suite: controlFile }
+  { id: 'fixed-preview', file: relative.pane, source: replace(sources.pane, '{DEFAULT_AGENT_CONTINUITY_CONTINUATION}', '{draft.value.continuationPrompt}'), test: 'unsupported-only active fallback is opt in and preserves retained input while continuation stays independent', suite: uiFile },
+  { id: 'strict-schema', file: relative.schema, source: replace(sources.schema, "continuationPrompt: z.string().optional().describe('Retained historical recovery input; not an editable setting')\n    }).strict().optional()", "continuationPrompt: z.string().optional().describe('Retained historical recovery input; not an editable setting')\n    }).optional()"), test: 'all declared scalar types persist through the original owner with strict target and schema validation', suite: controlFile }
 ]
 const sourceIdentity = Object.fromEntries(Object.entries(relative).map(([key, file]) => [file, digest(sources[key])]))
 await fs.writeFile(path.join(directory, 'mutations.json'), JSON.stringify({ root, mutants }, null, 2))
@@ -109,6 +112,10 @@ if (!args.includes('--visual-only') && !deliveryOnly) {
   await run('control')
   for (const mutant of mutants) await run(mutant.id, mutant.id)
 }
+if (args.includes('--test-only')) {
+  await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify({ completed: true, sourceIdentity, runs, callers, native: 'not-requested', independentVisualReview: 'pending' }, null, 2))
+  console.log(JSON.stringify({ completed: true, directory, mutations: Math.max(0, runs.length - 1), independentVisualReview: 'pending' })); process.exit(0)
+}
 const mode = deliveryOnly ? 'session-continuity-delivery' : 'session-continuity-settings'
 const native = await qualify(path.join(directory, 'native'), false, false, { modes: [mode], sources: [
   'apps/desktop/scripts/fixtures/session-continuity-settings/scenario.cjs',
@@ -117,7 +124,7 @@ const native = await qualify(path.join(directory, 'native'), false, false, { mod
 assert.equal(native.completed, true, JSON.stringify(native.failure))
 const raw = JSON.parse(await fs.readFile(path.join(directory, `native/${mode}.json`), 'utf8'))
 assert.ok(raw.settingsOnly && raw.surface.exact, 'Settings keep the original work surface')
-if (deliveryOnly) assert.ok(raw.deliveryOnly && raw.savedContinuity && native.png.length === 2, 'Two complete delivery views consume the actual saved preferences')
+if (deliveryOnly) assert.ok(raw.deliveryOnly && raw.savedContinuity && native.png.length === 3, 'Wide defaults and two continuation views consume the actual saved preferences')
 else assert.ok(raw.cli?.length > 5, 'Actual CLI and mounted writable GUI share the original ConfigOwner')
 for (const [file, sha] of Object.entries(sourceIdentity)) assert.equal(digest(await fs.readFile(path.join(root, file))), sha, 'Candidate source drift: ' + file)
 await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify({ completed: true, sourceIdentity, runs, native: { sourceIdentity: native.sourceIdentity, frames: native.png, boundary: native.boundary }, independentVisualReview: 'pending' }, null, 2))
