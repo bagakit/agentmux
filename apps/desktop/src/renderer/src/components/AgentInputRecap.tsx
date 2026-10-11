@@ -73,7 +73,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
       if (!original.current?.contains(original.current.ownerDocument.activeElement)) setInspected(null)
     }, 180)
   }
-  useEffect(() => { if (!enabled || request.pinned) cancelTimers(); if (!available) setInspected(null); return cancelTimers }, [enabled, available, request.pinned])
+  useLayoutEffect(() => { if (!enabled || request.pinned) cancelTimers(); if (!available) setInspected(null); return cancelTimers }, [enabled, available, request.pinned])
   const snapshot = frozen ?? (enabled ? current : held.current ?? current)
   const ordered = snapshot.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
   // Missing times retain the public source order; they cannot establish a cross-source chronology.
@@ -85,7 +85,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
     onKeyDown={event => {
       if (event.key === 'Escape' && inspected) { event.preventDefault(); event.stopPropagation(); markWindowOverlayDismissal(event.nativeEvent); closeInput() }
     }}>
-    <h4>Recent inputs <small>Hover to read · Enter to open</small></h4>
+    <h4>Recent inputs <small>{request.pinned ? 'Click or Enter to read' : 'Hover to read · Enter to open'}</small></h4>
     {!ordered ? <small className="focus-context-hover__coverage">Current reading window · Order unavailable</small> : null}
     {messages.length ? <ol inert={Boolean(inspected)}>{messages.map(message => {
       const meta = inputPresentation(message)
@@ -95,7 +95,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
           onKeyDown={event => {
             if (['Enter', ' ', 'ArrowDown'].includes(event.key)) { event.preventDefault(); openInput(message, event.currentTarget, true) }
           }}
-          onPointerEnter={event => { if (event.pointerType === 'touch') return; cancelTimers(); const anchor = event.currentTarget; openTimer.current = setTimeout(() => openInput(message, anchor, false), 160) }}
+          onPointerEnter={event => { cancelTimers(); if (event.pointerType === 'touch' || request.pinned) return; const anchor = event.currentTarget; openTimer.current = setTimeout(() => openInput(message, anchor, false), 160) }}
           onPointerLeave={event => { clearTimeout(openTimer.current); if (!original.current?.contains(event.relatedTarget as Node | null)) scheduleClose() }}>
           <div className="agent-input-recall__copy"><div className="focus-context-hover__input-meta"><strong>{meta.author}</strong>
             <time dateTime={meta.date?.toISOString()} title={meta.provenance} aria-label={`${meta.time} · ${meta.provenance}`}>{meta.time}</time></div>
