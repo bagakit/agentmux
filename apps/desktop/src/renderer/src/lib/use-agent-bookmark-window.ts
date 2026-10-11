@@ -17,7 +17,7 @@ type Gesture = {
 }
 export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, panel: RefObject<HTMLDivElement | null>, reading: RefObject<HTMLDivElement | null>, document: Document) {
   const gesture = useRef<Gesture | null>(null), view = document.defaultView!
-  const viewportAnchor = useRef<{ surface: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
+  const viewportAnchor = useRef<{ surface: HTMLElement; anchor: NonNullable<ReturnType<typeof captureReadingAnchor>>; text: string; width: number; height: number } | null>(null)
   function apply(bounds: AgentBookmarkBounds) {
     if (panel.current) Object.assign(panel.current.style, { left: `${bounds.x}px`, top: `${bounds.y}px`, width: `${bounds.width}px`, height: `${bounds.height}px`, visibility: 'visible' })
   }
@@ -26,9 +26,11 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
     return rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null
   }
   function reader() { return reading.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reading.current }
-  function rememberReading() {
-    const surface = reader()
-    viewportAnchor.current = surface ? { surface, anchor: captureReadingAnchor(surface) } : null
+  function rememberReading(event?: Event) {
+    const surface = reader(), saved = viewportAnchor.current
+    if (!surface || event && (event.target !== surface || saved && (saved.width !== view.innerWidth || saved.height !== view.innerHeight))) return
+    const anchor = captureReadingAnchor(surface)
+    if (anchor) viewportAnchor.current = { surface, anchor, text: anchor.node.data, width: view.innerWidth, height: view.innerHeight }
   }
   function end(commit: boolean) {
     const current = gesture.current
@@ -47,7 +49,8 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
       if (gesture.current) return
       const surface = reader(), saved = viewportAnchor.current
       // CSS viewport limits may reflow before the resize event. Keep the last actual scroll anchor.
-      const anchor = surface && saved?.surface === surface && saved.anchor && surface.contains(saved.anchor.node)
+      const anchor = surface && saved?.surface === surface && saved.text === saved.anchor.node.data && saved.anchor.offset < saved.text.length &&
+        saved.anchor.node.ownerDocument === document && surface.contains(saved.anchor.node)
         ? saved.anchor : surface ? captureReadingAnchor(surface) : null
       apply(fitAgentBookmark(bookmark.bounds, view.innerWidth, view.innerHeight))
       if (surface) restoreReadingAnchor(surface, anchor)
