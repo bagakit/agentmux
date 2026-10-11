@@ -20,8 +20,6 @@ import { feishuPublicationHttp } from './fixtures/feishu-publication.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
-// The shared harness names source constructors with nominal private fields; these are the matching built constructors from this same package graph.
-const compiledOwner = core as unknown as NonNullable<Parameters<typeof rpcOwnerFixture>[1]>
 const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => {
   const errors: unknown[] = []
@@ -36,7 +34,7 @@ const response = (id: string, role: string, text: string) => ({ type: 'response_
 } })
 async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
   const nativeSource = { ...source, providerId }
-  const original = await rpcOwnerFixture(['original-agent'], compiledOwner, root => ({ providerId, executorId: providerId,
+  const original = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId, executorId: providerId,
     nativeHandle: { kind: 'provider', providerId, sessionId: source.nativeSessionId, transcriptPath: join(root, 'native.jsonl') } }))
   closes.push(original.close)
   const transcript = join(original.root, 'native.jsonl')
@@ -185,6 +183,52 @@ it.each(['claude'] as const)('%s mixed native tool results cannot qualify adjace
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 20_000)
 
+it('Claude typed API error containers stay locally complete without publishing their body or wrapped tool output', async () => {
+  const f = await fixture('claude'), hidden = 'Private API error canary', hiddenTool = 'Private wrapped API error tool canary'
+  const falseReply = 'Independent Agent reply with a false API marker', absentReply = 'Independent Agent reply without an API marker'
+  const failedTool = 'Ordinary failed tool output remains available', reference = 'data:image/png;base64,cGlj'
+  const record = (uuid: string, role: string, content: unknown, extra: Record<string, unknown> = {}) => ({
+    sessionId: source.nativeSessionId, uuid, type: role, message: { role, content }, ...extra
+  })
+  const errorContent = [{ type: 'text', text: hidden }, { type: 'tool_result', tool_use_id: 'wrapped-error-tool', content: hiddenTool }]
+  await appendFile(f.transcript, jsonl([
+    record('original-api-error', 'assistant', errorContent, { isApiErrorMessage: true, error: 'unknown', apiErrorStatus: 400, user_message_uuid: 'original-api-error-turn',
+      message: { role: 'assistant', model: '<synthetic>', content: errorContent, usage: { input_tokens: 5, output_tokens: 2 } } }),
+    record('original-api-error-resource', 'assistant', [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'cGlj' } }], { isApiErrorMessage: true }),
+    record('ordinary-false-marker', 'assistant', falseReply, { isApiErrorMessage: false, apiErrorStatus: 400 }),
+    record('ordinary-absent-marker', 'assistant', absentReply),
+    record('ordinary-failed-tool', 'user', [{ type: 'tool_result', tool_use_id: 'ordinary-failed-call', content: failedTool, is_error: true }])
+  ]))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => {
+    const wire = JSON.stringify(f.posts())
+    expect(wire).toContain(falseReply); expect(wire).toContain(absentReply); expect(wire).toContain(failedTool)
+    expect(f.services.publication!.store.list(f.binding).every(operation => operation.state === 'confirmed')).toBe(true)
+  }, { timeout: 10_000 })
+  // This assertion reaches actual SDK HTTP message bodies, not merely an internal projection.
+  expect(JSON.stringify(f.posts())).not.toContain(hidden)
+  expect(JSON.stringify(f.posts())).not.toContain(hiddenTool)
+  const read = core.consumeConversationWindowPage(await f.rpc.call('agent.conversation.inspect', f.ref))
+  expect(read.kind).toBe('complete'); if (read.kind !== 'complete') throw new Error('Original Claude error window incomplete')
+  const originals = read.snapshot.units.flatMap(unit => unit.records).filter(record => record.original.kind === 'native')
+  const error = originals.find(record => record.original.kind === 'native' && record.original.item.id === 'original-api-error')!
+  if (error.original.kind !== 'native') throw new Error('Original API error record missing')
+  expect(error.original.item).toMatchObject({ id: 'original-api-error', kind: 'activity', turnId: 'original-api-error-turn',
+    metrics: { scope: 'response', usage: { inputTokens: 5, outputTokens: 2 } } })
+  expect(error.original.item.contentParts).toEqual([
+    { kind: 'text', text: hidden, contentEligibility: 'unconfirmed' },
+    { kind: 'tool-result', callId: 'wrapped-error-tool', output: hiddenTool, contentEligibility: 'unconfirmed' }
+  ])
+  const resource = originals.find(record => record.original.kind === 'native' && record.original.item.id === 'original-api-error-resource')!
+  if (resource.original.kind !== 'native') throw new Error('Original API error resource missing')
+  expect(resource.original.item.contentParts).toEqual([{ kind: 'resource', resourceType: 'image', reference, contentEligibility: 'unconfirmed' }])
+  const listed = await f.cli(['connection', 'delivery', 'ls', '--connection', f.binding.connectionId, '--binding', f.binding.bindingId,
+    '--binding-revision', String(f.binding.revision)])
+  expect(listed.coverage.gaps.some((gap: ConnectionDeliveryGap) => gap.reason === 'public-content-unconfirmed')).toBe(true)
+  expect(f.client.agentSession(f.ref.agentSessionId).run).toEqual({ runId: 'run-original-agent' })
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 20_000)
+
 it('known model context is an accounted scope exclusion rather than a permanent synchronization failure', async () => {
   const f = await fixture()
   const privateResource = vi.spyOn(f.port, 'resource'), privateText = 'Private model context only '.repeat(90000)
@@ -212,7 +256,7 @@ it('known model context is an accounted scope exclusion rather than a permanent 
 }, 15_000)
 
 it('the physical OpenCode mixed record preserves separate original part purposes through the common Reader', async () => {
-  const original = await rpcOwnerFixture(['original-agent'], compiledOwner, root => ({ providerId: 'opencode', executorId: 'opencode',
+  const original = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'opencode', executorId: 'opencode',
     nativeHandle: { kind: 'provider', providerId: 'opencode', sessionId: 'original-mixed-native', transcriptPath: join(root, 'original.db') } }))
   closes.push(original.close)
   const db = new DatabaseSync(join(original.root, 'original.db'))
@@ -355,7 +399,7 @@ it.each(['dispatching', 'unknown'] as const)('%s original effects are inspected 
 }, 20_000)
 
 it('the original Droid Reader assigns a mixed user tool block separately before the common publication consumer', async () => {
-  const original = await rpcOwnerFixture(['original-agent'], compiledOwner, root => ({ providerId: 'droid', executorId: 'droid',
+  const original = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId: 'droid', executorId: 'droid',
     nativeHandle: { kind: 'provider', providerId: 'droid', sessionId: source.nativeSessionId, transcriptPath: join(root, 'droid.jsonl') } }))
   closes.push(original.close)
   await writeFile(join(original.root, 'droid.jsonl'), jsonl([{ type: 'session_start', id: source.nativeSessionId },
@@ -444,8 +488,8 @@ it.each(['requested-record', 'unrelated-record'] as const)('exact current record
   if (incoming === 'unrelated-record') await appendFile(f.transcript, jsonl([response('after-opening-cut', 'assistant', body)]))
   const cut = f.client.sessionHistoryCheckpoint.bind(f.client)
   let inserted = false
-  vi.spyOn(f.client, 'sessionHistoryCheckpoint').mockImplementation(async (...args) => {
-    const before = await cut(...args)
+  vi.spyOn(f.client, 'sessionHistoryCheckpoint').mockImplementation(async (agentSessionId, options = {}) => {
+    const before = await cut(agentSessionId, options)
     if (!inserted) { inserted = true; await appendFile(f.transcript, jsonl([response(incoming === 'requested-record' ? 'after-opening-cut' : 'independent-after-cut', 'assistant', incoming === 'requested-record' ? body : 'Independent append must not block the requested record')])) }
     return before
   })
