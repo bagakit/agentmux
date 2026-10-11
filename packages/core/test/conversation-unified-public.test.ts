@@ -203,28 +203,48 @@ it('the original diagnostic context codec retains typed captured provenance and 
 })
 
 it('canonical question and recorded answer stay complete through public units with an honest unresolved request gap', async () => {
-  const f = await savedQuestionFixture([savedQuestionEvent(), savedQuestionReply()], { unifiedCapturedRead: true }); release.push(f.close)
+  const reply = savedQuestionReply(), second = { ...reply, payload: { ...reply.payload, id: 'second-original-answer-record' } }
+  const f = await savedQuestionFixture([savedQuestionEvent(), reply, second], { unifiedCapturedRead: true }); release.push(f.close)
   const input = { hostId: 'local', agentSessionId: f.session.agentSessionId }
   const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: f.client }] }); release.push(() => service.dispose())
   const all = await collect(value => service.call('agent.conversation.inspect', value), input)
-  expect(all.units).toHaveLength(2)
+  expect(all.units).toHaveLength(3)
+  const localAnswers = all.units.flatMap(unit => unit.event.relations).filter(relation => relation.kind === 'answers')
+  expect(localAnswers.map(relation => relation.from.source.recordId).sort()).toEqual(['original-answer-record', 'second-original-answer-record'])
   const request = all.units.find(unit => unit.event.role === 'interaction')!
   expect(request.records[0]!.original.item).toMatchObject({ questionRequest: { delivery: 'async', questions: [{ id: savedQuestionId }] } })
   const answer = all.units.find(unit => unit.records[0]!.original.kind === 'native' && unit.records[0]!.original.item.questionAnswers)!
   expect(answer.records[0]!.original.item).toMatchObject({ questionAnswers: [{ questionId: savedQuestionId, answer: 'Keep the original work' }] })
   expect(all.pages.flatMap(page => page.coverage.flatMap(c => c.gaps)).some(gap => gap.code === 'CONVERSATION_QUESTION_TARGET_UNREAD' && gap.record?.source.recordId === answer.records[0]!.original.item.id)).toBe(true)
   const loaded = projectConversationTimeline({ ...input, executionHostId: 'local', historyPage: await f.client.sessionHistoryPage(input.agentSessionId) })
-  expect(loaded.events.flatMap(event => event.relations).filter(r => r.kind === 'answers')).toHaveLength(2) // one relation exposed at each contributing event
+  expect(loaded.events.flatMap(event => event.relations).filter(r => r.kind === 'answers')).toHaveLength(2)
   const byId = new Map(loaded.records.map(record => [record.id, record]))
   for (const event of loaded.events) {
     const unit = { event, records: event.recordIds.map(id => byId.get(id)!) }
     expect(parseConversationUnit(unit, input, loaded.scope).event).toEqual(event)
     const forged = structuredClone(unit), relation = forged.event.relations.find(value => value.kind === 'answers')
     if (!relation || relation.kind !== 'answers') continue
-    relation.question.questionId = 'unrelated-question'
-    const { revision: _, ...changed } = forged.event
-    forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
-    expect(() => parseConversationUnit(forged, input, loaded.scope)).toThrow()
+    const resign = (value: ConversationUnit) => {
+      const { revision: _, ...changed } = value.event
+      value.event.revision = conversationRevision({ policy: 1, versions: value.records.map(record => [record.id, record.revision]), event: changed })
+      return value
+    }
+    for (const field of ['host', 'session', 'provider', 'native', 'question', 'from', 'missing', 'duplicate'] as const) {
+      const candidate = structuredClone(unit), answer = candidate.event.relations.find(value => value.kind === 'answers')!
+      if (answer.kind !== 'answers') throw Error('An original answer must retain its local relation')
+      if (field === 'host') answer.question.hostId = 'other-host'
+      if (field === 'session') answer.question.agentSessionId = 'other-session'
+      if (field === 'provider') answer.question.source.providerId = 'other-provider'
+      if (field === 'native') answer.question.source.nativeSessionId = 'other-native'
+      if (field === 'question') answer.question.questionId = 'other-question'
+      if (field === 'from') answer.from.source.recordId = request.records[0]!.original.item.id
+      if (field === 'missing') candidate.event.relations = candidate.event.relations.filter(value => value.kind !== 'answers')
+      if (field === 'duplicate') candidate.event.relations = [...candidate.event.relations, structuredClone(answer)]
+      expect(() => parseConversationUnit(resign(candidate), input, loaded.scope), field).toThrow()
+    }
+    const targetOnly = { event: structuredClone(request.event), records: structuredClone(request.records) }
+    targetOnly.event.relations = [structuredClone(relation)]
+    expect(() => parseConversationUnit(resign(targetOnly), input, loaded.scope)).toThrow()
   }
 })
 
@@ -292,15 +312,27 @@ it('strict observation links retain the original typed target even when an unrel
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: ref.agentSessionId, item: { ...captured('observed', _historyFixtureEpoch(0, 0, 500)), conversation: { observes: target } } })
   const timeline = projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage, timeline: await f.client.sessionTimeline(ref.agentSessionId) })
   const byId = new Map(timeline.records.map(record => [record.id, record]))
-  for (const event of timeline.events) {
-    const unit = { event, records: event.recordIds.map(id => byId.get(id)!) }
-    expect(parseConversationUnit(unit, ref, timeline.scope).event).toEqual(event)
+  const native = timeline.events.find(event => event.reference?.source.kind === 'native')!
+  expect(native).toEqual(projectConversationTimeline({ ...ref, executionHostId: ref.hostId, historyPage }).events[0])
+  expect(native.relations.filter(relation => relation.kind === 'observes')).toEqual([])
+  const observer = timeline.events.find(event => event.reference?.source.kind === 'captured')!
+  const unit = { event: observer, records: observer.recordIds.map(id => byId.get(id)!) }
+  expect(parseConversationUnit(unit, ref, timeline.scope).event).toEqual(observer)
+  const resign = (value: ConversationUnit) => {
+    const { revision: _, ...changed } = value.event
+    value.event.revision = conversationRevision({ policy: 1, versions: value.records.map(record => [record.id, record.revision]), event: changed })
+    return value
+  }
+  const incoming = { event: structuredClone(native), records: native.recordIds.map(id => byId.get(id)!) }
+  incoming.event.relations = structuredClone(observer.relations)
+  expect(() => parseConversationUnit(resign(incoming), ref, timeline.scope)).toThrow()
+  for (const change of ['target', 'missing', 'duplicate'] as const) {
     const forged = structuredClone(unit), relation = forged.event.relations.find(value => value.kind === 'observes')!
     if (relation.kind !== 'observes' || !('recordId' in relation.target.source)) throw new Error('Original observation must name its exact source record')
-    relation.target.source.recordId = 'unrelated-record'
-    const { revision: _, ...changed } = forged.event
-    forged.event.revision = conversationRevision({ policy: 1, versions: forged.records.map(record => [record.id, record.revision]), event: changed })
-    expect(() => parseConversationUnit(forged, ref, timeline.scope)).toThrow()
+    if (change === 'target') relation.target.source.recordId = 'unrelated-record'
+    else if (change === 'missing') forged.event.relations = []
+    else forged.event.relations = [...forged.event.relations, structuredClone(relation)]
+    expect(() => parseConversationUnit(resign(forged), ref, timeline.scope)).toThrow()
   }
 })
 
@@ -514,4 +546,43 @@ it.runIf(process.env.AGENTMUX_UNIFIED_COMPILED === '1')('the real compiled CLI c
   expect(skill.code, skill.stderr).toBe(0); expect(skill.stdout).toContain('newest-first semantic units'); expect(skill.stdout).toContain('watch invalidates')
   expect(controls.every(control => !control.mock.calls.length)).toBe(true)
   expect(f.controls.every(control => !control.mock.calls.length)).toBe(true)
+})
+
+it.runIf(process.env.AGENTMUX_UNIFIED_COMPILED === '1')('the original four Codex records have equal full event versions through SDK page sizes, actual RPC and compiled CLI', async () => {
+  const original = unifiedConversationOriginals()
+  const f = await savedQuestionFixture(original.codexRows, { unifiedCapturedRead: true }); release.push(f.close)
+  const input = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  const compiled = await import('../dist/index.js')
+  const client = new compiled.AgentMuxClient({ store: new compiled.AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json')) }); release.push(() => client.dispose())
+  const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(Reflect.get(client, 'kernel'), name))
+  const connected = vi.spyOn(client, 'connect')
+  const server = new compiled.AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: () => [{ hostId: 'local', client }] })
+  await server.start(); release.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); release.push(() => rpc.dispose())
+  const native = await client.sessionHistoryPage(input.agentSessionId), captured = await client.sessionTimeline(input.agentSessionId)
+  const full = projectConversationTimeline({ agentSessionId: input.agentSessionId, historyPage: native, timeline: captured })
+  const expected = [...full.events].reverse()
+  const recordFacts = (records: readonly typeof full.records[number][]) => records.map(({ order: _pageWitness, ...record }) => record)
+  expect(expected).toHaveLength(4)
+  expect(full.events.flatMap(event => event.relations).filter(relation => relation.kind === 'answers')).toHaveLength(1)
+  expect(full.events.find(event => event.role === 'interaction')!.relations.filter(relation => relation.kind === 'answers')).toEqual([])
+  for (const limit of [1, 100]) {
+    const sdk = await collect(value => client.readAgentConversation(value), { ...input, limit })
+    const remote = await collect(value => rpc.call('agent.conversation.inspect', value), { ...input, limit })
+    for (const result of [sdk, remote]) {
+      expect(result.units.map(unit => unit.event)).toEqual(expected)
+      expect(recordFacts(result.units.flatMap(unit => unit.records).reverse())).toEqual(recordFacts(full.records))
+    }
+  }
+  const cli = await collect(async value => {
+    const result = await runCompiledObjectCli(['agent', 'conversation', 'inspect', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(value))
+    expect(result.code, result.stderr).toBe(0)
+    return JSON.parse(result.stdout).result
+  }, { ...input, limit: 1 })
+  expect(cli.units.map(unit => unit.event)).toEqual(expected)
+  expect(recordFacts(cli.units.flatMap(unit => unit.records).reverse())).toEqual(recordFacts(full.records))
+  expect(native.items.filter(item => item.questionAnswers).map(item => item.contentParts)).toHaveLength(1)
+  expect(await f.client.sessionHistoryPage(input.agentSessionId)).toEqual(native)
+  expect(controls.every(control => !control.mock.calls.length)).toBe(true)
+  expect(connected).not.toHaveBeenCalled()
 })

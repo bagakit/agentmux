@@ -12,8 +12,9 @@ const changes: Record<string, [string, string, string]> = {
   'trust-unrelated-relation': ['conversation-changes.ts', 'if (!local && !byId.has(conversationRecordId(to)) || local &&', 'if (local &&'],
   'trust-coalesce-claim': ['conversation-changes.ts', '!same(e.coalesces, expectedCoalesces.length ? expectedCoalesces : undefined)', 'false'],
   'trust-event-anchor': ['conversation-changes.ts', "if (records.some(record => record.id !== id && anchors.get(record.id) !== id))", 'if (false)'],
-  'trust-answer-claim': ['conversation-changes.ts', "value.questionId === question.questionId", 'true'],
-  'trust-observation-claim': ['conversation-changes.ts', "if (!observer && !observed || observer && !same(observer.original.item.conversation?.observes, target)) return bad()", 'if (false) return bad()'],
+  'omit-local-answer-relations': ['conversation-timeline.ts', 'relations.push(...conversationRecordRelations(record))', "if (!record.original.item.questionAnswers) relations.push(...conversationRecordRelations(record))"],
+  'trust-local-relation-set': ['conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'answers' || relation.kind === 'observes'), records.flatMap(record => conversationRecordRelations(record))))", 'if (false)'],
+  'import-foreign-host-answer': ['conversation-questions.ts', 'context?.sourceHostId === page.sourceHostId && context.agentSessionId', 'context?.agentSessionId'],
   'trust-invocation-claim': ['conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'invocation-member'), records.flatMap(record => conversationInvocationMembers(record))))", 'if (false)'],
   'trust-event-role': ['conversation-changes.ts', 'e.role !== conversationRecordRole(primary) || ', ''],
   'cross-session-watch': ['client-event-publisher.ts', 'this.timelineListeners.get(event.agentSessionId) ?? []', 'new Map([...this.timelineListeners.values()].flatMap(listeners => [...listeners]))'],
@@ -38,5 +39,6 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache
     'packages/core/test/conversation-timeline.test.ts', 'packages/core/test/client-event-publisher.test.ts',
     'packages/connectors/test/room-binding.test.ts', 'packages/connectors/test/durable-publication.test.ts', 'packages/connectors/test/publication-worker-consumer.test.ts'
   ] : ['packages/core/test/conversation-unified-public.test.ts',
+    ...(process.env.AGENTMUX_UNIFIED_QUESTION_READING === '1' ? ['packages/core/test/conversation-question-reference.test.ts'] : []),
     ...(process.env.AGENTMUX_UNIFIED_COMPILED === '1' ? ['packages/core/test/conversation-catch-up.test.ts', 'packages/core/test/conversation-facade.test.ts', 'packages/core/test/conversation-resource-anchor.test.ts'] : [])],
     passWithNoTests: false, fileParallelism: false } })
