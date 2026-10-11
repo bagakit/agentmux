@@ -209,12 +209,16 @@ export class AgentMuxClientEventPublisher {
     })
   }
 
-  publishTimeline(commit: AgentTimelineCommit, evidence: AgentMuxEvidence): void {
+  publishTimeline(commit: AgentTimelineCommit, evidence: AgentMuxEvidence, sourceHostId: string): void {
+    if (!commit.changed) return
     this.publish({
       type: 'agent-timeline',
       agentSessionId: commit.agentSessionId,
       revision: commit.revision,
       mutation: commit.mutation,
+      sourceHostId,
+      stream: structuredClone(commit.stream),
+      position: { ...commit.position },
       evidence
     })
   }

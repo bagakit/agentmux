@@ -14,7 +14,7 @@ import { configValuesEqual } from '../../../shared/config-edit'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses } from '@agentmux/core'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { agentPromptNotApplied, agentPromptPredecessor } from '@agentmux/core/prompt-condition'
-import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
+import { applyAgentTimelineEvent } from '@agentmux/core/timeline'
 import { agentDisplayState, isAgentActivityStatusSource, currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
 // renderer 引不动）。
@@ -240,16 +240,7 @@ function applyTimelineEvent(
   snapshot: AgentTimelineSnapshot,
   event: AgentTimelineRuntimeEvent['event']
 ): { snapshot: AgentTimelineSnapshot; gap: boolean } {
-  if (event.revision <= snapshot.revision) return { snapshot, gap: false }
-  if (event.revision !== snapshot.revision + 1) return { snapshot, gap: true }
-  return {
-    snapshot: {
-      agentSessionId: snapshot.agentSessionId,
-      revision: event.revision,
-      items: applyAgentTimelineMutation(snapshot.items, event.mutation)
-    },
-    gap: false
-  }
+  return applyAgentTimelineEvent(snapshot, event)
 }
 
 function workingToolEpoch(session: SessionSnapshot): number | undefined {
@@ -443,7 +434,7 @@ export function reduceTimelineSnapshot(
       return recovered
     }) } : {}),
     ...(current && (snapshot.revision < current.revision || snapshot.revision === current.revision && !current.liveTool) ? {} : {
-      timelines: { ...state.timelines, [sessionId]: { agentSessionId: snapshot.agentSessionId, revision: snapshot.revision, items: snapshot.items } }
+      timelines: { ...state.timelines, [sessionId]: { ...snapshot } }
     }),
     ...(pending?.created && failures ? { pendingAgentLaunches: failures.length > 0
       ? { ...state.pendingAgentLaunches, [snapshot.agentSessionId]: { ...pending, projectionFailures: failures } }

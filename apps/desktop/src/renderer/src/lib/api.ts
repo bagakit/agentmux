@@ -1,3 +1,4 @@
+import { conversationRevision } from '@agentmux/core/conversation'
 import { createConversationLandmarksApi } from './conversation-landmarks-api'
 import { createRendererNotebookObservation } from './notebook-observation-api'
 import { serializeThemeFile } from '@agentmux/client-ui/theme'
@@ -305,6 +306,16 @@ const mockTimelines: Record<string, AgentTimelineSnapshot> = {
     ]
   }
 }
+
+/** The web preview owns this declared demo source; it is never a real Core receipt. */
+function initializePreviewTimeline(timeline: AgentTimelineSnapshot): AgentTimelineSnapshot {
+  timeline.sourceHostId = 'local'
+  timeline.stream = { epoch: `web-preview:${timeline.agentSessionId}`, sequence: timeline.revision, revision: timeline.revision,
+    origin: 'beginning', gaps: [], positions: timeline.items.map((item, index) => ({ id: item.id,
+      firstSequence: index + 1, sequence: index + 1, revision: conversationRevision(item) })) }
+  return timeline
+}
+Object.values(mockTimelines).forEach(initializePreviewTimeline)
 
 let mockSnapshot: RuntimeSnapshot = {
   sessions: mockSessions,
@@ -979,11 +990,7 @@ const mockApi: AgentMuxDesktopApi = {
         }
       }
       mockSnapshot.sessions.push(session)
-      const timeline: AgentTimelineSnapshot = {
-        agentSessionId: session.id,
-        revision: 0,
-        items: []
-      }
+      const timeline = initializePreviewTimeline({ agentSessionId: session.id, revision: 0, items: [] })
       mockSnapshot.timelines[session.id] = timeline
       mockOutput.set(session.id, 'Starting agent…\r\n')
       return { session, timeline, projectionFailures: [], created: {
@@ -1095,8 +1102,14 @@ const mockApi: AgentMuxDesktopApi = {
           title: 'Prompt',
           content: data.trim()
         }
+        const previousStream = timeline.stream!
         timeline.revision += 1
+        const position = { id: item.id, firstSequence: previousStream.sequence + 1,
+          sequence: previousStream.sequence + 1, revision: conversationRevision(item) }
+        const stream = { epoch: previousStream.epoch, sequence: position.sequence, revision: timeline.revision,
+          origin: previousStream.origin, gaps: previousStream.gaps }
         timeline.items.push(item)
+        timeline.stream = { ...stream, positions: [...previousStream.positions, position] }
         sessionListeners.forEach((listener) => listener({
           type: 'core',
           hostId: session.hostId,
@@ -1104,6 +1117,7 @@ const mockApi: AgentMuxDesktopApi = {
             type: 'agent-timeline',
             agentSessionId: session.id,
             revision: timeline.revision,
+            sourceHostId: timeline.sourceHostId!, stream, position,
             mutation: {
               type: 'append',
               agentSessionId: session.id,

@@ -1034,7 +1034,7 @@ export class AgentMuxClient {
             run: { ...session.run }
           }
           const mutation = agentTimelineMutationFromAcpEvent(agentSessionId, event, observed)
-          if (mutation) await this.persistAndPublishTimeline(mutation, observed)
+          if (mutation) await this.persistAndPublishTimeline(mutation, observed, session.hostId)
           if (event.type === 'status' && event.state !== 'unknown') {
             await this.persistSemanticStatus(agentSessionId, session.run, {
               state: event.state,
@@ -7920,7 +7920,7 @@ export class AgentMuxClient {
     }
     const evidence = { source, observedAt, run: { ...session.run } }
     try {
-      await this.persistAndPublishTimeline(mutation, evidence)
+      await this.persistAndPublishTimeline(mutation, evidence, session.hostId)
     } catch (error) {
       this.publisher.publish({
         type: 'agent-error',
@@ -8184,7 +8184,7 @@ export class AgentMuxClient {
                 agentSessionId: next.agentSessionId, kind: 'lifecycle', status: 'failed', source: 'native-transcript',
                 createdAt: status.observedAt, updatedAt: status.observedAt, title: `[${status.failure.code}] ${status.failure.message}`,
                 content: JSON.stringify(status.failure)
-              } }, { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt })
+              } }, { source: 'native-transcript', run: { ...next.run }, observedAt: status.observedAt }, next.hostId)
             }
             if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return
             this.publishSession(next)
@@ -9252,7 +9252,7 @@ export class AgentMuxClient {
     }
     if (next.activityCommit?.latest.id === activityId) await this.flushAgentActivity(next)
     for (const mutation of normalized.timeline) {
-      try { await this.persistAndPublishTimeline(mutation, evidence, signal) }
+      try { await this.persistAndPublishTimeline(mutation, evidence, next.hostId, signal) }
       catch (error) {
         if (signal.aborted || (error instanceof AgentMuxError &&
           error.code !== 'INVALID_AGENT_TIMELINE_STORE' && error.code !== 'AGENT_TIMELINE_TOO_LARGE')) throw error
@@ -9332,7 +9332,7 @@ export class AgentMuxClient {
       try {
         await this.persistAndPublishTimeline({ type: 'append', agentSessionId: session.agentSessionId,
           item: agentActivityTimelineItem(session.agentSessionId, observation) },
-          { source: observation.source, observedAt: observation.createdAt, run: { ...observation.activityState.run } })
+          { source: observation.source, observedAt: observation.createdAt, run: { ...observation.activityState.run } }, session.hostId)
         const active = this.registry.findByRun(session.run)
         if (active?.agentSessionId !== session.agentSessionId) continue
         await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
@@ -9370,10 +9370,11 @@ export class AgentMuxClient {
   private async persistAndPublishTimeline(
     mutation: AgentTimelineMutation,
     evidence: Parameters<AgentMuxClientEventPublisher['publishTimeline']>[1],
+    sourceHostId: string,
     signal?: AbortSignal
   ): Promise<void> {
     const commit = await this.store.applyTimelineMutation(mutation, signal)
-    if (commit.changed) this.publisher.publishTimeline(commit, evidence)
+    if (commit.changed) this.publisher.publishTimeline(commit, evidence, sourceHostId)
   }
 
   private requireConnected(): void {
