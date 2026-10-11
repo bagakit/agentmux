@@ -69,11 +69,99 @@ export function MoteBotSetup({
   const enrollment = operation?.enrollment
   const challenge = setup.enrollmentView?.challenge,
     busy = !!setup.selectedId && setup.busy.includes(setup.selectedId)
+  const enrollmentActions = (setup.enrollmentView?.actions ?? []).filter(
+    action => action.kind !== 'recover-local'
+  )
+  const primaryEnrollmentAction =
+    enrollmentActions.find(action => action.kind !== 'renew-authentication') ?? enrollmentActions[0]
+  const enrollmentTitle = primaryEnrollmentAction
+    ? {
+        'continue-authentication': 'Sign in to your account',
+        'confirm-account': 'Check the account and enterprise',
+        'renew-authentication': 'Sign in again to continue',
+        create: 'Ready to create this bot',
+        'read-credential': 'Finish saving this bot',
+        'recover-local': 'Check the original save'
+      }[primaryEnrollmentAction.kind]
+    : null
   const enrollmentPlatform = enrollment
     ? (setup.capabilities.find(
         (item) => item.adapterId === enrollment.adapterId && item.domain === enrollment.domain
       )?.label ?? enrollment.domain)
     : ''
+  const originalResults = operation ? (
+    <dl className="mote-bot-stages" aria-label="Original bot setup results">
+      {operation.enrollment ? (
+        <>
+          <div>
+            <dt>Application</dt>
+            <dd>
+              {operation.enrollment.authorization === 'authorized'
+                ? 'Created'
+                : operation.enrollment.authorization === 'pending'
+                  ? 'Waiting for platform confirmation'
+                  : operation.enrollment.authorization === 'denied'
+                    ? 'Platform declined'
+                    : operation.enrollment.authorization === 'expired'
+                      ? 'Confirmation expired; creation not inferred'
+                      : 'Creation not confirmed'}
+            </dd>
+          </div>
+          <div>
+            <dt>Connection</dt>
+            <dd>
+              {operation.enrollment.configured ? 'Saved on this environment' : 'Save not complete'}
+            </dd>
+          </div>
+        </>
+      ) : null}
+      {operation.action === 'create' ? (
+        <div>
+          <dt>Mote default</dt>
+          <dd>
+            {operation.defaultLink.state === 'saved'
+              ? 'Original save confirmed'
+              : operation.defaultLink.state === 'conflict'
+                ? 'The saved choice changed. Review a new association.'
+                : operation.defaultLink.state === 'unknown'
+                  ? 'Original save not confirmed'
+                  : 'Not saved yet'}
+          </dd>
+        </div>
+      ) : null}
+    </dl>
+  ) : null
+  const originalActions = operation ? (
+    <div className="mote-bot-actions">
+      <button
+        type="button"
+        className={primaryEnrollmentAction ? 'small-button' : 'primary-button'}
+        disabled={busy}
+        onClick={() => void setup.check(operation.operationId, true)}
+      >
+        {busy ? 'Checking setup…' : 'Check saved progress'}
+      </button>
+      <button
+        type="button"
+        className="small-button"
+        onClick={() => void setup.check(operation.operationId)}
+      >
+        View original result
+      </button>
+    </div>
+  ) : null
+  const setupFeedback = setup.issue ? (
+    <p
+      role="status"
+      className={
+        setup.issueKind === 'notice'
+          ? 'mote-details__hint mote-bot-feedback'
+          : 'mote-details__issue'
+      }
+    >
+      {setup.issue}
+    </p>
+  ) : null
   return (
     <section className="mote-bot-setup" aria-label="Mote bot profile">
       {!selected ? (
@@ -209,9 +297,9 @@ export function MoteBotSetup({
           <div className="mote-bot-request-heading">
             <strong>{operation?.snapshot.name ?? 'Original bot setup'}</strong>
             <span className="mote-details__hint">
-              {operation?.action === 'sync' || raw?.action === 'sync'
+              {enrollmentTitle ?? (operation?.action === 'sync' || raw?.action === 'sync'
                 ? 'Profile update'
-                : 'Bot creation'}
+                : 'Bot creation')}
             </span>
           </div>
           {challenge ? (
@@ -239,63 +327,25 @@ export function MoteBotSetup({
               · {setup.enrollmentView.account.tenantName ?? setup.enrollmentView.account.tenantId}
             </p>
           ) : null}
-          {setup.enrollmentView?.actions
-            .filter((action) => action.kind !== 'recover-local')
-            .map((action) => (
-              <button
-                key={action.actionId}
-                type="button"
-                className="primary-button"
-                disabled={busy}
-                onClick={() => operation && void setup.check(operation.operationId, true, action)}
-              >
-                {enrollmentActionLabel[action.kind]}
-              </button>
-            ))}
+          {enrollmentActions.length ? (
+            <div className="mote-bot-actions mote-bot-auth-actions">
+              {enrollmentActions.map(action => (
+                <button
+                  key={action.actionId}
+                  type="button"
+                  className={action === primaryEnrollmentAction ? 'primary-button' : 'small-button'}
+                  disabled={busy}
+                  onClick={() => operation && void setup.check(operation.operationId, true, action)}
+                >
+                  {enrollmentActionLabel[action.kind]}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {setupFeedback}
           {operation ? (
             <>
-              <dl className="mote-bot-stages" aria-label="Original bot setup results">
-                {operation.enrollment ? (
-                  <>
-                    <div>
-                      <dt>Application</dt>
-                      <dd>
-                        {operation.enrollment.authorization === 'authorized'
-                          ? 'Created'
-                          : operation.enrollment.authorization === 'pending'
-                            ? 'Waiting for platform confirmation'
-                            : operation.enrollment.authorization === 'denied'
-                              ? 'Platform declined'
-                              : operation.enrollment.authorization === 'expired'
-                                ? 'Confirmation expired; creation not inferred'
-                                : 'Creation not confirmed'}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Connection</dt>
-                      <dd>
-                        {operation.enrollment.configured
-                          ? 'Saved on this environment'
-                          : 'Save not complete'}
-                      </dd>
-                    </div>
-                  </>
-                ) : null}
-                {operation.action === 'create' ? (
-                  <div>
-                    <dt>Mote default</dt>
-                    <dd>
-                      {operation.defaultLink.state === 'saved'
-                        ? 'Original save confirmed'
-                        : operation.defaultLink.state === 'conflict'
-                          ? 'The saved choice changed. Review a new association.'
-                          : operation.defaultLink.state === 'unknown'
-                            ? 'Original save not confirmed'
-                            : 'Not saved yet'}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
+              {!primaryEnrollmentAction ? originalResults : null}
               {operation.profile ? (
                 <ConnectionProfileResult operation={operation.profile} />
               ) : operation.connection ? (
@@ -310,29 +360,10 @@ export function MoteBotSetup({
                   saved bot explicitly to make a new association; its existing setup is kept.
                 </p>
               ) : null}
-              <div className="mote-bot-actions">
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={busy}
-                  onClick={() => void setup.check(operation.operationId, true)}
-                >
-                  {busy
-                    ? 'Checking setup…'
-                    : challenge
-                      ? `Check ${enrollmentPlatform} confirmation`
-                      : 'Check saved progress'}
-                </button>
-                <button
-                  type="button"
-                  className="small-button"
-                  onClick={() => void setup.check(operation.operationId)}
-                >
-                  View original result
-                </button>
-              </div>
+              {!primaryEnrollmentAction ? originalActions : null}
               <details className="bot-profile-details">
                 <summary>Original setup details</summary>
+                {primaryEnrollmentAction ? <>{originalResults}{originalActions}</> : null}
                 <dl>
                   <div>
                     <dt>Original request</dt>
@@ -405,11 +436,7 @@ export function MoteBotSetup({
           </button>
         </details>
       ) : null}
-      {setup.issue ? (
-        <p role="status" className="mote-details__issue">
-          {setup.issue}
-        </p>
-      ) : null}
+      {!selected ? setupFeedback : null}
       {history.length ? (
         <details className="mote-bot-history">
           <summary>Previous bot operations</summary>
