@@ -244,6 +244,8 @@ Message Tools 的形态、工具入口与启动页编辑行为只由[快捷输�
 
 ## Steer 与 Provider 输入能力
 
+普通当前终端输入保持其原目标合同；显式寻址原生对话的意图必须携带准确原来源，并由原 Run 内可核对的 actor、轮次及请求合同接纳。已保存历史可读不代表读取它的进程拥有原 actor 写资格，原生 client correlation 也不代表可重放。无原通道、错来源或失效目标只拒绝该次定向操作，保留原操作及健康终端输入。共同信箱、采用关系及接入方边界分别见[输入与邮箱](conversation-input.md#统一发送信箱与原生采用)和[Conversation 协议](../../specs/conversation-protocol.md#mailbox-consumption)，不由各客户端重定义。
+
 用户反馈工作中的 steer 被“composer readiness epoch already consumed”拒绝。Provider 负责具体 CLI 的可用输入方式及就绪证据，Core 负责同一 Run 的并发提交、去重和交付。不能把 turn 完成信号当成所有输入的唯一机会，使本可接受 steer 的健康 Agent 被内部纪元卡住；也不能绕过尚未完成的提交或把未知输入状态猜成安全。已入队未投出的消息必须保留；提示准确说清当前等待对象，不能承诺永远等不到的自动恢复，也不能建议结束健康 Session 来修复流程。
 
 人工明确发送允许复用原 Session／Run 的当前终端输入，由原生 CLI 按其当前草稿、附件、界面和执行状态处理输入；不要求启动时未保证存在的外部 Native 接口，也不承诺只提交 Message Tool 这一条正文。直接发送和对应快捷键立即提交到这条原输入通路，不添加 interrupt、ESC、清草稿或刷新动作；原生 CLI 决定开始、steer 或排队，平台不能由字节 ACK 宣称已经按立即意图接纳。Provider 只在自己的边界编码受支持终端协议，Core 复用同一逻辑 submission、输入 phase、原 Run、作者与去重 owner，Client 不增加厂商按键或独立检测器。持久保存、终端字节确认、原生接纳和业务完成分别表达；字节已经确认时结束本次写入等待并明确说明，不能冒充原生消费，也不能因为未取得原生接纳继续显示发送中。用户操作、快捷键及单条授权范围只见[《Composer 静息形态与主操作》](conversation-input.md#composer-静息形态与主操作)。

@@ -19,6 +19,8 @@
 
 ## 三种来源怎样读取
 
+Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。规范要求 Core 原 Reader 持有有界接受窗口与跨批贡献；下文列出的当前 raw UI 读窗与公共 Reader 并行接线不等于该切换已经完成。
+
 | 来源／需求 | 原读取 owner |
 | --- | --- |
 | Provider 原生页、精确记录及资源 | `sessionHistoryPage`／Provider history 能力；精确回读保持原 Provider source 和签名资源引用 |
@@ -78,6 +80,8 @@ flowchart LR
 | 原生异步问题 | [`projectConversationQuestions`](../../packages/core/src/conversation-questions.ts) → [`AgentAsyncQuestionCard`](../../packages/client-ui/src/components/AgentAsyncQuestionCard.tsx) → Provider 声明的原 Terminal 路由；`replySessionQuestion` 明确拒绝无原生协议的自动回复。选项、草稿、Copy 和导航不派发输入。 |
 | 显式打开原终端 | SessionPane 选择原展示 Region，再向原 caret owner 请求该终端；[`TerminalView`](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 只消费准确、可见且非 inert 的目标，保留后来的人工焦点。 |
 | reaction／Mailbox | [`useConversationReactions`](../../apps/desktop/src/renderer/src/lib/conversation-reactions.tsx) 沿原输入队列；[`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 保原消息和 read-marker，详情复用共同 Message。 |
+
+外部入站 `DurableIngressHost.deliver` 已经调用原 `submitAgentMessage`，与本地输入复用原 `DurableAgentMuxMessageQueue`／input journal 及准入 owner；无需新增发送队列。当前 Renderer 的本地待发列表不能代签全部入口发现，旧 exact-condition／launch 输入也不一定具有 input-intent 记录；共同信箱的读取覆盖及旧缺口须按原事实说明。当前 PTY 发送受据及 `inputRef` 尚不构成原生采用，不能由界面收起卡片来补造关联。准确来源意图和原 actor 写通道仍须沿原 Provider／输入边界实现与核验，不能借历史 reader 冒充控制口。
 
 具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
 

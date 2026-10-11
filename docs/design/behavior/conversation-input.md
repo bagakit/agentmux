@@ -252,6 +252,14 @@ Command 与 Skill 的体验差异要求分别核对实际发现路径、目录�
 
 ## 邮箱、位置与工作面入口
 
+### 统一发送信箱与原生采用
+
+本地 Composer、Message Tool、其他 Agent 以及飞书等 conversation connector 的已授权入站消息，使用 Core 原发送信箱与同一输入／准入 owner；入口只贡献真实作者、来源与明确意图，不另建队列、重试循环或客户端事实账本。各端从同一个有界公共读取发现已保存的输入及其原受据，不能要求它先在当前 Renderer 建过本地条目才可见。尚未发送的编辑草稿仍归编辑器，平台 publication Outbox 仍归原 connector，不混成第二个 Agent 输入队列。
+
+入站确认、保存接纳、等待与尝试、发往原终端、原生采用、失败及结果未知分别表达。重开或重连沿原输入身份核对事实，不自动重发未知操作。历史缺少的记录或采用证据明确说明，保留原文和回执，不补造历史。采用后的单消息主次与原文可达只定义在[对话视图 PRD](conversation-mode.md#连续统一的对话列表)，准确输入／原生关系归[Conversation 协议](../../specs/conversation-protocol.md#mailbox-consumption)。
+
+普通当前终端输入与显式寻址到准确原生对话的输入是不同意图；后者须由原 Provider 协议和原 actor 能力核对，不把一个意图静默改成另一个。缺准确原生通道只影响该次定向操作，保留健康终端的已有输入、草稿与工作面。输入资格及通道边界归[Provider 输入能力](agent-capabilities-and-messaging.md#steer-与-provider-输入能力)。
+
 ### Message Tools 邮箱
 
 邮箱的原生消息观察按本次工作面是否真正可见暂停或继续；打开的邮箱随工作面隐藏时保留原正文与阅读状态。具体隐藏、迟到读取与同身份正文保全沿[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)的原生对话阅读约束，其他仍可见的同 Session 消费者正常继续，readonly 不表示隐藏。
