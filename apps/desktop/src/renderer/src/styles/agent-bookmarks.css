@@ -3,3 +3,12 @@
 .agent-information-reader__update > button { border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
 .agent-bookmarks-issue { position: fixed; z-index: var(--layer-service); left: 12px; bottom: 38px; max-width: min(520px, calc(100vw - 24px)); padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); box-shadow: var(--elev-2); }
 .agent-bookmarks-issue > button { margin-left: 8px; border: 0; background: none; color: var(--text); font: inherit; text-decoration: underline; cursor: pointer; }
+.agent-information-reader[data-bookmark-key] { min-width: 0; min-height: 0; }
+.agent-information-reader[data-bookmark-key] .agent-information-reader__header { cursor: grab; touch-action: none; }
+.agent-information-reader[data-bookmark-key] .agent-information-reader__header:active { cursor: grabbing; }
+.agent-bookmark__move { flex: none; border: 0; padding: 2px; background: transparent; color: var(--text-3); font-size: 16px; cursor: grab; line-height: 20px; }
+.agent-bookmark__move:hover { color: var(--text); }
+.agent-bookmark__move:focus-visible { color: var(--text); outline: 1px solid var(--green); border-radius: var(--radius-sm); }
+.agent-bookmark__resize { position: absolute; right: 0; bottom: 0; z-index: 3; width: 13px; height: 13px; padding: 0; border: 0; color: var(--text-3); background: transparent; font-size: 17px; line-height: 12px; cursor: nwse-resize; touch-action: none; }
+.agent-bookmark__resize:hover, .agent-bookmark__resize:focus-visible { background: var(--surface-3); color: var(--text); outline: 1px solid var(--line); }
+.agent-information-reader[data-bookmark-key]:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-2) 45%, var(--line)), var(--elev-3); }

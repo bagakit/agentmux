@@ -13,6 +13,7 @@ export type AgentInformationPreview = {
   anchor: HTMLButtonElement; keepOpen(): void; restoreFocus(): void; openWorkface(): void
   session: SessionSnapshot | undefined; control: AgentSessionControl | undefined; sourceKey: string | undefined
   enterReading: boolean; pinned: boolean; contentChanged: boolean
+  focusReading?: object | undefined
   bookmark?: AgentBookmark | undefined
 }
 type Opening = Omit<AgentInformationPreview, 'session' | 'control' | 'sourceKey' | 'pinned' | 'contentChanged' | 'bookmark'>
@@ -43,7 +44,11 @@ export const agentInformationPreview = {
     cancelIntent()
     const session = original(request)
     const existing = session?.kind === 'agent' ? current.find(item => item.bookmark?.hostId === session.control.hostId && item.bookmark.agentSessionId === session.control.agentSessionId) : undefined
-    if (existing) { agentBookmarks.bringToFront(existing.bookmark!.key); return true }
+    if (existing) {
+      agentBookmarks.bringToFront(existing.bookmark!.key)
+      if (request.enterReading) publish(current.map(item => item.token === existing.token ? { ...item, focusReading: {} } : item))
+      return true
+    }
     if (current.some(item => item.token === request.token)) return true
     const control = session?.kind === 'agent' && session.control.hostId === request.context.hostId ? session.control : undefined
     publish([...current.filter(item => item.pinned), { ...request, session, control, sourceKey: session?.kind === 'agent' ? nativeBindingKey(session) : undefined, pinned: false, contentChanged: false }])
