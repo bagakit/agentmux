@@ -71,6 +71,7 @@ export async function readSavedMoteBotProfile(
 /** A bounded UI reading window. Main owns the original operation and every child receipt. */
 export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: string) {
   const identity = JSON.stringify(target),
+    historySource = JSON.stringify([identity, topicId]),
     lifetime = useRef(0),
     occurrences = useRef(new Map<string, number>())
   const writing = useRef(new Set<string>()),
@@ -84,7 +85,9 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   const setIssue = (text: string) => setMessage({ kind: 'issue', text })
   const [busy, setBusy] = useState<string[]>([]),
     [next, setNext] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false),
+    [historyRead, setHistoryRead] = useState<string | null>(null),
+    [driving, setDriving] = useState(false)
   const [enrollmentView, setEnrollmentView] = useState<{
     parentId: string
     value: ConnectionEnrollmentView
@@ -94,6 +97,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     sourceRead = useRef(0),
     listRead = useRef(0)
   const pick = (id: string | null) => {
+    setDriving(false)
     selection.current = id
     feedback.current++
     setSelected(id)
@@ -121,6 +125,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       before = new Map(occurrences.current),
       request = ++listRead.current,
       message = feedback.current
+    if (!cursor) setHistoryRead(null)
     try {
       const result = await api.moteConnections.call('space.mote.connection.ls', {
         target,
@@ -132,7 +137,10 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         if (before.get(operation.operationId) === occurrences.current.get(operation.operationId))
           accept(operation)
       setNext(result.next)
+      if (!cursor) setHistoryRead(historySource)
     } catch (error) {
+      if (token === lifetime.current && request === listRead.current && !cursor)
+        setHistoryRead(null)
       if (token === lifetime.current && message === feedback.current) setIssue(presentError(error))
     }
   }
@@ -161,6 +169,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     lifetime.current++
     const token = lifetime.current
     setOperations([])
+    setHistoryRead(null)
     setEnrollmentView(null)
     pick(null)
     setProfile(null)
@@ -221,8 +230,11 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: result.enrollmentOperationId
           })
-          if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
+          if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
             setEnrollmentView({ parentId: id, value: view })
+            setDriving(request.action === 'create' && result.issue !== 'child-unconfirmed' &&
+              view.actions.some(action => action.kind === 'continue-authentication'))
+          }
         }
         if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
           setMessage({ kind: 'notice', text: '' })
@@ -295,12 +307,13 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       if (creating.current === original) creating.current = null
     }
   }
-  async function check(id: string, advance = false, action?: ConnectionEnrollmentAction) {
+  async function check(id: string, advance = false, action?: ConnectionEnrollmentAction, automatic = false) {
     if (advance && writing.current.has(id)) return
     const token = lifetime.current,
       order = occurrence(id)
     pick(id)
-    setMessage({ kind: 'notice', text: advance ? 'Checking this setup…' : 'Reading the original result…' })
+    if (!automatic)
+      setMessage({ kind: 'notice', text: advance ? 'Checking this setup…' : 'Reading the original result…' })
     if (advance) pending(id, true)
     try {
       const child = enrollmentView?.parentId === id ? enrollmentView.value.operation : null
@@ -325,10 +338,14 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: operation.enrollmentOperationId
           })
-          if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
+          if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
             setEnrollmentView({ parentId: id, value: view })
+            setDriving(advance && !!action && ['continue-authentication', 'renew-authentication'].includes(action.kind) &&
+              operation.issue !== 'child-unconfirmed' &&
+              view.actions.some(item => item.kind === 'continue-authentication'))
+          }
         }
-        if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
+        if (!automatic && token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
           setMessage(operation
             ? { kind: 'notice', text: 'Saved progress checked.' }
             : { kind: 'issue', text: 'No recorded result was found. Keep the original request; this does not confirm that nothing happened.' }
@@ -341,6 +358,18 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       if (advance) pending(id, false)
     }
   }
+  useEffect(() => {
+    if (!driving || !selectedId || busy.includes(selectedId) || enrollmentView?.parentId !== selectedId) return
+    const view = enrollmentView.value,
+      action = view.actions.find(item => item.kind === 'continue-authentication')
+    if (!action) return
+    const id = selectedId, token = lifetime.current, chosen = feedback.current
+    const timer = setTimeout(() => {
+      if (token === lifetime.current && selection.current === id && chosen === feedback.current)
+        void check(id, true, action, true)
+    }, view.challenge ? Math.max(0, view.challenge.nextPollAt - Date.now()) : 0)
+    return () => clearTimeout(timer)
+  }, [driving, selectedId, busy, enrollmentView])
   return {
     profile,
     capabilities,
@@ -353,6 +382,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     issueKind: message.kind,
     busy,
     loading,
+    historyReady: historyRead === historySource,
+    driving,
     next,
     list,
     refreshSource,
