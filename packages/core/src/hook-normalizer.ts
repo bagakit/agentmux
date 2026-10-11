@@ -545,6 +545,10 @@ function buildTimeline(
       // Provider 给了关联 id：把一次调用的入参与结果收敛到**同一条 item**。
       // id 包含 [run, provider, subject-kind, nativeID, callID] 的 JSON tuple base64url，
       // 以固定 ASCII 前缀 tool_ 开头，防止不同主体/会话的相同调用 ID 发生碰撞。
+      const conversation = { invocations: ([...(toolInput === undefined ? [] : ['toolInput' as const]), ...(outcome?.output === undefined ? [] : ['toolOutput' as const])]).map(field => ({
+        selector: { kind: 'captured-field' as const, field }, invocation: { source: { providerId: envelope.providerId, nativeSessionId: subject.nativeSessionId },
+          subject: subject.kind === 'main' ? 'main' as const : { kind: 'child' as const, nativeActorId: subject.nativeSessionId }, scope: { kind: 'session' as const }, callId: toolCallId }
+      })) }
       const itemId = nativeHookToolItemId(
         envelope.runId,
         envelope.providerId,
@@ -560,21 +564,23 @@ function buildTimeline(
         // 缺失就补落一条自洽的终态行——携带完整 item（kind/source/title 俱全），不靠残缺字段合成。
         timeline.push(timelineItem(envelope, timeline.length, kind, toolName, eventName, observedAt, {
           id: itemId,
+          conversation,
           toolName,
           // 失败是**观察到的事实**，不是默认值：采集判定失败才翻 failed，否则收敛为 complete
           // （不再是 streaming——调用已结束）。
           status: outcome?.failed ? 'failed' : 'complete',
-          ...(toolInput ? { toolInput } : {}),
-          ...(outcome?.output ? { toolOutput: outcome.output } : {})
+          ...(toolInput === undefined ? {} : { toolInput }),
+          ...(outcome?.output === undefined ? {} : { toolOutput: outcome.output })
         }, 'upsert'))
       } else {
         // 事前：先落在途态。`streaming` 徽标此前只有 ACP 会点亮，而所有 Provider 的 ACP 都是
         // none——hook 驱动的 Agent 由此第一次能显示「这一步正在跑」。
         timeline.push(timelineItem(envelope, timeline.length, kind, toolName, eventName, observedAt, {
           id: itemId,
+          conversation,
           toolName,
           status: 'streaming',
-          ...(toolInput ? { toolInput } : {})
+          ...(toolInput === undefined ? {} : { toolInput })
         }))
       }
     } else {
@@ -582,8 +588,8 @@ function buildTimeline(
       // 事后结果，靠渲染层的折叠让带结果的那行胜出（f-23p8fsbs8/T-001 在无关联前提下的最简解）。
       append(kind, toolName, {
         toolName,
-        ...(toolInput ? { toolInput } : {}),
-        ...(outcome?.output ? { toolOutput: outcome.output } : {}),
+        ...(toolInput === undefined ? {} : { toolInput }),
+        ...(outcome?.output === undefined ? {} : { toolOutput: outcome.output }),
         ...(outcome?.failed ? { status: 'failed' as const } : {})
       })
     }

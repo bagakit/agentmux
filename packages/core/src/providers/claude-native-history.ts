@@ -1,3 +1,4 @@
+import { nativeConversationProvenance } from '../conversation-provenance.js'
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../conversation-changes.js'
 // Native record/role interpretation follows Paseo's convertClaudeHistoryEntry / normalizeHistoryBlocks.
 // Source: Paseo 3c6e4e39 (Apache-2.0, Copyright (c) 2025-present Mohamed Boudra). Modified for bounded, read-only pages,
@@ -142,7 +143,9 @@ function mainRecord(record: Record<string, unknown>, start: number, nativeSessio
     if (record.sessionId === undefined && record.type !== 'user' && record.type !== 'assistant') return null
     throw new AgentMuxError('Claude transcript belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
   }
-  return convert(record, start)
+  const item = convert(record, start)
+  const conversation = nativeConversationProvenance(item.contentParts, { providerId: 'claude', nativeSessionId })
+  return { ...item, ...(conversation ? { conversation } : {}) }
 }
 
 export async function readClaudeSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {

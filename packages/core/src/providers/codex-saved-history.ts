@@ -1,3 +1,4 @@
+import { nativeConversationProvenance } from '../conversation-provenance.js'
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../conversation-changes.js'
 import { stat } from 'node:fs/promises'
 import { AgentMuxError } from '../errors.js'
@@ -113,7 +114,9 @@ function item(record: Record<string, unknown>, start: number, nativeSessionId: s
   const messageTurnId = typeof metadata.turn_id === 'string' && metadata.turn_id.length > 0 ? metadata.turn_id : undefined
   // Conflicting native facts cannot assign this original record to either turn.
   const turnId = directTurnId && messageTurnId && directTurnId !== messageTurnId ? undefined : directTurnId ?? messageTurnId
+  const conversation = nativeConversationProvenance(parts, { providerId: 'codex', nativeSessionId })
   return { id, kind, contentParts: parts,
+    ...(conversation ? { conversation } : {}),
     ...metrics(record, payload, nativeSessionId),
     ...(kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'final_answer' ? { messagePhase: 'final' as const }
       : kind === 'assistant-message' && (asyncQuestion ? nativeItem.phase : payload.phase) === 'commentary' ? { messagePhase: 'progress' as const } : {}),

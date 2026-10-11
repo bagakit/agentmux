@@ -1,4 +1,5 @@
 import { parseAgentExternalMessageAuthor } from './external-author.js'
+import { conversationProvenanceFields } from './conversation-provenance.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
@@ -159,7 +160,7 @@ export function normalizeAgentActivityState(value: unknown): AgentActivityState 
   throw new AgentMuxError('Activity state observation is invalid.', 'INVALID_AGENT_TIMELINE')
 }
 
-function normalizeItem(value: unknown): AgentTimelineItem {
+export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
   const source = record(value)
   if (!KINDS.includes(source.kind as AgentTimelineItemKind)) {
     throw new AgentMuxError('Timeline item kind is invalid.', 'INVALID_AGENT_TIMELINE')
@@ -207,6 +208,7 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     ...optionalField(source, 'toolInput'),
     ...optionalField(source, 'toolOutput'),
     ...optionalField(source, 'eventName'),
+    ...conversationProvenanceFields(source),
     ...(source.activityState === undefined ? {} : { activityState: normalizeAgentActivityState(source.activityState) })
   }
 }
@@ -224,7 +226,7 @@ export function normalizeAgentTimelineMutation(value: unknown): AgentTimelineMut
   }
   const agentSessionId = text(source.agentSessionId, 'Timeline Agent Session id')
   if (source.type === 'append' || source.type === 'upsert') {
-    const item = normalizeItem(source.item)
+    const item = normalizeAgentTimelineItem(source.item)
     if (item.agentSessionId !== agentSessionId) {
       throw new AgentMuxError('Timeline item belongs to another Agent Session.', 'INVALID_AGENT_TIMELINE')
     }
@@ -256,7 +258,7 @@ export function applyAgentTimelineMutation(
   value: AgentTimelineMutation
 ): AgentTimelineItem[] {
   const mutation = normalizeAgentTimelineMutation(value)
-  const items = current.map((item) => normalizeItem(item))
+  const items = current.map((item) => normalizeAgentTimelineItem(item))
   if (items.some((item) => item.agentSessionId !== mutation.agentSessionId)) {
     throw new AgentMuxError('Timeline contains another Agent Session.', 'INVALID_AGENT_TIMELINE')
   }
@@ -270,7 +272,7 @@ export function normalizeAgentTimeline(
   if (!Array.isArray(values) || values.length > MAX_AGENT_TIMELINE_ITEMS) {
     throw new AgentMuxError('Agent Timeline exceeds its item limit.', 'AGENT_TIMELINE_LIMIT')
   }
-  const normalized = values.map(normalizeItem)
+  const normalized = values.map(normalizeAgentTimelineItem)
   const states = normalized.filter((item) => item.activityState !== undefined).length
   const inputs = normalized.filter((item) => !item.activityState && item.kind === 'user_message').length
   if (states > MAX_AGENT_TIMELINE_STATUS_ITEMS || inputs > MAX_TIMELINE_ITEMS_PER_WINDOW ||

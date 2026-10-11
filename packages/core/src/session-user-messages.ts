@@ -8,6 +8,7 @@ import type {
   AgentSessionUserMessageSource,
   AgentTimelineSnapshot
 } from './types.js'
+import { recordedConversationAuthor } from './conversation-author.js'
 
 function encodeSegment(s: string): string {
   return s.replace(/%/g, '%25').replace(/:/g, '%3A')
@@ -100,13 +101,7 @@ export function projectSessionUserMessages(params: {
       if (seenCapturedIds.has(rawId)) continue
       seenCapturedIds.add(rawId)
 
-      const author: AgentSessionUserMessageAuthor = item.authorAgentSessionId !== undefined
-        ? { kind: 'agent', agentSessionId: item.authorAgentSessionId }
-        : item.authorExternal !== undefined
-          ? item.authorExternal
-        : item.authorHuman === true
-          ? { kind: 'human' }
-          : { kind: 'unknown' }
+      const author = recordedConversationAuthor(item)
 
       const source: AgentSessionUserMessageSource = {
         kind: 'captured',

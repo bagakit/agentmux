@@ -125,7 +125,7 @@ export function speakerOfExternalAuthor(author: Extract<AgentSessionUserMessage[
   return { role: 'external', id: JSON.stringify([author.actor.application.domain, author.actor.application.appId, author.actor.idType, author.actor.userId]), external: author }
 }
 
-export function speakerOfUserMessage(message: AgentSessionUserMessage): ConversationSpeaker {
+export function speakerOfUserMessage(message: Pick<AgentSessionUserMessage, 'author'>): ConversationSpeaker {
   if (message.author.kind === 'external') return speakerOfExternalAuthor(message.author)
   if (message.author.kind === 'human') {
     return { role: 'human', id: HUMAN_SPEAKER_ID }
