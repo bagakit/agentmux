@@ -3949,9 +3949,7 @@ export class AgentMuxClient {
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use an authenticated initial message.', 'MESSAGE_ENVELOPE_REQUIRED')
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt)
     const createOperationId = input.createOperationId ?? randomUUID()
-    const agentSessionId = safeId(input.agentSessionId ?? (input.initialMessage || forkSource || nativeResumeSource
-      ? await this.resolveAgentCreationSessionId(createOperationId)
-      : mintAgentSessionId()), 'Agent Session id')
+    const agentSessionId = safeId(input.agentSessionId ?? await this.resolveAgentCreationSessionId(createOperationId), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
     let initialAuthor: AgentMuxStoredAgentSession | undefined
     if (input.initialMessage) {
@@ -3959,28 +3957,25 @@ export class AgentMuxClient {
       initialAuthor = await this.currentStoredAgentSession(input.initialMessage.callerAgentSessionId)
       this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, initialAuthor)
     }
-    const intentDigest = admitted?.intentDigest ?? (forkSource || nativeResumeSource ? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor) : undefined)
-    const durableCreate = intentDigest !== undefined
+    const intentDigest = admitted?.intentDigest ?? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor)
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
-    if (durableCreate) {
-      const existing = await this.readCreationSession(agentSessionId)
-      if (existing && existing.creation?.persistence !== 'unconfirmed') {
-        if (existing.creation?.createOperationId !== createOperationId || existing.providerId !== input.providerId ||
-          existing.executorId !== executorId || existing.workspacePath !== input.workspacePath ||
-          JSON.stringify(existing.forkedFrom) !== JSON.stringify(forkSource) || existing.creation.intentDigest !== intentDigest) {
-          throw new AgentMuxError('This creation operation is bound to another source or created Session.', 'AGENT_FORK_OPERATION_CONFLICT')
-        }
-        return { session: structuredClone(existing), promptConfirmed: existing.creation.agentMuxContext === 'confirmed' &&
-          (existing.creation.initialPrompt === 'not-requested' || existing.creation.initialPrompt === 'confirmed'), creation: existing.creation }
+    const existing = await this.readCreationSession(agentSessionId)
+    if (existing && existing.creation?.persistence !== 'unconfirmed') {
+      if (existing.creation?.createOperationId !== createOperationId || existing.providerId !== input.providerId ||
+        existing.executorId !== executorId || existing.workspacePath !== input.workspacePath ||
+        JSON.stringify(existing.forkedFrom) !== JSON.stringify(forkSource) || existing.creation.intentDigest !== intentDigest) {
+        throw new AgentMuxError('This creation operation is bound to another source or created Session.', 'AGENT_FORK_OPERATION_CONFLICT')
       }
-      const pending = await this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest!)
-      if (pending) {
-        const session = await this.completePreparedCreate(pending, await this.kernel.list())
-        return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
-      }
-      if (forkSource) assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
+      return { session: structuredClone(existing), promptConfirmed: existing.creation.agentMuxContext === 'confirmed' &&
+        (existing.creation.initialPrompt === 'not-requested' || existing.creation.initialPrompt === 'confirmed'), creation: existing.creation }
     }
+    const pending = await this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest)
+    if (pending) {
+      const session = await this.completePreparedCreate(pending, await this.kernel.list())
+      return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
+    }
+    if (forkSource) assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
     if (nativeResumeSource) {
       const managed = await this.managedNativeSessions(nativeResumeSource)
       if (managed.length) throw new AgentMuxError('This native conversation already has Core ownership. Continue its original Session; no Run was started.',
@@ -4019,7 +4014,6 @@ export class AgentMuxClient {
     let reservation = await this.registry.reserveNew(agentSessionId, lifecycleOperationId)
     let hookBinding: AgentHookBinding | null = null
     let persisted: AgentMuxStoredAgentSession | null = null
-    let abandonedRun: AgentMuxRunRef | null = null
     let preservePreparedCreation = false
     try {
       const provider = this.providers.get(input.providerId)
@@ -4097,12 +4091,12 @@ export class AgentMuxClient {
       )
       const launchOptions = normalizeLaunchOptionSelection(input.launchOptions)
       let preparedCreation: AgentMuxPreparedCreation | undefined
-      if (durableCreate && reservation.kind === 'create') {
+      if (reservation.kind === 'create') {
         const preparedAt = Date.now()
         preparedCreation = { kind: 'agent', agentSessionId, providerId: input.providerId, executorId, hostId: 'local',
           workspacePath: input.workspacePath, hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
-          creation: { createOperationId, intentDigest: intentDigest!, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', agentMuxContext: 'unknown', ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
+          creation: { createOperationId, intentDigest, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', agentMuxContext: 'unknown', ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
           ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}), ...(launchOptions ? { launchOptions } : {}) }
         reservation = await this.registry.prepareCreate(reservation, preparedCreation!)
@@ -4113,7 +4107,7 @@ export class AgentMuxClient {
         await assertForkCurrent?.()
       }
       await assertNativeSource?.()
-      if (durableCreate) preservePreparedCreation = true
+      preservePreparedCreation = true
       const run = await this.kernel.start({
         operationKey: lifecycleOperationId,
         program: plan.command,
@@ -4131,7 +4125,7 @@ export class AgentMuxClient {
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }).catch(error => {
-        if (durableCreate && !(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
+        if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
           throw new AgentMuxError(`Agent start is unconfirmed. Inspect the original operation; no start or input was resent. ${error instanceof Error ? error.message : String(error)}`,
             'AGENT_CREATION_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
         }
@@ -4155,7 +4149,7 @@ export class AgentMuxClient {
         createdAt: preparedCreation?.createdAt ?? now,
         updatedAt: preparedCreation?.updatedAt ?? now,
         creation: { createOperationId, initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
-          ...(durableCreate ? { intentDigest: intentDigest!, agentMuxContext: 'unknown' as const } : {}),
+          intentDigest, agentMuxContext: 'unknown',
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
         ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
         ...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}),
@@ -4205,36 +4199,26 @@ export class AgentMuxClient {
           await this.publishCurrentRunState(readySession)
           throw error
         }
-        if (persisted || durableCreate) {
-          if (!persisted) {
-            try {
-              const canonical = (await this.store.readMetadata(agentSessionId))
-              if (canonical?.run.runId === run.runId && canonical.creation?.intentDigest === intentDigest && canonical.hookBindingId === session.hookBindingId) {
-                persisted = this.registry.rememberStartedCreation(canonical); preservePreparedCreation = false
-              }
-            } catch { /* Retain the durable no-Run seed and real Run while commit outcome is unknown. */ }
-          }
-          if (persisted && creationStep === 'session-commit') {
-            try {
-              creationStep = 'hook-bind'; await hookBinding.bindRun(run.runId)
-              this.pendingLifecycleBindings.delete(lifecycleOperationId)
-              creationStep = 'handshake'; readySession = await this.ensureTerminalHandshakeOrDegrade(persisted, run)
-            } catch (observationError) {
-              if (observationError instanceof AgentMuxError && observationError.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {
-                readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
-                await this.publishCurrentRunState(readySession)
-                throw observationError
-              }
-              readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
-              this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
-              this.pendingLifecycleBindings.delete(lifecycleOperationId)
-              this.queueNativeIdentityCapture(readySession, input)
-              await this.publishCurrentRunState(readySession)
-              return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
+        if (!persisted) {
+          try {
+            const canonical = (await this.store.readMetadata(agentSessionId))
+            if (canonical?.run.runId === run.runId && canonical.creation?.intentDigest === intentDigest && canonical.hookBindingId === session.hookBindingId) {
+              persisted = this.registry.rememberStartedCreation(canonical); preservePreparedCreation = false
             }
-          } else {
-            preservePreparedCreation = !persisted
-            readySession = await this.retainCreationFailure(persisted ?? session, creationStep, error, !persisted)
+          } catch { /* Retain the durable no-Run seed and real Run while commit outcome is unknown. */ }
+        }
+        if (persisted && creationStep === 'session-commit') {
+          try {
+            creationStep = 'hook-bind'; await hookBinding.bindRun(run.runId)
+            this.pendingLifecycleBindings.delete(lifecycleOperationId)
+            creationStep = 'handshake'; readySession = await this.ensureTerminalHandshakeOrDegrade(persisted, run)
+          } catch (observationError) {
+            if (observationError instanceof AgentMuxError && observationError.code === AGENT_TERMINAL_HANDSHAKE_FAILED) {
+              readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
+              await this.publishCurrentRunState(readySession)
+              throw observationError
+            }
+            readySession = await this.retainCreationFailure(persisted, creationStep, observationError, false)
             this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
             this.pendingLifecycleBindings.delete(lifecycleOperationId)
             this.queueNativeIdentityCapture(readySession, input)
@@ -4242,26 +4226,13 @@ export class AgentMuxClient {
             return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
           }
         } else {
-        const rollbackErrors: unknown[] = [error]
-        try {
-          await hookBinding.close()
-          await this.retireUncommittedRun(run.runId)
-          abandonedRun = runRef(run.runId)
-        }
-        catch (cleanupError) { rollbackErrors.push(cleanupError) }
-        if (persisted) {
-          try {
-            await this.registry.delete(agentSessionId, session.run)
-            await this.registry.retireRuns([session.run])
-            abandonedRun = null
-          } catch (cleanupError) {
-            rollbackErrors.push(cleanupError)
-          }
-        }
-        if (rollbackErrors.length > 1) {
-          throw new AggregateError(rollbackErrors, 'Agent Session persistence and Run rollback failed.')
-        }
-        throw error
+          preservePreparedCreation = !persisted
+          readySession = await this.retainCreationFailure(persisted ?? session, creationStep, error, !persisted)
+          this.hookBindings.set(run.runId, hookBinding); this.runPids.set(run.runId, run.pid)
+          this.pendingLifecycleBindings.delete(lifecycleOperationId)
+          this.queueNativeIdentityCapture(readySession, input)
+          await this.publishCurrentRunState(readySession)
+          return { session: this.projectSession(readySession), promptConfirmed: false, creation: readySession.creation! }
         }
       }
       this.hookBindings.set(run.runId, hookBinding)
@@ -4304,10 +4275,10 @@ export class AgentMuxClient {
       }
       const creation: NonNullable<AgentMuxAgentSession['creation']> = {
         createOperationId,
-        ...(durableCreate ? { intentDigest: intentDigest! } : {}),
+        intentDigest,
         ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}),
         initialPrompt: input.prompt?.trim() ? (promptConfirmed ? 'confirmed' : 'unconfirmed') : 'not-requested',
-        ...(durableCreate ? { agentMuxContext: promptConfirmed ? 'confirmed' as const : 'unconfirmed' as const } : {})
+        agentMuxContext: promptConfirmed ? 'confirmed' : 'unconfirmed'
       }
       // Input has already happened. A save observation failure cannot revoke a healthy Run or
       // authorize sending again. Return the actual receipt; a later read keeps the durable unknown.
@@ -4327,7 +4298,7 @@ export class AgentMuxClient {
       if (hookBinding && !preservePreparedCreation && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
       if (!preservePreparedCreation) {
         this.pendingLifecycleBindings.delete(lifecycleOperationId)
-        await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
+        await this.registry.releaseLifecycle(reservation)
       }
     }
   }
