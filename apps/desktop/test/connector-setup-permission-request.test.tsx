@@ -148,6 +148,10 @@ it('a known accepted request with a lost local ACK makes same-child saving the p
   await click('[data-permission-add]')
   await ready(() => expect(dom.container.querySelector('[data-permission-recover].primary-button')).not.toBeNull())
   expect(dom.container.textContent).toContain('Finish saving the accepted request')
+  expect(dom.container.querySelector('[data-permission-partial]')).toBeNull()
+  const actions = [...dom.container.querySelectorAll('[data-management-permissions] button')], recover = dom.container.querySelector('[data-permission-recover]')!, review = dom.container.querySelector('[data-permission-review]')!
+  expect(actions.indexOf(recover)).toBeLessThan(actions.indexOf(review))
+  expect(review.classList.contains('primary-button')).toBe(false)
   const original = current().applicationConfiguration!.selected!
   expect(original).toMatchObject({ request: 'confirmed', secureStorage: 'unknown' })
   expect(dom.container.querySelector('[data-permission-original]')).toBeNull()
