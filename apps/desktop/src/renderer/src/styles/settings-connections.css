@@ -139,6 +139,7 @@
 .host-creation-trust [role="status"] { display: flex; align-items: center; gap: var(--sp-2); }
 
 /* One application task; group sharing stays with the exact Agent menu. */
+.connector-mod { width: 100%; max-width: 680px; }
 .connector-onboarding { min-width: 0; container-type: inline-size; }
 .connector-setup, .connector-library { min-width: 0; display: grid; gap: var(--sp-6); }
 .connector-back { justify-self: start; }
@@ -177,12 +178,17 @@
 .connector-enabled input { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--green); }
 .connector-optional .settings-group-note { margin-top: var(--sp-3); }
 .connector-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); }
+.connector-mod > .connector-service-control { margin-top: var(--sp-6); padding-top: var(--sp-6); }
 .connector-service-control { display: grid; gap: var(--sp-4); }
-.connector-service-control__heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
-.connector-service-control__heading h3,
+.connector-service-control__heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-4); }
+.connector-service-control__heading > div:first-child { min-width: 0; flex: 1 1 200px; }
+.connector-service-control__heading h3 { margin: 0; color: var(--text-2); font-size: var(--fs-body); font-weight: 550; line-height: 1.5; }
+.connector-service-control__heading p { margin: var(--sp-1) 0 0; }
+.connector-service-control__setting { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-4); }
+.connector-service-control__setting > span { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-service-control__setting .connector-enabled { min-height: 36px; font-size: var(--fs-meta); cursor: pointer; }
+.connector-service-control__refresh.small-button { background: transparent; box-shadow: none; color: var(--text-3); font-weight: 500; }
 .connector-library > .settings-pane-toolbar > strong { color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.5; }
-.connector-service-control__heading h3 { margin: 0; }
-.connector-service-control__heading > span { color: var(--text-3); font-size: var(--fs-meta); }
 .connector-service-requests { min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
 .connector-service-requests summary { cursor: pointer; }
 .connector-service-requests > .settings-group-note { margin-top: var(--sp-3); }
@@ -223,11 +229,16 @@
 /* The original application workface also owns its platform confirmation. */
 .connector-enrollment { gap: var(--sp-5); }
 .connector-enrollment__heading { display: grid; gap: var(--sp-3); min-width: 0; }
-.connector-enrollment__summary, .connector-enrollment__diagnosis { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.65; overflow-wrap: anywhere; }
-.connector-enrollment__diagnosis { padding-left: var(--sp-4); border-left: 2px solid var(--line); }
+.connector-enrollment__summary, .connector-enrollment__diagnosis { max-width: 56ch; margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.65; overflow-wrap: anywhere; }
+.connector-enrollment__diagnosis { color: var(--text-3); font-size: var(--fs-meta); }
 .connector-enrollment__action { display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-3); min-width: 0; }
 .connector-enrollment__action > button { max-width: 100%; white-space: normal; text-align: left; }
 .connector-enrollment__action .connector-check-feedback { font-size: var(--fs-body); }
+.connector-enrollment__action > .settings-group-note { max-width: 56ch; margin: 0; }
+.connector-enrollment__alternative { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
+.connector-enrollment__technical { max-height: 16rem; margin: var(--sp-4) 0; overflow: auto; color: var(--text-3); font: var(--fs-meta)/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.connector-list-feedback { display: grid; gap: var(--sp-4); }
+.connector-list-feedback > button { justify-self: start; }
 .connector-enrollment__text-action { display: inline-flex; align-items: center; justify-self: start; gap: var(--sp-2); width: fit-content; max-width: 100%; min-height: 32px; padding: var(--sp-2) 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: var(--fs-body)/1.5 var(--font-sans); text-align: left; cursor: pointer; }
 .connector-enrollment__text-action > svg { flex: none; color: var(--text-3); }
 .connector-enrollment__text-action:hover { color: var(--text); }
@@ -236,7 +247,8 @@
 .connector-enrollment > details > summary { padding-block: var(--sp-2); color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
 .connector-enrollment > .connector-optional > button { margin-top: var(--sp-3); }
 .connector-enrollment__identity { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: 0; }
-.connector-enrollment__identity strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.connector-enrollment__identity strong { color: var(--text-3); font-size: var(--fs-meta); font-weight: 550; overflow-wrap: anywhere; }
+.connector-enrollment__identity > svg { color: var(--green); flex: none; align-self: center; }
 .connector-enrollment__identity > span { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .connector-enrollment__confirmation { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-6); }
 .connector-enrollment__confirmation > div:last-child { min-width: 0; flex: 1 1 180px; }
@@ -255,7 +267,8 @@
 .connector-enrollment__previous:hover { background: var(--surface-1); }
 .connector-enrollment__previous:focus-visible, .connector-enrollment__history > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
 
-.connector-enrollment .connector-diagnostics > .small-button { margin-top: var(--sp-4); }
+.connector-enrollment__local-read { display: grid; justify-items: start; gap: var(--sp-3); margin-top: var(--sp-5); }
+.connector-enrollment__local-read > p { margin: 0; }
 @container (width < 480px) {
   .connector-enrollment__action > button,
   .connector-enrollment__text-action { min-height: 36px; }
