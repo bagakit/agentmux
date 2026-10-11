@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionConfigureInput, ConnectionRecord } from '@agentmux/core/connections'
+import { SettingsNavigation, type SettingsNavigationRequest } from '../SettingsNavigation'
+import { useAppStore } from '../../store'
+import { isSessionSurface } from '../../lib/workbench-surface-kinds'
+import { sessionPresentationById } from '../../lib/session-presentation'
 import { api } from '../../lib/api'
 import { BotEnrollmentPane, useBotEnrollment } from './BotEnrollmentPane'
 import { ConnectionProfilePanel } from './ConnectionProfilePanel'
@@ -14,7 +18,24 @@ const LinkIcon = semanticIconComponent('action.open-external')
 const GroupIcon = semanticIconComponent('object.conversations')
 const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : domain === 'open.larksuite.com' ? 'Lark' : domain
 
-export function ExternalConnectionsSettings({ active }: { active: boolean }) {
+export function ExternalConnectionsSettings({ active, onClose, navigationRequest }: { active: boolean; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
+  const navigation = useContext(SettingsNavigation), origin = navigationRequest?.section === 'chat-connections' ? navigationRequest.connectorOrigin : undefined
+  const originalAgent = useAppStore(state => {
+    if (!active || !origin) return undefined
+    const session = sessionPresentationById(state.sessions).get(origin.sessionId)
+    return session?.kind === 'agent' && session.control.hostId === origin.hostId && session.control.agentSessionId === origin.agentSessionId ? session : undefined
+  })
+  const appliedRoute = useRef<SettingsNavigationRequest | undefined>(undefined)
+  const returnToAgent = () => {
+    const current = origin && useAppStore.getState().sessions.find(session => session.kind === 'agent' && session.id === origin.sessionId && session.control.hostId === origin.hostId && session.control.agentSessionId === origin.agentSessionId)
+    if (current) {
+      useAppStore.getState().selectSession(current.id)
+      const state = useAppStore.getState(), selection = state.workbenchSpaceSelection
+      const region = selection?.tabId && selection.regionId ? state.tabs[selection.tabId]?.regions[selection.regionId] : undefined
+      if (state.mainSurface === 'workbench' && region && isSessionSurface(region) && region.sessionId === current.id) { onClose?.(); return }
+    }
+    navigation?.chooseAgent()
+  }
   const [records, setRecords] = useState<ConnectionRecord[]>([]), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [listIssue, setListIssue] = useState('')
   const [view, setView] = useState<'loading' | 'library' | 'enrollment' | 'new' | 'saved' | 'edit' | 'management'>('loading')
@@ -39,6 +60,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
   const enrolled = enrollment.operation?.configured
   useEffect(() => { if (active && enrolled) void read() }, [active, enrolled])
   const edit = (record: ConnectionRecord | null) => {
+    appliedRoute.current = navigationRequest
     if (pending.current) { setIssue('Check this save before changing the application.'); return }
     setSelected(record); setLabel(record?.config.label ?? ''); setAppId(record?.config.application.appId ?? ''); setDomain(record?.config.application.domain ?? 'open.feishu.cn'); setEnabled(record?.config.enabled ?? true); setSecret(''); setIssue(''); setSaveNotice(''); setView(record ? 'edit' : 'new')
   }
@@ -95,17 +117,24 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
     try { await api.ui.openExternal(`https://${applicationDomain}/app`) }
     catch (error) { setIssue(presentError(error)) }
   }
-  const existing = () => { if (selected && !pending.current) edit(null); else setView('new') }
+  const existing = () => { appliedRoute.current = navigationRequest; if (selected && !pending.current) edit(null); else setView('new') }
+  const startEnrollment = () => { appliedRoute.current = navigationRequest; setView('enrollment') }
   const current = view === 'enrollment' ? enrolled?.connection ?? null : selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
   const management = useConnectionManagementSetup(current, active && (view === 'saved' || view === 'management' || view === 'enrollment' && !!enrolled), view === 'management')
   const continuationSupport = management.catalog?.value?.support
   const canContinueEnrollment = !!current && continuationSupport?.connectionRevision === current.revision && continuationSupport.capabilities.includes('enrollment-continuation')
+  useEffect(() => {
+    if (!active || appliedRoute.current === navigationRequest || !origin?.connectionId || pending.current) return
+    const record = records.find(record => record.config.connectionId === origin.connectionId)
+    if (!record) return
+    appliedRoute.current = navigationRequest; edit(record); setView('saved')
+  }, [active, navigationRequest, records])
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
   if (!active) return null
   return <div className="settings-pane-stack connector-onboarding" data-connector-settings>
     {view === 'loading' ? <section className="connector-setup">
       <p className="settings-group-note" role="status">Reading saved applications…</p>
-      <div className="connector-editor-actions"><button type="button" className="primary-button" onClick={() => setView('enrollment')}>Set up a bot</button><button type="button" className="small-button" onClick={existing}>Connect an existing bot</button></div>
+      <div className="connector-editor-actions"><button type="button" className="primary-button" onClick={startEnrollment}>Set up a bot</button><button type="button" className="small-button" onClick={existing}>Connect an existing bot</button></div>
     </section> : null}
     {view === 'enrollment' ? <BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => saved(record, 'Application saved.')} onContinue={canContinueEnrollment ? record => {
       const operation = enrollment.operation
@@ -114,7 +143,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
       setSelected(record); setView('management')
     } : undefined} /> : null}
     {view === 'library' ? <section className="connector-library" aria-label="Saved chat applications">
-      <div className="settings-pane-toolbar"><strong>Bot applications</strong><button className="small-button" onClick={() => void read()}>Refresh</button><button data-enrollment-new className="primary-button" onClick={() => setView('enrollment')}>Add a bot</button><button data-enrollment-existing className="small-button" onClick={existing}>Connect an existing bot</button></div>
+      <div className="settings-pane-toolbar"><strong>Bot applications</strong><button className="small-button" onClick={() => void read()}>Refresh</button><button data-enrollment-new className="primary-button" onClick={startEnrollment}>Add a bot</button><button data-enrollment-existing className="small-button" onClick={existing}>Connect an existing bot</button></div>
       <p className="settings-group-note">Choose an application to check or change its connection. Groups are connected from each Agent’s menu.</p>
       {records.map(record => <article className="connector-record" key={record.config.connectionId} data-connection={record.config.connectionId}>
         <button className="connector-record__open" onClick={() => { edit(record); setView('saved') }}><span className="connector-record__mark"><GroupIcon size={18} /></span><span><strong className="connector-record__name">{record.config.label}</strong><small>{platform(record.config.application.domain)} · {connectionSummary(record)}</small></span><span className="connector-record__action">View connection</span></button>
@@ -146,6 +175,7 @@ export function ExternalConnectionsSettings({ active }: { active: boolean }) {
         <ConnectionProfilePanel key={JSON.stringify([current.config.connectionId, current.config.application, current.revision])} record={current} />
       </> : null}
     </section> : null}
+    {current && navigation ? <div className="connector-editor-actions"><button className="small-button" data-connector-return-agent onClick={returnToAgent}>{originalAgent ? 'Return to Agent' : 'Choose an Agent'}</button><span className="settings-group-note">Connect a group from the Agent’s menu.</span></div> : null}
     {listIssue ? <div className="connector-list-feedback" data-connection-list-issue><p role="status" className="connector-check-feedback">Could not refresh your saved bots. This does not change any bot’s creation or connection result.</p>{view !== 'loading' ? <button type="button" className="small-button" onClick={() => void read()}>Refresh bot list</button> : null}<details className="connector-diagnostics"><summary>List error details</summary><p className="connector-enrollment__technical">{listIssue}</p></details></div> : null}
     {issue ? <p role="status" className="connector-issue">{issue}</p> : null}
   </div>
