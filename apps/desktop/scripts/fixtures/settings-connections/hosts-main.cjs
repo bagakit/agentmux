@@ -128,6 +128,53 @@ app.whenReady().then(async () => {
       } else if (width===640&&theme==='light'||width===320&&theme==='light') {
         await click(`${pane} .settings-resource-back`)
       }
+      // Exercise the same saved Host panel and its explicit Refresh operation, without replacing the UI.
+      await read('window.connectionsProof.runtimeScenario("healthy")')
+      await choose(target,'overview')
+      if(width>900) { await mode('Topology');await click(`${pane} [data-host-node="host-01"]`) }
+      const runtime = `${pane} [data-host-runtime="${target}"]`
+      const running = `${runtime} .host-runtime__resources > div:first-child strong`
+      const sample = `${runtime} .host-runtime__sample`
+      await until(`document.querySelector(${JSON.stringify(runtime + ' [aria-label="Refresh Runtime observation"]')})?.disabled===false`)
+      await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
+      await until(`document.querySelector(${JSON.stringify(running)})?.textContent==='4'`)
+      assert.equal(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(2) strong')}).textContent`),'3')
+      assert.equal(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__resources > div:nth-child(3) strong')}).textContent`),'12 MiB')
+      await click(`${runtime} .host-runtime__details > summary`)
+      const identities = await read(`Object.fromEntries([...document.querySelectorAll(${JSON.stringify(runtime + ' dl > div')})].map(row=>[row.querySelector('dt').textContent,row.querySelector('dd').textContent]))`)
+      assert.equal(identities['Host route'],target,'The Host route remains its own identity')
+      assert.equal(identities['Semantic Runtime'],host.runtimeId ?? 'controlled-semantic-runtime')
+      assert.equal(identities['Core instance'],'controlled-core-instance')
+      assert.equal(identities['Native instance'],'controlled-native-instance','Native identity is displayed without substituting the Host route')
+      assert.equal(identities['Native build / protocol'],'controlled-native-build / 22')
+      assert.ok(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__environment')}).textContent.includes('linux · x64 · Node v24.0.0')`))
+      assert.ok(await read(`document.querySelector(${JSON.stringify(runtime + ' .host-runtime__capabilities')}).textContent.includes('Recoverable input')`))
+      await click(`${runtime} .host-runtime__details > summary`)
+      const originalSample = await read(`document.querySelector(${JSON.stringify(sample)}).textContent`)
+      await read('window.connectionsProof.runtimeScenario("partial")')
+      await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
+      await until(`document.querySelector(${JSON.stringify(runtime)})?.textContent.includes('Resource observation is temporarily unavailable')`)
+      assert.equal(await read(`document.querySelector(${JSON.stringify(running)}).textContent`),'4','A partial read keeps the original confirmed count')
+      assert.equal(await read(`document.querySelector(${JSON.stringify(sample)}).textContent`),originalSample,'A partial read preserves the original producer sample time')
+      await read('window.connectionsProof.runtimeScenario("recovered")')
+      await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
+      await until(`document.querySelector(${JSON.stringify(running)})?.textContent==='5'`)
+      assert.notEqual(await read(`document.querySelector(${JSON.stringify(sample)}).textContent`),originalSample,'A recovered real sample has its own producer time')
+      assert.equal(await read(`document.querySelector(${JSON.stringify(runtime)})?.textContent.includes('Resource observation is temporarily unavailable')`),false,'Recovery settles only its original source issue')
+      if(theme==='light') {
+        await read('window.connectionsProof.runtimeScenario("partial")')
+        await click(`${runtime} [aria-label="Refresh Runtime observation"]`)
+        await until(`document.querySelector(${JSON.stringify(runtime)})?.textContent.includes('Resource observation is temporarily unavailable')`)
+        assert.equal(await read(`document.querySelector(${JSON.stringify(running)}).textContent`),'5')
+      }
+      await read(`document.querySelector(${JSON.stringify(runtime)}).scrollIntoView({block:'center',inline:'nearest'})`)
+      await settle()
+      const runtimeFrame = await read(`({bounds:document.querySelector(${JSON.stringify(runtime)}).getBoundingClientRect().toJSON(),height:innerHeight})`)
+      assert.ok(runtimeFrame.bounds.height>0&&runtimeFrame.bounds.top>=0&&runtimeFrame.bounds.bottom<=runtimeFrame.height,'The complete actual Runtime panel is inside the captured viewport')
+      result.interactions.push({kind:'native-runtime-source-partial-recovery',width,theme,identities,originalSample,
+        runtimeFrame,
+        currentSample:await read(`document.querySelector(${JSON.stringify(sample)}).textContent`),
+        boundary:'Controlled strict public DTOs through the original Runtime panel; not a real remote Host or Native observation'})
       await settle()
       const facts=await read(`(()=>{const p=document.querySelector(${JSON.stringify(pane)}),close=document.querySelector('[aria-label="Close settings"]'),visible=n=>n.isConnected&&n.checkVisibility(),controls=[...p.querySelectorAll('button,input,select,summary')].filter(n=>visible(n)&&!n.closest('.react-flow'));return{theme:document.documentElement.dataset.appearance,viewport:{width:innerWidth,height:innerHeight},hosts:p.querySelectorAll('[data-host-node]').length,branches:p.querySelectorAll('[data-host-disclosure]').length,editors:[...p.querySelectorAll('[data-resource-editor]')].map(n=>({id:n.dataset.resourceEditor,panel:n.dataset.hostView,visible:visible(n)})),closeVisible:visible(close),clipped:controls.filter(n=>{const r=n.getBoundingClientRect();return r.width>0&&(r.left<-.5||r.right>innerWidth+.5)}).map(n=>({text:n.textContent?.slice(0,80),rect:n.getBoundingClientRect().toJSON()})),errors:window.connectionsProof.errors.slice()}})()`)
       assert.equal(facts.theme,theme);assert.equal(facts.closeVisible,true);assert.deepEqual(facts.errors,[])
