@@ -38,7 +38,6 @@ events.onmessage = event => {
   if (listeners) for (const listener of listeners) listener(value.value)
 }
 api.config.get = () => invoke('config.get')
-api.sessions.list = async () => []
 api.spatial.read = () => invoke('spatial.read')
 api.spatial.commit = async input => { const value = await invoke('spatial.commit', input); for (const listener of spatial) listener(value); return value }
 api.spatial.retainLabels = input => invoke('spatial.retainLabels', input)
