@@ -1,4 +1,5 @@
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
+import { registerConversationReadIpc } from './conversation-read-ipc'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
 import { RendererTimelineTracer } from './renderer-trace.js'
@@ -672,6 +673,8 @@ export async function registerIpc(args: {
       return callUserRpc(method, parseApplicationAccessParams(method,value))
     })
   })
+  const conversationReads = registerConversationReadIpc({ handle: handleWithEvent, trust: requireTrustedSender,
+    connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } }) })
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent, trust: requireTrustedSender,
@@ -2267,6 +2270,7 @@ export async function registerIpc(args: {
       { owner: 'host-runtime-reads', dispose: () => hostRuntimeReads.dispose() },
       { owner: 'search-reads', dispose: () => searchReads.dispose() },
       { owner: 'history-reads', dispose: () => historyReads.dispose() },
+      { owner: 'conversation-reads', dispose: () => conversationReads.dispose() },
       { owner: 'resource-observation', dispose: () => releaseResourceObservation() },
       { owner: 'notifier', dispose: () => notifier.dispose() },
       { owner: 'browser-native-input', dispose: () => { browsers.onNativeInput = undefined } },

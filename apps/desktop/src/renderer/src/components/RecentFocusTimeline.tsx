@@ -1,14 +1,14 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
-import { readCapturedConversationPage, retainCapturedItems } from '@agentmux/client-ui/captured-conversation-page'
-import { FOCUS_READING_NATIVE_RECORDS as MAX_NATIVE_RECORDS, FOCUS_READING_CAPTURED_RECORDS as MAX_CAPTURED_RECORDS, FOCUS_READING_BYTES as MAX_WINDOW_BYTES } from '../lib/focus-reading-budget'
+import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
+import { FOCUS_READING_BYTES as MAX_WINDOW_BYTES } from '../lib/focus-reading-budget'
 import { TextInput } from '@agentmux/client-ui/input'
 import { TIMELINE_MARKER_HEIGHT, TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
-import { conversationItemRef } from '@agentmux/core/conversation'
+import { conversationItemRef, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { focusMessageMarkers } from '../lib/focus-message-markers'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { projectConversationRecords, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
+import { projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { EMPTY_FOCUS_WORK_ITEMS, MAX_FOCUS_WORK_RECORDS, clipFocusWorkInterval, createFocusWorkSelector, mergeFocusWorkItems, projectFocusWorkHistory, type FocusWorkFacts, type FocusWorkInterval } from '../lib/focus-work-history'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentSessionHistoryPage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
@@ -38,7 +38,6 @@ import { FocusTimelineEventPreview } from './FocusTimelineEventPreview'
 import { focusVisitFacts, focusWorkingFacts, focusLiveFacts, focusGapFacts, type FocusTimelineEventFacts } from '../lib/focus-timeline-event-facts'
 import { FocusTimelineRulerSettings, type FocusDateChoice } from './FocusTimelineRulerSettings'
 import { createFocusTimeFormatters, focusDateCandidates, focusRulerLabels, focusRulerTicks, focusUtcOffset, resolvedFocusTimeZone, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
-import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useFocusHistorySources, type FocusHistoryCatalogue } from '../lib/focus-history-sources'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -112,233 +111,117 @@ function useFocusSpeakerResolver(messages: readonly ConversationRecord[]): Focus
   }, [ids, facts])
 }
 
-const MAX_BATCH_PAGES = 3
 type LatestInputs = { messages: readonly ConversationRecord[]; loading: boolean; error: Error | null; observationError: Error | null; windowFrozen: boolean; windowIncomplete: boolean; refresh(): Promise<void> }
 const EMPTY_LATEST_INPUTS: LatestInputs = { messages: [], loading: false, error: null, observationError: null, windowFrozen: false, windowIncomplete: false, refresh: async () => {} }
-// Subscribe in a memoized leaf: another Context's status/output may update the
-// tracks, but cannot reproject this Context's unchanged native/captured inputs.
-const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pinned, timeline, onChange }: {
-  control: AgentSessionControl | undefined; enabled: boolean; pinned: ConversationRecord | undefined; timeline: AgentTimelineSnapshot | undefined; onChange(value: LatestInputs): void
-}) {
-  const latest = useSessionUserMessages(control, { enabled })
-  const reading = useMemo(() => {
-    if (!enabled) return { messages: EMPTY_LATEST_INPUTS.messages, clipped: false }
-    const page = latest.nativeHistoryPage
-    const pin = pinned?.source.kind === 'native' && pinned.agentSessionId === control?.agentSessionId && pinned.executionHostId === control?.hostId ? pinned : undefined
-    const protectedItem = pin?.source.kind === 'native' && page?.source.providerId === pin.source.providerId && page.source.nativeSessionId === pin.source.nativeSessionId
-      ? page.items.find(item => item.id === pin.rawId) : undefined
-    const capacity = pin ? MAX_NATIVE_RECORDS - 1 : MAX_NATIVE_RECORDS
-    const selected = protectedItem ? new Set([...page!.items.filter(item => item !== protectedItem).slice(-capacity), protectedItem]) : undefined
-    const retained = selected ? page!.items.filter(item => selected.has(item)) : page?.items.slice(-capacity)
-    return { messages: projectConversationRecords({ agentSessionId: control?.agentSessionId ?? '', executionHostId: control?.hostId,
-      ...(page && retained ? { historyPage: { ...page, items: retained } } : {}), timeline }).filter(record => record.role !== 'process'),
-      clipped: !!page && !!retained && retained.length < page.items.length }
-  }, [enabled, latest.nativeHistoryPage, control?.hostId, control?.agentSessionId, pinned, timeline])
-  useLayoutEffect(() => { if (!enabled) return; onChange({ messages: reading.messages, loading: latest.loading, error: latest.error, observationError: latest.observationError, windowFrozen: latest.windowFrozen, windowIncomplete: latest.windowIncomplete === true || reading.clipped, refresh: latest.refresh }) }, [enabled, reading, latest.loading, latest.error, latest.observationError, latest.windowFrozen, latest.windowIncomplete, latest.refresh, onChange])
-  return null
-})
 type NativeWindow = {
   scope: string; reference: SessionHistoryReference | undefined
-  page: AgentSessionHistoryPage | null; timeline: AgentTimelineSnapshot | undefined
-  messages: readonly ConversationRecord[]
-  work: FocusWorkFacts | null
-  capturedCursor?: string | null | undefined; capturedRevision?: string | undefined
-  loading: boolean; error: string | null; capturedError: string | null; rotated: boolean; read: boolean
+  frame?: ConversationWindowSnapshot | undefined
+  page: AgentSessionHistoryPage | null; timeline: AgentTimelineSnapshot | undefined; messages: readonly ConversationRecord[]
+  work: FocusWorkFacts | null; loading: boolean; error: string | null; capturedError: string | null; rotated: boolean; read: boolean
+  capturedCursor?: string | null | undefined; latest?: LatestInputs | undefined
+  earlier?(): Promise<unknown>; newer?(): Promise<unknown>; refresh?(): Promise<void>
 }
 const EMPTY_NATIVE_WINDOW: NativeWindow = { scope: '', reference: undefined, page: null, timeline: undefined, messages: [], work: null, loading: false, error: null, capturedError: null, rotated: false, read: false }
 const EMPTY_READING_PARTITIONS: ReadonlyMap<string, NativeWindow> = new Map()
-type ReadingWindow = { partitions: ReadonlyMap<string, NativeWindow>; trimmed: boolean; nativeCount: number; capturedCount: number; workCount: number; sourceCount: number; bytes: number }
-const EMPTY_READING_WINDOW: ReadingWindow = { partitions: EMPTY_READING_PARTITIONS, trimmed: false, nativeCount: 0, capturedCount: 0, workCount: 0, sourceCount: 0, bytes: 0 }
+type ReadingWindow = { partitions: ReadonlyMap<string, NativeWindow>; trimmed: boolean; nativeCount: number; capturedCount: number; workCount: number; sourceCount: number; readerCount: number; bytes: number }
+const EMPTY_READING_WINDOW: ReadingWindow = { partitions: EMPTY_READING_PARTITIONS, trimmed: false, nativeCount: 0, capturedCount: 0, workCount: 0, sourceCount: 0, readerCount: 0, bytes: 0 }
 
-/** The one mounted reading window. Viewport changes filter it; explicit reads admit raw facts. */
-function useFocusInputWindow(control: SessionHistoryReference | undefined, scope: string, enabled: boolean, snapshot: boolean, pinned: ConversationRecord | undefined, includeCaptured: boolean, captured: AgentTimelineSnapshot | undefined) {
+/** Each admitted Context keeps one original public view. Inactive leaves park it without reads. */
+const FocusInputSource = memo(function FocusInputSource({ reference, scope, active, historical, pinned, onChange }: {
+  reference: SessionHistoryReference; scope: string; active: boolean; historical: boolean; pinned: ConversationRecord | undefined; onChange(part: NativeWindow): void
+}) {
+  const previous = useRef<readonly ConversationRecord[]>([])
+  const view = useConversationView(api.conversation, reference, active, { identity: scope, beforeCommit: frame => {
+    if (!pinned || !previous.current.some(record => record.id === pinned.id)) return true
+    return projectConversationWindow(frame).records.some(record => record.id === pinned.id && record.event?.revision === pinned.event?.revision)
+  } })
+  const projection = useMemo(() => view.snapshot ? projectConversationWindow(view.snapshot) : null, [view.snapshot])
+  const messages = useMemo(() => projection?.records.filter(record => record.role !== 'process') ?? EMPTY_LATEST_INPUTS.messages, [projection])
+  previous.current = messages
+  useEffect(() => { view.acceptHeld() }, [pinned, view.acceptHeld])
+  const requestedEarlier = useRef(false)
+  useEffect(() => {
+    if (!historical) { requestedEarlier.current = false; return }
+    if (!active || requestedEarlier.current || !view.snapshot || view.loading) return
+    requestedEarlier.current = true; void view.earlier()
+  }, [active, historical, view.snapshot, view.loading, view.earlier])
+  useLayoutEffect(() => {
+    onChange({ ...EMPTY_NATIVE_WINDOW, reference, scope, frame: view.snapshot ?? undefined,
+      page: projection?.historyPage ?? null, timeline: projection?.captured, messages,
+      loading: view.loading, error: view.error ? presentError(view.error) : null,
+      capturedError: view.observationError ? presentError(view.observationError) : view.held ? 'The pinned original frame is retained. Close its preview to accept newer records.' : null,
+      rotated: Boolean(view.snapshot?.window.outside.older || view.snapshot?.window.outside.newer), read: !!view.snapshot,
+      capturedCursor: view.snapshot?.window.navigation.older ?? (view.snapshot ? null : undefined),
+      earlier: view.earlier, newer: view.newer, refresh: view.refresh,
+      latest: { messages, loading: view.loading, error: view.error, observationError: view.observationError,
+        windowFrozen: view.historical, windowIncomplete: Boolean(view.snapshot?.window.outside.older), refresh: view.refresh } })
+  }, [reference, scope, projection, messages, view.snapshot, view.loading, view.error, view.observationError, view.historical, view.held, onChange])
+  return null
+})
+
+/** Presentation retention of whole accepted frames, never a private native/captured merge. */
+function useFocusInputWindow(control: SessionHistoryReference | undefined, scope: string, enabled: boolean, historical: boolean, pinned: ConversationRecord | undefined) {
   const [window, setWindow] = useState<ReadingWindow>(EMPTY_READING_WINDOW)
   const windowRef = useRef(window); windowRef.current = window
-  const pinnedRef = useRef(pinned); pinnedRef.current = pinned
-  const lifetime = useRef(0), pending = useRef(false)
-  const enabledRef = useRef(enabled); enabledRef.current = enabled
-  // Sizes belong to the raw records in this holder, not a second message cache.
-  // Only admission/pruning consults them; viewport/Now renders never stringify.
+  const pin = useRef(pinned); pin.current = pinned
+  const selected = useRef(scope); selected.current = scope
+  const active = useRef(enabled); active.current = enabled
   const sizes = useRef(new WeakMap<object, number>())
   const admit = useCallback((next: NativeWindow) => {
     const partitions = new Map(windowRef.current.partitions)
-    // Typed work shares this reading holder, but not the captured-input budget
-    // or the native Run/read-mode scope. A closed projection can disappear from
-    // Store without erasing what this page has already observed.
-    const observed = next.timeline?.items.filter(item => item.activityState !== undefined) ?? EMPTY_FOCUS_WORK_ITEMS
-    if (next.reference && observed.length) {
-      const workScope = JSON.stringify(['work', next.reference.hostId, next.reference.agentSessionId])
-      const before = partitions.get(workScope) ?? { ...EMPTY_NATIVE_WINDOW, scope: workScope, reference: next.reference }
-      const identities = new Map(before.work?.identities)
-      for (const item of observed) if (!identities.has(item.id)) identities.set(item.id, undefined)
-      partitions.set(workScope, { ...before, work: { items: mergeFocusWorkItems(before.work?.items ?? EMPTY_FOCUS_WORK_ITEMS, observed), identities, trimmed: before.work?.trimmed ?? false, error: null }, read: before.read || next.read })
-    }
     partitions.delete(next.scope); partitions.set(next.scope, next)
-    let trimmed = windowRef.current.trimmed
-    const pin = pinnedRef.current
-    const protects = (part: NativeWindow, item: { id: string }, kind: 'native' | 'captured') => {
-      if (!pin || pin.agentSessionId !== part.reference?.agentSessionId || pin.executionHostId !== part.reference?.hostId) return false
-      return kind === 'native' ? pin.source.kind === 'native' && pin.source.recordId === item.id && pin.source.providerId === part.page?.source.providerId && pin.source.nativeSessionId === part.page?.source.nativeSessionId
-        : pin.source.kind === 'captured' && pin.source.recordId === item.id
-    }
-    const isPinned = (part: NativeWindow) => !!(part.page?.items.some(item => protects(part, item, 'native')) || part.timeline?.items.some(item => protects(part, item, 'captured')))
-    for (const [key, part] of partitions) {
-      if (partitions.size <= MAX_NATIVE_RECORDS) break
-      if (key !== next.scope && !isPinned(part)) { partitions.delete(key); trimmed = true }
-    }
-    const byteSize = (item: object) => {
-      let bytes = sizes.current.get(item)
-      if (bytes === undefined) { bytes = new TextEncoder().encode(JSON.stringify(item)).byteLength; sizes.current.set(item, bytes) }
+    const size = (object: object) => {
+      let bytes = sizes.current.get(object)
+      if (bytes === undefined) { bytes = new TextEncoder().encode(JSON.stringify(object)).byteLength; sizes.current.set(object, bytes) }
       return bytes
     }
-    let nativeCount = 0, capturedCount = 0, workCount = 0, bytes = 0
-    const readReferences = new Set<string>()
-    for (const part of partitions.values()) {
-      if (part.read && part.reference) readReferences.add(JSON.stringify([part.reference.hostId, part.reference.agentSessionId]))
-      for (const item of part.page?.items ?? []) { nativeCount++; bytes += byteSize(item) }
-      for (const item of part.timeline?.items ?? []) { capturedCount++; bytes += byteSize(item) }
-      for (const item of part.work?.items ?? []) { workCount++; bytes += byteSize(item); const identity = part.work?.identities?.get(item.id); if (identity) bytes += byteSize(identity) }
-    }
-    // Trim complete records in least-recently-read partitions first. The active
-    // identity is retained, but its pages receive no exemption from the budget.
-    while (nativeCount > MAX_NATIVE_RECORDS || capturedCount > MAX_CAPTURED_RECORDS || workCount > MAX_FOCUS_WORK_RECORDS || bytes > MAX_WINDOW_BYTES) {
-      let removed = false
-      // Work admissions must not evict already read inputs while work itself
-      // can release bytes. Choose the category across the whole holder before
-      // visiting its partitions, rather than according to partition order.
-      const kinds: readonly ('native' | 'captured' | 'work')[] = nativeCount > MAX_NATIVE_RECORDS ? ['native'] : capturedCount > MAX_CAPTURED_RECORDS ? ['captured'] : workCount > MAX_FOCUS_WORK_RECORDS ? ['work'] : ['work', 'native', 'captured']
-      trim: for (const kind of kinds) for (const [key, part] of partitions) {
-        const items = kind === 'native' ? part.page?.items : kind === 'work' ? part.work?.items : part.timeline?.items
-        if (!items?.length) continue
-        let index = kind === 'work' ? 0 : items.length - 1
-        while (index >= 0 && kind !== 'work' && protects(part, items[index]!, kind)) index--
-        if (index < 0) continue
-        bytes -= byteSize(items[index]!)
-        if (kind === 'work') { const identity = part.work?.identities?.get(items[index]!.id); if (identity) bytes -= byteSize(identity) }
-        if (kind === 'native') {
-          nativeCount--; partitions.set(key, { ...part, page: { ...part.page!, items: part.page!.items.filter((_, i) => i !== index) }, rotated: true })
-        } else if (kind === 'work') {
-          const identities = new Map(part.work!.identities); identities.delete(items[index]!.id)
-          workCount--; partitions.set(key, { ...part, work: { ...part.work!, items: part.work!.items.filter((_, i) => i !== index), identities, trimmed: true } })
-        } else {
-          capturedCount--; partitions.set(key, { ...part, timeline: { ...part.timeline!, items: part.timeline!.items.filter((_, i) => i !== index) }, rotated: true })
+    const totals = () => {
+      let nativeCount = 0, capturedCount = 0, workCount = 0, bytes = 0, sourceCount = 0, readerCount = 0
+      for (const part of partitions.values()) {
+        if (part.reference && !part.work) readerCount++
+        if (part.frame) {
+          sourceCount++; bytes += size(part.frame)
+          for (const unit of part.frame.units) for (const record of unit.records) record.original.kind === 'native' ? nativeCount++ : capturedCount++
         }
-        removed = true; trimmed = true; break trim
+        for (const item of part.work?.items ?? []) { workCount++; bytes += size(item); const identity = part.work?.identities?.get(item.id); if (identity) bytes += size(identity) }
       }
-      if (!removed) break // The one previously admitted pin is already within the bound.
+      return { nativeCount, capturedCount, workCount, bytes, sourceCount, readerCount }
     }
-    // Memoize only the derived view alongside this holder's raw facts. Updating
-    // B's page/status cannot reproject unchanged A; pruned facts do reproject.
+    let trimmed = windowRef.current.trimmed, count = totals()
+    const protectedFrame = (part: NativeWindow) => part.scope === selected.current || Boolean(pin.current && part.messages.some(message => message.id === pin.current!.id))
+    // An original frame is indivisible. Release older unselected frames first;
+    // the current frame obeys the backend's original record/body bound.
     for (const [key, part] of partitions) {
-      const before = windowRef.current.partitions.get(key)
-      if (before && part.page === before.page && part.timeline === before.timeline) {
-        if (part.messages !== before.messages) partitions.set(key, { ...part, messages: before.messages })
-      } else if (part.reference) partitions.set(key, { ...part, messages: projectConversationRecords({ agentSessionId: part.reference.agentSessionId, executionHostId: part.reference.hostId, historyPage: part.page ?? undefined, timeline: part.timeline }).filter(record => record.role !== 'process') })
+      if (count.bytes <= MAX_WINDOW_BYTES && count.readerCount <= 16 && count.workCount <= MAX_FOCUS_WORK_RECORDS) break
+      if (protectedFrame(part)) continue
+      partitions.delete(key); trimmed = true; count = totals()
     }
-    const value = { partitions, trimmed, nativeCount, capturedCount, workCount, sourceCount: readReferences.size, bytes }
-    windowRef.current = value; setWindow(value)
+    const result = { partitions, trimmed, ...count }
+    windowRef.current = result; setWindow(result)
   }, [])
-  const readBatch = useCallback(async (refresh = false) => {
-    if (!enabledRef.current || !snapshot || !control || pending.current) return
-    const before = windowRef.current.partitions.get(scope) ?? { ...EMPTY_NATIVE_WINDOW, scope, reference: control }
-    if (!refresh && before.page?.nextCursor === null && before.capturedCursor === null) return
-    const request = lifetime.current
-    pending.current = true
-    admit({ ...before, ...(refresh ? { capturedCursor: undefined, capturedRevision: undefined } : {}), loading: true, error: null })
-    let accepted = refresh ? null : before.page
-    let rotated = refresh ? false : before.rotated
-    const valid = () => enabledRef.current && request === lifetime.current
-    const commit = (change: Partial<NativeWindow>) => {
-      if (valid()) admit({ ...(windowRef.current.partitions.get(scope) ?? before), ...change })
-    }
-    try {
-      if (includeCaptured && (refresh || !before.timeline)) {
-        try {
-          const timeline = await api.sessions.timeline(control)
-          if (!valid()) return
-          if (timeline.agentSessionId !== control.agentSessionId) throw new Error('Captured records belong to another Context.')
-          commit({ timeline, capturedError: null, read: true })
-        } catch (cause) { if (!valid()) return; commit({ capturedError: presentError(cause) }) }
-      }
-      // The existing bounded holder pages the retained captured source too. The recent
-      // projection is not a claim that earlier captured records have been read.
-      if (!refresh && before.read && before.capturedCursor !== null) {
-        try {
-          const current = windowRef.current.partitions.get(scope) ?? before
-          let next: string | null | undefined = before.capturedCursor; let result: Awaited<ReturnType<typeof readCapturedConversationPage>>
-          const base = current.timeline?.items ?? [], known = new Set(base.map(item => item.id))
-          let incoming: AgentTimelineItem[] = [], scanned = 0
-          do {
-            result = await readCapturedConversationPage(input => {
-              const { hostId: _host, agentSessionId: _session, ...options } = input
-              return api.sessions.readHistory(control, options)
-            }, { hostId: control.hostId, agentSessionId: control.agentSessionId, limit: 100, ...(next ? { cursor: next } : {}) }, valid)
-            if (!valid()) return
-            if (current.timeline?.sourceHostId && current.timeline.sourceHostId !== result.snapshot.sourceHostId) throw new Error('The original captured source Host changed. Its reading and cursor are retained.')
-            if (before.capturedRevision !== undefined && before.capturedRevision !== result.revision) throw new Error('Captured source changed. The original reading is retained; refresh source.')
-            incoming = retainCapturedItems(result.snapshot.items, incoming); next = result.nextCursor; scanned += result.snapshot.items.length
-          } while (next && !incoming.some(item => !known.has(item.id)) && scanned < MAX_CAPTURED_RECORDS)
-          commit({ timeline: { ...result.snapshot, items: retainCapturedItems(incoming, base) }, capturedCursor: next,
-            capturedRevision: result.revision, capturedError: null, read: true })
-        } catch (cause) { if (!valid()) return; commit({ capturedError: presentError(cause) }) }
-      }
-      if (!refresh && accepted?.nextCursor === null) return
-      for (let index = 0; index < MAX_BATCH_PAGES; index++) {
-        if (!valid()) return
-        const cursor = accepted?.nextCursor ?? undefined
-        const page = await api.sessions.historyPage(control, { limit: 30, ...(cursor ? { cursor } : {}) })
-        if (!valid()) return
-        if (page.agentSessionId !== control.agentSessionId) throw new Error('Input records belong to another Context.')
-        if (accepted && (accepted.source.providerId !== page.source.providerId || accepted.source.nativeSessionId !== page.source.nativeSessionId)) throw new Error('Native history source changed. Refresh source to read the new snapshot.')
-        if (cursor && page.nextCursor === cursor) throw new Error('The input history cursor did not advance. Retry this read.')
-        const existing = accepted?.items ?? [], ids = new Set(existing.map(item => item.id))
-        const combined = [...page.items.filter(item => { if (ids.has(item.id)) return false; ids.add(item.id); return true }), ...existing]
-        commit({ page: { ...page, items: combined }, loading: true, error: null, rotated, read: true })
-        accepted = windowRef.current.partitions.get(scope)!.page
-        rotated = windowRef.current.partitions.get(scope)!.rotated
-        if (page.nextCursor === null) break
-      }
-    } catch (cause) { commit({ error: presentError(cause) }) }
-    finally { if (valid()) { pending.current = false; commit({ loading: false }) } }
-  }, [control?.hostId, control?.agentSessionId, scope, snapshot, includeCaptured, admit])
   useEffect(() => {
-    ++lifetime.current; pending.current = false
-    if (!enabled) {
-      const partitions = new Map([...windowRef.current.partitions].map(([key, part]) => [key, part.loading ? { ...part, loading: false } : part]))
-      const next = { ...windowRef.current, partitions }; windowRef.current = next; setWindow(next)
+    if (!enabled || !control || windowRef.current.partitions.has(scope)) return
+    const old = [...windowRef.current.partitions].filter(([, part]) => part.reference?.hostId === control.hostId && part.reference.agentSessionId === control.agentSessionId && !part.work)
+    for (const [key] of old) {
+      const partitions = new Map(windowRef.current.partitions); partitions.delete(key)
+      windowRef.current = { ...windowRef.current, partitions }
     }
-    else if (control && snapshot) {
-      // A new Run/read mode invalidates only this Context's old reading intent.
-      const partitions = new Map(windowRef.current.partitions)
-      let stopped = false
-      for (const [key, part] of partitions) if (part.loading) { partitions.set(key, { ...part, loading: false }); stopped = true }
-      for (const [key, part] of partitions) if (key !== scope && !part.work && part.reference?.hostId === control.hostId && part.reference.agentSessionId === control.agentSessionId) partitions.delete(key)
-      if (partitions.size !== windowRef.current.partitions.size || stopped) {
-        windowRef.current = { ...windowRef.current, partitions }
-        const next = partitions.get(scope) ?? { ...EMPTY_NATIVE_WINDOW, scope, reference: control }
-        admit(next)
-      }
-      const retained = partitions.get(scope)
-      if (!retained || (!retained.page && !retained.error)) void readBatch(!retained)
-    }
-    return () => { ++lifetime.current; pending.current = false }
-  }, [enabled, scope, snapshot, readBatch, admit])
-  useEffect(() => {
-    if (!enabled || !snapshot || !control || includeCaptured || !captured || captured.agentSessionId !== control.agentSessionId) return
-    const part = windowRef.current.partitions.get(scope) ?? { ...EMPTY_NATIVE_WINDOW, scope, reference: control }
-    admit({ ...part, timeline: captured, read: true })
-  }, [captured, enabled, snapshot, control?.hostId, control?.agentSessionId, scope, includeCaptured, admit])
+    admit({ ...EMPTY_NATIVE_WINDOW, reference: control, scope })
+  }, [control?.hostId, control?.agentSessionId, scope, enabled, admit])
   const observeWork = useCallback((reference: SessionHistoryReference, items: readonly AgentTimelineItem[], identity: AgentFocusHistoryIdentity | undefined) => {
-    if (!enabledRef.current || !items.length) return
+    if (!active.current || !items.length) return
     const workScope = JSON.stringify(['work', reference.hostId, reference.agentSessionId])
     const before = windowRef.current.partitions.get(workScope) ?? { ...EMPTY_NATIVE_WINDOW, scope: workScope, reference }
     const merged = mergeFocusWorkItems(before.work?.items ?? EMPTY_FOCUS_WORK_ITEMS, items)
     if (before.work && merged === before.work.items) return
     const identities = new Map(before.work?.identities)
-    for (const item of items) if (!identities.has(item.id)) identities.set(item.id, identity)
+    for (const item of merged) if (!identities.has(item.id)) identities.set(item.id, identity)
     admit({ ...before, work: { items: merged, identities, trimmed: before.work?.trimmed ?? false, error: before.work?.error ?? null } })
   }, [admit])
-  return { ...(window.partitions.get(scope) ?? EMPTY_NATIVE_WINDOW), window, observeWork, continueReading: () => void readBatch(), refresh: () => void readBatch(true) }
+  const current = window.partitions.get(scope) ?? EMPTY_NATIVE_WINDOW
+  const readers = [...window.partitions].flatMap(([key, part]) => part.reference && !part.work ? [<FocusInputSource key={key}
+    reference={part.reference} scope={key} active={enabled && key === scope} historical={key === scope && historical} pinned={pinned} onChange={admit} />] : [])
+  return { ...current, window, readers, observeWork, continueReading: () => void current.earlier?.(), refresh: () => void current.refresh?.() }
 }
 
 const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, scaleWidth, lane, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence, onEvent, onEventChanged, onCurrentPresence }: {
@@ -364,23 +247,12 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const userName = useAppStore(state => state.agentNames[sessionId])
   // A track observes only its own canonical timeline; unrelated output never scans its messages.
   const timeline = useAppStore(state => state.timelines[sessionId])
-  const resyncTimeline = useAppStore(state => state.resyncTimeline)
-  const requestedHistory = useRef<string | null>(null)
-  const sessionHostId = session?.kind === 'agent' ? session.control.hostId : undefined
-  useEffect(() => {
-    if (timeline) { requestedHistory.current = null; return }
-    if (!observing || context?.kind !== 'agent' || sessionHostId !== context.hostId) return
-    const key = JSON.stringify([context.hostId, sessionId])
-    if (requestedHistory.current === key) return
-    requestedHistory.current = key
-    void resyncTimeline(sessionId, { observationOnly: true })
-  }, [observing, context?.kind, context?.hostId, sessionHostId, sessionId, timeline, resyncTimeline])
   const name = agentDisplayName({ userName,
     firstPrompt: session?.kind === 'agent' ? firstPromptFromTimeline(timeline) : undefined,
     fallbackLabel: session?.kind === 'agent' ? session.label : context?.name ?? identity?.name ?? sessionId,
     providerLabel: agentProviderLabel(context?.providerId ?? identity?.providerId ?? '') })
   const observedName = !context && identity?.name && identity.name !== name ? identity.name : undefined
-  const captured = useMemo(() => nativeMessages === undefined && context && timeline ? projectConversationRecords({ agentSessionId: sessionId, executionHostId: context?.hostId, timeline }).filter(record => record.role !== 'process') : EMPTY_LATEST_INPUTS.messages, [sessionId, !!context, context?.hostId, timeline, nativeMessages])
+  const captured = EMPTY_LATEST_INPUTS.messages
   // Record facts are checked when observed; the slowly refreshed playhead is not their arrival fence.
   const messages = useMemo(() => { const observedNow = Date.now(); return (nativeMessages ?? captured).filter(item =>
     (!recordedMessageTracks?.has(item.id) || recordedMessageTracks.get(item.id) === track.key) && item.recordedAt !== undefined && Number.isFinite(item.recordedAt)
@@ -859,10 +731,10 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const readonlyReading = !!inputReference && !inputControl
   const readingEnabled = mode !== 'collapsed' && documentVisible && !!inputReference
   const historical = earlier || readonlyReading
-  const [latest, setLatest] = useState<LatestInputs>(EMPTY_LATEST_INPUTS)
   // The viewport filters a bounded snapshot; it is not another reading intent.
-  const readingScope = JSON.stringify([inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId, historical ? 'snapshot' : 'latest', readonlyReading])
-  const nativeWindow = useFocusInputWindow(inputReference, readingScope, mode !== 'collapsed' && documentVisible, historical, preview?.message, readonlyReading, inputTimeline)
+  const readingScope = JSON.stringify([inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId])
+  const nativeWindow = useFocusInputWindow(inputReference, readingScope, mode !== 'collapsed' && documentVisible, historical, preview?.message)
+  const latest = nativeWindow.latest ?? EMPTY_LATEST_INPUTS
   const readSources = useMemo(() => [...nativeWindow.window.partitions.values()].filter(part => part.reference && (part.page || part.timeline || part.work)).map(part => ({
     reference: part.reference!, messages: part.messages, conversationRead: !!(part.page || part.timeline), work: part.work, capturedError: part.capturedError
   })), [nativeWindow.window.partitions])
@@ -878,7 +750,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   }, [readSources])
   const projected = useMemo(() => inputReference ? historical
     ? readMessagesByReference.get(JSON.stringify([inputReference.hostId, inputReference.agentSessionId])) ?? []
-    : inputControl ? latest.messages : projectConversationRecords({ agentSessionId: inputReference.agentSessionId, executionHostId: inputReference.hostId, timeline: inputTimeline }).filter(record => record.role !== 'process') : [], [inputReference?.hostId, inputReference?.agentSessionId, inputControl, readingEnabled, historical, readMessagesByReference, inputTimeline, latest.messages])
+    : latest.messages : [], [inputReference?.hostId, inputReference?.agentSessionId, inputControl, readingEnabled, historical, readMessagesByReference, inputTimeline, latest.messages])
   const inputMessages = useMemo(() => projected.filter(item => item.agentSessionId === inputReference?.agentSessionId), [projected, inputReference?.agentSessionId])
   const messagesByReference = useMemo(() => {
     const result = new Map(readMessagesByReference)
@@ -1067,8 +939,8 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const inputObservationNotice = historical ? null : latest.windowFrozen
     ? 'Automatic updates are paused. The current reading window is kept. Read latest records to open a new window.'
     : latest.observationError ? `Automatic updates unavailable: ${presentError(latest.observationError)} Existing records are kept.` : null
-  return <section ref={timelineRef} style={{ height: mode === 'collapsed' ? 28 : height, '--focus-name-width': `${nameWidth}px` } as CSSProperties} className="recent-focus" aria-label="Recent Focus" data-mode={mode} data-ruler-mode={ruler.mode} data-time-zone={time.zone} data-read-source-count={nativeWindow.window.sourceCount} data-native-record-count={nativeWindow.window.nativeCount} data-captured-record-count={nativeWindow.window.capturedCount} data-work-record-count={nativeWindow.window.workCount} data-read-bytes={nativeWindow.window.bytes} data-reading-trimmed={nativeWindow.window.trimmed || undefined} data-window-start={range.start} data-window-end={range.end}>
-    <FocusLatestInputs control={inputControl} timeline={inputTimeline} enabled={readingEnabled && !historical} pinned={historical || !preview?.interactive ? undefined : preview.message} onChange={setLatest} />
+  return <section ref={timelineRef} style={{ height: mode === 'collapsed' ? 28 : height, '--focus-name-width': `${nameWidth}px` } as CSSProperties} className="recent-focus" aria-label="Recent Focus" data-mode={mode} data-ruler-mode={ruler.mode} data-time-zone={time.zone} data-read-source-count={nativeWindow.window.sourceCount} data-mounted-reader-count={nativeWindow.window.readerCount} data-native-record-count={nativeWindow.window.nativeCount} data-captured-record-count={nativeWindow.window.capturedCount} data-work-record-count={nativeWindow.window.workCount} data-read-bytes={nativeWindow.window.bytes} data-reading-trimmed={nativeWindow.window.trimmed || undefined} data-window-start={range.start} data-window-end={range.end}>
+    {nativeWindow.readers}
     {mode !== 'collapsed' ? <div ref={nameResize.containerRef} className="recent-focus__name-column-resize" data-resizing={nameResize.isResizing} style={{ top: headerHeight + 8 }}>
       <div ref={nameHandleRef} className="recent-focus__name-separator" role="separator" tabIndex={0} aria-label="Resize timeline names" aria-orientation="vertical" aria-valuemin={FOCUS_TIMELINE_NAME_WIDTH_MIN} aria-valuemax={nameMaximum} aria-valuenow={nameWidth}
         title="Drag to resize timeline names · Double-click or Enter to reset" onDoubleClick={nameResize.onResizeReset}
@@ -1143,7 +1015,6 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         onMessage: (message: ConversationRecord) => setPreview(current => current ? { ...current, message } : current),
         onContinue: () => { if (!historical) setEarlier(true); else nativeWindow.continueReading() },
         onRefresh: () => {
-          if (inputContext && !inputTimeline) void useAppStore.getState().resyncTimeline(inputContext.id, { observationOnly: true })
           if (historical) nativeWindow.refresh(); else void latest.refresh()
         }
       } } : {})} /> : null}

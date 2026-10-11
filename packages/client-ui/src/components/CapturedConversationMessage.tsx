@@ -23,7 +23,7 @@ export function CapturedConversationMessage({ item, record, replyObservation, ..
       <dt>Session</dt><dd><code>{item.agentSessionId}</code></dd>
       {item.eventName ? <><dt>Recorded event</dt><dd>{item.eventName}</dd></> : null}
     </dl>{props.messageDetails}</>} />
-  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} observation={Boolean(replyObservation)} compact={replyObservation?.compact ?? false} reveal={props.located === true} sources={record?.sources}>{message}</ReplyObservation>
+  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} observation={record?.role === 'observation' || Boolean(replyObservation)} compact={replyObservation?.compact ?? record?.role === 'observation'} reveal={props.located === true} sources={record?.sources}>{message}</ReplyObservation>
 }
 
 function ReplyObservation({ item, observation, compact, reveal, children, sources }: { item: AgentTimelineItem; observation: boolean; compact: boolean; reveal: boolean; children: ReactNode; sources?: import('../lib/conversation-sources.js').ConversationSources | undefined }) {

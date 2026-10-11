@@ -1603,6 +1603,7 @@ export type HostCreationTrustSnapshot = {
 export type ThemeFileExportResult = { status: 'saved'; path: string } | { status: 'cancelled' } | { status: 'download-requested' }
 
 export type AgentMuxDesktopApi = {
+  conversation: import('./conversation-read').ConversationReadApi
   performance: {
     captureProfile(input: import('@agentmux/core/control').RendererV8ProfileInput): Promise<import('@agentmux/core/control').RendererV8ProfileResult>
     captureTrace(input: import('@agentmux/core/control').RendererTraceInput): Promise<import('@agentmux/core/control').RendererTraceResult>
@@ -2070,11 +2071,12 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'applications'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'applications' | 'conversation'> & {
   applications: {
     call<M extends import('@agentmux/core').ApplicationAccessMethod>(method: M,
       params: import('@agentmux/core').ApplicationAccessParameterMap[M]): Promise<SessionInputOperationResult<import('@agentmux/core').ApplicationAccessResultMap[M]>>
   }
+  conversation: import('./conversation-read').ConversationReadPreloadApi
   hosts: Omit<AgentMuxDesktopApi['hosts'], 'inspect'> & {
     inspect(host: HostConfig, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SessionInputOperationResult<import('@agentmux/core').HostRuntimeObservation>>
   }

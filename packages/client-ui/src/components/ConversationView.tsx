@@ -3,7 +3,7 @@ import { CapturedProcessRecord } from './CapturedProcessRecord.js'
 import { ConversationOriginalRecords } from './ConversationOriginalRecords.js'
 import { useConversationRecordLayout } from '../lib/use-conversation-record-layout.js'
 import type { AgentCapabilities, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
-import { projectConversationReading, type ConversationRecord } from '../lib/conversation-records.js'
+import type { ConversationRecord } from '../lib/conversation-records.js'
 import { memo, useMemo, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
@@ -35,7 +35,7 @@ type Props = ReadingProps & {
   renderQuestionNotice?: QuestionNoticeRenderer
   page?: AgentSessionHistoryPage | null
   timeline?: AgentTimelineSnapshot | undefined
-  records?: readonly ConversationRecord[]
+  records: readonly ConversationRecord[]
   originalRecords?: readonly ConversationRecord[]
   coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage']
   onLocateRecord?: import('react').ComponentProps<typeof ConversationCoverage>['onLocate']
@@ -60,17 +60,14 @@ type Props = ReadingProps & {
 export const ConversationView = memo(function ConversationView({
   page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
 }: Props) {
-  const projection = useMemo(() => acceptedRecords ? { records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords, coverage: coverage ?? acceptedRecords[0]?.coverage ?? [] }
-    : (() => { const value = projectConversationReading({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page ?? undefined, timeline }); return { records: value.records, originalRecords: value.originalRecords, coverage: value.timeline.coverage } })(),
-    [acceptedRecords, acceptedOriginals, coverage, page, timeline, sessionId, reading.executionHostId])
-  const projectedRecords = projection.records
-  const layout = useConversationRecordLayout(projectedRecords, { agentSessionId: sessionId, executionHostId: reading.executionHostId,
-    historyPage: page ?? undefined, timeline }, JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch]))
+  const projection = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
+    coverage: coverage ?? acceptedRecords[0]?.coverage ?? [] }), [acceptedRecords, acceptedOriginals, coverage])
+  const layout = useConversationRecordLayout(projection.records, projection.originalRecords, JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch]))
   const describedRecords = layout.records
   if (page && page.agentSessionId !== sessionId) return null
   if (describedRecords.length === 0 && !insertions?.length && projection.coverage.length === 0) return null
   const descriptions = new Map(describedRecords.filter(record => record.original.kind === 'native').map(record => [record.rawId, record]))
-  const originals = new Map(projection.originalRecords.map(record => [record.records![0]!.id, record]))
+  const originals = new Map(layout.originalRecords.map(record => [record.records![0]!.id, record]))
   const questions = new Map((page ? projectConversationQuestions({ agentSessionId: sessionId, executionHostId: reading.executionHostId, historyPage: page ?? undefined, answerContext: questionAnswerContext }) : [])
     .map(question => [question.recordId, question]))
   const locatedRecord = locatedMessageKey ? describedRecords.find(record => conversationMessageSourceKey(sessionId, record.source) === locatedMessageKey
@@ -92,7 +89,7 @@ export const ConversationView = memo(function ConversationView({
     return renderCapturedRecord ? renderCapturedRecord(record, disclosure) : record.role === 'process' || record.role === 'interaction'
       ? <CapturedProcessRecord record={record} {...(disclosure ? { disclosure } : {})} located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)} /> : <CapturedConversationMessage
         item={record.original.kind === 'captured' ? record.original.item : neverCaptured()} record={record}
-        {...(record.role === 'observation' ? { replyObservation: { compact: Boolean(page?.items.length) } } : {})}
+        {...(record.role === 'observation' ? { replyObservation: { compact: true } } : {})}
         {...(record.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})}
         {...(record.speaker ? { speaker: record.speaker } : {})}
         {...(describeSpeaker ? { describeSpeaker } : {})} conversationSessionId={sessionId}
