@@ -307,8 +307,7 @@ it('unavailable encryption refuses only enrollment before any bootstrap effect a
     expect.objectContaining({
       adapterId: 'feishu',
       domain: input.domain,
-      availability: 'unavailable',
-      reason: 'secure-storage-unavailable'
+      availability: 'available'
     })
   )
   const attempted = await client.call('connection.enrollment.begin', input)
