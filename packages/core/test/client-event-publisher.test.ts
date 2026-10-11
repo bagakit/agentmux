@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
+import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+
 
 const event: AgentMuxClientEvent = {
   type: 'agent-error',
@@ -26,9 +28,9 @@ describe('AgentMux Client event publisher Consumer isolation', () => {
   })
 
   it('reports rejecting and unresolved JS Consumers without blocking healthy Consumers or a transient synchronous failure', async () => {
-    const publisher = new AgentMuxClientEventPublisher(), failures = vi.fn(), delivered = vi.fn()
+    const publisher = new AgentMuxClientEventPublisher(), failures = vi.fn(), delivered = vi.fn<(value: AgentMuxClientEvent) => void>()
     let throws = true
-    const recovering = vi.fn(() => { if (throws) throw new Error('transient failure') })
+    const recovering = vi.fn((_event: AgentMuxClientEvent) => { if (throws) throw new Error('transient failure') })
     publisher.onEvent(recovering)
     publisher.onEvent((async () => { throw new Error('async failure') }) as unknown as (event: AgentMuxClientEvent) => void, { onError: failures })
     publisher.onEvent((() => new Promise<void>(() => {})) as unknown as (event: AgentMuxClientEvent) => void, { onError: failures })
@@ -84,7 +86,7 @@ describe('AgentMux Client event publisher Consumer isolation', () => {
 
   it('publishes the Store-assigned Timeline revision and canonical mutation', () => {
     const publisher = new AgentMuxClientEventPublisher()
-    const delivered = vi.fn()
+    const delivered = vi.fn<(value: AgentMuxClientEvent) => void>()
     publisher.onEvent(delivered)
     const mutation = {
       type: 'update' as const,
@@ -98,14 +100,19 @@ describe('AgentMux Client event publisher Consumer isolation', () => {
       agentSessionId: 'session-1',
       revision: 7,
       changed: true,
-      mutation
-    }, { source: 'acp', observedAt: 2, acpAdapterId: 'adapter-1', acpSessionId: 'native-1' })
+      mutation,
+      stream: { epoch: 'original-epoch', sequence: 4, revision: 7, origin: 'retained-prefix', gaps: [] },
+      position: { id: 'assistant-1', firstSequence: 1, sequence: 4, revision: 'a'.repeat(64) }
+    }, { source: 'acp', observedAt: _historyFixtureEpoch(0, 0, 2), acpAdapterId: 'adapter-1', acpSessionId: 'native-1' }, 'original-source-host')
 
     expect(delivered).toHaveBeenCalledWith({
       type: 'agent-timeline',
       agentSessionId: 'session-1',
       revision: 7,
       mutation,
+      sourceHostId: 'original-source-host',
+      stream: { epoch: 'original-epoch', sequence: 4, revision: 7, origin: 'retained-prefix', gaps: [] },
+      position: { id: 'assistant-1', firstSequence: 1, sequence: 4, revision: 'a'.repeat(64) },
       evidence: {
         source: 'acp',
         observedAt: 2,
