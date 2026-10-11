@@ -121,6 +121,7 @@ const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pi
 }) {
   const latest = useSessionUserMessages(control, { enabled })
   const reading = useMemo(() => {
+    if (!enabled) return { messages: EMPTY_LATEST_INPUTS.messages, clipped: false }
     const page = latest.nativeHistoryPage
     const pin = pinned?.source.kind === 'native' && pinned.agentSessionId === control?.agentSessionId && pinned.executionHostId === control?.hostId ? pinned : undefined
     const protectedItem = pin?.source.kind === 'native' && page?.source.providerId === pin.source.providerId && page.source.nativeSessionId === pin.source.nativeSessionId
@@ -131,7 +132,7 @@ const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pi
     return { messages: projectConversationRecords({ agentSessionId: control?.agentSessionId ?? '', executionHostId: control?.hostId,
       ...(page && retained ? { historyPage: { ...page, items: retained } } : {}), timeline }).filter(record => record.role !== 'process'),
       clipped: !!page && !!retained && retained.length < page.items.length }
-  }, [latest.nativeHistoryPage, control?.hostId, control?.agentSessionId, pinned, timeline])
+  }, [enabled, latest.nativeHistoryPage, control?.hostId, control?.agentSessionId, pinned, timeline])
   useLayoutEffect(() => { if (!enabled) return; onChange({ messages: reading.messages, loading: latest.loading, error: latest.error, observationError: latest.observationError, windowFrozen: latest.windowFrozen, windowIncomplete: latest.windowIncomplete === true || reading.clipped, refresh: latest.refresh }) }, [enabled, reading, latest.loading, latest.error, latest.observationError, latest.windowFrozen, latest.windowIncomplete, latest.refresh, onChange])
   return null
 })
