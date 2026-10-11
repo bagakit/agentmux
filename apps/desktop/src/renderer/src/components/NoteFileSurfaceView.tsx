@@ -183,9 +183,10 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />
-    <details className="note-directory-sources"><summary>Note sources <span>{!directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
-      : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : `${directoryFacts.confirmedPaths.length} confirmed in this directory${directoryFacts.status === 'partial' ? ' · partial' : ''}`}</span></summary>
+    <details className="note-directory-sources" aria-label="Note sources"><summary>Source coverage <span>{!directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
+      : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : directoryFacts.status === 'partial' ? 'Partial' : null}</span></summary>
       <button type="button" className="note-text-button" disabled={directoryFacts?.status === 'reading'} onClick={() => void useAppStore.getState().refreshNoteDirectorySources(tabId, surface.regionId)}>Refresh directory</button>
+      {directoryFacts && directoryFacts.status !== 'reading' && directoryFacts.status !== 'unknown' && <p className="note-scope">{directoryFacts.confirmedPaths.length} confirmed in this directory{directoryFacts.status === 'partial' ? ' · partial' : ''}</p>}
       <p className="note-scope">This checks the original Note directory. Other directories may contain more sources.</p>
       {directoryFacts?.unreadPaths.length ? <div className="note-scope"><strong>Not yet read</strong>{directoryFacts.unreadPaths.map(path => <div className="note-unread-source" key={path}><span>{path}</span>
         <button type="button" className="note-text-button" aria-label={`Open Note source ${surface.workspaceId} · ${path}`} onClick={() => void openUnread(path)}>Open</button></div>)}</div> : null}
