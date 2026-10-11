@@ -3,11 +3,12 @@ import { rpcRecord } from './rpc-data.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { normalizeAgentTimelineItem } from './session-timeline.js'
 import { parseConversationProvenance } from './conversation-provenance.js'
-import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces,
+import { conversationRecordId, conversationRevision, conversationRecordRole, conversationEventAuthor, conversationSourceKey, conversationInvocationMembers, conversationRecordRelations, conversationSameEventTarget, conversationRecordAnchors, conversationEventCoalesces, conversationInputAdoptionEdges, conversationNativeInputWitness, conversationInputKey,
   type ConversationEvent, type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationTimeline } from './conversation-timeline.js'
 import { parseNativeConversationCheckpoint, parseConversationRef, type NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
 import { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 export { parseConversationRef } from './session-history-changes.js'
 export * from './session-history-changes.js'
 
@@ -70,6 +71,12 @@ export function consumeConversationWindowPage(page: AgentConversationReadPage, p
   }
   if (fragment || units.length !== page.window.itemCount || !page.window.view) return bad('The replacement window is incomplete.')
   if (page.window.anchor && units.flatMap(unit => unit.records).some(record => !same(record.reference, page.window.anchor!.record) || record.revision !== page.window.anchor!.revision)) return bad('The exact-anchor window contains another original record or version.')
+  const originals = units.flatMap(unit => unit.records), contexts = units.flatMap(unit => unit.event.inputAdoption ? [unit.event.inputAdoption] : [])
+  const adoption = conversationInputAdoptionEdges(originals, { witnesses: contexts.flatMap(context => context.witnesses), ...(contexts.some(context => context.unconfirmed) ? { unconfirmed: true } : {}) })
+  for (const unit of units) for (const record of unit.records) if (record.original.kind === 'captured' && conversationInputKey(record) && !record.original.item.conversation?.sameEvent) {
+    const target = adoption.targets.get(record.id), actual = unit.event.relations.find(relation => relation.kind === 'same-event' && conversationRecordId(relation.from) === record.id)
+    if (target ? !actual || actual.kind !== 'same-event' || !same(target, actual.to) : actual !== undefined) return bad('Native adoption contradicts the complete accepted window or its retained counterevidence.')
+  }
   const { items: _items, ...envelope } = page
   return { kind: 'complete', snapshot: { ...envelope, units } }
 }
@@ -240,17 +247,33 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
       result = { id, reference, revision: version, order: { kind: 'captured-stream', epoch, firstSequence: integer(order.firstSequence, 1) }, original: { kind: 'captured', item } }
     }
     if (conversationRevision(result.original.item) !== version) return bad('Original conversation record version changed.')
+    if (result.original.item.conversation?.adoptedInput && !conversationNativeInputWitness(result)?.key) return bad('The native adoption does not belong to this original record.')
     return result
   })
   const byId = new Map(records.map(record => [record.id, record]))
   if (byId.size !== records.length) return bad()
-  const e = rpcRecord(p.event, ['id', 'revision', 'anchorId', 'reference', 'role', 'author', 'recordIds', 'content', 'relations', 'coalesces'], 'CONTROL_PROTOCOL_ERROR')
+  const e = rpcRecord(p.event, ['id', 'revision', 'anchorId', 'reference', 'role', 'author', 'recordIds', 'content', 'relations', 'coalesces', 'inputAdoption'], 'CONTROL_PROTOCOL_ERROR')
+  const rawAdoption = e.inputAdoption === undefined ? undefined : rpcRecord(e.inputAdoption, ['unconfirmed', 'witnesses'], 'CONTROL_PROTOCOL_ERROR')
+  if (rawAdoption && (rawAdoption.unconfirmed !== undefined && rawAdoption.unconfirmed !== true || !Array.isArray(rawAdoption.witnesses) || rawAdoption.witnesses.length > 400)) return bad()
+  const inputAdoption: import('./conversation-timeline.js').ConversationInputAdoptionContext | undefined = rawAdoption ? {
+    ...(rawAdoption.unconfirmed ? { unconfirmed: true as const } : {}), witnesses: (rawAdoption.witnesses as unknown[]).map(value => {
+      const w = rpcRecord(value, ['record', 'recordRevision', 'semanticItemId', 'turnId', 'clientCorrelation', 'key'], 'CONTROL_PROTOCOL_ERROR'), record = itemRef(w.record, ref, accepted), key = w.key === undefined ? undefined : validateAgentPromptInputKey(w.key), semanticItemId = text(w.semanticItemId), recordRevision = revision(w.recordRevision), turnId = text(w.turnId), clientCorrelation = text(w.clientCorrelation, 8192)
+      if (record.source.kind !== 'native' || key && key.agentSessionId !== ref.agentSessionId || !clientCorrelation.startsWith('amux-input-v1.')) return bad()
+      const fact = { record, recordRevision, semanticItemId, turnId, clientCorrelation, ...(key ? { key } : {}) }
+      const local = byId.get(conversationRecordId(record))
+      if (local?.revision === recordRevision && !same(conversationNativeInputWitness(local), fact)) return bad('The retained input witness contradicts a local original.')
+      return fact
+    }) } : undefined
+  const localInputs = new Set(records.flatMap(record => { const key = conversationInputKey(record); return key ? [key] : [] }))
+  const adopted = conversationInputAdoptionEdges(records, inputAdoption)
+  const relevant = [...localInputs].flatMap(key => adopted.byKey.get(key) ?? [])
+  if (inputAdoption && (!localInputs.size || inputAdoption.witnesses.some(witness => !relevant.some(value => same(value, witness))))) return bad('The retained witness belongs to another original input.')
   const reference = itemRef(e.reference, ref), id = text(e.id, 131_072)
   if (id !== text(e.anchorId, 131_072) || id !== conversationRecordId(reference) || !Array.isArray(e.recordIds) || e.recordIds.length !== records.length ||
     e.recordIds.some((v, i) => v !== records[i]!.id) || !Array.isArray(e.content) || !Array.isArray(e.relations) || e.relations.length > 100_000) return bad()
   const nativeSource = accepted.sources.find(source => source.kind === 'native')
   const targets = new Map(records.flatMap(record => {
-    const target = conversationSameEventTarget(record, nativeSource?.kind === 'native' ? nativeSource : undefined)
+    const target = conversationSameEventTarget(record, nativeSource?.kind === 'native' ? nativeSource : undefined, adopted.targets.get(record.id))
     return target && conversationRecordId(target) !== record.id ? [[record.id, conversationRecordId(target)] as const] : []
   }))
   const anchors = conversationRecordAnchors(records, targets).anchors
@@ -290,7 +313,7 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
     if (r.kind === 'same-event') {
       rpcRecord(value, ['kind', 'from', 'to'], 'CONTROL_PROTOCOL_ERROR')
       const from = itemRef(r.from, ref), to = itemRef(r.to, ref), local = byId.get(conversationRecordId(from))
-      if (!local && !byId.has(conversationRecordId(to)) || local && !same(conversationSameEventTarget(local, nativeSource?.kind === 'native' ? nativeSource : undefined), to)) return bad()
+      if (!local && !byId.has(conversationRecordId(to)) || local && !same(conversationSameEventTarget(local, nativeSource?.kind === 'native' ? nativeSource : undefined, adopted.targets.get(local.id)), to)) return bad()
       return { kind: 'same-event' as const, from, to }
     }
     if (r.kind === 'invocation-member') {
@@ -328,10 +351,11 @@ export function parseConversationUnit(value: unknown, ref: ConversationRef, acce
     return selected.map(selector => ({ recordId: record.id, recordRevision: record.revision, selector, placement: record === primary ? 'body' : 'detail' }))
   })
   if (!same(content, expectedContent)) return bad('Original conversation content order or placement changed.')
-  const expectedCoalesces = conversationEventCoalesces(records, id, nativeSource?.kind === 'native' ? nativeSource : undefined)
+  const expectedCoalesces = conversationEventCoalesces(records, id, nativeSource?.kind === 'native' ? nativeSource : undefined, adopted.targets)
   if (!same(e.coalesces, expectedCoalesces.length ? expectedCoalesces : undefined) ||
     expectedCoalesces.some(coalesce => !relations.some(relation => same(relation, coalesce.relation)))) return bad('Conversation coalesce does not name its original contribution.')
   const event = { id, anchorId: id, reference, role: e.role as ConversationEvent['role'], author: e.author as ConversationEvent['author'], recordIds: records.map(r => r.id), content,
+    ...(inputAdoption ? { inputAdoption } : {}),
     relations, ...(e.coalesces === undefined ? {} : { coalesces: e.coalesces as NonNullable<ConversationEvent['coalesces']> }) }
   const version = revision(e.revision)
   if (conversationRevision({ policy: 1, versions: records.map(record => [record.id, record.revision]), event }) !== version) return bad('Conversation event version changed.')

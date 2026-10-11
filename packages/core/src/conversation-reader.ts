@@ -1,8 +1,8 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { projectConversationTimeline, conversationRecordId, conversationRevision, conversationSourceKey,
-  type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage } from './conversation-timeline.js'
+import { projectConversationTimeline, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
+  type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionContext } from './conversation-timeline.js'
 import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPage, parseConversationChangesPage,
   CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
   type ConversationCheckpointPage, type AgentConversationReadPage, type ConversationChangesPage, type ConversationUnit, type ConversationUnitEntry, type ConversationVersionedAnchor, type ConversationReadWindow } from './conversation-changes.js'
@@ -33,9 +33,9 @@ type HistoryPosition = { position: Position; after: Position; checkpoint: Conver
   captured?: { first: number; last: number; count: number };
   head?: { page: AgentSessionHistoryPage; rows: ConversationSourceRecord[] } }
 type Snapshot = { rows: ConversationSourceRecord[]; batch: Batch; units: ConversationUnit[]; coverage: ConversationSourceCoverage[];
-  order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor'] }
+  order: ReturnType<typeof projection>['order']; revision: number; checkpoint: ConversationFrontier; committed: boolean; requestKey: string; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
 type ReadingView = ConversationRef & { id: string; scope: ConversationFrontier['scope']; revision: number; rows: ConversationSourceRecord[];
-  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor'] }
+  checkpoint: ConversationFrontier; snapshots: Map<string, Snapshot>; observers: number; outside: ConversationReadWindow['outside']; history: HistoryPosition[]; anchor?: ConversationReadWindow['anchor']; inputAdoption: ConversationInputAdoptionContext }
 const MAX_VIEW_RECORDS = 1200
 const MAX_UNOBSERVED_VIEWS = 16
 /** Temporary state of this original Reader. Durable originals remain in their original owners. */
@@ -47,7 +47,7 @@ export class ConversationReaderState {
   }
   create(ref: ConversationRef, checkpoint: ConversationFrontier): ReadingView {
     this.trimParked(MAX_UNOBSERVED_VIEWS - 1)
-    const view: ReadingView = { ...ref, id: randomUUID(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, outside: { older: null, newer: null } }
+    const view: ReadingView = { ...ref, id: randomUUID(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
     this.views.set(view.id, view); return view
   }
   get(id: string, ref: ConversationRef, scope: ConversationFrontier['scope']): ReadingView {
@@ -147,14 +147,14 @@ export async function conversationCheckpoint(ref: ConversationRef, port: Convers
   const target = { ...ref, hostId: port.readHostId ?? ref.hostId }
   return { ...target, sourceHostId: ref.hostId, scope: found.scope, checkpoint: { ...target, sourceHostId: ref.hostId, frontier: checkpoint }, coverage: found.coverage }
 }
-function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'], rows: ConversationSourceRecord[], coverage: ConversationSourceCoverage[]) {
+function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'], rows: ConversationSourceRecord[], coverage: ConversationSourceCoverage[], inputAdoption: ConversationInputAdoptionContext) {
   const native = rows.filter(r => r.original.kind === 'native'), captured = rows.filter(r => r.original.kind === 'captured')
   const source = accepted.sources.find((s): s is Extract<ConversationSourceRef, { kind: 'native' }> => s.kind === 'native')
   const stream = accepted.sources.find((s): s is Extract<ConversationSourceRef, { kind: 'captured' }> => s.kind === 'captured')
   const timeline = projectConversationTimeline({ agentSessionId: ref.agentSessionId, executionHostId: ref.hostId,
     ...(native.length && source ? { historyPage: { agentSessionId: ref.agentSessionId, source, items: native.map(r => (r.original as { kind: 'native'; item: AgentSessionHistoryItem }).item), nextCursor: null } } : {}),
     ...(captured.length ? { timeline: { agentSessionId: ref.agentSessionId, revision: 0, items: captured.map(r => (r.original as Extract<ConversationSourceRecord['original'], { kind: 'captured' }>).item) } } : {}),
-    sourceOrders: new Map(rows.map(r => [r.id, r.order])), coverage })
+    sourceOrders: new Map(rows.map(r => [r.id, r.order])), coverage, inputAdoption })
   const records = new Map(timeline.records.map(record => [record.id, record]))
   // The original committed revision is retained; the normal form uses the same Core version hash.
   for (const row of rows) if (records.get(row.id)?.revision !== row.revision) return fail('An original record version changed during the frozen read.')
@@ -409,11 +409,18 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     const captured = [...records.values()].filter(record => record.original.kind === 'captured').sort((a, b) =>
       a.order.kind === 'captured-stream' && b.order.kind === 'captured-stream' ? a.order.firstSequence - b.order.firstSequence : 0)
     let rows = [...nativeIds.map(id => records.get(id)!), ...captured]
+    const knownInputs = conversationInputAdoptionEdges(rows, view.inputAdoption)
+    const witnesses = knownInputs.witnesses
+    // Retain only bounded identity witnesses in this original temporary view. An
+    // overflow preserves known counterevidence and makes adoption unknown, never first-wins.
+    const inputAdoption: ConversationInputAdoptionContext = knownInputs.unconfirmed || witnesses.length > MAX_VIEW_RECORDS || Buffer.byteLength(JSON.stringify(witnesses)) > CONVERSATION_MAX_UNIT_BYTES
+      ? { ...view.inputAdoption, unconfirmed: true } : { witnesses }
     // Bound the temporary accepted window before duplicating bodies into a projection.
     // Whole existing event groups leave the window; their original owners and exact
     // versioned anchors remain available. Incoming originals never disappear here.
     const previous = [...view.snapshots.values()].find(value => value.committed && value.revision === view.revision)
     const protectedIds = new Set(accepted.flatMap(record => [record.id,
+      ...(knownInputs.targets.get(record.id) ? [conversationRecordId(knownInputs.targets.get(record.id)!)] : []),
       ...(record.original.item.conversation?.sameEvent ? [conversationRecordId(record.original.item.conversation.sameEvent)] : [])]))
     const outside = { ...view.outside }, sizes = new Map(rows.map(record => [record.id, Buffer.byteLength(JSON.stringify(record))]))
     const heads = new Map(history.flatMap(position => position.head?.rows ?? []).map(row => [row.id, row]))
@@ -444,7 +451,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
     }
     rows = rows.filter(record => !removed.has(record.id))
     if (retainedCount > MAX_VIEW_RECORDS || retainedBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event contribution exceeds the temporary window assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
-    let projected = projection(ref, state.scope, rows, loaded.batch.coverage)
+    let projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption)
     let unitBytes = projected.units.reduce((sum, unit) => sum + Buffer.byteLength(JSON.stringify(unit)), 0)
     for (const unit of mode === 'changes' || state.direction === 'newer' ? projected.units : [...projected.units].reverse()) {
       if (unitBytes <= CONVERSATION_MAX_UNIT_BYTES) break
@@ -452,11 +459,11 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       unitBytes -= Buffer.byteLength(JSON.stringify(unit)); evict(unit)
     }
     if (unitBytes > CONVERSATION_MAX_UNIT_BYTES) return fail('This exact event exceeds its wire assembly bound. Its original source and continuation are retained.', 'AGENT_SESSION_HISTORY_BUDGET')
-    if (removed.size) { rows = rows.filter(record => !removed.has(record.id)); projected = projection(ref, state.scope, rows, loaded.batch.coverage) }
+    if (removed.size) { rows = rows.filter(record => !removed.has(record.id)); projected = projection(ref, state.scope, rows, loaded.batch.coverage, inputAdoption) }
     const { events: _events, ...originalBatch } = loaded.batch
     const batch: Batch = { ...originalBatch, records: [], index: 0, offset: 0, digests: [] }
     snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, order: projected.order,
-      ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history }
+      ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history, inputAdoption }
     state.viewRevision = view.revision; state.snapshotId = randomUUID(); state.batch = { index: 0, offset: 0 }
     view.snapshots.set(state.snapshotId, snapshot)
     while (view.snapshots.size > 3) view.snapshots.delete(view.snapshots.keys().next().value!)
@@ -505,7 +512,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
   port.signal?.throwIfAborted()
   if (page.window.complete && !snapshot.committed) {
     if (view.revision !== state.viewRevision) return fail('Another read already advanced this accepted window. Retain this response as uncommitted and read the current view.')
-    view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; snapshot.committed = true
+    view.rows = snapshot.rows; view.revision = snapshot.revision; view.checkpoint = snapshot.checkpoint; view.outside = snapshot.outside; view.history = snapshot.history; if (snapshot.anchor) view.anchor = snapshot.anchor; view.inputAdoption = snapshot.inputAdoption; snapshot.committed = true
   }
   return parsed
 }

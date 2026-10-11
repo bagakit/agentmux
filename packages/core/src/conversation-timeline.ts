@@ -3,6 +3,7 @@ import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHist
 import type { ConversationItemRef, ConversationRef } from './conversation.js'
 import { recordedConversationAuthor } from './conversation-author.js'
 import { conversationQuestionIdentity, type ConversationQuestionIdentity } from './conversation-questions.js'
+import { agentPromptInputId, type AgentPromptInputKey } from './agent-prompt-condition.js'
 
 export type ConversationAuthor = AgentSessionUserMessageAuthor | { kind: 'system'; providerId?: string }
 export type ConversationSelector = { kind: 'native-part'; partIndex: number }
@@ -17,6 +18,10 @@ export type ConversationInvocationRef = ConversationRef & ConversationInvocation
 /** Produced at the original Provider/Core normalization boundary, never decoded from an opaque item ID. */
 export type ConversationRecordProvenance = {
   sameEvent?: ConversationItemRef
+  /** Canonical Provider item identity; physical recordId remains independent. */
+  nativeInput?: { source: AgentSessionHistorySource; semanticItemId: string; turnId: string; clientCorrelation: string }
+  /** Core confirmed this native item against the original durable input claim. No sharing/control authority. */
+  adoptedInput?: { key: import('./agent-prompt-condition.js').AgentPromptInputKey }
   nativeInvocationScope?: Omit<ConversationInvocation, 'callId'>
   observes?: ConversationItemRef
   invocations?: readonly { selector: ConversationSelector; invocation: ConversationInvocation }[]
@@ -48,6 +53,9 @@ export type ConversationSourceRecord = {
   order: ConversationSourceOrder
   original: { kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'captured'; item: AgentTimelineItem }
 }
+/** Bounded original-reading witnesses, not a claim of whole-Session uniqueness. No bodies or write authority. */
+export type ConversationInputWitness = { record: ConversationItemRef; recordRevision: string; semanticItemId: string; turnId: string; clientCorrelation: string; key?: AgentPromptInputKey }
+export type ConversationInputAdoptionContext = { unconfirmed?: true; witnesses: readonly ConversationInputWitness[] }
 export type ConversationEvent = {
   id: string
   revision: string
@@ -59,6 +67,7 @@ export type ConversationEvent = {
   content: readonly { recordId: string; recordRevision: string; selector: ConversationSelector; placement: 'body' | 'detail' }[]
   relations: readonly ConversationRelation[]
   coalesces?: readonly { fromEventIds: readonly string[]; relation: Extract<ConversationRelation, { kind: 'same-event' }> }[]
+  inputAdoption?: ConversationInputAdoptionContext
 }
 export type ConversationTimeline = {
   reference: ConversationRef | null
@@ -76,6 +85,7 @@ export type ConversationProjectionInput = {
   timeline?: AgentTimelineSnapshot | undefined
   sourceOrders?: ReadonlyMap<string, ConversationSourceOrder>
   coverage?: readonly ConversationSourceCoverage[]
+  inputAdoption?: ConversationInputAdoptionContext
 }
 
 function canonical(value: unknown): unknown {
@@ -211,18 +221,78 @@ export function conversationInvocationMembers(record: ConversationSourceRecord):
 }
 
 /** A canonical reading target is an exact same-source fact, never an event/version claim. */
-export function conversationSameEventTarget(record: ConversationSourceRecord, nativeSource?: AgentSessionHistorySource): ConversationItemRef | undefined {
-  const target = record.original.item.conversation?.sameEvent, reference = record.reference
+export function conversationSameEventTarget(record: ConversationSourceRecord, nativeSource?: AgentSessionHistorySource, adoptedTarget?: ConversationItemRef): ConversationItemRef | undefined {
+  const target = record.original.item.conversation?.sameEvent ?? adoptedTarget, reference = record.reference
   return target && reference && target.hostId === reference.hostId && target.agentSessionId === reference.agentSessionId && target.source.kind === 'native' &&
     (!nativeSource || sameSource(target.source, nativeSource)) ? target : undefined
 }
 /** Explicit identity coalesces name the exact original contributing edge. */
-export function conversationEventCoalesces(records: readonly ConversationSourceRecord[], anchorId: string, nativeSource?: AgentSessionHistorySource): NonNullable<ConversationEvent['coalesces']> {
+export function conversationEventCoalesces(records: readonly ConversationSourceRecord[], anchorId: string, nativeSource?: AgentSessionHistorySource, adoptedTargets?: ReadonlyMap<string, ConversationItemRef>): NonNullable<ConversationEvent['coalesces']> {
   return records.flatMap(record => {
-    const target = conversationSameEventTarget(record, nativeSource)
+    const target = conversationSameEventTarget(record, nativeSource, adoptedTargets?.get(record.id))
     return record.id !== anchorId && target && conversationRecordId(target) !== record.id
       ? [{ fromEventIds: [record.id], relation: { kind: 'same-event' as const, from: record.reference!, to: target } }] : []
   })
+}
+
+export function conversationInputKey(record: ConversationSourceRecord): string | undefined {
+  const key = record.original.kind === 'native' ? record.original.item.conversation?.adoptedInput?.key
+    : record.original.item.kind === 'user_message' && record.original.item.source === 'user' ? record.original.item.inputRef : undefined
+  return key && record.reference && key.agentSessionId === record.reference.agentSessionId
+    ? inputIdentity(record.reference.hostId, key) : undefined
+}
+const inputIdentity = (hostId: string, key: AgentPromptInputKey): string => JSON.stringify([hostId, key.kind, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)])
+export const conversationInputWitnessKey = (fact: ConversationInputWitness): string | undefined => fact.key ? inputIdentity(fact.record.hostId, fact.key) : undefined
+const inputWitnessGroup = (fact: ConversationInputWitness): string => {
+  const source = fact.record.source
+  return JSON.stringify([fact.record.hostId, fact.record.agentSessionId, source.kind === 'native' ? source.providerId : null,
+    source.kind === 'native' ? source.nativeSessionId : null, fact.turnId, fact.clientCorrelation])
+}
+export function conversationNativeInputWitness(record: ConversationSourceRecord): ConversationInputWitness | undefined {
+  if (record.original.kind !== 'native' || record.original.item.kind !== 'user-message' || record.reference?.source.kind !== 'native') return undefined
+  const fact = record.original.item.conversation?.nativeInput, adopted = record.original.item.conversation?.adoptedInput
+  // A branded canonical candidate supplies no input key or adoption authority.
+  // Only an exact qualified witness can relate its complete token/source/turn to a key.
+  return fact && fact.clientCorrelation.startsWith('amux-input-v1.') && fact.clientCorrelation.length <= 8192 &&
+    (!adopted || conversationInputKey(record)) && record.original.item.turnId === fact.turnId && sameSource(fact.source, record.reference.source)
+    ? { record: record.reference, recordRevision: record.revision, semanticItemId: fact.semanticItemId, turnId: fact.turnId,
+      clientCorrelation: fact.clientCorrelation, ...(adopted ? { key: adopted.key } : {}) } : undefined
+}
+/** One edge owner for accepted inventory plus retained, bounded original reading witnesses. */
+export function conversationInputAdoptionEdges(records: readonly ConversationSourceRecord[], context?: ConversationInputAdoptionContext): {
+  targets: ReadonlyMap<string, ConversationItemRef>; byKey: ReadonlyMap<string, readonly ConversationInputWitness[]>; ambiguous: ReadonlySet<string>; unconfirmed: boolean; witnesses: readonly ConversationInputWitness[]
+} {
+  const byKey = new Map<string, ConversationInputWitness[]>(), groups = new Map<string, ConversationInputWitness[]>(), ambiguous = new Set<string>(), targets = new Map<string, ConversationItemRef>()
+  const current = new Map(records.map(record => [record.id, record]))
+  const unconfirmed = !!context?.unconfirmed || (context?.witnesses ?? []).some(fact => {
+    const record = current.get(conversationRecordId(fact.record))
+    if (!record || record.revision === fact.recordRevision) return false
+    const next = conversationNativeInputWitness(record)
+    return !next || next.semanticItemId !== fact.semanticItemId || inputWitnessGroup(next) !== inputWitnessGroup(fact) ||
+      !!fact.key && conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact)
+  })
+  for (const fact of [...records.flatMap(record => { const value = conversationNativeInputWitness(record); return value ? [value] : [] }), ...(context?.witnesses ?? [])]) {
+    const group = inputWitnessGroup(fact), known = groups.get(group) ?? []
+    const duplicate = known.findIndex(value => conversationRecordId(value.record) === conversationRecordId(fact.record) && value.semanticItemId === fact.semanticItemId)
+    if (duplicate >= 0) {
+      if (!known[duplicate]!.key && fact.key) known[duplicate] = fact
+    } else if (known.length < 2) known.push(fact)
+    // Two originals suffice for conflict, but later qualification must not be lost
+    // behind two earlier candidates. Keep that exact positive and one counterexample.
+    else if (fact.key && !known.some(value => value.key)) known[1] = fact
+    groups.set(group, known)
+  }
+  for (const facts of groups.values()) for (const key of new Set(facts.flatMap(fact => { const key = conversationInputWitnessKey(fact); return key ? [key] : [] }))) {
+    const known = byKey.get(key) ?? []
+    for (const fact of facts) if (!known.some(value => conversationRecordId(value.record) === conversationRecordId(fact.record) && value.semanticItemId === fact.semanticItemId)) known.push(fact)
+    byKey.set(key, known)
+    if (known.length > 1) ambiguous.add(key)
+  }
+  for (const record of records) {
+    const key = conversationInputKey(record), candidates = key ? byKey.get(key) : undefined
+    if (record.original.kind === 'captured' && key && candidates?.length === 1 && candidates[0]!.key && !unconfirmed && !ambiguous.has(key)) targets.set(record.id, candidates[0]!.record)
+  }
+  return { targets, byKey, ambiguous, unconfirmed, witnesses: [...groups.values()].flat() }
 }
 /** Resolve only original accepted edges. A cycle retains each original record identity. */
 export function conversationRecordAnchors(records: readonly ConversationSourceRecord[], targets: ReadonlyMap<string, string>): { anchors: ReadonlyMap<string, string>; cyclicRecordIds: readonly string[] } {
@@ -285,12 +355,26 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
     if (row) { row.current = 'partial'; row.gaps = [...row.gaps, { code, message, ...(target ? { record: target } : {}) }] }
   }
   const relations: ConversationRelation[] = [], edges = new Map<string, { target: string; relation: Extract<ConversationRelation, { kind: 'same-event' }> }>()
+  const adopted = conversationInputAdoptionEdges(records, input.inputAdoption)
+  const adoptionGaps = new Set<string>()
+  const adoptionGap = (record: ConversationSourceRecord, code: string, message: string) => {
+    const key = JSON.stringify([sourceKey(sourceOf(record)), code])
+    // Source coverage is collective. Exact diagnostics and ref witnesses remain on
+    // each original/event; duplicating this status for every row can block reading.
+    if (!adoptionGaps.has(key)) { adoptionGaps.add(key); gap(record, code, message) }
+  }
   if (conflictingHosts) for (const record of records) gap(record, 'CONVERSATION_SOURCE_HOST_CONFLICT', 'These accepted sources have different original Host namespaces. Original records remain independently readable; they do not authorize a cross-Host association.', record.reference ?? undefined)
   for (const record of records) {
     const provenance = record.original.item.conversation
-    const target = provenance?.sameEvent
+    const target = provenance?.sameEvent ?? adopted.targets.get(record.id)
+    const inputKey = conversationInputKey(record)
+    if (inputKey && (adopted.ambiguous.has(inputKey) || adopted.unconfirmed)) adoptionGap(record,
+      adopted.ambiguous.has(inputKey) ? 'CONVERSATION_INPUT_ADOPTION_AMBIGUOUS' : 'CONVERSATION_INPUT_ADOPTION_COVERAGE_UNKNOWN',
+      'The accepted source contains inputs with conflicting or incomplete native item witnesses. Original utterances and submissions remain independently readable.')
+    const diagnostic = record.original.item.conversationDiagnostic
+    if (diagnostic?.code === 'CONVERSATION_INPUT_ADOPTION_UNCONFIRMED') adoptionGap(record, diagnostic.code, diagnostic.message)
     if (target && record.reference) {
-      if (!conversationSameEventTarget(record, page?.source)) {
+      if (!conversationSameEventTarget(record, page?.source, adopted.targets.get(record.id))) {
         gap(record, 'CONVERSATION_RELATION_SCOPE', 'The recorded canonical target is outside this accepted source scope.', target)
       } else {
         const relation = { kind: 'same-event' as const, from: record.reference, to: target }
@@ -364,7 +448,11 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
 
     const primary = byId.get(id) ?? group.find(record => record.original.kind === 'native') ?? group[0]!
     const related = [...new Set(group.flatMap(record => [...(relationsByRecord.get(record.id) ?? [])]))]
-    const coalesces = conversationEventCoalesces(group, id, page?.source)
+    const coalesces = conversationEventCoalesces(group, id, page?.source, adopted.targets)
+    const localIds = new Set(group.map(record => record.id)), inputKeys = new Set(group.flatMap(record => { const key = conversationInputKey(record); return key ? [key] : [] }))
+    const witnesses = [...inputKeys].flatMap(key => adopted.byKey.get(key) ?? []).filter(fact => !localIds.has(conversationRecordId(fact.record)))
+    const inputAdoption = inputKeys.size && (witnesses.length || adopted.unconfirmed)
+      ? { ...(adopted.unconfirmed ? { unconfirmed: true as const } : {}), witnesses } : undefined
     const body = [primary, ...group.filter(record => record !== primary)]
     const content = body.flatMap(record => selectors(record).map(selector => ({ recordId: record.id, recordRevision: record.revision, selector, placement: record === primary ? 'body' as const : 'detail' as const })))
     const attribution = conversationEventAuthor(group, primary, agentSessionId)
@@ -372,6 +460,7 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
       'The same event has conflicting recorded authors; original attributions remain readable.', byId.get(recordId)!.reference ?? undefined)
     const event = { id, anchorId: id, reference: byId.get(id)?.reference ?? canonicalReferences.get(id) ?? primary.reference,
       role: conversationRecordRole(primary), author: attribution.author, recordIds: group.map(record => record.id), content, relations: related,
+      ...(inputAdoption ? { inputAdoption } : {}),
       ...(coalesces.length ? { coalesces } : {}) }
     return { ...event, revision: conversationRevision({ policy: 1, versions: group.map(record => [record.id, record.revision]), event }) }
   })
