@@ -1,4 +1,5 @@
 import { AgentSessionContinuitySupervisor } from './agent-session-continuity-supervisor.js'
+import { parseAgentInputMailboxRead, type AgentInputMailboxRead, type AgentInputMailboxPage, type AgentInputMailboxItem } from './agent-input-mailbox.js'
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
 import { classifyExecutable, executorUnavailableError, type AgentExecutableProbeContext } from './executable-probe.js'
 import { unconfirmedExecutableObservation } from './executable-observation.js'
@@ -1082,7 +1083,8 @@ export class AgentMuxClient {
         if (await this.messageQueue.inspectInput({ key })) throw new AgentMuxError(
           'The original controlled input requires its original journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       },
-      withUncontrolledInputClaim: (key, claim) => this.messageQueue.withUncontrolledInputClaim(key, claim),
+      withUncontrolledInputClaim: (key, claim) => this.messageQueue.withUncontrolledInputClaim(key, claim, async () => Boolean(await this.inspectAgentPromptSubmission(key))),
+      onInputAccepted: (key, at) => this.recordAcceptedInput(key, at),
       assertAgentRun: (session, run) => { this.assertAgentRun(session, run) },
       updateExactAgentSession: (agentSessionId, expectedRun, update, futureIntentId, author) =>
         this.updateExactAgentSession(agentSessionId, expectedRun, update, futureIntentId, author)
@@ -5247,8 +5249,10 @@ export class AgentMuxClient {
         throw failure
       }
       try {
-        try { persisted = await this.registry.commitLifecycle(reservation, next) }
-        catch (error) { persisted = this.retainUnconfirmedLifecycle(error, next); readySession = persisted }
+        try {
+          persisted = await this.registry.commitLifecycle(reservation, next)
+          if (persisted?.continuity?.launchInput?.key) await this.recordAcceptedInput(persisted.continuity.launchInput.key, persisted.updatedAt)
+        } catch (error) { persisted = this.retainUnconfirmedLifecycle(error, next); readySession = persisted }
         // The Store atomically preserves a cancellation accepted after prepare. Refresh that exact
         // commit before publishing or observing the new binding; a stale prepared image cannot revive it.
         if (continuity?.supervision || continuity?.intentOperationId) readySession = await this.registry.refresh(current.agentSessionId, next.run)
@@ -5901,6 +5905,74 @@ export class AgentMuxClient {
     return { providerId: session.providerId, executorId: session.executorId,
       ...(session.nativeHandle ? { nativeHandle: structuredClone(session.nativeHandle) } : {}),
       ...(session.nativeBinding ? { nativeBinding: { source: session.nativeBinding.source, run: { ...session.nativeBinding.run } } } : {}) }
+  }
+
+  /** Read original journal membership; this never creates waiting, prepares or dispatches input. */
+  async readAgentInputMailbox(value: AgentInputMailboxRead, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputMailboxPage> {
+    const input = parseAgentInputMailboxRead(value)
+    if (caller) {
+      await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
+      if (caller.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Input mailbox reading belongs to its exact recipient.', 'CONTROL_PERMISSION_DENIED')
+    }
+    const page = await this.messageQueue.readInputMailbox(input)
+    if (!page.cut.throughSequence && !await this.store.readHistorySource(input.agentSessionId)) throw new AgentMuxError('The exact input recipient is unknown. No Session was created or input changed.', 'UNKNOWN_AGENT_SESSION')
+    const result: AgentInputMailboxPage = { agentSessionId: input.agentSessionId, queueId: this.messageQueue.queueId,
+      cut: page.cut, budgetBytes: input.maxBytes ?? 64 * 1024, items: [], nextCursor: null,
+      coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } }
+    const entries: import('./json-read-fragments.js').JsonReadEntry<AgentInputMailboxItem>[] = []
+    const fits = (entry: typeof entries[number], nextCursor: string | null) =>
+      Buffer.byteLength(JSON.stringify({ ...result, items: [...entries, entry], nextCursor })) <= result.budgetBytes - 1024
+    let index = 0, offset = page.offset
+    for (const original of page.items) {
+      const { sequence, recordedAt } = original
+      let item: AgentInputMailboxItem
+      if (original.kind === 'submission') {
+        let record: import('./types.js').AgentPromptSubmissionRecord | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
+        try { record = await this.inspectAgentPromptSubmission(original.key); if (!record) throw new AgentMuxError('The original accepted admission is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
+        catch (error) { failure = deliveryFailure(error) }
+        item = { kind: 'submission', sequence, recordedAt, key: original.key, record, ...(failure ? { failure } : {}) }
+      } else {
+        let receipt: AgentInputSubmissionReceipt | null = null, failure: ReturnType<typeof deliveryFailure> | undefined
+        try { receipt = await this.inspectAgentInput({ key: original.intent.key }); if (!receipt) throw new AgentMuxError('The original input receipt is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED') }
+        catch (error) { failure = deliveryFailure(error) }
+        const { environment: _environment, ...intent } = original.intent
+        item = { kind: 'controlled', sequence, recordedAt, intent, ...(original.message ? { message: original.message,
+          ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) } : {}),
+          receipt, ...(failure ? { failure } : {}) }
+      }
+      const bytes = Buffer.from(JSON.stringify(item)), digest = createHash('sha256').update(bytes).digest('hex')
+      if (offset && (index !== 0 || page.digest !== digest || offset >= bytes.length)) throw new AgentMuxError('The original input observation changed during fragmentation. Retain its claim and retry this read.', 'AGENT_INPUT_READ_CHANGED')
+      const next = page.continuation(index + 1)
+      if (!offset && fits({ kind: 'item', item }, next)) { entries.push({ kind: 'item', item }); index++; continue }
+      const key = item.kind === 'controlled' ? item.intent.key : item.key
+      const fragment = (length: number) => ({ kind: 'fragment' as const, itemId: agentInputJournalKey(key), encoding: 'json-utf8-base64' as const,
+        sha256: digest, offsetBytes: offset, totalBytes: bytes.length, dataBase64: bytes.subarray(offset, offset + length).toString('base64') })
+      let low = 0, high = bytes.length - offset
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2), complete = offset + middle === bytes.length
+        if (fits(fragment(middle), complete ? next : page.continuation(index, offset + middle, digest))) low = middle
+        else high = middle - 1
+      }
+      if (low) {
+        entries.push(fragment(low)); offset += low
+        if (offset === bytes.length) { index++; offset = 0 }
+      }
+      break
+    }
+    result.items = entries; result.nextCursor = page.continuation(index, offset, offset ? page.digest ?? (entries.at(-1)?.kind === 'fragment' ? (entries.at(-1) as Extract<typeof entries[number], { kind: 'fragment' }>).sha256 : undefined) : undefined)
+    if (page.items.length && !entries.length || Buffer.byteLength(JSON.stringify(result)) > result.budgetBytes - 1024) throw new AgentMuxError('The mailbox continuation cannot fit this read budget. Increase maxBytes; the original input is retained.', 'AGENT_INPUT_READ_BUDGET')
+    return result
+  }
+
+  /** Journal visibility cannot revoke an already accepted input or turn its side effect into failure. */
+  private async recordAcceptedInput(key: AgentPromptInputKey, at: number): Promise<void> {
+    try {
+      await this.messageQueue.recordInputSubmission(key, at)
+      this.publisher.publish({ type: 'agent-input-recorded', agentSessionId: key.agentSessionId })
+    } catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: key.agentSessionId, code: 'AGENT_INPUT_RECORDING_UNCONFIRMED', evidence: { source: 'agentmux', observedAt: Date.now(), run: { ...key.expectedRun } },
+        message: `The original input claim is retained; mailbox recording is unconfirmed: ${error instanceof Error ? error.message : String(error)}` })
+    }
   }
 
   /** Same original journal/key selector. Inspect never constructs a new waiting generation. */

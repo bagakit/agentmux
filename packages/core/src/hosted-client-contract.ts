@@ -8,7 +8,7 @@ import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
 /** The finite SDK surface delegated by a Client to the single semantic Host. */
 export const AGENTMUX_HOSTED_METHODS = [
   'clientPerformanceDiagnostics', 'connectRuntime', 'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
-  'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
+  'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting',
   'listHostExecutors', 'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory',
   'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource', 'configureHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
@@ -33,7 +33,7 @@ export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
 export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
   ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]]
-  : M extends 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction'
+  : M extends 'readAgentInputMailbox' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>
 export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>

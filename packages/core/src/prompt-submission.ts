@@ -192,6 +192,8 @@ type PromptSubmissionDeps = {
   /** Under the original Session input lock, refuse another saved producer contract. */
   assertUncontrolledInput?: (key: AgentPromptInputKey) => Promise<void>
   withUncontrolledInputClaim?: (key: AgentPromptInputKey, claim: () => Promise<AgentMuxStoredAgentSession>) => Promise<AgentMuxStoredAgentSession>
+  /** A newly committed claim only; never invoked by receipt-only rejoin. */
+  onInputAccepted?: (key: AgentPromptInputKey, at: number) => Promise<void>
   assertAgentRun: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => void
   updateExactAgentSession: (
     agentSessionId: string,
@@ -523,7 +525,10 @@ export class AgentPromptSubmissionCoordinator {
       }, expectedFutureIntent?.intentId, control?.authority?.binding)
       const result = await (!control?.authorizeDispatch && this.deps.withUncontrolledInputClaim
         ? this.deps.withUncontrolledInputClaim(inputKey, claim) : claim())
-      if (createsClaim) newClaim = { admission: structuredClone(result.promptCompletionAdmission!), terminal: structuredClone(result.terminalPromptSubmission) }
+      if (createsClaim) {
+        newClaim = { admission: structuredClone(result.promptCompletionAdmission!), terminal: structuredClone(result.terminalPromptSubmission) }
+        await this.deps.onInputAccepted?.(inputKey, result.updatedAt)
+      }
       return result
     }
     const refreshSession = (id: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxStoredAgentSession> =>

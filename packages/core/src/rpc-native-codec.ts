@@ -1,3 +1,4 @@
+import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
@@ -483,6 +484,14 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
           method === 'agent.role.register' && credentials && binding.agentSessionId !== credentials.agentSessionId) fail(); break }
+      case 'agent.input.ls': {
+        record(p, ['hostId', 'agentSessionId', 'queueId', 'cut', 'budgetBytes', 'items', 'nextCursor', 'coverage'])
+        if (p.hostId !== input.hostId) fail()
+        const { hostId: _route, ...page } = p
+        const { hostId: _target, ...read } = input
+        parseAgentInputMailboxPage(page, read as import('./agent-input-mailbox.js').AgentInputMailboxRead)
+        break
+      }
       case 'agent.input.inspect': {
         record(p, ['record', 'input'])
         const observed = p.input === null || p.input === undefined ? null : inputReceipt(p.input)

@@ -63,9 +63,10 @@ import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './agent-role-directory.js'
-import { DurableAgentMuxMessageQueue, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
+import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
 import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { agentSessionMatches } from './rpc-agent-filter.js'
@@ -93,7 +94,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
-  'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
+  'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
@@ -222,6 +223,7 @@ const NATIVE_FIELDS = {
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
+  'agent.input.ls': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes'],
   'agent.input.inspect': ['key', 'kind', 'originalControlOperationId'],
   'agent.input.stop': ['ref', 'cancelOperationId'], 'agent.input.rejoin': ['ref'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'expectedRun', 'sourceChannel'],
@@ -1512,6 +1514,24 @@ export class AgentMuxRpcService {
             : await owner.client.recordDispatchEvent({ ...input, replyMessageId: rpcString(p.replyMessageId, 'Reply message ID'),
               kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] })
         } break
+      }
+      case 'agent.input.ls': {
+        const hostId = rpcString(p.hostId, 'Original input Host ID')
+        if (caller && caller.hostId !== hostId || !caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) {
+          throw new AgentMuxError('Input mailbox reading requires its original Host and an authenticated recipient or user/device.', 'CONTROL_PERMISSION_DENIED')
+        }
+        const scopes = (caller ? [caller] : await this.clients()).filter(scope => scope.hostId === hostId)
+        if (scopes.length !== 1 || this.endpointUnverified(scopes[0]!.client)) throw new AgentMuxError('The original input Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const client = scopes[0]!.client, { hostId: _route, ...read } = p
+        const input = parseAgentInputMailboxRead(read)
+        result = await readRoutedInputMailbox({ ...input, hostId }, async sourceInput => {
+          if (!client.forwardRpc) return await client.readAgentInputMailbox(sourceInput, caller ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined)
+          const forwarded = await client.forwardRpc('agent.input.ls', { ...sourceInput, hostId: 'local' }, context)
+          if (forwarded.hostId !== 'local') throw new AgentMuxError('The original mailbox Host response changed.', 'CONTROL_PROTOCOL_ERROR')
+          const { hostId: _sourceRoute, ...page } = forwarded
+          return page
+        })
+        break
       }
       case 'agent.input.inspect': {
         if (p.kind === 'message-control') {

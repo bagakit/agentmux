@@ -49,6 +49,10 @@ not generated chapters or copied bodies. A saved point is not record availabilit
 full source and the original operation after an unknown save; ls --operation-id inspects that
 receipt. Offline targets retain their points; original conversation readers own reachability.
 Ordinary input must use the original public input/message owner and returned admission facts.
+agent input ls --host-id HOST --session SID reads the original bounded sending mailbox, including
+prompt and connector message inputs. Reassemble complete JSON entries before interpreting their
+original controls or receipts. Older unrecorded claims remain a coverage gap; a read never sends,
+acknowledges, recreates waiting or proves native adoption.
 agent interrupt, stop, resume and reopen are distinct explicit lifecycle operations. Observe
 the original input after an uncertain send; inspect a creation/move operation before another
 action. A handshake or status probe failure never authorizes stopping a healthy Run.

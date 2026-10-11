@@ -1,10 +1,10 @@
 import { AgentMuxError } from './errors.js'
+import { dequal } from 'dequal'
 import { parseDeliveryFailure } from './delivery-attempt.js'
 import { agentInputSubmissionStatus, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
 import { agentPromptInputId, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { rpcRecord } from './rpc-data.js'
-const sameJSON = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 function wireFail(): never { throw new AgentMuxError('Original input receipt is invalid.', 'CONTROL_PROTOCOL_ERROR') }
 const wireRecord = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'CONTROL_PROTOCOL_ERROR')
 function wireString(value: unknown): void { if (typeof value !== 'string' || !value || /[\0\r\n]/.test(value)) wireFail() }
@@ -13,11 +13,11 @@ function wireMember(value: unknown, fields: readonly unknown[]): void { if (!fie
 export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubmissionReceipt {
   const p = wireRecord(value, ['key', 'ref', 'originalControlOperationId', 'persistence', 'control', 'admission', 'status', 'observation'])
   const key = validateAgentPromptInputKey(p.key), ref = validateAgentInputWaitRef(p.ref)
-  if (!sameJSON(key, ref.key) || p.persistence !== 'confirmed') wireFail()
+  if (!dequal(key, ref.key) || p.persistence !== 'confirmed') wireFail()
   wireMember(p.observation, ['owned', 'rejoin-needed', 'closed'])
   if (p.originalControlOperationId !== undefined) wireString(p.originalControlOperationId)
   const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId'])
-  if (!sameJSON(validateAgentInputWaitRef(control.ref), ref)) wireFail()
+  if (!dequal(validateAgentInputWaitRef(control.ref), ref)) wireFail()
   wireMember(control.state, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized']); wireTimestamp(control.at)
   if (control.state === 'dispatch-authorized') wireString(control.gateId)
   else if (control.gateId !== undefined) wireFail()
@@ -39,7 +39,7 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   }
   const admission = p.admission === null ? null : parsePromptSubmissionRecord(p.admission)
   if (admission && (admission.agentSessionId !== key.agentSessionId || admission.run.runId !== key.expectedRun.runId ||
-      admission.admission?.inputKey && !sameJSON(admission.admission.inputKey, key) ||
+      admission.admission?.inputKey && !dequal(admission.admission.inputKey, key) ||
       (admission.admission?.submissionId ?? admission.terminalPromptSubmission?.submissionId ?? admission.admission?.operationId) !== agentPromptInputId(key))) wireFail()
   const status = agentInputSubmissionStatus(control as AgentInputSubmissionReceipt['control'], admission)
   if (p.status !== status) wireFail()

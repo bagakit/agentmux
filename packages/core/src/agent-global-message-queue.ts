@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto'
-import { parseAgentExternalMessageAuthor, type AgentExternalMessageAuthor } from './external-author.js'
+import { validateAgentMuxMessageEnvelope, messageEnvelopeString as nonEmpty, messageEnvelopeTimestamp as finiteTimestamp, type AgentMuxMessageEnvelope } from './agent-message-envelope.js'
+export { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { mintObjectId } from './object-id.js'
 import { chmod, mkdir } from 'node:fs/promises'
@@ -22,38 +23,10 @@ import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWa
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
   type AgentInputWaitStopReceipt, type AgentInputDispatchLink } from './agent-input-wait.js'
-import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
+import { parseAgentInputMailboxRead, type AgentInputMailboxRead } from './agent-input-mailbox.js'
 
-export type AgentMuxMessageIdentity =
-  | AgentExternalMessageAuthor
-  | { readonly kind: 'agent-session'; readonly agentSessionId: string }
-  /** Unattributed local ingress. The established wire kind does not authenticate a human;
-   * principal records the transport and must never be displayed as participant identity. */
-  | { readonly kind: 'human'; readonly principal: 'local-cli' }
-
-export type AgentMuxMessageRecipient =
-  | { readonly kind: 'agent-session'; readonly agentSessionId: string }
-  | { readonly kind: 'target'; readonly target: AgentMuxMessageTarget }
-
-/** Versioned A2A facts. The body is intentionally opaque and retained byte-for-byte as a string. */
-export type AgentMuxMessageEnvelope = {
-  readonly schema: 'agentmux.a2a.v1'
-  readonly messageId: string
-  readonly operationId: string
-  readonly createdAt: number
-  readonly sender: AgentMuxMessageIdentity
-  readonly recipient: AgentMuxMessageRecipient
-  readonly threadId: string
-  readonly correlationId: string
-  readonly replyTo: string | null
-  readonly workspaceId: string | null
-  readonly senderSessionId: string | null
-  readonly senderRunId: string | null
-  readonly recipientSessionId: string | null
-  readonly recipientRunId: string | null
-  readonly body: string
-}
-
+export type { AgentMuxMessageIdentity, AgentMuxMessageRecipient, AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 export type AgentMuxMessageDeliveryState = {
   readonly state: AgentDeliveryState
   readonly at: number
@@ -125,6 +98,12 @@ export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' 
 export { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 
 const processQueueTails = new Map<string, Promise<void>>()
+const inputMailboxCursorKey = randomBytes(32)
+type InputMailboxCursor = { queueId: string; incarnation: string; agentSessionId: string; through: number; before: number; offset?: number; digest?: string }
+type InputMailboxJournalItem = { sequence: number; recordedAt: number } & (
+  | { kind: 'controlled'; intent: AgentInputJournalIntent; control: AgentInputWaitControl; message?: AgentMuxMessageEnvelope; sourceChannel?: AgentMessageChannel; sourceDevice?: AgentOperationDevice }
+  | { kind: 'submission'; key: AgentPromptInputKey }
+)
 
 export type AgentMuxMessageJournalRecord =
   | AgentInputWaitJournalRecord
@@ -167,65 +146,6 @@ function storageFailure(stage: string, cause: unknown,
     original?.controlFailure, original?.logId)
   Object.defineProperty(error, 'cause', { value: cause, configurable: true })
   return error
-}
-
-function nonEmpty(value: string, label: string): string {
-  if (!value.trim() || /[\0\r\n]/u.test(value)) throw new AgentMuxError(`${label} is invalid.`, 'MESSAGE_ENVELOPE_INVALID')
-  return value
-}
-
-function finiteTimestamp(value: number, label: string): number {
-  if (!Number.isFinite(value)) throw new AgentMuxError(`${label} is invalid.`, 'MESSAGE_ENVELOPE_INVALID')
-  return value
-}
-
-function identity(value: AgentMuxMessageIdentity, label: string): AgentMuxMessageIdentity {
-  if (value.kind === 'agent-session') return { kind: value.kind, agentSessionId: nonEmpty(value.agentSessionId, label) }
-  if (value.kind === 'human' && value.principal === 'local-cli') return value
-  if (value.kind === 'external') return parseAgentExternalMessageAuthor(value)
-  throw new AgentMuxError(`${label} is invalid.`, 'MESSAGE_ENVELOPE_INVALID')
-}
-
-function recipient(value: AgentMuxMessageRecipient): AgentMuxMessageRecipient {
-  if (value.kind === 'agent-session') return { kind: value.kind, agentSessionId: nonEmpty(value.agentSessionId, 'Message recipient') }
-  if (value.kind === 'target') {
-    const target = value.target
-    if (target.kind === 'self') return { kind: 'target', target }
-    if (target.kind === 'agent-session') return { kind: 'target', target: { kind: target.kind, agentSessionId: nonEmpty(target.agentSessionId, 'Message recipient') } }
-    if (target.kind === 'region') return { kind: 'target', target: { kind: target.kind, regionId: nonEmpty(target.regionId, 'Message recipient') } }
-    if (target.kind === 'tab') return { kind: 'target', target: { kind: target.kind, tabId: nonEmpty(target.tabId, 'Message recipient') } }
-  }
-  throw new AgentMuxError('Message recipient is invalid.', 'MESSAGE_ENVELOPE_INVALID')
-}
-
-/** Validate an envelope crossing the control socket without deriving identity from UI facts. */
-export function validateAgentMuxMessageEnvelope(value: unknown): AgentMuxMessageEnvelope {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgentMuxError('Message envelope is invalid.', 'MESSAGE_ENVELOPE_INVALID')
-  const source = value as AgentMuxMessageEnvelope
-  if (source.schema !== 'agentmux.a2a.v1') throw new AgentMuxError('Message envelope schema is invalid.', 'MESSAGE_ENVELOPE_INVALID')
-  const messageId = nonEmpty(source.messageId, 'Message id')
-  const operationId = nonEmpty(source.operationId, 'Message operation id')
-  if (messageId === operationId) throw new AgentMuxError('Message id must not be the Control request id.', 'MESSAGE_ID_REQUEST_ID_COLLISION')
-  if (typeof source.body !== 'string') throw new AgentMuxError('Message body is invalid.', 'MESSAGE_ENVELOPE_INVALID')
-  const sender = identity(source.sender, 'Message sender')
-  const target = recipient(source.recipient)
-  return Object.freeze({
-    schema: source.schema,
-    messageId,
-    operationId,
-    createdAt: finiteTimestamp(source.createdAt, 'Message createdAt'),
-    sender,
-    recipient: target,
-    threadId: nonEmpty(source.threadId, 'Message thread id'),
-    correlationId: nonEmpty(source.correlationId, 'Message correlation id'),
-    replyTo: source.replyTo === null ? null : nonEmpty(source.replyTo, 'Message replyTo'),
-    workspaceId: source.workspaceId === null ? null : nonEmpty(source.workspaceId, 'Message workspace id'),
-    senderSessionId: source.senderSessionId === null ? null : nonEmpty(source.senderSessionId, 'Message sender session id'),
-    senderRunId: source.senderRunId === null ? null : nonEmpty(source.senderRunId, 'Message sender run id'),
-    recipientSessionId: source.recipientSessionId === null ? null : nonEmpty(source.recipientSessionId, 'Message recipient session id'),
-    recipientRunId: source.recipientRunId === null ? null : nonEmpty(source.recipientRunId, 'Message recipient run id'),
-    body: source.body
-  })
 }
 
 function sameEnvelope(left: AgentMuxMessageEnvelope, right: AgentMuxMessageEnvelope): boolean {
@@ -387,8 +307,9 @@ export class DurableAgentMuxMessageQueue {
       JOIN records original ON original.sequence=i.intent_sequence JOIN records latest ON latest.sequence=i.control_sequence
       WHERE i.input_id=?`).get(agentInputJournalKey(key))
     if (!row) return undefined
-    const original = JSON.parse(String(row.original)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' }>
-    if (!isDeepStrictEqual(original.intent.key, key)) throw new AgentMuxError('Another producer owns this original input identity.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    const original = JSON.parse(String(row.original)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-submission' }>
+    if (!isDeepStrictEqual(original.kind === 'input-submission' ? original.key : original.intent.key, key)) throw new AgentMuxError('Another producer owns this original input identity.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    if (original.kind === 'input-submission') return undefined
     const latest = JSON.parse(String(row.latest)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-control' }>
     return { sequence: original.sequence, intent: structuredClone(original.intent), control: latest.kind === 'input-intent'
       ? { ref: { key: structuredClone(original.intent.key), waitGeneration: 1 }, state: 'enabled', at: original.at }
@@ -396,6 +317,12 @@ export class DurableAgentMuxMessageQueue {
   }
 
   private applyInputRecord(record: AgentInputWaitJournalRecord): void {
+    if (record.kind === 'input-submission') {
+      const key = validateAgentPromptInputKey(record.key)
+      finiteTimestamp(record.at, 'Original input acceptance time')
+      this.db.prepare('INSERT INTO input_intents VALUES (?, ?, ?, ?)').run(agentInputJournalKey(key), key.agentSessionId, record.sequence, record.sequence)
+      return
+    }
     if (record.kind === 'input-intent') {
       const intent = record.intent, key = validateAgentPromptInputKey(intent.key)
       const admissionIntent = validateAgentPromptAdmissionIntent(intent.admissionIntent)
@@ -457,6 +384,7 @@ export class DurableAgentMuxMessageQueue {
         if (!isDeepStrictEqual(existing.intent.source, intent.source)) throw new AgentMuxError('Input identity already names another original content or author.', 'AGENT_PROMPT_OPERATION_CONFLICT')
         return existing
       }
+      if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key))) return null
       if (intent.source.kind !== 'prompt') throw new AgentMuxError('Prompt journal requires its original prompt producer.', 'INVALID_AGENT_INPUT_CONTROL')
       if (originalClaimAbsent && !await originalClaimAbsent()) return null
       await this.appendRecord({ kind: 'input-intent', sequence: this.nextSequence, intent: structuredClone(intent), at: Date.now() })
@@ -464,10 +392,71 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
+  /** Called only for a newly accepted original claim. Reopening old claims never backfills rows. */
+  async recordInputSubmission(keyValue: AgentPromptInputKey, at: number): Promise<void> {
+    const key = validateAgentPromptInputKey(keyValue)
+    await this.withLock(async () => {
+      const existing = this.db.prepare('SELECT original.json AS json FROM input_intents i JOIN records original ON original.sequence=i.intent_sequence WHERE input_id=?').get(agentInputJournalKey(key))
+      if (existing) {
+        const original = JSON.parse(String(existing.json)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-submission' }>
+        if (!isDeepStrictEqual(original.kind === 'input-intent' ? original.intent.key : original.key, key)) throw new AgentMuxError('Another producer owns this original input identity.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+        return
+      }
+      await this.appendRecord({ kind: 'input-submission', sequence: this.nextSequence, key, at })
+    }, true)
+  }
+
+  /** Membership/order are frozen by the cursor; control and admission remain their original owners. */
+  async readInputMailbox(value: AgentInputMailboxRead): Promise<{ items: InputMailboxJournalItem[]; cut: { incarnation: string; throughSequence: number }; offset: number; digest?: string; continuation(index: number, offset?: number, digest?: string): string | null }> {
+    const input = parseAgentInputMailboxRead(value)
+    return this.withLock(async () => {
+      const incarnation = String(this.db.prepare('SELECT incarnation FROM metadata').get()!.incarnation)
+      let through = Number(this.db.prepare('SELECT COALESCE(MAX(intent_sequence),0) AS n FROM input_intents WHERE recipient_id=?').get(input.agentSessionId)!.n)
+      let before = through + 1, offset = 0
+      let digest: string | undefined
+      if (input.cursor) {
+        try {
+          const [body, signature, extra] = input.cursor.split('.')
+          if (!body || !signature || extra) throw Error()
+          const expected = createHmac('sha256', inputMailboxCursorKey).update(body).digest(), actual = Buffer.from(signature, 'base64url')
+          if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw Error()
+          const cut = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as InputMailboxCursor
+          if (cut.queueId !== this.queueId || cut.incarnation !== incarnation || cut.agentSessionId !== input.agentSessionId ||
+              !Number.isSafeInteger(cut.through) || cut.through < 0 || cut.through > through ||
+              !Number.isSafeInteger(cut.before) || cut.before < 1 || cut.before > cut.through + 1) throw Error()
+          if (cut.offset !== undefined && (!Number.isSafeInteger(cut.offset) || cut.offset < 1 || typeof cut.digest !== 'string' || !/^[a-f0-9]{64}$/u.test(cut.digest)) || cut.offset === undefined && cut.digest !== undefined) throw Error()
+          through = cut.through; before = cut.before; offset = cut.offset ?? 0; digest = cut.digest
+        } catch { throw new AgentMuxError('The input mailbox cursor does not belong to this original journal and recipient.', 'INVALID_AGENT_INPUT_CURSOR') }
+      }
+      const limit = input.limit ?? 25
+      const rows = this.db.prepare(`SELECT original.json AS original FROM input_intents i
+        JOIN records original ON original.sequence=i.intent_sequence
+        WHERE i.recipient_id=? AND i.intent_sequence<=? AND i.intent_sequence<?
+        ORDER BY i.intent_sequence DESC LIMIT ?`).all(input.agentSessionId, through, before, limit + 1)
+      const items: InputMailboxJournalItem[] = rows.slice(0, limit).map(row => {
+        const original = JSON.parse(String(row.original)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-submission' }>
+        if (original.kind === 'input-submission') return { kind: 'submission', sequence: original.sequence, recordedAt: original.at, key: original.key }
+        const saved = this.input(original.intent.key)!
+        const message = saved.intent.source.kind === 'message' ? this.message(saved.intent.source.messageId)! : undefined
+        return { kind: 'controlled', sequence: saved.sequence, recordedAt: original.at, intent: saved.intent, control: saved.control, ...(message ? { message: message.envelope, ...(message.sourceChannel ? { sourceChannel: message.sourceChannel } : {}), ...(message.sourceDevice ? { sourceDevice: message.sourceDevice } : {}) } : {}) }
+      })
+      const continuation = (index: number, offset = 0, digest?: string): string | null => {
+        if (index >= items.length && rows.length <= limit) return null
+        const before = index < items.length ? items[index]!.sequence + 1 : items.at(-1)!.sequence
+        const cut: InputMailboxCursor = { queueId: this.queueId, incarnation, agentSessionId: input.agentSessionId, through, before,
+          ...(offset ? { offset, digest: digest! } : {}) }
+        const body = Buffer.from(JSON.stringify(cut)).toString('base64url')
+        return body + '.' + createHmac('sha256', inputMailboxCursorKey).update(body).digest('base64url')
+      }
+      return { items, cut: { incarnation, throughSequence: through }, offset, ...(digest ? { digest } : {}), continuation }
+    })
+  }
+
   /** Only the original metadata claim runs here; no Provider or Native awaits. */
-  async withUncontrolledInputClaim<T>(key: import('./agent-prompt-condition.js').AgentPromptInputKey, claim: () => Promise<T>): Promise<T> {
+  async withUncontrolledInputClaim<T>(key: import('./agent-prompt-condition.js').AgentPromptInputKey, claim: () => Promise<T>, originalClaim?: () => Promise<boolean>): Promise<T> {
     return await this.withLock(async () => {
       if (this.input(key)) throw new AgentMuxError('The original controlled input requires its journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key)) && (!originalClaim || !await originalClaim())) throw new AgentMuxError('This accepted original input has no available admission to rejoin. Its recorded identity is retained.', 'AGENT_INPUT_READ_UNCONFIRMED')
       return await claim()
     }, true)
   }
@@ -587,7 +576,7 @@ export class DurableAgentMuxMessageQueue {
     if (!Number.isSafeInteger(record.sequence) || record.sequence < this.nextSequence) {
       throw new AgentMuxError('Message journal sequence is invalid or out of order.', 'MESSAGE_QUEUE_UNAVAILABLE')
     }
-    if (record.kind === 'input-intent' || record.kind === 'input-control' || record.kind === 'input-stop') {
+    if (record.kind === 'input-intent' || record.kind === 'input-submission' || record.kind === 'input-control' || record.kind === 'input-stop') {
       this.applyInputRecord(record)
       this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
       return
@@ -715,7 +704,8 @@ export class DurableAgentMuxMessageQueue {
           throw new AgentMuxError('Controlled message requires its explicit original direct intent.', 'INVALID_AGENT_INPUT_CONTROL')
         }
         const key = { kind: 'message' as const, agentSessionId: envelope.recipientSessionId, expectedRun: { runId: envelope.recipientRunId }, messageId }
-        await this.appendRecord({ kind: 'input-intent', sequence: this.nextSequence, at: envelope.createdAt,
+        this.input(key) // Also verifies producer ownership for a read-only original submission.
+        if (!this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key))) await this.appendRecord({ kind: 'input-intent', sequence: this.nextSequence, at: envelope.createdAt,
           intent: { key, admissionIntent: frozenIntent, execution: 'immediate', environment: structuredClone(newMessage.inputEnvironment),
             source: { kind: 'message', messageId, originalControlOperationId: envelope.operationId } } })
       }
@@ -1052,4 +1042,44 @@ export async function recordGlobalMessageDeliveryIssue(messageId: string, reason
   path = defaultAgentMuxMessageQueuePath()
 ): Promise<AgentMuxMessageReceipt> {
   return await new DurableAgentMuxMessageQueue(path).recordDeliveryIssue(messageId, reason, at)
+}
+
+/** The selected Host route encloses the original queue/cut; it never relabels an input key or inner cursor. */
+export async function readRoutedInputMailbox(
+  value: import('./agent-input-mailbox.js').AgentInputMailboxRead & { hostId: string },
+  read: (input: import('./agent-input-mailbox.js').AgentInputMailboxRead) => Promise<import('./agent-input-mailbox.js').AgentInputMailboxPage>
+): Promise<import('./agent-input-mailbox.js').AgentInputMailboxPage & { hostId: string }> {
+  const { hostId, ...request } = value
+  const input = parseAgentInputMailboxRead(request)
+  if (typeof hostId !== 'string' || !hostId || hostId.length > 4096 || /[\0\r\n]/u.test(hostId)) throw new AgentMuxError('The original mailbox route is invalid.', 'INVALID_AGENT_INPUT_READ')
+  type Route = { version: 1; hostId: string; agentSessionId: string; queueId: string; cut: { incarnation: string; throughSequence: number }; cursor: string }
+  const encode = (route: Route) => {
+    const body = Buffer.from(JSON.stringify(route)).toString('base64url')
+    return body + '.' + createHmac('sha256', inputMailboxCursorKey).update('input-mailbox-route\0').update(body).digest('base64url')
+  }
+  let original: Route | undefined
+  if (input.cursor) {
+    try {
+      const [body, signature, extra] = input.cursor.split('.')
+      if (!body || !signature || extra) throw Error()
+      const expected = createHmac('sha256', inputMailboxCursorKey).update('input-mailbox-route\0').update(body).digest(), actual = Buffer.from(signature, 'base64url')
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw Error()
+      original = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as Route
+      if (original.version !== 1 || original.hostId !== hostId || original.agentSessionId !== input.agentSessionId || typeof original.cursor !== 'string' || !original.cursor) throw Error()
+    } catch { throw new AgentMuxError('The mailbox continuation does not belong to this exact Host route and recipient.', 'INVALID_AGENT_INPUT_CURSOR') }
+  }
+  const { parseAgentInputMailboxPage } = await import('./agent-input-mailbox-codec.js')
+  const budget = input.maxBytes ?? 64 * 1024
+  let sourceBudget = budget
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const sourceInput = { ...input, ...(original ? { cursor: original.cursor } : {}), maxBytes: sourceBudget }
+    const page = parseAgentInputMailboxPage(await read(sourceInput), sourceInput)
+    if (original && (page.queueId !== original.queueId || !isDeepStrictEqual(page.cut, original.cut))) throw new AgentMuxError('The mailbox response belongs to another original journal or accepted cut.', 'CONTROL_PROTOCOL_ERROR')
+    const nextCursor = page.nextCursor === null ? null : encode({ version: 1, hostId, agentSessionId: input.agentSessionId, queueId: page.queueId, cut: page.cut, cursor: page.nextCursor })
+    const result = { ...page, hostId, budgetBytes: budget, nextCursor }, overflow = Buffer.byteLength(JSON.stringify(result)) - budget
+    if (overflow <= 0) return result
+    sourceBudget -= overflow + 128
+    if (sourceBudget < 4096) break
+  }
+  throw new AgentMuxError('The original route envelope cannot fit this mailbox read. Increase maxBytes; no input was changed.', 'AGENT_INPUT_READ_BUDGET')
 }
