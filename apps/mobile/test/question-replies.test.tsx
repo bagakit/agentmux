@@ -53,7 +53,7 @@ it('actual MobileApp edits two answers, copies a plain answer, opens the same or
   await click(button(view.element, 'Keep original')); await type(view.element, '  第二题答案\n保留空白  ')
   await click(button(view.element, 'Copy answer: 补充说明')); expect(copy.mock.calls[0]![0]).toBe('  第二题答案\n保留空白  ')
   const draft = structuredClone(record().questionDrafts), frozen = structuredClone(attempt())
-  await click(button(view.element, 'View original terminal'))
+  await click(button(view.element, '打开原终端'))
   expect(view.element.querySelector('.mobile-terminal')?.getAttribute('data-control')).toBe('watch')
   expect(JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!).selectedSessionId).toBe(sid)
   expect(f.write).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.rpc.mock.calls.some(([method]) => method === 'agent.question.reply' || method.includes('goal.pause'))).toBe(false)
@@ -89,7 +89,7 @@ it('keeps editing/terminal/clipboard failure available after device save failure
   const view = await mount(surface()); await type(view.element, 'Original answer'); await click(button(view.element, 'Copy answer: 补充说明')); expect(view.element.textContent).toContain('Retry copy')
   const set = localStorage.setItem.bind(localStorage); vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => { if (key === DEVICE_WORKFACE_KEY) throw new Error('Device save unavailable'); return set(key, value) })
   await type(view.element, 'Unsaved answer retained'); await vi.waitFor(() => expect(view.element.textContent).toContain('尚未持久保存'))
-  await click(button(view.element, 'Answer in original terminal')); expect(showTerminal).toHaveBeenCalledOnce(); expect(f.write).not.toHaveBeenCalled()
+  await click(button(view.element, '打开原终端')); expect(showTerminal).toHaveBeenCalledOnce(); expect(f.write).not.toHaveBeenCalled()
   const pending = deferred<boolean>(); copy.mockImplementationOnce(() => pending.promise); await click(button(view.element, 'Copy answer: 补充说明'))
   const other = f.sessions.get('other')!; f.sessions.set('other', { ...other, hostId: 'other-host', run: { runId: 'other-run' } }); f.setPage({ ...page, agentSessionId: 'other', source: { ...page.source, nativeSessionId: 'other-source' } })
   await view.render(surface('other')); await act(async () => pending.resolve(true))
@@ -99,12 +99,12 @@ it('keeps editing/terminal/clipboard failure available after device save failure
 it('actual mobile surface treats changed or unknown current native source as retained viewing while keeping the original draft/copy/navigation', async () => {
   const f = questionFixture(), platform = createBrowserPlatform(), copy = vi.spyOn(platform, 'copyText').mockResolvedValue(true), show = vi.fn()
   const view = await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={platform} onShowTerminal={show}/>)
-  await type(view.element, 'Kept draft across source changes'); expect(button(view.element, 'Answer in original terminal')).toBeDefined()
+  await type(view.element, 'Kept draft across source changes'); expect(button(view.element, '打开原终端')).toBeDefined()
   for (const nativeHandle of [{ kind: 'provider' as const, providerId: 'codex', sessionId: 'changed-native-source' }, undefined]) {
     const next = { ...f.sessions.get(sid)!, nativeHandle }; await act(async () => { f.sessions.set(sid, next); f.emit({ type: 'agent-session', session: next }) })
-    expect(button(view.element, 'View original terminal')).toBeDefined(); expect(view.element.textContent).toContain('retained question')
+    expect(button(view.element, '打开原终端')).toBeDefined(); expect(view.element.textContent).toContain('retained question')
     expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!.disabled).toBe(false)
     await click(button(view.element, 'Copy answer: 补充说明')); expect(copy.mock.lastCall?.[0]).toBe('Kept draft across source changes')
   }
-  await click(button(view.element, 'View original terminal')); expect(show).toHaveBeenCalledOnce(); expect(f.write).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+  await click(button(view.element, '打开原终端')); expect(show).toHaveBeenCalledOnce(); expect(f.write).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
 })

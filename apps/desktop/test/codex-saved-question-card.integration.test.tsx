@@ -31,8 +31,8 @@ it.each([['answered options', true], ['unanswered free text', false]] as const)(
   if (answered) expect(card.querySelector('.agent-question__answer')?.textContent).toContain(answer)
   else {
     expect(card.querySelector(`[aria-label="Your answer: ${prompt}"]`)).not.toBeNull()
-    expect(card.textContent).toContain('Answer in original terminal')
-    await act(async () => [...card.querySelectorAll('button')].find(button => button.textContent?.includes('Answer in original terminal'))!.click())
+    expect(card.textContent).toContain('打开原终端')
+    await act(async () => [...card.querySelectorAll('button')].find(button => button.textContent?.includes('打开原终端'))!.click())
     expect(openTerminal).toHaveBeenCalledOnce()
   }
   await act(async () => {

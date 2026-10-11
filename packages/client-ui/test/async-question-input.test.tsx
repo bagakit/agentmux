@@ -11,7 +11,7 @@ const request: AgentSessionHistoryQuestionRequest = { delivery: 'async', questio
   { id: 'opaque-choice', prompt: 'Choose a direction', options: [{ id: 'keep', label: 'Keep original' }], acceptsText: true }
 ] }
 let host: HTMLDivElement, root: ReturnType<typeof createRoot>
-const copyText = vi.fn(async () => true), changed = vi.fn(), terminal = vi.fn()
+const copyText = vi.fn<(text: string) => Promise<boolean>>(async () => true), changed = vi.fn(), terminal = vi.fn()
 const platform = { copyText, bindComposerFocus: () => () => {} } as unknown as ClientUiPlatform
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); copyText.mockReset().mockResolvedValue(true); changed.mockReset(); terminal.mockReset(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals() })
@@ -22,11 +22,14 @@ async function render(extra: Partial<Parameters<typeof AgentAsyncQuestionCard>[0
 }
 it('edits multiple answers without a submit callback, copies only one plain answer and opens the original terminal without submitting', async () => {
   await render(); expect(field().disabled).toBe(false)
+  expect(host.textContent).toContain('答案草稿（尚未提交）')
+  expect(host.textContent).toContain('这里只整理答案；复制后到原终端粘贴并确认。')
   await type('  保留原始草稿\n不猜确认  ')
   await act(async () => host.querySelector<HTMLButtonElement>('[data-question-id="opaque-choice"] button')!.click())
   expect(changed.mock.lastCall?.[0]).toEqual([{ questionId: 'opaque-free', answer: '  保留原始草稿\n不猜确认  ' }, { questionId: 'opaque-choice', answer: 'Keep original' }])
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Copy answer: What should remain available?"]')!.click())
   expect(copyText.mock.calls[0]![0]).toBe('  保留原始草稿\n不猜确认  ')
+  expect(host.querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端')
   await act(async () => host.querySelector<HTMLButtonElement>('.agent-question__footer button')!.click())
   expect(terminal).toHaveBeenCalledOnce(); expect(host.textContent).not.toContain('Submit reply')
 })
@@ -61,7 +64,7 @@ it('keeps draft editing and terminal navigation available with an undeclared rou
 
 it('uses a neutral terminal viewing action when the original current source is unknown or changed, while preserving edit/copy/navigation', async () => {
   await render({ terminalCurrent: false }); await type('Kept independent draft')
-  expect(host.querySelector('.agent-question__footer button')?.textContent).toContain('View original terminal')
+  expect(host.querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端')
   expect(host.textContent).toContain('retained question'); expect(field().disabled).toBe(false)
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Copy answer: What should remain available?"]')!.click())
   expect(copyText.mock.calls[0]![0]).toBe('Kept independent draft')

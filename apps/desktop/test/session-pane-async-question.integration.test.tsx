@@ -82,14 +82,14 @@ it('same-source native answers never settle old unknown or clear diagnostic; onl
 
 it('actual Pane distinguishes retained or unknown native sources and a known old reply Run without blocking draft/copy/original terminal', async () => {
   const f = await setup(); await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Kept draft across source changes')
-  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('Answer in original terminal')
+  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端')
   for (const change of [{ nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'changed-native-source' } }, { nativeHandle: undefined }]) {
     await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, ...change } : session) }))); await flush()
-    expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('View original terminal'); expect(card().textContent).toContain('retained question')
+    expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端'); expect(card().textContent).toContain('retained question')
     expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.disabled).toBe(false)
     await click('[aria-label="Copy answer: Free text answer"]'); expect(f.copy.mock.lastCall?.[0]).toBe('Kept draft across source changes')
   }
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, nativeHandle: { kind: 'provider', providerId: target.source.providerId, sessionId: target.source.nativeSessionId }, control: { ...control, run: { runId: 'new-run' } } } : session), questionReplies: { [control.agentSessionId]: { [key]: { ...held, phase: 'rejected' } } } }))); await flush()
-  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('View original terminal')
+  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端')
   await click('.agent-question__footer button'); expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal'); expect(f.send).not.toHaveBeenCalled(); expect(f.write).not.toHaveBeenCalled()
 })

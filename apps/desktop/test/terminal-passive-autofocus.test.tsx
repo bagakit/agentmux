@@ -14,7 +14,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 
 // Native parser, buffers, modes and viewport methods are real; DOM paint/addons and Run boundary are not.
-const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null }))
+const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, keyHandler: null as ((event: KeyboardEvent) => boolean) | null }))
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
@@ -28,7 +28,7 @@ vi.mock('@xterm/xterm', async () => {
     getSelection() { return '' }
     hasSelection() { return false }
     registerLinkProvider() { return { dispose() {} } }
-    attachCustomKeyEventHandler() {}
+    attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean) { fixture.keyHandler = handler }
   } }
 })
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { activate() {} dispose() {} fit() {} proposeDimensions() { return { cols: 80, rows: 24 } } } }))
@@ -69,7 +69,7 @@ const lines = Array.from({ length: 600 }, (_, i) => `private-${i}\r\n`).join('')
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  fixture.terminals.length = 0; fixture.receive = null; releases = []
+  fixture.terminals.length = 0; fixture.receive = null; fixture.keyHandler = null; releases = []
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(lines))
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(receive => { fixture.receive = receive; return () => { fixture.receive = null } })
@@ -177,4 +177,62 @@ it('explicit exact Region caret intent still transfers focus from Composer to it
   expect(useAppStore.getState().regionCaretFocus).toBeNull()
   expect(composer.textContent).toBe('Original draft')
   expect(write).not.toHaveBeenCalled()
+})
+
+async function retainedTerminal(visible: boolean) {
+  await act(async () => root.render(createElement('div', null,
+    createElement(TerminalView, { session, themeId: 'graphite', interactiveResize: false, visible,
+      autoFocus: false, linkOrigin: origin }),
+    createElement('input', { 'aria-label': 'Later editable owner' }))))
+  expect(fixture.terminals).toHaveLength(1)
+}
+it('an explicit hidden terminal caret waits for its same retained view and consumes only after focus succeeds', async () => {
+  await retainedTerminal(false)
+  const input = fixture.terminals[0]!.element!.querySelector('textarea')!
+  await act(async () => useAppStore.getState().requestRegionCaretFocus(origin.regionId))
+  expect(useAppStore.getState().regionCaretFocus).toMatchObject({ regionId: origin.regionId, target: 'terminal' })
+  expect(document.activeElement).not.toBe(input)
+  await retainedTerminal(true)
+  expect(document.activeElement).toBe(input)
+  expect(useAppStore.getState().regionCaretFocus).toBeNull()
+  expect(attach).toHaveBeenCalledTimes(1); expect(write).not.toHaveBeenCalled()
+})
+it.each(['focus', 'input'] as const)('a pending explicit terminal caret preserves a later %s owner', async later => {
+  await retainedTerminal(false)
+  const other = document.querySelector<HTMLInputElement>('[aria-label="Later editable owner"]')!
+  if (later === 'input') other.focus()
+  await act(async () => useAppStore.getState().requestRegionCaretFocus(origin.regionId))
+  expect(useAppStore.getState().regionCaretFocus).not.toBeNull()
+  await act(async () => {
+    if (later === 'focus') other.focus()
+    else other.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }))
+  })
+  expect(useAppStore.getState().regionCaretFocus).toBeNull()
+  await retainedTerminal(true)
+  expect(document.activeElement).toBe(other)
+  expect(attach).toHaveBeenCalledTimes(1); expect(write).not.toHaveBeenCalled()
+})
+it('a pending explicit caret for a different Region never focuses this retained terminal', async () => {
+  await retainedTerminal(false)
+  await act(async () => useAppStore.getState().requestRegionCaretFocus('another-region'))
+  await retainedTerminal(true)
+  expect(document.activeElement).not.toBe(fixture.terminals[0]!.element!.querySelector('textarea'))
+  expect(useAppStore.getState().regionCaretFocus).toMatchObject({ regionId: 'another-region' })
+})
+
+it('an explicit terminal caret bypasses a retained search field while ordinary navigation preserves search focus', async () => {
+  await retainedTerminal(true)
+  expect(fixture.keyHandler).not.toBeNull()
+  await act(async () => {
+    fixture.keyHandler!(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', metaKey: true }))
+    fixture.keyHandler!(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', ctrlKey: true, shiftKey: true }))
+  })
+  const search = document.querySelector<HTMLInputElement>('[aria-label="Find in terminal"]')!
+  expect(search).not.toBeNull()
+  await act(async () => useAppStore.setState({ regionCaretFocus: { regionId: origin.regionId, nonce: 101 } }))
+  expect(document.activeElement).toBe(search)
+  await act(async () => useAppStore.getState().requestRegionCaretFocus(origin.regionId))
+  expect(document.activeElement).toBe(fixture.terminals[0]!.element!.querySelector('textarea'))
+  expect(useAppStore.getState().regionCaretFocus).toBeNull()
+  expect(search.isConnected).toBe(true); expect(attach).toHaveBeenCalledTimes(1); expect(write).not.toHaveBeenCalled()
 })

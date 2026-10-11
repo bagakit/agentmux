@@ -69,9 +69,9 @@ afterEach(async () => {
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
-async function mount(presentation: WorkbenchPresentation = { active: true, retainedRegionId: null }) {
+async function mount(presentation: WorkbenchPresentation = { active: true, retainedRegionId: null }, readOnly = false) {
   await act(async () => root.render(<WorkbenchPresentationContext.Provider value={presentation}>
-    <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible
+    <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible readOnly={readOnly}
       linkOrigin={{ workspaceId: resourceId, tabGroupId: 'resource-group', tabId, regionId, sessionId: session.id }} />
     <input aria-label="Later control" />
   </WorkbenchPresentationContext.Provider>))
@@ -104,7 +104,7 @@ function historyReturnButton(reader: HTMLElement) {
   return buttons[0]!
 }
 async function openTerminal() {
-  const action = container.querySelector<HTMLButtonElement>('.agent-interaction__actions button')
+  const action = container.querySelector<HTMLButtonElement>('.agent-interaction__native-terminal')
   expect(action?.textContent).toBe('Open terminal')
   await act(async () => action!.click())
 }
@@ -150,6 +150,7 @@ it.each(['survey', 'mote', 'focus'] as const)('%s native terminal action uses th
   const before = workSelection(), global = vi.spyOn(useAppStore.getState(), 'focusRegion')
   await openTerminal()
   expect(select).toHaveBeenCalledExactlyOnceWith(regionId); expect(global).not.toHaveBeenCalled()
+  expect(useAppStore.getState().regionCaretFocus).toMatchObject({ regionId, target: 'terminal' })
   expect(useAppStore.getState().viewModes[session.id]).toBe('terminal')
   expect(useAppStore.getState().agentFocus.execution.reference).toEqual(reference)
   expectOwnedSelection(surface, before)
@@ -214,4 +215,19 @@ it.each(['later input', 'different Group', 'different context'] as const)('a que
   expect(select).toHaveBeenCalledExactlyOnceWith(regionId)
   expect(document.activeElement).toBe(currentInput)
   expect(useAppStore.getState().regionCaretFocus).toBeNull()
+})
+
+
+it('a read-only native question preserves the Session without requesting a terminal input caret', async () => {
+  await mount(undefined, true)
+  expect(container.querySelector('.agent-interaction__native-terminal')).toBeNull()
+  expect(useAppStore.getState().regionCaretFocus).toBeNull()
+  expect(useAppStore.getState().sessions[0]!.control).toBe(session.control)
+})
+it('an original Session awaiting restoration does not claim a currently usable terminal input position', async () => {
+  useAppStore.setState({ sessions: [{ ...session, processState: 'exited' }] })
+  await mount()
+  await openTerminal()
+  expect(useAppStore.getState().regionCaretFocus).toBeNull()
+  expect(useAppStore.getState().sessions[0]!.control).toBe(session.control)
 })
