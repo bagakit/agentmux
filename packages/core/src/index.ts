@@ -135,3 +135,6 @@ export * from './conversation-landmarks.js'
 export * from './conversation-landmark-store.js'
 // Node transport adapters reuse the original route/source fence and byte budget owner.
 export { forwardConversationInput, forwardConversationPage, readRoutedConversation } from './conversation-reader.js'
+
+export * from './application-access.js'
+export * from './application-access-owner.js'

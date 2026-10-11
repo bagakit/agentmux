@@ -1,3 +1,4 @@
+import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult, type ApplicationAccessPort, type ApplicationAccessMethod } from './application-access.js'
 import { isDeepStrictEqual } from 'node:util'
 import { isConnectionSetupMethod, parseConnectionSetupParams } from './connection-setup-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
@@ -106,6 +107,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client'>>
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
   moteConnections?: MoteConnectionPort
   connections?: ConnectionPort
@@ -243,7 +245,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -574,6 +576,20 @@ export class AgentMuxRpcService {
       }) as AgentMuxRpcResult<M>
     }
     await this.assertRuntimeFence(context)
+    if (isApplicationAccessMethod(method)) {
+      const input = parseApplicationAccessParams(method,params)
+      // This domain executes private configured application connectors. An Agent cannot self-approve.
+      const writes = ['settings.applications.configure','settings.applications.delete','settings.applications.apply'].includes(method)
+      if (writes && (context.caller !== undefined || context.principal?.kind !== 'user' || !context.principal.id)) throw new AgentMuxError('Application access changes require a transport-approved user without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+      if (!context.caller && (!context.principal || !['user','device'].includes(context.principal.kind) || !context.principal.id)) throw new AgentMuxError('Application access observation requires an authenticated original transport.', 'CONTROL_PERMISSION_DENIED')
+      await this.authenticated(context)
+      context.signal?.throwIfAborted()
+      if (!this.ports.applicationAccess) {
+        if (this.ports.forwardControl) return parseApplicationAccessResult(method,await this.ports.forwardControl<ApplicationAccessMethod>(method,input,context),input) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The original application access owner is unavailable. Existing applications and Agents are retained.', 'CONTROL_UNAVAILABLE')
+      }
+      return parseApplicationAccessResult(method,await this.ports.applicationAccess.call(method,input,context.signal),input) as AgentMuxRpcResult<M>
+    }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
       if (method === 'settings.hosts.inspect' && !this.ports.coreClients && !this.local) throw new AgentMuxError(
