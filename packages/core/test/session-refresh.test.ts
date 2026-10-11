@@ -32,7 +32,7 @@ it('canonical SDK refresh reads one exact SID after rebind while explicit Run an
   const h = await fixture(), previous = h.client.agentSession('refresh-original').run
   await h.rebind()
   const scan = vi.spyOn(h.store, 'loadMetadata').mockRejectedValue(new Error('A canonical SID read must not scan all Sessions'))
-  expect(await h.client.refreshAgentSession('refresh-original')).toMatchObject({ agentSessionId: 'refresh-original', hostId: 'local', run: { runId: 'canonical-run' } })
+  await expect(h.client.refreshAgentSession('refresh-original')).resolves.toMatchObject({ agentSessionId: 'refresh-original', hostId: 'local', run: { runId: 'canonical-run' } })
   expect(scan).not.toHaveBeenCalled()
   await expect(h.client.refreshAgentSession('refresh-original', previous)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
   await expect(h.client.writeAgent({ agentSessionId: 'refresh-original', expectedRun: previous, source: 'user', data: 'kept original input' })).rejects.toBeInstanceOf(Error)
@@ -67,7 +67,11 @@ it('refresh re-observes late native identity on the returned canonical Run witho
   const discover = vi.spyOn(provider, 'discoverNativeSession').mockResolvedValue({ handle: { kind: 'provider', providerId: 'codex', sessionId: 'native-original' }, assertCurrent: witness })
   const result = await h.client.refreshAgentSession('refresh-original')
   expect(result.run.runId).toBe('canonical-run')
-  await expect.poll(() => h.client.agentSession('refresh-original').nativeHandle?.sessionId).toBe('native-original')
+  const observed = (async () => {
+    await expect.poll(() => h.client.agentSession('refresh-original').nativeHandle?.sessionId).toBe('native-original')
+  })()
+  await expect(observed).resolves.toBeUndefined()
+  expect(h.client.agentSession('refresh-original').nativeHandle?.sessionId).toBe('native-original')
   expect(discover).toHaveBeenCalledWith(expect.objectContaining({ processId: 12345, workspacePath: h.root }))
   expect(witness).toHaveBeenCalled(); expect((await h.read())!.nativeHandle?.sessionId).toBe('native-original')
   expect(h.inner.kernel.status.mock.calls.every(([id]: [string]) => id === 'canonical-run')).toBe(true); h.unchanged()

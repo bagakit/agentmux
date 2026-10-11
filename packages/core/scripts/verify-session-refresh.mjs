@@ -49,7 +49,7 @@ try {
     { name: 'baseline' },
     { name: 'canonical-requires-old-run', path: 'packages/core/src/agent-session-registry.ts',
       anchor: 'if (expectedRun && !sameRun(current.run, expectedRun))', replacement: 'if (!sameRun(current.run, expectedRun ?? previous.run))',
-      target: 'canonical SDK refresh reads one exact SID', expected: 'Agent Session changed before prompt Input' },
+      target: 'canonical SDK refresh reads one exact SID', expected: 'promise rejected', cause: 'STALE_AGENT_SESSION' },
     { name: 'explicit-run-fence', path: 'packages/core/src/agent-session-registry.ts',
       anchor: 'if (expectedRun && !sameRun(current.run, expectedRun))', replacement: 'if (false)',
       target: 'canonical SDK refresh reads one exact SID', expected: 'promise resolved' },
@@ -59,7 +59,7 @@ try {
     { name: 'canonical-native-observer', path: 'packages/core/src/client.ts',
       anchor: 'this.hookNativeWitnesses.delete(session.run.runId)\n    this.queueNativeIdentityCapture(session)',
       replacement: "this.hookNativeWitnesses.delete(session.run.runId)\n    this.queueNativeIdentityCapture({ ...session, run: { runId: 'unconfirmed-reader-run' } })",
-      target: 'refresh re-observes late native identity', expected: "expected undefined to be 'native-original'" },
+      target: 'refresh re-observes late native identity', expected: 'promise rejected' },
     { name: 'public-uses-refresh-owner', path: 'packages/core/src/public-rpc-service.ts',
       anchor: 'const session = await selected.client.refreshAgentSession(agentSessionId)', replacement: 'const session = selected.session',
       target: 'real public RPC and compiled CLI explicitly refresh', expected: 'to be called 2 times' },
@@ -147,8 +147,12 @@ try {
     const summary = JSON.parse(await readFile(report, 'utf8'))
     const assertions = summary.testResults.flatMap(suite => suite.assertionResults)
     const failed = assertions.filter(row => row.status === 'failed')
-    const semanticRed = variant.target && result.code === 1 && !result.signal && failed.some(row =>
-      row.fullName.includes(variant.target) && (row.failureMessages.join('\n') + result.stdout + result.stderr).includes(variant.expected))
+    const semanticRed = variant.target && result.code === 1 && !result.signal && failed.some(row => {
+      const failure = row.failureMessages.join('\n')
+      const assertion = /AssertionError|__VITEST_(?:REJECTS|RESOLVES)__|expected .+ to /su.test(failure)
+      return row.fullName.includes(variant.target) && assertion && failure.includes(variant.expected)
+        && (!variant.cause || (failure + result.stdout + result.stderr).includes(variant.cause))
+    })
     const entry = { name: variant.name, compiled, code: result.code, signal: result.signal,
       total: summary.numTotalTests, passed: summary.numPassedTests, failed: summary.numFailedTests,
       semanticRed: !!semanticRed, report, failures: failed.map(row => ({ name: row.fullName, messages: row.failureMessages })) }
