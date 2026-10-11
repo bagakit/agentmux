@@ -10,10 +10,13 @@ const definitions = {
   T001: { name: 'session-continuity-supervision', schema: 'agentmux.session-continuity-supervision-proof.v1', minimum: 37, mutants: 10 },
   T002: { name: 'session-continuity-control', schema: 'agentmux.session-continuity-control-proof.v1', minimum: 23, mutants: 11 },
   T003: { name: 'resume-context-observation', schema: 'agentmux.resume-context-observation-proof.v1', minimum: 33, mutants: 18 },
-  T006: { name: 'session-continuity-executor', schema: 'agentmux.session-continuity-executor-proof.v1', minimum: 16, mutants: 10,
+  T006: { name: 'session-continuity-executor', schema: 'agentmux.session-continuity-executor-proof.v1', minimum: 16, mutants: 11,
+    consumerSchema: 'agentmux.continuity-executor-consumer.v1',
     consumerNames: ['sdk-no-owner', 'sdk-unrelated-owner', 'independent-core', 'initial-runtime-unknown', 'delay-restart',
       'host-current-missing', 'host-current-malformed', 'unknown-sdk-missing', 'unknown-sdk-malformed', 'damaged-private-healthy-native', 'unknown-start', 'public-cli-hosted'] },
-  T007: { name: 'initial-continuity-cancellation', schema: 'agentmux.initial-continuity-cancellation-proof.v1', minimum: 8, mutants: 6 }
+  T007: { name: 'initial-continuity-cancellation', schema: 'agentmux.initial-continuity-cancellation-proof.v1', minimum: 12, mutants: 10,
+    consumerSchema: 'agentmux.initial-continuity-consumer.v1',
+    consumerNames: ['delay-cancel-public-restart', 'runtime-unknown-healthy-raw', 'unknown-admitted-start'] }
 }
 
 /** Consume original owner artifacts; authored passed flags cannot replace raw or loaded evidence. */
@@ -23,6 +26,8 @@ export async function readSupervisionCoreOwner(root, task, receiptFile) {
   assert.equal(receipt.schema, definition.schema); assert.equal(receipt.passed, true); assert.equal(receipt.sourceStable, true)
   const gate = 'packages/core/scripts/verify-' + definition.name + '.mjs'
   const sourceInputs = await verifySourcePins(root, receipt.inputs, gate)
+  const originalGate = Object.keys(receipt.inputs).find(name => name === gate || name.endsWith('/' + gate))
+  const producerRoot = path.isAbsolute(originalGate) ? originalGate.slice(0, -gate.length) : root
   const baseline = receipt.results.filter(one => one.code === 0), mutations = receipt.results.filter(one => one.code !== 0)
   assert.equal(baseline.length, 1, 'Exactly one original candidate baseline is required')
   assert.ok(mutations.length >= definition.mutants, 'Original supervision owner counterexamples are missing')
@@ -47,12 +52,12 @@ export async function readSupervisionCoreOwner(root, task, receiptFile) {
   }
   const consumerEvidence = []
   if (definition.consumerNames) {
-    assert.ok(Array.isArray(receipt.consumerEvidence), 'Original executor consumer evidence is missing')
+    assert.ok(Array.isArray(receipt.consumerEvidence), 'Original recovery consumer evidence is missing')
     assert.deepEqual(receipt.consumerEvidence.map(one => one.name).sort(), [...definition.consumerNames].sort())
     for (const entry of receipt.consumerEvidence) {
-      const original = await readFile(path.resolve(root, entry.path)), proof = JSON.parse(original)
-      assert.equal(hash(original), entry.sha256, 'Original executor consumer bytes changed')
-      assert.equal(proof.schema, 'agentmux.continuity-executor-consumer.v1'); assert.equal(proof.name, entry.name)
+      const original = await readFile(path.resolve(producerRoot, entry.path)), proof = JSON.parse(original)
+      assert.equal(hash(original), entry.sha256, 'Original recovery consumer bytes changed')
+      assert.equal(proof.schema, definition.consumerSchema); assert.equal(proof.name, entry.name)
       assert.equal(proof.userRuntimeTouched, false); assert.ok(proof.facts && Object.keys(proof.facts).length > 0)
       consumerEvidence.push(entry)
     }
@@ -63,11 +68,11 @@ export async function readSupervisionCoreOwner(root, task, receiptFile) {
 
 /** Main wire and full Store/UI producers retain their own loaded-source witness format. */
 export async function readSupervisionConsumerOwner(root, kind, receiptFile) {
-  const definition = kind === 'wire'
-    ? { schema: 'agentmux.continuity-control-wire-proof.v1', gate: 'verify-session-continuity-control-wire.mjs', minimum: 3, mutants: 3 }
-    : kind === 'consumer'
-      ? { schema: 'agentmux.continuity-supervision-consumer-proof.v1', gate: 'verify-session-continuity-supervision.mjs', minimum: 14, mutants: 12 }
-      : null
+  const definition = {
+    wire: { schema: 'agentmux.continuity-control-wire-proof.v1', gate: 'verify-session-continuity-control-wire.mjs', minimum: 3, mutants: 3 },
+    consumer: { schema: 'agentmux.continuity-supervision-consumer-proof.v1', gate: 'verify-session-continuity-supervision.mjs', minimum: 14, mutants: 12 },
+    cleanup: { schema: 'agentmux.probe-cleanup-observation-proof.v1', gate: 'verify-probe-cleanup-observation.mjs', minimum: 24, mutants: 3 }
+  }[kind]
   assert.ok(definition, 'Unknown supervision consumer owner')
   const file = path.resolve(root, receiptFile), bytes = await readFile(file), receipt = JSON.parse(bytes), directory = path.dirname(file)
   assert.equal(receipt.schema, definition.schema); assert.equal(receipt.passed, true); assert.equal(receipt.sourceStable, true)
@@ -77,7 +82,8 @@ export async function readSupervisionConsumerOwner(root, kind, receiptFile) {
   assert.ok(receipt.runs.filter(one => one.exitCode !== 0).length >= definition.mutants)
   assert.equal(new Set(receipt.runs.map(one => one.id)).size, receipt.runs.length)
   for (const run of receipt.runs) {
-    const reportFile = path.resolve(root, run.rawReport)
+    assert.equal(path.basename(run.rawReport), run.id + '.json')
+    const reportFile = path.join(directory, run.id + '.json')
     assert.equal(hash(await readFile(reportFile)), run.rawSha256, 'Original consumer raw report changed')
     const report = await parse(reportFile), rows = await verifyReport(reportFile, run.exitCode === 0, run.exitCode === 0 ? definition.minimum : 1,
       { total: report.numTotalTests, passed: run.passed, failed: run.failed })
@@ -121,6 +127,7 @@ export async function readSupervisionSettingsOwner(root, receiptFile) {
   }
   const nativeDirectory = path.join(directory, 'native'), native = await parse(path.join(nativeDirectory, 'receipt.json'))
   assert.equal(native.completed, true); assert.equal(native.sourceIdentity, receipt.native.sourceIdentity)
+  assert.ok(native.compiled.length > 0 && native.assets.length > 0, 'The original App compilation and assets must be nonempty')
   assert.equal(native.sourceIdentity, hash(JSON.stringify(native.source)))
   await verifySourcePins(root, Object.fromEntries(Object.entries(native.source).map(([name, entry]) => [name, entry.sha256])),
     'apps/desktop/scripts/fixtures/session-continuity-settings/scenario.cjs')
