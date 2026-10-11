@@ -10,6 +10,8 @@ import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgent
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
+import * as Modal from '@agentmux/client-ui/components/Modal'
+import { DocumentOverlayPortal } from '../src/renderer/src/components/WindowOverlayHost'
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
 const dom = composerDOM({ agentInformation: true }), a = composerSession('bookmark-a'), b = composerSession('bookmark-b'), neighbor = { ...composerSession('neighbor-display'), hostId: 'neighbor-host', control: { ...a.control, hostId: 'neighbor-host' } }
 const timeline = (id: string, text: string) => ({ agentSessionId: id, revision: text.length, items: [{ id: id + '-reply', agentSessionId: id, kind: 'assistant_message' as const, source: 'native-hook' as const, status: 'complete' as const, title: 'Reply', content: text, createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }] })
@@ -134,13 +136,35 @@ it('keeps preferred geometry when a fitted heading is clicked without dragging',
   })
   expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(preferred)
 })
-it('raises the same bookmark tree when keyboard focus enters from another window', async () => {
+it('raises the same bookmark tree in DOM order when keyboard focus enters it', async () => {
   await scene(); await open(); await pin(); const original = panel()
   await open(b.id); await pin(b.id)
+  const second = panel(b.id), firstHost = original.parentElement!, secondHost = second.parentElement!
+  expect(firstHost.parentElement).toBe(secondHost.parentElement)
+  expect(firstHost.compareDocumentPosition(secondHost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(original.style.zIndex).toBe('var(--layer-popover)'); expect(second.style.zIndex).toBe('var(--layer-popover)')
+  const prose = second.querySelector('.focus-context-hover__recap p')!, range = document.createRange()
+  range.selectNodeContents(prose); document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
   expect(agentBookmarks.get().bookmarks.at(-1)!.agentSessionId).toBe(b.control.agentSessionId)
   const target = original.querySelector<HTMLButtonElement>('.agent-information-reader__close')!
   await act(async () => target.focus())
   expect(document.activeElement).toBe(target); expect(panel()).toBe(original)
   expect(agentBookmarks.get().bookmarks.at(-1)!.agentSessionId).toBe(a.control.agentSessionId)
   expect(panels()).toHaveLength(2)
+  expect(secondHost.compareDocumentPosition(firstHost) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(original.parentElement).toBe(firstHost); expect(second.parentElement).toBe(secondHost)
+  expect(document.getSelection()!.toString()).toBe(b.id + ' original reply')
+  await dom.render(<Modal.Root open>
+    <DocumentOverlayPortal component={Modal.Portal}>
+      <Modal.Overlay className="dialog-scrim" />
+      <Modal.Content className="dialog-surface" aria-describedby={undefined}><Modal.Title>Later modal</Modal.Title><button>Modal action</button></Modal.Content>
+    </DocumentOverlayPortal>
+  </Modal.Root>)
+  const scope = document.querySelector<HTMLElement>('[data-overlay-modal-scope]')!
+  expect(scope).not.toBeNull()
+  expect(original.closest('[data-overlay-modal-scope]')).toBeNull()
+  expect(second.closest('[data-overlay-modal-scope]')).toBeNull()
+  expect(firstHost.closest('#agentmux-window-overlay-host')!.contains(scope)).toBe(true)
+  expect(original.style.zIndex).toBe('var(--layer-popover)'); expect(second.style.zIndex).toBe('var(--layer-popover)')
+  expect(scope.querySelectorAll('[data-overlay-modal-part]')).toHaveLength(2)
 })
