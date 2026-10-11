@@ -27,6 +27,8 @@ function recoveryReminder(operation: AgentMuxContinuityOperation): string {
 /** Freeze the original text before starting. A not-yet-created Run is never named in its body. */
 export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperation, catalog: AgentCatalogEntry,
   lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest): AgentMuxContinuityLaunchInput | undefined {
+  // A later attempt restores context only; omitting fresh input alone would synthesize the old automatic task again.
+  if (operation.intentOperationId) return
   const automatic = operation.trigger !== 'input' && operation.interruptedWorking && catalog.promptDelivery !== 'post-launch-only'
   const input = fresh ?? (automatic ? { submissionId: 'continuity-' + digest(JSON.stringify([operation.agentSessionId, operation.operationId])),
     prompt: operation.recoveryInputs?.continuation ?? '', agentMuxNote: recoveryReminder(operation) } : undefined)
@@ -53,7 +55,7 @@ export function bindContinuityLaunchInput(operation: AgentMuxContinuityOperation
 
 /** Called by the Run lifecycle commit, before another input can claim this Run. */
 export function createContinuityInputDelivery(operation: AgentMuxContinuityOperation, initialInputByte?: number): AgentMuxContinuityInputDelivery | undefined {
-  if (operation.trigger === 'input' || !operation.interruptedWorking || !operation.newRun || !operation.nativeTarget) return
+  if (operation.intentOperationId || operation.trigger === 'input' || !operation.interruptedWorking || !operation.newRun || !operation.nativeTarget) return
   const inputs = operation.recoveryInputs
   if (!inputs?.reminder.trim() && !inputs?.continuation.trim()) return
   const previousInput = operation.previousInput ?? { scope: 'typed-prompt' as const, outcome: 'unknown' as const }

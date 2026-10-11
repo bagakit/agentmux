@@ -21,6 +21,10 @@ export type AgentMuxContinuityPolicy = {
   resumeAfterExit: boolean
   recheckIntervalMs: number
   recheckMaxAttempts: number
+  retryInitialDelayMs: number
+  retryMaxDelayMs: number
+  /** Additional admitted attempt records; the initial native resume is not counted. */
+  retryMaxAttempts: number
   reminderMode: 'off' | 'default' | 'default-plus-custom'
   reminderAppend: string
   continuationEnabled: boolean
@@ -33,6 +37,7 @@ export const DEFAULT_AGENT_CONTINUITY_POLICY: Readonly<AgentMuxContinuityPolicy>
   activeRecovery: 'automatic', activeRecoveryDelayMs: 0,
   confirmedIdleWindowMs: 24 * 60 * 60 * 1000, resumeAfterExit: true,
   recheckIntervalMs: 1000, recheckMaxAttempts: 3,
+  retryInitialDelayMs: 1000, retryMaxDelayMs: 30_000, retryMaxAttempts: 3,
   reminderMode: 'default', reminderAppend: '', continuationEnabled: true,
   continuationPrompt: DEFAULT_AGENT_CONTINUITY_CONTINUATION
 })
@@ -43,7 +48,9 @@ export function normalizeAgentContinuityPolicy(authored?: Partial<AgentMuxContin
     !['off', 'default', 'default-plus-custom'].includes(policy.reminderMode) ||
     typeof policy.resumeAfterExit !== 'boolean' || typeof policy.continuationEnabled !== 'boolean' ||
     typeof policy.reminderAppend !== 'string' || typeof policy.continuationPrompt !== 'string' ||
-    ![policy.activeRecoveryDelayMs, policy.confirmedIdleWindowMs, policy.recheckIntervalMs, policy.recheckMaxAttempts]
+    policy.retryMaxDelayMs < policy.retryInitialDelayMs ||
+    ![policy.activeRecoveryDelayMs, policy.confirmedIdleWindowMs, policy.recheckIntervalMs, policy.recheckMaxAttempts,
+      policy.retryInitialDelayMs, policy.retryMaxDelayMs, policy.retryMaxAttempts]
       .every(value => Number.isSafeInteger(value) && value >= 0)) {
     throw new TypeError('Invalid Agent continuity policy.')
   }
@@ -119,12 +126,46 @@ export type AgentMuxContinuityLaunchInput = {
   receipt?: { kind: 'runtime-launch'; operationId: string; run: AgentMuxRunRef; observedAt: number }
 }
 
+export type AgentMuxContinuityContextEvidence = {
+  source: 'native-hook'
+  run: AgentMuxRunRef
+  nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  hookReceiptId: string
+  observedAt: number
+}
+export type AgentMuxContinuityCancellation = {
+  source: 'native-hook' | 'control' | 'user-stop'
+  run: AgentMuxRunRef
+  nativeTarget: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  operationId: string
+  observedAt: number
+}
+export type AgentMuxContinuitySupervision = {
+  phase: 'observing' | 'retry-wait' | 'paused' | 'settled' | 'cancelled'
+  activeAttemptOperationId: string
+  /** Includes the initial admitted native resume. History never resets on explicit continuation. */
+  attemptCount: number
+  /** Total admitted attempts authorized by the frozen policy and exact later control receipts. */
+  attemptLimit: number
+  nextAttemptAt?: number
+  observedAt: number
+  reason: string
+  process?: { run: AgentMuxRunRef; state: 'running' | 'exited' | 'interrupted' | 'unknown'; observedAt: number;
+    exitCode?: number | null; exitSignal?: string | number | null }
+  contextEvidence?: AgentMuxContinuityContextEvidence
+  cancellation?: AgentMuxContinuityCancellation
+  observationError?: { code: string; message: string; observedAt: number }
+}
+
 export type AgentMuxContinuityOperation = {
   operationId: string
   agentSessionId: string
   trigger: AgentMuxContinuityTrigger
   timingOverride?: 'startup' | 'on-open'
   policy: AgentMuxContinuityPolicy
+  /** This attempt only restores context under the original durable automatic intent. */
+  intentOperationId?: string
+  supervision?: AgentMuxContinuitySupervision
   previousRun: AgentMuxRunRef
   newRun?: AgentMuxRunRef
   nativeTarget?: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
@@ -177,10 +218,27 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     !op.previousRun || typeof op.previousRun.runId !== 'string' || typeof op.reason !== 'string' ||
     ![op.admittedAt, op.observedAt, op.rechecks, ...(op.nextActionAt === undefined ? [] : [op.nextActionAt])].every(value => Number.isSafeInteger(value) && value >= 0) ||
     !op.evidence || typeof op.evidence.kind !== 'string' || op.newRun && typeof op.newRun.runId !== 'string' ||
-    op.nativeTarget && (op.nativeTarget.kind !== 'provider' || typeof op.nativeTarget.providerId !== 'string' || typeof op.nativeTarget.sessionId !== 'string') ||
+    op.nativeTarget && (op.nativeTarget.kind !== 'provider' || typeof op.nativeTarget.providerId !== 'string' || !op.nativeTarget.providerId || typeof op.nativeTarget.sessionId !== 'string' || !op.nativeTarget.sessionId) ||
     op.requestDigest !== undefined && (typeof op.requestDigest !== 'string' || !op.requestDigest) ||
     op.errorCode !== undefined && (typeof op.errorCode !== 'string' || !op.errorCode) ||
     op.recoveryInputs && (typeof op.recoveryInputs.reminder !== 'string' || typeof op.recoveryInputs.continuation !== 'string')) throw new TypeError('Invalid continuity operation.')
+  const supervision = op.supervision
+  if (op.intentOperationId !== undefined && (typeof op.intentOperationId !== 'string' || !op.intentOperationId || op.intentOperationId === op.operationId) ||
+    supervision && (!['observing', 'retry-wait', 'paused', 'settled', 'cancelled'].includes(supervision.phase) ||
+      typeof supervision.activeAttemptOperationId !== 'string' || !supervision.activeAttemptOperationId || typeof supervision.reason !== 'string' ||
+      supervision.attemptCount < 1 || supervision.attemptLimit < 1 ||
+      ![supervision.attemptCount, supervision.attemptLimit, supervision.observedAt, ...(supervision.nextAttemptAt === undefined ? [] : [supervision.nextAttemptAt])].every(value => Number.isSafeInteger(value) && value >= 0) ||
+      supervision.process && (!supervision.process.run || typeof supervision.process.run.runId !== 'string' || !supervision.process.run.runId || !['running', 'exited', 'interrupted', 'unknown'].includes(supervision.process.state) ||
+        !Number.isSafeInteger(supervision.process.observedAt) || supervision.process.observedAt < 0 ||
+        supervision.process.exitSignal !== undefined && supervision.process.exitSignal !== null && typeof supervision.process.exitSignal !== 'string' && !Number.isSafeInteger(supervision.process.exitSignal) ||
+        supervision.process.exitCode !== undefined && supervision.process.exitCode !== null && !Number.isSafeInteger(supervision.process.exitCode)) ||
+      supervision.contextEvidence && (supervision.contextEvidence.source !== 'native-hook' || typeof supervision.contextEvidence.hookReceiptId !== 'string' || !supervision.contextEvidence.hookReceiptId) ||
+      supervision.cancellation && (!['native-hook', 'control', 'user-stop'].includes(supervision.cancellation.source) || typeof supervision.cancellation.operationId !== 'string' || !supervision.cancellation.operationId) ||
+      supervision.observationError && (typeof supervision.observationError.code !== 'string' || typeof supervision.observationError.message !== 'string' ||
+        !Number.isSafeInteger(supervision.observationError.observedAt) || supervision.observationError.observedAt < 0) ||
+      [supervision.contextEvidence, supervision.cancellation].some(fact => fact && (!fact.run || typeof fact.run.runId !== 'string' || !fact.run.runId ||
+        fact.nativeTarget?.kind !== 'provider' || typeof fact.nativeTarget.providerId !== 'string' || !fact.nativeTarget.providerId || typeof fact.nativeTarget.sessionId !== 'string' || !fact.nativeTarget.sessionId ||
+        !Number.isSafeInteger(fact.observedAt) || fact.observedAt < 0)))) throw new TypeError('Invalid original recovery supervision.')
   if (op.launchInput) {
     const launched = normalizeAgentContinuityLaunchInput(op.launchInput)
     if (launched.key && (launched.key.agentSessionId !== op.agentSessionId || launched.key.expectedRun.runId !== op.newRun?.runId)) throw new TypeError('Continuity launch input changed its exact Run.')
