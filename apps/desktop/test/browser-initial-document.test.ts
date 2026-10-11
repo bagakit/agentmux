@@ -113,7 +113,8 @@ function deferred() { let resolve!:()=>void, reject!:(error:Error)=>void;const p
 function fixture() {
   const directory=mkdtempSync(join(tmpdir(),'browser-initial-document-'));roots.push(directory)
   const contents=new native.Contents(),views:InstanceType<typeof native.View>[]=[]
-  const window={webContents:contents,isDestroyed:()=>false,getContentBounds:()=>({x:0,y:0,width:1200,height:800}),contentView:{children:views,addChildView:(v:InstanceType<typeof native.View>)=>{views.push(v)},removeChildView:(v:InstanceType<typeof native.View>)=>{const n=views.indexOf(v);if(n!==-1)views.splice(n,1)}}}
+  const attachments:{bounds:{x:number;y:number;width:number;height:number};visible:boolean}[]=[]
+  const window={webContents:contents,isDestroyed:()=>false,getContentBounds:()=>({x:0,y:0,width:1200,height:800}),contentView:{children:views,addChildView:(v:InstanceType<typeof native.View>)=>{attachments.push({bounds:v.getBounds(),visible:v.getVisible()});views.push(v)},removeChildView:(v:InstanceType<typeof native.View>)=>{const n=views.indexOf(v);if(n!==-1)views.splice(n,1)}}}
   const journal=new BrowserOperationJournal(new BrowserOperationFileStore(join(directory,'journal.json')))
   const results=new BrowserResultArtifactStore(join(directory,'results'))
   const demonstrations={get:vi.fn(async()=>null),stop:vi.fn(async()=>null),getPersistenceWarning:()=>undefined} as unknown as BrowserDemonstrationRecorder
@@ -123,7 +124,7 @@ function fixture() {
   const session={sendCommand,frames:new Map(),endedReason:null,detach:vi.fn(),observe:()=>()=>{}}
   vi.spyOn(BrowserCdpSession,'attach').mockReturnValue(session as never)
   const entry=()=>Reflect.get(manager,'entries').get('original-browser')
-  return{manager,journal,views,sendCommand,session,entry,demonstrations,results}
+  return{manager,journal,views,sendCommand,session,entry,demonstrations,results,attachments}
 }
 const url='https://fixture.invalid/original'
 async function started(f:ReturnType<typeof fixture>) { await vi.waitFor(()=>expect(f.entry().activity.operation?.steps.length).toBeGreaterThan(0)) }
@@ -251,12 +252,29 @@ describe('the original initial Browser document',()=>{
     next.resolve();old.reject(new Error('Old request failed'));await Promise.resolve()
     expect(f.entry().error).toBeNull()
   })
-  it('rechecks the original owner before screenshot capture after viewport observation',async()=>{
+  it.each([
+    {name:'responsive',viewport:'responsive' as const,width:1200,height:800},
+    {name:'tablet',viewport:'tablet' as const,width:768,height:1024},
+    {name:'custom',viewport:{width:640,height:480,screenPosition:'desktop' as const},width:640,height:480}
+  ])('initializes the hidden $name drawing size before original attachment without changing capture or presentation geometry',async({viewport,width,height})=>{
+    const f=fixture();await f.manager.create('original-browser',url,'workspace',undefined,'normal',viewport);await Promise.resolve();await Promise.resolve()
+    const view=f.views[0]!,entry=f.entry(),originalParent=[...Reflect.get(f.manager,'window').contentView.children]
+    expect(f.attachments).toEqual([{bounds:{x:0,y:0,width,height},visible:false}])
+    expect(view.getBounds()).toEqual({x:0,y:0,width,height})
+    await f.manager.captureScreenshot('original-browser')
+    expect(view.getBounds()).toEqual({x:0,y:0,width,height})
+    expect(view.getVisible()).toBe(false);expect(entry.bounds).toBeNull();expect(entry.inputLeaseId).toBeNull();expect(entry.visible).toBe(false)
+    expect(Reflect.get(f.manager,'window').contentView.children).toEqual(originalParent)
+    expect(view.webContents.capturePage).toHaveBeenCalledWith()
+    view.setBounds({x:10,y:20,width:400,height:300})
+    await f.manager.captureScreenshot('original-browser');expect(view.getBounds()).toEqual({x:10,y:20,width:400,height:300})
+  })
+  it('rechecks the original capture owner after viewport observation without changing either drawable',async()=>{
     const f=fixture();await f.manager.create('original-browser',url,'workspace');await Promise.resolve();await Promise.resolve()
-    const original=f.views[0]!,replacement=new native.View()
+    const original=f.views[0]!,replacement=new native.View(),bounds=original.getBounds()
     original.webContents.executeJavaScriptInIsolatedWorld.mockImplementation(async()=>{f.entry().view=replacement;return{width:768,height:1024,deviceScaleFactor:1}})
     await expect(f.manager.captureScreenshot('original-browser')).rejects.toThrow('Browser page changed')
-    expect(original.getBounds()).toMatchObject({width:0,height:0});expect(replacement.getBounds()).toMatchObject({width:0,height:0})
+    expect(original.getBounds()).toEqual(bounds);expect(replacement.getBounds()).toMatchObject({width:0,height:0})
     expect(original.webContents.capturePage).not.toHaveBeenCalled()
   })
   it('keeps creation immediate and lets the real run read the loaded document after its original native load',async()=>{
