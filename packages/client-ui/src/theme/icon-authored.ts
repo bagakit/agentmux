@@ -20,10 +20,10 @@ type AuthoredIconDefinition = {
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
   "goal-consensus": {
-    shapes: [["path",{"d":"M2.5 8 6.5 4l5 2-3.5 3a2.1 2.1 0 0 0 3 3M14 9l6.5 5-3.5 3.5a3 3 0 0 1-4 0l-6-5.5-4.5 4.5"}],["path",{"d":"m11.5 6 5-2 5 4-4 4"}],["path",{"d":"m11 12 3-3","pathLength":"1","data-semantic-icon-part":"agreement-line"}]],
+    shapes: [["path",{"d":"M5 3h14a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H8l-5 3V5a2 2 0 0 1 2-2Z"}],["path",{"d":"M9 15V6.5"}],["path",{"d":"M9 6.5h8l-2 3 2 3H9Z","fill":"currentColor","stroke":"none","data-semantic-icon-part":"agreement-flag"}]],
     design: {
-      rest: "双方腕口与内部握合折线形成共同约定，开放负空间在小尺寸保留一体轮廓；不是爱心、完成勾或普通靶心",
-      motion: {"kind": "once", "animation": "feedback", "description": "仅内部握合短线描入一次，双方腕口与外轮廓固定", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航、旧确认和结果验收不触发。"}
+      rest: "对话框中的实心旗帜表达讨论并约定共同方向，小尺寸保留清晰旗面与对话尾；不表示已经确认或完成",
+      motion: {"kind": "once", "animation": "feedback", "description": "仅旗面沿固定旗杆轻轻展开一次，对话框与旗杆保持静止", "trigger": "本次准确 Goal 与所见 revision 经原 owner 确认后显式反馈；导航、旧确认和结果验收不触发。"}
     }
   },
   "survey-explore": {
