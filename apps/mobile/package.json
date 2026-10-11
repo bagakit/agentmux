@@ -24,7 +24,6 @@
     "@capacitor/clipboard": "8.0.0",
     "@capacitor/keyboard": "8.0.4",
     "@capawesome/capacitor-file-picker": "8.0.0",
-    "@radix-ui/react-dialog": "^1.1.23",
     "@xterm/xterm": "6.1.0-beta.303",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",

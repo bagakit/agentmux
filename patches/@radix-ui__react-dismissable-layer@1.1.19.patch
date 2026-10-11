@@ -1,0 +1,356 @@
+diff --git a/dist/index.js b/dist/index.js
+index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7bd2b1d7cb 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -50,18 +50,16 @@ var import_jsx_runtime = require("react/jsx-runtime");
+ var CONTEXT_UPDATE = "dismissableLayer.update";
+ var POINTER_DOWN_OUTSIDE = "dismissableLayer.pointerDownOutside";
+ var FOCUS_OUTSIDE = "dismissableLayer.focusOutside";
+-var originalBodyPointerEvents;
+-var DismissableLayerContext = React.createContext({
+-  layers: /* @__PURE__ */ new Set(),
+-  layersWithOutsidePointerEventsDisabled: /* @__PURE__ */ new Set(),
+-  branches: /* @__PURE__ */ new Set(),
+-  // Outside elements that belong to a layer's own dismiss affordance (eg, a
+-  // dialog overlay). Pressing them should dismiss the layer regardless of
+-  // whether or not they stop propagation.
+-  //
+-  // See https://github.com/radix-ui/primitives/issues/3346
+-  dismissableSurfaces: /* @__PURE__ */ new Set()
+-});
++// The existing layer stack, branches and body lock belong to one actual document.
++var DismissableLayerContext = React.createContext(new WeakMap());
++function getDocumentLayers(contexts, ownerDocument) {
++  let context = ownerDocument ? contexts.get(ownerDocument) : undefined;
++  if (!context) {
++    context = { layers: new Set(), layersWithOutsidePointerEventsDisabled: new Set(), branches: new Set(), dismissableSurfaces: new Set(), originalBodyPointerEvents: "" };
++    if (ownerDocument) contexts.set(ownerDocument, context);
++  }
++  return context;
++}
+ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+   // blank line to reduce diff noise
+   /* @__PURE__ */ __name(function DismissableLayer2(props, forwardedRef) {
+@@ -75,9 +73,10 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       onDismiss,
+       ...layerProps
+     } = props;
+-    const context = React.useContext(DismissableLayerContext);
++    const contexts = React.useContext(DismissableLayerContext);
+     const [node, setNode] = React.useState(null);
+     const ownerDocument = node?.ownerDocument ?? globalThis?.document;
++    const context = getDocumentLayers(contexts, ownerDocument);
+     const [, force] = React.useState({});
+     const composedRefs = (0, import_react_compose_refs.useComposedRefs)(forwardedRef, setNode);
+     const layers = Array.from(context.layers);
+@@ -102,7 +101,7 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+         dismissableSurfaces: context.dismissableSurfaces,
+         shouldHandlePointerDownOutside: React.useCallback(
+           (target) => {
+-            if (!(target instanceof Node)) {
++            if ((!target || typeof target.nodeType !== "number")) {
+               return false;
+             }
+             const isPointerDownOnBranch = [...context.branches].some(
+@@ -147,18 +146,18 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       if (!node) return;
+       if (disableOutsidePointerEvents) {
+         if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
+-          originalBodyPointerEvents = ownerDocument.body.style.pointerEvents;
++          context.originalBodyPointerEvents = ownerDocument.body.style.pointerEvents;
+           ownerDocument.body.style.pointerEvents = "none";
+         }
+         context.layersWithOutsidePointerEventsDisabled.add(node);
+       }
+       context.layers.add(node);
+-      dispatchUpdate();
++      dispatchUpdate(ownerDocument);
+       return () => {
+         if (disableOutsidePointerEvents) {
+           context.layersWithOutsidePointerEventsDisabled.delete(node);
+           if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
+-            ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;
++            ownerDocument.body.style.pointerEvents = context.originalBodyPointerEvents;
+           }
+         }
+       };
+@@ -168,14 +167,14 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+         if (!node) return;
+         context.layers.delete(node);
+         context.layersWithOutsidePointerEventsDisabled.delete(node);
+-        dispatchUpdate();
++        dispatchUpdate(ownerDocument);
+       };
+     }, [node, context]);
+     React.useEffect(() => {
+       const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
+-      document.addEventListener(CONTEXT_UPDATE, handleUpdate);
+-      return () => document.removeEventListener(CONTEXT_UPDATE, handleUpdate);
+-    }, []);
++      ownerDocument.addEventListener(CONTEXT_UPDATE, handleUpdate);
++      return () => ownerDocument.removeEventListener(CONTEXT_UPDATE, handleUpdate);
++    }, [ownerDocument]);
+     return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+       import_react_primitive.Primitive.div,
+       {
+@@ -196,23 +195,26 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+   }, "DismissableLayer")
+ );
+ var DismissableLayerBranch = /* @__PURE__ */ React.forwardRef(/* @__PURE__ */ __name(function DismissableLayerBranch2(props, forwardedRef) {
+-  const context = React.useContext(DismissableLayerContext);
+-  const ref = React.useRef(null);
+-  const composedRefs = (0, import_react_compose_refs.useComposedRefs)(forwardedRef, ref);
++  const contexts = React.useContext(DismissableLayerContext);
++  const [node, setNode] = React.useState(null);
++  const ownerDocument = node?.ownerDocument;
++  const composedRefs = (0, import_react_compose_refs.useComposedRefs)(forwardedRef, setNode);
+   React.useEffect(() => {
+-    const node = ref.current;
+     if (node) {
++      const context = getDocumentLayers(contexts, node.ownerDocument);
+       context.branches.add(node);
+       return () => {
+         context.branches.delete(node);
+       };
+     }
+-  }, [context.branches]);
++  }, [node, contexts, ownerDocument]);
+   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_react_primitive.Primitive.div, { ...props, ref: composedRefs });
+ }, "DismissableLayerBranch"));
+ function useDismissableLayerSurface() {
+-  const context = React.useContext(DismissableLayerContext);
++  const contexts = React.useContext(DismissableLayerContext);
+   const [node, setNode] = React.useState(null);
++  const ownerDocument = node?.ownerDocument ?? globalThis.document;
++  const context = getDocumentLayers(contexts, ownerDocument);
+   React.useEffect(() => {
+     if (!node) {
+       return;
+@@ -256,12 +258,12 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+         return;
+       }
+       const target = event.target;
+-      const isDismissableSurface = target instanceof Node && [...dismissableSurfaces].some((surface) => surface.contains(target));
++      const isDismissableSurface = target && typeof target.nodeType === "number" && [...dismissableSurfaces].some((surface) => surface.contains(target));
+       if (!isDismissableSurface) {
+         interceptedOutsideInteractionEventsRef.current.set(event.type, true);
+       }
+       if (event.type === "click") {
+-        window.setTimeout(() => {
++        (ownerDocument.defaultView ?? globalThis).setTimeout(() => {
+           if (isPointerDownOutsideRef.current) {
+             handleClickRef.current();
+           }
+@@ -327,11 +329,11 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+       ownerDocument.addEventListener(eventName, handleInteractionCapture, true);
+       ownerDocument.addEventListener(eventName, handleInteractionBubble);
+     }
+-    const timerId = window.setTimeout(() => {
++    const timerId = (ownerDocument.defaultView ?? globalThis).setTimeout(() => {
+       ownerDocument.addEventListener("pointerdown", handlePointerDown);
+     }, 0);
+     return () => {
+-      window.clearTimeout(timerId);
++      (ownerDocument.defaultView ?? globalThis).clearTimeout(timerId);
+       ownerDocument.removeEventListener("pointerdown", handlePointerDown);
+       ownerDocument.removeEventListener("click", handleClickRef.current);
+       for (const eventName of outsideInteractionEvents) {
+@@ -374,14 +376,16 @@ function useFocusOutside(onFocusOutside, ownerDocument = globalThis?.document) {
+   };
+ }
+ __name(useFocusOutside, "useFocusOutside");
+-function dispatchUpdate() {
+-  const event = new CustomEvent(CONTEXT_UPDATE);
+-  document.dispatchEvent(event);
++function dispatchUpdate(ownerDocument) {
++  const Event = ownerDocument.defaultView?.CustomEvent ?? CustomEvent;
++  const event = new Event(CONTEXT_UPDATE);
++  ownerDocument.dispatchEvent(event);
+ }
+ __name(dispatchUpdate, "dispatchUpdate");
+ function handleAndDispatchCustomEvent(name, handler, detail, { discrete }) {
+   const target = detail.originalEvent.target;
+-  const event = new CustomEvent(name, { bubbles: false, cancelable: true, detail });
++  const Event = target.ownerDocument?.defaultView?.CustomEvent ?? CustomEvent;
++  const event = new Event(name, { bubbles: false, cancelable: true, detail });
+   if (handler) target.addEventListener(name, handler, { once: true });
+   if (discrete) {
+     (0, import_react_primitive.dispatchDiscreteCustomEvent)(target, event);
+diff --git a/dist/index.mjs b/dist/index.mjs
+index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d65d5706c1 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -12,18 +12,16 @@ import { jsx } from "react/jsx-runtime";
+ var CONTEXT_UPDATE = "dismissableLayer.update";
+ var POINTER_DOWN_OUTSIDE = "dismissableLayer.pointerDownOutside";
+ var FOCUS_OUTSIDE = "dismissableLayer.focusOutside";
+-var originalBodyPointerEvents;
+-var DismissableLayerContext = React.createContext({
+-  layers: /* @__PURE__ */ new Set(),
+-  layersWithOutsidePointerEventsDisabled: /* @__PURE__ */ new Set(),
+-  branches: /* @__PURE__ */ new Set(),
+-  // Outside elements that belong to a layer's own dismiss affordance (eg, a
+-  // dialog overlay). Pressing them should dismiss the layer regardless of
+-  // whether or not they stop propagation.
+-  //
+-  // See https://github.com/radix-ui/primitives/issues/3346
+-  dismissableSurfaces: /* @__PURE__ */ new Set()
+-});
++// The existing layer stack, branches and body lock belong to one actual document.
++var DismissableLayerContext = React.createContext(new WeakMap());
++function getDocumentLayers(contexts, ownerDocument) {
++  let context = ownerDocument ? contexts.get(ownerDocument) : undefined;
++  if (!context) {
++    context = { layers: new Set(), layersWithOutsidePointerEventsDisabled: new Set(), branches: new Set(), dismissableSurfaces: new Set(), originalBodyPointerEvents: "" };
++    if (ownerDocument) contexts.set(ownerDocument, context);
++  }
++  return context;
++}
+ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+   // blank line to reduce diff noise
+   /* @__PURE__ */ __name(function DismissableLayer2(props, forwardedRef) {
+@@ -37,9 +35,10 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       onDismiss,
+       ...layerProps
+     } = props;
+-    const context = React.useContext(DismissableLayerContext);
++    const contexts = React.useContext(DismissableLayerContext);
+     const [node, setNode] = React.useState(null);
+     const ownerDocument = node?.ownerDocument ?? globalThis?.document;
++    const context = getDocumentLayers(contexts, ownerDocument);
+     const [, force] = React.useState({});
+     const composedRefs = useComposedRefs(forwardedRef, setNode);
+     const layers = Array.from(context.layers);
+@@ -64,7 +63,7 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+         dismissableSurfaces: context.dismissableSurfaces,
+         shouldHandlePointerDownOutside: React.useCallback(
+           (target) => {
+-            if (!(target instanceof Node)) {
++            if ((!target || typeof target.nodeType !== "number")) {
+               return false;
+             }
+             const isPointerDownOnBranch = [...context.branches].some(
+@@ -109,18 +108,18 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       if (!node) return;
+       if (disableOutsidePointerEvents) {
+         if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
+-          originalBodyPointerEvents = ownerDocument.body.style.pointerEvents;
++          context.originalBodyPointerEvents = ownerDocument.body.style.pointerEvents;
+           ownerDocument.body.style.pointerEvents = "none";
+         }
+         context.layersWithOutsidePointerEventsDisabled.add(node);
+       }
+       context.layers.add(node);
+-      dispatchUpdate();
++      dispatchUpdate(ownerDocument);
+       return () => {
+         if (disableOutsidePointerEvents) {
+           context.layersWithOutsidePointerEventsDisabled.delete(node);
+           if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
+-            ownerDocument.body.style.pointerEvents = originalBodyPointerEvents;
++            ownerDocument.body.style.pointerEvents = context.originalBodyPointerEvents;
+           }
+         }
+       };
+@@ -130,14 +129,14 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+         if (!node) return;
+         context.layers.delete(node);
+         context.layersWithOutsidePointerEventsDisabled.delete(node);
+-        dispatchUpdate();
++        dispatchUpdate(ownerDocument);
+       };
+     }, [node, context]);
+     React.useEffect(() => {
+       const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
+-      document.addEventListener(CONTEXT_UPDATE, handleUpdate);
+-      return () => document.removeEventListener(CONTEXT_UPDATE, handleUpdate);
+-    }, []);
++      ownerDocument.addEventListener(CONTEXT_UPDATE, handleUpdate);
++      return () => ownerDocument.removeEventListener(CONTEXT_UPDATE, handleUpdate);
++    }, [ownerDocument]);
+     return /* @__PURE__ */ jsx(
+       Primitive.div,
+       {
+@@ -158,23 +157,26 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+   }, "DismissableLayer")
+ );
+ var DismissableLayerBranch = /* @__PURE__ */ React.forwardRef(/* @__PURE__ */ __name(function DismissableLayerBranch2(props, forwardedRef) {
+-  const context = React.useContext(DismissableLayerContext);
+-  const ref = React.useRef(null);
+-  const composedRefs = useComposedRefs(forwardedRef, ref);
++  const contexts = React.useContext(DismissableLayerContext);
++  const [node, setNode] = React.useState(null);
++  const ownerDocument = node?.ownerDocument;
++  const composedRefs = useComposedRefs(forwardedRef, setNode);
+   React.useEffect(() => {
+-    const node = ref.current;
+     if (node) {
++      const context = getDocumentLayers(contexts, node.ownerDocument);
+       context.branches.add(node);
+       return () => {
+         context.branches.delete(node);
+       };
+     }
+-  }, [context.branches]);
++  }, [node, contexts, ownerDocument]);
+   return /* @__PURE__ */ jsx(Primitive.div, { ...props, ref: composedRefs });
+ }, "DismissableLayerBranch"));
+ function useDismissableLayerSurface() {
+-  const context = React.useContext(DismissableLayerContext);
++  const contexts = React.useContext(DismissableLayerContext);
+   const [node, setNode] = React.useState(null);
++  const ownerDocument = node?.ownerDocument ?? globalThis.document;
++  const context = getDocumentLayers(contexts, ownerDocument);
+   React.useEffect(() => {
+     if (!node) {
+       return;
+@@ -218,12 +220,12 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+         return;
+       }
+       const target = event.target;
+-      const isDismissableSurface = target instanceof Node && [...dismissableSurfaces].some((surface) => surface.contains(target));
++      const isDismissableSurface = target && typeof target.nodeType === "number" && [...dismissableSurfaces].some((surface) => surface.contains(target));
+       if (!isDismissableSurface) {
+         interceptedOutsideInteractionEventsRef.current.set(event.type, true);
+       }
+       if (event.type === "click") {
+-        window.setTimeout(() => {
++        (ownerDocument.defaultView ?? globalThis).setTimeout(() => {
+           if (isPointerDownOutsideRef.current) {
+             handleClickRef.current();
+           }
+@@ -289,11 +291,11 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+       ownerDocument.addEventListener(eventName, handleInteractionCapture, true);
+       ownerDocument.addEventListener(eventName, handleInteractionBubble);
+     }
+-    const timerId = window.setTimeout(() => {
++    const timerId = (ownerDocument.defaultView ?? globalThis).setTimeout(() => {
+       ownerDocument.addEventListener("pointerdown", handlePointerDown);
+     }, 0);
+     return () => {
+-      window.clearTimeout(timerId);
++      (ownerDocument.defaultView ?? globalThis).clearTimeout(timerId);
+       ownerDocument.removeEventListener("pointerdown", handlePointerDown);
+       ownerDocument.removeEventListener("click", handleClickRef.current);
+       for (const eventName of outsideInteractionEvents) {
+@@ -336,14 +338,16 @@ function useFocusOutside(onFocusOutside, ownerDocument = globalThis?.document) {
+   };
+ }
+ __name(useFocusOutside, "useFocusOutside");
+-function dispatchUpdate() {
+-  const event = new CustomEvent(CONTEXT_UPDATE);
+-  document.dispatchEvent(event);
++function dispatchUpdate(ownerDocument) {
++  const Event = ownerDocument.defaultView?.CustomEvent ?? CustomEvent;
++  const event = new Event(CONTEXT_UPDATE);
++  ownerDocument.dispatchEvent(event);
+ }
+ __name(dispatchUpdate, "dispatchUpdate");
+ function handleAndDispatchCustomEvent(name, handler, detail, { discrete }) {
+   const target = detail.originalEvent.target;
+-  const event = new CustomEvent(name, { bubbles: false, cancelable: true, detail });
++  const Event = target.ownerDocument?.defaultView?.CustomEvent ?? CustomEvent;
++  const event = new Event(name, { bubbles: false, cancelable: true, detail });
+   if (handler) target.addEventListener(name, handler, { once: true });
+   if (discrete) {
+     dispatchDiscreteCustomEvent(target, event);

@@ -1,0 +1,344 @@
+diff --git a/dist/es2015/component.d.ts b/dist/es2015/component.d.ts
+--- a/dist/es2015/component.d.ts
++++ b/dist/es2015/component.d.ts
+@@ -1,12 +1,13 @@
+ import * as React from 'react';
+ import { GapMode } from './utils';
+ export interface BodyScroll {
++    ownerDocument?: Document;
+     noRelative?: boolean;
+     noImportant?: boolean;
+     gapMode?: GapMode;
+ }
+ export declare const lockAttribute = "data-scroll-locked";
+-export declare const useLockAttribute: () => void;
++export declare const useLockAttribute: (ownerDocument?: Document) => void;
+ /**
+  * Removes page scrollbar and blocks page scroll when mounted
+  */
+diff --git a/dist/es2015/component.js b/dist/es2015/component.js
+--- a/dist/es2015/component.js
++++ b/dist/es2015/component.js
+@@ -19,35 +19,25 @@
+         .filter(Boolean)
+         .join(''), "\n  }\n  \n  .").concat(zeroRightClassName, " {\n    right: ").concat(gap, "px ").concat(important, ";\n  }\n  \n  .").concat(fullWidthClassName, " {\n    margin-right: ").concat(gap, "px ").concat(important, ";\n  }\n  \n  .").concat(zeroRightClassName, " .").concat(zeroRightClassName, " {\n    right: 0 ").concat(important, ";\n  }\n  \n  .").concat(fullWidthClassName, " .").concat(fullWidthClassName, " {\n    margin-right: 0 ").concat(important, ";\n  }\n  \n  body[").concat(lockAttribute, "] {\n    ").concat(removedBarSizeVariable, ": ").concat(gap, "px;\n  }\n");
+ };
+-var getCurrentUseCounter = function () {
+-    var counter = parseInt(document.body.getAttribute(lockAttribute) || '0', 10);
++var getCurrentUseCounter = function (ownerDocument) {
++    var counter = parseInt(ownerDocument.body.getAttribute(lockAttribute) || '0', 10);
+     return isFinite(counter) ? counter : 0;
+ };
+-export var useLockAttribute = function () {
++export var useLockAttribute = function (ownerDocument) {
++    ownerDocument = ownerDocument || globalThis.document;
+     React.useEffect(function () {
+-        document.body.setAttribute(lockAttribute, (getCurrentUseCounter() + 1).toString());
++        if (!ownerDocument) return;
++        ownerDocument.body.setAttribute(lockAttribute, (getCurrentUseCounter(ownerDocument) + 1).toString());
+         return function () {
+-            var newCounter = getCurrentUseCounter() - 1;
+-            if (newCounter <= 0) {
+-                document.body.removeAttribute(lockAttribute);
+-            }
+-            else {
+-                document.body.setAttribute(lockAttribute, newCounter.toString());
+-            }
++            var newCounter = getCurrentUseCounter(ownerDocument) - 1;
++            if (newCounter <= 0) ownerDocument.body.removeAttribute(lockAttribute);
++            else ownerDocument.body.setAttribute(lockAttribute, newCounter.toString());
+         };
+-    }, []);
++    }, [ownerDocument]);
+ };
+-/**
+- * Removes page scrollbar and blocks page scroll when mounted
+- */
+-export var RemoveScrollBar = function (_a) {
+-    var noRelative = _a.noRelative, noImportant = _a.noImportant, _b = _a.gapMode, gapMode = _b === void 0 ? 'margin' : _b;
+-    useLockAttribute();
+-    /*
+-     gap will be measured on every component mount
+-     however it will be used only by the "first" invocation
+-     due to singleton nature of <Style
+-     */
+-    var gap = React.useMemo(function () { return getGapWidth(gapMode); }, [gapMode]);
+-    return React.createElement(Style, { styles: getStyles(gap, !noRelative, gapMode, !noImportant ? '!important' : '') });
++export var RemoveScrollBar = function (props) {
++    var ownerDocument = props.ownerDocument || globalThis.document;
++    useLockAttribute(ownerDocument);
++    var gap = React.useMemo(function () { return getGapWidth(props.gapMode, ownerDocument); }, [props.gapMode, ownerDocument]);
++    return React.createElement(Style, { ownerDocument: ownerDocument, styles: getStyles(gap, !props.noRelative, props.gapMode, !props.noImportant ? '!important' : '') });
+ };
+diff --git a/dist/es2015/utils.d.ts b/dist/es2015/utils.d.ts
+--- a/dist/es2015/utils.d.ts
++++ b/dist/es2015/utils.d.ts
+@@ -11,4 +11,4 @@
+     right: number;
+     gap: number;
+ };
+-export declare const getGapWidth: (gapMode?: GapMode) => GapOffset;
++export declare const getGapWidth: (gapMode?: GapMode, ownerDocument?: Document) => GapOffset;
+diff --git a/dist/es2015/utils.js b/dist/es2015/utils.js
+--- a/dist/es2015/utils.js
++++ b/dist/es2015/utils.js
+@@ -5,21 +5,22 @@
+     gap: 0,
+ };
+ var parse = function (x) { return parseInt(x || '', 10) || 0; };
+-var getOffset = function (gapMode) {
+-    var cs = window.getComputedStyle(document.body);
++var getOffset = function (gapMode, ownerDocument) {
++    var cs = ownerDocument.defaultView.getComputedStyle(ownerDocument.body);
+     var left = cs[gapMode === 'padding' ? 'paddingLeft' : 'marginLeft'];
+     var top = cs[gapMode === 'padding' ? 'paddingTop' : 'marginTop'];
+     var right = cs[gapMode === 'padding' ? 'paddingRight' : 'marginRight'];
+     return [parse(left), parse(top), parse(right)];
+ };
+-export var getGapWidth = function (gapMode) {
++export var getGapWidth = function (gapMode, ownerDocument) {
+     if (gapMode === void 0) { gapMode = 'margin'; }
+-    if (typeof window === 'undefined') {
++    ownerDocument = ownerDocument || globalThis.document;
++    if (!ownerDocument || !ownerDocument.defaultView) {
+         return zeroGap;
+     }
+-    var offsets = getOffset(gapMode);
+-    var documentWidth = document.documentElement.clientWidth;
+-    var windowWidth = window.innerWidth;
++    var offsets = getOffset(gapMode, ownerDocument);
++    var documentWidth = ownerDocument.documentElement.clientWidth;
++    var windowWidth = ownerDocument.defaultView.innerWidth;
+     return {
+         left: offsets[0],
+         top: offsets[1],
+diff --git a/dist/es2019/component.d.ts b/dist/es2019/component.d.ts
+--- a/dist/es2019/component.d.ts
++++ b/dist/es2019/component.d.ts
+@@ -1,12 +1,13 @@
+ import * as React from 'react';
+ import { GapMode } from './utils';
+ export interface BodyScroll {
++    ownerDocument?: Document;
+     noRelative?: boolean;
+     noImportant?: boolean;
+     gapMode?: GapMode;
+ }
+ export declare const lockAttribute = "data-scroll-locked";
+-export declare const useLockAttribute: () => void;
++export declare const useLockAttribute: (ownerDocument?: Document) => void;
+ /**
+  * Removes page scrollbar and blocks page scroll when mounted
+  */
+diff --git a/dist/es2019/component.js b/dist/es2019/component.js
+--- a/dist/es2019/component.js
++++ b/dist/es2019/component.js
+@@ -52,34 +52,25 @@
+     ${removedBarSizeVariable}: ${gap}px;
+   }
+ `;
+-const getCurrentUseCounter = () => {
+-    const counter = parseInt(document.body.getAttribute(lockAttribute) || '0', 10);
++var getCurrentUseCounter = function (ownerDocument) {
++    var counter = parseInt(ownerDocument.body.getAttribute(lockAttribute) || '0', 10);
+     return isFinite(counter) ? counter : 0;
+ };
+-export const useLockAttribute = () => {
+-    React.useEffect(() => {
+-        document.body.setAttribute(lockAttribute, (getCurrentUseCounter() + 1).toString());
+-        return () => {
+-            const newCounter = getCurrentUseCounter() - 1;
+-            if (newCounter <= 0) {
+-                document.body.removeAttribute(lockAttribute);
+-            }
+-            else {
+-                document.body.setAttribute(lockAttribute, newCounter.toString());
+-            }
++export var useLockAttribute = function (ownerDocument) {
++    ownerDocument = ownerDocument || globalThis.document;
++    React.useEffect(function () {
++        if (!ownerDocument) return;
++        ownerDocument.body.setAttribute(lockAttribute, (getCurrentUseCounter(ownerDocument) + 1).toString());
++        return function () {
++            var newCounter = getCurrentUseCounter(ownerDocument) - 1;
++            if (newCounter <= 0) ownerDocument.body.removeAttribute(lockAttribute);
++            else ownerDocument.body.setAttribute(lockAttribute, newCounter.toString());
+         };
+-    }, []);
++    }, [ownerDocument]);
+ };
+-/**
+- * Removes page scrollbar and blocks page scroll when mounted
+- */
+-export const RemoveScrollBar = ({ noRelative, noImportant, gapMode = 'margin' }) => {
+-    useLockAttribute();
+-    /*
+-     gap will be measured on every component mount
+-     however it will be used only by the "first" invocation
+-     due to singleton nature of <Style
+-     */
+-    const gap = React.useMemo(() => getGapWidth(gapMode), [gapMode]);
+-    return React.createElement(Style, { styles: getStyles(gap, !noRelative, gapMode, !noImportant ? '!important' : '') });
++export var RemoveScrollBar = function (props) {
++    var ownerDocument = props.ownerDocument || globalThis.document;
++    useLockAttribute(ownerDocument);
++    var gap = React.useMemo(function () { return getGapWidth(props.gapMode, ownerDocument); }, [props.gapMode, ownerDocument]);
++    return React.createElement(Style, { ownerDocument: ownerDocument, styles: getStyles(gap, !props.noRelative, props.gapMode, !props.noImportant ? '!important' : '') });
+ };
+diff --git a/dist/es2019/utils.d.ts b/dist/es2019/utils.d.ts
+--- a/dist/es2019/utils.d.ts
++++ b/dist/es2019/utils.d.ts
+@@ -11,4 +11,4 @@
+     right: number;
+     gap: number;
+ };
+-export declare const getGapWidth: (gapMode?: GapMode) => GapOffset;
++export declare const getGapWidth: (gapMode?: GapMode, ownerDocument?: Document) => GapOffset;
+diff --git a/dist/es2019/utils.js b/dist/es2019/utils.js
+--- a/dist/es2019/utils.js
++++ b/dist/es2019/utils.js
+@@ -5,20 +5,20 @@
+     gap: 0,
+ };
+ const parse = (x) => parseInt(x || '', 10) || 0;
+-const getOffset = (gapMode) => {
+-    const cs = window.getComputedStyle(document.body);
++const getOffset = (gapMode, ownerDocument) => {
++    const cs = ownerDocument.defaultView.getComputedStyle(ownerDocument.body);
+     const left = cs[gapMode === 'padding' ? 'paddingLeft' : 'marginLeft'];
+     const top = cs[gapMode === 'padding' ? 'paddingTop' : 'marginTop'];
+     const right = cs[gapMode === 'padding' ? 'paddingRight' : 'marginRight'];
+     return [parse(left), parse(top), parse(right)];
+ };
+-export const getGapWidth = (gapMode = 'margin') => {
+-    if (typeof window === 'undefined') {
++export const getGapWidth = (gapMode = 'margin', ownerDocument = globalThis.document) => {
++    if (!ownerDocument || !ownerDocument.defaultView) {
+         return zeroGap;
+     }
+-    const offsets = getOffset(gapMode);
+-    const documentWidth = document.documentElement.clientWidth;
+-    const windowWidth = window.innerWidth;
++    const offsets = getOffset(gapMode, ownerDocument);
++    const documentWidth = ownerDocument.documentElement.clientWidth;
++    const windowWidth = ownerDocument.defaultView.innerWidth;
+     return {
+         left: offsets[0],
+         top: offsets[1],
+diff --git a/dist/es5/component.d.ts b/dist/es5/component.d.ts
+--- a/dist/es5/component.d.ts
++++ b/dist/es5/component.d.ts
+@@ -1,12 +1,13 @@
+ import * as React from 'react';
+ import { GapMode } from './utils';
+ export interface BodyScroll {
++    ownerDocument?: Document;
+     noRelative?: boolean;
+     noImportant?: boolean;
+     gapMode?: GapMode;
+ }
+ export declare const lockAttribute = "data-scroll-locked";
+-export declare const useLockAttribute: () => void;
++export declare const useLockAttribute: (ownerDocument?: Document) => void;
+ /**
+  * Removes page scrollbar and blocks page scroll when mounted
+  */
+diff --git a/dist/es5/component.js b/dist/es5/component.js
+--- a/dist/es5/component.js
++++ b/dist/es5/component.js
+@@ -23,37 +23,27 @@
+         .filter(Boolean)
+         .join(''), "\n  }\n  \n  .").concat(constants_1.zeroRightClassName, " {\n    right: ").concat(gap, "px ").concat(important, ";\n  }\n  \n  .").concat(constants_1.fullWidthClassName, " {\n    margin-right: ").concat(gap, "px ").concat(important, ";\n  }\n  \n  .").concat(constants_1.zeroRightClassName, " .").concat(constants_1.zeroRightClassName, " {\n    right: 0 ").concat(important, ";\n  }\n  \n  .").concat(constants_1.fullWidthClassName, " .").concat(constants_1.fullWidthClassName, " {\n    margin-right: 0 ").concat(important, ";\n  }\n  \n  body[").concat(exports.lockAttribute, "] {\n    ").concat(constants_1.removedBarSizeVariable, ": ").concat(gap, "px;\n  }\n");
+ };
+-var getCurrentUseCounter = function () {
+-    var counter = parseInt(document.body.getAttribute(exports.lockAttribute) || '0', 10);
++var getCurrentUseCounter = function (ownerDocument) {
++    var counter = parseInt(ownerDocument.body.getAttribute(exports.lockAttribute) || '0', 10);
+     return isFinite(counter) ? counter : 0;
+ };
+-var useLockAttribute = function () {
++var useLockAttribute = function (ownerDocument) {
++    ownerDocument = ownerDocument || globalThis.document;
+     React.useEffect(function () {
+-        document.body.setAttribute(exports.lockAttribute, (getCurrentUseCounter() + 1).toString());
++        if (!ownerDocument) return;
++        ownerDocument.body.setAttribute(exports.lockAttribute, (getCurrentUseCounter(ownerDocument) + 1).toString());
+         return function () {
+-            var newCounter = getCurrentUseCounter() - 1;
+-            if (newCounter <= 0) {
+-                document.body.removeAttribute(exports.lockAttribute);
+-            }
+-            else {
+-                document.body.setAttribute(exports.lockAttribute, newCounter.toString());
+-            }
++            var newCounter = getCurrentUseCounter(ownerDocument) - 1;
++            if (newCounter <= 0) ownerDocument.body.removeAttribute(exports.lockAttribute);
++            else ownerDocument.body.setAttribute(exports.lockAttribute, newCounter.toString());
+         };
+-    }, []);
++    }, [ownerDocument]);
++};
++var RemoveScrollBar = function (props) {
++    var ownerDocument = props.ownerDocument || globalThis.document;
++    useLockAttribute(ownerDocument);
++    var gap = React.useMemo(function () { return (0, utils_1.getGapWidth)(props.gapMode, ownerDocument); }, [props.gapMode, ownerDocument]);
++    return React.createElement(Style, { ownerDocument: ownerDocument, styles: getStyles(gap, !props.noRelative, props.gapMode, !props.noImportant ? '!important' : '') });
+ };
+ exports.useLockAttribute = useLockAttribute;
+-/**
+- * Removes page scrollbar and blocks page scroll when mounted
+- */
+-var RemoveScrollBar = function (_a) {
+-    var noRelative = _a.noRelative, noImportant = _a.noImportant, _b = _a.gapMode, gapMode = _b === void 0 ? 'margin' : _b;
+-    (0, exports.useLockAttribute)();
+-    /*
+-     gap will be measured on every component mount
+-     however it will be used only by the "first" invocation
+-     due to singleton nature of <Style
+-     */
+-    var gap = React.useMemo(function () { return (0, utils_1.getGapWidth)(gapMode); }, [gapMode]);
+-    return React.createElement(Style, { styles: getStyles(gap, !noRelative, gapMode, !noImportant ? '!important' : '') });
+-};
+ exports.RemoveScrollBar = RemoveScrollBar;
+diff --git a/dist/es5/utils.d.ts b/dist/es5/utils.d.ts
+--- a/dist/es5/utils.d.ts
++++ b/dist/es5/utils.d.ts
+@@ -11,4 +11,4 @@
+     right: number;
+     gap: number;
+ };
+-export declare const getGapWidth: (gapMode?: GapMode) => GapOffset;
++export declare const getGapWidth: (gapMode?: GapMode, ownerDocument?: Document) => GapOffset;
+diff --git a/dist/es5/utils.js b/dist/es5/utils.js
+--- a/dist/es5/utils.js
++++ b/dist/es5/utils.js
+@@ -8,21 +8,22 @@
+     gap: 0,
+ };
+ var parse = function (x) { return parseInt(x || '', 10) || 0; };
+-var getOffset = function (gapMode) {
+-    var cs = window.getComputedStyle(document.body);
++var getOffset = function (gapMode, ownerDocument) {
++    var cs = ownerDocument.defaultView.getComputedStyle(ownerDocument.body);
+     var left = cs[gapMode === 'padding' ? 'paddingLeft' : 'marginLeft'];
+     var top = cs[gapMode === 'padding' ? 'paddingTop' : 'marginTop'];
+     var right = cs[gapMode === 'padding' ? 'paddingRight' : 'marginRight'];
+     return [parse(left), parse(top), parse(right)];
+ };
+-var getGapWidth = function (gapMode) {
++var getGapWidth = function (gapMode, ownerDocument) {
+     if (gapMode === void 0) { gapMode = 'margin'; }
+-    if (typeof window === 'undefined') {
++    ownerDocument = ownerDocument || globalThis.document;
++    if (!ownerDocument || !ownerDocument.defaultView) {
+         return exports.zeroGap;
+     }
+-    var offsets = getOffset(gapMode);
+-    var documentWidth = document.documentElement.clientWidth;
+-    var windowWidth = window.innerWidth;
++    var offsets = getOffset(gapMode, ownerDocument);
++    var documentWidth = ownerDocument.documentElement.clientWidth;
++    var windowWidth = ownerDocument.defaultView.innerWidth;
+     return {
+         left: offsets[0],
+         top: offsets[1],

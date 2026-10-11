@@ -1,6 +1,6 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { Branch as DismissableLayerBranch } from '@radix-ui/react-dismissable-layer'
-import { Children, cloneElement, createContext, forwardRef, useCallback, useContext, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentPropsWithoutRef, type HTMLAttributes, type ReactElement, type Ref } from 'react'
+import { Root as DismissableLayer, Branch as DismissableLayerBranch } from '@radix-ui/react-dismissable-layer'
+import { Children, cloneElement, createContext, forwardRef, useCallback, useContext, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentPropsWithoutRef, type HTMLAttributes, type ReactElement, type Ref, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useClientUiOwnerDocument } from '../platform.js'
 
@@ -22,7 +22,7 @@ type ModalContextValue = {
 const ModalContext = createContext<ModalContextValue | null>(null)
 const ModalAttachmentContext = createContext<{ container: HTMLElement | null; ready: boolean } | null>(null)
 const ModalPortalMountContext = createContext(false)
-const ModalBoundaryContext = createContext<{ boundary: HTMLDivElement | null; scrimHost: HTMLDivElement | null; publish(props: HTMLAttributes<HTMLDivElement>): void } | null>(null)
+const ModalBoundaryContext = createContext<{ document: Document; ready: boolean; boundary: HTMLDivElement | null; scrimHost: HTMLDivElement | null; publish(props: HTMLAttributes<HTMLDivElement>): void } | null>(null)
 
 /** A global reader follows only the scope that physically contains its original anchor. */
 export function getModalOverlayContainer(anchor: Element): HTMLElement | null {
@@ -37,6 +37,30 @@ export function useModalOverlayContainer<T extends Element | DocumentFragment | 
   const attachment = useContext(ModalAttachmentContext)
   return attachment ? attachment.ready ? attachment.container : null : fallback
 }
+
+/** A retained attachment owns Escape and observes its exact scope's retirement without replacing DOM.
+ * This does not add a focus scope or pointer/focus capture behavior; those remain with the consumer.
+ */
+export function ModalAttachmentDismissal({ active, targetRef, onEscapeKeyDown, onOwnerRemoved }: {
+  active: boolean
+  targetRef: RefObject<HTMLElement | null>
+  onEscapeKeyDown: NonNullable<ComponentProps<typeof DismissableLayer>['onEscapeKeyDown']>
+  onOwnerRemoved?(): void
+}) {
+  const attachment = useContext(ModalAttachmentContext)
+  useLayoutEffect(() => {
+    const slot = active && targetRef.current ? getModalOverlayContainer(targetRef.current) : null
+    if (!slot || !onOwnerRemoved) return
+    const departed = (event: Event) => { if (event.target === slot) onOwnerRemoved() }
+    slot.addEventListener(MODAL_OVERLAY_SLOT_REMOVED, departed)
+    return () => slot.removeEventListener(MODAL_OVERLAY_SLOT_REMOVED, departed)
+  }, [active, targetRef, onOwnerRemoved, attachment?.container, attachment?.ready])
+  return active ? <DismissableLayer asChild onEscapeKeyDown={onEscapeKeyDown}><AttachmentTarget targetRef={targetRef} /></DismissableLayer> : null
+}
+const AttachmentTarget = forwardRef<HTMLDivElement, { targetRef: RefObject<HTMLElement | null> }>(function AttachmentTarget({ targetRef }, ref) {
+  useImperativeHandle(ref, () => targetRef.current as HTMLDivElement, [targetRef])
+  return null
+})
 
 /** Radix retains focus, dismissal and keyboard ownership; presentation failure does not cancel the request. */
 export function ModalRoot({ open, defaultOpen = false, onOpenChange, modal = true, recoveryCloseDisabled = false, children, ...props }: ComponentProps<typeof DialogPrimitive.Root> & { recoveryCloseDisabled?: boolean }) {
@@ -73,14 +97,31 @@ export function ModalPortal({ container, children, ...props }: ComponentProps<ty
   const presentationDocument = useClientUiOwnerDocument()
   const ownerDocument = container?.ownerDocument ?? presentationDocument ?? globalThis.document
   const windowContainer = container ?? ownerDocument?.body
+  const [host, setHost] = useState<HTMLDivElement | null>(null)
+  const [placement, setPlacement] = useState<{ host: HTMLElement; container: Element | DocumentFragment; document: Document } | null>(null)
+  const placed = host !== null && placement?.host === host && placement.container === windowContainer && placement.document === ownerDocument && host.ownerDocument === ownerDocument && host.parentNode === windowContainer
+  const mounted = context?.modal && (context.requestedOpen || props.forceMount === true)
+  if (mounted && !host && ownerDocument) {
+    const node = ownerDocument.createElement('div')
+    node.style.display = 'contents'; node.dataset.overlayModalHost = ''
+    setHost(node)
+  }
+  useLayoutEffect(() => {
+    if (!host) return
+    if (!mounted || !windowContainer) { host.remove(); return }
+    if (host.parentNode !== windowContainer) moveModalHost(host, windowContainer)
+    setPlacement(previous => previous?.host === host && previous.container === windowContainer && previous.document === ownerDocument ? previous : { host, container: windowContainer, document: ownerDocument })
+  }, [host, mounted, windowContainer, ownerDocument])
+  useLayoutEffect(() => () => host?.remove(), [host])
   useLayoutEffect(() => { if (!parentAttachment || parentAttachment.ready) setAdmitted(true) }, [parentAttachment])
   if (!admitted && parentAttachment && !parentAttachment.ready) return null
   if (!context?.modal) return parentAttachment && !inheritedContainer ? null : <DialogPrimitive.Portal {...props} container={inheritedContainer ?? windowContainer}>{children}</DialogPrimitive.Portal>
   const failed = context.requestedOpen && context.failure !== null
+  if (!host) return null
   return <>
     <ModalPortalMountContext.Provider value={props.forceMount === true || failed}>
-      <DialogPrimitive.Portal {...props} {...(failed ? { forceMount: true } : {})} container={windowContainer}>
-        <ModalScope context={context} document={ownerDocument}>{children}</ModalScope>
+      <DialogPrimitive.Portal {...props} {...(failed ? { forceMount: true } : {})} container={host}>
+        <ModalScope context={context} document={ownerDocument} placed={placed}>{children}</ModalScope>
       </DialogPrimitive.Portal>
     </ModalPortalMountContext.Provider>
     {failed && windowContainer ? createPortal(<aside className="modal-presentation-note" role="status" data-state="open">
@@ -93,15 +134,15 @@ export function ModalPortal({ container, children, ...props }: ComponentProps<ty
 }
 
 /** One non-scrolling boundary gives Radix ownership of both the content and its attached controls. */
-const ModalScope = forwardRef<HTMLDivElement, { context: ModalContextValue; document: Document; children?: ComponentProps<typeof DialogPrimitive.Portal>['children'] }>(function ModalScope({ context, document, children }, forwardedRef) {
+const ModalScope = forwardRef<HTMLDivElement, { context: ModalContextValue; document: Document; placed: boolean; children?: ComponentProps<typeof DialogPrimitive.Portal>['children'] }>(function ModalScope({ context, document, placed, children }, forwardedRef) {
   const [scope, setScope] = useState<HTMLDivElement | null>(null)
   const [boundary, setBoundary] = useState<HTMLDivElement | null>(null)
   const [scrimHost, setScrimHost] = useState<HTMLDivElement | null>(null)
   const [behavior, setBehavior] = useState<HTMLAttributes<HTMLDivElement>>({})
   const [slot, setSlot] = useState<HTMLDivElement | null>(null)
-  const [readyScope, setReadyScope] = useState<{ scope: HTMLDivElement; attempt: string } | null>(null)
+  const [readyScope, setReadyScope] = useState<{ scope: HTMLDivElement; attempt: string; document: Document } | null>(null)
   const visible = context.requestedOpen && context.failure === null
-  const ready = visible && scope !== null && readyScope?.scope === scope && readyScope.attempt === context.id
+  const ready = visible && placed && scope !== null && scope.ownerDocument === document && readyScope?.scope === scope && readyScope.attempt === context.id && readyScope.document === document
   const attachment = useMemo(() => ({ container: slot, ready: ready && slot !== null }), [slot, ready])
   const attachScope = useCallback((node: HTMLDivElement | null) => {
     setScope(node)
@@ -117,12 +158,17 @@ const ModalScope = forwardRef<HTMLDivElement, { context: ModalContextValue; docu
       setSlot(null)
     }
   }, [])
+  useLayoutEffect(() => {
+    // Reopening a retained scope is a new presentation. DOM order and Radix's newest
+    // focus owner must agree without remounting the original content or adding ranks.
+    if (scope && visible && placed) moveModalScopeToFront(scope)
+  }, [scope, context.id, visible, placed])
   // Radix first hides the rest of the document from accessibility. Attach this modal's
   // own non-scrolling slot afterwards; later nested modals then mount above this scope.
   useEffect(() => {
-    if (!scope || !visible) return
-    setReadyScope({ scope, attempt: context.id })
-  }, [scope, context.id, visible])
+    if (!scope || !visible || !placed) return
+    setReadyScope({ scope, attempt: context.id, document })
+  }, [scope, context.id, visible, placed, document])
   useLayoutEffect(() => {
     const node = scope
     if (!node || !visible) return
@@ -134,7 +180,7 @@ const ModalScope = forwardRef<HTMLDivElement, { context: ModalContextValue; docu
     node.addEventListener(MODAL_PRESENTATION_FAILURE_EVENT, failed)
     return () => node.removeEventListener(MODAL_PRESENTATION_FAILURE_EVENT, failed)
   }, [context, scope, visible])
-  const owner = useMemo(() => ({ boundary, scrimHost, publish: setBehavior }), [boundary, scrimHost])
+  const owner = useMemo(() => ({ document, ready: placed, boundary, scrimHost, publish: setBehavior }), [document, placed, boundary, scrimHost])
   const events = Object.fromEntries(Object.entries(behavior).filter(([name, value]) => /^on[A-Z]/.test(name) && typeof value === 'function').map(([name, handler]) => [name, (event: { target: EventTarget | null }) => {
     if (event.target && boundary?.contains(event.target as Node)) (handler as (event: unknown) => void)(event)
   }]))
@@ -153,7 +199,7 @@ export const ModalOverlay = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
   const forceMount = useContext(ModalPortalMountContext) || props.forceMount
   if (context && !context.modal) return null
   const group = context?.modal ? { 'data-overlay-modal-id': context.id, 'data-overlay-modal-part': 'scrim' } : {}
-  if (context && (!context.requestedOpen || context.failure !== null)) {
+  if (context && (!context.requestedOpen || context.failure !== null || boundary && !boundary.ready)) {
     if (!forceMount && !context.requestedOpen) return null
     const { forceMount: _forceMount, asChild, children, ...dom } = props
     const visual = asChild ? cloneElement(Children.only(children) as ReactElement<Record<string, unknown>>, { ...dom, ...group, 'data-state': 'closed', ref })
@@ -169,12 +215,15 @@ export const ModalContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
   const inheritedBoundary = useContext(ModalBoundaryContext)
   const boundary = context?.modal === false ? null : inheritedBoundary
   const forceMount = useContext(ModalPortalMountContext) || props.forceMount
-  const active = !context || context.requestedOpen && context.failure === null
+  const active = (!context || context.requestedOpen && context.failure === null) && (!boundary || boundary.ready)
   const [element, setElement] = useState<HTMLDivElement | null>(null)
   const [behavior, setBehavior] = useState<HTMLAttributes<HTMLDivElement>>({})
   const child = props.asChild ? Children.only(props.children) as ReactElement<Record<string, unknown>> : null
   const childRef = child?.props.ref as Ref<HTMLDivElement> | undefined
-  const latest = useRef({ requestedOpen: context?.requestedOpen, id: context?.id }); latest.current = { requestedOpen: context?.requestedOpen, id: context?.id }
+  const behaviorDocument = inheritedBoundary?.document ?? element?.ownerDocument
+  const documentLease = useRef({ document: behaviorDocument, generation: 0 })
+  if (documentLease.current.document !== behaviorDocument) documentLease.current = { document: behaviorDocument, generation: documentLease.current.generation + 1 }
+  const latest = useRef({ failure: context?.failure, id: context?.id, document: behaviorDocument }); latest.current = { failure: context?.failure, id: context?.id, document: behaviorDocument }
   const rawLeaseProps = { ...props, children: undefined }
   if (boundary) for (const name of Object.keys(rawLeaseProps)) if (/^on[A-Z]/.test(name) && !['onOpenAutoFocus', 'onCloseAutoFocus', 'onEscapeKeyDown', 'onPointerDownOutside', 'onFocusOutside', 'onInteractOutside'].includes(name)) delete (rawLeaseProps as Record<string, unknown>)[name]
   const leaseProps = useRef(rawLeaseProps)
@@ -196,9 +245,9 @@ export const ModalContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
   // Radix's final DOM contract is attached to the retained visual node. Only its behavior
   // shell retires on failure/closed forceMount, releasing FocusScope, hideOthers and input locks.
   const lease = useMemo(() => {
-    const current = leaseProps.current
+    const current = leaseProps.current, attemptId = context?.id
     const autofocus = (event: Event, close: boolean) => {
-      if (close && latest.current.requestedOpen) { event.preventDefault(); return }
+      if (close && (latest.current.failure != null || latest.current.id !== attemptId || latest.current.document !== behaviorDocument)) { event.preventDefault(); return }
       if (!element) return
       if (event.target === element) { (close ? current.onCloseAutoFocus : current.onOpenAutoFocus)?.(event); return }
       const Event = element.ownerDocument.defaultView?.CustomEvent ?? CustomEvent
@@ -207,10 +256,10 @@ export const ModalContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
       ;(close ? current.onCloseAutoFocus : current.onOpenAutoFocus)?.(actual)
       if (actual.defaultPrevented) event.preventDefault()
     }
-    return active ? <DialogPrimitive.Content {...current} asChild onOpenAutoFocus={event => autofocus(event, false)} onCloseAutoFocus={event => autofocus(event, true)}>
+    return active ? <DialogPrimitive.Content key={documentLease.current.generation} {...current} asChild onOpenAutoFocus={event => autofocus(event, false)} onCloseAutoFocus={event => autofocus(event, true)}>
       <ContentBehavior target={boundary?.boundary ?? element} publish={setBehavior} boundaryPublish={boundary?.publish} />
     </DialogPrimitive.Content> : null
-  }, [active, leaseProps.current, element, boundary])
+  }, [active, leaseProps.current, element, boundary, context?.id, behaviorDocument])
   if (context && !context.requestedOpen && !forceMount) return null
   const { asChild: _asChild, forceMount: _forceMount, children, onOpenAutoFocus: _open, onCloseAutoFocus: _close,
     onEscapeKeyDown: _escape, onPointerDownOutside: _pointerOutside, onFocusOutside: _focusOutside, onInteractOutside: _interactOutside, ...dom } = props
@@ -233,6 +282,30 @@ const ContentBehavior = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement
   useLayoutEffect(() => { publish(props); boundaryPublish?.(props) }, [publish, boundaryPublish, props])
   return null
 })
+
+function moveModalScopeToFront(scope: HTMLElement): void {
+  const target = scope.parentElement?.hasAttribute('data-overlay-modal-host') ? scope.parentElement : scope
+  const parent = target.parentElement
+  if (parent && parent.lastElementChild !== target) moveModalHost(target, parent)
+}
+
+function moveModalHost(host: HTMLElement, destination: Element | DocumentFragment): void {
+  const movable = destination as Element & { moveBefore?(node: Node, before: Node | null): void }
+  if (host.isConnected && destination.isConnected && host.ownerDocument === destination.ownerDocument && typeof movable.moveBefore === 'function') { movable.moveBefore(host, null); return }
+  const document = host.ownerDocument, active = document.activeElement
+  const focus = active && host.contains(active) ? active as HTMLElement : null
+  const selection = document.getSelection(), range = selection?.rangeCount ? selection.getRangeAt(0) : null
+  const saved = range && host.contains(range.startContainer) && host.contains(range.endContainer)
+    ? { start: range.startContainer, startOffset: range.startOffset, end: range.endContainer, endOffset: range.endOffset } : null
+  destination.appendChild(host)
+  const nextDocument = host.ownerDocument
+  if (focus && (nextDocument.activeElement === nextDocument.body || host.contains(nextDocument.activeElement))) focus.focus({ preventScroll: true })
+  if (saved) {
+    const rebound = nextDocument.createRange()
+    rebound.setStart(saved.start, saved.startOffset); rebound.setEnd(saved.end, saved.endOffset)
+    const nextSelection = nextDocument.getSelection(); nextSelection?.removeAllRanges(); nextSelection?.addRange(rebound)
+  }
+}
 
 function sameShallow(left: object, right: object): boolean {
   const a = Object.entries(left), b = Object.entries(right)
