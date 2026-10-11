@@ -92,6 +92,18 @@ async function codexReport(): Promise<{ probe: string; action: string | null }> 
 }
 
 describe('doctor 区分「查不成」与「没装」', () => {
+  it('uses the requested private PATH and workspace for real executable facts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'doctor-context-')), command = join(root, 'probe-command')
+    try {
+      await writeFile(command, '#!/bin/sh\n'); await chmod(command, 0o755)
+      for (const override of ['probe-command', './probe-command']) {
+        const report = await diagnoseAgentMux({ client: clientWithRealProbes(), workspacePath: root,
+          env: { PATH: root }, commandOverrides: { codex: override } })
+        expect(report.agents.find(agent => agent.id === 'codex')).toMatchObject({ probe: 'found' })
+      }
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('PATH 退化、一个候选都算不出 → 说查不成并指向环境，绝不说没装', async () => {
     const previousPath = process.env.PATH
     // 相对命令名（codex 的 catalog executable）+ 空 PATH = 那次误报的真实输入形态。
@@ -118,7 +130,7 @@ describe('doctor 区分「查不成」与「没装」', () => {
     try {
       const { probe, action } = await codexReport()
       expect(probe, '真的没装却报成了查不成——判据过宽').toBe('missing')
-      expect(action).toMatch(/^Install /)
+      expect(action).toMatch(/Configured executable.*was not found/)
     } finally {
       if (previousPath === undefined) delete process.env.PATH
       else process.env.PATH = previousPath
