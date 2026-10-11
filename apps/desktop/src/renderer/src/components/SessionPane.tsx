@@ -245,6 +245,9 @@ export function SessionPane({
     useAppStore.getState().setViewMode(sessionId, 'terminal')
     setHistoryOpen(false)
     selectOwnRegion()
+    if (projectionPolicy.acceptsInput && !pendingAgentRestore && linkOrigin.regionId) {
+      useAppStore.getState().requestRegionCaretFocus(linkOrigin.regionId)
+    }
   }
   useEffect(() => {
     if (navigation.current.isCurrent && !navigation.current.isCurrent()) navigation.current.cancel?.()

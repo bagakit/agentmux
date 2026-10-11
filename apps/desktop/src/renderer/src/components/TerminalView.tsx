@@ -438,9 +438,10 @@ export function TerminalView({
     const request = useAppStore.getState().regionCaretFocus
     if (!regionCaretFocusTargets(request, linkOriginRef.current.regionId)) return
     if (!visibleRef.current) return
-    const target = searchInputRef.current ?? terminalRef.current
+    const search = request.target === 'terminal' ? null : searchInputRef.current
+    const target = search ?? terminalRef.current
     if (!target) return
-    const element = searchInputRef.current ?? terminalRef.current?.element
+    const element = search ?? terminalRef.current?.element
     if (!element?.isConnected || element.closest('[inert]')) return
     target.focus()
     // A retained View can still be in its private parking host when this child mounts.
@@ -450,13 +451,30 @@ export function TerminalView({
   }
 
   useEffect(() => {
-    if (!regionCaretFocus || !visible) return
+    if (!regionCaretFocusTargets(regionCaretFocus, linkOrigin.regionId)) return
     const nonce = regionCaretFocus.nonce
     const ownerWindow = hostDocument.defaultView!
     let observer: MutationObserver | undefined
     let frame: number | undefined
+    const previousFocus = hostDocument.activeElement
+    const onLaterFocus = (event: FocusEvent): void => {
+      const target = event.target
+      if (target === previousFocus || target === hostDocument.body || target === hostDocument.documentElement ||
+        target instanceof ownerWindow.Node && terminalRef.current?.element?.contains(target)) return
+      clearRegionCaretFocus(nonce)
+      dispose()
+    }
+    const onLaterInput = (event: Event): void => {
+      const target = event.target
+      if (target instanceof ownerWindow.Node && terminalRef.current?.element?.contains(target)) return
+      clearRegionCaretFocus(nonce)
+      dispose()
+    }
     const dispose = (): void => {
       observer?.disconnect()
+      hostDocument.removeEventListener('focusin', onLaterFocus)
+      hostDocument.removeEventListener('keydown', onLaterInput)
+      hostDocument.removeEventListener('pointerdown', onLaterInput)
       if (frame !== undefined) ownerWindow.cancelAnimationFrame(frame)
     }
     const attempt = (): void => {
@@ -469,11 +487,14 @@ export function TerminalView({
     if (useAppStore.getState().regionCaretFocus?.nonce !== nonce) return
     // Only this exact pending consumer observes body attachment/inert changes, until
     // its request succeeds or is replaced. Ordinary terminals have no observer here.
+    hostDocument.addEventListener('focusin', onLaterFocus)
+    hostDocument.addEventListener('keydown', onLaterInput)
+    hostDocument.addEventListener('pointerdown', onLaterInput)
     observer = new ownerWindow.MutationObserver(attempt)
     observer.observe(hostDocument.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
     frame = ownerWindow.requestAnimationFrame(attempt)
     return dispose
-  }, [regionCaretFocus, visible, searchOpen, hydrating, hostDocument])
+  }, [regionCaretFocus, visible, searchOpen, hydrating, hostDocument, linkOrigin.regionId])
 
   useLayoutEffect(() => {
     // reveal() schedules a commit. Before this commit, the actual xterm host is
