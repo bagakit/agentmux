@@ -1,3 +1,4 @@
+import { conversationRevision } from './conversation-timeline.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { conversationProvenanceFields } from './conversation-provenance.js'
@@ -19,7 +20,9 @@ import type {
   AgentTimelineItem,
   AgentTimelineItemKind,
   AgentTimelineItemStatus,
-  AgentTimelineMutation
+  AgentTimelineMutation,
+  AgentTimelineSnapshot,
+  AgentMuxClientEvent
 } from './types.js'
 
 export type {
@@ -268,6 +271,41 @@ export function applyAgentTimelineMutation(
     throw new AgentMuxError('Timeline contains another Agent Session.', 'INVALID_AGENT_TIMELINE')
   }
   return applyNormalizedTimelineMutation(items, mutation)
+}
+
+/** Apply only an exact committed captured delta; an observation gap never replaces the old reading. */
+export function applyAgentTimelineEvent(snapshot: AgentTimelineSnapshot,
+  event: Extract<AgentMuxClientEvent, { type: 'agent-timeline' }>): { snapshot: AgentTimelineSnapshot; gap: boolean } {
+  const gap = () => ({ snapshot, gap: true })
+  if (snapshot.agentSessionId !== event.agentSessionId) return gap()
+  if (event.revision <= snapshot.revision) return { snapshot, gap: false }
+  const stream = event.stream, position = event.position
+  if (!stream || !position || typeof event.sourceHostId !== 'string' || !event.sourceHostId ||
+    snapshot.sourceHostId !== undefined && snapshot.sourceHostId !== event.sourceHostId ||
+    typeof stream.epoch !== 'string' || !stream.epoch || !['beginning', 'retained-prefix', 'unknown'].includes(stream.origin) ||
+    !Array.isArray(stream.gaps) || !stream.gaps.every(row => row && typeof row.code === 'string' && typeof row.message === 'string') ||
+    !Number.isSafeInteger(stream.sequence) || stream.sequence < 1 || !Number.isSafeInteger(stream.revision) ||
+    stream.revision !== event.revision || event.revision !== snapshot.revision + 1 ||
+    position.sequence !== stream.sequence || !Number.isSafeInteger(position.firstSequence) || position.firstSequence < 1 ||
+    position.firstSequence > position.sequence || typeof position.revision !== 'string') return gap()
+  const previous = snapshot.stream
+  if (previous ? previous.epoch !== stream.epoch || stream.sequence !== previous.sequence + 1
+    : snapshot.items.length !== 0 || snapshot.revision !== 0 || stream.sequence !== 1) return gap()
+  try {
+    const mutation = normalizeAgentTimelineMutation(event.mutation)
+    const id = mutation.type === 'update' ? mutation.itemId : mutation.item.id
+    if (mutation.agentSessionId !== snapshot.agentSessionId || position.id !== id) return gap()
+    const original = previous?.positions.find(row => row.id === id)
+    if (original && original.firstSequence !== position.firstSequence || !original && position.firstSequence < position.sequence) return gap()
+    const items = applyNormalizedTimelineMutation(snapshot.items, mutation), changed = items.find(item => item.id === id)
+    if (!changed || conversationRevision(changed) !== position.revision) return gap()
+    const retained = new Set(items.map(item => item.id))
+    const positions = (previous?.positions ?? []).filter(row => retained.has(row.id))
+      .map(row => row.id === id ? { ...position } : row)
+    if (!original) positions.push({ ...position })
+    return { snapshot: { ...snapshot, sourceHostId: event.sourceHostId, revision: event.revision, items,
+      stream: { ...stream, gaps: stream.gaps.map(row => ({ ...row })), positions } }, gap: false }
+  } catch { return gap() }
 }
 
 export function normalizeAgentTimeline(

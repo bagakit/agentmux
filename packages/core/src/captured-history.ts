@@ -76,18 +76,21 @@ export function commitCapturedMutation(db: DatabaseSync, mutation: AgentTimeline
   const items = previous ? [previous] : [];
   const next = applyNormalizedTimelineMutation(items, mutation);
   const changed = next !== items;
+  const header = { epoch: stream.epoch, sequence: stream.sequence, revision: stream.revision, origin: stream.origin, gaps: JSON.parse(stream.gaps_json) };
   if (!changed)
-    return { agentSessionId: id, revision: stream.revision, changed: false, mutation };
+    return { agentSessionId: id, revision: stream.revision, changed: false, mutation, stream: header,
+      position: { id: recordId, firstSequence: Number(previousRow!.first_sequence), sequence: Number(previousRow!.sequence), revision: String(previousRow!.revision) } };
   if (!Number.isSafeInteger(stream.sequence + 1) || !Number.isSafeInteger(stream.revision + 1))
     throw new AgentMuxError('Captured stream sequence limit reached.', 'AGENT_TIMELINE_REVISION_LIMIT');
-  const item = next[0]!, sequence = stream.sequence + 1, revision = stream.revision + 1;
+  const item = next[0]!, sequence = stream.sequence + 1, revision = stream.revision + 1, itemRevision = conversationRevision(item);
   db.prepare('INSERT INTO captured_record_versions VALUES (?,?,?,?,?,?,?)')
-    .run(id, stream.epoch, sequence, recordId, conversationRevision(item), revision, JSON.stringify(item));
+    .run(id, stream.epoch, sequence, recordId, itemRevision, revision, JSON.stringify(item));
   db.prepare(`INSERT INTO captured_record_heads VALUES (?,?,?,?,?,?,?) ON CONFLICT(session_id,epoch,record_id)
   DO UPDATE SET latest_sequence=excluded.latest_sequence,kind=excluded.kind,activity=excluded.activity`)
     .run(id, stream.epoch, recordId, sequence, sequence, item.kind, Number(item.activityState !== undefined));
   db.prepare('UPDATE captured_streams SET sequence=?,revision=? WHERE session_id=?').run(sequence, revision, id);
-  return { agentSessionId: id, revision, changed: true, mutation };
+  return { agentSessionId: id, revision, changed: true, mutation, stream: { ...header, sequence, revision },
+    position: { id: recordId, firstSequence: previousRow ? Number(previousRow.first_sequence) : sequence, sequence, revision: itemRevision } };
 }
 export function readCapturedPage(db: DatabaseSync, id: string, input: AgentCapturedTimelineRead = {}): AgentCapturedTimelinePage {
   const stream = accepted(db, id), cut = input.throughSequence ?? stream.sequence, limit = input.limit ?? 100;

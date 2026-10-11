@@ -2498,7 +2498,9 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       history.stream.sequence = sequence;
       history.stream.revision = revision;
     }
-    return structuredClone({ agentSessionId: id, revision: history.stream.revision, changed, mutation: canonicalMutation });
+    const head = history.heads.get(recordId)!;
+    return structuredClone({ agentSessionId: id, revision: history.stream.revision, changed, mutation: canonicalMutation,
+      stream: history.stream, position: { id: recordId, firstSequence: head.firstSequence, sequence: head.sequence, revision: head.revision } });
   }
 
 }

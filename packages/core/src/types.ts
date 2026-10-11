@@ -1757,6 +1757,9 @@ export type AgentMuxClientEvent = (
       agentSessionId: string
       revision: number
       mutation: AgentTimelineMutation
+      sourceHostId: string
+      stream: AgentCapturedTimelineStream
+      position: AgentTimelineCommit['position']
       evidence: AgentMuxEvidence
     }
   | {
@@ -1992,6 +1995,8 @@ export type AgentTimelineCommit = {
   revision: number
   changed: boolean
   mutation: AgentTimelineMutation
+  stream: AgentCapturedTimelineStream
+  position: NonNullable<AgentTimelineSnapshot['stream']>['positions'][number]
 }
 
 export type AgentLaunchPlan = {
