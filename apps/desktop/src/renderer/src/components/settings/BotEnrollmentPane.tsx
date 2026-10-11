@@ -36,7 +36,7 @@ export function useBotEnrollment(active: boolean) {
   const [submissions, setSubmissions] = useState<ConnectionEnrollmentBeginInput[]>([])
   const [submittedId, setSubmittedId] = useState<string | null>(null)
   const submitted = submissions.find(item => item.operationId === submittedId) ?? operations.find(item => item.operationId === submittedId) ?? null
-  const [feedback, setFeedback] = useState<{ text: string; detail?: string }>({ text: '' })
+  const [feedback, setFeedback] = useState<{ text: string; detail?: string | undefined }>({ text: '' })
   const setIssue = (text: string, detail?: string) => setFeedback({ text, detail })
   const [pendingWrites, setPendingWrites] = useState<string[]>([])
   const selection = useRef<string | null>(null), selectionEpoch = useRef(0)
