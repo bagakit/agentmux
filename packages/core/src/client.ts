@@ -2360,7 +2360,7 @@ export class AgentMuxClient {
     const history = descriptor.history
     const matches = (handle: AgentNativeSessionHandle | undefined) => handle?.kind === 'provider' && handle.providerId === selected?.providerId && handle.sessionId === selected.nativeSessionId
     const previous = selected && !matches(history?.nativeHandle) && matches(history?.previousNativeHandle)
-    const acceptedViewOnly = input.view && !input.cursor && !('checkpoint' in input) && !input.anchor && !input.nativeSource
+    const acceptedViewOnly = input.view && !input.cursor && !('checkpoint' in input) && !input.anchor && !('record' in input && input.record) && !input.nativeSource
     if (selected && !matches(history?.nativeHandle) && !previous && !acceptedViewOnly) throw new AgentMuxError('The exact original native source is not retained by this Session. Its displayed records and Run are unchanged.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     const sourceOptions = previous ? { nativeSource: 'previous' as const } : {}
     if (previous && history) descriptor = { ...descriptor, history: { ...history, nativeHandle: history.previousNativeHandle! } }

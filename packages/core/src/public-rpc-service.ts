@@ -220,7 +220,7 @@ const NATIVE_FIELDS = {
   'agent.conversation.changes': ['hostId', 'agentSessionId', 'checkpoint', 'limit', 'cursor', 'maxBytes', 'view'],
   'agent.conversation.release': ['hostId', 'agentSessionId', 'view'],
   'agent.conversation.watch': ['hostId', 'agentSessionId', 'view'],
-  'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'anchor', 'view', 'nativeSource'],
+  'agent.conversation.inspect': ['hostId', 'agentSessionId', 'limit', 'cursor', 'maxBytes', 'record', 'anchor', 'view', 'nativeSource'],
   'agent.conversation.landmark.ls': ['hostId', 'agentSessionId', 'operationId'],
   'agent.conversation.landmark.apply': ['hostId', 'agentSessionId', 'operationId', 'expectedRevision', 'change'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes', 'kind', 'query', 'scanLimit'],
