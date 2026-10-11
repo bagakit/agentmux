@@ -4,6 +4,11 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { resolve, relative, dirname } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const mutants: Record<string, [string, string, string]> = {
+  'default-native-disabled': ['prompt-submission.ts', 'const source = nativeOriginal && defaultNativeSource(nativeOriginal)', 'const source = undefined'],
+  'forget-default-predecessor': ['prompt-submission.ts', '(stored.promptCompletionAdmission === undefined ? null : stored.promptCompletionAdmission.submissionId) !== admissionIntent.condition.afterSubmissionId', 'false'],
+  'forget-default-source': ['prompt-submission.ts', '!isDeepStrictEqual(defaultNativeSource(stored), source)', 'false'],
+  'forget-default-actor': ['prompt-submission.ts', '!isDeepStrictEqual(stored.nativeActor, original.nativeActor)', 'false'],
+  'ignore-observed-source': ['prompt-submission.ts', 'current.observedNativeHandle && !sameNativeHandle(current.observedNativeHandle, handle) ||', ''],
   'lose-native-correlation': ['prompt-submission.ts', 'const frozenPlan = { ...prepared.plan, clientCorrelation: createNativeInputCorrelation(inputKey) }', 'const frozenPlan = { ...prepared.plan }'],
   'leak-private-actor': ['agent-session-identity.ts', 'nativeActor: _nativeActor, ', ''],
   'forget-native-target': ['agent-global-message-queue.ts', '!isDeepStrictEqual(existing.intent.source, intent.source) || !isDeepStrictEqual(existing.intent.admissionIntent, intent.admissionIntent) || existing.intent.execution !== intent.execution', '!isDeepStrictEqual(existing.intent.source, intent.source)'],

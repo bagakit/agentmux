@@ -19,14 +19,14 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 const closes: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
-async function fixture() {
-  const f = await paginatedFixture([], 'paginated', process.env.AGENTMUX_NATIVE_ADOPTION_COMPILED === '1'), key = { kind: 'prompt' as const, agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: 'original-submission' }
+async function fixture(kind: 'prompt' | 'message' = 'prompt') {
+  const f = await paginatedFixture([], 'paginated', process.env.AGENTMUX_NATIVE_ADOPTION_COMPILED === '1'), key = kind === 'prompt' ? { kind, agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: 'original-submission' } : { kind, agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, messageId: 'original-submission' }
   closes.push(f.close)
   const token = createNativeInputCorrelation(key), plan = { kind: 'native-rpc' as const, protocolId: 'original-protocol', actorId: 'original-actor', sourceId: JSON.stringify(['codex', source.nativeSessionId]), threadId: source.nativeSessionId, operation: 'start-or-steer' as const, clientCorrelation: token }
-  const admission: NonNullable<AgentPromptSubmissionRecord['admission']> = { submissionId: key.submissionId, operationId: key.submissionId, inputKey: key, transport: 'native', acknowledged: true,
-    intent: { run: f.session.run, ownerInstanceId: 'original-daemon', prompt: 'Private Core system context\nOriginal user content', plan, execution: 'immediate',
+  const admission: NonNullable<AgentPromptSubmissionRecord['admission']> = { submissionId: 'original-submission', operationId: 'original-submission', inputKey: key, transport: 'native', acknowledged: true,
+    intent: { run: f.session.run, ownerInstanceId: 'original-daemon', prompt: 'Private Core system context\nOriginal user content', plan, execution: kind === 'prompt' ? 'immediate' : 'default',
       message: { userContent: 'Original user content', systemContext: 'Private Core system context', authorHuman: true },
-      admissionIntent: { kind: 'native-conversation', source, expectedRun: f.session.run } }, native: { plan, outcome: 'admitted', turnId: turn } }
+      admissionIntent: kind === 'prompt' ? { kind: 'native-conversation', source, expectedRun: f.session.run } : { kind: 'exact-condition', condition: { expectedRun: f.session.run, afterSubmissionId: null } } }, native: { plan, outcome: 'admitted', turnId: turn } }
   const next = { ...f.session, promptCompletionAdmission: admission }
   await f.store.compareAndSwap(f.session, next); Object.assign(f.session, next)
   const checkpoint = (await f.client.conversationCheckpoint({ hostId: 'local', agentSessionId: key.agentSessionId })).checkpoint
@@ -157,7 +157,7 @@ it('adopted page, exact physical anchor, original deferred resource and durable 
   expect(item.conversation?.adoptedInput).toEqual({ key: f.key })
   expect(part).toMatchObject({ kind: 'resource', resourceType: 'text', content: { kind: 'text' } })
   if (part.kind !== 'resource' || part.resourceType !== 'text') throw Error('Expected original deferred text resource')
-  expect(await readSessionHistoryTextResource(part, 0, { source, recordId: item.id, turnId: turn }, input => f.client.sessionHistoryResource(f.key.agentSessionId, input))).toEqual({ kind: 'text', text })
+  expect(await readSessionHistoryTextResource(part, 0, { source, recordId: item.id, turnId: turn }, input => f.client.sessionHistoryResource(f.key.agentSessionId, input))).toEqual({ kind: 'text', text, contentEligibility: 'unconfirmed' })
   expect((await f.client.readSessionHistoryChanges(f.key.agentSessionId, { checkpoint: cut })).items).toEqual([item])
   const opened = await f.read(), native = opened.snapshot.units[0]!.records[0]!
   const exact = await f.client.readAgentConversation({ hostId: 'local', agentSessionId: f.key.agentSessionId,
@@ -334,4 +334,24 @@ it('real RPC and compiled CLI preserve the Core-native primary, original submiss
     expect(cli.kind).toBe('complete'); if (cli.kind !== 'complete') throw Error('Expected full compiled CLI window')
     expect(cli.snapshot.units).toEqual(sdk.snapshot.units)
   }
+})
+
+
+it('adopts a default semantic message only from its complete frozen native plan and preserves the original submission contribution', async () => {
+  const f = await fixture('message'); await f.capture(); await appendFile(f.transcriptPath, jsonl([f.native()]))
+  const { snapshot } = await f.read()
+  expect(snapshot.units).toHaveLength(1)
+  expect(snapshot.units[0]!.records).toHaveLength(2)
+  expect(snapshot.units[0]!.event.content.map(slot => slot.placement)).toEqual(['body', 'detail'])
+  const native = snapshot.units[0]!.records.find(record => record.original.kind === 'native')!
+  if (native.original.kind !== 'native') throw Error('Expected original native contribution')
+  expect(native.original.item.conversation?.adoptedInput).toEqual({ key: f.key })
+  const wrong = structuredClone(f.admission)
+  if (wrong.transport !== 'native' || !wrong.intent || wrong.intent.plan.kind !== 'native-rpc') throw Error('Expected native original claim')
+  wrong.native.plan = { ...wrong.native.plan, sourceId: JSON.stringify(['codex', 'foreign-thread']) }
+  wrong.intent.plan = wrong.native.plan
+  const claim = { agentSessionId: f.key.agentSessionId, run: f.key.expectedRun, admission: wrong }
+  const refused = await confirmNativeInputAdoption(native.original.item, { hostId: 'local', agentSessionId: f.key.agentSessionId }, source, async () => claim)
+  expect(refused.conversation?.adoptedInput).toBeUndefined()
+  expect(refused.conversationDiagnostic?.code).toBe('CONVERSATION_INPUT_ADOPTION_UNCONFIRMED')
 })
