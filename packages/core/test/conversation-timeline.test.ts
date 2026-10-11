@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { runInNewContext } from 'node:vm'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { projectConversationTimeline, conversationRecordId, type ConversationSourceRecord } from '../src/conversation.js'
+import { projectConversationTimeline, projectConversationQuestions, conversationRecordId, type ConversationSourceRecord } from '../src/conversation.js'
 import { projectSessionUserMessages } from '../src/session-user-messages.js'
 import { normalizeAgentTimeline } from '../src/session-timeline.js'
 import { normalizeSessionHistoryPage, SESSION_HISTORY_MAX_PAGE_BYTES } from '../src/session-history.js'
@@ -96,7 +96,8 @@ it('reuses real saved Codex canonical questions, original function call IDs and 
   const result = projectConversationTimeline({ agentSessionId: f.session.agentSessionId, executionHostId: 'local', historyPage: native })
   expect(result.events.map(event => event.role)).toEqual(['process', 'interaction', 'message'])
   expect(result.records[0]?.original.item.conversation?.nativeInvocationScope).toMatchObject({ source: native.source, subject: 'main', scope: { kind: 'session' } })
-  expect(result.events[1]?.relations).toContainEqual(expect.objectContaining({ kind: 'answers', question: expect.objectContaining({ questionId: savedQuestionId }) }))
+  expect(result.events[1]?.relations).not.toContainEqual(expect.objectContaining({ kind: 'answers' }))
+  expect(result.events[2]?.relations).toContainEqual({ kind: 'answers', from: result.records[2]!.reference, question: { hostId: native.sourceHostId, agentSessionId: native.agentSessionId, source: native.source, questionId: savedQuestionId } })
   expect(result.records.map(record => record.original.item)).toEqual(native.items)
   await f.unchanged()
 })
@@ -239,4 +240,39 @@ it('retains exact explicit authors across same-event contributions and accounts 
   const process = project([input({ authorHuman: true })], page([{ ...native.items[0]!, kind: 'activity' }]))
   expect(process.events[0]).toMatchObject({ role: 'process', author: { kind: 'human' } })
   expect(process.records[1]?.original.item).not.toHaveProperty('publicContent')
+})
+
+it('each original answer owns its semantic relation without a read request, including multiple answers to one question', () => {
+  const first = { id: 'first-answer', kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: 'First original answer' }], questionAnswers: [{ questionId: 'opaque-question', prompt: 'Original question', answer: 'First' }] }
+  const second = { ...first, id: 'second-answer', contentParts: [{ kind: 'text' as const, text: 'Second original answer' }], questionAnswers: [{ questionId: 'opaque-question', prompt: 'Original question', answer: 'Second' }] }
+  const input = { agentSessionId: sid, historyPage: { ...page([first, second]), sourceHostId: 'original-source' } }
+  const full = projectConversationTimeline(input)
+  expect(full.events).toHaveLength(2)
+  expect(full.events.flatMap(event => event.relations)).toHaveLength(2)
+  for (const [index, item] of [first, second].entries()) {
+    const single = projectConversationTimeline({ ...input, historyPage: { ...input.historyPage, items: [item] } })
+    expect(single.events[0]).toEqual(full.events[index])
+    expect(single.events[0]!.relations).toEqual([{ kind: 'answers', from: single.records[0]!.reference, question: { hostId: 'original-source', agentSessionId: sid, source, questionId: 'opaque-question' } }])
+    expect(single.coverage.flatMap(value => value.gaps)).toContainEqual(expect.objectContaining({ code: 'CONVERSATION_QUESTION_TARGET_UNREAD' }))
+  }
+  const hostless = projectConversationTimeline({ agentSessionId: sid, historyPage: page([first]) })
+  expect(hostless.events[0]!.relations).toEqual([])
+  expect(hostless.records[0]!.original.item).toEqual(first)
+})
+
+it('card answer context requires the known original source Host, not a caller route or identical Session IDs', () => {
+  const request = { id: 'request', kind: 'assistant-message' as const, contentParts: [], questionRequest: { delivery: 'async' as const, questions: [{ id: 'opaque-question', prompt: 'Original question', options: [], acceptsText: true }] } }
+  const answer = { id: 'answer', kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: 'Complete original answer' }], questionAnswers: [{ questionId: 'opaque-question', prompt: 'Original question', answer: 'Recorded' }] }
+  const displayed = { ...page([request]), sourceHostId: 'original-source' }, context = { ...displayed, items: [answer] }
+  const read = (historyPage: AgentSessionHistoryPage, answerContext: AgentSessionHistoryPage) => projectConversationQuestions({ agentSessionId: sid, executionHostId: 'client-route', historyPage, answerContext })[0]!
+  expect(read(displayed, context).recordedAnswers.get('opaque-question')).toBe('Recorded')
+  expect(read(displayed, context).questions[0]!.answer!.hostId).toBe('original-source')
+  const { sourceHostId: _missingHost, ...unknownContext } = context
+  for (const foreign of [{ ...context, sourceHostId: 'other-source' }, unknownContext, { ...context, agentSessionId: 'other-session' }, { ...context, source: { ...source, providerId: 'other-provider' } }, { ...context, source: { ...source, nativeSessionId: 'other-native' } }]) {
+    expect(read(displayed, foreign).recordedAnswers.size).toBe(0)
+    expect(foreign.items[0]).toEqual(answer)
+  }
+  const { sourceHostId: _unknown, ...unknown } = displayed
+  expect(read(unknown, context).recordedAnswers.size).toBe(0)
+  expect(read({ ...unknown, items: [request, answer] }, context).recordedAnswers.size).toBe(0)
 })

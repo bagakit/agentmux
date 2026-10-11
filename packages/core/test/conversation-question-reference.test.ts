@@ -13,7 +13,7 @@ it('public Core references preserve the original native question and an accepted
   expect(question!.original).toBe(page.items[0])
   expect(question!.questions[0]!.reference).toEqual({ agentSessionId: f.input.agentSessionId, executionHostId: 'local',
     source: f.input.source, recordId: f.input.recordId, turnId: f.input.turnId, questionId: request.questions[0]!.id })
-  expect(question!.questions[0]!.answer).toMatchObject({ source: f.input.source, recordId: 'exact-answer-record', turnId: 'answer-turn',
+  expect(question!.questions[0]!.answer).toMatchObject({ hostId: context.sourceHostId, source: f.input.source, recordId: 'exact-answer-record', turnId: 'answer-turn',
     questionId: request.questions[0]!.id, answer: 'Keep original' })
   expect(question!.questions[0]!.answer!.original).toBe(context.items.find(item => item.id === 'exact-answer-record'))
   expect(question!.questions[1]!.answer).toBeUndefined()
@@ -23,10 +23,11 @@ it('public Core references preserve the original native question and an accepted
   expect(unknown.questions[0]!.answer).toBeUndefined()
 })
 
-it.each(['session', 'provider', 'native'] as const)('does not import %s answer facts into the original question', async field => {
+it.each(['host', 'unknown-host', 'session', 'provider', 'native'] as const)('does not import %s answer facts into the original question', async field => {
   const f = await fixture(), context = await f.client.sessionHistoryPage(f.input.agentSessionId, f.invocation)
   const page = { ...context, items: context.items.filter(item => item.questionRequest) }
-  const foreign = { ...context, ...(field === 'session' ? { agentSessionId: 'foreign-session' } : {}), source: {
+  const { sourceHostId: _missingHost, ...unknownContext } = context
+  const foreign = { ...(field === 'unknown-host' ? unknownContext : context), ...(field === 'host' ? { sourceHostId: 'foreign-host' } : {}), ...(field === 'session' ? { agentSessionId: 'foreign-session' } : {}), source: {
     ...context.source, ...(field === 'provider' ? { providerId: 'foreign-provider' } : field === 'native' ? { nativeSessionId: 'foreign-native' } : {}) } }
   const record = core.projectConversationQuestions({ agentSessionId: f.input.agentSessionId, historyPage: page, answerContext: foreign })[0]!
   expect(record.recordedAnswers.size).toBe(0)
@@ -45,7 +46,7 @@ it('pure projection preserves typed question data without granting an activity r
   expect(question!.questions[0]!.reference.recordId).toBe(item.id)
   const [record] = core.projectConversationRecords({ agentSessionId: f.input.agentSessionId, historyPage: page })
   expect(record!.kind).toBe('activity')
-  expect(record!.author).toBeUndefined()
+  expect(record!.author).toEqual({ kind: 'unknown' })
 })
 
 it('submission receipts remain independent of native answers and bind the original operation', async () => {
