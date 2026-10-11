@@ -10,7 +10,7 @@ function receiptIdentity(record: NonNullable<AgentInputSubmissionReceipt['admiss
     key?.kind, key?.agentSessionId, key?.expectedRun.runId, key?.kind === 'prompt' ? key.submissionId : key?.messageId,
     claim.inputDispatch?.ref.waitGeneration, claim.inputDispatch?.gateId,
     intent?.run.runId, intent?.ownerInstanceId, intent?.prompt, intent?.execution,
-    condition?.kind, condition?.kind === 'manual-actor' ? condition.expectedRun.runId : condition?.condition.expectedRun.runId,
+    condition?.kind, condition?.kind === 'exact-condition' ? condition.condition.expectedRun.runId : condition?.expectedRun.runId,
     condition?.kind === 'exact-condition' ? condition.condition.afterSubmissionId : undefined,
     message?.userContent, message?.systemContext, message?.authorAgentSessionId, message?.authorHuman,
     message?.sourceDevice?.hostId, message?.sourceDevice?.deviceId, message?.sourceDevice?.name, message?.sourceChannel]
