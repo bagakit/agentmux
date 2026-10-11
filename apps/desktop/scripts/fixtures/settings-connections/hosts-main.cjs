@@ -303,6 +303,26 @@ app.whenReady().then(async () => {
         await read(`document.querySelector(${JSON.stringify(application)}).scrollIntoView({block:'start'})`)
         await settle();await supplemental(width,theme,'retro-application-access')
       }
+      if (width===1480 || width===320 && theme==='light') {
+        await choose('local','agents')
+        const related = `${pane} [data-application-host="local"]`
+        const relatedAction = label => `js:[...document.querySelector(${JSON.stringify(related)}).querySelectorAll('button')].find(node=>node.textContent.trim()===${JSON.stringify(label)})`
+        await until(`document.querySelector(${JSON.stringify(related)})?.textContent.includes('Build service access')`)
+        const localName = await read(`window.connectionsProof.current().then(config=>config.hosts.find(host=>host.id==='local').label)`)
+        assert.ok(await read(`document.querySelector(${JSON.stringify(related+' .application-access__header')}).textContent.includes(${JSON.stringify('Manage application access involving '+localName+'.')})`),'Source Host is a related environment, not a claimed target')
+        await read(`document.querySelector(${JSON.stringify(related)}).scrollIntoView({block:'start'})`)
+        await settle();await supplemental(width,theme,'application-source')
+        await click(relatedAction('Edit rule'))
+        const targetSelect = related + ' [aria-label="Target environment"]'
+        await until(`!!document.querySelector(${JSON.stringify(targetSelect)})`)
+        const actualTarget = await read(`({value:document.querySelector(${JSON.stringify(targetSelect)}).value,label:document.querySelector(${JSON.stringify(targetSelect)}).selectedOptions[0].textContent,choices:[...document.querySelector(${JSON.stringify(targetSelect)}).options].map(option=>option.value)})`)
+        assert.equal(actualTarget.value,target);assert.equal(actualTarget.label,host.label,'Source context retains the actual registered target')
+        assert.ok(actualTarget.choices.includes('host-02'),'Another registered target remains a legal choice')
+        await read(`document.querySelector(${JSON.stringify(width===1480 ? related+' .application-access__endpoints' : targetSelect)}).scrollIntoView({block:'start'})`)
+        await settle();await supplemental(width,theme,'application-source-editor')
+        result.interactions.push({kind:'native-application-source-context',width,theme,sourceHostId:'local',actualTarget,
+          boundary:'Actual source HostSettingsPane and native editor opening, original two-ended public metadata projection; no credentials or apply.'})
+      }
       await click('[aria-label="Close settings"]');await until('!document.querySelector(".settings-page")')
     }
     assert.equal(result.frames.length,6)

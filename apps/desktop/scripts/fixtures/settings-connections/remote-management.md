@@ -21,3 +21,5 @@ Runtime 采集仍挂载原 `HostRuntimePanel`，受控 `api.hosts.inspect` 只�
 块面改版场景：宽窗图中读取原配置hostname、user、port override、Runtime binding；另一Host省略user/port时显示SSH config，不猜默认值。移除ReactFlow Background。浅色宽窗用真实鼠标按下、移动、抬起采pan before/mid/after，选择准确原Host后viewport保持。宽窗另外切现有Retro Future浅深主题采图，用户实际主题与配置不变。原6主图、8管理附图外增加3运动帧和2Retro主题图，构成19张原管理覆盖；来源仍是受控DTO的原完整Renderer，不代签物理网络观察。
 
 应用账户同步新增12张原图：3宽度浅色双端配置、宽窗浅深差异计划、3宽度深色原unknown结果、宽窗浅深验真结果和Retro浅深应用面，总计31张。原生输入编辑固定argv、保存准确目标、比较、显式apply、离开返回与查询同一operationId；确认apply仅一次。只有公共白名单metadata受控，无导出材料或私密输入。真实CLI/connector/stdin/目标验真与服务进程重启由独立领域证据持有，Renderer采图不代签外部应用登录。
+
+Source context: the original `settings.applications.ls(hostId)` projection includes either endpoint. Six additional full originals show source Host context and its actual registered target editor (wide light/dark and narrow light); native input opens the real editor and asserts that other registered targets remain legal. These are controlled metadata, not application credentials.

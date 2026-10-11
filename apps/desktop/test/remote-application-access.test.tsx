@@ -129,3 +129,40 @@ it('application-late-read: an earlier list response cannot erase a newly accepte
   expect(dom.container.textContent).toContain('Project tooling')
   expect(queried, 'Original operation ID is preserved').toEqual([original])
 })
+
+it('application-source: source Host edits the true target and removes a rule moved elsewhere while retaining the original operation', async () => {
+  const source = config.hosts.find(item => item.id === 'local')!, other = config.hosts.find(item => item.id === 'host-02')!
+  operations = [record('original-source-operation')]
+  const original = vi.mocked(api.applications.call).getMockImplementation()!, saved: ApplicationAccessConfiguration[] = []
+  vi.mocked(api.applications.call).mockImplementation((async (method: string, input: Record<string,unknown>) => {
+    if (method === 'settings.applications.configure') {
+      const result: ApplicationAccessConfiguration = { profileId: input.profileId as string, revision: 'saved-' + saved.length,
+        profile: structuredClone(input.profile as ApplicationAccessConfiguration['profile']) }
+      saved.push(result); return result
+    }
+    return original(method as never,input as never)
+  }) as typeof api.applications.call)
+  await dom.render(<HostSettingsPane config={config} active onSave={async () => {}} />)
+  await dom.click('[aria-label="List"]'); await dom.click('[data-host-disclosure="local"] [data-host-panel="agents"]')
+  expect(listed, 'Source Host consumes the same relevant rule owner').toEqual([source.id])
+  const panel = () => dom.container.querySelector<HTMLElement>('[data-application-host="local"]')!
+  expect(panel().textContent).toContain(`Manage application access involving ${source.label}.`)
+  await click('Edit rule')
+  const select = (side: string) => panel().querySelector<HTMLSelectElement>(`[aria-label="${side} environment"]`)!
+  expect(select('Target').selectedOptions[0]?.textContent, 'Source context retains the actual registered target').toBe(host.label)
+  expect([...select('Target').options].some(option => option.value === other.id), 'All registered targets remain selectable').toBe(true)
+  async function changeSide(side: string, id: string) {
+    await act(async () => { const field=select(side); field.value=id; field.dispatchEvent(new Event('change',{bubbles:true})) })
+    await act(async () => { const field=panel().querySelector<HTMLInputElement>(`[aria-label="${side} Runtime ID"]`)!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(field,'known-runtime-'+id);field.dispatchEvent(new Event('input',{bubbles:true})) })
+  }
+  await changeSide('Target',other.id); await click('Save application rule')
+  expect(saved[0]?.profile.target.hostId).toBe(other.id)
+  expect(panel().textContent, 'A rule is still related through its unchanged source').toContain('Project tooling')
+  await click('Edit rule'); await changeSide('Source',other.id); await click('Save application rule')
+  expect(saved[1]?.profile.source.hostId).toBe(other.id)
+  expect(panel().querySelector('[aria-label="Application rules"]'), 'A saved rule unrelated to this Host leaves its rule projection').toBeNull()
+  expect(panel().textContent).toContain('Synchronization result not confirmed')
+  await click('Check original operation')
+  expect(queried, 'Changing a rule never changes the original operation ID').toEqual(['original-source-operation'])
+  expect(applied, 'Editing a rule never replays synchronization').toEqual([])
+})
