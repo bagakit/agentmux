@@ -1,0 +1,39 @@
+{
+  "scope": "Sanitized bounded public-query fixture; native query remained partial. No record join is asserted.",
+  "agentSessionId": "zhQgDdn5pgdZ",
+  "source": {
+    "providerId": "claude",
+    "nativeSessionId": "f2844f7b-df53-4289-9484-707e981ec22e"
+  },
+  "native": {
+    "id": "d34259b2-5987-4e25-bddf-f951c8cacaff",
+    "kind": "assistant-message",
+    "contentParts": [
+      {
+        "kind": "text",
+        "text": "搞定了！已严格基于最新 `main`（Commit `ac700ed633`）完成打包、安装并重启运行，全部多余检查与等待已跳过：\n\n### 1. 交付物与安装运行状态\n- **安装路径**: `AgentMux.app（当前用户的应用目录）`\n- **运行 Main PID**: `59984`\n- **源码 Commit**: `ac700ed633`（严格匹配 main HEAD，源码与二进制逐字节一致）\n- **最新 DMG 镜像**: `apps/desktop/release/mac/AgentMux-0.1.0-darwin-arm64.dmg` (258 MB)\n  - **SHA256**: `6ff13b0bb3832586eea50913951a50d7de2cb9715ea6b72274d8beec806a0ba5`\n- **签名状态**: `Developer ID / 本地证书` codesign 验证通过，Designed Requirement 满足\n\n### 2. 工作面与会话无缝恢复（RPC 实测核验）\n- **Tabs**: 241 个全部恢复\n- **Regions**: 258 个全部保留\n- **活跃 Agent/终端会话**: 27 个运行中会话保持正常连接\n- **工作区保护**: 同行全部未提交工作树文件就地完整保全\n- **磁盘可用空间**: 15 GiB"
+      }
+    ],
+    "metrics": {
+      "scope": "response",
+      "usage": {
+        "inputTokens": 2348,
+        "outputTokens": 603,
+        "cachedInputTokens": 655744
+      }
+    },
+    "startedAt": 1000
+  },
+  "captured": {
+    "id": "e9af34a6-fd41-4f56-8a8b-40a10c9f8b72:ce68e5df-9254-4d70-ad3a-abd023b0cec5:0",
+    "agentSessionId": "zhQgDdn5pgdZ",
+    "kind": "assistant_message",
+    "status": "complete",
+    "source": "native-hook",
+    "createdAt": 1242,
+    "updatedAt": 1242,
+    "title": "Assistant response",
+    "content": "搞定了！已严格基于最新 `main`（Commit `ac700ed633`）完成打包、安装并重启运行，全部多余检查与等待已跳过：\n\n### 1. 交付物与安装运行状态\n- **安装路径**: `AgentMux.app（当前用户的应用目录）`\n- **运行 Main PID**: `59984`\n- **源码 Commit**: `ac700ed633`（严格匹配 main HEAD，源码与二进制逐字节一致）\n- **最新 DMG 镜像**: `apps/desktop/release/mac/AgentMux-0.1.0-darwin-arm64.dmg` (258 MB)\n  - **SHA256**: `6ff13b0bb3832586eea50913951a50d7de2cb9715ea6b72274d8beec806a0ba5`\n- **签名状态**: `Developer ID / 本地证书` codesign 验证通过，Designed Requirement 满足\n\n### 2. 工作面与会话无缝恢复（RPC 实测核验）\n- **Tabs**: 241 个全部恢复\n- **Regions**: 258 个全部保留\n- **活跃 Agent/终端会话**: 27 个运行中会话保持正常连接\n- **工作区保护**: 同行全部未提交工作树文件就地完整保全\n- **磁盘可用空间**: 15 GiB",
+    "eventName": "Stop"
+  }
+}

@@ -89,11 +89,18 @@ it('retains unknown native times and inserts a new captured record without repla
   expect(page.items[0]!.startedAt).toBeUndefined()
 })
 
-it('splits native and captured process groups at the other source records instead of swallowing speech', async () => {
+it('folds interleaved native and captured steps once, visits internal slots and leaves real speech outside', async () => {
   page.items = [native('process-a', _historyFixtureEpoch(0, 0, 100), 'native process a', 'activity'), native('process-b', _historyFixtureEpoch(0, 0, 300), 'native process b', 'activity'), native('reply', _historyFixtureEpoch(0, 0, 500))]
   items = [captured('step-a', _historyFixtureEpoch(0, 0, 50), 'captured step a', 'tool_call'), captured('step-b', _historyFixtureEpoch(0, 0, 200), 'captured step b', 'tool_call'), captured('input', _historyFixtureEpoch(0, 0, 400))]
   await render()
-  expect([...host.querySelectorAll('[data-native-record-ids]')].map(node => JSON.parse(node.getAttribute('data-native-record-ids')!))).toEqual([['process-a'], ['process-b']])
+  expect([...host.querySelectorAll('[data-native-record-ids]')].map(node => JSON.parse(node.getAttribute('data-native-record-ids')!))).toEqual([['process-a', 'process-b']])
+  const group = host.querySelector<HTMLButtonElement>('.conversation-record-process .wf-head')!
+  expect(group.getAttribute('aria-expanded')).toBe('false')
+  expect(host.querySelectorAll('[data-observation-step-id]')).toHaveLength(0)
+  expect(bodies()).toEqual(['input', 'reply'])
+  await act(async () => group.click())
+  expect([...host.querySelectorAll('[data-observation-step-id]')].map(node => node.getAttribute('data-observation-step-id'))).toEqual(['step-a', 'process-a', 'step-b', 'process-b'])
+  expect(group.textContent).toContain('4 条已加载记录')
   expect(host.querySelectorAll('[data-segment-key]')).toHaveLength(3)
   expect(bodies()).toEqual(['input', 'reply'])
 })
@@ -126,7 +133,7 @@ it('review: captured step Range survives a native append that splits the capture
   page.items = [native('reply', _historyFixtureEpoch(0, 0, 500))]
   items = [captured('step-a', _historyFixtureEpoch(0, 0, 50), 'captured a', 'tool_call'), captured('step-b', _historyFixtureEpoch(0, 0, 150), 'captured b', 'tool_call'), captured('step-c', _historyFixtureEpoch(0, 0, 250), 'selected captured c', 'tool_call')]
   await render()
-  const group = host.querySelector<HTMLButtonElement>('[data-segment-key] .wf-head')!
+  const group = host.querySelector<HTMLButtonElement>('.conversation-record-process .wf-head')!
   expect(group).not.toBeNull()
   await act(async () => group.click())
   const steps = [...host.querySelectorAll<HTMLButtonElement>('[data-segment-key] .wf-tool-row')]
@@ -142,7 +149,8 @@ it('review: captured step Range survives a native append that splits the capture
   expect(getSelection()!.toString()).toBe(before)
   expect(host.textContent).toContain('保留选区')
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
-  expect(host.querySelectorAll('[data-segment-key]')).toHaveLength(2)
+  expect(host.querySelectorAll('[data-segment-key]')).toHaveLength(3)
+  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(2)
   expect(host.textContent).toContain('selected captured c')
   const finalStep = [...host.querySelectorAll('[data-segment-key]')].find(node => node.getAttribute('data-segment-key') === JSON.stringify(['item', 'step-c']))!
   expect(finalStep.querySelector('.wf-tool-row')?.getAttribute('aria-expanded')).toBe('true')
