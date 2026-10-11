@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
 import type { NativeOverlayRegion } from '../../../src/shared/native-overlay'
+import { createAvatarLayeringSeed } from './avatar-seed'
 
 const root = process.env.AGENTMUX_UI_LAYERING_ROOT!, html = process.env.AGENTMUX_UI_LAYERING_HTML!
 app.setPath('userData', join(root, 'user-data')); app.setPath('sessionData', join(root, 'session-data'))
@@ -435,6 +436,126 @@ async function verifyMobile() {
 
 }
 
+async function verifyAvatar() {
+  const originalBounds = window.getContentBounds(), originalBrowser = { id: page.webContents.id, url: page.webContents.getURL(),
+    input: await page.webContents.executeJavaScript('document.querySelector("input").value'), clicks: await page.webContents.executeJavaScript('clicks') }
+  const originalWork = (await facts()).workbench, fixture = await createAvatarLayeringSeed(root), samples: any[] = []
+  const avatar = () => read('layeringProbe.avatar.read()')
+  const brief = (state: any) => ({ ...state, png: state.png ? { sha256: createHash('sha256').update(state.png).digest('hex'), bytes: state.png.length } : null })
+  const projections = () => (overlays as any).projections as Map<string, { view: WebContentsView; region: NativeOverlayRegion; revision: number }>
+  let primaryFailed = false
+  async function nativeDrag(selector: string, from: number, to: number) {
+    const rect = await read(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()`)
+    const zoom = window.webContents.getZoomFactor(), p = { x: (rect.x + rect.width * from) * zoom, y: (rect.y + rect.height / 2) * zoom }
+    const view = topAt(p); assert.ok(view && view !== page, 'The original Avatar control must be owned by native modal content above the Browser')
+    const modalId = (await avatar()).modalId, declaration = receipt.publications.at(-1)?.regions.find((region: NativeOverlayRegion) => region.modal?.id === modalId && region.modal.part === 'content')
+    assert.equal(view, projections().get(declaration?.id)?.view, 'The original Avatar gesture belongs to its exact current content View')
+    const bounds = view.getBounds()
+    for (const [type, fraction] of [['mouseMove', from], ['mouseDown', from], ['mouseMove', to], ['mouseUp', to]] as const)
+      view.webContents.sendInputEvent({ type, x: Math.round((rect.x + rect.width * fraction) * zoom - bounds.x), y: Math.round(p.y - bounds.y), button: 'left', clickCount: 1 })
+    await painted()
+  }
+  async function sample(label: string, previous?: any) {
+    const state = await avatar(), parent = (await facts()).nodes.find((node: any) => node.modal === state.modalId && node.part === 'content')
+    assert.ok(state.sameModal && state.sameCanvas && state.draftReady === 'true' && state.png?.startsWith('data:image/png;'), 'The original Avatar request must retain its real nonempty canvas and editable PNG draft')
+    assert.deepEqual(state.target, fixture.seed.baseline.target)
+    assert.equal(state.invokerTargetKey, fixture.seed.baseline.target.objectKey); assert.equal(state.seriesTargetKey, fixture.seed.baseline.target.objectKey)
+    assert.deepEqual(state.originalChoice, fixture.seed.baseline.choice, 'Series changes remain an unsaved draft on the original target')
+    const renderFacts = JSON.parse(state.renderFacts)
+    assert.ok(renderFacts.meshCount > 0 && renderFacts.triangles > 0 && renderFacts.renderCalls > 0 && !renderFacts.contextLost, 'The original GLB renderer must draw real meshes and triangles')
+    assert.deepEqual(JSON.parse(state.frameSource), fixture.seed.prepared.find(value => value.definition.kind === 'glb')!.source, 'The actual GLB frame remains bound to its original source revision')
+    const pair = receipt.publications.at(-1)?.regions.filter((region: NativeOverlayRegion) => region.modal?.id === state.modalId) ?? []
+    assert.deepEqual(pair.map((region: NativeOverlayRegion) => region.modal?.part).sort(), ['content', 'scrim'], 'Avatar content and scrim belong to one original complete modal request')
+    const declaration = pair.find((region: NativeOverlayRegion) => region.modal?.part === 'content'), projection = projections().get(declaration.id)
+    assert.ok(projection && projection.view.getVisible() && window.contentView.children.includes(projection.view), 'Avatar must have its exact attached original native content projection')
+    assert.ok(parent.bounds.x < pageBounds.x + pageBounds.width && parent.bounds.x + parent.bounds.width > pageBounds.x &&
+      parent.bounds.y < pageBounds.y + pageBounds.height && parent.bounds.y + parent.bounds.height > pageBounds.y, 'The real Avatar modal must overlap the actually visible Browser')
+    assert.equal(page.getVisible(), true)
+    const zoom = window.webContents.getZoomFactor(), roi = { x: Math.ceil(state.canvas.x * zoom + 8), y: Math.ceil(state.canvas.y * zoom + 8),
+      width: Math.floor(state.canvas.width * zoom) - 16, height: Math.floor(state.canvas.height * zoom) - 16 }
+    const bounds = projection.view.getBounds(), local = { ...roi, x: roi.x - bounds.x, y: roi.y - bounds.y }
+    assert.equal(topAt({ x: roi.x + roi.width / 2, y: roi.y + roi.height / 2 }), projection.view, 'The original Avatar canvas is covered by its exact content View, never the scrim or Browser')
+    assert.ok(state.material?.hit, 'The Avatar material sample must hit the original dialog itself, outside text, controls and rounded corners')
+    assert.equal(state.material.rgba[3], 255, 'The original projected Avatar content must provide its actual opaque material')
+    const materialPoint = { x: Math.floor(state.material.point.x * zoom), y: Math.floor(state.material.point.y * zoom), width: 1, height: 1 }
+    const rendererMaterial = (await window.webContents.capturePage(materialPoint)).toBitmap()
+    const chromeMaterial = (await projection.view.webContents.capturePage({ ...materialPoint, x: materialPoint.x - bounds.x, y: materialPoint.y - bounds.y })).toBitmap()
+    const expected = [state.material.rgba[2], state.material.rgba[1], state.material.rgba[0], 255]
+    receipt.avatarMaterial = { modalId: state.modalId, point: materialPoint, expectedBGRA: expected, rendererBGRA: [...rendererMaterial.subarray(0, 4)], chromeBGRA: [...chromeMaterial.subarray(0, 4)] }
+    for (const pixels of [rendererMaterial, chromeMaterial]) assert.ok(pixels.subarray(0, 4).every((value, channel) => Math.abs(value - expected[channel]) <= 2),
+      'The actual Avatar material remains undimmed above its scrim in Renderer and native Chrome')
+    const renderer = await window.webContents.capturePage(roi), chrome = await projection.view.webContents.capturePage(local)
+    const rendererFile = label + '-canvas-renderer.png', chromeFile = label + '-canvas-chrome.png'
+    await writeFile(join(root, rendererFile), renderer.toPNG()); await writeFile(join(root, chromeFile), chrome.toPNG())
+    const current: any = { label, state: brief(state), regionId: declaration.id, webContentsId: projection.view.webContents.id, revision: projection.revision,
+      roi, rendererFile, chromeFile, rendererSHA256: createHash('sha256').update(renderer.toBitmap()).digest('hex'), chromeSHA256: createHash('sha256').update(chrome.toBitmap()).digest('hex') }
+    samples.push(current); receipt.avatar = { target: fixture.seed.baseline.target, sourceInputs: fixture.seed.sourceInputs, samples }
+    assert.deepEqual(chrome.getSize(), renderer.getSize())
+    assert.equal(current.chromeSHA256, current.rendererSHA256, 'The original Avatar native compositor pixels must match the latest real Renderer canvas, not an older bitmap')
+    if (previous) {
+      assert.equal(state.modalId, previous.state.modalId); assert.equal(state.frameSource, previous.state.frameSource)
+      assert.equal(current.webContentsId, previous.webContentsId, 'Continuous Avatar edits retain the original native View')
+      assert.notEqual(current.state.png.sha256, previous.state.png.sha256, 'The real Avatar parameter edit must change its original PNG draft')
+      assert.ok(renderFacts.frames > JSON.parse(previous.state.renderFacts).frames, 'Continuous edits must commit a newer frame in the original GLB renderer')
+      assert.ok(current.revision > previous.revision, 'A committed Avatar canvas change must advance its original native paint revision')
+      assert.notEqual(current.chromeSHA256, previous.chromeSHA256, 'Continuous Avatar edits must change the original native compositor pixels')
+    }
+    await frame(label)
+    return current
+  }
+  try {
+    window.setContentSize(1280, 960); layout(); await painted()
+    await read('layeringProbe.avatar.start(' + JSON.stringify(fixture.seed) + ')'); await painted()
+    await wait(() => read('!!document.querySelector("[data-pmo-teams-topic-launcher] button[data-space-icon-target]")'), 'The original Mote entry must resolve its exact directory/avatar target')
+    const invoker = await point('[data-pmo-teams-topic-launcher] button')
+    for (const type of ['mousePressed', 'mouseReleased']) await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type,
+      x: invoker.x / window.webContents.getZoomFactor(), y: invoker.y / window.webContents.getZoomFactor(), button: 'right', clickCount: 1 })
+    await wait(() => read('!!document.querySelector("[role=menu]")'), 'The original Mote context menu must open')
+    await click('[role=menuitem]', 'Change avatar…')
+    await wait(() => read('document.querySelector(".space-icon-picker")?.dataset.avatarBaselineReady === "true"'), 'The real Avatar editor must read the original isolated saved identity')
+    await nativeReady(); assert.equal((await avatar()).menuOpen, false, 'The original menu releases focus before opening Avatar')
+    await click('[data-avatar-source=series]', undefined, true)
+    const seriesSelect = JSON.stringify('select[aria-label="Avatar series"]')
+    await wait(() => read('document.querySelectorAll(' + JSON.stringify('select[aria-label="Avatar series"] option') + ').length > 0'), 'The original source owner must supply a nonempty Avatar catalog')
+    // Use the real select's keyboard input, preserving the product's onChange.
+    await read('document.querySelector(' + seriesSelect + ').focus()'); await key('Home', 36)
+    const series = fixture.seed.catalog.series.map(value => JSON.stringify([value.origin, value.seriesId])).indexOf(JSON.stringify(['builtin', 'geometry']))
+    assert.ok(series >= 0)
+    for (let index = 0; index < series; index++) await key('ArrowDown', 40)
+    await key('Enter', 13)
+    assert.equal(await read('document.querySelector(' + seriesSelect + ').value'), JSON.stringify(['builtin', 'geometry']), 'Original catalog keyboard selection reaches the real Series onChange')
+    const source = fixture.seed.prepared.find(value => value.definition.kind === 'glb')!
+    await wait(() => read('!!document.querySelector(' + JSON.stringify('[data-series-entry="' + source.source.entryId + '"]') + ')'), 'The actual GLB entry must belong to the original selected collection')
+    await click('[data-series-entry="' + source.source.entryId + '"]', undefined, true)
+    await wait(() => read('document.querySelector(".space-icon-picker")?.dataset.seriesDraftReady === "true" && !!document.querySelector(".mote-series__preview canvas[data-series-render-facts]")'), 'The original real GLB renderer must commit its nonempty editable draft')
+    await nativeReady(); await read('layeringProbe.avatar.remember()')
+    let previous = await sample('avatar-series-initial')
+    for (const [label, action, control] of [
+      ['avatar-series-toon', async () => click('[data-series-material=toon]', undefined, true), 'material'],
+      ['avatar-series-expression', async () => nativeDrag('[data-series-morph]', .3, .8), 'morphs'],
+      ['avatar-series-rotation', async () => nativeDrag('[aria-label="Series model rotation"]', .5, .72), 'yaw'],
+      ['avatar-series-drag', async () => nativeDrag('.mote-series__preview canvas', .45, .65), 'yaw']
+    ] as const) {
+      const oldPng = (await avatar()).png
+      await action()
+      await wait(async () => { const state = await avatar(); return state.draftReady === 'true' && state.png && state.png !== oldPng }, 'The original Avatar parameter interaction must commit a newer real PNG')
+      assert.notDeepEqual((await avatar()).controls[control], previous.state.controls[control], 'Native input must change the original Avatar control value')
+      await painted(); await nativeReady(); previous = await sample(label, previous)
+    }
+    await click('.space-icon-picker footer button', 'Cancel', true); await nativeReady(0)
+    const cancelled = await avatar(); assert.equal(cancelled.modalId, undefined); assert.equal(cancelled.activeInvoker, true, 'Avatar Cancel returns focus to its exact original Mote entry')
+    assert.ok(cancelled.calls.every((call: any) => !['save', 'config.save'].includes(call.method)), 'Avatar Cancel never invokes a saved-avatar/configuration write')
+    await fixture.verifyUnchanged()
+    for (const field of ['sessions', 'drafts', 'tabs', 'layout', 'stops', 'writes', 'pastes']) assert.deepEqual((await facts()).workbench[field], originalWork[field], 'Avatar retains original workbench ' + field)
+    assert.deepEqual({ id: page.webContents.id, url: page.webContents.getURL(), input: await page.webContents.executeJavaScript('document.querySelector("input").value'), clicks: await page.webContents.executeJavaScript('clicks') }, originalBrowser)
+    receipt.cases.push({ label: 'mote-avatar-series-native-layer-and-continuous-paint', samples, cancelled: brief(cancelled), savedAvatarUnchanged: true })
+  } catch (error) { primaryFailed = true; receipt.avatarFailureState = brief(await avatar().catch(() => ({}))); throw error }
+  finally {
+    try { await read('layeringProbe.avatar.dispose()'); window.setContentSize(originalBounds.width, originalBounds.height); layout(); await painted(); await nativeReady(0) }
+    catch (error) { receipt.avatarCleanupFailure = failureDetails(error); if (!primaryFailed) throw error }
+  }
+}
+
 async function run() {
   await app.whenReady()
   if (process.env.AGENTMUX_VISUAL_ORCA_CLI) { app.setAccessibilitySupportEnabled(true); receipt.privateAccessibilitySupport = app.accessibilitySupportEnabled }
@@ -696,6 +817,7 @@ async function run() {
   await frame('modal-retained-draft-retry'); await click('.confirmation-dialog__cancel', undefined, true); await nativeReady(0)
   receipt.cases.push({ label: 'focusable-completion-and-editor-retained-through-retry', actions: await read('layeringProbe.actions()') })
 
+  await verifyAvatar()
   await verifyCrossDocumentWorkbench()
   await verifyMobile()
 
