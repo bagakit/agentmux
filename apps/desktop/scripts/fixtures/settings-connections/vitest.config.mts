@@ -10,6 +10,7 @@ assert.ok(evidence, 'Explicit owned evidence directory')
 const mutant = process.env.AGENTMUX_CONNECTIONS_MUTANT ?? 'baseline'
 const base = 'apps/desktop/src/renderer/src/components/settings/'
 const edits: Record<string, { file: string; before: string; after: string }> = {
+  graph: { file: base + 'HostSettingsPane.tsx', before: 'onSelect={selectTopologyHost}', after: 'onSelect={() => {}}' },
   catalog: { file: base + 'modules/devices.tsx', before: "group: 'connections'", after: "group: 'resources'" },
   single: { file: base + 'HostSettingsPane.tsx', before: 'hosts.filter((host) => host.id === selectedId).map', after: 'hosts.filter(() => true).map' },
   drafts: { file: base + 'HostSettingsPane.tsx', before: 'function selectHostPanel(id: string, panel: HostConnectionPanel): void {',
@@ -37,6 +38,6 @@ export default defineConfig({ root, cacheDir: resolve(evidence, 'cache'),
       appendFileSync(resolve(evidence, 'loaded-source.jsonl'), JSON.stringify({ path, originalSHA256: sha(original), consumedSHA256: sha(code), mutant, applied }) + '\n')
       return code === input ? undefined : { code, map: null }
     } }],
-  test: { include: ['apps/desktop/test/settings-connections.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')],
+  test: { include: ['apps/desktop/test/settings-connections.test.tsx', 'apps/desktop/test/host-settings-navigation.test.tsx', 'apps/desktop/test/remote-management.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')],
     maxWorkers: 1, passWithNoTests: false, testTimeout: 15_000 }
 })
