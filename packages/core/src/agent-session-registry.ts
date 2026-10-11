@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { cloneSession } from './agent-session-identity.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import type { AgentCapabilityBinding } from './agent-capability.js'
@@ -7,6 +8,7 @@ import {
   loadAgentSessionMetadata,
   agentSessionMetadata,
   AgentMuxSessionDurabilityError,
+  agentLifecycleOperationIdentity,
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation,
@@ -123,8 +125,9 @@ export class AgentMuxAgentSessionRegistry {
         this.store.loadRetiredAgentSessions()
       ])
       assertCurrent?.()
-      const current = sessions.filter(session => session.hostId === hostId &&
-        !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId))
+      const projected = await Promise.all(sessions.filter(session => session.hostId === hostId &&
+        !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId)).map(session => this.readStartedResume(session)))
+      const current = projected.filter(session => !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId))
       for (const session of this.sessions.values()) if (session.hostId === hostId &&
         (cut.sessions.has(session.agentSessionId) || this.unconfirmedDurability.has(session.agentSessionId))) current.push(session)
       const retired = retiredAgentSessions.filter(session => session.hostId === hostId && !cut.retirements.has(session.agentSessionId))
@@ -337,6 +340,48 @@ export class AgentMuxAgentSessionRegistry {
     return this.get(session.agentSessionId)
   }
 
+  /** The acknowledged Run remains usable while its original prepared commit is unconfirmed. */
+  async rememberStartedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
+    value: AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession> {
+    const session = normalizeStoredAgentSession(value), prepared = reservation.preparedSession
+    const [original, canonical] = await Promise.all([
+      this.store.loadResumeCorrelation(reservation.agentSessionId, reservation.operationId), this.store.readMetadata(reservation.agentSessionId)
+    ])
+    if (!original || original.reservationId !== reservation.reservationId || original.ownerId !== reservation.ownerId ||
+      !isDeepStrictEqual(original.preparedSession, prepared) || !canonical || !this.matchesStartedResume(reservation, session, canonical)) {
+      throw new AgentMuxError('The acknowledged resume no longer matches its original prepared owner.', 'STALE_AGENT_SESSION')
+    }
+    const previous = this.sessions.get(session.agentSessionId)
+    if (previous && !sameRun(previous.run, reservation.expectedRun) && !sameRun(previous.run, session.run)) throw new AgentMuxError('The resume projection has another current Run.', 'STALE_AGENT_SESSION')
+    this.assertAvailable(session)
+    if (previous) this.forget(previous)
+    this.remember(session)
+    return this.get(session.agentSessionId)
+  }
+
+  /** Exact prepared ownership may supplement older durable metadata; it never changes that metadata. */
+  async readStartedResume(canonical: AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession> {
+    const started = this.sessions.get(canonical.agentSessionId), operation = started?.continuity
+    if (!started || sameRun(started.run, canonical.run) || operation?.reason !== 'operation-unconfirmed') return canonical
+    const reservation = await this.store.loadResumeCorrelation(canonical.agentSessionId, agentLifecycleOperationIdentity('resume', canonical.agentSessionId, operation.operationId))
+    return reservation && this.matchesStartedResume(reservation, started, canonical) ? structuredClone(started) : canonical
+  }
+
+  private matchesStartedResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>,
+    session: AgentMuxStoredAgentSession, canonical: AgentMuxStoredAgentSession): boolean {
+    const prepared = reservation.preparedSession, operation = session.continuity, frozen = prepared?.continuity
+    return Boolean(prepared && operation && frozen && canonical.hostId === prepared.hostId &&
+      canonical.agentSessionId === prepared.agentSessionId && canonical.providerId === prepared.providerId &&
+      canonical.executorId === prepared.executorId && canonical.workspacePath === prepared.workspacePath && sameRun(canonical.run, reservation.expectedRun) &&
+      session.agentSessionId === prepared.agentSessionId && session.hostId === prepared.hostId &&
+      session.providerId === prepared.providerId && session.executorId === prepared.executorId && session.workspacePath === prepared.workspacePath &&
+      isDeepStrictEqual(session.nativeHandle, prepared.nativeHandle) && isDeepStrictEqual(canonical.nativeHandle, prepared.nativeHandle) &&
+      operation.operationId === frozen.operationId && sameRun(operation.previousRun, reservation.expectedRun) &&
+      operation.newRun && sameRun(operation.newRun, session.run) && !sameRun(session.run, reservation.expectedRun) &&
+      isDeepStrictEqual(operation.launchInput?.launchPlan, frozen.launchInput?.launchPlan) &&
+      isDeepStrictEqual(operation.launchInput?.input, frozen.launchInput?.input) && operation.requestDigest === frozen.requestDigest)
+  }
+
   async releaseReopenOwner(): Promise<void> {
     await this.store.releaseReopenOwner(this.lifecycleOwnerId)
   }
@@ -484,7 +529,7 @@ export class AgentMuxAgentSessionRegistry {
   async refresh(agentSessionId: string, expectedRun?: AgentMuxRunRef, futureIntentId?: string): Promise<AgentMuxStoredAgentSession> {
     return await this.enqueue(agentSessionId, async () => {
       const previous = this.get(agentSessionId)
-      const current = await this.store.readMetadata(agentSessionId)
+      let current = await this.store.readMetadata(agentSessionId)
       if (!current) {
         throw new AgentMuxError(
           'The current Session record could not be confirmed. Its Run is kept; refresh the Store before retrying this prompt.',
@@ -494,6 +539,7 @@ export class AgentMuxAgentSessionRegistry {
       if (current.hostId !== previous.hostId) {
         throw new AgentMuxError('Agent Session Host changed before prompt Input.', 'STALE_AGENT_SESSION')
       }
+      current = await this.readStartedResume(current)
       this.assertAvailable(current)
       this.forget(previous)
       this.remember(current)

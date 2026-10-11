@@ -1140,6 +1140,19 @@ export class CtxmuxRunAdapter {
     }
   }
 
+  private launchCommand(input: { program: string; args: readonly string[]; env?: Readonly<Record<string, string>> }) {
+    const env = { ...localProcessEnvironment(), ...input.env }
+    // RunSpec.env is additive. The same-PID exec wrapper removes only absent host policy keys.
+    const unsetArgs = missingHostEnvironmentKeys(env).flatMap(key => ['-u', key])
+    return { program: '/usr/bin/env', args: [...unsetArgs, '--', input.program, ...input.args], env }
+  }
+
+  /** Exact RunSpec identity used by the existing Start owner, without exposing environment values. */
+  launchIdentity(input: { program: string; args: readonly string[]; env?: Readonly<Record<string, string>> }): { program: string; argsDigest: string } {
+    const command = this.launchCommand(input)
+    return { program: command.program, argsDigest: createHash('sha256').update(JSON.stringify(command.args)).digest('base64url') }
+  }
+
   async start(input: {
     operationKey: string
     program: string
@@ -1150,17 +1163,13 @@ export class CtxmuxRunAdapter {
     rows?: number
   }): Promise<CtxmuxAdapterRun> {
     try {
-      const environment = { ...localProcessEnvironment(), ...input.env }
-      // RunSpec.env adds entries to the daemon's environment; omitting a key does not unset it.
-      // The system env utility execs the original program in the same PID/PTY, removing only
-      // policy keys absent from the final environment. Values remain in env, never in argv.
-      const unsetArgs = missingHostEnvironmentKeys(environment).flatMap(key => ['-u', key])
-      const run = await this.requireClient().start(defineRun('/usr/bin/env', {
-        args: [...unsetArgs, '--', input.program, ...input.args],
+      const command = this.launchCommand(input)
+      const run = await this.requireClient().start(defineRun(command.program, {
+        args: command.args,
         cwd: input.cwd,
         // The daemon can outlive this application. Every new local Run receives the current
         // client environment; explicit Run overrides remain authoritative.
-        env: environment,
+        env: command.env,
         initialSize: { cols: input.cols ?? 80, rows: input.rows ?? 24 }
       }), createOperationKey(input.operationKey))
       return this.projectRun(run)
