@@ -530,6 +530,8 @@ export type AgentCapabilities = {
   timeline: 'unavailable' | 'complete-events' | 'streaming'
   permission: 'none' | 'observe' | 'respond'
   providerResume: boolean
+  /** Explicit native turn-interruption recognition. Missing evidence remains unknown when supported. */
+  nativeInterruption?: true
   /** Native copies preserve their Provider context and receive a new conversation identity. */
   providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
@@ -1414,6 +1416,8 @@ export type AgentHookIngressObservation = {
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity'> & {
+  /** Retained original-Run recovery evidence; never a live activity or input-authorization projection. */
+  recoveryActivity?: AgentRecoveryActivity
   /** Private native service credential, frozen with this original lifecycle launch. Never a public capability ACK. */
   nativeActor?: AgentPrivateNativeActor
   /** Private original invocation provenance; retained opaque and checked only at its exact root. Never public. */
@@ -2082,10 +2086,21 @@ export type NativeHookEnvelope = {
 /** Provider-owned ordered activity facts; an observation gap never ends a task. */
 export type AgentNativeActivityEvent = {
   state: 'active' | 'idle' | 'unknown'
+  /** Exact native turn outcome only; an idle turn does not by itself prove interruption or task completion. */
+  interruption?: 'interrupted' | 'not-interrupted'
   nativeSessionId: string
   nativeTurnId?: string
   sourceId: string
   sequence: number
+}
+
+/** Persisted native activity for recovery of this exact Run, independent of live observer availability. */
+export type AgentRecoveryActivity = AgentNativeActivityEvent & {
+  run: AgentMuxRunRef
+  hookReceiptId: string
+  observedAt: number
+  /** Original typed-prompt admission observed with this fact; a later claim cannot inherit its old end. */
+  promptSubmissionId?: string
 }
 
 export type AgentCurrentActivity = AgentNativeActivityEvent & {

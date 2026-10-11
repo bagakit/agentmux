@@ -50,6 +50,7 @@ import type {
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
   AgentPromptSubmissionRecord,
+  AgentRecoveryActivity,
   AgentNativeSessionHandle,
   AgentNativeSessionConfirmationReceipt,
   AgentSessionHistoryMetadata,
@@ -1616,6 +1617,32 @@ function nativeTurnEnds(value: unknown): NonNullable<AgentMuxStoredAgentSession[
     })) }
 }
 
+function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentRecoveryActivity {
+  const source = record(value, 'recoveryActivity')
+  const run = runRef(source.run)
+  const handle = session.nativeHandle
+  if (Object.keys(source).some(key => !['state', 'interruption', 'nativeSessionId', 'nativeTurnId', 'sourceId',
+    'sequence', 'run', 'hookReceiptId', 'observedAt', 'promptSubmissionId'].includes(key)) ||
+    !['active', 'idle', 'unknown'].includes(String(source.state)) || run.runId !== session.run.runId ||
+    handle?.kind !== 'provider' || handle.providerId !== session.providerId || source.nativeSessionId !== handle.sessionId ||
+    source.interruption !== undefined && (source.state !== 'idle' || !['interrupted', 'not-interrupted'].includes(String(source.interruption)))) {
+    throw new AgentMuxError('Recovery activity does not match its original native Run.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const observedAt = timestamp(source.observedAt, 'recoveryActivity.observedAt')
+  if (observedAt > session.updatedAt) {
+    throw new AgentMuxError('Recovery activity exceeds the Session time.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { run, state: source.state as AgentRecoveryActivity['state'],
+    nativeSessionId: string(source.nativeSessionId, 'recoveryActivity.nativeSessionId'),
+    sourceId: string(source.sourceId, 'recoveryActivity.sourceId'),
+    sequence: positiveInteger(source.sequence, 'recoveryActivity.sequence'),
+    hookReceiptId: string(source.hookReceiptId, 'recoveryActivity.hookReceiptId'), observedAt,
+    ...(source.state !== 'unknown' || source.nativeTurnId !== undefined
+      ? { nativeTurnId: string(source.nativeTurnId, 'recoveryActivity.nativeTurnId') } : {}),
+    ...(source.interruption === undefined ? {} : { interruption: source.interruption as NonNullable<AgentRecoveryActivity['interruption']> }),
+    ...(source.promptSubmissionId === undefined ? {} : { promptSubmissionId: string(source.promptSubmissionId, 'recoveryActivity.promptSubmissionId') }) }
+}
+
 function normalizePrivateNativeActor(value: unknown): import('./types.js').AgentPrivateNativeActor {
   const v = record(value, 'private native actor')
   const launch = record(v.launch, 'original Provider launch')
@@ -1627,7 +1654,9 @@ function normalizePrivateNativeActor(value: unknown): import('./types.js').Agent
 
 export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
   const source = record(value, 'Agent Session')
-  return { ...normalizeAgentSession(source),
+  const session = normalizeAgentSession(source)
+  return { ...session,
+    ...(source.recoveryActivity === undefined ? {} : { recoveryActivity: recoveryActivity(source.recoveryActivity, session) }),
     ...(source.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(source.nativeActor) }),
     ...(source.continuityExecutors === undefined ? {} : { continuityExecutors: structuredClone(source.continuityExecutors) }),
     ...(source.nativeTurnEnds === undefined ? {} : { nativeTurnEnds: nativeTurnEnds(source.nativeTurnEnds) }),

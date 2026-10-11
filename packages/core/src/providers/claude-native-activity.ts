@@ -44,7 +44,8 @@ export function claudeNativeActivity(
   if (eventName === 'turn.complete' &&
       (!['answer', 'aborted', 'refusal', 'error'].includes(String(payload.reason)) ||
        typeof payload.isAborted !== 'boolean' || (payload.reason === 'aborted') !== payload.isAborted)) return
-  return { ...base, nativeTurnId: payload.turnId, state: eventName === 'turn.start' ? 'active' : 'idle' }
+  return { ...base, nativeTurnId: payload.turnId, state: eventName === 'turn.start' ? 'active' : 'idle',
+    ...(eventName === 'turn.complete' ? { interruption: payload.isAborted ? 'interrupted' as const : 'not-interrupted' as const } : {}) }
 }
 
 /** A Provider-owned native observer; classic hooks retain input, permission and history ownership. */

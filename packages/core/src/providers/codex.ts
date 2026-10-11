@@ -190,7 +190,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       acpStrategy: { kind: 'none' },
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
-        providerResume: true, replyCorrelation: 'none', nativeConversationInput: { managedRuns: true },
+        providerResume: true, nativeInterruption: true, replyCorrelation: 'none', nativeConversationInput: { managedRuns: true },
         asyncQuestionReply: 'terminal',
         providerFork: { current: true },
         promptExecution: { immediate: 'terminal-submit' },

@@ -86,6 +86,7 @@ function agentCapabilities(value: unknown): void {
   const capabilities = record(value)
   promptExecution(capabilities.promptExecution)
   if (capabilities.nativeConversationInput !== undefined && record(capabilities.nativeConversationInput, ['managedRuns']).managedRuns !== true) fail()
+  if (capabilities.nativeInterruption !== undefined && capabilities.nativeInterruption !== true) fail()
   if (capabilities.asyncQuestionReply !== undefined) member(capabilities.asyncQuestionReply, ['terminal'])
   if (capabilities.terminal !== true) fail()
   member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
@@ -121,13 +122,17 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
     }
     if (source.currentActivity !== undefined) {
       const activity = record(source.currentActivity, ['state', 'source', 'run', 'nativeSessionId', 'nativeTurnId',
-        'sourceId', 'sequence', 'hookReceiptId', 'observedAt'])
+        'sourceId', 'sequence', 'hookReceiptId', 'observedAt', 'interruption'])
       member(activity.state, ['active', 'idle', 'unknown']); member(activity.source, ['native-hook'])
       if (runRef(activity.run).runId !== session.run.runId || session.nativeHandle?.kind !== 'provider' ||
           activity.nativeSessionId !== session.nativeHandle.sessionId) fail()
       for (const key of ['nativeSessionId', 'sourceId', 'hookReceiptId']) string(activity[key])
       if (activity.state !== 'unknown' || activity.nativeTurnId !== undefined) string(activity.nativeTurnId)
       count(activity.sequence); if (activity.sequence === 0) fail(); count(activity.observedAt)
+      if (activity.interruption !== undefined) {
+        if (activity.state !== 'idle') fail()
+        member(activity.interruption, ['interrupted', 'not-interrupted'])
+      }
       session.currentActivity = structuredClone(activity) as NonNullable<typeof session.currentActivity>
     }
     return session
@@ -300,7 +305,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.native.ls': {
         record(p, ['hostId', 'executorId', 'providerId', 'capabilities', 'availability', 'sessions', 'issues'])
         string(p.hostId); string(p.executorId); string(p.providerId)
-        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'nativeConversationInput', 'usage'])
+        record(p.capabilities, ['terminal', 'timeline', 'permission', 'providerResume', 'nativeInterruption', 'providerFork', 'replyCorrelation', 'asyncQuestionReply', 'promptExecution', 'nativeConversationInput', 'usage'])
         agentCapabilities(p.capabilities)
         if (p.hostId !== input.hostId || p.executorId !== input.executorId) fail()
         member(p.availability, ['available', 'unsupported'])
