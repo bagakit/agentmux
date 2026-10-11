@@ -8,8 +8,8 @@ export type ConversationViewClient = Pick<AgentMuxClient, 'readAgentConversation
 export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes' | 'resume' | 'reopen'
 type Operation = ConversationViewOperation
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor'>
-type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; error: Error | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
-const empty = (): ViewState => ({ snapshot: null, loading: false, error: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
+type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
+const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
 const errorOf = (error: unknown) => error instanceof Error ? error : new Error(String(error))
 function sourceReadError(snapshot: ConversationWindowSnapshot): Error | null {
   const failures = snapshot.coverage.filter(source => source.current === 'unavailable')
@@ -48,7 +48,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       binding: null as ConversationWindowSnapshot | null, invalidations: 0, unavailable: 0 }
     owner.current = current
     setState(value => value.snapshot?.hostId === reference.hostId && value.snapshot.agentSessionId === reference.agentSessionId
-      ? { ...value, loading: true, error: null } : { ...empty(), loading: true })
+      ? { ...value, loading: true, operation: parked ? 'resume' : 'latest' } : { ...empty(), loading: true, operation: 'latest' })
     const signal = current.controller.signal
     const alive = () => owner.current === current && !signal.aborted
     const schedule = () => {
@@ -124,7 +124,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       const change: ConversationChangesInput | null = kind === 'changes' && prior ? {
         ...ref, checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES
       } : null
-      setState(value => ({ ...value, loading: true, error: null }))
+      setState(value => ({ ...value, loading: true, operation: kind }))
       if (kind === 'changes' || kind === 'latest') current.dirty = false
       const pending = (async () => {
         let complete: ConversationWindowSnapshot | null = null
@@ -171,12 +171,16 @@ export function useConversationView(client: ConversationViewClient | null, refer
           // retry intent with another replay of that same unavailable coverage.
           if (sourceError && kind !== 'resume') retryOperation.current = { client, key, kind, selection }
           setState(value => ({ ...value, ...(current.held ? {} : { snapshot: complete }), held: current.held,
+            // A live update or retained-frame replay does not fulfill a failed
+            // navigation. Resolve only its operation, a new explicit cut, or
+            // replace it with the current frame's actual source failure.
+            ...(sourceError || kind === 'latest' || kind === 'reopen' || value.errorOperation === kind ? { error: null, errorOperation: null } : {}),
             sourceError, historical: current.historical, newerAvailable: kind === 'latest' || kind === 'changes' && !more && !current.held && !current.historical ? false : value.newerAvailable }))
           if (more) current.dirty = true
         } catch (error) { if (isCurrent()) {
           if (complete && complete.window.id !== current.snapshot?.window.id) release(complete)
           retryOperation.current = { client, key, kind, selection }
-          setState(value => ({ ...value, error: errorOf(error) }))
+          setState(value => ({ ...value, error: errorOf(error), errorOperation: kind }))
           const code = (error as { code?: string })?.code
           // A parked current view is a disposable reader, not a durable source.
           // Rebuild it once from the original source; the normal commit guard
@@ -191,7 +195,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           signal.removeEventListener('abort', abortRead)
           if (!isCurrent()) { if (complete && complete.window.id !== current.snapshot?.window.id) release(complete); return }
           current.inFlight = null
-          setState(value => ({ ...value, loading: false }))
+          setState(value => ({ ...value, loading: false, operation: null }))
           if (reopenExpired) void read('reopen')
           else if (current.dirty) schedule()
         }
@@ -243,5 +247,5 @@ export function useConversationView(client: ConversationViewClient | null, refer
     if (current.dirty && !current.historical) void operation.current('changes')
   }, [])
   const reading = useMemo(() => snapshot ? projectConversationWindow(snapshot) : null, [snapshot])
-  return { ...state, error: state.error ?? state.sourceError, snapshot, reading, loading: active && state.loading, hasMore: Boolean(snapshot?.window.navigation.older), hasNewer: Boolean(snapshot?.window.navigation.newer), earlier, newer, refresh, resume, settle, changes, retry, inspect, acceptHeld, selectSource, reveal }
+  return { ...state, error: state.error ?? state.sourceError, errorOperation: state.error ? state.errorOperation : null, snapshot, reading, loading: active && state.loading, hasMore: Boolean(snapshot?.window.navigation.older), hasNewer: Boolean(snapshot?.window.navigation.newer), earlier, newer, refresh, resume, settle, changes, retry, inspect, acceptHeld, selectSource, reveal }
 }
