@@ -144,6 +144,10 @@ try {
       if (phase === 'seed') receipt.originalHealthy = native.supervision.healthy
       else assert.deepEqual(native.supervision.healthy, receipt.originalHealthy)
       receipt.survivingHealthy = native.supervision.healthy
+      if (!supervisionSurface) {
+        const image = path.join(evidence, phase + '-workface.png')
+        entry.image = { path: image, sha256: hash(await fs.readFile(image)) }
+      }
       for (const frame of native.supervision.frames ?? []) {
         const file = path.join(evidence, frame.file)
         assert.equal(hash(await fs.readFile(file)), frame.sha256)
