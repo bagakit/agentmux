@@ -441,6 +441,12 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.conversation.landmark.apply': return parseConversationLandmarkWritePage(value, parseConversationLandmarkWrite(input))
       case 'agent.conversation.inspect': return parseConversationReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
+      case 'agent.refresh': {
+        record(p, ['session'])
+        const session = parseRpcAgentSession(p.session)
+        if (session.agentSessionId !== input.agentSessionId) fail()
+        break
+      }
       case 'agent.inspect': case 'whoami': {
         record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['routeHostId', 'session', 'status', 'displayName', 'unavailable'])
         const session = parseRpcAgentSession(p.session), target = method === 'whoami' ? { kind: 'self' } : record(input.target)

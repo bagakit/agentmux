@@ -2103,17 +2103,17 @@ export class AgentMuxClient {
     return this.projectSession(this.registry.get(agentSessionId))
   }
 
-  /** Read one exact durable Session binding without starting, attaching or stopping its Run. */
-  async refreshAgentSession(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxAgentSession> {
+  /** Read one canonical Session; a supplied Run remains an exact fence. Passive identity observation may follow. */
+  async refreshAgentSession(agentSessionId: string, expectedRun?: AgentMuxRunRef): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     await this.resolveRawAgentSession(agentSessionId)
     const session = await this.registry.refresh(agentSessionId, expectedRun)
     this.hookNativeWitnesses.delete(session.run.runId)
     this.queueNativeIdentityCapture(session)
     const hookObservation = this.hookIngressObservations.get(agentSessionId)
-    if (hookObservation && sameRun(hookObservation.run, expectedRun)) {
+    if (hookObservation && sameRun(hookObservation.run, session.run)) {
       try {
-        const run = await this.kernel.status(expectedRun.runId)
+        const run = await this.kernel.status(session.run.runId)
         this.assertAgentRun(session, run)
         if (run.state.type === 'running') await this.restoreHookBinding(session)
         else this.backfillEndedRuns([run])

@@ -24,6 +24,9 @@ const definitions: Readonly<Record<string, ModuleDefinition>> = {
 owns Run/process/output facts. Executor configuration, durable Session, one Run and its
 display Regions are distinct objects. Begin with agent ls and agent inspect for the exact
 Session and routeHostId. Use configured settings executors discovery before opening.
+agent refresh --session ID re-reads the complete original Session ID without starting,
+resuming, stopping or sending input. Passive identity confirmation may finish later;
+the reply neither promises a native identity nor reopens a retired Session.
 Choose Provider-native collaboration or an independent Session from the user's purpose.
 Keep original operation, Session, Run and resource identities; a new display is not a new task.
 

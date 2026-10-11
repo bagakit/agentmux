@@ -266,6 +266,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       if (!f.values.has('--operation-id') || !f.values.has('--retired-at')) invalid('--operation-id and --retired-at are required.')
       return { agentSessionId: id(f, '--session', true), operationId: value(f, '--operation-id', true)!, ...numbers(f, { '--retired-at': 'expectedRetiredAt' }) }
     }),
+  command('agent.refresh', '--session ID', 'Re-read the canonical original Session using its complete Session ID.',
+    { '--session': 'data' }, f => ({ agentSessionId: id(f, '--session', true) }),
+    'No Run is started, resumed or stopped and no input is sent. Passive native identity observation may confirm and persist metadata asynchronously; this reply does not promise identity recovery or reopen a retired Session. Use agent inspect for diagnostic inspection.'),
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect the service routeHostId, original Core identity and Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) }),
     'status.session.semanticStatus.failure carries code, message, recovery, nativeTurnId and available nativeCode/httpStatusCode. Failed turns retain their original healthy Run; observation errors are reported separately.'),
