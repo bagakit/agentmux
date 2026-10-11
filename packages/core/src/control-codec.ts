@@ -1174,12 +1174,16 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
     const fields = settingsResourceEnvelope(result, ['input', 'availability', 'executable', 'cause'], code)
-    const captured = settingsResourceEnvelope(fields.input, ['executorId', 'providerId', 'command', 'host'], code)
+    const captured = settingsResourceEnvelope(fields.input, ['executorId', 'providerId', 'command', 'host', 'environmentRevision'], code)
     const input = {
       executorId: text(captured.executorId, 'Executor ID', code),
       providerId: text(captured.providerId, 'Provider ID', code),
       command: text(captured.command, 'Authored command', code),
-      host: settingsResourceRecord(captured.host, code)
+      host: settingsResourceRecord(captured.host, code),
+      ...(captured.environmentRevision === undefined ? {} : { environmentRevision: text(captured.environmentRevision, 'Executable environment revision', code) })
+    }
+    if (input.environmentRevision !== undefined && !/^[a-f0-9]{64}$/u.test(input.environmentRevision)) {
+      throw new AgentMuxError('Executable environment revision is invalid.', code)
     }
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true as const, operation }
     const executable = Object.hasOwn(fields, 'executable') ? text(fields.executable, 'Resolved executable', code) : undefined

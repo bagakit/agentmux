@@ -1,5 +1,5 @@
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './agent-session-continuity-input.js'
-import { missingExecutableCause } from './executable-diagnostics.js'
+import { classifyExecutable, executorUnavailableError, type AgentExecutableProbeContext } from './executable-probe.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseConversationCheckpoint, parseConversationChangesPage, type ConversationCheckpoint, type ConversationChangesPage } from './conversation-changes.js'
 import type { AgentConversationReadPage } from './conversation.js'
@@ -11,8 +11,6 @@ import type { AgentMuxRunStorageObservation } from './run-storage-observation.js
 
 import { isDeepStrictEqual } from 'node:util'
 import { createHash, randomUUID } from 'node:crypto'
-import { constants as fsConstants } from 'node:fs'
-import { access, stat } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -650,76 +648,6 @@ function projectRunWith(
   }
 }
 
-/** X_OK also accepts searchable directories. Check the file kind first; later valid candidates win over earlier failures. */
-async function classifyExecutable(executable: string): Promise<AgentMuxExecutorProbeResult> {
-  const candidates = isAbsolute(executable) || executable.includes('/')
-    ? [executable]
-    : (process.env.PATH ?? '').split(delimiter).filter(Boolean).map((directory) => join(directory, executable))
-  if (candidates.length === 0) return { executable, availability: 'check-failed', cause: {
-    code: 'EXECUTABLE_SEARCH_UNAVAILABLE',
-    message: `No candidate path was searchable for "${executable}". Check PATH and the shell environment this app was launched from.`
-  } }
-  let unknown: { code: string; message: string } | undefined
-  let notFile: { code: string; message: string } | undefined
-  for (const candidate of candidates) {
-    try {
-      const metadata = await stat(candidate)
-      if (!metadata.isFile()) {
-        notFile ??= { code: 'EXECUTABLE_NOT_FILE', message: `${candidate} is ${metadata.isDirectory() ? 'a directory' : 'not a regular file'}; expected a regular executable file.` }
-        continue
-      }
-      await access(candidate, fsConstants.X_OK)
-      return { executable, availability: 'available' }
-    } catch (error) {
-      const code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
-        ? error.code : 'EXECUTABLE_CHECK_FAILED'
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-        unknown ??= { code, message: error instanceof Error ? error.message : String(error) }
-      }
-    }
-  }
-  if (unknown) return { executable, availability: 'check-failed', cause: unknown }
-  return { executable, availability: 'missing', cause: notFile ?? missingExecutableCause(executable) }
-}
-
-async function hasExecutable(executable: string): Promise<boolean> {
-  return (await classifyExecutable(executable)).availability === 'available'
-}
-
-/**
- * 启动闸拒绝时**为什么**拒绝——把三态里被 boolean 压掉的那一档还原成一句诚实的话。
- *
- * 闸门本身不变（非 available 一律不放行，见 {@link hasExecutable}），变的只是理由。`installed: false`
- * 同时表达「查成了、确实不在」和「PATH 空到根本没候选可查」，而这两者对用户是完全不同的下一步：前者
- * 去装，后者去修环境。压平的后果实测过——PATH 退化的用户被告知「工具没装在这台机器上」，于是去追一个
- * 根本不存在的安装问题。
- *
- * 为什么理由落在 **message** 而不只是 error code：Electron 的 `ipcRenderer.invoke` 会丢掉 `.code` 和
- * `.detail`，只把 `.message` 送到渲染端（见 error-presentation.ts 的第 3 条）。所以在这条路上，message
- * 就是用户能看到的全部；只加一个 code 改不到任何人眼前。
- *
- * 收成一处投影而不是在两个闸门各写一句：createAgent 与 resume 的那两处此前是逐字相同的两份，这正是
- * 「只改一处、另一处静默保留旧行为」的经典形状。
- */
-async function executorUnavailableError(
-  label: string,
-  executable: string
-): Promise<AgentMuxError> {
-  const result = await classifyExecutable(executable)
-  if (result.availability === 'check-failed') {
-    return new AgentMuxError(
-      `Could not verify the ${label} executable on this host: ${result.cause.code}: ${result.cause.message}`,
-      'AGENT_NOT_FOUND',
-      'executor-check-failed'
-    )
-  }
-  if (result.availability === 'available') {
-    return new AgentMuxError(`${label} executable availability changed while preparing the launch. Retry the launch.`, 'AGENT_NOT_FOUND', 'executor-check-failed')
-  }
-  return new AgentMuxError(result.cause
-    ? `The configured ${label} executable is not available: ${result.cause.message}`
-    : missingExecutableCause(executable).message, 'AGENT_NOT_FOUND', 'executor-missing')
-}
 
 type AgentInputObservation = {
   run: AgentMuxRunRef
@@ -3296,9 +3224,9 @@ export class AgentMuxClient {
     return { ...observation, run: originalRun, runtime, observedAt: Date.now() }
   }
 
-  async probeAgent(providerId: AgentProviderId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {
+  async probeAgent(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentCapabilitySnapshot> {
     return await this.providers.get(providerId).probeCapabilities(
-      { hasExecutable },
+      { hasExecutable: async executable => (await classifyExecutable(executable, context)).availability === 'available' },
       commandOverride
     )
   }
@@ -3311,7 +3239,7 @@ export class AgentMuxClient {
    * 三态归类：`probeAgent` 里的 boolean `installed` 会把「查不成」折进「没装」，而发现列表必须区分二者
    * （那正是那次误报要防的）。启动路径仍走 `probeAgent().installed`（=== 'available'），行为不变。
    */
-  async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string): Promise<AgentMuxExecutorProbeResult> {
+  async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentMuxExecutorProbeResult> {
     // 借 probeCapabilities 的命令解析：它把解析后的命令传给 hasExecutable，我们截下那条命令再三态归类，
     // 不在这里重抄一份 commandOverride/catalog 的取舍（重抄一份就是第二处会漂移的命令解析）。
     let resolvedCommand: string | null = null
@@ -3320,7 +3248,7 @@ export class AgentMuxClient {
       commandOverride
     )
     if (resolvedCommand === null) throw new AgentMuxError('Executor availability probe did not resolve a command.', 'AGENT_NOT_FOUND')
-    return await classifyExecutable(resolvedCommand)
+    return await classifyExecutable(resolvedCommand, context)
   }
 
   private async withRunSnapshot<T, R>(target: string | null, read: () => Promise<T>,
@@ -4025,10 +3953,6 @@ export class AgentMuxClient {
       await assertNativeSource?.()
       // 这个 Run 的说话凭证。raw 只进受管进程的环境，Core 侧只留 hash。
       const invocationCapability = issueAgentCapability()
-      const capability = await this.probeAgent(input.providerId, input.commandOverride)
-      if (!capability.installed) {
-        throw await executorUnavailableError(provider.label, capability.executable)
-      }
       // `post-launch-only` 的 Provider 在启动期收不到任何 prompt（它的交互 UI 没有那个入口，
       // 见对应 Provider 模块的出处），所以**不给它组装启动 prompt**——交了只会被 buildLaunch
       // 拒绝，而运行时引导默认开、`composeAgentLaunchPrompt` 因此几乎总是非空，那等于这个
@@ -4072,6 +3996,9 @@ export class AgentMuxClient {
       const plan = forkSource ? provider.buildForkLaunch!({ ...launchContext, nativeHandle: forkSource.expectedNativeHandle })
         : nativeResumeSource ? provider.buildResumeLaunch({ ...launchContext, nativeHandle: nativeResumeSource.nativeHandle })
         : provider.buildLaunch(launchContext)
+      const executableContext = { workspacePath: input.workspacePath, env: terminalEnvironment(plan.env) }
+      const capability = await this.probeAgent(input.providerId, plan.command, executableContext)
+      if (!capability.installed) throw await executorUnavailableError(provider.label, capability.executable, executableContext)
       // Binding 必须先于 Hook 安装：一个把 hook 投递代码**写进文件**的 Provider（opencode 的 JS
       // 插件）跑在自己进程里，拿不到 AgentMux 注入 PTY 的 `AGENTMUX_HOOK_URL`/`TOKEN`，所以 endpoint
       // 必须在安装那一刻就内联进被写出去的内容。写命令的那九家不受影响——它们的命令在运行时才从
@@ -4700,6 +4627,25 @@ export class AgentMuxClient {
     this.publisher.publishRunState(this.projectRun(run, this.registry.get(session.agentSessionId)), session.agentSessionId)
   }
 
+  private buildResumePlan(session: Pick<AgentMuxAgentSession, 'workspacePath' | 'providerId' | 'nativeHandle' | 'launchOptions'>,
+    input: Pick<AgentMuxAgentResumeOperationInput, 'args' | 'env' | 'commandOverride'>, prompt?: string) {
+    const provider = this.providers.get(session.providerId)
+    const resumeLaunchOptionArgv = provider.resolveLaunchArgv(session.launchOptions ?? {})
+    // 与 launch 同一条判据、同一个函数：`post-launch-only` 的 Provider 续跑时也收不到启动期
+    // prompt，于是不把它交给 buildResumeLaunch（交了只会被拒），改在下面进程起来之后键入。
+    const { atLaunch: launchTimePrompt, deferred: deferredResumePrompt } =
+      splitLaunchPromptByDelivery(provider.catalog, prompt ?? '')
+    const plan = provider.buildResumeLaunch({
+      workspacePath: session.workspacePath,
+      nativeHandle: session.nativeHandle!,
+      ...(launchTimePrompt ? { prompt: launchTimePrompt } : {}),
+      args: [...(input.args ?? []), ...resumeLaunchOptionArgv],
+      env: input.env ?? {},
+      ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
+    })
+    return { plan, deferredResumePrompt }
+  }
+
   private async resumeAgentRun(
     input: AgentMuxAgentResumeOperationInput,
     expectedRun?: AgentMuxRunRef,
@@ -4773,28 +4719,15 @@ export class AgentMuxClient {
       }
       // resume 换了 Run，就换一枚凭证——旧 Run 的那枚随之作废，不能再以此 Agent 名义说话。
       const invocationCapability = issueAgentCapability()
-      const capability = knownCapability ?? await this.probeAgent(current.providerId, input.commandOverride)
-      if (!capability.installed) {
-        throw await executorUnavailableError(provider.label, capability.executable)
-      }
       // Re-resolve the posture the create fixed and append it to the resume args exactly as createAgent
       // does, so the sandbox/approval/permission-mode flags survive the stop/resume boundary rather than
       // reverting to the Provider's more permissive default. buildResumeArgs orders these per provider
       // (codex places them after the positional prompt, claude before) and the positional prompt is a
       // distinct token, so intermixing the option flags stays CLI-valid.
-      const resumeLaunchOptionArgv = provider.resolveLaunchArgv(current.launchOptions ?? {})
-      // 与 launch 同一条判据、同一个函数：`post-launch-only` 的 Provider 续跑时也收不到启动期
-      // prompt，于是不把它交给 buildResumeLaunch（交了只会被拒），改在下面进程起来之后键入。
-      const { atLaunch: launchTimePrompt, deferred: deferredResumePrompt } =
-        splitLaunchPromptByDelivery(provider.catalog, prompt ?? '')
-      const plan = provider.buildResumeLaunch({
-        workspacePath: current.workspacePath,
-        nativeHandle: current.nativeHandle,
-        ...(launchTimePrompt ? { prompt: launchTimePrompt } : {}),
-        args: [...(input.args ?? []), ...resumeLaunchOptionArgv],
-        env: input.env ?? {},
-        ...(input.commandOverride === undefined ? {} : { commandOverride: input.commandOverride })
-      })
+      const { plan, deferredResumePrompt } = this.buildResumePlan(current, input, prompt)
+      const executableContext = { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) }
+      const capability = await this.probeAgent(current.providerId, plan.command, executableContext)
+      if (!capability.installed) throw await executorUnavailableError(provider.label, capability.executable, executableContext)
       await this.requireHookIngressOwner()
       await this.hookBindings.get(current.run.runId)?.close()
       this.hookBindings.delete(current.run.runId)
@@ -5308,7 +5241,21 @@ export class AgentMuxClient {
     if (canProbe && current) {
       try {
         input = await this.sessionExecutorOptions(current, input)
-        capability = await this.probeAgent(current.providerId, input.commandOverride)
+        receipt.evidence = evidence
+        receipt.nativeTarget = structuredClone(handle!)
+        const oldInput = current?.promptCompletionAdmission
+        receipt.previousInput = { scope: 'typed-prompt', outcome: !oldInput ? 'none' : current && agentPromptNotApplied(current) ? 'not-applied'
+          : oldInput.acknowledged ? oldInput.transport === 'native' ? oldInput.native.outcome === 'admitted' ? 'native-admitted' : 'unknown' : 'terminal-confirmed' : 'unknown',
+          ...(oldInput?.inputKey ? { key: structuredClone(oldInput.inputKey) } : {}) }
+        receipt.interruptedWorking = admission?.kind === 'resume' && admission.interruptedWorking
+        receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking ? resolveAgentContinuityReminder(policy) : '',
+          continuation: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking && policy.continuationEnabled ? policy.continuationPrompt : '' }
+        const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
+          agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)
+        if (launchInput) receipt.launchInput = launchInput
+        const originalPrompt = composeAgentPrompt(receipt.launchInput?.input.prompt, receipt.launchInput?.input.agentMuxNote).text
+        const { plan } = this.buildResumePlan(current, input, originalPrompt || undefined)
+        capability = await this.probeAgent(current.providerId, plan.command, { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) })
       } catch (error) {
         receipt.error = error instanceof Error ? error.message : String(error)
         if (prior) receipt.rechecks++
@@ -5336,17 +5283,6 @@ export class AgentMuxClient {
       throw error
     }
     receipt.kind = 'starting'; receipt.reason = admission?.kind === 'resume' ? admission.reason : 'explicit-request'; receipt.evidence = evidence
-    receipt.nativeTarget = structuredClone(decision.nativeHandle)
-    const oldInput = current?.promptCompletionAdmission
-    receipt.previousInput = { scope: 'typed-prompt', outcome: !oldInput ? 'none' : current && agentPromptNotApplied(current) ? 'not-applied'
-      : oldInput.acknowledged ? oldInput.transport === 'native' ? oldInput.native.outcome === 'admitted' ? 'native-admitted' : 'unknown' : 'terminal-confirmed' : 'unknown',
-      ...(oldInput?.inputKey ? { key: structuredClone(oldInput.inputKey) } : {}) }
-    receipt.interruptedWorking = admission?.kind === 'resume' && admission.interruptedWorking
-    receipt.recoveryInputs = { reminder: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking ? resolveAgentContinuityReminder(policy) : '',
-      continuation: receipt.trigger !== 'input' && admission?.kind === 'resume' && admission.interruptedWorking && policy.continuationEnabled ? policy.continuationPrompt : '' }
-    const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
-      agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)
-    if (launchInput) receipt.launchInput = launchInput
     // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
     current = await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, value => {
       const frozen = value.continuityOperations?.[receipt.operationId]?.launchInput

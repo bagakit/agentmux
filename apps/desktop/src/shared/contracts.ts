@@ -1253,6 +1253,7 @@ export type ExecutorDetectionInput = {
   providerId: AgentProviderId
   command: string
   host: HostConfig
+  environmentRevision?: string
 }
 export type ExecutorDetection = { input: ExecutorDetectionInput } & (
   | AgentMuxExecutorProbeResult

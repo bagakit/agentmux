@@ -1,4 +1,5 @@
 import type { AgentMuxClient } from './client.js'
+import type { AgentExecutableProbeContext } from './executable-probe.js'
 type DoctorClient = Pick<AgentMuxClient, 'connect' | 'runtimeIdentity' | 'runtimeDiagnostics' |
   'probeAgent' | 'probeExecutorAvailability' | 'inspectManagedHooks' | 'catalog'>
 import { runtimeStorageUsage, type RuntimeStorageUsage } from './runtime-storage-usage.js'
@@ -110,15 +111,15 @@ async function probeAgent(
   client: DoctorClient,
   catalog: AgentCatalogEntry,
   commandOverride: string | undefined,
-  hookInstallation: AgentMuxDoctorAgent['hookInstallation']
+  hookInstallation: AgentMuxDoctorAgent['hookInstallation'], context: AgentExecutableProbeContext
 ): Promise<AgentMuxDoctorAgent> {
   try {
-    const capability = await client.probeAgent(catalog.id, commandOverride)
+    const capability = await client.probeAgent(catalog.id, commandOverride, context)
     // 三态探测问的是同一个 Executor 的同一件事，但它区分「查不成」与「没装」，而 `capability.installed`
     // 把两者折成 false。诊断恰恰是最不能折的地方：用户来这里就是为了知道病因。两次探测共用
     // probeCapabilities 里那一份命令解析（commandOverride 优先，否则 catalog executable），所以它们
     // 看的一定是同一条命令，不会各自解析出不同的东西。
-    const result = await client.probeExecutorAvailability(catalog.id, commandOverride)
+    const result = await client.probeExecutorAvailability(catalog.id, commandOverride, context)
     const probe = result.availability === 'available'
       ? 'found'
       : result.availability === 'check-failed' ? 'unverifiable' : 'missing'
@@ -175,7 +176,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       Promise.all(catalog.map(async (entry, index) => await probeAgent(
         options.client,
         entry,
-        options.commandOverrides?.[entry.id], hookInstallations[index]!
+        options.commandOverrides?.[entry.id], hookInstallations[index]!, { ...(options.workspacePath === undefined ? {} : { workspacePath: options.workspacePath }), ...(options.env === undefined ? {} : { env: options.env }) }
       )))
     ])
     return {

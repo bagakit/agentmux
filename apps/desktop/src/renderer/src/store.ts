@@ -1,3 +1,4 @@
+import { executorEnvironmentRevision } from '../../shared/executor-probe-context'
 import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
 import { parseConversationLandmarkWrite, type ConversationLandmarkWrite } from '@agentmux/core/conversation'
 import { restoredMoteBotRequests, type MoteBotRequest } from './lib/mote-bot-request'
@@ -7483,7 +7484,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }).map(([executorId, executor]) => {
       const key = executorDetectionKey(hostId, executorId), requestId = Symbol()
       detectionRequestIds.set(key, requestId)
-      const input = structuredClone({ executorId, providerId: executor.providerId, command: executor.command, host })
+      const input = structuredClone({ executorId, providerId: executor.providerId, command: executor.command, environmentRevision: executorEnvironmentRevision(executor.env), host })
       return { key, requestId, input }
     })
     if (targets.length === 0) { await Promise.all(inFlight); return }

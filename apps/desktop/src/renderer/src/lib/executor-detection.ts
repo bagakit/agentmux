@@ -1,7 +1,8 @@
+import { executorEnvironmentRevision } from '../../../shared/executor-probe-context'
 import type { AgentExecutorConfig, ExecutorDetectionInput, HostConfig } from '../../../shared/contracts'
 import type { ExecutorDetectionState } from '../store'
 
-type ExecutableInput = Pick<AgentExecutorConfig, 'providerId' | 'command'>
+type ExecutableInput = Pick<AgentExecutorConfig, 'providerId' | 'command'> & Partial<Pick<AgentExecutorConfig, 'env'>>
 export function executorDetectionKey(hostId: string, executorId: string): string {
   return `${hostId}\0${executorId}`
 }
@@ -14,7 +15,7 @@ export function executorDetectionMatches(
   host: HostConfig | undefined
 ): boolean {
   if (!input || !executor || !host || input.executorId !== executorId || input.providerId !== executor.providerId ||
-    input.command !== executor.command || input.host.id !== host.id || input.host.kind !== host.kind) return false
+    input.command !== executor.command || (input.environmentRevision ?? executorEnvironmentRevision()) !== executorEnvironmentRevision(executor.env) || input.host.id !== host.id || input.host.kind !== host.kind) return false
   if (input.host.kind === 'local' && host.kind === 'local') return true
   return input.host.kind === 'ssh' && host.kind === 'ssh' && input.host.hostname === host.hostname &&
     input.host.user === host.user && input.host.port === host.port && input.host.identityFile === host.identityFile
