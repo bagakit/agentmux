@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
@@ -13,7 +14,8 @@ const mutations: Record<string, [string, string]> = {
   'stale-retained-order': ['if (scope && visible && placed) moveModalScopeToFront(scope)', 'if (false) moveModalScopeToFront(scope!)'],
   'suppress-business-close': ['if (close && (latest.current.failure != null || latest.current.id !== attemptId || latest.current.document !== behaviorDocument))', 'if (close)'],
   'drop-attachment-owner': ['return active ? <DismissableLayer asChild onEscapeKeyDown={onEscapeKeyDown}>', 'return false ? <DismissableLayer asChild onEscapeKeyDown={onEscapeKeyDown}>'],
-  'drop-retained-host': ['container={host}', 'container={windowContainer}']
+  'drop-retained-host': ['container={host}', 'container={windowContainer}'],
+  'retain-retired-placement': ['host.remove(); setPlacement(null); return', 'host.remove(); return']
 }
 const dependencyMutations: Record<string, [string, string, string]> = {
   'unpatched-focus-scope': ['react-focus-scope', 'getDocumentFocusScopes', 'upstream-focus-scope'],
@@ -42,7 +44,10 @@ export default defineConfig({
     if (!path.endsWith('/packages/client-ui/src/components/Modal.tsx')) return
     const [needle, replacement] = mutations[mutation]!
     assert.equal(source.split(needle).length, 2, 'Actual Modal mutation anchor must be unique')
-    return source.replace(needle, replacement)
+    const changed = source.replace(needle, replacement)
+    if (process.env.MODAL_MUTATION_HIT) appendFileSync(process.env.MODAL_MUTATION_HIT, JSON.stringify({ mutation, file: path,
+      sourceSHA256: createHash('sha256').update(source).digest('hex'), changedSHA256: createHash('sha256').update(changed).digest('hex') }) + '\n')
+    return changed
   } }],
   test: {
     include: ['packages/client-ui/test/modal.test.tsx'], environment: 'happy-dom', globals: false,
