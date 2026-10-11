@@ -79,6 +79,10 @@ async function run(label, mutation) {
     // Main consumes the same external ESM Core as the product. Its actual loader
     // bytes are observed below; bundling this package into CJS changes its contract.
     builder.onResolve({ filter: /^@agentmux\/core(?:\/|$)/ }, args => ({ path: fileURLToPath(import.meta.resolve(args.path)), external: true }))
+    // Original filesystem helpers locate their native executable relative to their
+    // own module. Preserve that product location instead of relocating import.meta.
+    builder.onResolve({ filter: /\.mjs$/ }, args => args.path.startsWith('.') && args.importer.startsWith(repository + '/') && !args.importer.includes('/node_modules/')
+      ? { path: resolve(args.resolveDir, args.path), external: true } : undefined)
     builder.onLoad({ filter: /\.(?:ts|tsx)$/ }, async args => {
       const source = await record(args.path)
       return source === undefined ? undefined : { contents: source, loader: args.path.endsWith('.tsx') ? 'tsx' : 'ts' }
@@ -171,11 +175,6 @@ import('./main.mjs').catch(error => { console.error(error); require('electron').
     ;(file.includes('/node_modules/') ? dependencies : consumed)[name] = digest
   }
   const receipt = JSON.parse(await readFile(join(directory, 'result.json'), 'utf8'))
-  if (!mutation && !mobileOnly && !fullscreenOnly) {
-    const assets = Object.keys(receipt.avatar?.sourceInputs ?? {})
-    assert.ok(assets.some(name => name.endsWith('.glb')) && assets.some(name => name.endsWith('/series.json')),
-      'The actual Avatar combination must bind nonempty original GLB and catalog source bytes')
-  }
   for (const [name, digest] of Object.entries(receipt.avatar?.sourceInputs ?? {})) {
     assert.equal(hash(await readFile(join(repository, name))), digest, 'Original Avatar source bytes remain unchanged: ' + name)
     if (originalInputs.has(name)) assert.equal(digest, originalInputs.get(name), 'Every run consumes the same original Avatar source: ' + name)
@@ -196,6 +195,11 @@ import('./main.mjs').catch(error => { console.error(error); require('electron').
   } else {
     assert.equal(processReceipt.exitCode, 0, receipt.failure?.message ?? `Coverage gates remain open: ${(receipt.uncovered ?? []).join(', ')}`)
     assert.equal(receipt.availableChecksPassed, true, 'All requested available product checks must pass')
+    if (!mobileOnly && !fullscreenOnly) {
+      const assets = Object.keys(receipt.avatar?.sourceInputs ?? {})
+      assert.ok(assets.some(name => name.endsWith('.glb')) && assets.some(name => name.endsWith('/series.json')),
+        'The actual Avatar combination must bind nonempty original GLB and catalog source bytes')
+    }
     if (!partial) assert.equal(receipt.completeGate, true, 'Default mode requires every coverage gate, including system fullscreen and OS composition')
     if (partial) { assert.equal(receipt.completeGate, false); assert.equal(receipt.passed, false, 'Partial evidence cannot claim complete success') }
     const systemFullscreen = ['system-fullscreen-enter', 'system-fullscreen-restored', 'system-fullscreen-preserves-original-input-and-draft']
