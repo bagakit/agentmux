@@ -805,60 +805,85 @@ object does not establish a logged-in account or enterprise.
 
 App-management eligibility, configuration and publication remain unimplemented
 continuations. This reference-native Feishu authentication is not live tenant
-qualification; Lark keeps its original device-registration route. Settings still
-uses its existing creation and saved-connection flow until the combined
-confirmation journey is implemented and visually reviewed.
+qualification. A new ordinary application uses the separate Enrollment intent
+below; confirming a management login does not authorize creation. Web creation
+is offered only for adapter-declared domains. Existing saved and manual
+connections remain usable independently.
 
 ## Application enrollment
 
-Desktop Settings → Mods → Agent Conversation Connector consumes this same public
-service. **Create and connect a bot** opens the platform confirmation without
-asking the user to copy credentials. **Connect an existing bot** keeps the
-original credential-entry path. Opening Settings only reads local progress;
-checking platform confirmation is an explicit action on the original setup.
-Closing and reopening keeps that setup available, including earlier entries.
-To create a separate bot, expand **Other setup options** and choose
-**Start a separate setup**. Earlier requests remain available even if their
-results are unknown; a pending request does not block another explicit setup.
-After the application is saved, **View connection** opens its original details;
-the Agent menu separately creates or connects its group.
+The original `connection.enrollment.begin/advance/inspect/ls` service owns one
+explicit application-creation intent. Core supplies vendor-neutral contracts,
+strict SDK/CLI parsing and public RPC dispatch. The default Host composes its
+original SQLite journal, native adapter and secure credential owner. Enrollment
+creates no Agent, group, Binding or sharing grant and does not publish an app or
+prove a live connection.
 
-`connection.enrollment.ls` discovers locally retained enrollment operations and
-implemented issuer capabilities. `inspect` reads one original operation without
-contacting the platform. `begin` is an explicit application-creation intent;
-`advance` may make one original protocol request or continue its local secure
-handoff. All administration uses the public service's approved user/device
-identity. No Agent, group or sharing grant is created by enrollment.
+`begin --input FILE|-` freezes `operationId`, `connectionId`, `adapterId`, `domain`,
+`label` and `preset: {name, description?, avatar: {pngDataUrl}}`. The PNG uses the
+original saved-avatar byte bound and strict PNG header/dimension validation;
+the original secure owner retains its exact bytes while the safe summary stores
+its hash and dimensions. Public CLI clients supply their own PNG. Desktop assets
+and Mote source images are supplied through their original client/Host owners,
+not a Core file path or a hosted image URL.
 
-Private challenges and application credentials stay in the executing Host's
-secure credential owner. A pending authorization, securely stored credential,
-configured connection and actual live connection are separate facts. After an
-unknown one-time delivery, inspect the same operation rather than beginning or
-polling again. A still-running Host can explicitly continue a verified response
-whose secure save was temporarily unavailable. A process lost before that save
-may leave an unrecoverable unknown result; expiry or closing a page does not
-prove that the remote application was never created.
+Begin, advance and inspect return an active View with a safe `operation`, private
+`challenge` and `account`, and exact offered `actions`. The original
+transport-approved user/device alone may read that View. `ls` returns safe
+summaries and implemented capabilities; it contains no QR, account, cookie,
+CSRF value or credential. Inspect and list are local reads, including while an
+original native effect is in flight. Private-view reads recheck the original
+transport and authentication attempt after secure-storage awaits; an obsolete
+read cannot reveal an earlier QR or account.
 
-An operation may include a strictly parsed `diagnostic` with an observed
-`stage`, a finite `code`, and a response-only `httpStatus`. The same original
-operation exposes these facts through `begin`, `advance`, `inspect`, and `ls`;
-no separate RPC or CLI command is needed. Diagnostics distinguish request,
-response, confirmation and secure-storage problems without exposing response
-bodies, exception text or private authorization material. They do not establish
-whether the platform applied a request, permit replay, or invent a cause for an
-older unknown operation. Successful local recovery clears the earlier diagnosis.
-The setup page presents one main next action. Its details retain a separate
-read-only refresh of the saved result, including while a platform effect is in
-progress.
+Choose the exact offered action, including its `actionId` and `ownRevision`:
 
-The original SDK registration protocol is invoked as finite begin/poll effects,
-without its internal polling loop or implicit issuer migration. Requested bot
-permissions and configuration are not evidence that the platform granted them.
-The Feishu/Lark adapter also accepts the official CLI's public-code response
-shape when the complete confirmation URL is absent. It constructs that page only
-on the original frozen issuer; a supplied unsafe URL remains rejected.
-The existing credential-entry flow remains available independently.
+```json
+{
+  "operationId": "bot-creation",
+  "ownRevision": 4,
+  "decision": {
+    "actionId": "returned-original-action",
+    "kind": "confirm-account"
+  }
+}
+```
 
+Pass this input to `advance --input FILE|-`. An explicit `confirm-account`
+confirms only the displayed stable account and enterprise. A separate offered
+`create` decision authorizes a finite sequence: upload the frozen PNG, create
+one ordinary application, read that exact application's credential, then save
+the original Vault/Connection result. Each HTTP has its own durable claim and
+saved receipt before the next request. There is no template, capability switch,
+event/callback, permission scope, visibility, version or publication operation.
+Only `continue-authentication` may drive an offered login observation; it cannot
+confirm an account or create an application.
+
+An unknown request is not replayed. A repeated action reads its original decision
+receipt or repairs its original local ACK. Intent rows retain only the active
+decision reference; historical decision receipts are read by exact action ID,
+separately from the original HTTP-attempt journal. The exact created app ID is
+retained before credential handoff. If its credential read fails, a new explicit
+`read-credential` can continue that same app; it never re-creates or selects an
+application by name. Local Vault/configure ACK recovery runs before current
+adapter or login eligibility, including after owner process loss. A failed local
+save cannot erase an already confirmed receipt or a different owner's recovery.
+
+A finite typed `diagnostic` identifies the observed preparation, authentication,
+request, response, adapter, journal or secure-storage stage. A response status is
+included only when observed. No raw response, exception text or private material
+is returned. Diagnostics do not authorize replay or invent a cause for an older
+unknown operation. Authorization, secure credential storage, configured
+Connection and live reception remain separate facts.
+
+The obsolete device-registration execution is removed. Existing durable
+operations keep their original IDs, stored bytes and unknown meaning. Reads
+safely project those original facts; recovery may inspect and finish their
+original local secure/configuration ACK. Missing Web account state never mints a
+new native action or silently changes the creation route. No migration or new
+compatibility executor is introduced. A separate new setup requires a separate
+explicit intent. Existing credential-entry and saved-connection management
+remain available independently of Enrollment observations or automatic traffic.
 
 ## Application profile operations
 
@@ -916,15 +941,20 @@ its original Files, saved-avatar and Connection owners. Core supplies the pure
 contract and strict SDK/CLI parsing; connectors do not acquire a Mote or file
 configuration store. Each request freezes the exact saved public topic revision,
 optional saved PNG appearance revision, default-file baseline and child IDs
-before registration. Only the saved public title/summary and selected saved PNG
+before enrollment. Only the saved public title/summary and selected saved PNG
 are shared. Personality, private memory, unsaved editor content and avatar
 creation are outside this operation.
 
-Enrollment's optional `preset` fills the original platform confirmation URL.
-The user may edit that page, so a QR preset is never a confirmed profile write.
-The created application's own credential then serves the original profile owner;
-upload, PATCH, publication requirements and online observations keep their
-separate meanings. No parent action publishes an application.
+New enrollment freezes the selected saved PNG and exact public title/summary
+as its creation input. Its actor-private login View remains owned by Enrollment;
+Mote list/inspect receipts contain safe child summaries. A parent `advance`
+without an `enrollment` decision only observes that child. To confirm an account
+or create, pass the exact child operation ID, offered action and own revision in
+`enrollment`; the parent never invents or automatically chooses either decision.
+Old parents preserve their original request and child facts, without starting a
+new Web intent. The resulting exact application may separately use the original
+profile owner; upload, PATCH, publication requirements and online observations
+retain their separate meanings. No parent action publishes an application.
 
 Default preference saving remains an original Files CAS. The parent records the
 full save input and dispatch claim before calling it. A lost File acknowledgement
@@ -933,7 +963,7 @@ certify its ACK or permit an automatic rewrite. Explicit reassociation uses a ne
 original preference-save intent with the same already-created application.
 `sync` changes neither the Mote default nor any existing group Binding.
 `inspect/ls` read only the original parent journal; explicit `advance` can inspect
-or continue the fixed children, without replaying unknown registration, upload,
+or explicitly advance the fixed children, without replaying unknown creation, upload,
 PATCH or File writes. Independent Motes and original connections remain usable.
 
 The original Mote Profile exposes these parent operations from its bot row.
