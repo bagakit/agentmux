@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { appendFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
 import { fixtureIso } from '../scripts/lib/fixture-values.mjs'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
-import type { AgentConversationReadPage } from '@agentmux/core'
+import type { AgentConversationReadPage, ConversationChangesPage } from '@agentmux/core'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
@@ -25,15 +26,15 @@ afterEach(async () => {
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 const pause = async (ms = 20) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)) })
-const wait = (assertion: () => void) => vi.waitFor(async () => { await pause(); assertion() }, { timeout: 45000, interval: 20 })
+const wait = (assertion: () => void, timeout = 45000) => vi.waitFor(async () => { await pause(); assertion() }, { timeout, interval: 20 })
 
-async function fixture(count: number, step = 3_600_000) {
+async function fixture(count: number, step = 3_600_000, role: 'assistant' | 'user' = 'assistant') {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   HTMLElement.prototype.scrollIntoView = vi.fn()
-  const rows = Array.from({ length: count }, (_, index) => ({ type: 'assistant', uuid: `answer-${index}`, sessionId: 'native-main', timestamp: fixtureIso(index * step),
-    message: { role: 'assistant', content: `Original answer ${index}: **selected words** remain readable.` } }))
+  const rows = Array.from({ length: count }, (_, index) => ({ type: role, uuid: `answer-${index}`, sessionId: 'native-main', timestamp: fixtureIso(index * step),
+    message: { role, content: `Original answer ${index}: **selected words** remain readable.` } }))
   const f = await nativeHistoryFixture('claude', jsonl(rows)); closes.push(f.close)
   await desktopConversationReadBridge(f, closes)
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: f.root })
@@ -55,6 +56,8 @@ async function fixture(count: number, step = 3_600_000) {
   const pages: AgentConversationReadPage[] = [], originalRead = f.client.readAgentConversation.bind(f.client)
   const reads = vi.spyOn(f.client, 'readAgentConversation').mockImplementation(async (...args) => { const page = await originalRead(...args); pages.push(page); return page })
   const sourceReads = vi.spyOn(f.client, 'sessionHistoryPage')
+  const changePages: ConversationChangesPage[] = [], originalChanges = f.client.readConversationChanges.bind(f.client)
+  vi.spyOn(f.client, 'readConversationChanges').mockImplementation(async (...args) => { const page = await originalChanges(...args); changePages.push(page); return page })
   const frontendReads = vi.spyOn(api.conversation, 'readAgentConversation')
   const changes = vi.spyOn(api.conversation, 'readConversationChanges')
   const sample = () => inspectConversationConsumers({hostId: 'local', agentSessionId: agent.id}).consumers.find(value => !value.viewport.hidden)
@@ -63,17 +66,17 @@ async function fixture(count: number, step = 3_600_000) {
   const feed = () => host.querySelector<HTMLElement>('.global-session-workspace .activity-feed')!
   const earlier = () => feed().querySelector<HTMLButtonElement>('.activity-feed__reading-action')!
   const completed = () => pages.filter(page => page.window.complete).at(-1)!
-  const unchanged = async () => {
+  const unchanged = async (expectedNative = f.before.native) => {
     expect(useAppStore.getState().sessions).toEqual([agent]); expect(useAppStore.getState().tabs[tab.id]).toEqual(tab)
     expect(useAppStore.getState().layouts[location.displayWorkspaceId]).toEqual(layout)
     expect(useAppStore.getState().agentComposerDrafts[agent.id]).toBe('Original unsent draft')
     expect(useAppStore.getState().agentComposerDrafts[location.regionId]).toBe('Original Region draft')
     expect(legacy.map(value => value.mock.calls.length)).toEqual([0, 0]); expect(f.controls.map(value => value.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
-    expect((await f.bytes()).native).toEqual(f.before.native)
+    expect((await f.bytes()).native).toEqual(expectedNative)
     const stored = (await f.store.load()).find(value => value.agentSessionId === agent.id)!
     expect(stored.run).toEqual(f.session.run); expect(stored.nativeHandle).toEqual(f.session.nativeHandle)
   }
-  return { f, reads, sourceReads, frontendReads, originalRead, pages, completed, sample, changes, host, feed, earlier, unchanged,
+  return { f, reads, sourceReads, frontendReads, originalRead, pages, changePages, completed, sample, changes, host, feed, earlier, unchanged,
     render: async () => act(async () => root.render(<FocusConversationReadingScene route="projection" />)) }
 }
 
@@ -152,4 +155,30 @@ it('actual automatic rejection stays in the original Earlier button with its ful
   expect(h.earlier()?.getAttribute('data-read-error') ?? null).toBeNull()
   expect(h.feed().querySelector('.activity-feed__read-notice')).toBeNull(); expect(h.feed().textContent).not.toContain(cause)
   retained(); await h.unchanged()
+})
+
+it('actual native input window bounds keep normal range hints in the original Earlier action without a standalone notice', async () => {
+  const h = await fixture(180, 3_600_000, 'user'); await h.render()
+  await wait(() => { expect(h.sample()?.accepted?.recordCount).toBe(100); expect(h.sample()?.loading).toBe(false); expect(h.earlier()?.disabled).toBe(false) })
+  expect(h.completed().window.navigation.older).not.toBeNull()
+  expect(h.feed().textContent).toContain('Original answer 179:')
+  expect(h.earlier().title).toBe('Read earlier conversation and process records in the original sequence')
+  expect(h.feed().querySelector('.activity-feed__read-notice')).toBeNull()
+  // Real native arrivals advance both existing current consumers. The input
+  // consumer must itself cross Core's bound; the reading window's newer-outside
+  // flag and an assistant-only empty input set cannot prove this condition.
+  await act(async () => appendFile(h.f.path, jsonl(Array.from({length: 1300}, (_, index) => ({type: 'user', uuid: `new-input-${index}`, sessionId: 'native-main', timestamp: fixtureIso((180 + index) * 3_600_000), message: {role: 'user', content: `Recent input ${index}.`}})))))
+  const appendedNative = (await h.f.bytes()).native
+  const inputBoundary = () => h.changePages.filter(page => page.window.complete && page.window.id !== h.sample()?.watch.windowId && page.window.outside.older && !page.more).at(-1)
+  await wait(() => { expect(inputBoundary()).toBeDefined(); expect(h.feed().textContent).toContain('Recent input 1299.'); expect(h.sample()?.loading).toBe(false) }, 75000)
+  const actual = inputBoundary()!
+  expect(actual.window.outside.older).not.toBeNull(); expect(actual.window.itemCount).toBeGreaterThan(100); expect(actual.window.itemCount).toBeLessThanOrEqual(1200)
+  expect(actual.scope.sources).toContainEqual({kind: 'native', providerId: 'claude', nativeSessionId: 'native-main'})
+  expect(h.earlier()).not.toBeNull(); expect(h.earlier().disabled).toBe(false)
+  expect(h.earlier().title).toBe('Read earlier conversation and process records in the original sequence')
+  expect(h.feed().querySelector('.activity-feed__read-notice')).toBeNull()
+  expect(h.feed().textContent).not.toContain('This window keeps recent conversation and process records.')
+  expect(h.feed().querySelector('[data-read-error]')).toBeNull()
+  expect(h.feed().querySelector('summary')?.textContent).toContain('source coverage')
+  await h.unchanged(appendedNative)
 })

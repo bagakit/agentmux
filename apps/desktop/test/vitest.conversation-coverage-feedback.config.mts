@@ -9,7 +9,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-coverage-f
     if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/client-ui/src/') && !path.startsWith('packages/core/src/')) return
     let code = source
     const mutation = process.env.AGENTMUX_COVERAGE_FEEDBACK_MUTATION
-    if (mutation && mutation !== 'clear-error-on-unrelated-changes' && path === 'apps/desktop/src/renderer/src/lib/session-conversation-window.ts') {
+    if (mutation && ['invent-boundary-error', 'drop-automatic-error'].includes(mutation) && path === 'apps/desktop/src/renderer/src/lib/session-conversation-window.ts') {
       const replacements: Record<string, [string, string]> = {
         'invent-boundary-error': ["const automaticReadError = intent.current === 'coverage' && view.errorOperation === 'older' ? view.error : null", "const automaticReadError = intent.current === 'coverage' ? view.error ?? (view.snapshot?.units.reduce((total, unit) => total + unit.records.length, 0) === 1200 || view.snapshot?.window.outside.newer ? Error('The selected time range exceeds this bounded reading window. Scroll earlier to continue.') : null) : null"],
         'drop-automatic-error': ["const automaticReadError = intent.current === 'coverage' && view.errorOperation === 'older' ? view.error : null", 'const automaticReadError = null']
@@ -22,6 +22,11 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-coverage-f
       const needle = "...(sourceError || kind === 'latest' || kind === 'reopen' || value.errorOperation === kind ? { error: null, errorOperation: null } : {}),"
       if (source.split(needle).length !== 2) throw Error('Nonunique error settlement mutation')
       code = source.replace(needle, 'error: null, errorOperation: null,')
+    }
+    if (mutation === 'resurrect-normal-input-bar' && path === 'apps/desktop/src/renderer/src/components/ActivityView.tsx') {
+      const needle = 'if (!needsService && (!showEarlier || !read.windowIncomplete && !read.hasMore)) return null'
+      if (source.split(needle).length !== 2) throw Error('Nonunique normal input bar mutation')
+      code = source.replace(needle, 'if (!needsService && !read.windowIncomplete && !(showEarlier && read.hasMore)) return null')
     }
     if (process.env.AGENTMUX_COVERAGE_FEEDBACK_LOADED) {
       const hash = (value: string) => createHash('sha256').update(value).digest('hex')
