@@ -364,6 +364,10 @@ async function mockHistorySources(options?: { observation: true }): Promise<Agen
 }
 
 const mockApi: AgentMuxDesktopApi = {
+  performance: {
+    captureProfile: async () => { throw new Error('Open Desktop to sample the original Renderer.') },
+    captureTrace: async () => { throw new Error('Open Desktop to trace the original Renderer.') }
+  },
   landmarks: {
     list: async () => { throw new Error('The original reading-point owner is unavailable in web preview. Open Desktop to read your saved points.') },
     apply: async () => { throw new Error('The original reading-point owner is unavailable in web preview. Your name and original save intent are retained.') }

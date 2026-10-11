@@ -5,6 +5,7 @@ import type { MetricsSource, RunUsage, ToolkitAgentCard as AgentCard, ToolkitAge
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
 import { PerformanceTrend } from './PerformanceTrend'
+import { PerformanceCapture } from './PerformanceCapture'
 
 import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type ToolkitAgentCardFacts } from '../toolkit/ToolkitAgentCards'
 
@@ -211,7 +212,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
               <Metric label="Selected resident memory" value={memory(activeRun.rssKib)} hint="Latest · root + descendants" points={selectedTrend.map(point => ({ id: JSON.stringify(point), at: point.at, value: point.rss }))} sourceKey={runSourceKey} unit="KiB" color="var(--blue)" /></div></> : null}</>}
         <SourceNote source={source} />
         {scope === 'app' && app && app.cpuPercent === null ? <p className="performance-state">CPU unavailable · waiting for a valid interval</p> : null}
-        {scope === 'app' ? <PerformanceAttribution observation={observation} paused={paused} /> : <>
+        {scope === 'app' ? <><PerformanceCapture observation={observation} /><PerformanceAttribution observation={observation} paused={paused} /></> : <>
           <div className="performance-section-heading"><strong>Run processes</strong><div className="performance-sort" role="group" aria-label="Sort contributors">
             <button type="button" aria-pressed={sort === 'cpu'} onClick={() => setSort('cpu')}>CPU</button><button type="button" aria-pressed={sort === 'rss'} onClick={() => setSort('rss')}>RSS</button></div></div>
           <div className="performance-table-head"><span>Run</span><span>CPU</span><span>RSS</span></div>
