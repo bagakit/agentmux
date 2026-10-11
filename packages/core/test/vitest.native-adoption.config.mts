@@ -4,6 +4,7 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { resolve, relative, dirname } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const mutants: Record<string, [string, string, string]> = {
+  "forget-native-source-key": ["packages/core/src/native-input-adoption.ts", "plan.sourceId !== nativeInputSourceId(source)", "false"],
   "foreign-token": [
     "packages/core/src/native-input-adoption.ts",
     "plan.clientCorrelation !== native.clientCorrelation ||",
