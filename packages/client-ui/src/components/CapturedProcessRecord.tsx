@@ -1,3 +1,4 @@
+import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import { useEffect, useId, useState } from 'react'
 import type { ConversationRecord } from '../lib/conversation-records.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
@@ -18,11 +19,11 @@ export function CapturedProcessRecord({ record, disclosure, located = false }: {
   const item = record.original.item, expanded = located || (disclosure?.steps.get(item.id) ?? localOpen)
   const fields = [item.content, item.toolInput, item.toolOutput]
   return <div className="wf-native-process" data-message-source-key={conversationMessageSourceKey(record.agentSessionId, record.source)} data-captured-process-id={item.id} data-conversation-role={record.role}>
-    <RecordedToolRow className="log-row" observation={{ id: item.id, title: item.title, source: item.source, persistentSource: true, status: item.status,
+    <RecordedToolRow className="log-row" observation={{ id: item.id, title: item.title, source: <ConversationSourceLabels sources={record.sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content'] ?? record.sources?.main} />, persistentSource: true, status: item.status,
       recordedTime: describeActivityRecordTime(item.createdAt, item.createdAt, Number.NaN) }} icon={<SemanticIcon name="conversation.tool-call" size={12} />}
       expanded={expanded} controls={bodyId} onToggle={() => { if (!expanded) setPresented(true); setOpen(!expanded); disclosure?.onStepExpandedChange(item.id, !expanded) }} />
     <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>{expanded || presented ? fields.some(value => value !== undefined)
-      ? fields.map((text, index) => text === undefined ? null : <ConversationToolPayload key={index} text={text} identity={item} sourceIdentity={item} copyLabel={index === 1 ? 'Copy tool input' : index === 2 ? 'Copy tool output' : 'Copy recorded content'} />)
+      ? fields.map((text, index) => text === undefined ? null : <div key={index}><ConversationSourceLabels sources={record.sources?.fields[index === 1 ? 'toolInput' : index === 2 ? 'toolOutput' : 'content']} /><ConversationToolPayload text={text} identity={item} sourceIdentity={item} copyLabel={index === 1 ? 'Copy tool input' : index === 2 ? 'Copy tool output' : 'Copy recorded content'} /></div>)
       : <ConversationToolPayload text={JSON.stringify(item, null, 2)} identity={item} sourceIdentity={item} copyLabel="Copy original record" /> : null}</div>
   </div>
 }

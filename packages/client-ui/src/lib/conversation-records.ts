@@ -2,18 +2,20 @@ import type { AgentConversationRecord } from '@agentmux/core'
 import type { ConversationProjectionInput } from '@agentmux/core/conversation'
 import { projectConversationReading as projectCoreReading } from '@agentmux/core/conversation'
 import { speakerOfUserMessage, type ConversationSpeaker } from './conversation-speaker.js'
+import { conversationSourcePresenter, type ConversationSources } from './conversation-sources.js'
 import { describeConversationInputSource } from './conversation-input-source.js'
 
 export type ConversationRecordSource = AgentConversationRecord['source']
-export type ConversationRecord = AgentConversationRecord & { speaker?: ConversationSpeaker; presentationKey?: string; coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage'] }
+export type ConversationRecord = AgentConversationRecord & { speaker?: ConversationSpeaker; presentationKey?: string; sources?: ConversationSources; coverage?: import('@agentmux/core/conversation').ConversationTimeline['coverage'] }
 
 /** The Core owns source-qualified records; this adapter only supplies client speaker presentation. */
 export function projectConversationReading(input: ConversationProjectionInput) {
   const reading = projectCoreReading({ ...input, executionHostId: undefined, ...(input.executionHostId ? { routeHostId: input.executionHostId } : {}) })
+  const presentSources = conversationSourcePresenter(reading.timeline)
   const describe = (record: AgentConversationRecord): ConversationRecord => {
     const speaker = record.author?.kind === 'system' ? { role: 'system' as const, id: record.author.providerId ?? 'agentmux' }
       : record.author ? speakerOfUserMessage({ author: record.author }) : undefined
-    return { ...record, coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
+    return { ...record, sources: presentSources(record), coverage: reading.timeline.coverage, ...(speaker ? { speaker } : {}) }
   }
   return { timeline: reading.timeline, records: reading.records.map(describe), originalRecords: reading.originalRecords.map(describe) }
 }

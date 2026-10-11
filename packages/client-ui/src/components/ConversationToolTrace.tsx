@@ -1,3 +1,5 @@
+import { ConversationSourceLabels } from './ConversationSourceLabels.js'
+import type { ConversationSourceDisplay } from '../lib/conversation-sources.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
@@ -5,6 +7,7 @@ import { memo, useId, useMemo, useState } from 'react'
 import { stepTitle } from '../lib/activity-step-summary.js'
 
 export type ConversationToolTraceProps = {
+  sources?: ConversationSourceDisplay | undefined
   part: ToolPart
   workspaceRoot?: string
   copyIdentity?: object
@@ -17,7 +20,7 @@ type ToolPart = Extract<AgentSessionHistoryContentPart, { kind: 'tool-call' | 't
 
 /** One observed part, in the host's original order. Calls and results are never paired here. */
 export const ConversationToolTrace = memo(function ConversationToolTrace({
-  part, workspaceRoot = '', traceId, copyIdentity, expanded, onToggle
+  part, sources, workspaceRoot = '', traceId, copyIdentity, expanded, onToggle
 }: ConversationToolTraceProps) {
   const [localOpen, setLocalOpen] = useState(false)
   const open = expanded ?? localOpen
@@ -40,7 +43,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
         }} title={name}>
         <SemanticIcon name={failed ? 'status.failed' : isCall ? 'conversation.tool-call' : 'conversation.tool-result'} size={13} aria-hidden="true" />
         <span className="conversation-tool-trace__title">{title}</span>
-        <span className="conversation-tool-trace__kind">{isCall ? 'Tool call' : 'Tool result'}</span>
+        <ConversationSourceLabels sources={sources} /><span className="conversation-tool-trace__kind">{isCall ? 'Tool call' : 'Tool result'}</span>
         {failed ? <span className="conversation-tool-trace__failure">Failed</span> : null}
         <SemanticIcon name="navigation.disclosure" className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
       </button>
