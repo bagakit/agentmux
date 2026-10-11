@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
-import { parseConnectionSetupConfigurationReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupConfigurationAction, type ConnectionSetupConfigurationReceipt, type ConnectionSetupInspect, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
+import { connectionSetupConfigurationSubject, parseConnectionSetupConfigurationReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupConfigurationEffect, type ConnectionSetupConfigurationAction, type ConnectionSetupConfigurationReceipt, type ConnectionSetupInspect, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
-import type { SetupApplicationInspection, SetupMessagingSource } from './connection-setup-inspection.js'
+import type { SetupApplicationInspection, SetupConfigurationSource } from './connection-setup-inspection.js'
 
 type Parent = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
 type Child = { receipt: ConnectionSetupConfigurationReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null }
@@ -19,7 +19,6 @@ type Owner = {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const failure = (message: string, code = 'CONNECTION_SETUP_UNCONFIRMED') => new AgentMuxError(message, code)
-const effect = 'enable-messaging'
 
 /** Explicit finite effect children in the original setup journal. No current configuration Store. */
 export class SetupApplicationConfiguration {
@@ -38,15 +37,16 @@ export class SetupApplicationConfiguration {
   private decode(record: Record<string, unknown>): Child {
     const value = JSON.parse(String(record.record_json)), receipt = parseConnectionSetupConfigurationReceipt(value.receipt)
     const recovery = parseConnectionSetupParams('connection.setup.advance', { ...receipt.input, decision: { actionId: value.recoveryActionId, value: 'continue' } })
-    if (value.effect !== effect || record.step_id !== receipt.stepId || record.operation_id !== receipt.input.operationId || record.action_id !== receipt.input.decision.actionId || record.recovery_action_id !== recovery.decision.actionId || typeof value.authenticationStepId !== 'string' || !value.authenticationStepId) throw failure('This original configuration effect has different identity.', 'CONNECTION_OPERATION_CONFLICT')
+    if (value.effect !== receipt.effect || record.step_id !== receipt.stepId || record.operation_id !== receipt.input.operationId || record.action_id !== receipt.input.decision.actionId || record.recovery_action_id !== recovery.decision.actionId || typeof value.authenticationStepId !== 'string' || !value.authenticationStepId) throw failure('This original configuration effect has different identity.', 'CONNECTION_OPERATION_CONFLICT')
     return { receipt, authenticationStepId: value.authenticationStepId, recoveryActionId: recovery.decision.actionId, privateRef: record.private_ref === null ? null : String(record.private_ref) }
   }
-  private find(operationId: string, selector?: { stepId?: string; actionId?: string }): Child | null {
+  private find(operationId: string, selector: { effect?: ConnectionSetupConfigurationEffect; stepId?: string; actionId?: string }): Child | null {
     return this.safe(() => {
-      const db = this.owner.connections.database
-      const record = selector?.stepId ? db.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect')=? AND step_id=?").get(operationId, effect, selector.stepId)
-        : selector?.actionId ? db.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect')=? AND (action_id=? OR recovery_action_id=?)").get(operationId, effect, selector.actionId, selector.actionId)
-          : db.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect')=? ORDER BY ordinal DESC LIMIT 1").get(operationId, effect)
+      const filters = ["operation_id=?", "json_extract(record_json,'$.effect') IN ('enable-messaging','use-persistent-connection')"], values: string[] = [operationId]
+      if (selector.effect) { filters.push("json_extract(record_json,'$.effect')=?"); values.push(selector.effect) }
+      if (selector.stepId) { filters.push('step_id=?'); values.push(selector.stepId) }
+      if (selector.actionId) { filters.push('(action_id=? OR recovery_action_id=?)'); values.push(selector.actionId, selector.actionId) }
+      const record = this.owner.connections.database.prepare('SELECT * FROM connection_setup_inspection WHERE ' + filters.join(' AND ') + ' ORDER BY ordinal DESC LIMIT 1').get(...values)
       return record ? this.decode(record) : null
     })
   }
@@ -56,8 +56,8 @@ export class SetupApplicationConfiguration {
     return result
   }
   private binding(row: Parent, child: Child): string {
-    const o = row.operation
-    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: true, authenticationStepId: child.authenticationStepId, sourceStepId: child.receipt.sourceStepId })
+    const o = row.operation, effect = child.receipt.effect
+    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: effect === 'enable-messaging' ? true : 'persistent-connection', authenticationStepId: child.authenticationStepId, sourceStepId: child.receipt.sourceStepId })
   }
   private envelope(value: string | null, row: Parent, child: Child): Envelope | null {
     try {
@@ -65,23 +65,23 @@ export class SetupApplicationConfiguration {
       return parsed && parsed.binding === this.binding(row, child) && parsed.stepId === child.receipt.stepId && typeof parsed.privateState === 'string' ? parsed : null
     } catch { return null }
   }
-  private adapter(row: Parent) {
+  private adapter(row: Parent, effect: ConnectionSetupConfigurationEffect) {
     const adapter = this.owner.connections.registeredAdapter(row.operation.adapterId)?.setup?.applicationConfiguration
-    return adapter?.domains.includes(row.operation.application.domain) && typeof adapter.messagingCapability === 'function' && typeof adapter.enableMessaging === 'function' ? adapter : null
+    return adapter?.domains.includes(row.operation.application.domain) && (effect === 'enable-messaging' ? typeof adapter.messagingCapability === 'function' && typeof adapter.enableMessaging === 'function' : typeof adapter.eventTransportCapability === 'function' && typeof adapter.usePersistentConnection === 'function') ? adapter : null
   }
-  private targetFact(row: Parent, unresolved: boolean): string | null {
+  private targetFact(row: Parent, effect: ConnectionSetupConfigurationEffect, unresolved: boolean): string | null {
     return this.safe(() => {
-      // Relevant local application facts only, including aliases and ordinary new-setup routes.
-      // This journal cannot assert distributed or external exactly-once behavior.
+      // Only this app, effect and original source subject participate; independent effects stay available.
       const filter = unresolved
-        ? "json_extract(i.record_json,'$.effect')='enable-messaging' AND (json_extract(i.record_json,'$.receipt.request') IS NOT 'confirmed' OR json_extract(i.record_json,'$.receipt.secureStorage') IS NOT 'stored')"
-        : "(json_extract(i.record_json,'$.effect')='enable-messaging' OR json_extract(i.record_json,'$.receipt.subject')='bot-settings')"
-      const record = this.owner.connections.database.prepare(`SELECT i.step_id FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND ${filter} ORDER BY i.ordinal DESC LIMIT 1`).get(row.operation.application.domain, row.operation.application.appId)
+        ? "json_extract(i.record_json,'$.effect')=? AND (json_extract(i.record_json,'$.receipt.request') IS NOT 'confirmed' OR json_extract(i.record_json,'$.receipt.secureStorage') IS NOT 'stored')"
+        : "(json_extract(i.record_json,'$.effect')=? OR (json_extract(i.record_json,'$.effect') IS NULL AND json_extract(i.record_json,'$.receipt.subject')=?))"
+      const values = [row.operation.application.domain, row.operation.application.appId, effect, ...(unresolved ? [] : [connectionSetupConfigurationSubject(effect)])]
+      const record = this.owner.connections.database.prepare(`SELECT i.step_id FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND ${filter} ORDER BY i.ordinal DESC LIMIT 1`).get(...values)
       return record ? String(record.step_id) : null
     })
   }
-  private currentSource(row: Parent, source: SetupMessagingSource, admittedStepId?: string): boolean {
-    return this.owner.current(row) && this.owner.inspection.messagingSourceCurrent(row, source) && this.targetFact(row, false) === (admittedStepId ?? source.receipt.stepId)
+  private currentSource(row: Parent, source: SetupConfigurationSource, effect: ConnectionSetupConfigurationEffect, admittedStepId?: string): boolean {
+    return source.receipt.subject === connectionSetupConfigurationSubject(effect) && this.owner.current(row) && this.owner.inspection.configurationSourceCurrent(row, source) && this.targetFact(row, effect, false) === (admittedStepId ?? source.receipt.stepId)
   }
   private originalTarget(row: Parent, stepId: string): NonNullable<ConnectionSetupView['applicationConfiguration']>['unresolved'] {
     return this.safe(() => {
@@ -91,43 +91,44 @@ export class SetupApplicationConfiguration {
       return parent && parent.actor.kind === row.actor.kind && parent.actor.id === row.actor.id ? { operationId: parent.operation.operationId, connectionId: parent.operation.connectionId, stepId } : undefined
     })
   }
-  private action(row: Parent, source: SetupMessagingSource): ConnectionSetupConfigurationAction {
-    return { kind: effect, expectedRevision: row.operation.revision, actionId: 'setup-enable:' + digest({ operation: row.operation, actor: row.actor, sourceStepId: source.receipt.stepId, authenticationStepId: source.authenticationStepId, desired: true }) }
+  private action(row: Parent, source: SetupConfigurationSource, effect: ConnectionSetupConfigurationEffect): ConnectionSetupConfigurationAction {
+    return { kind: effect, expectedRevision: row.operation.revision, actionId: (effect === 'enable-messaging' ? 'setup-enable:' : 'setup-persistent:') + digest({ operation: row.operation, actor: row.actor, sourceStepId: source.receipt.stepId, authenticationStepId: source.authenticationStepId, desired: effect === 'enable-messaging' ? true : 'persistent-connection' }) }
   }
-  async attach(base: ConnectionSetupView, row: Parent, context: ConnectionEnrollmentCallContext, selector: NonNullable<ConnectionSetupInspect['applicationConfiguration']> = {}): Promise<ConnectionSetupView> {
+  async attach(base: ConnectionSetupView, row: Parent, context: ConnectionEnrollmentCallContext, selector: NonNullable<ConnectionSetupInspect['applicationConfiguration']>): Promise<ConnectionSetupView> {
     await this.owner.authority(context, row)
+    const effect = selector.effect, subject = connectionSetupConfigurationSubject(effect)
     const limit = selector.limit ?? 25, before = selector.cursor === undefined ? Number.MAX_SAFE_INTEGER : Number(selector.cursor)
     if (!Number.isSafeInteger(before) || before < 1 || selector.cursor !== undefined && !/^[1-9][0-9]*$/u.test(selector.cursor)) throw failure('The original configuration history cursor is invalid.', 'INVALID_CONNECTION_SETUP_DATA')
     const records = this.safe(() => this.owner.connections.database.prepare("SELECT * FROM connection_setup_inspection WHERE operation_id=? AND json_extract(record_json,'$.effect')=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?").all(row.operation.operationId, effect, before, limit + 1))
-    const selected = this.find(row.operation.operationId, selector.selectedStepId ? { stepId: selector.selectedStepId } : undefined)
+    const selected = this.find(row.operation.operationId, selector.selectedStepId ? { effect, stepId: selector.selectedStepId } : { effect })
     const actions: ConnectionSetupConfigurationAction[] = []
     if (selected?.receipt.request === 'confirmed' && selected.receipt.secureStorage !== 'stored') actions.push({ kind: 'recover-configuration-effect', actionId: selected.recoveryActionId, expectedRevision: selected.receipt.input.expectedRevision })
-    let source: SetupMessagingSource | null = null
+    let source: SetupConfigurationSource | null = null
     let capability: NonNullable<ConnectionSetupView['applicationConfiguration']>['capability'] = 'unknown'
     let reason: NonNullable<ConnectionSetupView['applicationConfiguration']>['reason'] = 'source-unconfirmed'
-    const adapter = this.adapter(row)
+    const adapter = this.adapter(row, effect)
     if (!adapter) reason = 'adapter-unavailable'
     else {
-      source = await this.owner.inspection.messagingSource(row)
+      source = await this.owner.inspection.configurationSource(row, connectionSetupConfigurationSubject(effect))
       if (source) {
-        try { capability = await adapter.messagingCapability(source.originalReadState) } catch { /* Keep this source unconfirmed. */ }
+        try { capability = await (effect === 'enable-messaging' ? adapter.messagingCapability(source.originalReadState) : adapter.eventTransportCapability(source.originalReadState)) } catch { /* Keep this source unconfirmed. */ }
         if (!['enabled', 'disabled', 'unknown'].includes(capability)) capability = 'unknown'
       }
     }
     await this.owner.authority(context, row)
     const fresh = this.owner.read(row.operation.operationId)!
-    if (!source || !this.currentSource(fresh, source) || base.operation?.authentication?.stepId !== source.authenticationStepId || base.reason === 'connection-revised') { source = null; capability = 'unknown' }
+    if (!source || !this.currentSource(fresh, source, effect) || base.operation?.authentication?.stepId !== source.authenticationStepId || base.reason === 'connection-revised') { source = null; capability = 'unknown' }
     else if (capability !== 'unknown') reason = undefined
-    const unresolved = this.targetFact(fresh, true)
+    const unresolved = this.targetFact(fresh, effect, true)
     if (unresolved) reason = 'original-effect-unconfirmed'
-    if (source && capability === 'disabled' && !unresolved && !this.find(row.operation.operationId) && this.adapter(fresh) === adapter && base.operation?.revision === fresh.operation.revision) actions.push(this.action(fresh, source))
+    if (source && capability === 'disabled' && !unresolved && !this.find(row.operation.operationId, { effect }) && this.adapter(fresh, effect) === adapter && base.operation?.revision === fresh.operation.revision) actions.push(this.action(fresh, source, effect))
     const original = unresolved ? this.originalTarget(fresh, unresolved) : undefined
-    return { ...base, applicationConfiguration: { effects: records.slice(0, limit).map(record => this.summary(this.decode(record))), next: records.length > limit ? String(records[limit - 1]!.ordinal) : null, selected: selected ? this.summary(selected) : null, source: source?.receipt ?? null, capability, actions, ...(original ? { unresolved: original } : {}), ...(reason ? { reason } : {}) } }
+    return { ...base, applicationConfiguration: { effect, subject, effects: records.slice(0, limit).map(record => this.summary(this.decode(record))), next: records.length > limit ? String(records[limit - 1]!.ordinal) : null, selected: selected ? this.summary(selected) : null, source: source?.receipt ?? null, capability, actions, ...(original ? { unresolved: original } : {}), ...(reason ? { reason } : {}) } }
   }
   private update(row: Parent, child: Child, change: Partial<Pick<ConnectionSetupConfigurationReceipt, 'request' | 'secureStorage'>>, privateRef = child.privateRef): Child {
     return this.safe(() => {
       const next = { ...child, receipt: parseConnectionSetupConfigurationReceipt({ ...child.receipt, ...change }), privateRef }
-      const record = (c: Child) => JSON.stringify({ effect, receipt: c.receipt, authenticationStepId: c.authenticationStepId, recoveryActionId: c.recoveryActionId })
+      const record = (c: Child) => JSON.stringify({ effect: c.receipt.effect, receipt: c.receipt, authenticationStepId: c.authenticationStepId, recoveryActionId: c.recoveryActionId })
       if (record(next) === record(child) && privateRef === child.privateRef) return child
       const db = this.owner.connections.database
       db.exec('BEGIN IMMEDIATE')
@@ -159,7 +160,7 @@ export class SetupApplicationConfiguration {
   }
   private async result(row: Parent, child: Child, input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     const current = this.owner.read(row.operation.operationId)!
-    return { ...await this.attach(await this.owner.view(current, context), current, context, { selectedStepId: child.receipt.stepId }), receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: this.summary(child).request } }
+    return { ...await this.attach(await this.owner.view(current, context), current, context, { effect: child.receipt.effect, selectedStepId: child.receipt.stepId }), receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: this.summary(child).request } }
   }
   async advance(input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView | null> {
     const row = this.owner.read(input.operationId)!
@@ -174,10 +175,11 @@ export class SetupApplicationConfiguration {
     }
     // The original actor's local secure ACK is independent of all current native eligibility.
     if (previous) return repeat(previous)
-    if (!input.decision.actionId.startsWith('setup-enable:')) return null
-    const adapter = this.adapter(row), source = await this.owner.inspection.messagingSource(row)
+    const effect: ConnectionSetupConfigurationEffect | null = input.decision.actionId.startsWith('setup-enable:') ? 'enable-messaging' : input.decision.actionId.startsWith('setup-persistent:') ? 'use-persistent-connection' : null
+    if (!effect) return null
+    const adapter = this.adapter(row, effect), source = await this.owner.inspection.configurationSource(row, connectionSetupConfigurationSubject(effect))
     let capability = 'unknown'
-    if (adapter && source) { try { capability = await adapter.messagingCapability(source.originalReadState) } catch { /* No native request. */ } }
+    if (adapter && source) { try { capability = await (effect === 'enable-messaging' ? adapter.messagingCapability(source.originalReadState) : adapter.eventTransportCapability(source.originalReadState)) } catch { /* No native request. */ } }
     await this.owner.authority(context, row)
     previous = this.find(input.operationId, { actionId: input.decision.actionId })
     if (previous) return repeat(previous)
@@ -188,7 +190,7 @@ export class SetupApplicationConfiguration {
         const existing = this.find(input.operationId, { actionId: input.decision.actionId })
         if (existing) { db.exec('COMMIT'); return { child: existing, claimed: false } }
         const fresh = this.owner.read(input.operationId)!
-        if (!source || !adapter || capability !== 'disabled' || this.adapter(fresh) !== adapter || !this.currentSource(fresh, source) || this.targetFact(fresh, true) || this.find(input.operationId) || input.decision.value !== 'confirm' || fresh.operation.revision !== input.expectedRevision || this.action(fresh, source).actionId !== input.decision.actionId) throw failure('This exact enable-only action has no current original source or has an unresolved prior effect. Read that same request and current bot settings; platform continuation and existing bots remain available.', 'CONNECTION_SETUP_ACTION_STALE')
+        if (!source || !adapter || capability !== 'disabled' || this.adapter(fresh, effect) !== adapter || !this.currentSource(fresh, source, effect) || this.targetFact(fresh, effect, true) || this.find(input.operationId, { effect }) || input.decision.value !== 'confirm' || fresh.operation.revision !== input.expectedRevision || this.action(fresh, source, effect).actionId !== input.decision.actionId) throw failure('This exact scalar action has no current original source or has an unresolved prior effect. Read that same request and current setting; platform continuation and existing bots remain available.', 'CONNECTION_SETUP_ACTION_STALE')
         const receipt: ConnectionSetupConfigurationReceipt = { effect, stepId: randomUUID(), sourceStepId: source.receipt.stepId, input, request: 'dispatching', secureStorage: 'not-started' }
         const child: Child = { receipt, authenticationStepId: source.authenticationStepId, recoveryActionId: 'setup-effect-recover:' + digest(receipt), privateRef: null }
         db.prepare('INSERT INTO connection_setup_inspection(step_id,operation_id,action_id,recovery_action_id,record_json) VALUES(?,?,?,?,?)').run(receipt.stepId, input.operationId, input.decision.actionId, child.recoveryActionId, JSON.stringify({ effect, receipt, authenticationStepId: child.authenticationStepId, recoveryActionId: child.recoveryActionId }))
@@ -202,17 +204,18 @@ export class SetupApplicationConfiguration {
     this.pending.set(child.receipt.stepId, work)
     try { return await work } finally { this.live.delete(child.receipt.stepId); this.pending.delete(child.receipt.stepId) }
   }
-  private async run(row: Parent, child: Child, source: SetupMessagingSource, input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
+  private async run(row: Parent, child: Child, source: SetupConfigurationSource, input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     let original: Envelope | null = null
+    const effect = child.receipt.effect
     try {
-      const adapter = this.adapter(row)
+      const adapter = this.adapter(row, effect)
       const assertCurrent = () => {
         context.signal?.throwIfAborted()
         const fresh = this.owner.read(input.operationId)!
-        if (this.closed || this.adapter(fresh) !== adapter || !this.currentSource(fresh, source, child.receipt.stepId)) throw failure('The original configuration source changed before its native request.')
+        if (this.closed || this.adapter(fresh, effect) !== adapter || !this.currentSource(fresh, source, effect, child.receipt.stepId)) throw failure('The original configuration source changed before its native request.')
       }
       assertCurrent()
-      const result = await adapter!.enableMessaging({ operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState, assertCurrent }, context.signal)
+      const result = await (effect === 'enable-messaging' ? adapter!.enableMessaging : adapter!.usePersistentConnection)({ operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState, assertCurrent }, context.signal)
       if (result.kind === 'accepted' && typeof result.privateState === 'string') original = { binding: this.binding(row, child), stepId: child.receipt.stepId, privateState: result.privateState }
     } catch { /* Only this original request is unconfirmed; never replay it or infer health. */ }
     if (this.closed) return { operation: row.operation, challenge: null, reason: 'challenge-unavailable', receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: 'unknown' } }

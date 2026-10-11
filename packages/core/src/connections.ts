@@ -24,5 +24,5 @@ export { parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, agen
 export type { AgentExternalInteractionAuthor } from './external-author.js'
 
 export type * from './connection-setup-contract.js'
-export { connectionSetupDecisionForAction, CONNECTION_SETUP_READ_ACTIONS } from './connection-setup-contract.js'
+export { connectionSetupDecisionForAction, connectionSetupConfigurationSubject, CONNECTION_SETUP_READ_ACTIONS } from './connection-setup-contract.js'
 export * from './connection-setup-codec.js'

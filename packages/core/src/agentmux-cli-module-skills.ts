@@ -157,8 +157,12 @@ retain independent receipts, not a complete configuration snapshot or readiness.
 confirmed stored auth; original actor local recovery needs only the frozen original child/input,
 even after renewal, revision or restart. Old private results stay withheld and an unrecoverable
 old result never blocks a separate eligible new observation. Reported basic-info read permission
-is not actual app data, owning tenant or write authority. With --application-configuration, inspect locally reads original finite enable-only effects and
-the latest exact bot source. Copy an offered enable-messaging action with explicit confirm;
+is not actual app data, owning tenant or write authority. Inspect locally reads the explicitly selected scalar effect and its exact original source. Configuration selection always names its effect: use
+--application-configuration enable-messaging or --application-configuration use-persistent-connection.
+The latter reads only the exact event-settings source and offers one explicit application-wide
+switch to persistent connection. Warn that existing event consumers are affected. Already persistent
+needs no write; unknown native modes stay unknown. Its accepted write is not readback or publication.
+Unknown results are isolated by app/effect/source subject and cannot block independent bot-enable. Copy an offered enable-messaging or use-persistent-connection action with explicit confirm;
 recover-configuration-effect uses continue and only repairs its original encrypted ACK. An unknown
 effect cannot be replayed through renewal, a new setup or a known application alias; unresolved
 identifies the original actor-owned request when available. A new current read never signs that

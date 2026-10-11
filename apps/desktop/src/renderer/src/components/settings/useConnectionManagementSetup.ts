@@ -26,6 +26,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const visibleCatalog = catalog?.key === key && catalog.source === source ? catalog : null
   const visible = active && opened && reading?.key === key && reading.source === source && reading.id === selection.current && api.connections.call === source ? reading : null
   const view = visible?.value ?? null, operation = view?.operation ?? null
+  const configurationEffect = view?.applicationConfiguration?.effect ?? 'enable-messaging'
   const supported = !!record && visibleCatalog?.value?.support?.connectionRevision === record.revision && visibleCatalog.value.support.capabilities.includes('management-authentication')
   const originals = visibleCatalog?.value?.operations ?? []
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
@@ -76,7 +77,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
           const details = await source('connection.setup.inspect', {
             operationId: id,
             applicationInspection: value.applicationInspection?.selected ? { selectedStepId: value.applicationInspection.selected.stepId } : {},
-            applicationConfiguration: value.applicationConfiguration?.selected ? { selectedStepId: value.applicationConfiguration.selected.stepId } : {}
+            applicationConfiguration: { effect: value.applicationConfiguration?.effect ?? (actionKind === 'read-event-settings' ? 'use-persistent-connection' : actionKind === 'read-bot-settings' ? 'enable-messaging' : configurationEffect), ...(value.applicationConfiguration?.selected ? { selectedStepId: value.applicationConfiguration.selected.stepId } : {}) }
           })
           if (!accepts()) return
           validate(details); value = details
@@ -106,7 +107,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function choose(input: ConnectionSetupBegin) {
     setFresh(false)
     submittedActions.current.clear()
-    void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId, applicationInspection: {}, applicationConfiguration: {} }), true)
+    void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId, applicationInspection: {}, applicationConfiguration: { effect: configurationEffect } }), true)
   }
   function handoff(enrollment: ConnectionSetupEnrollmentSource) {
     if (!record || !currentSource() || !visibleCatalog?.value?.support?.capabilities.includes('enrollment-continuation')) return
@@ -118,7 +119,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function inspectOriginal(selectors: Omit<ConnectionSetupInspect, 'operationId'> = {}, originalOperationId?: string) {
     const id = originalOperationId ?? visible?.id
     if (id) void perform(id, () => source('connection.setup.inspect', {
-      operationId: id, applicationInspection: {}, applicationConfiguration: {}, ...selectors
+      operationId: id, applicationInspection: {}, applicationConfiguration: { effect: configurationEffect }, ...selectors
     }), false)
   }
   function inspect() { inspectOriginal() }

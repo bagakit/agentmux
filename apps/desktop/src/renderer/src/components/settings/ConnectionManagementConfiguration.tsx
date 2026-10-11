@@ -1,4 +1,5 @@
 import type { ConnectionRecord, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
+import { SurfaceModeSwitch } from '../SurfaceModeSwitch'
 import type { ConnectionManagementModel } from './useConnectionManagementSetup'
 
 const subjects: Record<ConnectionSetupReadSubject, string> = {
@@ -11,6 +12,12 @@ const resultLabel = (request: string, storage: string) => request === 'confirmed
 /** Presentation only: current capability and the original request remain separate facts. */
 export function connectionConfigurationSummary(view: ConnectionSetupView | null) {
   const configuration = view?.applicationConfiguration
+  if (configuration?.effect === 'use-persistent-connection') {
+    if (configuration.reason === 'original-effect-unconfirmed') return { title: 'Delivery change not confirmed', summary: 'The original application-wide request is kept. A current read does not confirm that earlier request.' }
+    if (configuration.capability === 'enabled') return { title: 'Events use a persistent connection', summary: 'The current event delivery mode is confirmed. Subscriptions, publishing and message intake are separate steps.' }
+    if (configuration.selected?.request === 'confirmed') return { title: 'Delivery change accepted', summary: 'Read the current event setting to confirm the mode. This does not publish the app.' }
+    return { title: 'Set up event delivery', summary: configuration.capability === 'disabled' ? 'Switch this application’s event delivery to a persistent connection. Existing event consumers will be affected.' : 'Read this application’s current event delivery mode before choosing a change.' }
+  }
   if (configuration?.capability === 'enabled') return { title: 'Bot messages are on', summary: 'The bot’s message capability is switched on. More setup is needed before it can chat.' }
   if (configuration?.capability === 'disabled') return { title: 'Bot messages are off', summary: configuration.actions.some(action => action.kind === 'enable-messaging')
     ? 'Turn on messaging for this bot. It will still need the remaining setup before it can chat.'
@@ -28,8 +35,12 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
 }) {
   const { view, busy } = model
   const inspection = view?.applicationInspection, configuration = view?.applicationConfiguration
-  const read = inspection?.actions.find(action => action.kind === 'read-bot-settings')
-  const enable = configuration?.actions.find(action => action.kind === 'enable-messaging')
+  const transport = configuration?.effect === 'use-persistent-connection'
+  const effect = transport ? 'use-persistent-connection' as const : 'enable-messaging' as const
+  const read = inspection?.actions.find(action => action.kind === (transport ? 'read-event-settings' : 'read-bot-settings'))
+  const modeRead = inspection?.selected?.stepId === configuration?.source?.stepId && inspection?.readResult?.subject === 'event-settings' ? inspection.readResult.transport : null
+  const modeLabel = configuration?.capability === 'enabled' ? 'Persistent connection' : modeRead === 'webhook' ? 'Webhook' : modeRead === 'function' ? 'Function' : 'Not confirmed'
+  const enable = configuration?.actions.find(action => action.kind === effect)
   const recoverRead = inspection?.actions.find(action => action.kind === 'recover-application-inspection')
   const recoverEffect = configuration?.actions.find(action => action.kind === 'recover-configuration-effect')
   const unresolved = configuration?.unresolved
@@ -43,20 +54,25 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
   // A selected original may be outside the current bounded page. Keep it visible without another Store.
   const visibleReads = readSelected && !readPage.some(receipt => receipt.stepId === readSelected.stepId) ? [readSelected, ...readPage] : readPage
   const visibleEffects = effectSelected && !effectPage.some(receipt => receipt.stepId === effectSelected.stepId) ? [effectSelected, ...effectPage] : effectPage
-  const selectedRead = (stepId: string) => model.inspectOriginal({ applicationInspection: { selectedStepId: stepId }, applicationConfiguration: configuration?.selected ? { selectedStepId: configuration.selected.stepId } : {} })
-  const selectedEffect = (stepId: string, operationId?: string) => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { selectedStepId: stepId } }, operationId)
+  const selectedRead = (stepId: string) => model.inspectOriginal({ applicationInspection: { selectedStepId: stepId }, applicationConfiguration: { effect, ...(configuration?.selected ? { selectedStepId: configuration.selected.stepId } : {}) } })
+  const selectedEffect = (stepId: string, operationId?: string) => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect, selectedStepId: stepId } }, operationId)
   const hasActivity = !!visibleReads.length || !!visibleEffects.length
   return <div className="connector-configuration" data-management-configuration>
+    {current && (model.catalog?.value?.support?.capabilities.includes('persistent-event-transport') || transport) ? <SurfaceModeSwitch value={effect} active={current} ariaLabel="Bot setup step" options={[
+      { value: 'enable-messaging', label: 'Bot messages' }, { value: 'use-persistent-connection', label: 'Event delivery' }
+    ]} onChange={effect => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect } })} /> : null}
     {current ? <div className="connector-enrollment__action" aria-busy={busy}>
+      {busy && !model.reading?.actionKind ? <p className="settings-group-note" role="status">Reading setup actions…</p> : null}
+      {transport ? <p className="settings-group-note" data-management-current-transport>Last checked event delivery: {modeLabel}</p> : null}
       {uncertainEffect && originalEffect ? <button className="primary-button" data-management-original-effect disabled={busy} onClick={() => selectedEffect(originalEffect.stepId, originalEffect.operationId)}>{busy ? 'Checking original request…' : 'Check original request'}</button> : null}
-      {enable ? <><button className="primary-button" data-management-enable disabled={busy} onClick={() => model.advance(enable)}>{busy ? 'Turning on messages…' : 'Turn on bot messages'}</button><p className="settings-group-note">This requests messaging for {record.config.label}. Publishing is a separate step.</p></> : null}
-      {read ? <button className={primaryRead ? 'primary-button' : 'small-button'} data-management-read-bot={!acceptedEffect ? '' : undefined} data-management-current-setting={acceptedEffect ? '' : undefined} disabled={busy} onClick={() => model.advance(read)}>{busy && model.reading?.actionKind === 'read-bot-settings' ? 'Checking bot settings…' : acceptedEffect ? 'Check current setting' : configuration?.source ? 'Check setting again' : 'Check bot settings'}</button> : null}
+      {enable ? <><button className="primary-button" data-management-enable={!transport ? '' : undefined} data-management-use-persistent={transport ? '' : undefined} disabled={busy} onClick={() => model.advance(enable)}>{busy && model.reading?.actionKind === effect ? transport ? 'Changing event delivery…' : 'Turning on messages…' : transport ? 'Use persistent connection' : 'Turn on bot messages'}</button><p className="settings-group-note">{transport ? `This changes event delivery for the whole ${record.config.label} application, including existing event consumers. This step does not add or remove subscriptions, or publish the app.` : `This requests messaging for ${record.config.label}. Publishing is a separate step.`}</p></> : null}
+      {read ? <button className={primaryRead ? 'primary-button' : 'small-button'} data-management-read-bot={!transport && !acceptedEffect ? '' : undefined} data-management-read-events={transport ? '' : undefined} data-management-current-setting={acceptedEffect ? '' : undefined} disabled={busy} onClick={() => model.advance(read)}>{busy && model.reading?.actionKind === read.kind ? 'Checking current setting…' : acceptedEffect ? 'Check current setting' : configuration?.source ? 'Check setting again' : transport ? 'Check event delivery' : 'Check bot settings'}</button> : null}
       {!inspection && !configuration || model.reading?.configurationIssue ? <><p className="connector-check-feedback" role="status">Bot setup actions could not be read. Your confirmed account is kept.</p><button className="small-button" data-management-inspect disabled={busy} onClick={model.inspect}>Check setup actions</button></> : null}
-      {configuration?.capability === 'enabled' ? <p className="settings-group-note">Complete the remaining platform setup in the developer console, then return to check the connection.</p> : null}
+      {configuration?.capability === 'enabled' && !transport ? <p className="settings-group-note">Complete the remaining platform setup in the developer console, then return to check the connection.</p> : null}
       <button className="small-button" data-management-console onClick={() => void onConsole()}>Open developer console</button>
     </div> : null}
     {uncertainEffect ? <div className="connector-configuration__notice" data-management-unresolved role="status">
-      <p>{configuration?.capability === 'enabled' ? 'The current setting is on, but the earlier turn-on request still has no confirmed result.' : 'An earlier turn-on request for this application is still unconfirmed.'}</p>
+      <p>{configuration?.capability === 'enabled' ? transport ? 'The current delivery mode is persistent, but the earlier change still has no confirmed result.' : 'The current setting is on, but the earlier turn-on request still has no confirmed result.' : transport ? 'An earlier event delivery change for this application is still unconfirmed.' : 'An earlier turn-on request for this application is still unconfirmed.'}</p>
       {unresolved && unresolved.connectionId !== record.config.connectionId ? <><p>It belongs to another saved bot entry. Return to your bot library to find that original request.</p><button className="small-button" data-management-library onClick={onBack}>Back to bot library</button></> : null}
       {!current && originalEffect ? <button className="small-button" data-management-original-effect disabled={busy} onClick={() => selectedEffect(originalEffect.stepId, originalEffect.operationId)}>Check original request</button> : null}
       {unresolved ? <details className="connector-diagnostics"><summary>Original request location</summary><dl className="connector-identity"><div><dt>Saved bot entry</dt><dd><code>{unresolved.connectionId}</code></dd></div><div><dt>Original request</dt><dd><code>{unresolved.operationId}</code></dd></div></dl></details> : null}
@@ -64,17 +80,17 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
     {recoverRead || recoverEffect ? <div className="connector-configuration__notice" role="status">
       <p>The original result was received. Finish saving it locally; this does not send another platform request.</p>
       {recoverRead ? <button className="small-button" data-management-recover-read disabled={busy} onClick={() => model.advance(recoverRead)}>Finish saving check result</button> : null}
-      {recoverEffect ? <button className="small-button" data-management-recover-effect disabled={busy} onClick={() => model.advance(recoverEffect)}>Finish saving turn-on result</button> : null}
+      {recoverEffect ? <button className="small-button" data-management-recover-effect disabled={busy} onClick={() => model.advance(recoverEffect)}>{transport ? 'Finish saving delivery result' : 'Finish saving turn-on result'}</button> : null}
     </div> : null}
     {hasActivity ? <details className="connector-optional connector-configuration__activity" data-management-activity>
       <summary>Original setup activity</summary>
       <p className="settings-group-note">These are results of earlier actions. Viewing them does not check or change the platform.</p>
       {visibleReads.length ? <div className="connector-configuration__results" aria-label="Original checks">{visibleReads.map(receipt => <button className="connector-configuration__result" key={receipt.stepId} data-management-read-result={receipt.stepId} aria-pressed={readSelected?.stepId === receipt.stepId} onClick={() => selectedRead(receipt.stepId)}>
         <span>{receipt.subject ? subjects[receipt.subject] : 'Application access check'}</span><small>{resultLabel(receipt.request, receipt.secureStorage)}</small>{readSelected?.stepId === receipt.stepId ? <small className="connector-configuration__selection">Selected original result</small> : null}<code>{receipt.stepId}</code>
-      </button>)}{inspection?.next ? <button className="small-button" data-management-more-reads disabled={busy} onClick={() => model.inspectOriginal({ applicationInspection: { cursor: inspection.next! }, applicationConfiguration: {} })}>More checks</button> : null}</div> : null}
-      {visibleEffects.length ? <div className="connector-configuration__results" aria-label="Original turn-on requests">{visibleEffects.map(receipt => <button className="connector-configuration__result" key={receipt.stepId} data-management-effect-result={receipt.stepId} aria-pressed={configuration?.selected?.stepId === receipt.stepId} onClick={() => selectedEffect(receipt.stepId)}>
-        <span>Turn on bot messages</span><small>{resultLabel(receipt.request, receipt.secureStorage)}</small>{configuration?.selected?.stepId === receipt.stepId ? <small className="connector-configuration__selection">Selected original result</small> : null}<code>{receipt.stepId}</code>
-      </button>)}{configuration?.next ? <button className="small-button" data-management-more-effects disabled={busy} onClick={() => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { cursor: configuration.next! } })}>More turn-on requests</button> : null}</div> : null}
+      </button>)}{inspection?.next ? <button className="small-button" data-management-more-reads disabled={busy} onClick={() => model.inspectOriginal({ applicationInspection: { cursor: inspection.next! }, applicationConfiguration: { effect } })}>More checks</button> : null}</div> : null}
+      {visibleEffects.length ? <div className="connector-configuration__results" aria-label="Original configuration requests">{visibleEffects.map(receipt => <button className="connector-configuration__result" key={receipt.stepId} data-management-effect-result={receipt.stepId} aria-pressed={configuration?.selected?.stepId === receipt.stepId} onClick={() => selectedEffect(receipt.stepId)}>
+        <span>{receipt.effect === 'use-persistent-connection' ? 'Use persistent connection' : 'Turn on bot messages'}</span><small>{resultLabel(receipt.request, receipt.secureStorage)}</small>{configuration?.selected?.stepId === receipt.stepId ? <small className="connector-configuration__selection">Selected original result</small> : null}<code>{receipt.stepId}</code>
+      </button>)}{configuration?.next ? <button className="small-button" data-management-more-effects disabled={busy} onClick={() => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect, cursor: configuration.next! } })}>More configuration requests</button> : null}</div> : null}
     </details> : null}
     {model.reading?.configurationIssue ? <details className="connector-diagnostics"><summary>Setup action details</summary><p className="connector-enrollment__technical">{model.reading.configurationIssue}</p></details> : null}
   </div>

@@ -23,6 +23,10 @@ export interface ConnectionSetupAdapter {
     readonly domains: readonly string[]
     /** Local interpretation of the exact already-bound raw bot read, with zero network effects. */
     messagingCapability(originalReadState: string): Promise<ConnectionSetupCapability>
+    /** Local interpretation of the original raw event mode; missing native fields stay unknown. */
+    eventTransportCapability(originalReadState: string): Promise<ConnectionSetupCapability>
+    /** Exactly one event transport scalar request; subscriptions and publication are separate. */
+    usePersistentConnection(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
     /** Exactly one native enable-only request, never menu, modes or publication. */
     enableMessaging(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
   }
