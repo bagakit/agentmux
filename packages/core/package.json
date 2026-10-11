@@ -26,6 +26,10 @@
       "types": "./dist/agent-session-continuity.d.ts",
       "import": "./dist/agent-session-continuity.js"
     },
+    "./agent-session-continuity-control": {
+      "types": "./dist/agent-session-continuity-control.d.ts",
+      "import": "./dist/agent-session-continuity-control.js"
+    },
     "./note-provenance": {
       "types": "./dist/note-provenance.d.ts",
       "import": "./dist/note-provenance.js"
