@@ -1,29 +1,30 @@
 import type { AgentTimelineItem } from '@agentmux/core'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
-import { conversationItemRef } from '@agentmux/core/conversation'
+import { type AgentConversationRecord, conversationItemRef } from '@agentmux/core/conversation'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { RecordedToolRow } from './WorkflowObservation.js'
 import { describeActivityRecordTime } from '../lib/activity-record-time.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 /** Exact captured record metadata. A failed native reader cannot hide a confirmed Hook reply. */
-export function CapturedConversationMessage({ item, replyObservation, ...props }: Omit<ConversationMessageProps, 'content' | 'messageId' | 'createdAt' | 'status'> & {
+export function CapturedConversationMessage({ item, record, replyObservation, ...props }: Omit<ConversationMessageProps, 'content' | 'messageId' | 'createdAt' | 'status'> & {
   item: AgentTimelineItem
+  record?: AgentConversationRecord
   /** Local reading role only; never asserts native coverage or a record join. */
   replyObservation?: { compact: boolean }
 }) {
-  const itemRef = conversationItemRef({ agentSessionId: item.agentSessionId, ...(props.executionHostId ? { executionHostId: props.executionHostId } : {}), source: { kind: 'captured', recordId: item.id } })
-  const message = <ConversationMessage {...props} {...(itemRef ? { itemRef } : {})} messageId={item.id} content={item.content ?? ''} status={item.status} createdAt={item.createdAt}
+  const itemRef = record ? conversationItemRef(record) : conversationItemRef({ agentSessionId: item.agentSessionId, ...(props.executionHostId ? { executionHostId: props.executionHostId } : {}), source: { kind: 'captured', recordId: item.id } })
+  const message = <ConversationMessage {...props} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
     messageDetails={<><dl className="conversation-input-details__facts">
       <dt>Record source</dt><dd>{item.source}</dd>
       <dt>Captured record</dt><dd><code>{item.id}</code></dd>
       <dt>Session</dt><dd><code>{item.agentSessionId}</code></dd>
       {item.eventName ? <><dt>Recorded event</dt><dd>{item.eventName}</dd></> : null}
     </dl>{props.messageDetails}</>} />
-  return replyObservation ? <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} compact={replyObservation.compact} reveal={props.located === true}>{message}</ReplyObservation> : message
+  return <ReplyObservation key={JSON.stringify([item.agentSessionId, item.source, item.id])} item={item} observation={Boolean(replyObservation)} compact={replyObservation?.compact ?? false} reveal={props.located === true}>{message}</ReplyObservation>
 }
 
-function ReplyObservation({ item, compact, reveal, children }: { item: AgentTimelineItem; compact: boolean; reveal: boolean; children: ReactNode }) {
+function ReplyObservation({ item, observation, compact, reveal, children }: { item: AgentTimelineItem; observation: boolean; compact: boolean; reveal: boolean; children: ReactNode }) {
   const [choice, setChoice] = useState<boolean>()
   const [readOnce, setReadOnce] = useState(!compact)
   const [, selectionChanged] = useState(0)
@@ -36,7 +37,7 @@ function ReplyObservation({ item, compact, reveal, children }: { item: AgentTime
   if (selection && !selection.isCollapsed && selection.rangeCount && body.current) {
     try { selected = selection.getRangeAt(0).intersectsNode(body.current) } catch { selected = true }
   }
-  const expanded = choice ?? (!compact || selected)
+  const expanded = !observation || (choice ?? (!compact || selected))
   useEffect(() => {
     if (!selected || !document) return
     const update = () => selectionChanged(value => value + 1)
@@ -44,12 +45,12 @@ function ReplyObservation({ item, compact, reveal, children }: { item: AgentTime
     return () => document.removeEventListener('selectionchange', update)
   }, [selected, document])
   const preview = (item.content ?? '').replace(/\s+/gu, ' ').trim().slice(0, 180)
-  return <div className="conversation-reply-observation" data-captured-reply-observation={item.id} tabIndex={-1}
-    data-message-source-key={conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id })}>
-    <RecordedToolRow className="log-row" observation={{ id: item.id, title: '回复观察', source: item.source, persistentSource: true, status: item.status,
+  return <div className={observation ? 'conversation-reply-observation' : undefined} data-captured-reply-observation={observation ? item.id : undefined} tabIndex={-1}
+    data-message-source-key={observation ? conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id }) : undefined}>
+    {observation ? <RecordedToolRow className="log-row" observation={{ id: item.id, title: '回复观察', source: item.source, persistentSource: true, status: item.status,
       recordedTime: describeActivityRecordTime(item.createdAt, item.createdAt, Number.NaN) }}
       icon={<SemanticIcon name="conversation.assistant-message" size={12} />} expanded={expanded} controls={bodyId}
-      onToggle={() => { setChoice(!expanded); if (!expanded) setReadOnce(true) }} />
+      onToggle={() => { setChoice(!expanded); if (!expanded) setReadOnce(true) }} /> : null}
     {!expanded && preview ? <p className="conversation-reply-observation__preview">{preview}</p> : null}
     <div ref={body} id={bodyId} hidden={!expanded} inert={!expanded}>{expanded || readOnce ? children : null}</div>
   </div>

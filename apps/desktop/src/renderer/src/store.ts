@@ -929,7 +929,7 @@ type AppState = {
   setFocusTimelineRuler(preferences: FocusRulerPreferences): void
   focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection, options?: { navigate: boolean }): boolean
   conversationRevealIntent: ConversationRevealIntent | null
-  revealConversationItem(itemRef: ConversationItemRef): Promise<MailboxMessageNavigationResult>
+  revealConversationItem(itemRef: ConversationItemRef, routeHostId?: string): Promise<MailboxMessageNavigationResult>
   selectMainRegion(reference: WorkbenchProjectionSelection, expected?: AgentMuxDesktopSpaceSelection | null): boolean
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
@@ -7140,11 +7140,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.reportError(new Error(result.issue ?? 'The selected Agent occurrence is unconfirmed. Its workface is kept; choose an exact original location.'), { kind: 'indeterminate' })
     return false
   },
-  revealConversationItem(itemRef) {
+  revealConversationItem(itemRef, routeHostId = itemRef.hostId) {
     get().conversationRevealIntent?.complete({ kind: 'cancelled' })
     const state = get(), reference = state.agentFocus.execution.reference
     const session = sessionPresentationById(state.sessions).get(itemRef.agentSessionId)
-    if (!reference || session?.kind !== 'agent' || session.control.hostId !== itemRef.hostId ||
+    if (!reference || session?.kind !== 'agent' || session.control.hostId !== routeHostId ||
       !confirmedFocusReference(state, itemRef.agentSessionId, reference) ||
       !sameWorkbenchProjectionSelection(mainRegionReference(state.workbenchSpaceSelection), reference)) {
       return Promise.resolve({ kind: 'unavailable', itemRef: { ...itemRef, source: { ...itemRef.source } }, message: 'Original location is unconfirmed. Choose its confirmed existing location; the recorded content and workface are kept.' })
@@ -7156,11 +7156,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       let unsubscribe = () => {}
       const changedIntent = () => intent.complete({ kind: 'cancelled' })
       const intent: ConversationRevealIntent = {
-        itemRef: frozenRef, reference: frozenLocation, claimed: false,
+        itemRef: frozenRef, routeHostId, reference: frozenLocation, claimed: false,
         isCurrent: () => {
           const current = get(), live = sessionPresentationById(current.sessions).get(frozenRef.agentSessionId)
           return !finished && current.conversationRevealIntent === intent && current.mainSurface === state.mainSurface &&
-            live?.kind === 'agent' && live.control.hostId === frozenRef.hostId &&
+            live?.kind === 'agent' && live.control.hostId === routeHostId &&
             sameWorkbenchProjectionSelection(mainRegionReference(current.workbenchSpaceSelection), frozenLocation)
         },
         complete: result => {

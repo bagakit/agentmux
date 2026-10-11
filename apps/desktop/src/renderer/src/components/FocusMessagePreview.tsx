@@ -1,3 +1,4 @@
+import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentSessionHistoryResourceRequest } from '@agentmux/core'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
@@ -36,8 +37,9 @@ export type FocusMessageReader = {
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** One inspected recorded message. Current Context facts never become its historical author or Run. */
-export function FocusMessagePreview({ autoFocus = true, message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, timeFormatters, onSelect, onReveal, onClose, onMouseEnter, onMouseLeave }: {
+export function FocusMessagePreview({ active = true, autoFocus = true, message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, timeFormatters, onSelect, onReveal, onClose, onMouseEnter, onMouseLeave }: {
   autoFocus?: boolean
+  active?: boolean
   describeSpeaker: FocusDescribeSpeaker
   message: ConversationRecord | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
@@ -69,7 +71,7 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
   const branch = sender?.workspace?.branch ?? hierarchy?.worktrees.find(item => item.hostId === sender?.hostId && item.path === sender.workspacePath)?.branch
   const project = lane?.projectWorkspaceId ? lane.labels[0] : sender?.workspace?.name
   const targetName = recipient?.name ?? recipientName ?? message?.agentSessionId ?? 'Context'
-  const roleName = message?.role === 'observation' ? 'Reply observation' : system ? 'System message' : speaker?.role === 'external' ? 'External message' : speaker?.role === 'human' ? 'Human message' : agent ? reply ? 'Agent reply' : 'Agent input' : 'Prompt · Sender not recorded'
+  const roleName = message?.role === 'interaction' ? 'Recorded interaction' : message?.role === 'observation' ? 'Reply observation' : system ? 'System message' : speaker?.role === 'external' ? 'External message' : speaker?.role === 'human' ? 'Human message' : agent ? reply ? 'Agent reply' : 'Agent input' : 'Prompt · Sender not recorded'
   const executionHostId = message?.executionHostId, agentSessionId = message?.agentSessionId
   const readHistoryResource = useCallback(async (input: AgentSessionHistoryResourceRequest) => {
     if (!executionHostId || !agentSessionId) throw new Error('The original conversation Host is unknown. Its recorded text remains readable; reopen its original source to read this resource.')
@@ -146,7 +148,7 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
     if (!onReveal) { navigate(recipient); return }
     returnFocus.current = false
     setNavigationFeedback({ kind: 'pending', message: 'Locating original record…' })
-    const result = await onReveal(itemRef)
+    const result = await onReveal(itemRef, message.executionHostId)
     if (generation !== revealGeneration.current || inspectedMessage.current !== messageId) return
     if (result.kind === 'located') onClose()
     else setNavigationFeedback(result.kind === 'unavailable' ? { kind: 'unavailable', message: result.message } : null)
@@ -171,7 +173,7 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
       <div className="recent-focus__input-list" aria-label="Available conversation records">{reader.messages.map(item => {
         const itemSpeaker = item.speaker!
         const itemIdentity = describeSpeaker(itemSpeaker)
-        const authorLabel = item.role === 'observation' ? 'Reply observation' : itemSpeaker.role === 'external' ? `External message from ${itemIdentity.name}` : itemSpeaker.role === 'system' ? `System message from ${itemSpeaker.id}` : itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `${item.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} from ${itemIdentity.name} · Sender ${itemSpeaker.id}` : 'Input, sender not recorded'
+        const authorLabel = item.role === 'interaction' ? 'Recorded interaction' : item.role === 'observation' ? 'Reply observation' : itemSpeaker.role === 'external' ? `External message from ${itemIdentity.name}` : itemSpeaker.role === 'system' ? `System message from ${itemSpeaker.id}` : itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `${item.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} from ${itemIdentity.name} · Sender ${itemSpeaker.id}` : 'Input, sender not recorded'
         const excerpt = item.content || (item.kind === 'system-message' ? 'System message with resources' : 'Input with resources')
         return <button type="button" key={item.id} data-input-message-id={item.input?.id} data-input-source={item.input?.source.kind} data-conversation-record-id={item.id} data-conversation-role={item.role} data-record-kind={item.kind} data-record-source={item.source.kind} data-record-raw-id={item.rawId} data-conversation-item-ref={conversationItemRef(item) ? JSON.stringify(conversationItemRef(item)) : undefined} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${excerpt}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
           <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} mote={itemIdentity.mote} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{excerpt}</span><small title={describeConversationRecordSource(item).title}>{describeConversationRecordSource(item).caption} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
@@ -192,7 +194,8 @@ export function FocusMessagePreview({ autoFocus = true, message, sender, recipie
       <dt>Current topic</dt><dd>{topic && !topic.readError ? topic.title || 'Untitled topic' : 'Not recorded'}</dd>
     </dl>{sender ? <p className="recent-focus__sender-work">Current: {sender.stateLabel} · {sender.detail}</p> : null}
       <p className="recent-focus__sender-run">Sender Run not recorded · Execution relationship unknown</p></details> : null}
-    <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind} data-conversation-role={message.role}><ConversationMessage messageId={message.input?.id ?? message.id}
+    {message.coverage ? <ConversationCoverage coverage={message.coverage} record={message} {...(onReveal ? { onLocate: onReveal } : {})} /> : null}
+    <div className="recent-focus__message-body" data-input-preview-id={message.input?.id} data-input-source={message.input?.source.kind} data-record-preview-id={message.id} data-record-source={message.source.kind} data-conversation-role={message.role}><ConversationMessage active={active} {...(message.event ? { conversationEvent: message.event } : {})} messageId={message.input?.id ?? message.id}
       speaker={speaker!} recordedIdentity
       describeSpeaker={describeSpeaker} {...(message.input ? { inputSource: message.input.source } : {})} conversationSessionId={message.agentSessionId}
       {...(conversationItemRef(message) ? { itemRef: conversationItemRef(message)! } : {})}

@@ -1,4 +1,8 @@
-import type { ConversationItemRef } from '@agentmux/core/conversation'
+import { conversationItemRef } from '@agentmux/core/conversation'
+import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
+import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
+import { type AgentConversationRecord, type ConversationItemRef } from '@agentmux/core/conversation'
+import { projectConversationReading, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import { ConversationToolPayload } from '@agentmux/client-ui/components/ConversationToolPayload'
@@ -7,7 +11,7 @@ import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
-import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -49,7 +53,7 @@ import type { ConversationProcessProps } from '@agentmux/client-ui/components/Co
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
-import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow } from '@agentmux/client-ui/components/WorkflowObservation'
+import { RecordedToolRow as WorkflowToolRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
@@ -58,7 +62,6 @@ import type { ConversationRevealRequest, RevealConversationItem } from '../lib/m
 const ThemeFileTextIcon = semanticIconComponent('file.text')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 const ThemeActionCurrentIcon = semanticIconComponent('action.current')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
@@ -91,98 +94,33 @@ function Glyph({ kind, toolName, size = 12 }: { kind: AgentTimelineItem['kind'];
  * stretch of lifecycle noise that sits between a prompt and its answer.
  */
 type Segment = (
-  | { kind: 'item'; item: AgentTimelineItem }
-  | { kind: 'run'; id: string; items: AgentTimelineItem[] }
+  | { kind: 'item'; item: AgentTimelineItem; record?: ConversationRecord }
   | { kind: 'user-message'; message: AgentSessionUserMessage }) & { beforeRecordId?: string }
 
-type RawEntry =
-  | { type: 'timeline'; item: AgentTimelineItem; time: number }
-  | { type: 'user-message'; message: AgentSessionUserMessage; time?: number }
-
-/** A Hook snapshot is an observation, never an inferred second utterance or native join. */
-function isReplyObservation(item: AgentTimelineItem): boolean {
-  return item.source === 'native-hook' && item.kind === 'assistant_message'
-    && item.authorHuman !== true && item.authorAgentSessionId === undefined && item.authorExternal === undefined
-}
-
-function buildActivityEntries(
-  sourceItems: AgentTimelineItem[],
-  userMessages?: readonly AgentSessionUserMessage[],
-  nativePage?: AgentSessionHistoryPage | null
-): {
-  unifiedItems: ConversationAxisItem[]
-  segments: Segment[]
-} {
-  // Host diagnostics remain queryable in the original timeline, outside conversation content.
-  const items = sourceItems.filter(item => !(item.kind === 'system_message' && item.source === 'agentmux' && item.id.startsWith('device-operation:')))
+/** Positions only adapt the already ordered Core events to retained source renderers. */
+function buildActivityEntries(sessionId: string, sourceItems: AgentTimelineItem[], timeline: AgentTimelineSnapshot | undefined,
+  userMessages?: readonly AgentSessionUserMessage[], nativePage?: AgentSessionHistoryPage | null, executionHostId?: string) {
+  const projection = projectConversationReading({ agentSessionId: sessionId, executionHostId, historyPage: nativePage ?? undefined,
+    timeline: timeline?.items === sourceItems ? timeline : { ...(timeline?.agentSessionId === sessionId ? timeline : { revision: 0 }), agentSessionId: sessionId, items: sourceItems } })
+  const records = projection.records
   const segments: Segment[] = []
-  let run: AgentTimelineItem[] = []
-  let runBefore: string | undefined
-  const flush = (): void => {
-    if (run.length === 0) return
-    // A single hook step is cheaper to read inline than behind a disclosure.
-    const position = runBefore === undefined ? {} : { beforeRecordId: runBefore }
-    if (run.length === 1) segments.push({ kind: 'item', item: run[0]!, ...position })
-    else segments.push({ kind: 'run', id: `run-${run[0]!.id}`, items: run, ...position })
-    run = []
-  }
-
-  // Replace only the exact captured record with its richer input projection,
-  // retaining the original timeline order even when its clock moves backwards.
-  const captured = new Map((userMessages ?? []).filter(message => message.source.kind === 'captured').map(message => [message.rawId, message]))
-  const represented = new Set<string>()
-  const original: RawEntry[] = items.map(item => {
-    const message = (item.kind === 'user_message' || item.source === 'user') ? captured.get(item.id) : undefined
-    if (!message) return { type: 'timeline', item, time: item.createdAt }
-    represented.add(message.id)
-    return { type: 'user-message', message, time: item.createdAt }
-  })
-  const stream: RawEntry[] = []
-  let at = 0
-  for (const message of userMessages ?? []) {
-    if (represented.has(message.id)) continue
-    while (at < original.length && message.recordedAt !== undefined && original[at]!.time !== undefined && original[at]!.time! <= message.recordedAt) stream.push(original[at++]!)
-    stream.push({ type: 'user-message', message, ...(message.recordedAt === undefined ? {} : { time: message.recordedAt }) })
-  }
-  stream.push(...original.slice(at))
-
   const unifiedItems: ConversationAxisItem[] = []
-
-  let nativeIndex = 0
-  for (const entry of stream) {
-    // A monotonic merge preserves both original source sequences. A known time
-    // positions a foreign record; it never sorts or rewrites the native source.
-    if (entry.time !== undefined && Number.isFinite(entry.time)) while (nativeIndex < (nativePage?.items.length ?? 0)) {
-      const nativeTime = nativePage!.items[nativeIndex]!.startedAt
-      if (nativeTime !== undefined && Number.isFinite(nativeTime) && nativeTime > entry.time) break
-      nativeIndex++
-    }
-    const beforeRecordId = nativePage?.items[nativeIndex]?.id
-    const position = beforeRecordId === undefined ? {} : { beforeRecordId }
-    if (entry.type === 'user-message') {
-      flush()
-      segments.push({ kind: 'user-message', message: entry.message, ...position })
-      unifiedItems.push(entry.message)
-    } else {
-      unifiedItems.push(entry.item)
-      if (nativePage) {
-        // The shared sequence groups individual source placements once, across both sources.
-        flush()
-        segments.push({ kind: 'item', item: entry.item, ...position })
-      } else if (entry.item.source === 'native-hook' && !isConversationTurn(entry.item)) {
-        if (run.length && beforeRecordId !== runBefore) flush()
-        runBefore = beforeRecordId
-        run.push(entry.item)
-      } else {
-        flush()
-        segments.push({ kind: 'item', item: entry.item, ...position })
-      }
-    }
+  let beforeRecordId: string | undefined
+  for (let index = records.length - 1; index >= 0; index--) {
+    const record = records[index]!
+    if (record.original.kind === 'native') { beforeRecordId = record.rawId; continue }
+    const item = record.original.item
+    unifiedItems.push(item)
+    segments.push({ kind: 'item', item, record, ...(beforeRecordId === undefined ? {} : { beforeRecordId }) })
   }
-  flush()
-  return { unifiedItems, segments }
+  segments.reverse(); unifiedItems.reverse()
+  // These are already projected Core inputs supplied by a legacy input-only caller.
+  // Without an original page they remain readable in source order, never time-merged.
+  if (!nativePage) for (const message of userMessages ?? []) if (message.source.kind === 'native') {
+    segments.push({ kind: 'user-message', message }); unifiedItems.push(message)
+  }
+  return { records, originalRecords: projection.originalRecords, coverage: projection.timeline.coverage, unifiedItems, segments }
 }
-
 
 function Row({
   item,
@@ -280,51 +218,6 @@ export function DiffBlock({ diff }: { diff: ToolDiff }): JSX.Element {
   )
 }
 
-function Run({ items, origin, workspaceRoot, disclosure }: { items: AgentTimelineItem[]; origin: number; workspaceRoot: string; disclosure?: ConversationProcessProps['disclosure'] }) {
-  const [localOpen, setOpen] = useState(false)
-  const open = disclosure?.expanded ?? localOpen
-  const [showAll, setShowAll] = useState(false)
-  const [presentedIds, setPresentedIds] = useState<Set<string>>(() => new Set())
-  const visible = (item: AgentTimelineItem, index: number): boolean =>
-    showAll || items.length <= 10 || presentedIds.has(item.id) || disclosure?.steps.has(item.id) === true || index >= items.length - 6 || item.status !== 'complete'
-  // Only disclosure intent is retained. Records stay in the original Timeline snapshot.
-  // A status change must never remove a row the user has already read or selected.
-  useLayoutEffect(() => {
-    if (!open) return
-    disclosure?.onStepsPresented?.(items.filter(visible).map(item => item.id))
-    setPresentedIds((previous) => {
-      const next = new Set(previous)
-      items.forEach((item, index) => {
-        if (visible(item, index)) next.add(item.id)
-      })
-      return next.size === previous.size ? previous : next
-    })
-  }, [items, open, showAll, disclosure])
-  if (items.length === 0) return null
-  const hiddenCount = items.filter((item, index) => !visible(item, index)).length
-  const failed = items.some((item) => item.status === 'failed')
-  const streaming = items.some((item) => item.status === 'streaming')
-  const complete = items.every((item) => item.status === 'complete')
-  // This is the recorded range of these observations, not a Run execution duration.
-  const lastRecordedAt = Math.max(...items.map((item) => item.updatedAt))
-  const recordedTime = describeActivityRecordTime(items[0]!.createdAt, lastRecordedAt, origin)
-  return <WorkflowCard compact observation={{
-    id: `observed-${items[0]!.id}`,
-    label: '执行过程',
-    stepCount: items.length,
-    ...(failed ? { status: 'failed' as const } : streaming ? { status: 'streaming' as const } : complete ? { status: 'complete' as const } : {}),
-    streaming,
-    recordedTime
-  }} expanded={open} onExpandedChange={expanded => { setOpen(expanded); disclosure?.onExpandedChange(expanded) }}>
-    {hiddenCount > 0 ? <button type="button" className="wf-observation__more" onClick={() => setShowAll(true)}>
-      <ThemeNavigationDisclosureIcon size={12} aria-hidden="true" />Show {hiddenCount} more recorded steps
-    </button> : null}
-    {items.map((item, index) => visible(item, index) ? <Row key={item.id} item={item} origin={origin}
-      showSource={index === 0} workspaceRoot={workspaceRoot}
-      {...(disclosure ? { ...(disclosure.steps.has(item.id) ? { expanded: disclosure.steps.get(item.id)! } : {}), onExpandedChange: expanded => disclosure.onStepExpandedChange(item.id, expanded) } : {})} /> : null)}
-  </WorkflowCard>
-}
-
 /** A segment paired with the half-open range of event indices it covers, so a position on the ruler
  *  can find the row that hosts that event and the band can read which events are on screen. */
 type PlacedSegment = { entry: Segment; key: string; from: number; to: number }
@@ -333,8 +226,8 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
   const placed: PlacedSegment[] = []
   let index = 0
   for (const entry of segments) {
-    const size = entry.kind === 'run' ? entry.items.length : 1
-    const identity = entry.kind === 'run' ? entry.id : entry.kind === 'user-message' ? entry.message.id : entry.item.id
+    const size = 1
+    const identity = entry.kind === 'user-message' ? entry.message.id : entry.item.id
     const key = JSON.stringify([entry.kind, identity])
     placed.push({ entry, key, from: index, to: index + size - 1 })
     index += size
@@ -345,21 +238,17 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
 type SegmentLayout = { key: string; kind: Segment['kind']; id: string; ids: string[]; beforeRecordId?: string }
 function segmentLayout({ entry, key }: PlacedSegment): SegmentLayout {
   return { key, kind: entry.kind,
-    id: entry.kind === 'run' ? entry.id : entry.kind === 'item' ? entry.item.id : entry.message.id,
-    ids: entry.kind === 'run' ? entry.items.map(item => item.id) : [entry.kind === 'item' ? entry.item.id : entry.message.id],
+    id: entry.kind === 'item' ? entry.item.id : entry.message.id,
+    ids: [entry.kind === 'item' ? entry.item.id : entry.message.id],
     ...(entry.beforeRecordId === undefined ? {} : { beforeRecordId: entry.beforeRecordId }) }
 }
 /** Reuse committed grouping/placement choices, resolving bodies from current source records. */
 function retainSegmentLayout(layout: readonly SegmentLayout[], current: readonly Segment[]): Segment[] {
-  const timeline = new Map(current.flatMap(entry => entry.kind === 'run' ? entry.items.map(item => [item.id, item] as const) : entry.kind === 'item' ? [[entry.item.id, entry.item] as const] : []))
+  const timeline = new Map(current.flatMap(entry => entry.kind === 'item' ? [[entry.item.id, entry] as const] : []))
   const messages = new Map(current.flatMap(entry => entry.kind === 'user-message' ? [[entry.message.id, entry.message] as const] : []))
   return layout.flatMap((entry): Segment[] => {
     const position = entry.beforeRecordId === undefined ? {} : { beforeRecordId: entry.beforeRecordId }
-    if (entry.kind === 'run') {
-      const items = entry.ids.flatMap(id => timeline.has(id) ? [timeline.get(id)!] : [])
-      return items.length ? [{ kind: 'run', id: entry.id, items, ...position }] : []
-    }
-    if (entry.kind === 'item') { const item = timeline.get(entry.id); return item ? [{ kind: 'item', item, ...position }] : [] }
+    if (entry.kind === 'item') { const item = timeline.get(entry.id); return item ? [{ ...item, ...position }] : [] }
     const message = messages.get(entry.id)
     return message ? [{ kind: 'user-message', message, ...position }] : []
   })
@@ -416,6 +305,7 @@ export function ActivityView({
   sessionId,
   executionHostId,
   items: observedItems,
+  timelineSnapshot,
   userMessages,
   nativeHistoryPage: recentNativePage,
   nativeContextItems,
@@ -444,6 +334,7 @@ export function ActivityView({
   sessionId: string
   executionHostId?: string
   items: AgentTimelineItem[]
+  timelineSnapshot?: AgentTimelineSnapshot
   userMessages?: readonly AgentSessionUserMessage[]
   nativeHistoryPage?: AgentSessionHistoryPage | null
   nativeContextItems?: AgentSessionHistoryPage['items']
@@ -477,7 +368,7 @@ export function ActivityView({
    */
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
-  renderRecordActions?: (reference: ConversationItemRef, active: boolean) => ReactNode
+  renderRecordActions?: (reference: ConversationItemRef, active: boolean, routeHostId?: string) => ReactNode
   renderReadingTools?: (active: boolean, revealLoaded: RevealConversationItem) => ReactNode
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   questionReplyRoute?: ComponentProps<typeof ConversationView>['questionReplyRoute']
@@ -518,7 +409,17 @@ export function ActivityView({
       edgeRef.current.earlier = false; edgeRef.current.newer = false
     }
     return true
-  }, nativeContextItems, RULER_WINDOWS[rulerWindow])
+  }, nativeContextItems, RULER_WINDOWS[rulerWindow], timelineSnapshot, snapshot => {
+    if (!feedEl) return true
+    if (!canReplaceCapturedWindow(feedEl, snapshot, !followRef.current.following)) return false
+    anchorRef.current = captureReadingAnchor(feedEl)
+    return true
+  })
+  function readEarlierRecords(): void {
+    followRef.current = { ...followRef.current, following: false }
+    if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
+    readingWindow.readEarlier()
+  }
   const handleReadingKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     const interactive = event.target instanceof Element && event.target.closest('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="button"], [role="textbox"], [role="combobox"], [role="menu"]')
     if (!event.defaultPrevented && !interactive) {
@@ -566,7 +467,7 @@ export function ActivityView({
     if (conversationReading?.enabled && feedEl && anchorRef.current) restoreReadingPosition(feedEl, anchorRef.current)
     else if (conversationReading?.enabled && feedEl && followRef.current.following) pinToBottom()
     if (conversationReading?.enabled && feedEl) markProgrammaticReadingScroll(feedEl)
-  }, [nativeHistoryPage, feedEl, conversationReading?.enabled])
+  }, [nativeHistoryPage, items, feedEl, conversationReading?.enabled])
   useLayoutEffect(() => {
     // Error and transient newer notices can move a retained body before a page commits.
     if (conversationReading?.enabled && feedEl && anchorRef.current) {
@@ -594,21 +495,9 @@ export function ActivityView({
     if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
     returnRef.current?.focus({ preventScroll: true })
   }, [conversationReading?.opened, conversationReading?.identity])
-  const { unifiedItems, segments } = useMemo(() => {
-    const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
-    const nativeIds = new Set(page?.items.filter((item) => item.kind === 'user-message').map((item) => item.id))
-    // A historical native window contains only its own source records. Recent facts stay
-    // in the shared current window; a missing/different source never erases observed input.
-    const observedMessages = userMessages?.filter((message) => {
-      if (message.source.kind !== 'native' || !page?.items.length) return true
-      const sameSource = message.source.providerId === page.source.providerId && message.source.nativeSessionId === page.source.nativeSessionId
-      if (conversationReading?.nativeSourceFacts && !sameSource) return false
-      // Sparse input context is not a continuation of the original reading window.
-      // Static/fallback consumers still own their independent input projection.
-      return !sameSource || !conversationReading && !readingWindow.historical && !nativeIds.has(message.rawId)
-    })
-    return buildActivityEntries(items, observedMessages, page)
-  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical, Boolean(conversationReading), Boolean(conversationReading?.nativeSourceFacts)])
+  const { records: conversationRecords, originalRecords: originalConversationRecords, coverage: conversationCoverage, unifiedItems, segments } = useMemo(() => buildActivityEntries(sessionId, items,
+    readingWindow.capturedSnapshot ?? timelineSnapshot, userMessages, nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null, executionHostId),
+    [items, timelineSnapshot, readingWindow.capturedSnapshot, userMessages, nativeHistoryPage, sessionId, executionHostId])
   const proposedSegments = useMemo(() => placeSegments(segments), [segments])
   const proposedLayout = proposedSegments.map(segmentLayout)
   const layoutSource = JSON.stringify([sessionId, nativeHistoryPage?.source])
@@ -648,7 +537,7 @@ export function ActivityView({
     }
     return 0
   }, [unifiedItems])
-  const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems),
+  const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems, conversationRecords),
     [sessionId, nativeHistoryPage, unifiedItems])
   const [visible, setVisible] = useState<Set<string>>(new Set())
   const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow, visible), [rulerRecords, rulerWindow, visible])
@@ -763,8 +652,8 @@ export function ActivityView({
     const newer = tailTop >= 0 && (nativeReadingTail(el) ?? el.scrollHeight) - el.clientHeight - nextTop <= distance
     if (!earlier) edges.earlier = false
     if (!newer) edges.newer = false
-    if (direction < 0 && earlier && !edges.earlier && readingWindow.hasMore) {
-      edges.earlier = true; readingWindow.readEarlier()
+    if (direction < 0 && earlier && !edges.earlier && (readingWindow.hasMore || readingWindow.capturedHasMore)) {
+      edges.earlier = true; readEarlierRecords()
     } else if (direction > 0 && newer && anchorRef.current?.kind !== 'segment' && !edges.newer && readingWindow.hasNewer) {
       edges.newer = true; readingWindow.readNewer()
     }
@@ -854,12 +743,13 @@ export function ActivityView({
   // This same exact rendered-record owner also serves closed Sessions with no Run.
   function locateLoadedRecord(sourceKey: string, isCurrent: () => boolean): boolean {
     if (!readingEnabled || !feedEl?.isConnected || !isCurrent()) return false
-    const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key], .conversation-reply-observation[data-message-source-key]'))
+    const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key], .conversation-reply-observation[data-message-source-key], .conversation-original-record[data-message-source-key], [data-conversation-process-source-key]'))
       .filter(node => node.dataset.messageSourceKey === sourceKey && (node.matches('.conversation-reply-observation') || !node.closest('.conversation-reply-observation')))
-    if (matches.length !== 1) return false
-    const node = matches[0]!, head = node.matches('.conversation-reply-observation')
+    const owners = matches.filter(node => !matches.some(parent => parent !== node && parent.contains(node)))
+    if (owners.length !== 1) return false
+    const node = owners[0]!, head = node.matches('.conversation-reply-observation')
       ? node.querySelector<HTMLElement>('[data-observation-step-id]') ?? node
-      : node.querySelector<HTMLElement>('.log-turn__head') ?? node
+      : node.querySelector<HTMLElement>('.log-turn__head, .wf-tool-row') ?? node
     followRef.current = { ...followRef.current, following: false }
     head.scrollIntoView({ block: 'center', behavior: 'instant' })
     anchorRef.current = captureReadingAnchor(feedEl, node)
@@ -871,15 +761,18 @@ export function ActivityView({
     if (inView) setLocatedMessageKey(sourceKey)
     return inView
   }
-  const revealLoadedRecord: RevealConversationItem = async reference => {
-    if (reference.hostId !== executionHostId || reference.agentSessionId !== sessionId) return { kind: 'unavailable', message: 'This point belongs to another original conversation. Its reference is kept.' }
+  const revealLoadedRecord: RevealConversationItem = async (reference, routeHostId = executionHostId) => {
+    if (routeHostId !== executionHostId || reference.agentSessionId !== sessionId) return { kind: 'unavailable', message: 'This point belongs to another original conversation. Its reference is kept.' }
     const sourceKey = conversationMessageSourceKey(reference.agentSessionId, reference.source)
+    if (!originalConversationRecords.some(record => record.sourceHostId === reference.hostId && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)) return { kind: 'unavailable', message: 'The original source Host is unconfirmed or does not match this record. Its reference and content are kept.' }
+    if (sourceKey) { setLocatedMessageKey(sourceKey); await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) }
     return sourceKey && locateLoadedRecord(sourceKey, () => readingEnabled)
       ? { kind: 'located' } : { kind: 'unavailable', message: 'The exact original record is not in this loaded reading window. The point is kept; read earlier records or reconnect its original source, then try again.' }
   }
 
   useEffect(() => {
     if (!readingEnabled || !revealRequest || !feedEl) return
+    setLocatedMessageKey(revealRequest.sourceKey)
     const frame = requestAnimationFrame(() => {
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
       revealRequest.complete(locateLoadedRecord(revealRequest.sourceKey, revealRequest.isCurrent))
@@ -1029,13 +922,13 @@ export function ActivityView({
     </div>
   ) : null
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
-  const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.hasNewer ||
+  const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.capturedHasMore || readingWindow.hasNewer ||
     conversationReading.opened && conversationReading.onClose || readingAction || conversationReading.nativeSourceFacts?.nativeConfirmation) ? (
     <div ref={earlierRef} className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
       <div className="activity-feed__reading-entry">
-        {readingWindow.hasMore ? (
-          <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
-            aria-busy={readingWindow.loadingEarlier || undefined} onClick={readingWindow.readEarlier}>
+        {readingWindow.hasMore || readingWindow.capturedHasMore ? (
+          <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || readingWindow.capturedLoading || !conversationReading.enabled}
+            aria-busy={readingWindow.loadingEarlier || readingWindow.capturedLoading || undefined} onClick={readEarlierRecords}>
             {readingWindow.loadingEarlier ? <SemanticIcon name="status.loading" animation="spin" size={12} /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
             <span {...(readingWindow.loadingEarlier ? { role: 'status', 'aria-live': 'polite' as const } : {})}>{readingWindow.loadingEarlier ? 'Loading earlier…' : 'Earlier'}</span>
           </button>
@@ -1059,11 +952,11 @@ export function ActivityView({
   ) : null
   const readNotice = <>
     {readingNotice}
-    {readingWindow.capturedError ? <div role="status" className="activity-feed__read-notice">Submitted-message read unavailable: {readingWindow.capturedError}. Existing records are kept.</div> : null}
+    {readingWindow.capturedError ? <div role="status" className="activity-feed__read-notice">Captured history read unavailable: {readingWindow.capturedError}. Existing records are kept.</div> : null}
     {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>Retry</button></div> : null}
     {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading} read={userMessageRead ? { ...userMessageRead,
-      onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
+      onReadEarlier: conversationReading ? readEarlierRecords : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>
   const collapseTraces = nativeHistoryPage?.items.some(item => item.contentParts.some(part =>
     part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result')) ? <button type="button"
@@ -1117,6 +1010,7 @@ export function ActivityView({
         onWheel={handleReadingWheel}>
         {readNotice}
         {readingEntry}
+        <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {emptyReadStatus}
         <div className="activity-feed__empty">
@@ -1131,6 +1025,7 @@ export function ActivityView({
         onWheel={handleReadingWheel}>
         {readNotice}
         {readingEntry}
+        <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {emptyReadStatus}
         {!readPending && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
@@ -1147,6 +1042,7 @@ export function ActivityView({
         onWheel={handleReadingWheel}>
         {readNotice}
         {readingEntry}
+        <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {emptyReadStatus}
         <WorkingIndicator active={activitySemantic === 'active'} />
@@ -1154,6 +1050,7 @@ export function ActivityView({
     )
   }
 
+  const placedByRecord = new Map(placed.flatMap(segment => segment.entry.kind === 'item' && segment.entry.record ? [[segment.entry.record.id, segment] as const] : []))
   const registerSegment = (key: string) => (el: HTMLDivElement | null): void => {
     if (el) {
       el.dataset.segmentKey = key
@@ -1165,11 +1062,9 @@ export function ActivityView({
 
   const renderPlaced = ({ entry, key }: PlacedSegment, disclosure?: ConversationProcessProps['disclosure']): JSX.Element => {
   // Identity is resolved once here; the shared message only renders that verdict.
-  const speaker = entry.kind === 'run'
-    ? null
-    : entry.kind === 'user-message'
+  const speaker = entry.kind === 'user-message'
       ? speakerOfUserMessage(entry.message)
-      : speakerOf(entry.item)
+      : entry.record?.speaker ?? speakerOf(entry.item)
   const described = speaker ? describeSpeaker?.(speaker) : undefined
   return (
     // One wrapper per segment carries the scroll target, the observer key, and the selection
@@ -1177,11 +1072,10 @@ export function ActivityView({
     <div
       key={key}
       className="activity-log__segment"
+      {...(entry.kind === 'item' && entry.record?.role === 'process' ? { 'data-conversation-process-source-key': conversationMessageSourceKey(sessionId, entry.record.source), 'data-message-source-key': conversationMessageSourceKey(sessionId, entry.record.source) } : {})}
       ref={registerSegment(key)}
     >
-      {entry.kind === 'run' ? (
-        <Run items={entry.items} origin={origin} workspaceRoot={workspaceRoot} {...(disclosure ? { disclosure } : {})} />
-      ) : entry.kind === 'user-message' ? (
+      {entry.kind === 'user-message' ? (
         <ConversationMessage
           messageId={entry.message.id}
           conversationSessionId={sessionId}
@@ -1214,14 +1108,15 @@ export function ActivityView({
           {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
           {...(readPastedImage ? { readPastedImage: readEntryImage } : {})}
           {...(openHttpLink ? { openHttpLink } : {})}
-          {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt(unifiedItems, entry.message)) } : {})}
+          {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt([entry.message], entry.message)) } : {})}
           {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
         />
-      ) : speaker ? (
+      ) : entry.record?.role !== 'process' && entry.record?.role !== 'interaction' && speaker ? (
         <CapturedConversationMessage
           item={entry.item}
-          {...(isReplyObservation(entry.item) ? { replyObservation: { compact: Boolean(nativeHistoryPage?.items.length) && !readingWindow.error && !userMessageRead?.error } } : {})}
-          messageActions={<>{executionHostId && renderRecordActions?.({ hostId: executionHostId, agentSessionId: entry.item.agentSessionId, source: { kind: 'captured', recordId: entry.item.id } }, readingEnabled)}{entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
+          {...(entry.record ? { record: entry.record } : {})}
+          {...(entry.record?.role === 'observation' ? { replyObservation: { compact: Boolean(nativeHistoryPage?.items.length) && !readingWindow.error && !userMessageRead?.error } } : {})}
+          messageActions={<>{entry.record && conversationItemRef(entry.record) && renderRecordActions?.(conversationItemRef(entry.record)!, readingEnabled, executionHostId)}{entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
             !entry.item.authorAgentSessionId && entry.item.authorHuman !== true && entry.item.authorExternal === undefined && entry.item.source !== 'user'
             ? renderMessageActions?.({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) : null}</>}
           conversationSessionId={sessionId}
@@ -1254,6 +1149,7 @@ export function ActivityView({
     <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={handleReadingWheel}>
       {readNotice}
+      {!nativeHistoryPage && userMessages?.some(message => message.source.kind === 'native') ? <p className="activity-feed__read-notice" role="status">Original input records remain readable. Their complete native page and cross-source order are not loaded.</p> : null}
       {fileReferenceNotice}
       {capability === 'unavailable' ? (
         <div className="activity-feed__empty" role="status">
@@ -1286,15 +1182,17 @@ export function ActivityView({
       {readingEntry}
       {holdCapturedLayout ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}
       <div ref={logRef}>
-      {nativeHistoryPage ? <ConversationView
+      <ConversationView
         page={nativeHistoryPage}
-        insertions={[
-          { key: 'native-reading-tail', role: 'anchor', content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> },
-          ...placed.map(segment => ({ key: segment.key, ...(segment.entry.beforeRecordId === undefined ? {} : { beforeRecordId: segment.entry.beforeRecordId }),
-            role: segment.entry.kind === 'item' && !isConversationTurn(segment.entry.item) ? 'process' as const : 'message' as const,
-            recordIds: segment.entry.kind === 'run' ? segment.entry.items.map(item => item.id) : segment.entry.kind === 'item' ? [segment.entry.item.id] : [],
-            content: (disclosure: NonNullable<ConversationProcessProps['disclosure']>) => renderPlaced(segment, disclosure) }))
-        ]}
+        records={conversationRecords}
+        originalRecords={originalConversationRecords}
+        coverage={conversationCoverage}
+        onLocateRecord={revealLoadedRecord}
+        renderCapturedRecord={(record, disclosure) => {
+          const segment = placedByRecord.get(record.id) ?? (record.original.kind === 'captured' ? { entry: { kind: 'item' as const, item: record.original.item, record }, key: JSON.stringify(['item', record.rawId]), from: 0, to: 0 } : undefined)
+          return segment ? renderPlaced(segment, disclosure) : null
+        }}
+        insertions={[{ key: 'native-reading-tail', role: 'anchor', content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
         traceDisclosure={traceDisclosure}
         questionAnswerContext={questionAnswerContext}
         {...(historyBoundary && boundaryIndex > 0 ? {
@@ -1327,7 +1225,8 @@ export function ActivityView({
         {...(readHistoryResource ? { readHistoryResource } : {})}
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-      /> : <div className="activity-log">{placed.map(segment => renderPlaced(segment))}<div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /></div>}
+      />
+      {!nativeHistoryPage ? placed.filter(segment => segment.entry.kind === 'user-message').map(segment => renderPlaced(segment)) : null}
       </div>
       <div ref={readingTailRef} data-conversation-reading-tail aria-hidden="true" />
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}

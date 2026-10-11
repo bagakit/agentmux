@@ -4,11 +4,7 @@ import { classifyMarkdownLinkHref, splitMarkdownFileReferences, type MarkdownFil
 
 export type ConversationFile = { reference: MarkdownFileReference; name: string; kind: 'image' | 'document' | 'file' }
 
-/** Only the Provider's recorded final/completed reply qualifies; missing phase stays unknown. */
-export function completedNativeReply(item: AgentSessionHistoryItem): boolean {
-  return item.kind === 'assistant-message' && item.messagePhase !== 'progress' &&
-    (item.messagePhase === 'final' || item.completedAt !== undefined)
-}
+export { completedNativeReply } from '@agentmux/core/conversation'
 
 /** An index of explicit references in this reply, not a claim that the Agent created a file.
  * No filesystem IO: the original host confirms existence and opens the exact destination. */

@@ -9,11 +9,12 @@ export type MailboxMessageNavigationResult =
 
 export type RevealMailboxMessage = (message: AgentSessionUserMessage) => Promise<MailboxMessageNavigationResult>
 
-export type RevealConversationItem = (itemRef: ConversationItemRef) => Promise<MailboxMessageNavigationResult>
+export type RevealConversationItem = (itemRef: ConversationItemRef, routeHostId?: string) => Promise<MailboxMessageNavigationResult>
 
 /** One ephemeral client reading intent, frozen to the already selected original occurrence. */
 export type ConversationRevealIntent = {
   itemRef: ConversationItemRef
+  routeHostId: string
   reference: WorkbenchProjectionSelection
   claimed: boolean
   isCurrent(): boolean

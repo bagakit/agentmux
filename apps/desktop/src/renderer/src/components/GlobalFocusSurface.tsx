@@ -135,14 +135,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
   const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
-  const revealFocusRecord = useCallback<RevealConversationItem>(async itemRef => {
+  const revealFocusRecord = useCallback<RevealConversationItem>(async (itemRef, routeHostId = itemRef.hostId) => {
     const original = sessionPresentationById(useAppStore.getState().sessions).get(itemRef.agentSessionId)
-    if (original?.kind !== 'agent' || original.control.hostId !== itemRef.hostId) {
+    if (original?.kind !== 'agent' || original.control.hostId !== routeHostId) {
       return { kind: 'unavailable', itemRef, message: 'Original Session is unconfirmed. The recorded content remains readable; choose its original Context to inspect the source.' }
     }
     // Keep App's original Focus presentation callback, then hand off only a reading intent.
     focusExecutionSession(itemRef.agentSessionId)
-    const result = await useAppStore.getState().revealConversationItem(itemRef)
+    const result = await useAppStore.getState().revealConversationItem(itemRef, routeHostId)
     if (result.kind === 'unavailable') useAppStore.getState().reportError(new Error(result.message), { kind: 'indeterminate' })
     return result
   }, [focusExecutionSession])
