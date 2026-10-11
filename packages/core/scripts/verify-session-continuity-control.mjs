@@ -55,8 +55,8 @@ const variants = [
   {
     "name": "accept-changed-attempt-locator",
     "path": "packages/core/src/client.ts",
-    "from": "!matchesProviderNativeSessionTarget(active.nativeTarget, current.nativeHandle) ||",
-    "to": "false ||",
+    "from": "!matchesProviderNativeSessionTarget(active.nativeTarget, current.nativeHandle)",
+    "to": "false",
     "target": "accepts retained canonical locator enrichment while rejecting changed or lost known native targets",
     "expected": "promise resolved"
   },
