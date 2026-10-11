@@ -435,6 +435,33 @@ describe('RuntimeController configuration transaction', () => {
     vi.clearAllMocks()
   })
 
+  it('canonical original Session recheck reads a rebound Run without lifecycle or input', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!, old = agentStatusFixture()
+    const session = { ...old.session, run: { runId: 'canonical-rebound' } }
+    client.refreshAgentSession.mockResolvedValueOnce(session)
+    client.runtimeProjection.mockResolvedValueOnce({ hostId: 'local', subjects: [{ subjectId: 'agent:local:agent-1', kind: 'agent',
+      hostId: 'local', workspacePath: old.session.workspacePath, providerId: 'codex', executorId: 'review', agentSession: session,
+      run: { ...old.run, runId: session.run.runId } }] })
+    const control: SessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'agent-1', run: old.session.run }
+    await expect(controller.refresh(control, localConfig)).resolves.toMatchObject({ id: 'agent-1', control: { hostId: 'local', run: session.run } })
+    expect(client.refreshAgentSession).toHaveBeenCalledExactlyOnceWith('agent-1')
+    expect(client.createAgentWithDelivery).not.toHaveBeenCalled(); expect(client.resumeAgent).not.toHaveBeenCalled()
+    expect(client.ensureAgentContinuity).not.toHaveBeenCalled(); expect(client.stopAgent).not.toHaveBeenCalled()
+    await controller.dispose()
+  })
+
+  it('canonical original Session recheck refuses a foreign reply and retains observation failure', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!, control: SessionControl = {
+      kind: 'agent', hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-1' }
+    }
+    client.refreshAgentSession.mockResolvedValueOnce({ ...agentStatusFixture().session, agentSessionId: 'foreign' })
+    await expect(controller.refresh(control, localConfig)).rejects.toThrow('another original owner')
+    client.refreshAgentSession.mockRejectedValueOnce(new Error('Original metadata read failed'))
+    await expect(controller.refresh(control, localConfig)).rejects.toThrow('Original metadata read failed')
+    expect(client.runtimeSubject).not.toHaveBeenCalled(); expect(client.ensureAgentContinuity).not.toHaveBeenCalled()
+    expect(client.stopAgent).not.toHaveBeenCalled(); await controller.dispose()
+  })
+
   it('reads the local Provider catalog without requiring a Runtime handshake', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
     const catalog = new AgentProviderRegistry().catalog()
