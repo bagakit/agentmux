@@ -2098,7 +2098,7 @@ export async function registerIpc(args: {
     bindings: { spatial: spatialState, checkpoint: async (reference: import("@agentmux/core/conversation").ConversationRef) => {
       const original = args.runtime.rpcClients().filter(entry => entry.hostId === reference.hostId)
       if (original.length !== 1) throw new AgentMuxError('The exact execution Host is unavailable. No binding was rerouted.', 'CONTROL_UNAVAILABLE')
-      return { ...reference, checkpoint: await original[0]!.client.sessionHistoryCheckpoint(reference.agentSessionId) }
+      return await createPublicationConversationPort(() => original).checkpoint(reference, new AbortController().signal)
     } }
   })
   const moteConnections = new MoteConnectionOperations({ connections: connectorServices, preferences: moteConnectionPreferences,

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import type { ConnectionApplication } from '@agentmux/core/connections'
 import type { PublicationAdapter } from '../../publication-adapter.js'
 import type { PublicationMapping, PublicationOperation, PublicationReceipt, PublicationTarget } from '../../publication-store.js'
-import { parsePreparedPublication, type PreparedPublication } from '../../publication-wire.js'
+import { parsePreparedPublication, publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
 import type { FeishuAdapter } from './index.js'
 import { feishuFailure, feishuIdentity } from './message.js'
 
@@ -88,6 +88,11 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly addressing = 'group'
   readonly permissionActions = true as const
   constructor(private readonly clients: Pick<FeishuAdapter, 'withClient'>) {}
+  fragmentBytesFor(target: PublicationTarget): number {
+    // One ASCII control byte can occupy seven bytes after both JSON encodings.
+    // Reserve the fixed post/uuid envelope and the exact encoded audience.
+    return Math.max(4, Math.min(this.fragmentBytes, Math.floor((30 * 1024 - 1024 - Buffer.byteLength(JSON.stringify(target.externalConversationId))) / 8)))
+  }
 
   prepare(operation: Readonly<PublicationOperation>): PreparedPublication {
     feishuIdentity(operation.target.externalConversationId)
@@ -113,7 +118,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         method: mapping ? 'PATCH' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
         ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
     }
-    const text = [operation.payload.text, ...(operation.payload.questions ?? []).map(question => [question.prompt, ...question.options.map(option => `- ${option.label}`)].join('\n'))].filter(Boolean).join('\n\n')
+    const text = publicationSpeechText(operation.payload)
     if (!text) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
     const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId }), msg_type: 'post', content: post(text), ...(mapping ? {} : { uuid: key(operation.operationId) }) })
     // The platform limit applies after both JSON encodings, including exact target and envelope overhead.
