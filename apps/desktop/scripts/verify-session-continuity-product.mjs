@@ -11,6 +11,9 @@ import { AgentMuxControlServer } from '../../../packages/core/dist/public-rpc-se
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = core
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
+const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
+const supervision = supervisionSurface || process.env.AGENTMUX_CONTINUITY_SUPERVISION_PROOF === '1'
+const phases = supervisionSurface ? ['seed'] : ['seed', 'restore', 'reconnect']
 const desktop = path.resolve(import.meta.dirname, '..')
 const root = path.resolve(desktop, '../..')
 const fixture = path.join(desktop, 'scripts/fixtures/session-continuity')
@@ -21,8 +24,8 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-continuity-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
-const receipt = { schema: capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
-  limitations: ['Actual private Electron Main and Renderer restart exercise production App/Store and RuntimeController/Core, with a nonempty original spatial workface before hydration.',
+const receipt = { schema: supervisionSurface ? 'agentmux.continuity-supervision-surface.v1' : supervision ? 'agentmux.continuity-supervision-product.v1' : capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
+  limitations: [supervisionSurface ? 'One private Electron generation exercises production App/Store and RuntimeController/Core controls and frames; this surface receipt does not prove process restart.' : 'Actual private Electron Main and Renderer restart exercise production App/Store and RuntimeController/Core, with a nonempty original spatial workface before hydration.',
     'The native CLI is a repository protocol fixture. It validates the exact resume identity against retained native session metadata and appends to the original conversation record; this is not upstream Provider certification.',
     'Only private Runs are deliberately ended between Electron generations; no user profile, user Agent or user configuration is accessed.',
     'Unknown observation, durable input lost-receipt, policy settings and mutation proofs have separate focused gates consumed by this joined Feature.'] }
@@ -30,6 +33,8 @@ const files = async directory => (await Promise.all((await fs.readdir(directory,
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const sourceFiles = [new URL(import.meta.url).pathname, bootstrap, path.join(desktop, 'scripts/probe-process.mjs'),
   ...(capability ? [path.join(desktop, 'scripts/verify-session-capability-recovery-product.mjs')] : []),
+  ...(supervisionSurface ? [path.join(desktop, 'scripts/verify-session-continuity-supervision-surface.mjs')] : []),
+  ...(supervision && !supervisionSurface ? [path.join(desktop, 'scripts/verify-session-continuity-supervision-product.mjs')] : []),
   path.join(desktop, 'test/helpers/local-runtime-connector.ts'), path.join(desktop, 'test/helpers/client-ui-render.tsx'),
   path.join(root, 'packages/client-ui/package.json'),
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
@@ -113,7 +118,7 @@ try {
   // The ordinary Core daemon is shared by the three private Electron generations. Each Electron
   // watchdog owns only its own process group and phase directory; parent cleanup owns all Runs.
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  for (const phase of ['seed', 'restore', 'reconnect']) {
+  for (const phase of phases) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`)
     await fs.mkdir(phaseRoot)
     await fs.rm(path.join(evidence, `${phase}.json`), { force: true })
@@ -131,6 +136,18 @@ try {
     assert.equal(exit.timedOut, false, `${phase} watchdog fired`)
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
+    if (supervision) {
+      assert.equal(native.supervision?.kind, supervisionSurface ? 'surface' : 'durability')
+      assert.ok(native.supervision.healthy?.runId && native.supervision.healthy.pid)
+      if (phase === 'seed') receipt.originalHealthy = native.supervision.healthy
+      else assert.deepEqual(native.supervision.healthy, receipt.originalHealthy)
+      receipt.survivingHealthy = native.supervision.healthy
+      for (const frame of native.supervision.frames ?? []) {
+        const file = path.join(evidence, frame.file)
+        assert.equal(hash(await fs.readFile(file)), frame.sha256)
+      }
+      continue
+    }
     if (capability) {
       const image = path.join(evidence, phase + '-workface.png')
       entry.image = { path: image, sha256: hash(await fs.readFile(image)) }
@@ -226,7 +243,9 @@ try {
     }
 
   }
-  assert.equal(new Set(receipt.phases.map(phase => phase.native.pid)).size, 3)
+  assert.ok(phases.length > 0)
+  assert.equal(receipt.phases.length, phases.length)
+  assert.equal(new Set(receipt.phases.map(phase => phase.native.pid)).size, phases.length)
   if (capability) {
     const cliFixture = path.join(fixture, 'capability-public-cli.mjs')
     const cliSourceSha256 = hash(await fs.readFile(cliFixture))
@@ -251,7 +270,7 @@ finally {
       process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
       process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
       // A failed build has no Runtime to stop and must not create one during cleanup.
-      if (receipt.phases.length > 0) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
+      if (receipt.phases.length > 0 && !supervision) client = await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
     }
     if (client) { for (const run of await client.listRuns()) if (run.state === 'running') await client.stopTerminal({ runId: run.runId }); await client.dispose() }
   } catch (error) { errors.push(error.message) }

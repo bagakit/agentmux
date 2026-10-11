@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxHostExecutorOwner, AgentProviderRegistry } from '@agentmux/core'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { verifyCapabilityRecovery } from './capability-recovery'
+import { verifySupervisionSurface } from './supervision-surface'
+import { sessionObservationResult } from '../../../src/shared/session-observation-result'
 const [html, privateRoot, phase, preload, evidence, nodeExecutable] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
@@ -13,18 +15,32 @@ process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
-const executor = (mode: string) => ({ label: 'Private native continuity fixture', providerId: 'codex', command: path.join(privateRoot, 'fake-codex'),
+const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
+const supervision = process.env.AGENTMUX_CONTINUITY_SUPERVISION_PROOF === '1' || supervisionSurface
+const executor = (mode: string) => ({ label: 'Private native continuity fixture', providerId: 'codex', command: path.join(privateRoot, 'fake-codex'), args: [],
   env: { AGENTMUX_FAKE_READY_MODE: mode, AGENTMUX_FAKE_NATIVE_RECORD: '1',
     AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_LAUNCH_INPUT: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original continuity task: retain decision sentinel continuity-body-7f41 and the independent unsent draft.',
     CODEX_HOME: path.join(privateRoot, 'codex'), AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: path.join(privateRoot, 'codex', 'sessions') }, injectAgentMuxGuide: false })
+const supervisedExecutor = (mode: string, failure: string) => { const value = executor(mode); return { ...value, env: { ...value.env,
+  AGENTMUX_FAKE_NATIVE_RESUME_FAILURE: failure, AGENTMUX_FAKE_NATIVE_RESUME_FAILURE_DIRECTORY: path.join(privateRoot, 'resume-failures') } } }
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private continuity proof' }],
-  executors: { healthy: executor('before'), working: capability ? { ...executor('before'), env: { ...executor('before').env, AGENTMUX_FAKE_OMIT_HANDLE: '1' } } : executor('working-until-resume'), idle: executor('before') },
-  ...(capability ? { continuity: { activeRecovery: 'manual' } } : {}),
+  executors: { healthy: executor('before'), working: capability ? { ...executor('before'), env: { ...executor('before').env, AGENTMUX_FAKE_OMIT_HANDLE: '1' } }
+    : supervision ? supervisedExecutor('working-until-resume', 'once') : executor('working-until-resume'), idle: supervision ? supervisedExecutor('before', 'always') : executor('before') },
+  ...(capability ? { continuity: { activeRecovery: 'manual' } } : supervision ? { continuity: { retryMaxAttempts: 0, retryInitialDelayMs: 30000, retryMaxDelayMs: 30000 } } : {}),
   workspaces: [{ id: 'continuity-workspace', hostId: 'local', name: 'Private continuity proof', path: path.join(privateRoot, 'workspace'), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
 const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial.json'))
-const runtime = new RuntimeController(store, localRuntimeConnector)
+const executorOwner = supervision ? new AgentMuxHostExecutorOwner({ path: path.join(privateRoot, 'executors.json'),
+  runtimeId: 'continuity-proof-owner', catalog: () => new AgentProviderRegistry().catalog() }) : undefined
+const connector: typeof localRuntimeConnector = async (host, sessions) => {
+  if (host.kind === 'local' && executorOwner) {
+    const client = new AgentMuxClient({ store: sessions, hostExecutorOwner: executorOwner })
+    await client.connect(); return client
+  }
+  return await localRuntimeConnector(host, sessions)
+}
+const runtime = new RuntimeController(store, connector)
 const beganAt = Date.now()
 const result: Record<string, any> = { passed: false, phase, pid: process.pid, calls: [], progress: [] }
 const step = (label: string) => { const value = { label, elapsedMs: Date.now() - beganAt }; result.progress.push(value); process.stderr.write(JSON.stringify({ phase, ...value }) + '\n') }
@@ -63,6 +79,9 @@ ipcMain.handle('native-proof:request', async (_event, operation, ...args) => {
       }
       case 'resolve': return runtime.resolveSession(args[0], config as any)
       case 'refresh': return await runtime.refresh(args[0], config as any)
+      case 'control-continuity': return await sessionObservationResult(async () => {
+        const value = await runtime.controlContinuity(args[0], args[1]); call.result = structuredClone(value); return value
+      })
       case 'stop': return await runtime.stopSession(args[0])
       case 'flush': await win.webContents.session.flushStorageData(); return
       default: throw new Error('Unsupported private boundary: ' + operation)
@@ -73,6 +92,8 @@ ipcMain.handle('native-proof:request', async (_event, operation, ...args) => {
 app.whenReady().then(async () => {
   const state = () => win.webContents.executeJavaScript('window.continuityState()')
   try {
+    if (executorOwner && phase === 'seed') for (const [executorId, value] of Object.entries(config.executors))
+      await executorOwner.configure({ executorId, config: value })
     runtime.commit(await runtime.prepare(config as any)); step('runtime-prepared')
     if (phase === 'seed') {
       ids = {}
@@ -85,13 +106,19 @@ app.whenReady().then(async () => {
         step('native-ready-' + name)
         ids[name] = { sessionId: session.agentSessionId, run: session.run, nativeHandle: session.nativeHandle }
       }
+      if (supervision) for (const name of ['working', 'idle']) {
+        await client().stopTerminal(ids[name].run)
+        await wait('original private Run ended before hydration: ' + name, async () => (await client().listRuns()).find((run: any) => run.runId === ids[name].run.runId)?.state !== 'running')
+      }
       sessions = (await runtime.snapshot(config as any)).sessions
       await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(ids))
     } else ids = JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8'))
-    result.before = (await store.load()).map(one => ({ agentSessionId: one.agentSessionId, run: one.run, nativeHandle: one.nativeHandle, semanticStatus: one.semanticStatus }))
+    result.beforeObservedAt = Date.now()
+    result.before = (await store.load()).map(one => ({ agentSessionId: one.agentSessionId, run: one.run, nativeHandle: one.nativeHandle, semanticStatus: one.semanticStatus,
+      ...(supervision ? { continuity: one.continuity, continuityOperations: one.continuityOperations } : {}) }))
     result.spatialBefore = await spatial.readForLayout()
     if (phase !== 'seed') {
-      const expectedFile = capability ? 'capability-expected.json' : phase === 'restore' ? 'expected.json' : 'expected-restored.json'
+      const expectedFile = capability ? 'capability-expected.json' : supervision ? 'supervision-expected.json' : phase === 'restore' ? 'expected.json' : 'expected-restored.json'
       const expected = JSON.parse(await fs.readFile(path.join(privateRoot, expectedFile), 'utf8'))
       assert.deepEqual(result.spatialBefore, expected.spatial, 'Original spatial document must exist before Renderer hydration')
     }
@@ -104,6 +131,11 @@ app.whenReady().then(async () => {
     await wait('actual App and nonempty workface', async () => await win.webContents.executeJavaScript(`window.continuityReady && !window.continuityState().loading && Object.keys(window.continuityState().tabs).length ${capability ? '>= 1' : '=== 2'}`))
     if (capability) {
       await verifyCapabilityRecovery({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config })
+      result.passed = true
+      return
+    }
+    if (supervisionSurface) {
+      await verifySupervisionSurface({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config, nodeExecutable })
       result.passed = true
       return
     }
