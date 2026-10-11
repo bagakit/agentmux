@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { PublicationImage, ImageUploadReceipt, ResolvedPublicationPart } from './publication-image.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
@@ -12,7 +13,8 @@ export type PermissionPublicationPayload = {
   kind: 'permission'; disclosure: 'shared' | 'redacted'; title: string; context?: string; status: 'pending' | 'response-sent' | 'unconfirmed' | 'unavailable'
   options: Array<{ label: string; actionRef: string }>
 }
-export type PublicationPayload = PermissionPublicationPayload | {
+export type ImagePublicationPayload = { kind: 'image'; part: ConversationContentRef; image: PublicationImage; phase?: 'progress' | 'final'; relay?: NonNullable<ConnectionDelivery['relay']> }
+export type PublicationPayload = PermissionPublicationPayload | ImagePublicationPayload | {
   kind: 'speech'
   text: string
   phase?: 'progress' | 'final'
@@ -33,17 +35,19 @@ export type PublicationOperation = ConnectionDelivery & {
   /** Frozen before dispatch; private to this Host, never exposed in public delivery DTOs. */
   prepared?: PreparedPublication
   sourceRecords?: ConversationItemRef[]
+  uploads?: Array<{ state: 'dispatching' | 'unknown' | 'confirmed'; imageKey?: string }>
 }
 /** Reuse the original public receipt codec without accepting private request or body fields. */
 const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
-  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, ...delivery } = operation
-  return parseConnectionDelivery(delivery)
+  const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, uploads: _uploads, ...delivery } = operation
+  const last = operation.uploads?.at(-1)
+  return parseConnectionDelivery({ ...delivery, ...(operation.payload.kind === 'image' ? { resourceUpload: { kind: 'image', part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
 }
 export type PublicationPageOptions = {
   fragmentBytes?: number
   units: readonly ConversationUnit[]
-  resolvedText: ReadonlyMap<string, AgentSessionHistoryContentPart>
+  resolvedText: ReadonlyMap<string, ResolvedPublicationPart>
 }
 // JSON object property order carries no source or platform identity.
 const encode = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
@@ -74,6 +78,25 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
     ...(index !== texts.length - 1 || payload.questions === undefined ? {} : { questions: payload.questions }) }))
 }
 
+type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage }
+type ContentPayload = Exclude<PublicationPayload, PermissionPublicationPayload>
+type RepresentationPayload = Extract<PublicationPayload, { kind: 'speech' }> | { kind: 'sequence'; parts: ContentPayload[] }
+type MaterializedPlan = PublicationContentPlan & { imageParts?: RepresentationPart[] }
+function representation(parts: readonly RepresentationPart[], phase?: 'progress' | 'final', relay?: ConnectionDelivery['relay'], separator = '\n\n'): RepresentationPayload {
+  const fields = { ...(phase ? { phase } : {}), ...(relay ? { relay } : {}) }
+  if (!parts.some(part => part.image)) return { kind: 'speech', text: parts.map(part => part.text).filter(Boolean).join(separator), ...fields }
+  const result: ContentPayload[] = [], texts: string[] = []
+  const flush = () => { if (texts.length) result.push({ kind: 'speech', text: texts.splice(0).join(separator), ...fields }) }
+  for (const part of parts) {
+    if (part.image) { flush(); result.push({ kind: 'image', part: part.part!, image: part.image, ...fields }) }
+    else if (part.text) texts.push(part.text)
+  }
+  flush(); return { kind: 'sequence', parts: result }
+}
+function representationFragments(value: RepresentationPayload, bytes: number): ContentPayload[] {
+  return value.kind === 'speech' ? value.text ? fragments(value, bytes) as ContentPayload[] : []
+    : value.parts.flatMap(part => part.kind === 'speech' ? fragments(part, bytes) as ContentPayload[] : [part])
+}
 /** Connector-owned publication facts, not another Agent history or lifecycle. Borrows the Host database. */
 export class PublicationStore {
   constructor(readonly database: DatabaseSync) {
@@ -173,9 +196,25 @@ export class PublicationStore {
     this.database.prepare('INSERT INTO connector_publication_decision (binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,source_key,record_id,source_revision) DO UPDATE SET reason=excluded.reason,decision_json=excluded.decision_json')
       .run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
   }
-  private representationRows(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId: string): RepresentationRow[] {
-    return this.database.prepare("SELECT rowid,record_id,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND json_extract(decision_json,'$.kind') IN ('representation','legacy-representation') AND json_extract(decision_json,'$.projectionId')=? ORDER BY rowid")
+  private representationRows(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId: string, records: readonly ConversationItemRef[] = []): RepresentationRow[] {
+    const rows: RepresentationRow[] = this.database.prepare("SELECT rowid,record_id,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND json_extract(decision_json,'$.kind') IN ('representation','legacy-representation') AND json_extract(decision_json,'$.projectionId')=? ORDER BY rowid")
       .all(...scopeKey(boundary), projectionId).map(row => ({ ordinal: Number(row.rowid), id: String(row.record_id), value: JSON.parse(String(row.decision_json)) }))
+    // Core content is grouped by original record: primary first, then its accepted
+    // contributors. A newly recovered part must not acquire its position from rowid.
+    const order = new Map<string, number>(), groups = new Map<string, RepresentationRow[]>()
+    for (const record of records) { const id = conversationRecordId(record); if (!order.has(id)) order.set(id, order.size) }
+    for (const row of rows) {
+      const value = row.value, id = conversationRecordId(value.kind === 'representation' ? value.part.record : value.record)
+      const group = groups.get(id) ?? []; group.push(row); groups.set(id, group)
+    }
+    const known = [...groups].filter(([id]) => order.has(id)).sort(([a], [b]) => order.get(a)! - order.get(b)!)
+    let next = 0
+    return [...groups].flatMap(([id, original]) => {
+      // Unread contributor groups keep their accepted relative positions.
+      const group = order.has(id) ? known[next++]![1] : original
+      const index = (row: RepresentationRow) => row.value.kind === 'representation' && row.value.part.selector.kind === 'native-part' ? row.value.part.selector.partIndex : undefined
+      return group.every(row => index(row) !== undefined) ? group.sort((a, b) => index(a)! - index(b)!) : group
+    })
   }
   /** Retain original platform intent, not a fabricated version of a Core record. */
   private retainLegacyRepresentation(boundary: PublicationBoundary, projectionId: string): void {
@@ -189,7 +228,7 @@ export class PublicationStore {
       operations: operations.map(operation => operation.operationId), text: operations.map(operation => publicationSpeechText(operation.payload as Extract<PublicationPayload, { kind: 'speech' }>)).join('') } satisfies LegacyRepresentationIntent)
   }
   /** Only accepted exact slots replace intent. Unread or unresolved parts keep their prior representation. */
-  private materialize(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: PublicationContentPlan, coalesced: readonly string[], selected?: ConversationContentRef): PublicationContentPlan {
+  private materialize(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: PublicationContentPlan, coalesced: readonly string[], selected?: ConversationContentRef, records: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)]): MaterializedPlan {
     for (const original of [projectionId, ...coalesced]) {
       this.retainLegacyRepresentation(boundary, original)
       if (original !== projectionId) for (const row of this.representationRows(boundary, original))
@@ -213,9 +252,9 @@ export class PublicationStore {
       if (preserveLegacy.has(conversationRecordId(piece.part.record))) continue
       this.saveDecision(boundary, 'part-' + digest(publicationPartKey(piece.part)), 'current', { kind: 'representation', projectionId, ...piece } satisfies RepresentationIntent)
     }
-    const rows = this.representationRows(boundary, projectionId)
+    const rows = this.representationRows(boundary, projectionId, records)
     const sources = rows.flatMap(row => row.value.kind === 'representation' && row.value.text && row.value.relay ? [row.value.relay] : [])
-    return { ...plan, text: rows.map(row => row.value.text).filter(Boolean).join('\n\n'), ...(sources.length ? { relay: { sender: 'application', sources } } : {}) }
+    return { ...plan, ...(rows.some(row => row.value.kind === 'representation' && row.value.image) ? { imageParts: rows.map(row => row.value) } : {}), text: rows.map(row => row.value.text).filter(Boolean).join('\n\n'), ...(sources.length ? { relay: { sender: 'application', sources } } : {}) }
   }
   coverage(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string): ConnectionDeliveryCoverage {
     const pending = "json_extract(decision_json,'$.kind')='gap' AND json_extract(decision_json,'$.state')='unresolved'"
@@ -338,13 +377,12 @@ export class PublicationStore {
       this.database.prepare('UPDATE connector_publication_frontier SET checkpoint_json=? WHERE binding_id=? AND binding_revision=? AND source_key=?').run(encode(page.checkpoint), ...scopeKey(boundary), 'unified')
     })
   }
-  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: PublicationContentPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }): void {
-    const references = [unit.event.reference!, ...unit.records.map(r => r.reference!)]
+  private queueRepresentation(boundary: PublicationBoundary, projectionId: string, unit: ConversationUnit, plan: MaterializedPlan, fragmentBytes: number, event: ConnectionDelivery['event'] = { id: unit.event.id, revision: unit.event.revision }, references: readonly ConversationItemRef[] = [unit.event.reference!, ...unit.records.map(record => record.reference!)]): void {
     const latest = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE ordinal IN (SELECT MAX(ordinal) FROM connector_publication_operation WHERE projection_id=? GROUP BY fragment_ordinal) ORDER BY fragment_ordinal').all(projectionId).map(row => this.read(row)!)
     // An unresolved part never withdraws a prior complete platform representation.
-    if (!plan.text && !plan.complete) return
-    const payload: Extract<PublicationPayload, { kind: 'speech' }> = { kind: 'speech', text: plan.text, ...(plan.phase ? { phase: plan.phase } : {}), ...(plan.relay ? { relay: plan.relay } : {}) }
-    const revision = digest(payload), parts = plan.text ? fragments(payload, fragmentBytes) : []
+    if (!plan.text && !plan.imageParts?.some(part => part.image) && !plan.complete) return
+    const payload = representation(plan.imageParts ?? [{ text: plan.text }], plan.phase, plan.relay)
+    const revision = digest(payload), parts = representationFragments(payload, fragmentBytes)
     if (parts.length && latest.length && latest.every(o => o.sourceRevision === revision && o.state !== 'cancelled')) return
     const previous = new Map(latest.map(o => [o.fragment.ordinal, o])), count = Math.max(parts.length, ...latest.map(o => o.fragment.ordinal + 1))
     for (let ordinal = 0; ordinal < count; ordinal++) {
@@ -355,7 +393,7 @@ export class PublicationStore {
       if (!body && (!predecessor || predecessor.effect === 'withdraw')) continue
       const effect = body ? 'upsert' as const : 'withdraw' as const
       const operationId = 'publication-' + digest([projectionId, ordinal, prior?.operationId ?? null, revision, effect])
-      const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, ...(event ? { event } : {}), sourceRecords: references,
+      const operation: PublicationOperation = { operationId, projectionId, sourceRevision: revision, ...(event ? { event } : {}), sourceRecords: [...references],
         bindingId: boundary.bindingId, bindingRevision: boundary.revision, publicationScope: boundary.scope.publication,
         reference: unit.event.reference!, target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
         payload: body ?? { kind: 'speech', text: '' }, ...(plan.relay ? { relay: plan.relay } : {}), effect, fragment: { ordinal, count: parts.length }, state: 'pending', ...(predecessor ? { predecessorOperationId: predecessor.operationId } : {}) }
@@ -367,7 +405,7 @@ export class PublicationStore {
       .all(...scopeKey(boundary), after).map(row => ({ ordinal: Number(row.rowid), gap: JSON.parse(String(row.decision_json)).gap }))
   }
   /** Recovery admits only the missing exact part, with no read-cut movement or replay of represented bytes. */
-  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, AgentSessionHistoryContentPart>, authorized: () => boolean, fragmentBytes: number): boolean {
+  recoverPart(boundary: PublicationBoundary, gap: ConnectionDeliveryGap, original: ConversationUnit, resolvedText: ReadonlyMap<string, ResolvedPublicationPart>, authorized: () => boolean, fragmentBytes: number): boolean {
     if (!gap.anchor || !gap.part || !gap.event) return false
     const event = gap.event
     const unit = parseConversationUnit(original, { hostId: gap.anchor.frontier.sourceHostId, agentSessionId: boundary.agentSessionId }, gap.anchor.frontier.frontier.scope)
@@ -383,8 +421,8 @@ export class PublicationStore {
       // parts were gaps. Recovery updates that intent, never creates a second
       // event/message or substitutes a newer original record.
       if (!represented) return false
-      const projectionId = JSON.parse(String(represented.decision_json)).projectionId as string
-      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], gap.part), fragmentBytes, event)
+      const { projectionId, records } = JSON.parse(String(represented.decision_json)) as { projectionId: string; records: ConversationItemRef[] }
+      this.queueRepresentation(boundary, projectionId, unit, this.materialize(boundary, projectionId, unit, plan, [], gap.part, records), fragmentBytes, event, records)
       for (const representation of plan.origins) this.saveDecision(boundary, 'origin-' + digest(representation.part), representation.part.recordRevision, { kind: 'origin', representation })
       this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...JSON.parse(String(row.decision_json)), state: 'resolved' }), Number(row.rowid))
       return true
@@ -423,11 +461,11 @@ export class PublicationStore {
     return original
   }
   next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): PublicationOperation | null {
-    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + ' ORDER BY ordinal LIMIT 1' ).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])) )
+    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind')='image' THEN 1 ELSE 0 END,ordinal LIMIT 1" ).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])) )
   }
   /** Only the original pending projection supplies its relevant native records. No history scan. */
   pendingNativeRecords(operation: PublicationOperation): ConversationItemRef[] {
-    if (operation.payload.kind !== 'speech' || operation.effect !== 'upsert') return []
+    if (!['speech', 'image'].includes(operation.payload.kind) || operation.effect !== 'upsert') return []
     const rows = this.representationRows({ bindingId: operation.bindingId, revision: operation.bindingRevision }, operation.projectionId)
     const records = rows.flatMap(row => {
       const reference = row.value.kind === 'representation' ? row.value.part.record : row.value.record
@@ -438,11 +476,12 @@ export class PublicationStore {
   }
   /** New qualification must account for the exact frozen bytes, not bless another version's payload. */
   qualifyPending(boundary: PublicationBoundary, operation: PublicationOperation,
-    originals: ReadonlyMap<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, AgentSessionHistoryContentPart> }>, frontier: ConversationCheckpoint): 'qualified' | 'cancelled' | 'unavailable' {
+    originals: ReadonlyMap<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, ResolvedPublicationPart> }>, frontier: ConversationCheckpoint): 'qualified' | 'cancelled' | 'unavailable' {
     return this.transaction(() => {
       const current = this.inspect(operation.operationId)
-      if (!current || current.state !== 'pending' || !same(current, operation) || operation.payload.kind !== 'speech') return 'unavailable'
-      const rows = this.representationRows(boundary, operation.projectionId)
+      if (!current || current.state !== 'pending' || !same(current, operation) || !['speech', 'image'].includes(operation.payload.kind)) return 'unavailable'
+      const content = operation.payload as ContentPayload
+      const rows = this.representationRows(boundary, operation.projectionId, operation.sourceRecords)
       const failures: Array<{ reason: 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'; part?: ConversationContentRef; record?: ConversationItemRef; frontier?: ConversationCheckpoint }> = []
       if (!rows.length) failures.push({ reason: 'public-content-unconfirmed' })
       const qualified: Array<{ part: ConversationContentRef; frontier: ConversationCheckpoint }> = []
@@ -463,20 +502,20 @@ export class PublicationStore {
         }
         const plan = publicationContent(original.unit, boundary as RoomBinding, original.frontier, { resolved: original.resolved, origin: () => undefined, selected: part })
         const piece = plan.pieces.find(piece => publicationPartKey(piece.part) === publicationPartKey(part))
-        if (!plan.complete || !piece || piece.text !== retained.text) { failures.push({ reason: 'version-unavailable', part, frontier: original.frontier }); continue }
+        if (!plan.complete || !piece || piece.text !== retained.text || !same(piece.image, retained.image)) { failures.push({ reason: 'version-unavailable', part, frontier: original.frontier }); continue }
         this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...retained, part, contentEligibility: 'public' }), row.ordinal)
         qualified.push({ part, frontier: original.frontier })
       }
       // Verify the original whole payload and its exact stored fragments as well as each qualified slot.
       if (!failures.length) {
-        const payload: Extract<PublicationPayload, { kind: 'speech' }> = { kind: 'speech', text: rows.map(row => row.value.text).filter(Boolean).join('\n\n'),
-          ...(operation.payload.phase ? { phase: operation.payload.phase } : {}), ...(operation.payload.relay ? { relay: operation.payload.relay } : {}) }
+        const payload = representation(rows.map(row => row.value), content.phase, content.relay)
         const fragments = this.database.prepare('SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND source_revision=? ORDER BY fragment_ordinal,ordinal')
           .all(operation.projectionId, operation.sourceRevision).map(row => this.read(row)!).filter(value => value.effect === 'upsert')
         const latest = [...new Map(fragments.map(value => [value.fragment.ordinal, value])).values()]
-        if (digest(payload) === operation.sourceRevision && latest.length === operation.fragment.count && latest.every(value => value.payload.kind === 'speech') &&
-          latest.map(value => (value.payload as Extract<PublicationPayload, { kind: 'speech' }>).text).join('') === payload.text &&
-          latest.some(value => value.operationId === operation.operationId && same(value.payload, operation.payload))) return 'qualified'
+        const retained = representation(latest.map(value => value.payload.kind === 'image' ? { text: '', part: value.payload.part, image: value.payload.image }
+          : { text: value.payload.kind === 'speech' ? value.payload.text : '' }), content.phase, content.relay, '')
+        if (digest(payload) === operation.sourceRevision && latest.length === operation.fragment.count && latest.every(value => ['speech', 'image'].includes(value.payload.kind)) &&
+          same(payload, retained) && latest.some(value => value.operationId === operation.operationId && same(value.payload, operation.payload))) return 'qualified'
         failures.push({ reason: 'version-unavailable' })
       }
       // An already attempted request retains its prepared bytes and original receipt. It is never requalified into another effect.
@@ -505,11 +544,38 @@ export class PublicationStore {
       return 'cancelled'
     })
   }
+  claimImageUpload(operationId: string, authorized: () => boolean): PublicationOperation | null {
+    return this.transaction(() => {
+      const original = this.inspect(operationId)
+      if (!authorized() || !original || original.state !== 'pending' || original.effect !== 'upsert' || original.payload.kind !== 'image' || original.prepared || original.attempt !== undefined || ['dispatching', 'confirmed'].includes(original.uploads?.at(-1)?.state ?? '')) return null
+      const claimed = { ...original, uploads: [...(original.uploads ?? []), { state: 'dispatching' as const }] }
+      this.write(claimed); return claimed
+    })
+  }
+  settleImageUpload(operationId: string, attempt: number, receipt: ImageUploadReceipt): PublicationOperation {
+    return this.transaction(() => {
+      const original = this.inspect(operationId), previous = original?.uploads?.[attempt - 1]
+      if (!original || original.payload.kind !== 'image' || !Number.isSafeInteger(attempt) || attempt < 1 || !previous ||
+        receipt.state === 'confirmed' && (!receipt.imageKey || /[\u0000-\u001f\u007f]/u.test(receipt.imageKey) || receipt.imageKey.length > 16_384))
+        throw new AgentMuxError('The upload receipt does not identify its original image attempt.', 'PUBLICATION_RECEIPT_CONFLICT')
+      if (previous.state === 'confirmed') {
+        if (receipt.state === 'unknown') return original
+        if (previous.imageKey !== receipt.imageKey) throw new AgentMuxError('The original upload already confirmed another image key.', 'PUBLICATION_RECEIPT_CONFLICT')
+        return original
+      }
+      const uploads = original.uploads!.map((value, index) => index === attempt - 1 ? receipt : value)
+      const { reason: _reason, ...retained } = original
+      const result = attempt === uploads.length && original.attempt === undefined && ['pending', 'not-applied'].includes(original.state)
+        ? { ...retained, uploads, ...(receipt.state === 'confirmed' ? { state: 'pending' as const } : { state: 'not-applied' as const, reason: 'effect-unconfirmed' as const }) }
+        : { ...original, uploads }
+      this.write(result); return result
+    })
+  }
   /** Save the exact effect identity before any adapter call. Unknown work blocks this audience alone. */
   claimNext(boundary: PublicationBoundary, authorized: () => boolean, adapter: PublicationPreparer, projectionId?: string): PublicationOperation | null {
     return this.transaction(() => {
       if (!authorized()) return null
-      const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + ' ORDER BY ordinal LIMIT 1' )
+      const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind')='image' THEN 1 ELSE 0 END,ordinal LIMIT 1" )
         .get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])))
       if (!first || first.state !== 'pending') return null
       if ((first.publicationScope ?? 'future-native-user-facing') !== boundary.scope.publication)
@@ -517,6 +583,7 @@ export class PublicationStore {
       const predecessor = first.predecessorOperationId ? this.inspect(first.predecessorOperationId) : null
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
       const original = { ...first, ...(predecessor?.mapping && predecessor.effect !== 'withdraw' ? { mapping: predecessor.mapping } : {}) }
+      if (original.payload.kind === 'image' && original.effect === 'upsert' && original.uploads?.at(-1)?.state !== 'confirmed') return null
       let candidate: unknown = original.prepared
       if (!candidate) {
         try { candidate = adapter.prepare(JSON.parse(encode(original))) }
@@ -589,7 +656,7 @@ export class PublicationStore {
   attempts(operationId: string): Array<{ attempt: number; receipt: PublicationReceipt | null }> {
     return this.database.prepare('SELECT attempt,receipt_json FROM connector_publication_attempt WHERE operation_id=? ORDER BY attempt').all(operationId).map(row => ({ attempt: Number(row.attempt), receipt: row.receipt_json ? parseReceipt(JSON.parse(String(row.receipt_json))) : null }))
   }
-  /** Only an explicit retry of an authoritative non-application can return to the dispatch lane. */
+  /** Explicit retry of a non-applied message or an upload whose message was never attempted. */
   retry(operationId: string, authorized: () => boolean): PublicationOperation {
     return this.transaction(() => {
       const original = this.inspect(operationId)

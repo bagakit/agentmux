@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import type { ConnectionApplication } from '@agentmux/core/connections'
+import type { PublicationImage } from '../../publication-image.js'
 import type { PublicationAdapter } from '../../publication-adapter.js'
 import type { PublicationMapping, PublicationOperation, PublicationReceipt, PublicationTarget } from '../../publication-store.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
@@ -59,6 +60,24 @@ function samePost(value: unknown, text: string): boolean {
     return node?.tag === 'text' && node.text === text && (node.style === undefined || Array.isArray(node.style) && node.style.length === 0)
   } catch { return false }
 }
+function requestImage(prepared: PreparedPublication): string | null {
+  try {
+    const body = object(JSON.parse(prepared.request.body!)), post = typeof body?.content === 'string' ? object(JSON.parse(body.content)) : null
+    const content = object(post?.zh_cn), rows = content?.content
+    if (body?.msg_type !== 'post' || content?.title !== '' || !Array.isArray(rows) || rows.length !== 1 || !Array.isArray(rows[0]) || rows[0].length !== 1) return null
+    const image = object(rows[0][0])
+    return image?.tag === 'img' && Object.keys(image).length === 2 ? feishuIdentity(image.image_key) : null
+  } catch { return null }
+}
+function sameImagePost(value: unknown, prepared: PreparedPublication): boolean {
+  if (typeof value !== 'string') return false
+  try {
+    const post = object(JSON.parse(value)), rows = post?.content
+    if (post?.title !== '' || !Array.isArray(rows) || rows.length !== 1 || !Array.isArray(rows[0]) || rows[0].length !== 1) return false
+    const image = object(rows[0][0])
+    return image?.tag === 'img' && image.image_key === requestImage(prepared)
+  } catch { return false }
+}
 function failure(status: number | undefined, code: unknown): PublicationReceipt | null {
   // An explicit in-flight response cannot establish non-application, even under a retry's request key.
   if (code === 230049) return unknown()
@@ -87,6 +106,20 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly fragmentBytes = 4_096
   readonly addressing = 'group'
   readonly permissionActions = true as const
+  readonly images = {
+    maxBytes: 10 * 1024 * 1024,
+    accepts: (image: PublicationImage) => image.byteLength > 0 && image.byteLength <= this.images.maxBytes && image.width > 0 && image.height > 0 &&
+      image.width <= (image.mimeType === 'image/gif' ? 2000 : 12000) && image.height <= (image.mimeType === 'image/gif' ? 2000 : 12000),
+    upload: async (image: PublicationImage, target: PublicationTarget, credential: string, signal: AbortSignal) => {
+      if (!this.images.accepts(image) || Buffer.from(image.dataBase64, 'base64').length !== image.byteLength ||
+        createHash('sha256').update(Buffer.from(image.dataBase64, 'base64')).digest('hex') !== image.sha256 || signal.aborted) return { state: 'unknown' as const }
+      try {
+        // This pinned method returns data:{image_key} unwrapped, unlike client.request.
+        const result = object(await this.clients.withClient(target, credential, client => client.im.image.create({ data: { image_type: 'message', image: Buffer.from(image.dataBase64, 'base64') } }), signal))
+        return result?.image_key ? { state: 'confirmed' as const, imageKey: feishuIdentity(result.image_key) } : { state: 'unknown' as const }
+      } catch { return { state: 'unknown' as const } }
+    }
+  }
   constructor(private readonly clients: Pick<FeishuAdapter, 'withClient'>) {}
   fragmentBytesFor(target: PublicationTarget): number {
     // One ASCII control byte can occupy seven bytes after both JSON encodings.
@@ -113,7 +146,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         { tag: 'div', text: { tag: 'plain_text', content: status } },
         ...payload.options.map(option => ({ tag: 'action', actions: [{ tag: 'button', text: { tag: 'plain_text', content: option.label }, value: { actionRef: option.actionRef } }] }))
       ] }
-    } else if (operation.payload.relay) {
+    } else if (operation.payload.kind === 'speech' && operation.payload.relay) {
       card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared message · via amux' } },
         elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } }] }
     }
@@ -122,6 +155,17 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
         method: mapping ? 'PATCH' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
+        ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
+    }
+    if (operation.payload.kind === 'image') {
+      const uploaded = operation.uploads?.at(-1)
+      if (uploaded?.state !== 'confirmed') feishuFailure('FEISHU_IMAGE_UPLOAD_UNCONFIRMED')
+      const imageKey = feishuIdentity(uploaded.imageKey)
+      const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId }), msg_type: 'post',
+        content: JSON.stringify({ zh_cn: { title: '', content: [[{ tag: 'img', image_key: imageKey }]] } }), ...(mapping ? {} : { uuid: key(operation.operationId) }) })
+      if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
+      return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
+        method: mapping ? 'PUT' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
         ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
     }
     const text = operation.payload.kind === 'speech' ? publicationSpeechText(operation.payload) : ''
@@ -139,10 +183,10 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       parsePreparedPublication(prepared, this)
       if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > 30 * 1024) return false
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
-        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && requestText(prepared) !== null || prepared.request.method === 'PATCH' && prepared.renderVersion === this.renderVersion && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
+        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && prepared.renderVersion === this.renderVersion && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'post' && requestText(prepared) !== null || body.msg_type === 'interactive' && prepared.renderVersion === this.renderVersion && requestCard(prepared) !== null)
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && prepared.renderVersion === this.renderVersion && requestCard(prepared) !== null)
     } catch { return false }
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
@@ -164,7 +208,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const card = requestCard(prepared), messageId = feishuIdentity(data.message_id)
       if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== (card ? 'interactive' : 'post')) return unknown()
       const body = object(data.body)
-      if (body?.content !== undefined && !(card ? sameCard(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
+      if (body?.content !== undefined && !(card ? sameCard(body.content, prepared) : requestImage(prepared) ? sameImagePost(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
       if (mapping) return { state: 'confirmed', mapping: { ...mapping } }
       const threadId = data.thread_id === undefined ? undefined : feishuIdentity(data.thread_id)
       return { state: 'confirmed', mapping: { messageId, ...(threadId === undefined ? {} : { threadId }) } }
@@ -183,7 +227,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const original = matches[0]!
       if (original.deleted !== undefined && typeof original.deleted !== 'boolean' || original.chat_id !== target.externalConversationId || !ownSender(original.sender, target.application) || original.thread_id !== undefined && original.thread_id !== mapping.threadId) return null
       if (prepared.request.method === 'DELETE') return original.deleted === true ? { state: 'confirmed', mapping: { ...mapping } } : null
-      return original.deleted !== true && (requestCard(prepared) ? original.msg_type === 'interactive' && sameCard(object(original.body)?.content, prepared) : original.msg_type === 'post' && samePost(object(original.body)?.content, requestText(prepared)!)) ? { state: 'confirmed', mapping: { ...mapping } } : null
+      return original.deleted !== true && (requestCard(prepared) ? original.msg_type === 'interactive' && sameCard(object(original.body)?.content, prepared) : original.msg_type === 'post' && (requestImage(prepared) ? sameImagePost(object(original.body)?.content, prepared) : samePost(object(original.body)?.content, requestText(prepared)!))) ? { state: 'confirmed', mapping: { ...mapping } } : null
     } catch { return null }
   }
 }
