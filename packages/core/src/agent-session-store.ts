@@ -1,4 +1,5 @@
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
+import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-continuity-control.js'
 import { normalizeAgentContinuityOperation } from './agent-session-continuity.js'
 import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
@@ -124,6 +125,7 @@ export type AgentMuxLifecycleClaim = {
 }
 
 export type AgentMuxRetiredAgentSession = {
+  continuityControlReceipts?: Record<string, AgentMuxContinuityControlReceipt>
   agentSessionId: string
   hostId: string
   run: AgentMuxRunRef
@@ -131,6 +133,25 @@ export type AgentMuxRetiredAgentSession = {
   observedAt: number
   history?: AgentSessionHistoryMetadata
   activityCommit?: AgentActivityCommit
+}
+
+type ContinuityControlStoredResult = { receipt: AgentMuxContinuityControlReceipt } & (
+  { session: AgentMuxStoredAgentSession; retirement?: never } | { retirement: AgentMuxRetiredAgentSession; session?: never }
+)
+function continuityControlReceipts(session: AgentMuxStoredAgentSession): Record<string, AgentMuxContinuityControlReceipt> {
+  const records = { ...session.continuityControlReceipts }
+  for (const root of Object.values(session.continuityOperations ?? {})) {
+    for (const [id, receipt] of Object.entries(root.supervision?.controlOperations ?? {})) {
+      if (records[id] && !isDeepStrictEqual(records[id], receipt)) throw new AgentMuxError('The original recovery control identity has conflicting receipts.', 'INVALID_AGENT_SESSION_STORE')
+      records[id] = receipt
+    }
+  }
+  return records
+}
+function continuityControlStoredResult(session: AgentMuxStoredAgentSession | null, retirement: AgentMuxRetiredAgentSession | null,
+  operationId: string): ContinuityControlStoredResult | null {
+  const receipt = session ? continuityControlReceipts(session)[operationId] : retirement?.continuityControlReceipts?.[operationId]
+  return receipt ? structuredClone(session ? { receipt, session } : { receipt, retirement: retirement! }) : null
 }
 
 export type AgentMuxAgentSessionStore = {
@@ -142,6 +163,8 @@ export type AgentMuxAgentSessionStore = {
   load(): Promise<readonly unknown[]>
   loadMetadata(signal?: AbortSignal): Promise<readonly AgentMuxStoredAgentSession[]>
   readMetadata(agentSessionId: string): Promise<AgentMuxStoredAgentSession | null>
+  /** Exact original admission, including its retained retirement projection. */
+  readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null>
   /** Exact original claim; history is never loaded into ordinary Session metadata. */
   readPromptAdmission(agentSessionId: string, run: AgentMuxRunRef, submissionId: string): Promise<AgentPromptSubmissionRecord | null>
   /** Original outcome CAS. A late receipt cannot move the latest projection back. */
@@ -519,6 +542,7 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     run: runRef(source.run),
     source: 'user',
     observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
+    ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.history === undefined ? {} : { history: normalizeHistoryMetadata(source.history) }),
     ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) })
   }
@@ -1332,6 +1356,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   const priorRuns = retiredRuns(source.retiredRuns, currentRun)
   const session: AgentMuxAgentSession = {
     kind: 'agent',
+    ...(source.continuityControlReceipts === undefined ? {} : { continuityControlReceipts: parseAgentContinuityControlReceipts(source.continuityControlReceipts, String(source.agentSessionId)) }),
     ...(source.continuity === undefined ? {} : { continuity: normalizeAgentContinuityOperation(source.continuity) }),
     ...(source.continuityOperations === undefined ? {} : { continuityOperations: Object.fromEntries(Object.entries(record(source.continuityOperations, 'continuity operations')).map(([id, value]) => {
       const operation = normalizeAgentContinuityOperation(value)
@@ -2242,6 +2267,11 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     this.reservations.set(reservation.agentSessionId, structuredClone(reservation))
   }
 
+  async readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null> {
+    return continuityControlStoredResult(this.sessions.get(agentSessionId) ?? null,
+      this.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId) ?? null, operationId)
+  }
+
   async readLifecycleReservation(agentSessionId: string): Promise<AgentMuxLifecycleReservation | null> {
     const reservation = this.reservations.get(agentSessionId)
     return reservation ? structuredClone(reservation) : null
@@ -2389,6 +2419,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             source: 'user',
             observedAt: Date.now(),
             history: sessionHistoryMetadata(previous),
+            continuityControlReceipts: continuityControlReceipts(previous),
             ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {})
           }])
         : this.retiredAgentSessions,
@@ -2855,6 +2886,16 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     })
   }
 
+  async readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null> {
+    await this.tail
+    return await this.withReadDatabase(db => {
+      const session = this.sessionMetadata(db, agentSessionId)
+      const row = session ? undefined : db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
+      return continuityControlStoredResult(session, row ? retiredAgentSession(JSON.parse(String(row.json))) : null, operationId)
+    }, document => continuityControlStoredResult(document.sessions.find(session => session.agentSessionId === agentSessionId) ?? null,
+      document.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId) ?? null, operationId))
+  }
+
   async readLifecycleReservation(agentSessionId: string): Promise<AgentMuxLifecycleReservation | null> {
     await this.tail
     return await this.withReadDatabase(db => {
@@ -3077,6 +3118,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
               source: 'user',
               observedAt: Date.now(),
               history: sessionHistoryMetadata(previous),
+            continuityControlReceipts: continuityControlReceipts(previous),
               ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {})
             }])
           : document.retiredAgentSessions,

@@ -1125,6 +1125,8 @@ export type AgentNativePromptInputPlan = Readonly<{
 )>
 
 export type AgentMuxAgentSession = {
+  /** Read-only admissions retained through explicit retirement and reopen. */
+  continuityControlReceipts?: Record<string, import('./agent-session-continuity-control.js').AgentMuxContinuityControlReceipt>
   /** Core-owned current decision and exact original operation receipts. */
   continuity?: import('./agent-session-continuity.js').AgentMuxContinuityOperation
   continuityOperations?: Record<string, import('./agent-session-continuity.js').AgentMuxContinuityOperation>
