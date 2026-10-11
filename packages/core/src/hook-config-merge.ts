@@ -12,7 +12,7 @@ export type AgentHookMergeStrategy =
 
 /** An explicitly exclusive native key. Every sibling remains outside AgentMux's ownership. */
 export type AgentHookOwnedKeyMerge = { kind: 'json-owned-key'; key: string }
-/** Append missing current declarations under hooks.<event>, preserving every existing entry. */
+/** Append missing current declarations under hooks.<event>; retire only proven owned leaves. */
 export type AgentHookManagedEventsMerge = { kind: 'json-managed-events' }
 /** The same declaration rule where native event buckets live at the root. */
 export type AgentHookRootManagedEventsMerge = { kind: 'json-root-managed-events' }
@@ -93,15 +93,58 @@ function currentBucket(current: JsonObject, event: string): unknown[] {
   if (!Array.isArray(current[event])) return targetShape('Managed Hook target event must be an array; retaining the target.')
   return current[event]
 }
-function mergeEventBuckets(current: JsonObject, owned: Record<string, JsonObject[]>): { value: JsonObject; changed: boolean } {
+type RetiredDeclaration = { event: string; index: number; hooks?: number[] }
+/** An edited or multiply occurring declaration has no unique owned occurrence. */
+function ownedHookIndices(actual: JsonObject, expected: JsonObject): number[] | undefined {
+  if (!Array.isArray(expected.hooks)) return []
+  const actualHooks = actual.hooks as unknown[], expectedHooks = expected.hooks
+  const first: number[] = [], last: number[] = []
+  let position = 0
+  for (const leaf of expectedHooks) {
+    while (position < actualHooks.length && !isDeepStrictEqual(actualHooks[position], leaf)) position++
+    first.push(position++)
+  }
+  position = actualHooks.length - 1
+  for (const leaf of [...expectedHooks].reverse()) {
+    while (position >= 0 && !isDeepStrictEqual(actualHooks[position], leaf)) position--
+    last.unshift(position--)
+  }
+  return isDeepStrictEqual(first, last) ? first : undefined
+}
+function mergeEventBuckets(current: JsonObject, owned: Record<string, JsonObject[]>, previous: Record<string, JsonObject[]> = {}) {
   let value = { ...current }
   let changed = false
-  for (const [event, definitions] of Object.entries(owned)) {
-    const bucket = currentBucket(current, event)
-    const missing = definitions.filter(definition => !bucket.some(entry => containsDeclaration(entry, definition)))
-    if (missing.length) { value = { ...value, [event]: [...bucket, ...missing] }; changed = true }
+  const retained: Record<string, JsonObject[]> = Object.create(null), added: Record<string, JsonObject[]> = Object.create(null)
+  const retired: RetiredDeclaration[] = []
+  for (const [event, definitions] of Object.entries(previous)) {
+    if (Object.hasOwn(value, event) && !Array.isArray(value[event])) continue
+    let bucket = [...currentBucket(value, event)]
+    for (const definition of definitions) {
+      const matches = bucket.flatMap((entry, index) => containsDeclaration(entry, definition) ? [index] : [])
+      if (matches.length !== 1) continue
+      const index = matches[0]!, actual = bucket[index] as JsonObject, indices = ownedHookIndices(actual, definition)
+      if (!indices) continue
+      if (owned[event]?.some(expected => isDeepStrictEqual(expected, definition))) {
+        const declarations = retained[event] ??= []
+        declarations.push(definition)
+        continue
+      }
+      if (Array.isArray(definition.hooks) && indices.length < (actual.hooks as unknown[]).length) {
+        bucket[index] = { ...actual, hooks: (actual.hooks as unknown[]).filter((_leaf, at) => !indices.includes(at)) }
+        retired.push({ event, index, hooks: indices })
+      } else { bucket.splice(index, 1); retired.push({ event, index }) }
+      changed = true
+    }
+    value = { ...value, [event]: bucket }
   }
-  return { value, changed }
+  for (const [event, definitions] of Object.entries(owned)) {
+    const bucket = currentBucket(value, event)
+    const missing = definitions.filter(definition => !bucket.some(entry => containsDeclaration(entry, definition)))
+    if (missing.length) { value = { ...value, [event]: [...bucket, ...missing] }; added[event] = missing; changed = true }
+  }
+  const ownership = { ...retained }
+  for (const [event, definitions] of Object.entries(added)) ownership[event] = [...(ownership[event] ?? []), ...definitions]
+  return { value, changed, retired, added, ownership }
 }
 function inspectEvents(current: JsonObject, owned: Record<string, JsonObject[]>): { present: boolean; current: boolean } {
   let count = 0, satisfied = 0
@@ -118,18 +161,19 @@ function applyOwnedKey(current: string | null, owned: JsonObject, key: string): 
   if (!Object.hasOwn(owned, key)) return invalidPlan('Managed Hook owned content is missing its owned key.')
   return SERIALIZE({ ...parseCurrentObject(current), [key]: owned[key] })
 }
-function applyManagedEvents(current: string | null, owned: JsonObject, root = false): string {
+function applyManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined, root = false) {
   const parsed = parseCurrentObject(current)
   const expected = declarations(root ? owned : owned.hooks)
-  const merged = mergeEventBuckets(root ? parsed : currentHooks(parsed), expected)
-  if (!merged.changed && current !== null) return current
-  if (root) return SERIALIZE(merged.value)
+  const merged = mergeEventBuckets(root ? parsed : currentHooks(parsed), expected, previous ? declarations(root ? previous : previous.hooks) : undefined)
+  const ownedContent = Object.keys(merged.ownership).length ? SERIALIZE(root ? merged.ownership : { hooks: merged.ownership }) : null
+  if (!merged.changed && current !== null) return { content: current, ownedContent }
+  if (root) return { content: SERIALIZE(merged.value), ownedContent }
   let result: JsonObject = { ...parsed, hooks: merged.value }
   // A fragment does not grant ownership of an existing user's metadata key.
   for (const [key, value] of Object.entries(owned)) {
     if (key !== 'hooks' && !Object.hasOwn(result, key)) result = { ...result, [key]: value }
   }
-  return SERIALIZE(result)
+  return { content: SERIALIZE(result), ownedContent }
 }
 
 function yamlDocument(current: string | null) {
@@ -159,21 +203,32 @@ function yamlEntry(node: unknown): unknown {
   if (opaque) return undefined
   try { return node.toJSON() } catch { return undefined }
 }
-function applyYamlManagedEvents(current: string | null, owned: JsonObject): string {
+function applyYamlManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined) {
   const expected = declarations(owned.hooks), doc = yamlDocument(current)
-  let hooks = yamlHooks(doc), changed = false
-  for (const [event, definitions] of Object.entries(expected)) {
+  let hooks = yamlHooks(doc)
+  const events = new Set([...Object.keys(expected), ...Object.keys(previous ? declarations(previous.hooks) : {})])
+  const existing = Object.fromEntries([...events].map(event => {
+    const bucket = hooks?.get(event, true)
+    if (bucket !== undefined && !isSeq(bucket) && Object.hasOwn(expected, event)) return targetShape('Managed Hook target event must be a YAML sequence; retaining the target.')
+    return [event, bucket === undefined ? [] : isSeq(bucket) ? bucket.items.map(yamlEntry) : null]
+  }))
+  const merged = mergeEventBuckets(existing, expected, previous ? declarations(previous.hooks) : undefined)
+  for (const retired of merged.retired) {
+    const bucket = yamlBucket(hooks, retired.event)!
+    if (retired.hooks) {
+      const entry = bucket.items[retired.index] as YAMLMap, leaves = entry.get('hooks', true)
+      if (!isSeq(leaves)) return targetShape('Managed Hook leaves changed while preparing the exact owned declaration.')
+      for (const at of [...retired.hooks].reverse()) leaves.items.splice(at, 1)
+    } else bucket.items.splice(retired.index, 1)
+  }
+  for (const [event, definitions] of Object.entries(merged.added)) {
     let bucket = yamlBucket(hooks, event)
-    const existing = bucket?.items.map(yamlEntry) ?? []
-    const missing = definitions.filter(definition => !existing.some(entry => containsDeclaration(entry, definition)))
-    if (!missing.length) continue
     if (!hooks) { hooks = new YAMLMap(); doc.set('hooks', hooks) }
     if (!bucket) { bucket = new YAMLSeq(); hooks.set(event, bucket) }
-    for (const definition of missing) bucket.add(doc.createNode(definition))
-    changed = true
+    for (const definition of definitions) bucket.add(doc.createNode(definition))
   }
-  if (!changed && current !== null) return current
-  return doc.toString({ lineWidth: 0 })
+  return { content: !merged.changed && current !== null ? current : doc.toString({ lineWidth: 0 }),
+    ownedContent: Object.keys(merged.ownership).length ? SERIALIZE({ hooks: merged.ownership }) : null }
 }
 function approvalDeclarations(owned: JsonObject): JsonObject[] {
   if (!Array.isArray(owned.approvals) || owned.approvals.length === 0 ||
@@ -190,23 +245,38 @@ function currentApprovals(parsed: JsonObject): unknown[] {
 function containsApproval(current: unknown[], expected: JsonObject): boolean {
   return current.some(entry => object(entry) && entry.event === expected.event && entry.command === expected.command)
 }
-function applyManagedApprovals(current: string | null, owned: JsonObject): string {
+function applyManagedApprovals(current: string | null, owned: JsonObject, previous: JsonObject | undefined) {
   const expected = approvalDeclarations(owned), parsed = parseCurrentObject(current)
-  const approvals = currentApprovals(parsed), missing = expected.filter(entry => !containsApproval(approvals, entry))
-  if (!missing.length && current !== null) return current
-  return SERIALIZE({ ...parsed, approvals: [...approvals, ...missing] })
+  let approvals = [...currentApprovals(parsed)]
+  const retained: JsonObject[] = []
+  for (const definition of previous ? approvalDeclarations(previous) : []) {
+    const matches = approvals.flatMap((entry, index) => isDeepStrictEqual(entry, definition) ? [index] : [])
+    if (matches.length !== 1) continue
+    if (containsApproval(expected, definition)) retained.push(definition)
+    else approvals.splice(matches[0]!, 1)
+  }
+  const missing = expected.filter(entry => !containsApproval(approvals, entry))
+  approvals = [...approvals, ...missing]
+  const ownership = [...retained, ...missing]
+  return { content: isDeepStrictEqual(approvals, currentApprovals(parsed)) && current !== null ? current : SERIALIZE({ ...parsed, approvals }),
+    ownedContent: ownership.length ? SERIALIZE({ approvals: ownership }) : null }
 }
 
 /** Deterministic preparation; unknown shared entries never acquire deletion authority. */
-export function renderMergedHookContent(current: string | null, ownedContent: string, strategy: AgentHookMergeStrategy): string {
+export function prepareMergedHookContent(current: string | null, ownedContent: string, strategy: AgentHookMergeStrategy, previousOwnedContent?: string | null): { content: string; ownedContent: string | null } {
   const owned = parseOwnedObject(ownedContent)
+  const previous = previousOwnedContent ? parseOwnedObject(previousOwnedContent) : undefined
   switch (strategy.kind) {
-    case 'json-owned-key': return applyOwnedKey(current, owned, strategy.key)
-    case 'json-managed-events': return applyManagedEvents(current, owned)
-    case 'json-root-managed-events': return applyManagedEvents(current, owned, true)
-    case 'yaml-managed-events': return applyYamlManagedEvents(current, owned)
-    case 'json-managed-approvals': return applyManagedApprovals(current, owned)
+    case 'json-owned-key': return { content: applyOwnedKey(current, owned, strategy.key), ownedContent: null }
+    case 'json-managed-events': return applyManagedEvents(current, owned, previous)
+    case 'json-root-managed-events': return applyManagedEvents(current, owned, previous, true)
+    case 'yaml-managed-events': return applyYamlManagedEvents(current, owned, previous)
+    case 'json-managed-approvals': return applyManagedApprovals(current, owned, previous)
   }
+}
+
+export function renderMergedHookContent(current: string | null, ownedContent: string, strategy: AgentHookMergeStrategy, previousOwnedContent?: string | null): string {
+  return prepareMergedHookContent(current, ownedContent, strategy, previousOwnedContent).content
 }
 
 /** Exact current declarations only; neither historical ownership nor native activation. */
