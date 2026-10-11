@@ -14,7 +14,7 @@ const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'I
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
 function integer(value: unknown, minimum: number): number { if (!Number.isSafeInteger(value) || Number(value) < minimum) fail(); return value as number }
 function reason(value: unknown, queue = false): ConnectionDeliveryReason {
-  if (!CONNECTION_DELIVERY_RECEIPT_REASONS.includes(value as ConnectionDeliveryReceiptReason) && !(queue && value === 'original-speech-withdrawn')) fail()
+  if (!CONNECTION_DELIVERY_RECEIPT_REASONS.includes(value as ConnectionDeliveryReceiptReason) && !(queue && ['original-speech-withdrawn', 'private-content', 'public-content-unconfirmed', 'version-unavailable'].includes(String(value)))) fail()
   return value as ConnectionDeliveryReason
 }
 function mapping(value: unknown): ConnectionDeliveryMapping {
@@ -102,7 +102,7 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
   if (p.effect !== 'upsert' && p.effect !== 'withdraw' || p.effect === 'upsert' && ordinal >= count || !['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'].includes(p.state as string)) fail()
   const mapped = p.mapping === undefined ? undefined : mapping(p.mapping), receipt = p.receipt === undefined ? undefined : parseConnectionDeliveryReceipt(p.receipt)
   const why = p.reason === undefined ? undefined : reason(p.reason, true)
-  if (p.state === 'confirmed' && (!mapped || why !== undefined) || (p.state === 'unknown' || p.state === 'not-applied') && (why === undefined || why === 'original-speech-withdrawn')) fail()
+  if (p.state === 'confirmed' && (!mapped || why !== undefined) || (p.state === 'unknown' || p.state === 'not-applied') && (why === undefined || !CONNECTION_DELIVERY_RECEIPT_REASONS.includes(why as ConnectionDeliveryReceiptReason))) fail()
   if (p.effect === 'withdraw' && ['dispatching', 'unknown', 'confirmed', 'not-applied'].includes(p.state as string) && !mapped) fail()
   if (receipt?.state === 'confirmed' && (!mapped || receipt.mapping.messageId !== mapped.messageId || receipt.mapping.threadId !== mapped.threadId)) fail()
   if (receipt && ['confirmed', 'unknown', 'not-applied'].includes(p.state as string) && (receipt.state !== p.state || receipt.state !== 'confirmed' && receipt.reason !== why)) fail()

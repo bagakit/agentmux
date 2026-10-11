@@ -1,5 +1,5 @@
 import { AgentMuxError, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
@@ -163,7 +163,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const record = unit.records.find(record => record.id === slot.recordId)!
       if (record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
       const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
-      if (item.kind === 'user-message' || part.kind !== 'resource' || part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
+      if (part.contentEligibility !== 'public' || part.kind !== 'resource' || part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
       try {
         const value = await readSessionHistoryTextResource(part, slot.selector.partIndex,
           { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}) },
@@ -212,6 +212,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
+    const accepted = new Map<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, AgentSessionHistoryContentPart> }>()
+    const qualified = new Set<string>() // One frozen representation is verified once in this bounded drain.
     for (let count = 0; count < 16; count++) {
       if (signal.aborted || !this.authorized(binding)) return
       let original = this.store.next(binding, projectionId)
@@ -229,6 +231,37 @@ export class PublicationHost implements ConnectionDeliveryPort {
         }
         if (this.store.inspect(original.operationId)?.state === 'confirmed') continue
         return { state: 'unknown', reason: 'effect-unconfirmed' }
+      }
+      const frozen = JSON.stringify([original.projectionId, original.sourceRevision])
+      const relevant = qualified.has(frozen) ? [] : this.store.pendingNativeRecords(original)
+      if (!qualified.has(frozen) && original.payload.kind === 'speech' && original.effect === 'upsert' && (relevant.length || (original.sourceRecords ?? [original.reference]).some(record => record.source.kind === 'native'))) {
+        const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
+        try {
+          for (const record of relevant) {
+            const key = conversationRecordId(record)
+            if (accepted.has(key)) continue
+            let cursor: string | undefined, pending: ConversationWindowAssembly | undefined, complete = false
+            while (!complete) {
+              signal.throwIfAborted()
+              const input = { ...reference, record, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
+              const page = parseConversationReadPage(await this.options.conversation.inspect(input, signal), input)
+              const before = (pending?.bytes ?? 0) + (pending?.fragment?.receivedBytes ?? 0)
+              const consumed = consumeConversationWindowPage(page, pending)
+              if (consumed.kind === 'complete') {
+                const unit = consumed.snapshot.units.find(unit => unit.records.some(value => conversationRecordId(value.reference!) === key))
+                if (!unit) throw Error('The exact pending native record is unavailable')
+                accepted.set(key, { unit, frontier: page.window.checkpoint, resolved: await this.resolve(reference, [unit], signal, binding) }); complete = true; break
+              }
+              pending = consumed.pending
+              if (!page.items.length || !page.nextCursor || cursor === page.nextCursor || pending.bytes + (pending.fragment?.receivedBytes ?? 0) <= before) throw Error('The exact pending record made no progress')
+              cursor = page.nextCursor
+            }
+          }
+        } catch { signal.throwIfAborted() /* The exact missing observation becomes a durable gap below. */ }
+        const qualification = this.store.qualifyPending(binding, original, accepted, this.store.checkpoint(binding, binding.sourceFrontier?.sourceHostId ?? original.reference.hostId))
+        if (qualification === 'cancelled') continue
+        if (qualification !== 'qualified') return { state: 'unavailable', reason: 'source-unconfirmed' }
+        qualified.add(frozen)
       }
       if (original.payload.kind === 'permission' && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
       const claimed = this.store.claimNext(binding, () => this.authorized(binding) && (original!.payload.kind !== 'permission' || this.options.permissions?.authorized(original!) === true), adapter, projectionId)

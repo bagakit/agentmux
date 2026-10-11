@@ -4,7 +4,7 @@ import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRe
 
 export type PublicationContentPlan = {
   text: string
-  pieces: Array<{ part: ConversationContentRef; text: string; relay?: ConnectionDeliveryRelay['sources'][number] }>
+  pieces: Array<{ part: ConversationContentRef; text: string; contentEligibility?: 'public'; relay?: ConnectionDeliveryRelay['sources'][number] }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
   gaps: ConnectionDeliveryGap[]
@@ -18,7 +18,10 @@ export type PublicationContentOptions = {
   origin(recordId: string): ConnectionOriginRepresentation['origin'] | undefined
   selected?: ConversationContentRef
 }
-export const publicationPartKey = (part: Pick<ConversationContentRef, 'record' | 'selector'>) => JSON.stringify([conversationRecordId(part.record), part.selector])
+export const publicationPartKey = (part: Pick<ConversationContentRef, 'record' | 'selector'>) => {
+  const selector = part.selector.kind === 'native-part' ? { kind: 'native-part', partIndex: part.selector.partIndex } : { kind: 'captured-field', field: part.selector.field }
+  return JSON.stringify([conversationRecordId(part.record), selector])
+}
 
 /** Platform representation only. Identity, role, author, order and relations are accepted Core facts. */
 export function publicationContent(unit: ConversationUnit, binding: RoomBinding, frontier: ConversationCheckpoint, options: PublicationContentOptions): PublicationContentPlan {
@@ -38,9 +41,14 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       const start = binding.sourceFrontier?.frontier.cuts.find(c => c.kind === 'captured')
       if (!start || start.kind !== 'captured' || record.order.kind !== 'captured-stream' || record.order.epoch !== start.epoch || record.order.firstSequence <= start.sequence) { gap('start-cut-unconfirmed'); continue }
     }
-    // A native user record does not supply the qualified public input span. The
-    // original captured writer explicitly does; attribution alone never does.
-    if (original.kind === 'native' && original.item.kind === 'user-message' || original.kind === 'captured' && (original.item.kind === 'user_message' && original.item.publicContent !== 'confirmed' || original.item.kind === 'system_message' && original.item.source === 'agentmux')) { gap('public-content-unconfirmed'); continue }
+    if (original.kind === 'native') {
+      const eligibility = slot.selector.kind === 'native-part' ? original.item.contentParts[slot.selector.partIndex]?.contentEligibility : undefined
+      if (eligibility === 'private') { excluded.push(part); continue }
+      if (eligibility !== 'public') { gap('public-content-unconfirmed'); continue }
+    }
+    // Captured writers retain their own explicit public input contract. Native
+    // parts above carry the original Provider purpose independently of display kind.
+    if (original.kind === 'captured' && (original.item.kind === 'user_message' && original.item.publicContent !== 'confirmed' || original.item.kind === 'system_message' && original.item.source === 'agentmux')) { gap('public-content-unconfirmed'); continue }
     const external = original.kind === 'captured' ? original.item.authorExternal : undefined
     if (external && external.connectionId === binding.connectionId && external.externalConversationId === binding.externalConversationId && external.bindingId === binding.bindingId && external.bindingRevision === binding.revision) {
       const origin = options.origin(record.id)
@@ -84,7 +92,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
         : narrow || unit.event.role === 'message' && unit.event.author.kind === 'agent' && slot.placement === 'body' ? ''
         : `[${unit.event.role} · ${source} · ${unit.event.author.kind}${original.kind === 'captured' ? ` · ${original.item.status}` : ''}${unit.event.role === 'message' ? ' · via amux' : ' · read-only'}]\n`
       const text = value ? label + value : ''
-      pieces.push({ part, text, ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
+      pieces.push({ part, text, ...(original.kind === 'native' ? { contentEligibility: 'public' as const } : {}), ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
       if (text) sections.push(text)
     }
   }
