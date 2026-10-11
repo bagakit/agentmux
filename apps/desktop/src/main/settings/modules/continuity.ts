@@ -3,7 +3,7 @@ import type { AppConfig } from '../../../shared/contracts.js'
 import { booleanSetting, enumSetting, invalid, textSetting, type ScalarSetting } from '../scalar-setting.js'
 
 const defaults = DEFAULT_AGENT_CONTINUITY_POLICY
-function numberSetting(key: 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 'recheckIntervalMs' | 'recheckMaxAttempts'): ScalarSetting {
+function numberSetting(key: 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 'recheckIntervalMs' | 'recheckMaxAttempts' | 'retryInitialDelayMs' | 'retryMaxDelayMs' | 'retryMaxAttempts'): ScalarSetting {
   return {
     key: `continuity.${key}`,
     entry(config) { return { key: this.key, kind: 'number', value: normalizeAgentContinuityPolicy(config.continuity)[key], default: defaults[key] } },
@@ -14,7 +14,15 @@ function numberSetting(key: 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 
         error.message += ` Use a whole number from 0 to ${Number.MAX_SAFE_INTEGER}${key.endsWith('Ms') ? ' milliseconds' : ''}.`
         throw error
       }
-      return this.entry(config).value === value ? config : { ...config, continuity: { ...config.continuity, [key]: value } }
+      if (this.entry(config).value === value) return config
+      const next = { ...config, continuity: { ...config.continuity, [key]: value } }
+      try { normalizeAgentContinuityPolicy(next.continuity) }
+      catch {
+        const error = invalid(this.key, text)
+        error.message += ' The maximum retry base delay must be at least the initial retry base delay.'
+        throw error
+      }
+      return next
     }
   }
 }
@@ -32,6 +40,9 @@ export const continuitySettings = [
     config => normalizeAgentContinuityPolicy(config.continuity).resumeAfterExit, write('resumeAfterExit')),
   numberSetting('recheckIntervalMs'),
   numberSetting('recheckMaxAttempts'),
+  numberSetting('retryInitialDelayMs'),
+  numberSetting('retryMaxDelayMs'),
+  numberSetting('retryMaxAttempts'),
   enumSetting('continuity.reminderMode', ['off', 'default', 'default-plus-custom'], defaults.reminderMode,
     config => normalizeAgentContinuityPolicy(config.continuity).reminderMode, write('reminderMode')),
   textSetting('continuity.reminderAppend', config => normalizeAgentContinuityPolicy(config.continuity).reminderAppend,

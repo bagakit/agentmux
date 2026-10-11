@@ -6,7 +6,7 @@ import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
 import { validateThemeConfigEdit } from './theme-config.js'
-import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile } from '@agentmux/core'
+import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile, normalizeAgentContinuityPolicy } from '@agentmux/core'
 import { parseToolkitToolConfiguration, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
 import { PROMPT_REACTION_ICONS, isPromptReactionCode } from '@agentmux/core/prompt-reaction'
@@ -279,11 +279,17 @@ const configSchema = z
       resumeAfterExit: z.boolean().optional(),
       recheckIntervalMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       recheckMaxAttempts: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      retryInitialDelayMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      retryMaxDelayMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
+      retryMaxAttempts: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       reminderMode: z.enum(['off', 'default', 'default-plus-custom']).optional(),
       reminderAppend: z.string().optional(),
       continuationEnabled: z.boolean().optional(),
       continuationPrompt: z.string().optional()
-    }).strict().optional(),
+    }).strict().optional().superRefine((authored, context) => {
+      try { normalizeAgentContinuityPolicy(authored as AppConfig['continuity']) }
+      catch { context.addIssue({ code: 'custom', message: 'Invalid continuity policy. The maximum retry base delay must be at least the initial retry base delay.' }) }
+    }),
     startup: z.object({ skipAgentAvailabilityCheckWait: z.boolean().optional() }).strict().optional(),
     profile: z.object({
       displayName: z.string().max(USER_PROFILE_NAME_LIMIT).refine(value => !/[\r\n\x00-\x1f]/.test(value)),
