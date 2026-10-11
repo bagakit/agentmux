@@ -17,8 +17,8 @@ function receiptIdentity(record: NonNullable<AgentInputSubmissionReceipt['admiss
   if (claim.transport === 'native') {
     const native = claim.native.plan, input = plan?.kind === 'native-rpc' ? plan : undefined
     return JSON.stringify([...common, 'native', native.kind, native.operation, native.protocolId, native.sourceId, native.actorId,
-      native.threadId, native.expectedTurnId, input?.kind, input?.operation, input?.protocolId, input?.sourceId,
-      input?.actorId, input?.threadId, input?.expectedTurnId])
+      native.threadId, native.expectedTurnId, native.clientCorrelation, input?.kind, input?.operation, input?.protocolId, input?.sourceId,
+      input?.actorId, input?.threadId, input?.expectedTurnId, input?.clientCorrelation])
   }
   return JSON.stringify([...common, 'pty', claim.startByte, claim.endByte, plan?.kind,
     plan?.kind === 'single-phase' ? plan.data : plan?.kind === 'render-then-submit'
