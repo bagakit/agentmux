@@ -1,6 +1,7 @@
 import type { AgentMuxControlSettingsHostsRequest, AgentMuxControlSettingsHostsResult, AgentMuxControlSettingsResourceFields } from '@agentmux/core'
 import type { HostCheckResult, HostConfig } from '../shared/contracts.js'
 import { hostSchema } from './config-store.js'
+import { configValuesEqual } from '../shared/config-edit.js'
 import type { ConfigOwner } from './config-owner.js'
 import type { RuntimeController } from './runtime-controller.js'
 import type { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
@@ -28,6 +29,20 @@ export async function executeSettingsHostsControl(
 ): Promise<AgentMuxControlSettingsHostsResult> {
   if (request.operation === 'settings.hosts.list') {
     return { operation: request.operation, hosts: structuredClone(owner.current.hosts) as AgentMuxControlSettingsResourceFields[] }
+  }
+  if (request.operation === 'settings.hosts.update') {
+    const expected = hostSchema.safeParse(request.expected), candidate = hostSchema.safeParse(request.candidate)
+    if (!expected.success || !candidate.success || expected.data.id !== request.id || candidate.data.id !== request.id ||
+      expected.data.kind !== 'ssh' || candidate.data.kind !== 'ssh' || !expected.data.runtimeId || candidate.data.runtimeId !== expected.data.runtimeId) {
+      throw Object.assign(new Error('Route repair requires complete expected and candidate records of the same bound SSH Host.'), { code: 'INVALID_SETTING_VALUE' })
+    }
+    const saved = await owner.update(current => {
+      const actual = current.hosts.find(host => host.id === request.id)
+      if (configValuesEqual(actual, candidate.data)) return current
+      if (!configValuesEqual(actual, expected.data)) throw Object.assign(new Error('The Host changed; read its current configuration before another explicit update.'), { code: 'CONFIG_CONFLICT' })
+      return { ...current, hosts: current.hosts.map(host => host.id === request.id ? candidate.data as HostConfig : host) }
+    })
+    return { operation: request.operation, host: structuredClone(saved.hosts.find(host => host.id === request.id)!) as AgentMuxControlSettingsResourceFields }
   }
   const input = request.id !== undefined ? owner.current.hosts.find(host => host.id === request.id) : 'input' in request ? request.input : undefined
   if (input === undefined) throw Object.assign(new Error(`Host not found: ${request.id}`), { code: 'SETTING_RESOURCE_NOT_FOUND' })

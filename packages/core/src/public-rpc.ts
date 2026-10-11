@@ -63,7 +63,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'goal.activity.append': 'demand.activity.append', 'goal.activity.inspect': 'demand.activity.inspect',
   'app.inspect': 'inspect.client', 'app.focus': 'focus',
   'settings.inspect': 'settings.get', 'settings.set': 'settings.set',
-  'settings.hosts.ls': 'settings.hosts.list', 'settings.hosts.test': 'settings.hosts.test',
+  'settings.hosts.ls': 'settings.hosts.list', 'settings.hosts.update': 'settings.hosts.update', 'settings.hosts.test': 'settings.hosts.test',
   'settings.hosts.upgrade-check': 'settings.hosts.upgrade-check',
   'settings.hosts.upgrade': 'settings.hosts.upgrade',
   'settings.hosts.upgrade-inspect': 'settings.hosts.upgrade-inspect',

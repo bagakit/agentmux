@@ -145,6 +145,13 @@ export type RuntimePreparation = {
   reservedHostIds: string[]
   runtimeBindings?: Map<string, string>
   configs?: HostConfig[]
+  routeUpdates?: {
+    config: HostConfig & { kind: 'ssh'; runtimeId: string }
+    client: AgentMuxSshHostedClient
+    expectedSignature: string
+    candidate?: Awaited<ReturnType<AgentMuxSshHostedClient['prepareRoute']>>
+    executionHost?: ExecutionHost
+  }[]
   launcherUpdates?: {
     config: HostConfig & { kind: 'ssh'; runtimeId: string }
     client: AgentMuxSshHostedClient
@@ -544,10 +551,18 @@ export class RuntimeController {
       return [{ config: { ...next, runtimeId: next.runtimeId }, client: existing.client, expectedSignature }]
     })
     const launcherHostIds = new Set(launcherUpdates.map(update => update.config.id))
+    const routeUpdates: NonNullable<RuntimePreparation['routeUpdates']> = changed.flatMap(next => {
+      const existing = this.hosts.get(next.id), expectedSignature = this.hostSignatures.get(next.id)
+      if (launcherHostIds.has(next.id) || next.kind !== 'ssh' || !next.runtimeId || existing?.config.kind !== 'ssh' ||
+        existing.config.runtimeId !== next.runtimeId || expectedSignature === undefined ||
+        !isSshHostedClient(existing.client)) return []
+      return [{ config: { ...next, runtimeId: next.runtimeId }, client: existing.client, expectedSignature }]
+    })
+    const retainedHostIds = new Set([...launcherHostIds, ...routeUpdates.map(update => update.config.id)])
     const removedHostIds = [...this.hostSignatures.keys()].filter((id) => !nextSignatures.has(id))
     const reservedHostIds = [...new Set([
       ...removedHostIds,
-      ...changed.flatMap((host) => this.hosts.has(host.id) && !launcherHostIds.has(host.id) ? [host.id] : [])
+      ...changed.flatMap((host) => this.hosts.has(host.id) && !retainedHostIds.has(host.id) ? [host.id] : [])
     ])]
     const acquiredHostIds: string[] = []
     for (const hostId of reservedHostIds) {
@@ -560,8 +575,16 @@ export class RuntimeController {
     }
     try {
       await Promise.all(reservedHostIds.map(async (hostId) => await this.waitForHostQuiescence(hostId)))
-      await this.assertConfigurable(nextSignatures, launcherHostIds)
+      await this.assertConfigurable(nextSignatures, retainedHostIds)
       const results = await Promise.allSettled(changed.map(async host => {
+        const route = routeUpdates.find(update => update.config.id === host.id)
+        if (route) {
+          route.candidate = await route.client.prepareRoute({ ...route.config, hostId: route.config.id })
+          route.executionHost = createExecutionHost(route.config)
+          this.assertLauncherUpdateCurrent(route)
+          route.candidate.assertCurrent()
+          return undefined
+        }
         const update = launcherUpdates.find(update => update.config.id === host.id)
         if (!update) return await this.prepareHost(host)
         // A slow or failed probe cannot reserve healthy input on the retained consumer.
@@ -605,19 +628,31 @@ export class RuntimeController {
         hostSignatures: signatures(boundConfig),
         reservedHostIds,
         launcherUpdates,
+        routeUpdates,
         runtimeBindings,
         configs: boundConfig.hosts
       }
     } catch (error) {
+      await Promise.allSettled(routeUpdates.map(async update => { await update.candidate?.dispose(); await update.executionHost?.dispose() }))
       for (const hostId of reservedHostIds) this.hostReconfigurationReservations.delete(hostId)
       throw error
     }
   }
 
+  validatePreparation(preparation: RuntimePreparation): void {
+    for (const update of [...preparation.launcherUpdates ?? [], ...preparation.routeUpdates ?? []]) this.assertLauncherUpdateCurrent(update)
+    for (const update of preparation.routeUpdates ?? []) update.candidate?.assertCurrent()
+  }
+
   commit(preparation: RuntimePreparation): void {
     try {
-      for (const update of preparation.launcherUpdates ?? []) this.assertLauncherUpdateCurrent(update)
       for (const update of preparation.launcherUpdates ?? []) update.client.setRemoteCommand(update.config.remoteCommand)
+      for (const update of preparation.routeUpdates ?? []) {
+        update.candidate!.activate()
+        const host = this.hosts.get(update.config.id)!
+        const previous = host.executionHost; host.executionHost = update.executionHost!
+        void previous.dispose().catch(error => console.error('Retired execution route cleanup failed', error))
+      }
       const retired = new Map<string, RuntimeHost>()
       for (const id of preparation.removedHostIds) {
         const host = this.hosts.get(id)
@@ -665,6 +700,7 @@ export class RuntimeController {
   async discard(preparation: RuntimePreparation): Promise<void> {
     try {
       await disposePrepared(preparation.hosts)
+      await Promise.all((preparation.routeUpdates ?? []).map(async update => { await update.candidate?.dispose(); await update.executionHost?.dispose() }))
     } finally {
       for (const hostId of preparation.reservedHostIds) {
         this.hostReconfigurationReservations.delete(hostId)

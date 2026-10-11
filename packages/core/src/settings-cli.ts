@@ -42,6 +42,11 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     return { method, params: { id, input: value } }
   }
   if (resource === 'hosts') {
+    if (action === 'update' && args.length === 5 && id?.length && args[3] === '--input') {
+      const body = await input(args[4]!)
+      if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['expected', 'candidate'].includes(key))) invalid('Host update input requires complete expected and candidate Host records.')
+      return { method: 'settings.hosts.update', params: { ...body as Record<string, unknown>, id } }
+    }
     if (action === 'inspect' && args.length === 4 && id === '--host' && args[3]?.length) {
       return { method: 'settings.hosts.inspect', params: { hostId: args[3] } }
     }

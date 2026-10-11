@@ -361,6 +361,14 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return source.operation === 'settings.hosts.upgrade' ? { ...base, operation: source.operation, expected: parseRemoteCoreUpgradeExpected(source.expected) }
       : { ...base, operation: source.operation }
   }
+  if (source.operation === 'settings.hosts.update') {
+    const code = 'INVALID_CONTROL_REQUEST'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'id', 'expected', 'candidate'], code)
+    const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      id: text(source.id, 'Host ID', code), expected: settingsResourceRecord(source.expected, code), candidate: settingsResourceRecord(source.candidate, code) }
+    settingsResourceBudget(request, code)
+    return request
+  }
   if (source.operation === 'settings.hosts.list' || source.operation === 'settings.hosts.test' || source.operation === 'settings.hosts.upgrade-check') {
     const code = 'INVALID_CONTROL_REQUEST'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation !== 'settings.hosts.list' ? ['id', 'input'] : [])], code)
@@ -1261,6 +1269,13 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     settingsResourceEnvelope(fields, ['receipt'], code)
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt: fields.receipt === null ? null : parseRemoteCoreUpgradeReceipt(fields.receipt) } }
+  }
+  if (operation === 'settings.hosts.update') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    const fields = settingsResourceEnvelope(result, ['host'], code)
+    return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { host: settingsResourceRecord(fields.host, code) } })
   }
   if (operation === 'settings.hosts.list' || operation === 'settings.hosts.test') {
     const code = 'CONTROL_PROTOCOL_ERROR'
