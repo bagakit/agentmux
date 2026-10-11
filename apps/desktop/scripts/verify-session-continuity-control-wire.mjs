@@ -49,6 +49,8 @@ for (const variant of [{ id: 'baseline' }, ...variants]) {
     const target = assertions.find(test => test.fullName === variant.test)
     assert.equal(target?.status, 'failed', 'The owning business assertion must fail')
     assert.ok(target.failureMessages.some(message => /AssertionError|__VITEST_(?:REJECTS|RESOLVES)__|expected .* to /su.test(message)), 'No arbitrary runtime failure may qualify')
+    assert.ok(target.failureMessages.every(message => !/TypeError|ReferenceError|SyntaxError/u.test(message)), 'Setup and runtime exceptions cannot qualify')
+    if (variant.id === 'main-native-gate') assert.ok(target.failureMessages.some(message => message.includes('Reader Native readiness unavailable')), 'The original controlled Native rejection must be observed')
   } else { assert.equal(exitCode, 0, log); assert.equal(result.numFailedTests, 0); assert.equal(result.success, true) }
   runs.push({ id: variant.id, exitCode, passed: result.numPassedTests, failed: result.numFailedTests, rawReport: path.relative(root, report), rawSha256: sha(await fs.readFile(report)), ...(witness ? { witness, target: variant.test } : {}) })
   assert.deepEqual(await pins(), before); console.log(JSON.stringify(runs.at(-1)))
