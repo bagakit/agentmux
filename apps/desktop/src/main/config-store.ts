@@ -277,15 +277,16 @@ const configSchema = z
       activeRecoveryDelayMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       confirmedIdleWindowMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       resumeAfterExit: z.boolean().optional(),
+      activeInterruptionFallback: z.boolean().optional(),
       recheckIntervalMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       recheckMaxAttempts: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       retryInitialDelayMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       retryMaxDelayMs: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
       retryMaxAttempts: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(),
-      reminderMode: z.enum(['off', 'default', 'default-plus-custom']).optional(),
-      reminderAppend: z.string().optional(),
+      reminderMode: z.enum(['off', 'default', 'default-plus-custom']).optional().describe('Retained historical recovery input; not an editable setting'),
+      reminderAppend: z.string().optional().describe('Retained historical recovery input; not an editable setting'),
       continuationEnabled: z.boolean().optional(),
-      continuationPrompt: z.string().optional()
+      continuationPrompt: z.string().optional().describe('Retained historical recovery input; not an editable setting')
     }).strict().optional().superRefine((authored, context) => {
       try { normalizeAgentContinuityPolicy(authored as AppConfig['continuity']) }
       catch { context.addIssue({ code: 'custom', message: 'Invalid continuity policy. The maximum retry base delay must be at least the initial retry base delay.' }) }

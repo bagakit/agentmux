@@ -13,23 +13,22 @@ async function saveContinuity(value: AgentMuxContinuityPolicy, expected: AgentMu
     { ...current, continuity: { ...current.continuity, ...expected } })
 }
 export const continuitySettingsModule = {
-  id: 'continuity', group: 'preferences', title: 'Session continuity', icon: ContinuityIcon,
-  description: 'Restore the same conversation and choose what follows interrupted work.',
-  keywords: 'session continuity recovery resume restart idle interrupted wait recheck reminder continuation 会话 连续性 恢复 重启 续行 提醒 retry backoff budget 重试 退避',
+  id: 'continuity', group: 'preferences', title: 'Execution', icon: ContinuityIcon,
+  description: 'Reconnect sessions, restore conversations and continue interrupted work.',
+  keywords: 'execution session continuity recovery resume restart idle interrupted wait recheck continuation 会话 执行 连续性 恢复 重启 续行 retry backoff budget 重试 退避',
   searchTargets: [
-    { id: 'activeRecovery', title: 'Interrupted active sessions', keywords: 'automatic on demand resume' },
+    { id: 'activeRecovery', title: 'Automatic native recovery', keywords: 'automatic on demand resume' },
     { id: 'activeRecoveryDelayMs', title: 'Recovery wait', keywords: 'interruption delay seconds' },
-    { id: 'confirmedIdleWindowMs', title: 'Authoritative idle window', keywords: 'idle duration seconds' },
+    { id: 'confirmedIdleWindowMs', title: 'Automatic recovery window', keywords: 'active idle duration seconds' },
     { id: 'resumeAfterExit', title: 'Resume after confirmed exit', keywords: 'exit missing native resume' },
     { id: 'recheckMaxAttempts', title: 'Recheck count', keywords: 'recovery attempts' },
     { id: 'recheckIntervalMs', title: 'Recheck interval', keywords: 'recovery seconds delay' },
     { id: 'retryInitialDelayMs', title: 'First retry base delay', keywords: 'failed recovery retry seconds backoff' },
     { id: 'retryMaxDelayMs', title: 'Maximum retry base delay', keywords: 'failed recovery maximum backoff offset' },
     { id: 'retryMaxAttempts', title: 'Additional retries', keywords: 'failed recovery budget attempts zero context only' },
-    { id: 'reminderMode', title: 'Recovery reminder', keywords: 'reminder content append custom' },
+    { id: 'activeInterruptionFallback', title: 'Use active state when interruption detection is unsupported', keywords: 'provider unsupported active fallback off 兜底 中断' },
     { id: 'continuationEnabled', title: 'Continue interrupted work', keywords: 'send continuation after recovery' },
-    { id: 'continuationPrompt', title: 'Continuation prompt', keywords: 'interrupted work instruction' },
   ],
-  savedSummary: config => { const saved = normalizeAgentContinuityPolicy(config.continuity); return `${saved.activeRecovery === 'automatic' ? 'Automatic' : 'On demand'} · ${saved.retryMaxAttempts} retries · Reminder ${saved.reminderMode === 'off' ? 'off' : 'on'} · Continuation ${saved.continuationEnabled ? 'on' : 'off'}` },
+  savedSummary: config => { const saved = normalizeAgentContinuityPolicy(config.continuity); return `${saved.activeRecovery === 'automatic' ? 'Automatic' : 'On demand'} · ${saved.retryMaxAttempts} retries · Active fallback ${saved.activeInterruptionFallback ? 'on' : 'off'} · Continuation ${saved.continuationEnabled ? 'on' : 'off'}` },
   Pane({ config }) { return <ContinuitySettingsPane preferences={config.continuity} onSave={saveContinuity} /> }
 } as const satisfies SettingsModule
