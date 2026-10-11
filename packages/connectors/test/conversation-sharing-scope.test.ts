@@ -9,6 +9,7 @@ import { createPublicationConversationPort } from '../src/core-conversation-port
 import { PublicationStore, publicDelivery, type PublicationBoundary } from '../src/publication-store.js'
 import { ConnectionHost } from '../src/connection-host.js'
 import type { PublicationAdapter } from '../src/publication-adapter.js'
+import { publicationPage } from './fixtures/publication-page.js'
 import { roomBindingFixture, config, core } from './fixtures/room-binding.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
@@ -95,16 +96,20 @@ it.each(['confirmed', 'unknown'] as const)('a shared native input gap stays visi
   const bound = result(await f.cli(['bind', '--input', '-'], { ...f.input, scope: { ...f.input.scope, publication: shared } })).binding
   await appendFile(f.transcript, row(previousState === 'unknown' ? 'before-consent' : 'qualified-assistant-speech', 'assistant'))
   await vi.waitFor(() => expect(f.dispatch).toHaveBeenCalledTimes(1), { timeout: 5000 })
-  const store = f.services.publication!.store, initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, initial)
+  const store = f.services.publication!.store, initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, 'local')
   const originalEffect = store.list(bound)[0]!
   expect(originalEffect.state).toBe(previousState)
   await appendFile(f.transcript, row('unqualified-original-input', 'user') + row('later-speech', 'assistant'))
   await vi.waitFor(() => expect(f.services.publication!.observation(bound.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5000 })
   const args = ['delivery', 'ls', '--connection', config.connectionId, '--binding', bound.bindingId, '--binding-revision', '1']
-  expect(result(await f.cli(args)).observation).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' })
+  const content = result(await f.cli(args))
+  expect(content.observation).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' })
+  expect(content.coverage).toMatchObject({ state: 'incomplete', gaps: [expect.objectContaining({ reason: 'public-content-unconfirmed', part: expect.objectContaining({ record: expect.objectContaining({ hostId: 'local', agentSessionId: f.input.agentSessionId }) }) })] })
+  expect(JSON.stringify(content)).not.toMatch(/payload|prepared|Original content unqualified-original-input|private-scope-fixture/)
   expect(result(await f.cli(['delivery', 'inspect', '--operation-id', originalEffect.operationId])).delivery.state).toBe(previousState)
-  expect(store.checkpoint(bound, initial)).toEqual(frontier)
-  expect(store.list(bound)).toHaveLength(1); expect(f.dispatch).toHaveBeenCalledTimes(1)
+  expect(store.checkpoint(bound, 'local')).not.toEqual(frontier)
+  expect(store.list(bound)).toHaveLength(2); expect(f.dispatch).toHaveBeenCalledTimes(previousState === 'unknown' ? 1 : 2)
+  const retainedCut = store.checkpoint(bound, 'local')
   f.services.publication!.close()
   const { PublicationHost } = await import('../src/publication-host.js')
   const connections = new ConnectionHost({ database: f.services.database!, secrets: { resolve: async () => 'private-scope-fixture' },
@@ -114,7 +119,7 @@ it.each(['confirmed', 'unknown'] as const)('a shared native input gap stays visi
     conversation: createPublicationConversationPort(() => [{ hostId: 'local', client: f.client }]) })
   cleanup.push(() => restarted.close())
   await vi.waitFor(() => expect(restarted.observation(bound.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5000 })
-  expect(restarted.store.checkpoint(bound, initial)).toEqual(frontier); expect(f.dispatch).toHaveBeenCalledTimes(1)
+  expect(restarted.store.checkpoint(bound, 'local')).toEqual(retainedCut); expect(f.dispatch).toHaveBeenCalledTimes(previousState === 'unknown' ? 1 : 2)
   expect(await readFile(f.storePath)).toEqual(metadata); expect(f.client.connect).not.toHaveBeenCalled()
 }, 20000)
 
@@ -126,7 +131,7 @@ it('a content gap keeps original effect inspection and already admitted pending 
   await appendFile(f.transcript, row('before-consent', 'assistant') + row('already-admitted-speech', 'assistant'))
   const store = f.services.publication!.store
   await vi.waitFor(() => expect(store.list(bound).map(operation => operation.state)).toEqual(['unknown', 'pending']), { timeout: 5000 })
-  const [original, pending] = store.list(bound), initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, initial)
+  const [original, pending] = store.list(bound), initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, 'local')
   await appendFile(f.transcript, row('unqualified-original-input', 'user') + row('later-unadmitted-speech', 'assistant'))
   const args = ['delivery', 'ls', '--connection', config.connectionId, '--binding', bound.bindingId, '--binding-revision', '1']
   await vi.waitFor(() => expect(f.services.publication!.observation(bound.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5000 })
@@ -136,11 +141,11 @@ it('a content gap keeps original effect inspection and already admitted pending 
   confirmOriginal = true; f.services.publication!.refresh()
   await vi.waitFor(() => expect(store.inspect(pending!.operationId)?.state).toBe('confirmed'), { timeout: 5000 })
   expect(inspect).toHaveBeenCalled()
-  expect(f.dispatch.mock.calls.map(([prepared]) => prepared.request.body)).toEqual(['before-consent', 'already-admitted-speech'])
+  expect(f.dispatch.mock.calls.map(([prepared]) => prepared.request.body)).toEqual(['before-consent', 'already-admitted-speech', 'later-unadmitted-speech'])
   expect(result(await f.cli(['delivery', 'inspect', '--operation-id', original!.operationId])).delivery).toMatchObject({ operationId: original!.operationId, state: 'confirmed' })
   expect(result(await f.cli(args)).observation).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' })
-  expect(store.checkpoint(bound, initial)).toEqual(frontier)
-  expect(store.list(bound)).toHaveLength(2); expect(f.client.connect).not.toHaveBeenCalled()
+  expect(store.checkpoint(bound, 'local')).not.toEqual(frontier)
+  expect(store.list(bound)).toHaveLength(3); expect(f.client.connect).not.toHaveBeenCalled()
 }, 20000)
 
 it('stored legacy pending work keeps its original scope instead of inheriting a broader claim', () => {
@@ -148,9 +153,10 @@ it('stored legacy pending work keeps its original scope instead of inheriting a 
   const store = new PublicationStore(database), checkpoint = { agentSessionId: 'agent', source: { providerId: 'claude', nativeSessionId: 'native' }, cursor: 'original-cut' }
   const boundary: PublicationBoundary = { bindingId: 'binding', revision: 1, connectionId: 'connection', application: config.application,
     executionHostId: 'local', agentSessionId: 'agent', externalConversationId: 'room', sourceCheckpoints: [checkpoint], scope: { input: 'mentions-and-replies', publication: original } }
-  store.checkpoint(boundary, checkpoint)
-  store.commitPage(boundary, checkpoint, { hostId: 'local', agentSessionId: 'agent', source: checkpoint.source,
-    items: [{ id: 'reply', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Retained original speech' }] }], checkpoint: { ...checkpoint, cursor: 'after-reply' }, more: false }, () => true)
+  store.checkpoint(boundary, 'local')
+  const after = store.checkpoint(boundary, 'local'), projected = publicationPage(boundary, { ...checkpoint, cursor: 'after-reply' },
+    [{ id: 'reply', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Retained original speech' }] }])
+  store.commitPage(boundary, after, projected.page, () => true, projected)
   const saved = store.list(boundary)[0]!, { publicationScope: _scope, ...legacy } = saved
   database.prepare('UPDATE connector_publication_operation SET operation_json=? WHERE operation_id=?').run(JSON.stringify(legacy), saved.operationId)
   const prepare = vi.fn(() => ({ adapterId: 'sample', renderVersion: 'fixture', requestKey: saved.operationId, request: { method: 'POST' as const, path: '/messages' } }))
@@ -161,15 +167,16 @@ it('stored legacy pending work keeps its original scope instead of inheriting a 
   expect(publicDelivery(store.inspect(saved.operationId)!)).not.toHaveProperty('publicationScope')
 })
 
-it.each(['image', 'file'] as const)('broader sharing retains the original frontier when a complete %s cannot be delivered', kind => {
+it.each(['image', 'file'] as const)('broader sharing durably accounts an unsupported %s while admitting adjacent supported text and the read cut', kind => {
   const database = new DatabaseSync(':memory:'); cleanup.push(() => database.close())
   const store = new PublicationStore(database), checkpoint = { agentSessionId: 'agent', source: { providerId: 'claude', nativeSessionId: 'native' }, cursor: 'before-resource' }
   const boundary: PublicationBoundary = { bindingId: 'binding', revision: 1, connectionId: 'connection', application: config.application,
     executionHostId: 'local', agentSessionId: 'agent', externalConversationId: 'room', sourceCheckpoints: [checkpoint], scope: { input: 'mentions-and-replies', publication: shared } }
-  store.checkpoint(boundary, checkpoint)
-  expect(() => store.commitPage(boundary, checkpoint, { hostId: 'local', agentSessionId: 'agent', source: checkpoint.source,
-    items: [{ id: 'original-resource-message', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original description' },
-      { kind: 'resource', resourceType: kind, reference: 'original-opaque-read-reference' }] }], checkpoint: { ...checkpoint, cursor: 'after-resource' }, more: false }, () => true))
-    .toThrowError(/complete resource delivery/)
-  expect(store.checkpoint(boundary, checkpoint)).toEqual(checkpoint); expect(store.list(boundary)).toEqual([])
+  const after = store.checkpoint(boundary, 'local'), projected = publicationPage(boundary, { ...checkpoint, cursor: 'after-resource' },
+    [{ id: 'original-resource-message', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original description' },
+      { kind: 'resource', resourceType: kind, reference: 'original-opaque-read-reference' }] }])
+  store.commitPage(boundary, after, projected.page, () => true, projected)
+  expect(store.checkpoint(boundary, 'local')).toEqual(projected.page.checkpoint)
+  expect(store.list(boundary)[0]).toMatchObject({ payload: { kind: 'speech', text: 'Original description' } })
+  expect(store.coverage(boundary).gaps).toContainEqual(expect.objectContaining({ reason: 'transport-unsupported', part: expect.objectContaining({ record: expect.objectContaining({ source: expect.objectContaining({ recordId: 'original-resource-message' }) }) }) }))
 })

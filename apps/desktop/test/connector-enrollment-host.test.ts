@@ -59,7 +59,7 @@ beforeEach(async () => {
     throw new Error('Unexpected registration action')
   }))
   services = await createDesktopConnections({ directory: join(original.root, 'enrollment-host'), encryption,
-    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())
   server = new AgentMuxControlServer({ socketPath: join(original.root, 'enrollment.sock'), connections: services.connections, coreClients: original.coreClients })

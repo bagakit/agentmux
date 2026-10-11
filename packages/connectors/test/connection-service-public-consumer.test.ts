@@ -57,7 +57,7 @@ async function fixture(options: { feishu?: boolean; publication?: boolean; coreA
   let inputCore = (hostId: string): import('../src/durable-ingress.js').DurableIngressCore | undefined => options.coreAvailable === false || hostId !== 'local' ? undefined : original.client
   const services = await createDesktopConnections({ directory: join(original.root, 'service-owner'), ...(options.feishu ? {} : { adapters: [wire.adapter] }),
     encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
-    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ...(options.publication === false ? {} : { publication: createPublicationConversationPort(original.coreClients) }), ingress: { core: hostId => inputCore(hostId) } })
   cleanup.push(() => services.close())
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'service.sock'), connections: services.connections, spatialState: original.spatial, coreClients: original.coreClients })

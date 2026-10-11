@@ -24,7 +24,7 @@ let trusted: ReturnType<typeof vi.fn>
 
 async function openOwner(receiver = true) {
   services = await createDesktopConnections({ directory: join(original.root, 'setup-continuation'), encryption: enrollmentEncryption(),
-    bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
+    bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ...(receiver ? { ingress: { core: (hostId: string) => hostId === 'local' ? original.client : undefined } } : {}) })
   server = new AgentMuxControlServer({ socketPath: join(original.root, 'setup-continuation.sock'), connections: services.connections, coreClients: original.coreClients })
   await server.start()

@@ -87,12 +87,12 @@ it('unknown original effects remain inspect-only across worker replacement, with
 }, 15_000)
 
 it('source replacement exposes a retained source gap without adopting a new cut or mutating the original Agent', async () => {
-  const f = await fixture(), original = f.services.publication!.store.checkpoint(f.binding, f.binding.sourceCheckpoints[0]!), metadata = await readFile(f.storePath)
+  const f = await fixture(), original = f.services.publication!.store.checkpoint(f.binding, 'local'), metadata = await readFile(f.storePath)
   await rename(f.transcript, join(f.root, 'retained-source.jsonl'))
   await writeFile(f.transcript, row('replacement-speech'))
   f.services.publication!.refresh()
   await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'source-gap' }), { timeout: 5_000 })
-  expect(f.services.publication!.store.checkpoint(f.binding, f.binding.sourceCheckpoints[0]!)).toEqual(original)
+  expect(f.services.publication!.store.checkpoint(f.binding, 'local')).toEqual(original)
   expect(f.dispatched).toEqual([])
   expect(await readFile(f.storePath)).toEqual(metadata)
   expect(f.client.connect).not.toHaveBeenCalled()

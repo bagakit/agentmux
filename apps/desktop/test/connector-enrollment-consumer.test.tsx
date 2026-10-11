@@ -48,7 +48,7 @@ beforeEach(async () => {
   const directory = join(original.root, 'mounted-enrollment'), encryption = enrollmentEncryption()
   openOwner = async () => {
     services = await createDesktopConnections({ directory, encryption,
-      bindings: { spatial: original.spatial, checkpoint: async ref => ({ ...ref, checkpoint: await original.client.sessionHistoryCheckpoint(ref.agentSessionId) }) },
+      bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
       ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
     server = new AgentMuxControlServer({ socketPath: join(original.root, 'mounted-enrollment.sock'), connections: services.connections, coreClients: original.coreClients })
     await server.start()
