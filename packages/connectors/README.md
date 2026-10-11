@@ -324,10 +324,11 @@ retaining the original Agent and connection. External conversation and actor IDs
 are bounded opaque issuer values; an adapter owns any native syntax restriction.
 
 The owner records the original operation intent before asynchronous Core reads.
-It then rechecks the original spatial revision and exact Region occupant before a
-synchronous transaction saves the immutable binding, current mapping and applied
+It then rechecks the exact original Host, Session and Region before a synchronous
+transaction saves the immutable binding, current mapping and applied
 operation together. No SQL transaction spans an await, and no cross-database
-atomicity with Core is claimed. A `preparing` receipt confirms intent only. After
+atomicity with Core is claimed. An unrelated spatial revision does not invalidate
+an unchanged target. A `preparing` receipt confirms intent only. After
 an unconfirmed response, inspect and reconcile the same operation, input and
 transport authority; an applied operation always returns its original saved cut.
 
