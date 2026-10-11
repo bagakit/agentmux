@@ -10,7 +10,13 @@ import type { RoomMemberResult } from '@agentmux/core/connections'
 import { roomProvisioningFixture, context } from './fixtures/room-provisioning.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
-afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
+afterEach(async () => {
+  const failures: unknown[] = []
+  try {
+    for (const close of cleanup.splice(0).reverse()) { try { await close() } catch (error) { failures.push(error) } }
+  } finally { try { vi.restoreAllMocks() } catch (error) { failures.push(error) } }
+  if (failures.length) throw new AggregateError(failures, 'Room provisioning test cleanup failed')
+})
 async function fixture(options: Parameters<typeof roomProvisioningFixture>[0] = {}) { const f = await roomProvisioningFixture(options); cleanup.push(() => f.close()); return f }
 
 it('persists exact detached intent and claimed attempts before either effect, preserving separate creation and member receipts', async () => {
@@ -85,10 +91,18 @@ it.each(['host', 'session'] as const)('rejects an exact %s target change during 
 it('allows unrelated spatial changes while keeping the original exact target, and preserves empty-member room facts', async () => {
   let change!: () => Promise<unknown>
   const f = await fixture({ resolve: async () => { await change(); return 'private-fixture-credential' } })
+  const before = (await f.spatial.read())!, original = { ...f.createInput, members: [] }
   change = () => f.change(graph => { graph.regions.find(region => region.regionId === 'other-region')!.agentSessionId = 'other-agent' })
-  const result = await f.provisioning.create({ ...f.createInput, members: [] }, context)
+  const result = await f.provisioning.create(original, context), after = (await f.spatial.read())!
+  expect(after.revision).toBeGreaterThan(before.revision)
+  expect(after.graph.regions.find(region => region.regionId === original.regionAnchor.regionId)).toEqual(before.graph.regions.find(region => region.regionId === original.regionAnchor.regionId))
+  expect(result.input).toEqual(original)
   expect(result.creation).toMatchObject({ state: 'created', externalConversationId: 'created-room' })
-  expect(result.membership).toEqual({ state: 'not-requested' }); expect(f.addMembers).not.toHaveBeenCalled(); await f.unchanged()
+  expect(result.membership).toEqual({ state: 'not-requested' }); expect(f.addMembers).not.toHaveBeenCalled()
+  expect((await f.provisioning.inspect({ operationId: original.operationId })).operation).toEqual(result)
+  expect(await f.provisioning.create(original, context)).toEqual(result)
+  expect(f.create).toHaveBeenCalledTimes(1); expect(f.resolve).toHaveBeenCalledTimes(1)
+  await f.unchanged()
 })
 
 it('rechecks the original current authority after asynchronous preparation without exposing its private error', async () => {
