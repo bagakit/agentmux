@@ -11,6 +11,7 @@ import { useAppStore } from '../store'
 import { useSessionUserMessages } from './session-user-messages'
 
 const EMPTY: readonly string[] = Object.freeze([])
+const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
 async function copyRecordedText(text: string): Promise<boolean> {
   let failure: unknown
   const copied = await copyTextToClipboard(text, error => { failure = error })
@@ -42,7 +43,8 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   const native = useSessionUserMessages(control, { enabled })
   const captured = useMemo(() => sid ? projectSessionUserMessages({ agentSessionId: sid, timeline }) : [], [sid, timeline])
   // The original live reader retains input facts independently of its clipped continuous page.
-  const initialMessages = [...native.messages.filter(message => message.source.kind === 'native'), ...captured]
+  const nativeMessages = native.messages.length ? native.messages : EMPTY_MESSAGES
+  const initialMessages = useMemo(() => [...nativeMessages.filter(message => message.source.kind === 'native'), ...captured], [nativeMessages, captured])
   const history = useAgentInputHistory({ scope, enabled, read, initialMessages })
   useEffect(() => () => action.current?.abort(), [scope, visible, mailboxOpen, history.query])
   const local = useAppStore(state => state.agentComposerHistory[sessionId] ?? EMPTY)
