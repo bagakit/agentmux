@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -13,7 +13,7 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_RESU
 if (process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT) expect(Reflect.get(core, 'AGENTMUX_RESUME_CONTEXT_MUTANT')).toBe(process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; witnessAlternative?: boolean; unresolvedSubject?: boolean; customNormalization?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
+async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; witnessAlternative?: boolean; unresolvedSubject?: boolean; postLaunch?: boolean; customNormalization?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-context-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'runtime'), state = join(root, 'state')
@@ -46,12 +46,18 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
     } }
   if (options.unresolvedSubject) delete explicitHook.resolveSubject
   if (options.unsupported) delete explicitHook.continuity
-  const program = "const fs=require('node:fs');fs.writeFileSync('native.json',JSON.stringify({pid:process.pid,id:process.argv[1],children:['native-child'],locator:" + JSON.stringify(options.witnessAlternative ? 'observed-native.json' : 'native.json') + "}));fs.copyFileSync('native.json','observed-native.json');console.log('LAUNCH:'+JSON.stringify(process.argv.slice(1)));" + (options.failFirst ? "if(!fs.existsSync('failed')){fs.writeFileSync('failed','yes');process.exit(7)}" : '') + "process.stdin.setRawMode(true);process.stdin.on('data',d=>{if(d.toString()==='exit-failed')process.exit(7);process.stdout.write('INPUT:'+d.toString())});setInterval(()=>{},1000)"
+  const readiness = options.postLaunch ? "setInterval(()=>{if(fs.existsSync('ready-request')&&!fs.existsSync('input-ready.json'))fs.writeFileSync('input-ready.json',JSON.stringify({pid:process.pid,id:process.argv[1],state:'idle',recordId:'input-ready'}))},10)" : "setInterval(()=>{},1000)"
+  const program = "const fs=require('node:fs');fs.writeFileSync('native.json',JSON.stringify({pid:process.pid,id:process.argv[1],children:['native-child'],locator:" + JSON.stringify(options.witnessAlternative ? 'observed-native.json' : 'native.json') + "}));fs.copyFileSync('native.json','observed-native.json');console.log('LAUNCH:'+JSON.stringify(process.argv.slice(1)));" + (options.failFirst ? "if(!fs.existsSync('failed')){fs.writeFileSync('failed','yes');process.exit(7)}" : '') + "process.stdin.setRawMode(true);process.stdin.on('data',d=>{if(d.toString()==='exit-failed')process.exit(7);process.stdout.write('INPUT:'+d.toString())});" + readiness
   const provider = core.defineAgentProvider({ catalog: { id: providerId, label: 'Controlled native Hook process', executable: process.execPath,
-    expectedProcess: 'node', promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
+    expectedProcess: 'node', promptDelivery: options.postLaunch ? 'post-launch-only' : 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
     hookStrategy: { kind: 'native', installation: 'unmanaged' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' },
     capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: true, replyCorrelation: 'none' } },
     buildArgs: (_prompt, args) => [...args], buildResumeArgs: (id, _path, prompt) => ['-e', program, id, ...(prompt ? [prompt] : [])], hook: options.shape ? explicitHook : actual.hook,
+    ...(options.postLaunch ? { readPromptExecutionEvidence: async (context: any) => {
+      const evidence = await readFile(join(root, 'input-ready.json'), 'utf8').then(text => JSON.parse(text)).catch(() => null)
+      return evidence?.pid === context.processId && evidence.id === context.nativeHandle?.sessionId && evidence.state === 'idle'
+        ? { id: evidence.recordId, sourceId: 'native-machine:' + evidence.id, state: 'idle' as const } : null
+    } } : {}),
     // Controlled machine witness on a real Native PID; this does not claim an actual Codex binary.
     discoverNativeSession: async context => {
       const witness = JSON.parse(await readFile(join(root, 'native.json'), 'utf8'))
@@ -69,7 +75,7 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
   }))
   const store = new core.AgentMuxFileAgentSessionStore(join(root, 'sessions.sqlite')), client = new core.AgentMuxClient({ store, providers: [provider] }), inner = client as any
   Object.defineProperty(inner.hookServer, 'port', { value: 0 }); await client.connect()
-  const nativeStart = inner.kernel.start.bind(inner.kernel), start = vi.spyOn(inner.kernel, 'start'), input = vi.spyOn(inner.kernel, 'input'), stop = vi.spyOn(inner.kernel, 'stop')
+  const nativeInput = inner.kernel.input.bind(inner.kernel), nativeStart = inner.kernel.start.bind(inner.kernel), start = vi.spyOn(inner.kernel, 'start'), input = vi.spyOn(inner.kernel, 'input'), stop = vi.spyOn(inner.kernel, 'stop')
   cleanups.push(async () => {
     for (const run of await inner.kernel.list()) if (run.state.type === 'running') {
       try { await inner.kernel.stop(await inner.kernel.prepareStop(run.runId)) }
@@ -96,7 +102,7 @@ async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsup
   const saved = async () => (await store.readMetadata(original.agentSessionId))!
   const rootOf = async () => (await saved()).continuityOperations!['automatic-root']!
   const events: any[] = []; client.onEvent(event => { events.push(event) })
-  return { root, store, client, inner, current, original, binding, start, input, stop, post, saved, rootOf, events, normalized }
+  return { root, store, client, inner, current, original, binding, start, input, stop, post, saved, rootOf, events, normalized, nativeInput }
 }
 
 it('persists an exact resumed main context through the original authenticated Hook without replaying native first input', async () => {
@@ -380,6 +386,36 @@ it.each([true, false])('retains a known locator and usable Hook context when a v
 })
 
 
+async function wakeOriginalInput(f: Awaited<ReturnType<typeof fixture>>) {
+  await f.client.ensureAgentContinuity({ agentSessionId: f.original.agentSessionId, expectedRun: f.original.run, operationId: 'automatic-root',
+    trigger: 'startup', policy: { retryInitialDelayMs: 20, retryMaxDelayMs: 40 } })
+}
+async function readyNativeInput(f: Awaited<ReturnType<typeof fixture>>) {
+  await writeFile(join(f.root, 'ready-request'), 'ready')
+  await vi.waitFor(async () => expect(JSON.parse(await readFile(join(f.root, 'input-ready.json'), 'utf8')).pid).toBe((await f.inner.kernel.status(f.current.run.runId)).pid))
+  await wakeOriginalInput(f)
+}
+
+it('delivers the original waiting post-launch input once after Hook locator enrichment and exact native readiness', async () => {
+  const f = await fixture({ shape: 'explicit', witnessPath: true, postLaunch: true }), submit = vi.spyOn(f.client, 'submitAgentPrompt')
+  await vi.waitFor(async () => expect((await f.rootOf()).recoveryDelivery?.phase).toBe('waiting'))
+  const before = structuredClone((await f.rootOf()).recoveryDelivery!)
+  expect(f.input).not.toHaveBeenCalled()
+  expect((await f.post(locatorOnly, 'before-first-input')).status).toBe(204)
+  await readyNativeInput(f)
+  await vi.waitFor(async () => { const delivery = (await f.rootOf()).recoveryDelivery; expect(delivery?.phase, delivery?.reason).toBe('accepted') }, { timeout: 5000 })
+  const after = (await f.rootOf()).recoveryDelivery!
+  expect(after.key).toEqual(before.key); expect(after.reminder.text).toEqual(before.reminder.text); expect(after.continuation.text).toEqual(before.continuation.text)
+  expect(await f.client.inspectAgentPromptSubmission(before.key)).toMatchObject({ admission: { inputKey: before.key, acknowledged: true } })
+  const calls = f.input.mock.calls.length
+  expect(calls).toBeGreaterThan(0); expect(submit).toHaveBeenCalledTimes(1)
+  expect(submit.mock.calls[0]![0]).toMatchObject({ operationId: before.key.submissionId, prompt: before.continuation.text, agentMuxNote: before.reminder.text })
+  await wakeOriginalInput(f)
+  await f.inner.continuityInputs.tails.get(f.current.agentSessionId)?.pending
+  expect(f.input).toHaveBeenCalledTimes(calls); expect(f.start).toHaveBeenCalledTimes(1)
+})
+
+
 it('keeps an exact conflicting witness neutral before a custom Provider can declare main activity, readiness or cancellation', async () => {
   const f = await fixture({ shape: 'explicit', originalPath: true, witnessPath: true, witnessAlternative: true, customNormalization: true }), before = await f.saved()
   expect((await f.post(locatorOnly, 'custom-conflict')).status).toBe(204)
@@ -392,4 +428,41 @@ it('keeps an exact conflicting witness neutral before a custom Provider can decl
   expect(f.inner.hookTurnPhases.get(f.current.run.runId)).toBeUndefined()
   expect((await f.rootOf()).supervision!.cancellation).toBeUndefined(); expect((await f.rootOf()).supervision!.contextEvidence).toBeUndefined()
   expect(f.events.filter(event => event.type === 'agent-hook')).toEqual([]); expect(f.normalized).not.toHaveBeenCalled(); await raw(f)
+})
+
+
+it('keeps waiting recovery input superseded after its known native locator changes without spending another input key', async () => {
+  const f = await fixture({ shape: 'explicit', postLaunch: true, originalPath: true, witnessPath: true })
+  await vi.waitFor(async () => expect((await f.rootOf()).recoveryDelivery?.phase).toBe('waiting'))
+  const before = structuredClone((await f.rootOf()).recoveryDelivery!)
+  await f.inner.registry.update(f.current.agentSessionId, f.current.run, (saved: any) => ({ ...saved, nativeHandle: { ...saved.nativeHandle, transcriptPath: join(f.root, 'another-native.json') } }))
+  await readyNativeInput(f)
+  await vi.waitFor(async () => expect((await f.rootOf()).recoveryDelivery?.phase).toBe('superseded'))
+  const after = (await f.rootOf()).recoveryDelivery!
+  expect(after.key).toEqual(before.key); expect(after.reminder.text).toEqual(before.reminder.text); expect(after.continuation.text).toEqual(before.continuation.text)
+  expect(f.input).not.toHaveBeenCalled(); expect(f.start).toHaveBeenCalledTimes(1); await raw(f)
+})
+
+it('observes the same claimed post-launch input key after an actual Native Input ACK loss without replaying its bytes', async () => {
+  const f = await fixture({ shape: 'explicit', postLaunch: true, witnessPath: true })
+  await vi.waitFor(async () => expect((await f.rootOf()).recoveryDelivery?.phase).toBe('waiting'))
+  const before = structuredClone((await f.rootOf()).recoveryDelivery!), submit = vi.spyOn(f.client, 'submitAgentPrompt')
+  expect((await f.post(locatorOnly, 'unknown-input-locator')).status).toBe(204)
+  f.input.mockImplementationOnce(async (...args: any[]) => {
+    await f.nativeInput(...args)
+    throw new core.AgentMuxError('Original Native Input acknowledgement lost', 'CTXMUX_INPUT_UNKNOWN', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+  })
+  await readyNativeInput(f)
+  await vi.waitFor(async () => expect((await f.rootOf()).recoveryDelivery?.phase).toBe('unknown'))
+  const record = await f.client.inspectAgentPromptSubmission(before.key)
+  expect(record?.admission).toMatchObject({ inputKey: before.key, acknowledged: false })
+  expect(f.input).toHaveBeenCalledTimes(1); expect(submit).toHaveBeenCalledTimes(1)
+  expect((await f.inner.kernel.status(f.current.run.runId)).acceptedInputBytes).toBeGreaterThan(0)
+  expect((await f.post(locatorOnly, 'observe-unknown-again')).status).toBe(204)
+  await wakeOriginalInput(f); await wakeOriginalInput(f)
+  await f.inner.continuityInputs.tails.get(f.current.agentSessionId)?.pending
+  expect((await f.rootOf()).recoveryDelivery).toMatchObject({ phase: 'unknown', key: before.key })
+  expect((await f.rootOf()).recoveryDelivery!.reminder.text).toBe(before.reminder.text)
+  expect((await f.rootOf()).recoveryDelivery!.continuation.text).toBe(before.continuation.text)
+  expect(f.input).toHaveBeenCalledTimes(1); expect(submit).toHaveBeenCalledTimes(1); expect(f.start).toHaveBeenCalledTimes(1)
 })
