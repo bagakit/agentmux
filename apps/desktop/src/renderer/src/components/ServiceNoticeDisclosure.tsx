@@ -1,7 +1,9 @@
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { serviceNoticeFingerprint, useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
-import { useAppStore } from '../store'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
@@ -25,6 +27,8 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
   inlineActions?: ReactNode
   className?: string
 }) {
+  const document = useWorkbenchDocument()
+  const window = document.defaultView!
   const inbox = useServiceNotices(scope, notices, available, complete)
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
@@ -32,16 +36,9 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
   const previousFocus = useRef<HTMLElement | null>(null)
   const openedIdentity = useRef<string | null>(null)
   const [open, setOpen] = useState(false)
-  const acquire = useAppStore(state => state.acquireNativeSurfaceOverlay)
-  const release = useAppStore(state => state.releaseNativeSurfaceOverlay)
   const heading = title ?? notices[0]?.notice.notice.step ?? 'Service notice'
   const detailHeading = detailsTitle ?? (notices.length === 1 && heading === notices[0]?.notice.notice.step ? 'Details' : heading)
   const identity = JSON.stringify([scope, notices.map(item => [item.id, serviceNoticeFingerprint(item)])])
-  useEffect(() => {
-    if (!open) return
-    acquire()
-    return release
-  }, [open, acquire, release])
   useEffect(() => {
     if (!notices.length || !visible) { panel.current?.hidePopover?.(); setOpen(false) }
   }, [notices.length, visible])
@@ -80,10 +77,10 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
     if (!open) return
     positionDetails()
     const surface = trigger.current?.closest<HTMLElement>('[data-workbench-region-id], .agent-surface, .browser-surface, .terminal-view, .pane-group, .workspace-workbench') ?? document.documentElement
-    const observer = new ResizeObserver(positionDetails)
+    const observer = new window.ResizeObserver(positionDetails)
     observer.observe(surface)
     return () => observer.disconnect()
-  }, [open])
+  }, [open, document])
   if (!notices.length) return null
   function acknowledge() { inbox.acknowledge(notices) }
   function collapse() {
@@ -95,7 +92,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
     if (focus?.isConnected) focus.focus({ preventScroll: true })
     else trigger.current?.focus({ preventScroll: true })
   }
-  function rememberFocus() { previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }
+  function rememberFocus() { previousFocus.current = document.activeElement?.nodeType === 1 ? document.activeElement as HTMLElement : null }
   return <div className={`service-disclosure${className ? ` ${className}` : ''}`} data-unread={inbox.unread.length > 0}
     data-kind={notices.some(item => item.notice.kind === 'process-degraded') ? 'process-degraded' : 'indeterminate'}
     onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
@@ -134,5 +131,8 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
       </div>
       {actions ? <div className="service-disclosure__actions">{actions}</div> : null}
     </div>
+    <ModalAttachmentDismissal active={Boolean(open && panel.current && getModalOverlayContainer(panel.current))} targetRef={panel}
+      onOwnerRemoved={() => panel.current?.hidePopover()}
+      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); collapse() }} />
   </div>
 }

@@ -1,6 +1,7 @@
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SemanticIcon } from './semantic-icons'
-import { useAppStore } from '../store'
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentActivityHistoryProjection } from '@agentmux/core'
 import { describeReadout, describeRulerAxis, describeRulerRange, describeSpan, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
@@ -240,12 +241,9 @@ export function Ruler({
     selectedIndex === null ? undefined : describeReadout(scale.readoutOf(selectedIndex), scale.count).summary
 
   const legendId = useId()
+  const legend = useRef<HTMLDivElement>(null)
+  const [legendOpen, setLegendOpen] = useState(false)
   const legendAnchor = `--ruler-guide-${legendId.replace(/[^a-zA-Z0-9_-]/g, '')}`
-  const acquireOverlay = useAppStore(state => state.acquireNativeSurfaceOverlay)
-  const releaseOverlay = useAppStore(state => state.releaseNativeSurfaceOverlay)
-  const overlayLease = useRef<(() => void) | null>(null)
-  useEffect(() => () => { overlayLease.current?.(); overlayLease.current = null }, [])
-
   const participants = axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })
 
   return (
@@ -331,16 +329,9 @@ export function Ruler({
           title="Explain this timeline" popoverTarget={legendId} popoverTargetAction="toggle"
           style={{ anchorName: legendAnchor }} onClick={closeReadout}><ThemeActionHelpIcon size={13} aria-hidden="true" /></button>
       </div>
-      <div id={legendId} popover="auto" className="activity-ruler__guide" role="dialog"
+      <div ref={legend} id={legendId} popover="auto" className="activity-ruler__guide" role="dialog"
         aria-labelledby={`${legendId}-title`} style={{ positionAnchor: legendAnchor }}
-        onToggle={event => {
-          // The browser owns dismissal; hold only the existing native-surface resource lease.
-          if (event.newState === 'open' && !overlayLease.current) {
-            acquireOverlay(); overlayLease.current = releaseOverlay
-          } else if (event.newState === 'closed') {
-            overlayLease.current?.(); overlayLease.current = null
-          }
-        }}>
+        onToggle={event => { if (event.target === event.currentTarget) setLegendOpen(event.newState === 'open') }}>
         <h3 id={`${legendId}-title`}>Timeline guide</h3>
         <p className="activity-ruler__guide-scope">Only loaded records · Not the entire session</p>
         {reading?.hasMore ? <p className="activity-ruler__guide-scope">Earlier original records remain unread. The edge has no time width or completion percentage.</p> : null}
@@ -353,6 +344,9 @@ export function Ruler({
         </div>
         <p className="activity-ruler__guide-footnote">Height shows record density, not execution. Unmarked time is unknown.</p>
       </div>
+      <ModalAttachmentDismissal active={Boolean(legendOpen && legend.current && getModalOverlayContainer(legend.current))} targetRef={legend}
+        onOwnerRemoved={() => legend.current?.hidePopover()}
+        onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); legend.current?.hidePopover() }} />
       {readout && (readout.body.kind !== 'range' || range) ? (
         <div
           className="activity-ruler__readout"

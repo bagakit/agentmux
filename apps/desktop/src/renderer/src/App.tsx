@@ -363,13 +363,7 @@ function DesktopApp() {
   const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall'
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
-  const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
-  const releaseNativeSurfaceOverlay = useAppStore((state) => state.releaseNativeSurfaceOverlay)
-  const onAgentPanelVisibilityChange = useCallback((visible: boolean) => {
-    if (visible) acquireNativeSurfaceOverlay()
-    else releaseNativeSurfaceOverlay()
-  }, [acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
-  const executorIdentity = useMemo(() => ({ config, onPanelVisibilityChange: onAgentPanelVisibilityChange }), [config, onAgentPanelVisibilityChange])
+  const executorIdentity = useMemo(() => ({ config }), [config])
   const nativeOverlayWarning = useNativeOverlayChrome()
   const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
   const gitWorkspace = useAppStore(state => workspace ? workspaceZoneContext(state, workspace).resource : null)

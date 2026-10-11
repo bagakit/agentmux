@@ -1,6 +1,8 @@
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { autoUpdate, computePosition, offset, shift, size as floatingSize, type VirtualElement } from '@floating-ui/dom'
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
@@ -17,7 +19,7 @@ import { AgentProviderIcon, agentProviderLabel } from './AgentProviderIcon'
 import { SettingsNavigation } from './SettingsNavigation'
 import { SemanticIcon } from './semantic-icons'
 import { describeAgentDisplayState } from '../../../shared/agent-state-presentation'
-import { getWindowOverlayHost } from './WindowOverlayHost'
+import { useWindowOverlayHost } from './WindowOverlayHost'
 
 const ThemeObjectSettingsIcon = semanticIconComponent('object.settings')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -26,7 +28,6 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 /** Desktop presentation only; Core continues to own the Session and Provider facts. */
 export const ExecutorIdentityContext = createContext<{
   config: AppConfig | null
-  onPanelVisibilityChange?: (visible: boolean) => void
 }>({ config: null })
 
 /** The same face for an already resolved, read-only identity; no Store reader or disclosure. */
@@ -65,7 +66,7 @@ function AgentAvatarFace({ provider, displayState, avatar, count, size, mark, ti
 }
 
 /** Every Executor surface shares its artwork, state marker and hover/focus disclosure here. */
-export function AgentAvatar({ label, onOpen, providerId, state, appearance, count, executorId, sessionId, size = 18, detail, onPanelVisibilityChange, actionDisclosure, disclosure, visible = true, inlineLabel, details, mark: identityMark }: {
+export function AgentAvatar({ label, onOpen, providerId, state, appearance, count, executorId, sessionId, size = 18, detail, actionDisclosure, disclosure, visible = true, inlineLabel, details, mark: identityMark }: {
   label?: string | undefined
   /** A single inline link trigger shares the existing artwork, status and disclosure. */
   inlineLabel?: string | undefined
@@ -87,13 +88,11 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   /** Existing Focus surfaces provide context content without changing onOpen navigation. */
   disclosure?: { label: string; scope: string; content: ReactNode; reference(): VirtualElement; mark?: ReactNode } | undefined
   visible?: boolean
-  /** Browser rails use the existing native-surface occlusion lease while this panel is open. */
-  onPanelVisibilityChange?: ((visible: boolean) => void) | undefined
 }) {
   const document = useWorkbenchDocument()
   const window = document.defaultView!
+  const overlayHost = useWindowOverlayHost()
   const identity = useContext(ExecutorIdentityContext)
-  const notifyPanelVisibilityChange = onPanelVisibilityChange ?? identity.onPanelVisibilityChange
   const session = useAppStore(useShallow((store) => {
     const entry = sessionId ? sessionPresentationById(store.sessions).get(sessionId) : undefined
     return entry?.kind === 'agent' ? {
@@ -119,7 +118,6 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const openTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const controlledReference = useRef<VirtualElement | undefined>(undefined)
-  const nativeOverlayLeaseHeld = useRef(false)
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
   const attention = displayState ? attentionAccentFor(displayState) : null
   const Element = onOpen || actionDisclosure ? 'button' : 'span'
@@ -137,10 +135,6 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     const active = document.activeElement
     const ownsFocus = active === trigger.current || panel.current?.contains(active)
     const target = restoreInput && ownsFocus ? previousFocus.current : null
-    if (nativeOverlayLeaseHeld.current) {
-      nativeOverlayLeaseHeld.current = false
-      notifyPanelVisibilityChange?.(false)
-    }
     setPosition(null)
     if (target?.isConnected) target.focus({ preventScroll: true })
   }
@@ -188,11 +182,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   useEffect(() => () => {
     clearTimeout(closeTimer.current)
     clearTimeout(openTimer.current)
-    if (nativeOverlayLeaseHeld.current) {
-      nativeOverlayLeaseHeld.current = false
-      notifyPanelVisibilityChange?.(false)
-    }
-  }, [notifyPanelVisibilityChange])
+  }, [])
   useEffect(() => {
     if (!disclosure) return
     closeNow()
@@ -232,21 +222,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       window.removeEventListener('resize', dismiss)
       window.removeEventListener('scroll', dismiss, true)
     }
-  }, [position, document])
-  function syncNativeOverlayLease(left: number, top: number, width: number, height: number) {
-    const overlapsBrowser = [...document.querySelectorAll<HTMLElement>('[data-native-browser-stage]')]
-      .some((stage) => {
-        if (stage.closest('[inert]') || getComputedStyle(stage).visibility !== 'visible') return false
-        const browser = stage.getBoundingClientRect()
-        return browser.width > 0 && browser.height > 0 &&
-          left < browser.right && left + width > browser.left &&
-          top < browser.bottom && top + height > browser.top
-      })
-    if (overlapsBrowser !== nativeOverlayLeaseHeld.current) {
-      nativeOverlayLeaseHeld.current = overlapsBrowser
-      notifyPanelVisibilityChange?.(overlapsBrowser)
-    }
-  }
+  }, [position, document, overlayHost])
   useLayoutEffect(() => {
     const reference = controlledReference.current, surface = panel.current
     if (!position || !reference || !surface) return
@@ -263,12 +239,10 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       })
       if (disposed) return
       Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
-      const bounds = surface.getBoundingClientRect()
-      syncNativeOverlayLease(x, y, bounds.width, bounds.height)
     }
     const stop = autoUpdate(reference, surface, () => { void update() })
     return () => { disposed = true; stop() }
-  }, [position, document])
+  }, [position, document, overlayHost])
   useLayoutEffect(() => {
     if (!position || !panel.current || controlledReference.current) return
     let bounds = panel.current.getBoundingClientRect()
@@ -309,8 +283,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       if (top + bounds.height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - bounds.height - 8)
     }
     if (left !== position.left || top !== position.top) { setPosition({ left, top }); return }
-    syncNativeOverlayLease(left, top, bounds.width, bounds.height)
-  }, [position, actionDisclosure, document])
+  }, [position, actionDisclosure, document, overlayHost])
   useEffect(() => {
     if (!position || !actionDisclosure || !panel.current) return
     const observer = new window.ResizeObserver(() => show())
@@ -321,7 +294,6 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
   }, [Boolean(position), Boolean(actionDisclosure), document])
 
   const face = <AgentAvatarFace provider={provider} displayState={displayState} avatar={avatar} count={count} size={size} mark={identityMark ?? disclosure?.mark} tintMark={identityMark === undefined} active={session?.active === true} />
-  const overlayHost = getWindowOverlayHost(document)
   return <>
     <Element ref={trigger} className={`agent-avatar${inlineLabel !== undefined ? ' agent-avatar--inline' : ''}${displayState ? ` status status--${displayState}` : ''}`}
       style={{ '--agent-avatar-size': `${size}px` } as CSSProperties}
@@ -345,7 +317,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
         event.preventDefault()
         firstAction.focus({ preventScroll: true })
       }}
-      onKeyDown={(event) => { if (event.key === 'Escape') { closeToTrigger(); event.stopPropagation() } }}
+      onKeyDown={(event) => { if (event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) { closeToTrigger(); event.stopPropagation() } }}
       onClick={actionDisclosure ? (event) => {
         event.stopPropagation()
         if (pinned.current) closeToTrigger()
@@ -356,7 +328,7 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     {position && overlayHost ? createPortal(<div ref={panel} id={panelId} className={`agent-identity-popover${actionDisclosure ? ' agent-identity-popover--actions' : disclosure ? ' recent-focus__context-preview' : ''}`} role={disclosure ? 'tooltip' : 'dialog'} aria-label={actionDisclosure ? 'Agent status and actions' : disclosure?.label ?? (inlineLabel === undefined ? 'Executor details' : 'Linked Agent details')}
       style={{ ...position, ...(disclosure ? { visibility: 'hidden' } : {}) }} onPointerEnter={keepOpen} onPointerLeave={hideSoon} onFocus={keepOpen}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) hideSoon() }}
-      onKeyDown={(event) => { if (event.key === 'Escape') { closeToTrigger(); event.stopPropagation() } }}
+      onKeyDown={(event) => { if (event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) { closeToTrigger(); event.stopPropagation() } }}
       onPointerDown={() => { if (actionDisclosure) pinned.current = true }}
       onClick={(event) => event.stopPropagation()}>
       {disclosure ? disclosure.content : <><header><strong>{name}</strong><span className="agent-identity-popover__controls">{navigation && resolvedExecutorId ? <button type="button" className="icon-button" aria-label={`Edit ${executor?.label ?? name} executor`} title="Executor settings"
@@ -366,5 +338,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
         {statusLabel ? <><dt>Status</dt><dd>{statusLabel}</dd></> : null}</dl>
       {statusDetail ? <p>{statusDetail}</p> : null}{details}</>}</>}
     </div>, overlayHost) : null}
+    <ModalAttachmentDismissal active={Boolean(position && overlayHost?.hasAttribute('data-overlay-modal-slot'))} targetRef={panel}
+      onOwnerRemoved={closeNow}
+      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); closeToTrigger() }} />
   </>
 }

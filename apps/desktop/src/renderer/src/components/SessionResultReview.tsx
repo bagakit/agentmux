@@ -1,3 +1,6 @@
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useId, useRef, useState } from 'react'
@@ -19,6 +22,7 @@ export function SessionResultReview({ sessionId, items, origin, visible, surface
   visible: boolean
   surfaceAnchor: string
 }) {
+  const document = useWorkbenchDocument()
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
@@ -27,24 +31,17 @@ export function SessionResultReview({ sessionId, items, origin, visible, surface
   const popover = useRef<HTMLElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
   const ready = session?.kind === 'agent' && session.status.state === 'done'
-  const acquire = useAppStore((state) => state.acquireNativeSurfaceOverlay)
-  const release = useAppStore((state) => state.releaseNativeSurfaceOverlay)
   useEffect(() => { setExpanded(false); setDismissed(false) }, [sessionId])
   useEffect(() => {
     if (!ready) { setExpanded(false); setDismissed(false) }
     if (!visible) { popover.current?.hidePopover?.(); setExpanded(false) }
   }, [ready, visible])
-  useEffect(() => {
-    if (!ready || !expanded || dismissed || !visible) return
-    acquire()
-    return release
-  }, [ready, expanded, dismissed, visible, acquire, release])
   if (!ready || dismissed || !visible) return null
   function collapse() { popover.current?.hidePopover?.(); setExpanded(false) }
   return <span className="session-result-review-slot session-result-review" data-result-review-expanded={expanded ? 'true' : 'false'}>
     <button ref={trigger} type="button" className="session-result-review__trigger" aria-label="Turn ended · Review Agent result"
       title="Review this turn" aria-expanded={expanded} aria-controls={popoverId} popoverTarget={popoverId} popoverTargetAction="toggle"
-      onPointerDown={() => { previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }}
+      onPointerDown={() => { previousFocus.current = document.activeElement?.nodeType === 1 ? document.activeElement as HTMLElement : null }}
       onClick={() => setExpanded(value => !value)}><ThemeStatusCompletedIcon size={14} aria-hidden="true" /><span className="session-result-review__label">Review</span></button>
     <aside ref={popover} id={popoverId} popover="auto" className="session-result-review__popover" aria-label="Review Agent result"
       style={{ positionAnchor: surfaceAnchor }} onToggle={event => setExpanded(event.newState === 'open')}>
@@ -62,5 +59,8 @@ export function SessionResultReview({ sessionId, items, origin, visible, surface
           }}><ThemeActionCloseIcon size={12} /> Close</button>
         </div>} /> : null}
     </aside>
+    <ModalAttachmentDismissal active={Boolean(expanded && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}
+      onOwnerRemoved={collapse}
+      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); collapse() }} />
   </span>
 }
