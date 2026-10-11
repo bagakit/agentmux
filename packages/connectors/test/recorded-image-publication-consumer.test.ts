@@ -12,6 +12,7 @@ import { ingressFixture } from './fixtures/ingress.js'
 import { feishuConfig } from './fixtures/feishu.js'
 import { context } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
+import { recordedRaster } from '../../core/test/helpers/recorded-raster.js'
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
 const reference = 'data:image/png;base64,' + png.toString('base64')
@@ -357,3 +358,23 @@ it.each([{ captured: false, text: true }, { captured: true, text: true }, { capt
   if (variant.captured) expect(tail.endsWith('Captured original D')).toBe(true)
   else expect(tail).toBe('Original text C')
 }, 15_000)
+
+
+it('the original source-backed deferred raster reaches the same resource owner and actual multipart/message delivery', async () => {
+  const f = await fixture(), image = recordedRaster(), resource = vi.spyOn(f.port, 'resource')
+  expect(image.reference.length).toBeGreaterThan(2 * 1024 * 1024)
+  await append(f, native('deferred-original-image', [{ type: 'text', text: 'Independent original text beside deferred image' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: image.bytes.toString('base64') } }]))
+  const page = await f.client.sessionHistoryPage('original-agent', { limit: 10 }), item = page.items.find(item => item.id === 'deferred-original-image')!, part = item.contentParts[1]!
+  expect(part).toMatchObject({ kind: 'resource', resourceType: 'text', content: { kind: 'resource', encoding: 'json-utf8' } })
+  if (part.kind !== 'resource') throw new Error('An original deferred image resource is required')
+  const input = { source: page.source, recordId: item.id, partIndex: 1, expectedReference: part.reference }
+  expect((await f.rpc.call('agent.history.resource', { hostId: 'local', agentSessionId: 'original-agent', ...input, maxBytes: 128 * 1024 })).result).toMatchObject({ status: 'fragment', offsetBytes: 0 })
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(JSON.stringify(posts(f))).toContain('Independent original text beside deferred image'), { timeout: 10_000 })
+  await vi.waitFor(() => expect(f.remote.uploads).toHaveLength(1), { timeout: 10_000 })
+  expect(f.remote.uploads[0]).toEqual(image.bytes)
+  expect(resource.mock.calls.some(([, request]) => request.expectedReference === part.reference && request.recordId === item.id && request.partIndex === 1 && request.representation === 'image')).toBe(true)
+  await vi.waitFor(() => expect(imageOperation(f)?.state).toBe('confirmed'), { timeout: 10_000 })
+  expect(imagePosts(f)).toHaveLength(1)
+  expect(await f.cli(imageOperation(f)!.operationId)).toMatchObject({ delivery: { state: 'confirmed', resourceUpload: { kind: 'image', state: 'confirmed' } } })
+}, 30_000)
