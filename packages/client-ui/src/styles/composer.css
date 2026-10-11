@@ -37,7 +37,7 @@
 .composer__suggestion-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer__suggestion-icon { display: inline-flex; align-items: center; flex: none; grid-row: 1 / 3; }
 .composer__suggestion-feedback { color: var(--text-3); font-size: var(--fs-meta); padding: var(--sp-2) var(--sp-3); }
-.composer-completion-popover { z-index: var(--z-menu, 1000); display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 16px); max-height: min(320px, 40vh, var(--composer-completion-available-height, 100vh)); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
+.composer-completion-popover { z-index: var(--layer-popover); pointer-events: auto; display: flex; flex-direction: column; overflow: hidden; max-width: calc(100vw - 16px); max-height: min(320px, 40vh, var(--composer-completion-available-height, 100vh)); border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
 .composer-completion-popover .composer__suggestions { display: block; min-height: 0; max-height: none; overscroll-behavior: contain; }
 .composer-completion-popover .composer__suggestion-group { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--sp-1); }
 .composer-completion-popover .composer__suggestion-group + .composer__suggestion-group { margin-top: var(--sp-2); }

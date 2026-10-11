@@ -1,0 +1,19 @@
+/* Shared window ranks. A modal owns a local stack, including its attached menus and hints. */
+:root {
+  --layer-window-chrome: 20;
+  --layer-tooltip: 140;
+  --layer-popover: 180;
+  --layer-service: 240;
+  --layer-dialog: 320;
+}
+[data-overlay-modal-scope][data-overlay-modal-scope] { position: fixed; z-index: var(--layer-dialog); inset: 0; isolation: isolate; pointer-events: none; }
+[data-overlay-modal-scope][hidden] { display: none; }
+[data-overlay-modal-scope] [data-overlay-modal-part='scrim'] { z-index: 0; }
+[data-overlay-modal-scope] [data-overlay-modal-part='content'] { z-index: 1; }
+[data-overlay-modal-slot] { position: absolute; inset: 0; pointer-events: none; }
+.modal-presentation-note { position: fixed; z-index: var(--layer-service); right: 12px; bottom: 12px; box-sizing: border-box; width: min(420px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: var(--sp-5, 12px); border-radius: var(--radius, 9px); color: var(--text); background: var(--surface-2); box-shadow: var(--elev-2); pointer-events: auto; font: var(--fs-body, 13px)/1.5 var(--font-sans, sans-serif); }
+.modal-presentation-note strong { display: block; }
+.modal-presentation-note p { margin: var(--sp-3, 6px) 0; overflow-wrap: anywhere; }
+.modal-presentation-note > div { display: flex; flex-wrap: wrap; gap: var(--sp-3, 6px); margin-top: var(--sp-4, 8px); }
+.modal-presentation-note button { min-height: 28px; padding: 4px 10px; border: 0; border-radius: var(--radius-sm, 6px); color: var(--text); background: var(--surface-3); cursor: pointer; font: inherit; }
+.modal-presentation-note button:focus-visible { outline: 2px solid var(--focus-line, currentColor); outline-offset: 2px; }

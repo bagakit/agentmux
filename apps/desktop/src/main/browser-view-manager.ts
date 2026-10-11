@@ -858,6 +858,12 @@ export class BrowserViewManager {
     return { browserId, bounds: entry.view.getBounds(), view: entry.view }
   }
 
+  /** Resolve an actual attachment without interpreting its geometry, title or page DOM. */
+  nativeOwnerForView(view: WebContentsView, window?: BrowserWindow): NativeBrowserOwner | undefined {
+    for (const entry of this.entries.values()) if (entry.view === view) return this.nativeOwner(entry.id, window)
+    return undefined
+  }
+
   /** Actual OS owners, including out-of-process frames; a shared PID is reported only once. */
   resourceProcessIds(): number[] {
     const pids = new Set<number>()

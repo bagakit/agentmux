@@ -19,7 +19,7 @@
 .conversation-reactions__button:active svg { transform: scale(.92); }
 .conversation-reactions__hint {
   position: fixed;
-  z-index: 10;
+  z-index: var(--layer-tooltip);
   left: 0;
   top: 0;
   display: block;

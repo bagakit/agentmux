@@ -1,6 +1,7 @@
 import { type ComponentType, type ReactNode } from 'react'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { createPortal } from 'react-dom'
+import { ModalPortal, useModalOverlayContainer } from '@agentmux/client-ui/components/Modal'
 
 export const OVERLAY_LAYER_BANDS = {
   windowChrome: 'window-chrome',
@@ -150,7 +151,7 @@ export function resolveOverlayContainer(
 }
 
 export function useWindowOverlayHost(): HTMLElement | null {
-  return ensureInteractionHost(useWorkbenchDocument())
+  return useModalOverlayContainer(ensureInteractionHost(useWorkbenchDocument()))
 }
 
 /**
@@ -199,5 +200,8 @@ export function DocumentOverlayPortal({ component: Portal, container, ...props }
   forceMount?: true
 }) {
   const document = useWorkbenchDocument()
-  return <Portal {...props} container={resolveOverlayContainer(container, document)} />
+  const root = resolveOverlayContainer(container, document)
+  const owned = useModalOverlayContainer(root)
+  if (Portal !== ModalPortal && container == null && owned === null) return null
+  return <Portal {...props} container={Portal === ModalPortal ? root : container ?? owned} />
 }

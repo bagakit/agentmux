@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { DismissableLayer } from '@radix-ui/react-dismissable-layer'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { useClientUiPlatform } from '../platform.js'
 import { InlineComposer, type InlineComposerProps } from './InlineComposer.js'
@@ -10,6 +11,7 @@ import { composerKeywordAtCaret } from '../lib/composer-keywords.js'
 import { matchComposerShortcut } from '../lib/composer-keyboard.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 import { composerChoiceReadingProps } from '../lib/composer-choice-reading.js'
+import { useModalOverlayContainer } from './Modal.js'
 
 export type ComposerCompletionProps = {
   completionConfig?: ComposerInputConfig
@@ -29,6 +31,7 @@ export type ComposerCompletionEditorProps = Omit<InlineComposerProps, 'onKeyDown
 export function ComposerCompletionEditor({ completionConfig, commands = [], skills = [], references = [], promptKeywords = [],
   onCompletionQuery, completionFeedback, onSelectSuggestion, insertionRef, onKeyDown, onSelectionChange, ...editorProps }: ComposerCompletionEditorProps) {
   const platform = useClientUiPlatform()
+  const overlayContainer = useModalOverlayContainer(platform.overlayContainer())
   const config = resolveComposerInputConfig(completionConfig)
   const [caret, setCaret] = useState<ComposerCaret | null>(null)
   const [dismissed, setDismissed] = useState<string | null>(null)
@@ -62,7 +65,7 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
     }
     const stop = autoUpdate(anchor, floating, () => { void update() })
     return () => { current = false; stop() }
-  }, [open, platform.ownerDocument])
+  }, [open, platform.ownerDocument, overlayContainer])
   useEffect(() => { onCompletionQuery?.(queryKind ? { kind: queryKind, query: queryText } : null) }, [onCompletionQuery, queryKind, queryText])
   function selectionChanged(next: ComposerCaret): void {
     setCaret(previous => previous && previous.from === next.from && previous.to === next.to && previous.before === next.before && previous.after === next.after && previous.composing === next.composing ? previous : next)
@@ -140,7 +143,11 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
         }
         onKeyDown(event, position, empty, suggestions.length > 0)
       }} />
-    {open ? createPortal(<div ref={panel} className="composer-completion-popover" style={{ position: 'fixed', visibility: 'hidden' }}>
+    {open && overlayContainer ? createPortal(<DismissableLayer asChild
+      onFocusOutside={event => event.preventDefault()}
+      onPointerDownOutside={event => { if (shell.current?.contains(event.target as Node)) event.preventDefault() }}
+      onEscapeKeyDown={event => { event.preventDefault(); if (!isImeOwnedKeyboardEvent(event)) { setDismissed(queryKey); focusEditor() } }}
+      onDismiss={() => setDismissed(queryKey)}><div ref={panel} className="composer-completion-popover" style={{ position: 'fixed', visibility: 'hidden' }}>
     {suggestions.length ? <div className="composer__suggestions" role="listbox" aria-label={`Agent ${range!.kind}`} onKeyDown={suggestionKeyDown}>
       {[...groups].map(([group, items]) => {
         const options = items.map((item, index) => <button type="button" role="option" aria-selected="false" key={item.id ?? `${group}:${index}:${item.text}`} {...composerChoiceReadingProps(`${item.label ?? item.text}\n${item.description}`)}
@@ -151,6 +158,6 @@ export function ComposerCompletionEditor({ completionConfig, commands = [], skil
       })}
     </div> : null}
     {completionFeedback ? <div className="composer__suggestion-feedback" role="status">{completionFeedback}</div> : null}
-    </div>, platform.overlayContainer()) : null}
+    </div></DismissableLayer>, overlayContainer) : null}
   </div>
 }

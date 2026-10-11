@@ -1778,7 +1778,7 @@ export type AgentMuxDesktopApi = {
     nativeBrowserVisibility(document?: import('./workbench-windows').WorkbenchWindowDocument): Promise<import('./native-overlay').NativeBrowserVisibility>
     onNativeBrowserVisibility(listener: (visibility: import('./native-overlay').NativeBrowserVisibility) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
     publishNativeOverlays(regions: import('./native-overlay').NativeOverlayRegion[], document?: import('./workbench-windows').WorkbenchWindowDocument): Promise<import('./native-overlay').NativeOverlayReceipt>
-    onNativeOverlayWarning(listener: (warning: string) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
+    onNativeOverlayWarning(listener: (warning: string, modalId?: string) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
     onNativeBrowserInput(listener: (input: import('./native-overlay').NativeBrowserInput) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
     nativeOverlayFocus(document?: import('./workbench-windows').WorkbenchWindowDocument): boolean
     /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */

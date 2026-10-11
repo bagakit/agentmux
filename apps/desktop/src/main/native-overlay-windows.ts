@@ -16,7 +16,7 @@ export class NativeOverlayWindows {
   private disposed = false
   private readonly releaseFocus: () => void
 
-  constructor(private readonly main: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner' | 'windowForView'>,
+  constructor(private readonly main: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner' | 'nativeOwnerForView' | 'windowForView'>,
     private readonly windows: Pick<WorkbenchWindows, 'windowForDocument'>) {
     this.releaseFocus = installNativeOverlayFocus(main,
       { hasProjectionInFocusedWindow: () => this.entries.get(main)?.surfaces.hasProjectionInFocusedWindow() === true },
@@ -85,8 +85,9 @@ export class NativeOverlayWindows {
       ...(document ? { document: { ...document } } : {}),
       surfaces: new NativeOverlaySurfaces(window, {
         visibleNativeBounds: () => this.browsers.visibleNativeBounds(window),
-        nativeOwner: browserId => this.browsers.nativeOwner(browserId, window)
-      }, message => this.warning(entry, message), input => this.send(NATIVE_BROWSER_INPUT_CHANNEL,
+        nativeOwner: browserId => this.browsers.nativeOwner(browserId, window),
+        nativeOwnerForView: view => this.browsers.nativeOwnerForView(view, window)
+      }, (message, modalId) => this.warning(entry, message, modalId), input => this.send(NATIVE_BROWSER_INPUT_CHANNEL,
         { ...input, ...(entry.document ? { document: entry.document } : {}) })),
       release: () => {
         window.off('closed', release)
@@ -106,8 +107,8 @@ export class NativeOverlayWindows {
     return entry
   }
 
-  private warning(entry: Entry, message: string): void {
-    this.send(NATIVE_OVERLAY_WARNING_CHANNEL, { message, ...(entry.document ? { document: entry.document } : {}) })
+  private warning(entry: Entry, message: string, modalId?: string): void {
+    this.send(NATIVE_OVERLAY_WARNING_CHANNEL, { message, ...(modalId ? { modalId } : {}), ...(entry.document ? { document: entry.document } : {}) })
   }
   private send(channel: string, value: unknown): void {
     if (!this.disposed && !this.main.isDestroyed() && !this.main.webContents.isDestroyed()) this.main.webContents.send(channel, value)

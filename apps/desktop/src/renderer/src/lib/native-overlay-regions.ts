@@ -3,6 +3,9 @@ import { NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT } from '../../../share
 import type { RendererOverlayObservation } from '@agentmux/core/control'
 import { boundsOverlap } from '../../../shared/native-overlay'
 import { rendererCssBoundsToWindowDip } from './browser-bounds-sync'
+import { autoUpdate } from '@floating-ui/dom'
+import { MODAL_PRESENTATION_FAILURE_EVENT } from '@agentmux/client-ui/components/Modal'
+import { compareOverlayPaintOrder, opaqueComputedColor } from './overlay-paint-order'
 
 const OPEN_FLOAT = '[data-state="open"], [role="tooltip"], [role="dialog"], [role="menu"], [role="listbox"]'
 
@@ -21,6 +24,7 @@ export function observeNativeOverlayRegions(
   let nativeDemand: NativeBrowserVisibility | null = initialDemand ?? null
   let watched: Element[] = []
   let geometry: Element[] = []
+  let releasePositions: Array<() => void> = []
   let hoveredStage: Element | undefined
   let hoveredFloat: Element | undefined
   const topLayers = new Set<Element>()
@@ -88,13 +92,14 @@ export function observeNativeOverlayRegions(
     // ancestor. Capturing only the ancestor would crop the child's dialog.
     const nativeOrder = new Map([...topLayers].map((node, index) => [node, index + 1]))
     const floats = candidates.filter(node => !candidates.some(parent => parent !== node && parent.contains(node) && nativeOwner(parent) === nativeOwner(node)))
-      .sort((left, right) => (nativeOrder.get(nativeOwner(left)!) ?? 0) - (nativeOrder.get(nativeOwner(right)!) ?? 0))
+      .sort((left, right) => compareOverlayPaintOrder(left, right, nativeOrder, styleOf))
     const regions: NativeOverlayRegion[] = []
     const activeFloats: Element[] = []
     const staticFloats = new Set<Element>()
     const stages: Element[] = []
-    let pixels = 0
     let warning: string | undefined
+    const failedModals = new Map<string, string>()
+    const modalParts = new Map<string, Set<string>>()
     for (const node of floats) {
       // A scaled entry can initially miss a Browser that its final box overlaps.
       // Stabilize mounted floats before capture geometry whenever this Window has native content.
@@ -111,29 +116,33 @@ export function observeNativeOverlayRegions(
       const rect = rectOf(node)
       if (rect.width <= 0 || rect.height <= 0) continue
       activeFloats.push(node)
+      const modalId = node.getAttribute('data-overlay-modal-id')
+      const part = node.getAttribute('data-overlay-modal-part')
+      const modal: NativeOverlayRegion['modal'] = modalId && (part === 'scrim' || part === 'content') ? { id: modalId, part } : undefined
+      if (modal) {
+        const parts = modalParts.get(modal.id) ?? new Set<string>()
+        parts.add(modal.part); modalParts.set(modal.id, parts)
+      }
       const bounds = rendererCssBoundsToWindowDip(rect, zoomFactor())
-      if (nativeDemand && !nativeDemand.bounds.some(native => boundsOverlap(bounds, native))) continue
-      const emptyScrim = node.children.length === 0 && (node.textContent ?? '').trim() === '' && style.backgroundColor !== 'rgba(0, 0, 0, 0)'
+      const overlapping = !nativeDemand || nativeDemand.bounds.some(native => boundsOverlap(bounds, native))
+      // Main must validate a complete modal even when only its scrim crosses native pixels.
+      if (!modal && !overlapping) continue
+      const emptyScrim = modal?.part === 'scrim'
       // Chrome capture is composited against the Renderer. Only an opaque content box with
       // uniform native-clippable corners may be projected; never invent alpha by colour removal.
-      const alpha = style.backgroundColor.startsWith('rgba(') ? Number.parseFloat(style.backgroundColor.split(',').at(-1)!) : 1
-      const solid = /^rgba?\(/.test(style.backgroundColor) && alpha === 1 && Number(style.opacity || '1') === 1 &&
+      const solid = opaqueComputedColor(style.backgroundColor) && Number(style.opacity || '1') === 1 &&
         (!style.clipPath || style.clipPath === 'none') && (!style.maskImage || style.maskImage === 'none') &&
         [style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius].every(radius => radius === style.borderTopLeftRadius)
       if (!emptyScrim && !solid) {
         warning = 'Floating content has transparency or an unsupported clip. The Browser remains available; close the floating panel. Its transparency has not been replaced with an opaque window background.'
+        if (modal) failedModals.set(modal.id, warning)
         continue
       }
       if (!emptyScrim && rect.width >= win.innerWidth && rect.height >= win.innerHeight) {
         warning = 'Full-window floating content cannot be projected as a bitmap. The Browser remains available; close the floating panel.'
+        if (modal) failedModals.set(modal.id, warning)
         continue
       }
-      const cost = emptyScrim ? 0 : Math.ceil(bounds.width) * Math.ceil(bounds.height)
-      if (regions.length >= NATIVE_OVERLAY_LIMIT || pixels + cost > NATIVE_OVERLAY_PIXEL_LIMIT) {
-        warning = 'Floating content exceeds the native chrome budget. The Browser remains available; close an unused floating panel.'
-        continue
-      }
-      pixels += cost
       let id = ids.get(node)
       if (!id) { id = `chrome-${++nextId}`; ids.set(node, id) }
       const browserStages = Array.from(node.querySelectorAll('[data-native-browser-stage]')).flatMap(stage => {
@@ -143,18 +152,57 @@ export function observeNativeOverlayRegions(
         return [{ browserId, bounds: rendererCssBoundsToWindowDip(box, zoomFactor()) }]
       })
       regions.push({ id, bounds, radius: (Number.parseFloat(style.borderTopLeftRadius) || 0) * zoomFactor(),
+        ...(modal ? { modal } : {}),
         ...(emptyScrim ? { scrim: style.backgroundColor } : {}), ...(browserStages.length ? { browserStages } : {}) })
     }
+    for (const [id, parts] of modalParts) if (!parts.has('content') || !parts.has('scrim')) {
+      failedModals.set(id, 'The complete dialog surface could not be observed. Your original request is kept; retry displaying the dialog.')
+    }
+    // A rejected required member cannot leave its original scrim projected alone.
+    const groups = new Map<string, NativeOverlayRegion[]>()
+    for (const region of regions) {
+      if (region.modal && failedModals.has(region.modal.id)) continue
+      const key = region.modal?.id ?? region.id
+      const group = groups.get(key) ?? []
+      group.push(region); groups.set(key, group)
+    }
+    const accepted: NativeOverlayRegion[] = []
+    let pixels = 0
+    for (const group of groups.values()) {
+      const cost = group.reduce((sum, region) => sum + (region.scrim !== undefined || nativeDemand && !nativeDemand.bounds.some(native => boundsOverlap(region.bounds, native))
+        ? 0 : Math.ceil(region.bounds.width) * Math.ceil(region.bounds.height)), 0)
+      if (accepted.length + group.length > NATIVE_OVERLAY_LIMIT || pixels + cost > NATIVE_OVERLAY_PIXEL_LIMIT) {
+        warning = 'Floating content exceeds the native chrome budget. The Browser remains available; close an unused floating panel.'
+        const modal = group[0]?.modal
+        if (modal) failedModals.set(modal.id, warning)
+      } else { accepted.push(...group); pixels += cost }
+    }
+    // Budget grouping does not change the paint order of independent accessories.
+    const acceptedIds = new Set(accepted.map(region => region.id))
+    accepted.splice(0, accepted.length, ...regions.filter(region => acceptedIds.has(region.id)))
     releaseMotion(staticFloats)
     const observed = [...activeFloats, ...stages]
     if (geometry.length !== observed.length || geometry.some((node, index) => node !== observed[index])) {
       resize.disconnect()
+      for (const release of releasePositions) release()
+      releasePositions = []
       for (const node of observed) resize.observe(node)
+      if (typeof win.IntersectionObserver === 'function') for (const node of observed) if (html(node)) {
+        let initial = true
+        const release = autoUpdate(node, node, () => { if (!initial) schedule('resize') }, {
+          ancestorScroll: false, ancestorResize: false, elementResize: false, layoutShift: true, animationFrame: false
+        })
+        initial = false; releasePositions.push(release)
+      }
       geometry = observed
     }
     watched = activeFloats
     if (hoveredFloat && !watched.includes(hoveredFloat)) { hoveredFloat = undefined; hoveredStage = undefined }
-    publish(regions, warning)
+    publish(accepted, warning)
+    for (const [modalId, message] of failedModals) {
+      const scope = body.ownerDocument.getElementById(modalId)
+      if (scope?.getAttribute('data-overlay-modal-scope') === modalId) scope.dispatchEvent(new win.CustomEvent(MODAL_PRESENTATION_FAILURE_EVENT, { detail: { message } }))
+    }
     observe?.({ reason: 'collect', scheduled: false, coalesced: false, candidateCount: unique.length,
       geometryReadCount, nativeDemandCount: nativeDemand?.bounds.length ?? null, collectMs: win.performance.now() - started })
   }
@@ -210,6 +258,7 @@ export function observeNativeOverlayRegions(
     const target = event.target
     if (!element(target) || !target.hasAttribute('popover')) return
     if ((event as ToggleEvent).newState === 'open') {
+      topLayers.delete(target)
       topLayers.add(target)
       // ToggleEvent.source is the actual HTML popover invoker/implicit anchor; never scan #root.
       const source = (event as ToggleEvent & { source?: Element | null }).source
@@ -247,6 +296,8 @@ export function observeNativeOverlayRegions(
       releaseMotion()
       win.cancelAnimationFrame(frame); frame = 0
       observer.disconnect(); resize.disconnect(); geometry = []; watched = []
+      for (const release of releasePositions) release()
+      releasePositions = []
       clearHover(); publish([]); schedule('demand')
     } else { bind(); schedule('demand') }
   }, handleNativeInput(input) {
@@ -313,6 +364,7 @@ export function observeNativeOverlayRegions(
     win.cancelAnimationFrame(frame)
     observer.disconnect()
     resize.disconnect()
+    for (const release of releasePositions) release()
     win.removeEventListener('resize', onResize)
     win.removeEventListener('scroll', onScroll, true)
     body.removeEventListener('toggle', onToggle, true)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent, type ReactNode, type Ref } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
+import * as Dialog from './Modal.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { constrainImageView, FIT_IMAGE, imageViewSize, zoomImageView, type ImageViewGeometry } from '../lib/image-view-transform.js'
 
