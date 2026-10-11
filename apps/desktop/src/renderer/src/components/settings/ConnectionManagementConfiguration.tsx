@@ -1,5 +1,6 @@
 import type { ConnectionRecord, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
 import { SurfaceModeSwitch } from '../SurfaceModeSwitch'
+import { ConnectionManagementPublication } from './ConnectionManagementPublication'
 import { ConnectionManagementPermissions } from './ConnectionManagementPermissions'
 import { ConnectionManagementReception } from './ConnectionManagementReception'
 import type { ConnectionManagementModel } from './useConnectionManagementSetup'
@@ -18,6 +19,7 @@ const resultLabel = (request: string, storage: string) => request === 'confirmed
 /** Presentation only: current capability and the original request remain separate facts. */
 export function connectionConfigurationSummary(view: ConnectionSetupView | null) {
   const configuration = view?.applicationConfiguration
+  if (configuration?.effect === 'create-application-version' || configuration?.effect === 'submit-application-version') return { title: 'Publish application changes', summary: 'Review the complete application changes, create a version and explicitly submit the exact version. Acceptance and being live are separate.' }
   if (configuration?.effect === 'add-message-reception') {
     if (configuration.selected?.request === 'confirmed' && configuration.selected.secureStorage !== 'stored') return { title: 'Finish saving the accepted reception request', summary: 'The platform accepted this addition. Save its original result locally; this does not send it again.' }
     if (configuration.reason === 'original-effect-unconfirmed') return { title: 'Message reception request not confirmed', summary: 'The original addition is kept. A fresh check cannot confirm that earlier request or send it again.' }
@@ -56,6 +58,7 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
   const { view, busy } = model
   const inspection = view?.applicationInspection, configuration = view?.applicationConfiguration
   const supported = model.catalog?.value?.support?.capabilities ?? []
+  if (configuration?.effect === 'create-application-version' || configuration?.effect === 'submit-application-version') return <ConnectionManagementPublication key={view?.operation?.operationId} record={record} model={model} current={current} configuration={configuration} onConsole={onConsole} onBack={onBack} />
   const selectedMode = configuration?.effect === 'add-message-reception' ? 'use-persistent-connection' : configuration?.effect ?? 'enable-messaging'
   const modeSwitch = current && (supported.includes('persistent-event-transport') || supported.includes('application-permissions')) ? <SurfaceModeSwitch value={selectedMode} active={current} ariaLabel="Bot setup step" options={[
     { value: 'enable-messaging', label: 'Messages' }, ...(supported.includes('persistent-event-transport') ? [{ value: 'use-persistent-connection' as const, label: 'Delivery' }] : []), ...(supported.includes('application-permissions') ? [{ value: 'add-application-permissions' as const, label: 'Permissions' }] : [])
@@ -96,6 +99,7 @@ export function ConnectionManagementConfiguration({ record, model, current, onCo
       {!inspection && !configuration || model.reading?.configurationIssue ? <><p className="connector-check-feedback" role="status">Bot setup actions could not be read. Your confirmed account is kept.</p><button className="small-button" data-management-inspect disabled={busy} onClick={model.inspect}>Check setup actions</button></> : null}
       {configuration?.capability === 'enabled' && !transport ? <p className="settings-group-note">Complete the remaining platform setup in the developer console, then return to check the connection.</p> : null}
       {transport && supported.includes('message-reception') ? <button className={configuration.capability === 'enabled' && !uncertainEffect ? 'primary-button' : 'small-button'} data-management-review-reception disabled={busy} onClick={() => void model.reviewMessageReception()}>Check message reception</button> : null}
+      {supported.includes('application-publication') ? <button className="small-button" data-management-publication-open disabled={busy} onClick={() => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect: 'create-application-version' } })}>Review publishing</button> : null}
       <button className="small-button" data-management-console onClick={() => void onConsole()}>Open developer console</button>
     </div> : null}
     {uncertainEffect ? <div className="connector-configuration__notice" data-management-unresolved role="status">
