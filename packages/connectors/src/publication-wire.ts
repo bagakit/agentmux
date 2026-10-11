@@ -1,5 +1,10 @@
 import { AgentMuxError } from '@agentmux/core'
-import type { PublicationOperation } from './publication-store.js'
+import type { PublicationOperation, PublicationPayload } from './publication-store.js'
+
+/** Stored speech operations retain their original encoding, including legacy question payloads. */
+export function publicationSpeechText(payload: Extract<PublicationPayload, { kind: 'speech' }>): string {
+  return [payload.text, ...(payload.questions ?? []).map(question => [question.prompt, ...question.options.map(option => `- ${option.label}`)].join('\n'))].filter(Boolean).join('\n\n')
+}
 
 /** No authentication material belongs here. The adapter resolves current Host credentials at effect time. */
 export type PreparedPublication = {

@@ -1,5 +1,5 @@
 import { AgentMuxError } from '@agentmux/core'
-import { parseNativeConversationCheckpointPage, type NativeConversationCheckpoint, type NativeConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
+import { parseConversationCheckpointPage, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
 import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
 import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
@@ -9,7 +9,7 @@ export type RoomBindingHostOptions = {
   connections: ConnectionHost
   spatial: { read(): Promise<AgentMuxSpatialState | null> }
   /** Borrow the original Core client for the exact Host, never a new Runtime or focused occupant. */
-  checkpoint(reference: ConversationRef): Promise<NativeConversationCheckpointPage>
+  checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
 }
 type Action = RoomBindingOperation['action']
 type Input = RoomBindingBindInput | RoomBindingRelinkInput | RoomBindingPauseInput | RoomBindingGrantInput
@@ -158,13 +158,19 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     if (!target) refuse('ROOM_BINDING_TARGET_CHANGED')
     return target.revision
   }
-  private async cut(input: RoomBindingBindInput): Promise<NativeConversationCheckpoint[]> {
+  private async cut(input: RoomBindingBindInput): Promise<Pick<RoomBinding, 'sourceCheckpoints' | 'sourceFrontier'>> {
     const ref = { hostId: input.executionHostId, agentSessionId: input.agentSessionId }
-    let page: NativeConversationCheckpointPage
-    try { page = parseNativeConversationCheckpointPage(await this.options.checkpoint(ref), ref) }
+    let page: ConversationCheckpointPage
+    try { page = parseConversationCheckpointPage(await this.options.checkpoint(ref), ref) }
     catch { return refuse('ROOM_BINDING_SOURCE_UNAVAILABLE') }
-    if (!equal(page.checkpoint.source, input.expectedSource)) refuse('ROOM_BINDING_SOURCE_CHANGED')
-    return [page.checkpoint]
+    const native = page.checkpoint.frontier.cuts.filter(c => c.kind === 'native')
+    if (!native.length) refuse('ROOM_BINDING_SOURCE_UNAVAILABLE')
+    if (native.length !== 1 || !equal(native[0]!.checkpoint.source, input.expectedSource)) refuse('ROOM_BINDING_SOURCE_CHANGED')
+    const sourceFrontier = input.scope.publication === 'future-shared-conversation' ? page.checkpoint : {
+      ...page.checkpoint, frontier: { ...page.checkpoint.frontier,
+        scope: { sources: page.scope.sources.filter(s => s.kind === 'native') }, cuts: native }
+    }
+    return { sourceCheckpoints: native.map(c => c.checkpoint), sourceFrontier }
   }
   private conflicts(input: RoomBindingBindInput, bindingId: string): void {
     if ([this.matching('audience', input), this.matching('session', input)].some(b => b && b.bindingId !== bindingId)) refuse('ROOM_BINDING_MAPPING_CONFLICT')
@@ -174,7 +180,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
       const input = raw as RoomBindingBindInput, spatialRevision = await this.region(input)
       this.safe(() => this.connection(input))
       const existing = this.safe(() => this.readCurrent(input.bindingId) ?? this.matching('session', input))
-      const cut = existing ? existing.sourceCheckpoints : await this.cut(input)
+      const cut = existing ? { sourceCheckpoints: existing.sourceCheckpoints, ...(existing.sourceFrontier ? { sourceFrontier: existing.sourceFrontier } : {}) } : await this.cut(input)
       await context.assertCurrent?.()
       if (await this.region(input) !== spatialRevision) refuse('ROOM_BINDING_TARGET_CHANGED')
       return this.transaction(() => {
@@ -187,7 +193,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
           return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding: current, reused: true })
         }
         this.conflicts(input, input.bindingId)
-        const binding: RoomBinding = { bindingId: input.bindingId, revision: 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, sourceCheckpoints: cut, authorizedBy: authority }
+        const binding: RoomBinding = { bindingId: input.bindingId, revision: 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
         this.writeBinding(binding)
         return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding })
       })
@@ -206,7 +212,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         const connection = this.connection(input), current = this.readCurrent(input.bindingId)
         if (!current || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         this.conflicts(input, input.bindingId)
-        const binding: RoomBinding = { ...current, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, sourceCheckpoints: cut, authorizedBy: authority }
+        const binding: RoomBinding = { ...current, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
         this.writeBinding(binding)
         return this.finish({ operationId: input.operationId, action: 'relink', state: 'applied', binding })
       })

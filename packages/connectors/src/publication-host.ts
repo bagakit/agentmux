@@ -1,15 +1,18 @@
-import { AgentMuxError, readSessionHistoryTextResource, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { parseNativeConversationChangesPage, type NativeConversationChangesInput, type NativeConversationChangesPage, type ConversationRef } from '@agentmux/core/conversation'
+import { AgentMuxError, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
+import { consumeJsonReadEntry, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
+import { publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation } from './publication-store.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
 export interface PublicationConversationPort {
-  changes(input: NativeConversationChangesInput, signal: AbortSignal): Promise<NativeConversationChangesPage>
-  observe(reference: ConversationRef, listener: (value: AgentSessionHistoryObservation) => void, signal: AbortSignal): Promise<AgentSessionHistoryObservationHandle>
+  checkpoint(reference: ConversationRef, signal: AbortSignal): Promise<ConversationCheckpointPage>
+  changes(input: ConversationChangesInput, signal: AbortSignal): Promise<ConversationChangesPage>
+  inspect(input: ConversationTimelineReadInput, signal: AbortSignal): Promise<AgentConversationReadPage>
+  observe(reference: ConversationRef, listener: (value: ConversationObservation) => void, signal: AbortSignal): Promise<ConversationObservationHandle>
   resource(reference: ConversationRef, input: AgentSessionHistoryResourceRequest, signal: AbortSignal): Promise<AgentSessionHistoryResourceReadResult>
 }
 export interface PublicationPermissionsPort {
@@ -18,9 +21,9 @@ export interface PublicationPermissionsPort {
   authorized(operation: PublicationOperation): boolean
 }
 export type PublicationObservation = ConnectionDeliveryObservation
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; work?: Promise<void> | undefined; watch?: AgentSessionHistoryObservationHandle | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation }
+type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; work?: Promise<void> | undefined; watch?: ConversationObservationHandle | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; gapAfter?: number; read?: { after: ConversationCheckpoint; cursor?: string; pending?: JsonReadAssembly | undefined; units: ConversationUnit[]; bytes: number } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort }
-const sameSource = (a: { providerId: string; nativeSessionId: string }, b: { providerId: string; nativeSessionId: string }) => a.providerId === b.providerId && a.nativeSessionId === b.nativeSessionId
+
 
 /** Durable external publication. Each Binding has an independent read/effect lane, outside original Core input. */
 export class PublicationHost implements ConnectionDeliveryPort {
@@ -90,7 +93,12 @@ export class PublicationHost implements ConnectionDeliveryPort {
       try { await this.drain(lane, adapter, projection) } catch { permissionsUnavailable = true }
     }
     try { await this.catchUp(lane, adapter) }
-    catch { if (!signal.aborted) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' } }
+    catch {
+      // COMMIT may have succeeded before its acknowledgment was lost. Reload
+      // the retained cut before retrying, without inventing another operation.
+      lane.read = undefined
+      if (!signal.aborted) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
+    }
     if (!signal.aborted && this.authorized(binding)) {
       let effectObservation: PublicationObservation | undefined
       try { effectObservation = await this.drain(lane, adapter) }
@@ -102,59 +110,112 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   private async catchUp(lane: Lane, adapter: PublicationAdapter): Promise<void> {
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
-    if (!lane.watch || lane.watch.closed?.aborted) {
+    const sourceHostId = binding.sourceFrontier?.sourceHostId ?? (await this.options.conversation.checkpoint(reference, signal)).sourceHostId
+    let after = this.store.checkpoint(binding, sourceHostId)
+    if (!lane.watch || lane.watch.closed.aborted) {
       lane.watch?.dispose(); lane.watch = undefined
       try {
         const watch = await this.options.conversation.observe(reference, observation => {
           if (signal.aborted) return
-          if (observation.agentSessionId !== binding.agentSessionId || observation.source && !binding.sourceCheckpoints.some(c => sameSource(c.source, observation.source!))) {
-            lane.observation = { state: 'unavailable', reason: 'source-gap' }; return
-          }
+          if (observation.hostId !== reference.hostId || observation.agentSessionId !== reference.agentSessionId || observation.sourceHostId !== sourceHostId) { lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
+          if (!after.frontier.scope.sources.some(source => conversationSourceKey(source) === conversationSourceKey(observation.source))) return
           if (observation.kind === 'unavailable') { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
           this.wake(lane)
         }, signal)
         if (signal.aborted) { watch.dispose(); return }
-        if (!binding.sourceCheckpoints.some(c => sameSource(c.source, watch.source))) { watch.dispose(); lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
+        if (watch.hostId !== reference.hostId || watch.agentSessionId !== reference.agentSessionId || watch.sourceHostId !== sourceHostId) { watch.dispose(); throw Error('Foreign observation owner') }
         lane.watch = watch
-        watch.closed?.addEventListener('abort', () => { if (!signal.aborted) { lane.observation = { state: 'unknown', reason: 'source-unconfirmed' } } }, { once: true })
+        watch.closed.addEventListener('abort', () => { if (!signal.aborted) lane.observation = { state: 'unknown', reason: 'source-unconfirmed' } }, { once: true })
       } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
     }
-    // A watcher failure does not invalidate a healthy original durable reader.
-    for (const initial of binding.sourceCheckpoints) {
-      let after = this.store.checkpoint(binding, initial)
-      for (let reads = 0; reads < 8; reads++) {
-        if (signal.aborted || !this.authorized(binding)) return
-        let page: NativeConversationChangesPage
-        try { page = parseNativeConversationChangesPage(await this.options.conversation.changes({ ...reference, checkpoint: after, limit: 100 }, signal), { ...reference, checkpoint: after, limit: 100 }) }
-        catch (error) {
-          lane.observation = { state: 'unavailable', reason: error instanceof AgentMuxError && ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'AGENT_SESSION_HISTORY_CURSOR_INVALID', 'AGENT_CONVERSATION_SOURCE_CHANGED'].includes(error.code) ? 'source-gap' : 'source-unconfirmed' }
-          return
-        }
-        const resolvedText = new Map()
-        try {
-          for (const item of page.items) if (item.kind === 'assistant-message') {
-            const parts = new Map()
-            for (const [index, part] of item.contentParts.entries()) if (part.kind === 'resource' && part.content?.kind === 'text') {
-              const text = await readSessionHistoryTextResource(part, index, { source: page.source, recordId: item.id, ...(item.turnId === undefined ? {} : { turnId: item.turnId }) }, async input => {
-                const result = await this.options.conversation.resource(reference, input, signal)
-                if (result.agentSessionId !== binding.agentSessionId) throw new Error('Foreign original resource.')
-                return result
-              }, signal)
-              if (text.kind !== 'text') throw new Error('Original speech resource is unconfirmed.')
-              parts.set(index, text)
-            }
-            if (parts.size) resolvedText.set(item.id, parts)
-          }
-        } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
-        if (signal.aborted) return
-        try { this.store.commitPage(binding, after, page, () => this.authorized(binding), { resolvedText, fragmentBytes: adapter.fragmentBytes }) }
-        catch (error) { lane.observation = { state: 'unavailable', reason: error instanceof AgentMuxError && error.code === 'PUBLICATION_CONTENT_UNCONFIRMED' ? 'content-unconfirmed' : 'storage-unconfirmed' }; return }
-        after = page.checkpoint
-        if (!page.more) break
-        if (reads === 7) lane.dirty = true
+    // Transient fragment state is bounded to one original batch. A restart discards
+    // it and resumes the original durable cut, preserving all unknown effects.
+    lane.read ??= { after, units: [], bytes: 0 }
+    for (let reads = 0; reads < 8; reads++) {
+      if (signal.aborted || !this.authorized(binding)) return
+      const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, ...(state.cursor ? { cursor: state.cursor } : {}) }
+      let page: ConversationChangesPage
+      try { page = parseConversationChangesPage(await this.options.conversation.changes(input, signal), input) }
+      catch { lane.read = undefined; lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
+      const scopeKey = JSON.stringify([reference, page.sourceHostId, state.after])
+      for (const entry of page.items) {
+        const consumed = consumeJsonReadEntry({ entry, scopeKey, ...(state.pending ? { pending: state.pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
+        if (consumed.kind === 'pending') { state.pending = consumed.pending; continue }
+        const unit = parseConversationUnit(consumed.value, { hostId: page.sourceHostId, agentSessionId: reference.agentSessionId }, page.scope)
+        if (entry.kind === 'fragment' && entry.itemId !== unit.event.id) throw Error('Foreign unit fragment')
+        state.pending = undefined; state.bytes += Buffer.byteLength(JSON.stringify(unit)); state.units.push(unit)
+        if (state.bytes > CONVERSATION_MAX_UNIT_BYTES * Math.max(1, page.scope.sources.length)) throw Error('Original batch exceeds its declared source budget')
       }
+      if (page.nextCursor) {
+        if (page.nextCursor === state.cursor) throw Error('Original continuation made no progress')
+        state.cursor = page.nextCursor
+        if (reads === 7) lane.dirty = true
+        continue
+      }
+      if (state.pending) throw Error('Incomplete original unit')
+      const ordered = [...state.units].reverse() // The Core wire explicitly declares newest-first.
+      const resolvedText = await this.resolve(reference, ordered, signal, binding)
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes })
+      after = page.checkpoint; lane.read = { after, units: [], bytes: 0 }
+      if (!page.more) { lane.read = undefined; break }
+      if (reads === 7) lane.dirty = true
     }
-    lane.observation = lane.watch ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
+    await this.recoverContent(lane, adapter)
+    lane.observation = this.store.coverage(binding).state === 'incomplete' ? { state: 'unavailable', reason: 'content-unconfirmed' }
+      : lane.watch ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
+  }
+  private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding): Promise<Map<string, AgentSessionHistoryContentPart>> {
+    const result = new Map<string, AgentSessionHistoryContentPart>()
+    for (const unit of units) for (const slot of unit.event.content) {
+      const record = unit.records.find(record => record.id === slot.recordId)!
+      if (record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
+      const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
+      if (item.kind === 'user-message' || part.kind !== 'resource' || part.resourceType !== 'text' || !part.content || part.content.kind === 'resource' || binding.scope.publication === 'future-native-user-facing' && part.content.kind !== 'text') continue
+      try {
+        const value = await readSessionHistoryTextResource(part, slot.selector.partIndex,
+          { source: { providerId: record.reference!.source.providerId, nativeSessionId: record.reference!.source.nativeSessionId }, recordId: item.id, ...(item.turnId ? { turnId: item.turnId } : {}) },
+          async input => {
+            const response = await this.options.conversation.resource(reference, input, signal)
+            if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign resource Session')
+            return response
+          }, signal)
+        result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)
+      } catch { signal.throwIfAborted() /* Exact unresolved part is durably accounted; other contents keep flowing. */ }
+    }
+    return result
+  }
+  private async recoverContent(lane: Lane, adapter: PublicationAdapter): Promise<void> {
+    const binding = lane.binding, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }, signal = lane.abort.signal
+    const gaps = this.store.recoverableGaps(binding, lane.gapAfter ?? 0)
+    if (!gaps.length) { lane.gapAfter = 0; return }
+    for (const { ordinal, gap } of gaps) {
+      lane.gapAfter = ordinal
+      if (!gap.anchor || !gap.part || signal.aborted || !this.authorized(binding)) continue
+      try {
+        let cursor: string | undefined, pending: JsonReadAssembly | undefined
+        const units: ConversationUnit[] = []
+        for (let reads = 0; reads < 1024; reads++) {
+          const input = { ...reference, anchor: gap.anchor, maxBytes: 128 * 1024, ...(cursor ? { cursor } : {}) }
+          const page = parseConversationReadPage(await this.options.conversation.inspect(input, signal), input)
+          for (const entry of page.items) {
+            const value = consumeJsonReadEntry({ entry, scopeKey: JSON.stringify(gap.anchor), ...(pending ? { pending } : {}), maxTotalBytes: CONVERSATION_MAX_UNIT_BYTES })
+            if (value.kind === 'pending') { pending = value.pending; continue }
+            pending = undefined; units.push(parseConversationUnit(value.value, { hostId: page.sourceHostId, agentSessionId: binding.agentSessionId }, page.scope))
+          }
+          if (!page.nextCursor) {
+            if (pending) throw Error('Original part fragments are incomplete')
+            if (!units.length) {
+              const failure = page.coverage.flatMap(c => c.gaps).find(g => g.code === 'AGENT_CONVERSATION_VERSION_UNAVAILABLE')
+              if (failure) this.store.versionUnavailable(binding, gap, failure.code)
+            }
+            break
+          }
+          if (cursor === page.nextCursor) throw Error('Original part continuation made no progress')
+          cursor = page.nextCursor
+        }
+        for (const unit of units) this.store.recoverPart(binding, gap, unit, await this.resolve(reference, [unit], signal, binding), () => this.authorized(binding), adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes)
+      } catch { signal.throwIfAborted() /* Original exact gap remains durable and other contents continue. */ }
+    }
   }
   private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
@@ -220,7 +281,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const input = parseConnectionDeliveryParams('connection.delivery.ls', value), binding = this.options.bindings.readExact(input.bindingId, input.bindingRevision)
     if (!binding || binding.connectionId !== input.connectionId) throw new AgentMuxError('The delivery audience does not match this exact Binding.', 'PUBLICATION_SOURCE_CONFLICT')
     const deliveries = this.store.list(binding, input.limit ?? 30, input.after).map(publicDelivery)
-    return { deliveries, next: deliveries.length === (input.limit ?? 30) ? deliveries.at(-1)!.operationId : null, observation: this.observation(binding.bindingId, binding.revision) }
+    return { deliveries, next: deliveries.length === (input.limit ?? 30) ? deliveries.at(-1)!.operationId : null, observation: this.observation(binding.bindingId, binding.revision), coverage: this.store.coverage(binding, input.limit ?? 30, input.afterContent) }
   }
   async retry(value: ConnectionDeliveryOperationInput, context: RoomBindingCallContext) {
     if (this.closed) throw new AgentMuxError('The original publication owner is closed. Inspect the retained operation through its current Host.', 'PUBLICATION_OWNER_UNAVAILABLE')
