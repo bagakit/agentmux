@@ -16,7 +16,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
-  'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity',
+  'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
   'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
   'respondAgentInteraction', 'inspectAgentInteractionOperation', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'checkDeliveries', 'ackDeliveryBatch',
@@ -33,7 +33,7 @@ export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
 export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]
 type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource'
   ? [input: Parameters<AgentMuxClient['trustCreationSource']>[0]]
-  : M extends 'submitAgentPrompt' | 'submitAgentMessage' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction'
+  : M extends 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction'
     ? [input: Parameters<AgentMuxClient[M]>[0]] : Parameters<AgentMuxClient[M]>
 export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>

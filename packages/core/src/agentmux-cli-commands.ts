@@ -1,3 +1,4 @@
+import { parseAgentContinuityControlInput } from './agent-session-continuity-control.js'
 import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
 import { parseRendererTraceInput } from './renderer-trace.js'
 import { parseConversationLandmarkWrite } from './conversation-landmarks.js'
@@ -267,6 +268,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       if (!f.values.has('--operation-id') || !f.values.has('--retired-at')) invalid('--operation-id and --retired-at are required.')
       return { agentSessionId: id(f, '--session', true), operationId: value(f, '--operation-id', true)!, ...numbers(f, { '--retired-at': 'expectedRetiredAt' }) }
     }),
+  command('agent.continuity.control', '--input FILE|-', 'Continue or cancel one exact durable recovery intent.',
+    { '--input': 'data' }, async f => parseAgentContinuityControlInput(await readControlJsonInput(value(f, '--input', true)!, 'Recovery control')),
+    'JSON requires complete agentSessionId, intentOperationId, expectedRun, operationId and action. continue requires positive additionalAttempts; cancel forbids that field. Cancel prevents unclaimed attempts without stopping an admitted or healthy Run. Keep the exact full packet and operationId after an unknown receipt; repeat it to read the original result, including after retirement. Continue only reopens a paused intent and never replays prior input.'),
   command('agent.refresh', '--session ID', 'Re-read the canonical original Session using its complete Session ID.',
     { '--session': 'data' }, f => ({ agentSessionId: id(f, '--session', true) }),
     'No Run is started, resumed or stopped and no input is sent. Passive native identity observation may confirm and persist metadata asynchronously; this reply does not promise identity recovery or reopen a retired Session. Use agent inspect for diagnostic inspection.'),

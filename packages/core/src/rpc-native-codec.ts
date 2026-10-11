@@ -1,3 +1,4 @@
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
 import { parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'
@@ -441,6 +442,11 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.conversation.landmark.apply': return parseConversationLandmarkWritePage(value, parseConversationLandmarkWrite(input))
       case 'agent.conversation.inspect': return parseConversationReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
+      case 'agent.continuity.control': {
+        const result = parseAgentContinuityControlResult(value, parseAgentContinuityControlInput(input))
+        if (result.state === 'active') parseRpcAgentSession(result.session)
+        return result as unknown as Record<string, unknown>
+      }
       case 'agent.refresh': {
         record(p, ['session'])
         const session = parseRpcAgentSession(p.session)
