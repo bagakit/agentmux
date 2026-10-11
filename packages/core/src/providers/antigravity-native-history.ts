@@ -202,7 +202,7 @@ async function parseRecordParts(
     return {
       kind,
       ...(kind === 'activity' ? { title: 'Antigravity PLANNER_RESPONSE' } : {}),
-      contentParts: parts.length > 0 ? parts : [{ kind: 'text', text: '' }]
+      contentParts: (parts.length > 0 ? parts : [{ kind: 'text' as const, text: '' }]).map(part => ({ ...part, contentEligibility: 'public' as const }))
     }
   }
 

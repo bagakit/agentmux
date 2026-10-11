@@ -237,7 +237,7 @@ export function parseContentBlocks(content: unknown): AgentSessionHistoryContent
     // Resource fallback for media with url; unknown non-text is not converted to fake assistant speech
     const url = extractText(obj.url) ?? extractText(obj.reference)
     if (url) {
-      parts.push({ kind: 'resource', resourceType: 'other', reference: url })
+      parts.push({ kind: 'resource', resourceType: 'other', reference: url, contentEligibility: 'unconfirmed' })
     }
   }
   return parts
@@ -290,7 +290,7 @@ export async function readKimiSessionHistoryPage(
         items.push({
           id,
           kind,
-          contentParts: currentStep.parts,
+          contentParts: currentStep.parts.map(part => ({ ...part, contentEligibility: 'public' as const })),
           ...(currentStep.startedAt !== undefined ? { startedAt: currentStep.startedAt } : {}),
           ...(currentStep.completedAt !== undefined ? { completedAt: currentStep.completedAt } : {})
         })
@@ -446,10 +446,11 @@ export async function readKimiSessionHistoryPage(
         const time = typeof record.time === 'number' && Number.isSafeInteger(record.time) ? record.time : undefined
         const id = extractString(record.uuid) || extractString(message.id) || `kimi-record:${start}`
 
+        const contentEligibility: NonNullable<AgentSessionHistoryContentPart['contentEligibility']> = role === 'assistant' ? 'public' : 'unconfirmed'
         if (role === 'user') {
           if (origin?.kind === 'user') {
             // Proven human message
-            const contentParts = parseContentBlocks(message.content)
+            const contentParts = parseContentBlocks(message.content).map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility } satisfies AgentSessionHistoryContentPart))
             items.push({
               id,
               kind: 'user-message',
@@ -459,7 +460,7 @@ export async function readKimiSessionHistoryPage(
           } else if (origin?.kind === 'system_trigger') {
             // Stop-hook continuation or internal system trigger — neutral activity
             const name = extractString(origin.name)
-            const contentParts = parseContentBlocks(message.content)
+            const contentParts = parseContentBlocks(message.content).map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility } satisfies AgentSessionHistoryContentPart))
             items.push({
               id,
               kind: 'activity',
@@ -470,7 +471,7 @@ export async function readKimiSessionHistoryPage(
           } else if (origin?.kind === 'injection') {
             // Synthetic system injection
             const variant = extractString(origin.variant)
-            const contentParts = parseContentBlocks(message.content)
+            const contentParts = parseContentBlocks(message.content).map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility } satisfies AgentSessionHistoryContentPart))
             items.push({
               id,
               kind: 'activity',
@@ -480,7 +481,7 @@ export async function readKimiSessionHistoryPage(
             })
           } else {
             // Unproven origin
-            const contentParts = parseContentBlocks(message.content)
+            const contentParts = parseContentBlocks(message.content).map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility } satisfies AgentSessionHistoryContentPart))
             items.push({
               id,
               kind: 'activity',
@@ -491,7 +492,7 @@ export async function readKimiSessionHistoryPage(
           }
           if (items.length >= context.limit) break
         } else if (role === 'assistant') {
-          const contentParts = parseContentBlocks(message.content)
+          const contentParts = parseContentBlocks(message.content).map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility } satisfies AgentSessionHistoryContentPart))
           items.push({
             id,
             kind: 'assistant-message',

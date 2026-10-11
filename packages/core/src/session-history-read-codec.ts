@@ -5,7 +5,7 @@ import { rpcRecord } from './rpc-data.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { normalizeSessionHistoryMetrics, normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
+import { normalizeSessionHistoryContentEligibility, normalizeSessionHistoryMetrics, normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionUserMessage, AgentCapturedTimelineStream } from './types.js'
 
@@ -96,6 +96,10 @@ export function parseAgentSessionHistoryReadPage(value: unknown, input: AgentSes
       rpcRecord(row, ['kind', 'item'], 'CONTROL_PROTOCOL_ERROR')
       const item = rpcRecord(row.item, undefined, 'CONTROL_PROTOCOL_ERROR')
       if (!text(item.id) || input.source === 'captured' && item.agentSessionId !== input.agentSessionId) return bad()
+      if (input.source === 'native') {
+        if (!Array.isArray(item.contentParts)) return bad()
+        try { for (const part of item.contentParts) normalizeSessionHistoryContentEligibility(rpcRecord(part, undefined, 'CONTROL_PROTOCOL_ERROR').contentEligibility) } catch { return bad() }
+      }
       const { metrics: _metrics, metricsDiagnostic: _diagnostic, ...original } = item
       items.push(input.source === 'native' ? { kind: 'item', item: { ...original, ...normalizeSessionHistoryMetrics(item) } as AgentSessionHistoryItem }
         : row as AgentSessionHistoryReadEntry)

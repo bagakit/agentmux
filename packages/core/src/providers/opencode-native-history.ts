@@ -330,11 +330,14 @@ export async function readOpenCodeSessionHistoryPage(
         }
 
         const type = partData.type
+        const contentEligibility = role === 'compaction' || type === 'compaction' ? 'private'
+          : partData.synthetic === true || partData.ignored === true ? 'unconfirmed'
+          : role === 'assistant' && ['text', 'reasoning', 'tool', 'file'].includes(String(type)) ? 'public' : 'unconfirmed'
         if (type === 'text') {
           if (typeof partData.text !== 'string') {
             throw new AgentMuxError('Text part missing text string.', 'INVALID_AGENT_SESSION_HISTORY_PAGE')
           }
-          contentParts.push({ kind: 'text', text: partData.text })
+          contentParts.push({ kind: 'text', text: partData.text, contentEligibility })
           if (partData.text.trim().length > 0 && partData.synthetic !== true && partData.ignored !== true) {
             hasGenuineHumanSpeech = true
           }
@@ -342,7 +345,7 @@ export async function readOpenCodeSessionHistoryPage(
           if (typeof partData.text !== 'string') {
             throw new AgentMuxError('Reasoning part missing text string.', 'INVALID_AGENT_SESSION_HISTORY_PAGE')
           }
-          contentParts.push({ kind: 'reasoning', text: partData.text })
+          contentParts.push({ kind: 'reasoning', text: partData.text, contentEligibility })
         } else if (type === 'tool') {
           if (
             typeof partData.tool !== 'string' ||
@@ -363,6 +366,7 @@ export async function readOpenCodeSessionHistoryPage(
 
           contentParts.push({
             kind: 'tool-call',
+            contentEligibility,
             name: partData.tool,
             input: inputStr,
             callId: partData.callID
@@ -375,6 +379,7 @@ export async function readOpenCodeSessionHistoryPage(
 
             contentParts.push({
               kind: 'tool-result',
+              contentEligibility,
               name: partData.tool,
               output: outputStr,
               callId: partData.callID,
@@ -394,6 +399,7 @@ export async function readOpenCodeSessionHistoryPage(
 
                 contentParts.push({
                   kind: 'resource',
+                  contentEligibility,
                   resourceType,
                   reference: att.url,
                   ...(typeof att.filename === 'string' && att.filename ? { label: att.filename } : {})
@@ -419,15 +425,16 @@ export async function readOpenCodeSessionHistoryPage(
 
           contentParts.push({
             kind: 'resource',
+            contentEligibility,
             resourceType,
             reference: partData.url,
             ...(typeof partData.filename === 'string' && partData.filename ? { label: partData.filename } : {})
           })
         } else if (type === 'compaction') {
-          contentParts.push({ kind: 'text', text: 'What did we do so far?' })
+          contentParts.push({ kind: 'text', text: 'What did we do so far?', contentEligibility })
           isCompaction = true
         } else {
-          contentParts.push({ kind: 'text', text: JSON.stringify(partData) })
+          contentParts.push({ kind: 'text', text: JSON.stringify(partData), contentEligibility })
         }
       }
 

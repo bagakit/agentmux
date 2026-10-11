@@ -136,7 +136,7 @@ function decodeContentParts(rawContent: unknown): AgentSessionHistoryContentPart
               continue
             }
           }
-          parts.push({ kind: 'text', text: typeof item === 'string' ? item : JSON.stringify(item) })
+          parts.push({ kind: 'text', text: typeof item === 'string' ? item : JSON.stringify(item), contentEligibility: 'unconfirmed' })
         }
         return parts
       } else if (parsed && typeof parsed === 'object') {
@@ -161,14 +161,14 @@ function decodeContentParts(rawContent: unknown): AgentSessionHistoryContentPart
             ...(typeof block.name === 'string' ? { label: block.name } : {})
           }]
         }
-        return [{ kind: 'text', text: JSON.stringify(parsed) }]
+        return [{ kind: 'text', text: JSON.stringify(parsed), contentEligibility: 'unconfirmed' }]
       }
     } catch {
       // Malformed json sentinel fallback
     }
   }
 
-  return [{ kind: 'text', text: rawContent }]
+  return [{ kind: 'text', text: rawContent, ...(rawContent.startsWith('\x00json:') ? { contentEligibility: 'unconfirmed' as const } : {}) }]
 }
 
 function extractReasoning(row: {
@@ -265,13 +265,15 @@ function convertMessageRow(row: MessageRow): AgentSessionHistoryItem {
   const timeFields = timestampMs !== undefined ? { startedAt: timestampMs } : {}
   const rawContent = decodeRawString(row.content_blob)
   const decodedParts = decodeContentParts(rawContent)
+  const contentEligibility = row.role === 'system' || row.role === 'developer' ? 'private'
+    : row.role === 'assistant' || row.role === 'tool' ? 'public' : 'unconfirmed'
 
   if (row.role === 'user') {
     const parts = decodedParts.length > 0 ? [...decodedParts] : [{ kind: 'text' as const, text: '' }]
     return {
       id: `hermes-msg-${row.id}`,
       kind: 'user-message',
-      contentParts: parts,
+      contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
       ...timeFields
     }
   }
@@ -311,7 +313,7 @@ function convertMessageRow(row: MessageRow): AgentSessionHistoryItem {
     return {
       id: `hermes-msg-${row.id}`,
       kind,
-      contentParts: parts,
+      contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
       ...(kind === 'activity' ? { title: 'Hermes activity' } : {}),
       ...timeFields
     }
@@ -328,6 +330,7 @@ function convertMessageRow(row: MessageRow): AgentSessionHistoryItem {
         parts.push({
           kind: 'tool-result',
           output: p.text,
+          ...(p.contentEligibility ? { contentEligibility: p.contentEligibility } : {}),
           ...(name ? { name } : {}),
           ...(callId ? { callId } : {})
         })
@@ -350,7 +353,7 @@ function convertMessageRow(row: MessageRow): AgentSessionHistoryItem {
       id: `hermes-msg-${row.id}`,
       kind: 'activity',
       title: name ? `Tool: ${name}` : 'Tool result',
-      contentParts: parts,
+      contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
       ...timeFields
     }
   }
@@ -361,7 +364,7 @@ function convertMessageRow(row: MessageRow): AgentSessionHistoryItem {
     id: `hermes-msg-${row.id}`,
     kind: 'activity',
     title: typeof row.role === 'string' && row.role ? `Hermes ${row.role}` : 'Hermes activity',
-    contentParts: parts,
+    contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'public' ? part.contentEligibility ?? 'public' : contentEligibility })),
     ...timeFields
   }
 }

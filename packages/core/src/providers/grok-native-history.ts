@@ -293,6 +293,8 @@ function convertGrokRecord(
 ): AgentSessionHistoryItem | null {
   const type = extractString(record.type)
   if (!type) return null
+  const contentEligibility = type === 'system'
+    ? 'private' : ['assistant', 'reasoning', 'backend_tool_call', 'tool_result'].includes(type) ? 'public' : 'unconfirmed'
 
   // Byte offset id is honest for native Grok records
   const id = `grok-record:${start}`
@@ -307,7 +309,7 @@ function convertGrokRecord(
         id,
         kind: 'activity',
         title: `Grok ${syntheticReason}`,
-        contentParts
+        contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
       }
     }
 
@@ -319,7 +321,7 @@ function convertGrokRecord(
     return {
       id,
       kind: 'user-message',
-      contentParts
+      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
     }
   }
 
@@ -339,6 +341,7 @@ function convertGrokRecord(
         const input = isNativeText(call.arguments) ? call.arguments : stringifyValue(call.arguments)
         contentParts.push({
           kind: 'tool-call',
+          contentEligibility,
           name,
           input,
           ...(callId ? { callId } : {})
@@ -353,7 +356,7 @@ function convertGrokRecord(
       id,
       kind,
       ...(kind === 'activity' ? { title: 'Grok tool_calls' } : {}),
-      contentParts
+      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
     }
   }
 
@@ -397,7 +400,7 @@ function convertGrokRecord(
       id,
       kind: 'activity',
       title: 'Grok reasoning',
-      contentParts
+      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
     }
   }
 
@@ -414,6 +417,7 @@ function convertGrokRecord(
       contentParts: [
         {
           kind: 'tool-call',
+          contentEligibility: kindRecord ? contentEligibility : 'unconfirmed',
           name,
           input,
           ...(callId ? { callId } : {})
@@ -448,7 +452,7 @@ function convertGrokRecord(
       id,
       kind: 'activity',
       title: 'Grok tool_result',
-      contentParts
+      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
     }
   }
 
@@ -458,7 +462,7 @@ function convertGrokRecord(
       id,
       kind: 'activity',
       title: 'Grok system',
-      contentParts: [{ kind: 'text', text }]
+      contentParts: [{ kind: 'text', text, contentEligibility }]
     }
   }
 
@@ -466,7 +470,7 @@ function convertGrokRecord(
     id,
     kind: 'activity',
     title: `Grok ${type}`,
-    contentParts: [{ kind: 'text', text: nativeJsonStringify(record) }]
+    contentParts: [{ kind: 'text', text: nativeJsonStringify(record), contentEligibility }]
   }
 }
 

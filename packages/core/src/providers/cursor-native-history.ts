@@ -236,6 +236,7 @@ function stepItem(id: string, bytes: Uint8Array): AgentSessionHistoryItem {
           (tool.case === 'shellToolCall' && typeof asRecord(result.value)?.exitCode === 'number' && asRecord(result.value)?.exitCode !== 0) })
     }
   }
+  for (const part of parts) part.contentEligibility = 'public'
   preserveUnknown(step, parts, bytes)
   if (!parts.length) parts.push({ kind: 'resource', resourceType: 'other', reference: 'data:application/x-protobuf;base64,' + Buffer.from(bytes).toString('base64'), label: 'Original Cursor protobuf step' })
   return { id, kind, contentParts: parts, ...(message ? times(message) : {}) }
@@ -352,8 +353,8 @@ export async function readCursorSessionHistoryPage(context: AgentProviderSession
           if (selected?.case === 'shellConversationTurn' && structure) {
             const command = decodeNative('ShellCommand', await readBlob(reader, blobHex(structure.shellCommand)))
             const result = decodeNative('ShellOutput', await readBlob(reader, blobHex(structure.shellOutput)))
-            parts.push({ kind: 'tool-call', name: 'shell', input: nativeJson(command) },
-              { kind: 'tool-result', name: 'shell', output: nativeJson(result), ...(result.exitCode !== 0 ? { failed: true } : {}) })
+            parts.push({ kind: 'tool-call', name: 'shell', input: nativeJson(command), contentEligibility: 'public' },
+              { kind: 'tool-result', name: 'shell', output: nativeJson(result), contentEligibility: 'public', ...(result.exitCode !== 0 ? { failed: true } : {}) })
           }
           preserveUnknown(turn, parts, turnBytes)
           if (!parts.length) parts.push({ kind: 'resource', resourceType: 'other', reference: 'data:application/x-protobuf;base64,' + Buffer.from(turnBytes).toString('base64'), label: 'Original Cursor protobuf turn' })

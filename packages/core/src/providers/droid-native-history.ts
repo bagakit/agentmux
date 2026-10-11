@@ -101,7 +101,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
 
     const block = object(item)
     if (!block) {
-      parts.push({ kind: 'text', text: nativeJsonStringify(item) })
+      parts.push({ kind: 'text', text: nativeJsonStringify(item), contentEligibility: 'unconfirmed' })
       continue
     }
 
@@ -170,6 +170,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
             : undefined
       const name = typeof block.name === 'string' && block.name ? block.name : undefined
 
+      const firstToolPart = parts.length
       let emittedToolResult = false
 
       if (isNativeText(block.content)) {
@@ -258,6 +259,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
           ...(name !== undefined ? { name } : {})
         })
       }
+      for (const part of parts.slice(firstToolPart)) part.contentEligibility = 'public'
       continue
     }
 
@@ -295,7 +297,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
     }
 
     // Preserved neutral unknown serialized data; per DROID-08 never treated as assistant speech.
-    parts.push({ kind: 'text', text: nativeJsonStringify(block) })
+    parts.push({ kind: 'text', text: nativeJsonStringify(block), contentEligibility: 'unconfirmed' })
   }
 
   return { parts, hasSpeech }
@@ -315,6 +317,11 @@ function convertDroidRecord(
       ? `droid-${record.type.replace(/_/g, '-')}:${start}`
       : `droid-record:${start}`)
 
+  const originalMessage = record.type === 'message' ? object(record.message) : undefined
+  const originalRole = originalMessage?.role
+  const contentEligibility = record.type === 'compaction_state' || originalMessage?.visibility === 'llm_only' || originalRole === 'system' || originalRole === 'developer' ? 'private'
+    : record.type === 'session_start' || record.type === 'agent_turn_outcome' || originalRole === 'assistant' || originalRole === 'user' && (originalMessage?.visibility === 'user_only' || typeof originalMessage?.hookEventName === 'string') ? 'public' : 'unconfirmed'
+
   if (record.type === 'session_start') {
     return {
       id: `droid-session-start:${start}`,
@@ -323,6 +330,7 @@ function convertDroidRecord(
       contentParts: [
         {
           kind: 'text',
+          contentEligibility,
           text:
             typeof record.title === 'string' && record.title
               ? `Session started: ${record.title}`
@@ -355,7 +363,7 @@ function convertDroidRecord(
       kind: 'activity',
       title: 'Droid turn outcome',
       ...(turnId !== undefined ? { turnId } : {}),
-      contentParts: parts,
+      contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'private' ? 'private' : part.contentEligibility ?? contentEligibility })),
       ...(startedAt !== undefined ? { startedAt } : {})
     }
   }
@@ -369,7 +377,7 @@ function convertDroidRecord(
       id: typeof record.id === 'string' && record.id ? record.id : `droid-compaction:${start}`,
       kind: 'activity',
       title: 'Droid compaction',
-      contentParts: [{ kind: 'text', text: summaryText }],
+      contentParts: [{ kind: 'text', text: summaryText, contentEligibility }],
       ...(startedAt !== undefined ? { startedAt } : {})
     }
   }
@@ -381,7 +389,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid message',
-        contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2) }],
+        contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2), contentEligibility }],
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -392,7 +400,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid message',
-        contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2) }],
+        contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2), contentEligibility }],
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -438,11 +446,13 @@ function convertDroidRecord(
           )
         parts.push({
           kind: 'text',
+          contentEligibility,
           text: resultsText || `Hook ${messageObj.hookEventName ?? 'event'}`
         })
       } else {
         parts.push({
           kind: 'text',
+          contentEligibility,
           text: `Hook ${messageObj.hookEventName ?? 'event'}`
         })
       }
@@ -453,7 +463,7 @@ function convertDroidRecord(
       return {
         id,
         kind,
-        contentParts: parts.length > 0 ? parts : [{ kind: 'text', text: nativeJsonStringify(record) }],
+        contentParts: (parts.length > 0 ? parts : [{ kind: 'text' as const, text: nativeJsonStringify(record), contentEligibility: 'unconfirmed' as const }]).map(part => ({ ...part, contentEligibility: contentEligibility === 'private' ? 'private' : part.contentEligibility ?? contentEligibility })),
         ...(kind === 'activity' ? { title: 'Droid tool' } : {}),
         ...(startedAt !== undefined ? { startedAt } : {})
       }
@@ -465,7 +475,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid tool result',
-        contentParts: parts,
+        contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'private' ? 'private' : part.contentEligibility ?? contentEligibility })),
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -477,7 +487,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: eventName ? `Droid hook · ${eventName}` : 'Droid hook',
-        contentParts: parts,
+        contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'private' ? 'private' : part.contentEligibility ?? contentEligibility })),
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -487,7 +497,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid injected context',
-        contentParts: parts,
+        contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'private' ? 'private' : part.contentEligibility ?? contentEligibility })),
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -497,7 +507,7 @@ function convertDroidRecord(
         id,
         kind: 'activity',
         title: 'Droid message',
-        contentParts: [{ kind: 'text', text: nativeJsonStringify(record) }],
+        contentParts: [{ kind: 'text', text: nativeJsonStringify(record), contentEligibility }],
         ...(startedAt !== undefined ? { startedAt } : {})
       }
     }
@@ -505,7 +515,7 @@ function convertDroidRecord(
     return {
       id,
       kind: 'user-message',
-      contentParts: parts,
+      contentParts: parts.map(part => ({ ...part, contentEligibility: contentEligibility === 'private' ? 'private' : part.contentEligibility ?? contentEligibility })),
       ...(startedAt !== undefined ? { startedAt } : {})
     }
   }
@@ -515,7 +525,7 @@ function convertDroidRecord(
     id,
     kind: 'activity',
     title: typeof record.type === 'string' ? `Droid ${record.type}` : 'Droid activity',
-    contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2) }],
+    contentParts: [{ kind: 'text', text: nativeJsonStringify(record, null, 2), contentEligibility }],
     ...(startedAt !== undefined ? { startedAt } : {})
   }
 }

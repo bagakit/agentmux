@@ -40,6 +40,10 @@ function choice<T extends string>(value: unknown, values: readonly T[]): T {
   return value as T
 }
 
+export function normalizeSessionHistoryContentEligibility(value: unknown): AgentSessionHistoryContentPart['contentEligibility'] {
+  return value === undefined ? undefined : choice<NonNullable<AgentSessionHistoryContentPart['contentEligibility']>>(value, ['public', 'private', 'unconfirmed'])
+}
+
 function nativeReference(value: unknown): AgentSessionHistorySource {
   const reference = object(value)
   return { providerId: nonempty(reference.providerId), nativeSessionId: nonempty(reference.nativeSessionId) }
@@ -199,12 +203,14 @@ export function normalizeSessionHistoryPage(
     if (!Array.isArray(item.contentParts)) return invalid()
     const contentParts: AgentSessionHistoryContentPart[] = item.contentParts.map((value: unknown) => {
       const part = object(value)
+      const contentEligibility = normalizeSessionHistoryContentEligibility(part.contentEligibility)
+      const eligibility = contentEligibility === undefined ? {} : { contentEligibility }
       if (part.kind === 'text' && typeof part.text === 'string') {
         const readingRange = part.readingRange === undefined ? undefined : object(part.readingRange)
         if (readingRange && (!Number.isSafeInteger(readingRange.start) || !Number.isSafeInteger(readingRange.end) ||
           (readingRange.start as number) < 0 || (readingRange.end as number) < (readingRange.start as number) ||
           (readingRange.end as number) > part.text.length)) return invalid()
-        return { kind: 'text', text: part.text, ...(readingRange === undefined ? {} : {
+        return { kind: 'text', text: part.text, ...eligibility, ...(readingRange === undefined ? {} : {
           readingRange: { start: readingRange.start as number, end: readingRange.end as number }
         }) }
       }
@@ -213,6 +219,7 @@ export function normalizeSessionHistoryPage(
         if (part.redacted !== undefined && typeof part.redacted !== 'boolean') return invalid()
         return {
           kind: 'reasoning',
+          ...eligibility,
           text: part.text,
           ...(part.signature !== undefined ? { signature: part.signature } : {}),
           ...(part.redacted !== undefined ? { redacted: part.redacted } : {})
@@ -222,10 +229,10 @@ export function normalizeSessionHistoryPage(
         const callId = part.callId === undefined ? {} : { callId: nonempty(part.callId) }
         if (part.kind === 'tool-call') {
           if (typeof part.input !== 'string') return invalid()
-          return { kind: 'tool-call', name: nonempty(part.name), input: part.input, ...callId }
+          return { kind: 'tool-call', name: nonempty(part.name), input: part.input, ...callId, ...eligibility }
         }
         if (typeof part.output !== 'string' || (part.failed !== undefined && typeof part.failed !== 'boolean')) return invalid()
-        return { kind: 'tool-result', output: part.output, ...callId,
+        return { kind: 'tool-result', output: part.output, ...callId, ...eligibility,
           ...(part.name === undefined ? {} : { name: nonempty(part.name) }),
           ...(part.failed === undefined ? {} : { failed: part.failed }) }
       }
@@ -236,7 +243,7 @@ export function normalizeSessionHistoryPage(
       if (content && (content.encoding !== 'json-utf8' || !['text', 'reasoning', 'tool-call', 'tool-result', 'resource'].includes(String(content.kind)) ||
         !Number.isSafeInteger(content.byteLength) || (content.byteLength as number) < 1 || typeof content.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(content.sha256))) return invalid()
       return { kind: 'resource', resourceType: part.resourceType as 'image' | 'audio' | 'file' | 'other' | 'text',
-        reference: nonempty(part.reference), ...(part.label === undefined ? {} : { label: part.label }),
+        reference: nonempty(part.reference), ...eligibility, ...(part.label === undefined ? {} : { label: part.label }),
         ...(content === undefined ? {} : { content: { encoding: 'json-utf8' as const,
           kind: content.kind as 'text' | 'reasoning' | 'tool-call' | 'tool-result' | 'resource', byteLength: content.byteLength as number, sha256: content.sha256 as string } }) }
     })
