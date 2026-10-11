@@ -12,15 +12,20 @@ describe('native Chrome focus observation', () => {
     const overlays = { hasProjectionInFocusedWindow: vi.fn(() => true) }
     const dispose = installNativeOverlayFocus(window as any, overlays as any)
     const read = (sender: unknown, senderFrame: unknown) => {
-      const event = { sender, senderFrame, returnValue: undefined }
+      const replies: unknown[] = []
+      // Electron sends the synchronous reply on assignment; a later assignment cannot revise it.
+      const event = { sender, senderFrame, set returnValue(value: unknown) { replies.push(value) } }
       native.main.emit(NATIVE_OVERLAY_FOCUS_CHANNEL, event)
-      return event.returnValue
+      expect(replies).toHaveLength(1)
+      return replies[0]
     }
     expect(read(contents, contents.mainFrame)).toBe(true)
     expect(read({}, contents.mainFrame)).toBe(false)
     expect(read(contents, {})).toBe(false)
     expect(overlays.hasProjectionInFocusedWindow).toHaveBeenCalledTimes(1)
     overlays.hasProjectionInFocusedWindow.mockReturnValue(false)
+    expect(read(contents, contents.mainFrame)).toBe(false)
+    overlays.hasProjectionInFocusedWindow.mockImplementationOnce(() => { throw new Error('Original projection owner unavailable') })
     expect(read(contents, contents.mainFrame)).toBe(false)
     window.isDestroyed.mockReturnValue(true)
     expect(read(contents, contents.mainFrame)).toBe(false)
