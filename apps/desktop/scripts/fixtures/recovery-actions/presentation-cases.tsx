@@ -21,7 +21,7 @@ function session(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: 'private-run:' + id } } }
 }
 export async function initializeRecoveryScene() {
-  api.config.get = async () => config; api.providers.list = async () => []; api.demands.list = async () => []
+  api.config.get = async () => config; api.providers.list = async () => ({ catalog: [], warnings: [] }); api.demands.list = async () => []
   api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCandidates: [] })
   api.ui.requestStorageFlush = async () => undefined
   api.sessions.historyPage = async () => ({ source: 'unavailable', items: [], reason: 'native-handle-unavailable' } as never)
@@ -40,6 +40,12 @@ export async function initializeRecoveryScene() {
     activeWorkspaceId: 'project', mainSurface: 'workbench', viewModes: { [originalId]: 'terminal' }, spatialRequests: {}, timelines: {}, agentSteerQueues: {}, pendingAgentLaunches: {}, recoveryCandidates: [],
     agentNames: { [originalId]: 'Original implementation work', [moteId]: 'Review partner' }, agentComposerDrafts: { [originalId]: 'Keep the original unsent thought.', [moteId]: 'Keep the Mote draft.' },
     scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: JSON.stringify(['local', _hygiene_fixturePath("private-fixture/scratch")]), revision: 0, reading: false, error: null, topics: await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) } } })
+}
+/** Explicit presentation facts only; no private Runtime or lifecycle is invoked. */
+export function setOriginalRecheckScene() {
+  useAppStore.setState(state => ({ sessions: state.sessions.map(item => item.id === originalId
+    ? { ...item, status: { ...item.status, exitReason: 'crashed' as const, exitCode: 17 } } : item) }))
+  api.sessions.refresh = async () => { throw new Error('The original Host observation is unavailable.') }
 }
 export function recoveryScene() { return <DesktopClientUiProvider><SessionPane sessionId={originalId} surfaceKind="agent" visible interactiveResize={false} linkOrigin={{ workspaceId: 'project', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }} /></DesktopClientUiProvider> }
 
