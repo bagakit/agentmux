@@ -182,8 +182,8 @@ it('delivers terminal native user inputs to mounted AgentSessionComposer and Ses
   const outboxPanel = dom.container.querySelector('[id$="-outbox"]')!
 
   // Native input is recorded in session history; must NOT claim 'Sent' or 'Delivery not confirmed'
-  const headers = [...outboxPanel.querySelectorAll('.input-history__meta > span')].map((h) => h.textContent)
-  expect(headers).toContain('原生记录 · 入口未记录')
+  const headers = [...outboxPanel.querySelectorAll('.composer-mailbox__source > span')].map((h) => h.textContent)
+  expect(headers).toContain('原生对话 · 入口未记录')
   expect(headers).not.toContain('Sent')
   expect(headers).not.toContain('You')
 

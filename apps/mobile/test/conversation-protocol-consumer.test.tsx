@@ -603,3 +603,21 @@ it('authenticated Mobile pages the original captured stream beyond the recent wi
   expect(editor(view.element).textContent).toContain('Original retained draft')
   expect(view.element.textContent).toContain('Original native source unavailable')
 }, 20000)
+
+it('authenticated Mobile reads confirmed source labels from the original Core event without extra reads or Runtime actions',async()=>{
+  const f=await authenticatedFixture()
+  const item:AgentTimelineItem={id:'confirmed-hook-source',agentSessionId:sid,kind:'assistant_message',source:'native-hook',status:'complete',title:'Recorded observation',content:'Original observed contribution',createdAt:_historyTailFixtureEpoch(0, 0, 1),updatedAt:_historyTailFixtureEpoch(0, 0, 1),
+    conversation:{sameEvent:{hostId:'local',agentSessionId:sid,source:{kind:'native',...source,recordId:question.id}}}}
+  await f.store.applyTimelineMutation({type:'append',agentSessionId:sid,item})
+  const history=vi.spyOn(f.core,'sessionHistoryPage'),raw=vi.spyOn(f.core,'readAgentSessionHistory')
+  const view=await mount(f.surface())
+  await vi.waitFor(()=>expect(view.element.querySelectorAll('.log-turn__meta [data-conversation-source]')).toHaveLength(2))
+  expect(view.element.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1)
+  expect([...view.element.querySelectorAll<HTMLElement>('.log-turn__meta [data-conversation-source]')].map(n=>n.dataset.conversationSource).sort()).toEqual(['native','native-hook'])
+  expect(view.element.textContent).toContain('原生对话');expect(view.element.textContent).not.toContain('Authenticated Terminal')
+  const counts=[history.mock.calls.length,raw.mock.calls.length]
+  await click(view.element.querySelector<HTMLButtonElement>('.conversation-input-details__toggle')!)
+  expect([history.mock.calls.length,raw.mock.calls.length]).toEqual(counts)
+  expect(view.element.querySelector('[aria-label="Native asynchronous question"]')).not.toBeNull()
+  expect(f.writes).toHaveLength(0);expect(f.submit).not.toHaveBeenCalled();expect(f.reply).not.toHaveBeenCalled()
+})
