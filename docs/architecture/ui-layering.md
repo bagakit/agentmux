@@ -23,6 +23,8 @@ Portal 使用稳定的 DOM host。工作面跨 document 移动时，host 随原�
 
 内部描述和失败回执归 [`shared/native-overlay.ts`](../../apps/desktop/src/shared/native-overlay.ts)。它们是展示协议，不进入 Core 的 Session、Run、权限或恢复事实。
 
+系统文件／目录选择、保存和确认框不经过 Browser 位图投影。发起组件沿 [`WorkbenchDocument`](../../apps/desktop/src/renderer/src/lib/workbench-document.tsx) 携带当前窗口身份，原 preload／IPC 透传给 [`WorkbenchWindows.windowForDocument`](../../apps/desktop/src/main/workbench-windows.ts) 取得准确原生 parent。工作面移动仍复用原 Root 桥，因此 IPC sender 只证明可信来源，不决定对话框位置；窗口身份与代次继续由原窗口 owner 校验。
+
 ## 防退化验证
 
 [`overlay-architecture.test`](../../apps/desktop/test/overlay-architecture.test.ts) 从实际源码发现消费者，限制原始 Dialog 导入和全局 token 的定义 owner；它是贡献边界检查，不能替代真实绘制或输入验收。共享 Modal 测试覆盖关闭、失败、草稿和焦点生命周期，Renderer 与 Main 测试覆盖收集及整组投影。
