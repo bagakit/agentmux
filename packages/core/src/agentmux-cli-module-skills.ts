@@ -122,8 +122,15 @@ For an exact saved bot, connection setup begin requests one original management 
 Setup inspect is a local read of that actor-owned active challenge; setup ls returns safe summaries.
 Keep the original input after an unknown init; repeat begin only for original lookup or secure
 handoff recovery, never a second native request. Scan material belongs on its exact confirmation
-surface, not ordinary logs. Init ACK, secure storage and login are separate; setup confirmation,
-app eligibility, configuration and publication remain unproved, and no setup advance is registered.
+surface, not ordinary logs. Setup advance uses the exact actionId and expectedRevision from
+continuation.actions with decision.value continue, confirm or renew. One action performs at most
+one HTTP request or its original local secure handoff; repeating the same input never replays it.
+Renew explicitly abandons authentication within this intent, retaining old requests and snapshots;
+it never creates an application. Scan, phone confirmation and exact account/enterprise confirmation
+are separate stages. A confirmed management session does not establish app permission, tenant
+membership, configuration, publication or chat readiness. App eligibility, configuration and
+publication continuations remain unimplemented; this reference-native authentication does not
+qualify live platform login or the combined Settings journey.
 
 Configure or bind only within the user's authorized target. Inspect current values before
 changing them; use the current help's exact input and operation identities. A grant is an
