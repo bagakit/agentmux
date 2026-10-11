@@ -4,12 +4,13 @@ import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { protectsConversationWindow } from '../src/renderer/src/lib/session-conversation-window'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { ActivityView as ReaderActivityView } from '../src/renderer/src/components/ActivityView'
 import { api } from '../src/renderer/src/lib/api'
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { activityReadingProps } from './helpers/activity-reading-props'
 
 const reference = { hostId: 'local', agentSessionId: 'selected-head-session' }
@@ -19,6 +20,7 @@ const user = (id: string): AgentSessionHistoryItem => ({ id, kind: 'user-message
 const page = (items: AgentSessionHistoryItem[], nextCursor: string | null = null): AgentSessionHistoryPage => ({
   agentSessionId: reference.agentSessionId, source, items, nextCursor
 })
+const closes:Array<()=>Promise<void>>=[]
 let host: HTMLDivElement, root: Root
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -28,7 +30,7 @@ beforeEach(() => {
 })
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges()
-  vi.restoreAllMocks(); vi.unstubAllGlobals()
+  for(const close of closes.splice(0).reverse())await close();vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 const bounds = (top: number, height: number) => ({ x: 0, y: top, top, bottom: top + height, left: 0, right: 500, width: 500, height, toJSON() {} })
 async function render(next: AgentSessionHistoryPage, beforeRecordId?: string) {
@@ -71,7 +73,7 @@ it('selected process head protects a contiguous merge that would change its sele
   const next = page([activity('older-process'), ...current.items])
   expect(protectsConversationWindow(host, next, true, undefined, { current })).toBe(true)
   expectRetained(selected)
-  expect(selected.head.querySelector('.log-fold__steps')?.textContent).toBe('2 步')
+  expect(selected.head.querySelector('.log-fold__steps')?.textContent).toBe('2 条已加载记录')
   expect(selected.group.dataset.nativeRecordIds).toBe(JSON.stringify(current.items.map(item => item.id)))
 })
 
@@ -101,14 +103,16 @@ it('actual Activity earlier read keeps a selected unchanged head and commits its
   const current = page([{ ...activity('current-first'), startedAt: _newTailFixtureEpoch(0, 0, 1) }, { ...activity('current-second'), startedAt: _newTailFixtureEpoch(0, 0, 2) },
     { id: 'current-reply', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original current reply' }], startedAt: 25 * 3_600_000 }], 'original-earlier-cursor')
   const older = page([activity('older-process'), user('earlier-user')])
-  const read = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async (_target, options) => options?.cursor ? older : current)
+  const f=await conversationPagePortFixture(reference,source,async (_target, options)=>options?.cursor ? older : current);closes.push(f.close)
+  const read=f.nativeRead,raw=vi.spyOn(api.sessions,'historyPage')
   const controls = [vi.spyOn(api.sessions, 'submitPrompt'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'replyQuestion')]
-  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: reference })} nativeHistoryPage={current} />))
-  expect(read).toHaveBeenCalledTimes(1)
+  await act(async () => root.render(<ReaderActivityView {...activityReadingProps({ control: reference })} nativeHistoryPage={current} />))
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('.wf-head')).not.toBeNull()});expect(read).toHaveBeenCalledTimes(1)
   const viewport = host.querySelector<HTMLElement>('.activity-feed')!, selected = selectHead(viewport)
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!.click())
-  expect(read).toHaveBeenCalledTimes(2)
-  expect(read).toHaveBeenLastCalledWith(reference, { limit: 100, cursor: 'original-earlier-cursor' })
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('earlier-user')});expect(read).toHaveBeenCalledTimes(2)
+  expect(read.mock.calls.at(-1)).toMatchObject([reference.agentSessionId, { limit: 100, cursor: 'original-earlier-cursor' }])
+  expect(raw).not.toHaveBeenCalled();expect(f.controls.map(control=>control.mock.calls.length)).toEqual([0,0,0,0,0,0])
   expect(host.textContent).toContain('earlier-user')
   expect(host.textContent).not.toContain('Move your reading position or clear the selection')
   expectRetained(selected)

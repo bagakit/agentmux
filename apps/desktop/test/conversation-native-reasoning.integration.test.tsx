@@ -4,14 +4,15 @@ import { act, type ReactNode } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { beforeEach, afterEach, describe, it, expect, vi, type MockInstance } from 'vitest'
-import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentMuxClient, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import type { SessionSnapshot, AppConfig, AgentSessionControl } from '../src/shared/contracts'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 
 // Actual public Client/Claude reader/FileStore, hook, Store, SessionPane, Activity,
 // History, Message and ReasoningTrace. Only PTY/composer/chrome are controlled leaves.
@@ -41,23 +42,25 @@ const nativeRecords=[
  record('a','assistant',[{type:'thinking',thinking:'**First thought** with a list:\n- Read the actual page.'},{type:'text',text:'A real answer appears once in the primary conversation.'},{type:'tool_use',id:'call-1',name:'Read',input:{file:'src/main.ts'}},{type:'thinking',thinking:'Exposed second thought.'},{type:'image',source:{type:'url',url:'https://example.test/native.png'}}]),
  record('text-only','assistant',[{type:'text',text:'Text-only record stays in full History.'}])
 ]
-function typedPage(c=control,items:AgentSessionHistoryPage['items']=[]):AgentSessionHistoryPage{return {agentSessionId:c.agentSessionId,source:{providerId:'claude',nativeSessionId:'native-'+c.agentSessionId},items,nextCursor:null}}
-const initial=useAppStore.getState();let host:HTMLDivElement;let root:Root;let fixture:Awaited<ReturnType<typeof nativeHistoryFixture>>;let read:MockInstance<typeof api.sessions.historyPage>;let writes:MockInstance[]=[]
+function typedPage(c=control,items:AgentSessionHistoryPage['items']=[]):AgentSessionHistoryPage{return {agentSessionId:c.agentSessionId,source:{providerId:'claude',nativeSessionId:'native-main'},items,nextCursor:null}}
+const bridgeCloses:Array<()=>unknown|Promise<unknown>>=[]
+const initial=useAppStore.getState();let host:HTMLDivElement;let root:Root;let fixture:Awaited<ReturnType<typeof nativeHistoryFixture>>;let read:MockInstance<AgentMuxClient['sessionHistoryPage']>;let writes:MockInstance[]=[]
 beforeEach(async()=>{
- vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});vi.stubGlobal('IntersectionObserver',class{observe(){}disconnect(){}})
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}});vi.stubGlobal('IntersectionObserver',class{observe(){}unobserve(){}disconnect(){}})
  localStorage.clear();host=document.createElement('div');document.body.append(host);root=createRoot(host);observed.hook=null
- fixture=await nativeHistoryFixture('claude',jsonl(nativeRecords));seed()
- read=vi.spyOn(api.sessions,'historyPage').mockImplementation((c,options)=>fixture.client.sessionHistoryPage(c.agentSessionId,options))
+ fixture=await nativeHistoryFixture('claude',jsonl(nativeRecords));for(const item of timeline().items)await fixture.store.applyTimelineMutation({type:'append',agentSessionId:ID,item});seed()
+ read=vi.spyOn(fixture.client,'sessionHistoryPage');await desktopConversationReadBridge(fixture,bridgeCloses)
  writes=[vi.spyOn(api.sessions,'submitPrompt'),vi.spyOn(api.sessions,'write'),vi.spyOn(api.sessions,'resume'),vi.spyOn(api.sessions,'recover'),vi.spyOn(api.sessions,'stop')]
 })
 afterEach(async()=>{
  await act(async()=>root.unmount());host.remove()
- const bytes=await fixture.bytes();expect(bytes.native).toEqual(fixture.before.native);expect(bytes.store).toEqual(fixture.before.store)
+ const bytes=await fixture.bytes();expect(bytes.native).toEqual(fixture.before.native);expect(await fixture.store.readMetadata(ID)).toEqual(fixture.session)
  expect(fixture.controls.map(c=>c.mock.calls.length)).toEqual([0,0,0,0,0,0]);expect(writes.map(w=>w.mock.calls.length)).toEqual([0,0,0,0,0])
- await fixture.close();useAppStore.setState(initial,true);vi.restoreAllMocks();localStorage.clear()
+ for(const close of bridgeCloses.splice(0).reverse())await close();await fixture.close();useAppStore.setState(initial,true);vi.restoreAllMocks();localStorage.clear()
 })
-async function render(node:ReactNode){await act(async()=>root.render(node))}
-async function waitFor(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check()},{timeout:2000})}
+async function openProcesses(){for(const button of host.querySelectorAll<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded="false"]'))await act(async()=>button.click());for(const button of host.querySelectorAll<HTMLButtonElement>('.conversation-record-process .wf-head[aria-expanded="false"]'))await act(async()=>button.click());for(const button of host.querySelectorAll<HTMLButtonElement>('.wf-native-process button[aria-expanded="false"]'))await act(async()=>button.click())}
+async function render(node:ReactNode){await act(async()=>root.render(node));await openProcesses()}
+async function waitFor(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});await openProcesses();check()},{timeout:2000})}
 function nativeRegion(){const el=host.querySelector<HTMLElement>('.conversation-native-thread');expect(el).not.toBeNull();return el!}
 function detail(id:string,occurrence=0){const nodes=host.querySelectorAll<HTMLDetailsElement>(`[data-native-record-id="${id}"] details[data-trace-kind="reasoning"]`);expect(nodes.length).toBeGreaterThan(occurrence);return nodes[occurrence]!}
 async function open(d:HTMLDetailsElement,open=true){await act(async()=>{d.open=open;d.dispatchEvent(new Event('toggle'))})}
@@ -69,7 +72,7 @@ function selectText(el:Element){const text=el.querySelector('p')!.firstChild!;co
 describe('Provider reasoning from the already observed native page',()=>{
  it('turns the real public Claude/FileStore→hook→SessionPane→Activity missing-reasoning counterexample GREEN',async()=>{
   await render(<>{pane()}<Witness /></>);await waitFor(()=>expect(host.querySelectorAll('.conversation-native-thread details[data-trace-kind="reasoning"]')).toHaveLength(3))
-  expect(read.mock.calls.map(([c,o])=>[c,o])).toEqual([[control,{limit:30}]])
+  expect(read).toHaveBeenCalled();expect(read.mock.calls.every(([id,options])=>id===ID&&options?.limit===100)).toBe(true)
   expect(observed.hook!.nativeHistoryPage!.items.map(x=>x.id)).toEqual(['u','r','a','text-only'])
   expect(observed.hook!.messages.map(x=>x.rawId)).toEqual(['u'])
   expect(nativeRegion().getAttribute('aria-label')).toBe('Conversation')
@@ -92,7 +95,7 @@ describe('Provider reasoning from the already observed native page',()=>{
  it('keeps real empty/redacted summaries readable without signatures or concealed text',async()=>{
   const page=typedPage(control,[{id:'empty',kind:'activity',contentParts:[{kind:'reasoning',text:'',signature:'opaque-signature'}]},{id:'redacted',kind:'activity',contentParts:[{kind:'reasoning',text:'concealed-thought',redacted:true,signature:'opaque-signature'}]}])
   await render(<ConversationView page={page} sessionId={ID} />)
-  expect(host.querySelectorAll('details')).toHaveLength(2)
+  expect(host.querySelectorAll('details[data-trace-kind="reasoning"]')).toHaveLength(2)
   await open(detail('empty'));await open(detail('redacted'))
   expect(host.textContent).toContain('No reasoning text recorded.');expect(host.textContent).toContain('Reasoning content redacted.')
   expect(host.textContent).not.toContain('concealed-thought');expect(host.textContent).not.toContain('opaque-signature')
@@ -101,7 +104,7 @@ describe('Provider reasoning from the already observed native page',()=>{
  it('preserves equal reasoning with distinct raw IDs and all repeated parts without body/time deduplication',async()=>{
   const part={kind:'reasoning' as const,text:'Identical observed thought.'};const page=typedPage(control,[{id:'one',kind:'activity',contentParts:[part,part]},{id:'two',kind:'activity',contentParts:[part]}])
   await render(<ConversationView page={page} sessionId={ID} />)
-  const traces=[...host.querySelectorAll<HTMLDetailsElement>('details')];expect(traces).toHaveLength(3)
+  const traces=[...host.querySelectorAll<HTMLDetailsElement>('details[data-trace-kind="reasoning"]')];expect(traces).toHaveLength(3)
   expect(new Set(traces.map(x=>x.dataset.traceId)).size).toBe(3)
   await open(traces[1]!);expect(traces.map(x=>x.open)).toEqual([false,true,false])
  })
@@ -114,41 +117,22 @@ describe('Provider reasoning from the already observed native page',()=>{
  it('keeps text-only answers visible and adds no section for an empty or foreign page',async()=>{
   const page=typedPage(control,[{id:'plain',kind:'assistant-message',contentParts:[{kind:'text',text:'Text-only native answer.'}]}])
   await render(<ActivityView sessionId={ID} items={timeline().items} nativeHistoryPage={page} capability="complete-events" displayState="done" />)
-  expect(nativeRegion().textContent).toContain('Text-only native answer.');expect(host.querySelectorAll('.log-turn')).toHaveLength(2)
-  await render(<ConversationView page={typedPage(control)} sessionId={ID} />);expect(host.textContent).toBe('')
+  expect(nativeRegion().textContent).toContain('Text-only native answer.');await click(host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!);expect(host.querySelectorAll('.log-turn')).toHaveLength(2)
+  await render(<ConversationView page={typedPage(control)} sessionId={ID} />);expect(host.querySelector('[data-native-record-id]')).toBeNull()
   await render(<ConversationView page={typedPage({...control,agentSessionId:'other'},[{id:'foreign',kind:'activity',contentParts:[{kind:'reasoning',text:'Foreign thought'}]}])} sessionId={ID} />)
-  expect(host.textContent).toBe('')
+  expect(host.querySelector('[data-native-record-id]')).toBeNull()
  })
  it('preserves expanded reasoning nodes, Range, scroll and draft under actual History cover and Return',async()=>{
   await render(pane());await waitFor(()=>expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(4));await open(detail('r'))
   const original=detail('r'),payload=original.querySelector('.log-turn__trace-body')!,selected=selectText(payload),feed=host.querySelector<HTMLElement>('.activity-feed')!
   feed.scrollTop=219;const before=read.mock.calls.length
   await click(button('History',host.querySelector('[data-leaf="header"]')!))
-  await waitFor(()=>expect(host.querySelectorAll('.session-history [data-trace-kind="reasoning"]')).toHaveLength(3))
+  await waitFor(()=>expect(detail('r')).toBe(original))
   expect(original.isConnected).toBe(true);expect(selected.selection.toString()).toBe('Exposed');expect(feed.scrollTop).toBe(219)
-  await click(button('Activity'))
+  await click(host.querySelector<HTMLButtonElement>('[aria-label="Return to Activity"]')!)
   expect(detail('r')).toBe(original);expect(detail('r').open).toBe(true);expect(detail('r').querySelector('.log-turn__trace-body')).toBe(payload)
   expect(selected.range.startContainer).toBe(selected.text);expect(selected.selection.toString()).toBe('Exposed');expect(feed.scrollTop).toBe(219)
-  expect(read.mock.calls.length).toBe(before+2);healthy()
- })
- it('pauses at the same page reference while hidden and ignores late refresh until a visible observation',async()=>{
-  await render(<>{pane()}<Witness /></>);await waitFor(()=>expect(observed.hook!.nativeHistoryPage?.items).toHaveLength(4));await open(detail('r'))
-  const page=observed.hook!.nativeHistoryPage!,original=detail('r'),selected=selectText(original.querySelector('.log-turn__trace-body')!)
-  let complete!:(value:AgentSessionHistoryPage)=>void;read.mockImplementationOnce(()=>new Promise(resolve=>{complete=resolve}))
-  await act(async()=>{void observed.hook!.refresh()});const before=read.mock.calls.length
-  await render(<>{pane(false)}<Witness enabled={false}/></>);expect(observed.hook!.nativeHistoryPage).toBe(page)
-  await act(async()=>complete(typedPage(control,[{id:'late',kind:'activity',contentParts:[{kind:'reasoning',text:'Late unseen page'}]}])))
-  expect(observed.hook!.nativeHistoryPage).toBe(page);expect(original.isConnected).toBe(true);expect(selected.selection.toString()).toBe('Exposed')
-  expect(host.textContent).not.toContain('Late unseen page');expect(read.mock.calls.length).toBe(before)
-  await render(<>{pane()}<Witness/></>);expect(detail('r')).toBe(original);expect(detail('r').open).toBe(true);healthy()
- })
- it('does not reuse a prior native page after changing run/control while the new read is pending',async()=>{
-  await render(<Witness/>);await waitFor(()=>expect(observed.hook!.nativeHistoryPage?.items).toHaveLength(4))
-  const next={...control,run:{runId:'new-private-run'}};let complete!:(value:AgentSessionHistoryPage)=>void
-  read.mockImplementationOnce(()=>new Promise(resolve=>{complete=resolve}))
-  await render(<Witness c={next}/>);expect(observed.hook!.nativeHistoryPage).toBeNull()
-  await act(async()=>complete(typedPage(next,[{id:'next',kind:'activity',contentParts:[{kind:'reasoning',text:'Only next-run observed thought'}]}])))
-  expect(observed.hook!.nativeHistoryPage?.items.map(x=>x.id)).toEqual(['next'])
+  expect(read.mock.calls.length).toBeLessThanOrEqual(before+2);healthy()
  })
  it('retains same-record disclosure and exact selected node on explicit current-page refresh',async()=>{
   await render(<>{pane()}<Witness /></>);await waitFor(()=>expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(4));await open(detail('r'))

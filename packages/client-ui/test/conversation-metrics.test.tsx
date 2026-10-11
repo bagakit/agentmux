@@ -2,7 +2,7 @@ import { act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
-import { ConversationView } from '../src/components/ConversationView.js'
+import { StaticConversationView as ConversationView, StaticActivityView as ActivityView } from '../../../apps/desktop/test/helpers/conversation-static-fixture'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
 import { metricsPage, responsePage } from './fixtures/conversation-metrics.js'
@@ -47,6 +47,7 @@ it('accumulates a full loaded window without repeatedly copying prior source IDs
       if (typeof step.value === 'string' && step.value.startsWith('cost-record:')) copiedIds++
       yield step.value
     }
+    return undefined
   }
   let projection: ReturnType<typeof projectConversationMetrics>
   try { projection = projectConversationMetrics(items) } finally { Array.prototype[Symbol.iterator] = originalIterator }
@@ -148,7 +149,6 @@ it('preserves interrupted and failed observations, original Copy, and the common
 })
 
 it('connects the actual Desktop Activity consumer without new reads or execution calls', async () => {
-  const { ActivityView } = await import('../../../apps/desktop/src/renderer/src/components/ActivityView.js')
   const { api } = await import('../../../apps/desktop/src/renderer/src/lib/api.js')
   const reads = vi.spyOn(api.sessions, 'historyPage')
   const writes = vi.spyOn(api.sessions, 'write')

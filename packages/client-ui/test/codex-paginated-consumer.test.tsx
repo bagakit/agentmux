@@ -8,7 +8,7 @@ import { AgentMuxControlServer } from '../../core/dist/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../../core/dist/public-rpc-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
-import { ConversationView } from '../src/components/ConversationView.js'
+import { StaticConversationView as ConversationView } from '../../../apps/desktop/test/helpers/conversation-static-fixture'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation.js'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const platform: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body,

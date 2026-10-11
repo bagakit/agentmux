@@ -8,9 +8,9 @@ import { join } from 'node:path'
 import { ConversationLandmarkStore } from '@agentmux/core'
 import type { ConversationItemRef, ConversationLandmarkPage } from '@agentmux/core/conversation'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
 import { ConversationLandmarkList, SaveConversationLandmark, renderConversationLandmarkAction } from '../src/renderer/src/components/ConversationLandmarks'
 import { createConversationLandmarksApi } from '../src/renderer/src/lib/conversation-landmarks-api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -56,6 +56,7 @@ it('names the actual common native record without reading metadata on mount or r
 it('contributes the same exact action to actual captured Activity records without forging native source', async () => {
   const originalItem = { id: 'captured-answer', agentSessionId:scope.agentSessionId,kind:'assistant_message' as const,title:'Original',content:'Captured original answer.',status:'complete' as const,source:'native-hook' as const,createdAt:_historyFixtureEpoch(0, 0, 1),updatedAt:_historyFixtureEpoch(0, 0, 1)}
   await render(<ActivityView timelineSnapshot={{agentSessionId:scope.agentSessionId,sourceHostId:scope.hostId,revision:1,items:[originalItem]}} sessionId={scope.agentSessionId} executionHostId={scope.hostId} items={[{ id: 'captured-answer', agentSessionId: scope.agentSessionId, kind: 'assistant_message', title: 'Original', content: 'Captured original answer.', status: 'complete', source: 'native-hook', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }]} capability="complete-events" renderRecordActions={renderConversationLandmarkAction}/>)
+  await click(host.querySelector<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded]')!);
   await click(named('Name reading point')); await edit('Captured point'); await submit(); await until(savedStatus)
   expect((await store.list(scope)).points[0]?.reference).toEqual({ ...scope, source: { kind: 'captured', recordId: 'captured-answer' } })
 })

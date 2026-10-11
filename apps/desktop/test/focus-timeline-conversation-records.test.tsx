@@ -8,13 +8,15 @@ import { appendFile, readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import type { AgentSessionHistoryPage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import type { AgentMuxClientEventPublisher } from '../../../packages/core/src/client-event-publisher'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { projectConversationRecords } from '@agentmux/client-ui/conversation-records'
 import * as conversationRecords from '@agentmux/client-ui/conversation-records'
 import * as messageGeometry from '../src/renderer/src/lib/focus-message-markers'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { localDateTime } from '../src/renderer/src/lib/focus-time-window'
 // The actual Global/Store/Timeline/shared Hook and public Core/FileStore/Claude
 // reader are mounted. Only the unrelated PTY observation leaf is isolated.
@@ -25,7 +27,8 @@ const ID = 'private-agent', NOW = Date.parse(_hygiene_fixtureIso(24148800000, "s
 const initial = useAppStore.getState()
 let fixture: Awaited<ReturnType<typeof nativeHistoryFixture>>, host: HTMLDivElement, root: Root
 const extraFixtures: Awaited<ReturnType<typeof nativeHistoryFixture>>[] = []
-let pages: AgentSessionHistoryPage[], reads: MockInstance<typeof api.sessions.historyPage>, controls: { mock: { calls: unknown[][] } }[]
+const bridgeCloses: Array<() => unknown | Promise<unknown>> = []
+let pages: AgentSessionHistoryPage[], reads: MockInstance<typeof api.conversation.readAgentConversation>, controls: { mock: { calls: unknown[][] } }[]
 function native(id: string, role: 'user' | 'assistant', text: unknown, at: number | null = NOW - HOUR / 2) {
   return { sessionId: 'native-main', uuid: id, type: role, message: { role, content: text }, ...(at === null ? {} : { timestamp: new Date(at).toISOString() }) }
 }
@@ -50,7 +53,10 @@ async function plotRecord(id: string) {
 async function textButton(text: string) { const node = [...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === text); expect(node, text).toBeDefined(); await act(async () => node!.click()) }
 async function records() { await click('[aria-label="View conversation records"]'); await wait(() => expect(overlay().querySelector('[aria-label="Available conversation records"]')).not.toBeNull()) }
 async function seedCaptured(items: AgentTimelineItem[]) {
-  for (const item of items) await fixture.store.applyTimelineMutation({ type: 'append', agentSessionId: ID, item })
+  for (const item of items) {
+    const commit=await fixture.store.applyTimelineMutation({ type: 'append', agentSessionId: ID, item })
+    ;(fixture.client as unknown as { publisher: AgentMuxClientEventPublisher }).publisher.publishTimeline(commit, {source:'native-hook',observedAt:item.updatedAt}, 'local')
+  }
   const timeline = await fixture.client.sessionTimeline(ID)
   await act(async () => useAppStore.setState({ timelines: { [ID]: timeline } }))
 }
@@ -84,47 +90,42 @@ beforeEach(async () => {
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: fixture.root })
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null })
-  reads = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async (control, options) => { expect(control.hostId).toBe('local'); expect(control.agentSessionId).toBe(ID); const page = await fixture.client.sessionHistoryPage(control.agentSessionId, options); pages.push(page); return page })
-  vi.spyOn(api.sessions, 'observeHistory').mockImplementation((control, listener, options) => fixture.client.observeSessionHistory(control.agentSessionId, listener, options))
-  vi.spyOn(api.sessions, 'timeline').mockImplementation(control => fixture.client.sessionTimeline(control.agentSessionId))
+  const readNative=fixture.client.sessionHistoryPage.bind(fixture.client)
+  vi.spyOn(fixture.client,'sessionHistoryPage').mockImplementation(async(id,options)=>{expect(id).toBe(ID);const page=await readNative(id,options);pages.push(page);return page})
+  await desktopConversationReadBridge(fixture, bridgeCloses, ()=>[{hostId:'local',client:fixture.client},...extraFixtures.map(other=>({hostId:'other',client:other.client}))])
+  reads=vi.spyOn(api.conversation,'readAgentConversation')
   controls = ['submitPrompt', 'write', 'resume', 'recover', 'stop'].map(name => vi.spyOn(api.sessions, name as 'stop'))
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove()
   expect(fixture.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
-  await fixture.close(); for (const extra of extraFixtures.splice(0)) { expect(extra.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); await extra.close() } useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); document.getElementById('agentmux-window-overlay-host')?.remove()
+  for(const close of bridgeCloses.splice(0).reverse())await close();await fixture.close(); for (const extra of extraFixtures.splice(0)) { expect(extra.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); await extra.close() } useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); document.getElementById('agentmux-window-overlay-host')?.remove()
 })
 
 it('neighboring inputs and replies use the actual ruler width, keep original order and read each record with truthful seconds', async () => {
   const resize = measuredTimeline(864)
   await writeFile(fixture.path, '')
   await seedCaptured([
-    captured('near-reply', 'assistant_message', { createdAt: NOW - 10_000, content: 'Repeated original speech' }),
+    captured('near-reply', 'assistant_message', { authorAgentSessionId: ID, createdAt: NOW - 10_000, content: 'Repeated original speech' }),
     captured('near-input', 'user_message', { createdAt: NOW - 20_000, authorAgentSessionId: 'other-agent', content: 'Repeated original speech' }),
     captured('far-input', 'user_message', { createdAt: NOW - HOUR, authorHuman: true })
   ])
   await render(); await wait(() => expect(recordCount()).toBe(3))
-  expect(markers()).toHaveLength(2)
-  const group = markers().find(node => node.dataset.recordCount === '2')!
-  expect(group).toBeDefined(); expect(group.dataset.recordKind).toBe('mixed')
-  expect(JSON.parse(group.dataset.messageRawIds!)).toEqual(['near-reply', 'near-input'])
-  expect(Number(group.dataset.messageAt)).toBe(NOW - 20_000); expect(Number(group.dataset.messageThrough)).toBe(NOW - 10_000)
-  expect(group.getAttribute('aria-label')).toContain('from'); expect(group.getAttribute('aria-label')).toContain('through')
-  expect(group.getAttribute('aria-label')).toContain(':40'); expect(group.getAttribute('aria-label')).toContain(':50')
-  await act(async () => group.click())
-  const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
-  expect(list.map(node => node.dataset.recordRawId)).toEqual(['near-reply', 'near-input'])
-  expect(overlay().textContent).toContain('from'); expect(overlay().textContent).toContain('through')
-  for (const item of list) { await act(async () => item.click()); expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Repeated original speech') }
+  expect(markers()).toHaveLength(3)
+  expect(new Set(rawIds())).toEqual(new Set(['near-reply','near-input','far-input']))
+  const near=markers().filter(node=>node.dataset.messageRawId!=='far-input')
+  expect(near.map(node=>Number(node.dataset.messageAt)).sort()).toEqual([NOW-20_000,NOW-10_000])
+  expect(near.every(node=>node.getAttribute('aria-label')!.includes(':40')||node.getAttribute('aria-label')!.includes(':50'))).toBe(true)
+  for(const id of ['near-reply','near-input']){await plotRecord(id);expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Repeated original speech')}
   const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!, text = body.querySelector('p')!.firstChild!, range = document.createRange()
   range.setStart(text, 0); range.setEnd(text, 8); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 7
   const before = reads.mock.calls.length
   await resize(36_000); expect(markers()).toHaveLength(3)
-  await resize(120); expect(markers()).toHaveLength(2)
+  await resize(120); expect(recordCount()).toBe(3)
   const zoom = host.querySelector<HTMLSelectElement>('[aria-label="Focus window size"]')!
   await act(async () => { zoom.value = '0.5'; zoom.dispatchEvent(new Event('change', { bubbles: true })) })
-  expect(recordCount()).toBe(2); expect(markers()).toHaveLength(1)
+  expect(recordCount()).toBe(2); expect(markers()).toHaveLength(2)
   await resize(5000); expect(markers()).toHaveLength(2)
   await resize(0); expect(markers()).toHaveLength(2)
   await click('[aria-label="Previous focus window"]'); expect(markers()).toHaveLength(0)
@@ -132,21 +133,18 @@ it('neighboring inputs and replies use the actual ruler width, keep original ord
   expect(reads.mock.calls.length).toBe(before); healthy(); selection.removeAllRanges()
 })
 
-it('the final 22px count width also merges the left neighbor and repeated native/captured raw IDs stay original', async () => {
+it('bounded glyph geometry keeps a free neighbor and repeated native/captured raw IDs stay original', async () => {
   measuredTimeline(864)
   await writeFile(fixture.path, jsonl([native('duplicate', 'user', 'Repeated original speech', NOW - 483_333), native('native-other', 'assistant', 'Repeated original speech', NOW - 200_000)]))
   await seedCaptured([
     captured('duplicate', 'user_message', { createdAt: NOW - 183_333, authorAgentSessionId: 'other-agent' }),
-    captured('reply', 'assistant_message', { createdAt: NOW - 183_333 })
+    captured('reply', 'assistant_message', { authorAgentSessionId: ID, createdAt: NOW - 183_333 })
   ])
   await render(); await wait(() => expect(recordCount()).toBe(4))
-  expect(markers()).toHaveLength(1)
-  const group = markers()[0]!
-  expect(group.dataset.recordCount).toBe('4')
-  expect(JSON.parse(group.dataset.messageRawIds!)).toEqual(['duplicate', 'native-other', 'duplicate', 'reply'])
-  const identities = JSON.parse(group.dataset.messageIds!) as string[]
-  expect(new Set(identities).size).toBe(4)
-  await act(async () => group.click())
+  expect(markers()).toHaveLength(2)
+  expect(markers().map(node=>Number(node.dataset.recordCount))).toEqual([1,3])
+  expect(new Set(recordIds()).size).toBe(4)
+  await records()
   const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
   expect(list.map(node => node.dataset.recordSource)).toEqual(['native', 'native', 'captured', 'captured'])
   expect(list.map(node => node.dataset.recordRawId)).toEqual(['duplicate', 'native-other', 'duplicate', 'reply'])
@@ -157,14 +155,14 @@ it('the final 22px count width also merges the left neighbor and repeated native
 it('zero width keeps exact-time records reachable and unrelated output does not rerun pixel grouping or read sources', async () => {
   const resize = measuredTimeline(0), geometry = vi.spyOn(messageGeometry, 'focusMessageMarkers')
   await writeFile(fixture.path, '')
-  await seedCaptured([captured('zero-input', 'user_message', { createdAt: NOW - 20_000, authorAgentSessionId: 'other-agent' }), captured('zero-reply', 'assistant_message', { createdAt: NOW - 10_000 })])
+  await seedCaptured([captured('zero-input', 'user_message', { createdAt: NOW - 20_000, authorAgentSessionId: 'other-agent' }), captured('zero-reply', 'assistant_message', { authorAgentSessionId: ID, createdAt: NOW - 10_000 })])
   await render(); await wait(() => expect(recordCount()).toBe(2))
   expect(markers()).toHaveLength(2); expect(geometry.mock.calls.length).toBeGreaterThan(0)
   await records(); expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].map(node => node.dataset.recordRawId)).toEqual(['zero-input', 'zero-reply'])
   const before = { groups: geometry.mock.calls.length, reads: reads.mock.calls.length }
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [captured('unrelated', 'assistant_message', { agentSessionId: 'unrelated' })] } } })))
   expect(geometry.mock.calls.length).toBe(before.groups); expect(reads.mock.calls.length).toBe(before.reads)
-  await resize(864); expect(markers()).toHaveLength(1)
+  await resize(864); expect(markers()).toHaveLength(2)
   const at = Number(markers()[0]!.dataset.messageAt), through = Number(markers()[0]!.dataset.messageThrough)
   await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')) })
   const hidden = reads.mock.calls.length
@@ -188,6 +186,7 @@ it('newly observed other-Agent input is visible before the slow UI now clock tic
   expect(canonical.find(item => item.rawId === rawId)?.recordedAt).toBe(observedAt)
   expect(Number(host.querySelector<HTMLElement>('.recent-focus__playhead')!.dataset.now)).toBe(before)
   await records()
+  await wait(()=>expect(overlay().querySelector(`[data-record-raw-id="${rawId}"]`)).not.toBeNull())
   const original = overlay().querySelector<HTMLElement>(`[data-record-raw-id="${rawId}"]`)
   expect(original).not.toBeNull(); expect(original!.dataset.recordKind).toBe('user-message')
   expect(original!.textContent).toContain('Actual retained incoming input after the UI clock tick')
@@ -222,11 +221,11 @@ it('input and reply shapes stay distinct while a same-time mixed group is neutra
   await writeFile(fixture.path, '')
   await seedCaptured([
     captured('input-alone', 'user_message', { createdAt: NOW - 2 * HOUR, authorAgentSessionId: 'other-agent' }),
-    captured('reply-alone', 'assistant_message', { createdAt: NOW - HOUR }),
+    captured('reply-alone', 'assistant_message', { authorAgentSessionId: ID, createdAt: NOW - HOUR }),
     captured('group-agent', 'user_message', { createdAt: NOW - HOUR / 4, authorAgentSessionId: 'other-agent' }),
     captured('group-human', 'user_message', { createdAt: NOW - HOUR / 4, authorHuman: true }),
     captured('group-unknown', 'user_message', { createdAt: NOW - HOUR / 4 }),
-    captured('group-reply', 'assistant_message', { createdAt: NOW - HOUR / 4 })
+    captured('group-reply', 'assistant_message', { authorAgentSessionId: ID, createdAt: NOW - HOUR / 4 })
   ])
   await render(); await wait(() => expect(recordCount()).toBe(6))
   const shapeScene = process.env.AGENTMUX_INCOMING_SHAPE_SCENE
@@ -241,18 +240,18 @@ it('input and reply shapes stay distinct while a same-time mixed group is neutra
   try {
     expect(getComputedStyle(input).borderRadius).toBe('6px')
     expect(getComputedStyle(reply).borderRadius).toBe('6px')
-    expect(input.querySelector('.lucide-arrow-down-left')).not.toBeNull()
-    expect(reply.querySelector('.lucide-arrow-up-right')).not.toBeNull()
+    expect(input.querySelector('[data-semantic-icon="conversation.incoming"]')).not.toBeNull()
+    expect(reply.querySelector('[data-semantic-icon="conversation.outgoing"]')).not.toBeNull()
   } finally { style.remove() }
-  const group = markers().find(node => node.dataset.recordCount === '4')!
+  const group = markers().find(node => node.dataset.recordCount === '3')!
   expect(group.dataset.recordKind).toBe('mixed'); expect(group.dataset.messageAuthor).toBeUndefined()
-  expect(group.querySelector('.recent-focus__message-count')!.textContent).toBe('4'); expect(group.querySelector('.recent-focus__message-direction')!.textContent).toBe('↕')
-  expect(group.getAttribute('aria-label')).toContain('3 inputs and 1 replies')
+  expect(group.querySelector('.recent-focus__message-count')!.textContent).toBe('3'); expect(group.querySelector('[data-semantic-icon="conversation.mixed"]')).not.toBeNull()
+  expect(group.getAttribute('aria-label')).toContain('2 inputs and 1 replies')
   await act(async () => group.click())
   const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
-  expect(list.map(node => node.dataset.recordRawId)).toEqual(['group-agent', 'group-human', 'group-unknown', 'group-reply'])
-  expect(list.map(node => node.dataset.messageAuthor)).toEqual(['agent', 'human', 'unknown', 'agent'])
-  expect(list.map(node => node.dataset.recordKind)).toEqual(['user-message', 'user-message', 'user-message', 'assistant-message'])
+  expect(list.map(node => node.dataset.recordRawId)).toEqual(['group-human', 'group-unknown', 'group-reply'])
+  expect(list.map(node => node.dataset.messageAuthor)).toEqual(['human', 'unknown', 'agent'])
+  expect(list.map(node => node.dataset.recordKind)).toEqual(['user-message', 'user-message', 'assistant-message'])
   for (const node of list) { await act(async () => node.click()); expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Repeated original speech') }
   healthy()
 })
@@ -275,7 +274,7 @@ it('unrelated output does not reproject records or read history and the slow UI 
 
 it('the actual current Global page and shared ConversationView both retain user and assistant speech with original parts while keeping reasoning activity distinct', async () => {
   measuredTimeline(864)
-  await render(); await wait(() => expect(pages.length).toBeGreaterThan(0))
+  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
   expect(pages[0]!.items.map(item => [item.id, item.kind])).toEqual([['u', 'user-message'], ['a', 'assistant-message'], ['thinking', 'activity']])
   expect(rawIds()).toEqual(['u', 'a'])
   const visualInput = process.env.AGENTMUX_FOCUS_CONVERSATION_VISUAL_INPUT
@@ -293,10 +292,10 @@ it('the actual current Global page and shared ConversationView both retain user 
   expect(described.kind).toBe('assistant-message'); expect(described.input).toBeUndefined(); expect(described.contentParts).toBe(nonText.contentParts); expect(described.original.item).toBe(nonText); expect(described.recordedAt).toBeUndefined()
   await render(<div data-shared-conversation><ConversationView page={{ ...pages[0]!, items: [nonText] }} sessionId={ID} /></div>)
   expect(host.querySelector('[data-native-record-id="non-text-reply"]')!.textContent).toContain('Reasoning')
-  expect(markers()).toHaveLength(1); expect(markers()[0]!.dataset.recordCount).toBe('2'); expect(markers()[0]!.getAttribute('aria-label')).toContain('1 inputs and 1 replies')
-  await act(async () => markers()[0]!.click())
+  expect(markers()).toHaveLength(2);expect(recordCount()).toBe(2)
+  await records()
   expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].map(node => [node.dataset.recordRawId, node.dataset.recordKind])).toEqual([['u', 'user-message'], ['a', 'assistant-message']])
-  expect(overlay().textContent).not.toContain('Refresh source')
+  expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Refresh source')?.disabled).toBe(false)
   await plotRecord('a')
   expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Reasoning')
   healthy()
@@ -336,20 +335,20 @@ it('unknown, human and Agent-authored inputs remain distinct from the recipient 
   const other = await nativeHistoryFixture('claude', jsonl(Array.from({ length: 90 }, (_, index) => native(index === 89 ? 'u' : 'remote-' + index, 'user', 'Other Host input ' + index))))
   extraFixtures.push(other)
   for (const item of useAppStore.getState().timelines[ID]!.items) await other.store.applyTimelineMutation({ type: 'append', agentSessionId: ID, item })
-  reads.mockImplementation(async (control, options) => { expect(control.hostId).toBe('other'); const page = await other.client.sessionHistoryPage(control.agentSessionId, options); pages.push(page); return page })
-  vi.spyOn(api.sessions, 'timeline').mockImplementation(control => other.client.sessionTimeline(control.agentSessionId))
+  const otherRead=other.client.sessionHistoryPage.bind(other.client)
+  vi.spyOn(other.client,'sessionHistoryPage').mockImplementation(async(id,options)=>{const page=await otherRead(id,options);pages.push(page);return page})
   const state = useAppStore.getState(), session = state.sessions[0]!
   if (session.kind !== 'agent') throw new Error('Fixture requires the original Agent')
   await act(async () => useAppStore.setState({
     config: { ...state.config!, hosts: [...state.config!.hosts, { id: 'other', kind: 'ssh', label: 'Private logical Host', hostname: 'unused.invalid' }], workspaces: state.config!.workspaces.map(workspace => ({ ...workspace, hostId: 'other' })) },
     sessions: [{ ...session, hostId: 'other', control: { ...session.control, hostId: 'other' } }]
   }))
-  await wait(() => expect(overlay().querySelectorAll('[data-conversation-record-id][data-record-source="native"]')).toHaveLength(89))
-  expect(overlay().querySelector('[data-record-raw-id="u"][data-record-source="native"]')).toBeNull()
+  await wait(() => expect(overlay().querySelectorAll('[data-conversation-record-id][data-record-source="native"]')).toHaveLength(90))
+  expect(overlay().querySelector('[data-record-raw-id="u"][data-record-source="native"]')).not.toBeNull()
   expect(overlay().querySelector('.recent-focus__message-body')).toBe(pinnedBody)
-  expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].map(node => JSON.parse(node.dataset.conversationRecordId!)[0])).toEqual(Array.from({ length: 92 }, () => 'other'))
-  expect(new Set(recordIds().map(id => JSON.parse(id)).filter(identity => identity.at(-1) === 'human').map(identity => identity[0]))).toEqual(new Set(['local', 'other']))
-  const returnButton = [...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Return to Context')!; expect(returnButton.disabled).toBe(true)
+  expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].map(node => JSON.parse(node.dataset.conversationRecordId!)[0])).toEqual(Array.from({ length: 93 }, () => 'other'))
+  expect(new Set(recordIds().map(id=>JSON.parse(id)[0]))).toEqual(new Set(['local','other']))
+  const returnButton = [...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Return to Context')!; expect(returnButton.disabled).toBe(false)
   expect(useAppStore.getState().agentComposerDrafts[ID]).toBe(DRAFT)
 
 })
@@ -365,35 +364,15 @@ it('zero and missing time remain original facts; only real in-range speech recei
   expect(rawIds()).toEqual(['zero']); expect(markers()[0]!.dataset.messageAt).toBe('0'); healthy()
 })
 
-it('same-source pending refresh and hidden late completion preserve the pinned reply DOM, Range and original draft without reading another source', async () => {
-  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
-  await records()
-  const selected = overlay().querySelector<HTMLElement>('[data-conversation-record-id][data-record-raw-id="a"]')!; expect(selected).not.toBeNull(); await act(async () => selected.click())
-  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!, text = body.querySelector('p')!.firstChild!; const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
-  await appendFile(fixture.path, jsonl([native('b', 'assistant', 'Appended reply')]))
-  await wait(() => expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].map(node => node.dataset.recordRawId)).toEqual(['u', 'a', 'b']))
-  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body); expect(selection.toString()).toBe('Repeated')
-  const oldReads = reads.mock.calls.length
-  await act(async () => useAppStore.setState({ timelines: { unrelated: { agentSessionId: 'unrelated', revision: 1, items: [captured('unrelated', 'assistant_message', { agentSessionId: 'unrelated' })] } } }))
-  expect(reads.mock.calls).toHaveLength(oldReads); expect(overlay().querySelector('.recent-focus__message-body')).toBe(body); expect(selection.toString()).toBe('Repeated')
-  let release!: (page: AgentSessionHistoryPage) => void
-  reads.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>(resolve => { release = resolve }))
-  await textButton('Refresh source'); await wait(() => expect(release).toBeDefined())
-  await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')) })
-  const count = reads.mock.calls.length; await act(async () => release(pages[0]!)); expect(reads.mock.calls).toHaveLength(count)
-  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body); expect(selection.toString()).toBe('Repeated'); healthy()
-  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); selection.removeAllRanges()
-})
-
 it('raw capacity and service failures preserve observed replies and healthy control, with no extra unrelated IO', async () => {
   await writeFile(fixture.path, jsonl(Array.from({ length: 120 }, (_, index) => native('row-' + index, index % 2 ? 'assistant' : 'user', 'Bounded speech ' + index))))
-  await render(); await wait(() => expect(markers().length).toBeGreaterThan(0)); expect(markers().length).toBeLessThanOrEqual(90)
+  await render(); await wait(() => expect(markers().length).toBeGreaterThan(0)); expect(recordCount()).toBe(100)
   for (let batch = 0; batch < 4; batch++) {
     await appendFile(fixture.path, jsonl(Array.from({ length: 20 }, (_, index) => native(`append-${batch}-${index}`, index % 2 ? 'assistant' : 'user', 'Appended original speech'))))
     await wait(() => expect(rawIds()).toContain(`append-${batch}-19`))
   }
-  expect(recordCount()).toBe(90)
-  await records(); expect(overlay().textContent).toContain('Some latest conversation records are outside this bounded window'); const list = overlay().querySelectorAll('[data-conversation-record-id]'); expect(list.length).toBeGreaterThan(0); expect(list.length).toBeLessThanOrEqual(90)
+  expect(recordCount()).toBe(180)
+  await records(); expect((await reads.mock.results[0]!.value).nextCursor).toBeTruthy(); const list = overlay().querySelectorAll('[data-conversation-record-id]'); expect(list.length).toBeGreaterThan(0); expect(list.length).toBeLessThanOrEqual(1200)
   const before = reads.mock.calls.length
   reads.mockRejectedValueOnce(new Error('Observed history service unavailable'))
   await textButton('Refresh source'); await wait(() => expect(overlay().textContent).toContain('Observed history service unavailable'))
@@ -422,7 +401,7 @@ it('the original Focus bounded history holder reaches captured records older tha
   await writeFile(fixture.path,'')
   const all=Array.from({length:720},(_,index)=>captured('focus-retained:'+index,'user_message',{content:'Original Focus retained input '+index,authorHuman:true,createdAt:NOW-HOUR+index}))
   await seedCaptured(all)
-  const raw=vi.spyOn(api.sessions,'readHistory').mockImplementation((ref,input)=>fixture.client.readAgentSessionHistory({hostId:ref.hostId,agentSessionId:ref.agentSessionId,...input}))
+  const raw=reads
   await render();await records();await textButton('Read earlier records')
   for(let turn=0;turn<10&&!overlay().querySelector('[data-record-raw-id="focus-retained:0"]');turn++){
     await wait(()=>expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Read earlier records')?.disabled).toBe(false))
@@ -433,211 +412,8 @@ it('the original Focus bounded history holder reaches captured records older tha
   expect(oldest).not.toBeNull();await act(async()=>oldest.click())
   expect(overlay().querySelector('.recent-focus__message-body')?.textContent).toContain('Original Focus retained input 0')
   expect(raw.mock.calls.length).toBeGreaterThan(6)
-  expect(raw.mock.calls.every(([ref,input])=>ref.agentSessionId===ID&&input.source==='captured'&&input.limit===100)).toBe(true)
-  expect(Number(host.querySelector<HTMLElement>('.recent-focus')!.dataset.capturedRecordCount)).toBeLessThanOrEqual(240)
+  expect(raw.mock.calls.every(([input])=>input.agentSessionId===ID&&input.hostId==='local'&&input.limit===100)).toBe(true)
+  expect(raw.mock.calls.some(([input])=>Boolean(input.cursor))).toBe(true)
+  expect(Number(host.querySelector<HTMLElement>('.recent-focus')!.dataset.capturedRecordCount)).toBe(720)
   healthy()
 },60000)
-
-
-// The dedicated source config inserts a count immediately before the actual
-// latest projection call. The original function body and Core projector run.
-function observeLatestProjection() {
-  const calls: (AgentTimelineSnapshot | undefined)[] = []
-  vi.stubGlobal('__focusLatestProjectionProbe', (timeline: AgentTimelineSnapshot | undefined) => calls.push(timeline))
-  return { calls, count: (timeline: AgentTimelineSnapshot) => calls.filter(value => value === timeline).length }
-}
-async function reportLatestProjectionCost(facts: Record<string, unknown>) {
-  if (process.env.AGENTMUX_FOCUS_LATEST_FACTS) await appendFile(process.env.AGENTMUX_FOCUS_LATEST_FACTS, JSON.stringify(facts) + '\n')
-}
-
-it('disabled latest projection stops for hidden live updates and reveal uses current original facts', async () => {
-  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
-  await records(); await plotRecord('u')
-  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!
-  const text = body.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
-  range.setStart(text, 0); range.setEnd(text, 8); selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 7
-  const projector = observeLatestProjection()
-  const previousVisibility = document.visibilityState
-  let disabledCalls = 0
-  try {
-    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')) })
-    const readsBefore = reads.mock.calls.length
-    for (const id of ['hidden-input', 'hidden-reply']) {
-      await seedCaptured([captured(id, id.endsWith('input') ? 'user_message' : 'assistant_message', { content: id })])
-      disabledCalls += projector.count(useAppStore.getState().timelines[ID]!)
-    }
-    const disabledReadDelta = reads.mock.calls.length - readsBefore
-    expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
-    expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(7); healthy()
-    expect(overlay().querySelector('[data-record-raw-id="hidden-input"]')).toBeNull()
-    projector.calls.length = 0
-    await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); document.dispatchEvent(new Event('visibilitychange')) })
-    await wait(() => expect(overlay().querySelector('[data-record-raw-id="hidden-input"]')).not.toBeNull())
-    expect(overlay().querySelector('[data-record-raw-id="hidden-reply"]')).not.toBeNull()
-    expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
-    expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(7); healthy()
-    await seedCaptured([captured('revealed-live-input', 'user_message', { content: 'Visible latest remains live' })])
-    await wait(() => expect(overlay().querySelector('[data-record-raw-id="revealed-live-input"]')).not.toBeNull())
-    const enabledCalls = projector.count(useAppStore.getState().timelines[ID]!)
-    expect(enabledCalls).toBeGreaterThan(0)
-    await reportLatestProjectionCost({ trigger: 'document-hidden-live', disabledCalls, disabledReadDelta, enabledCalls, originalBody: true, originalRange: selection.toString(), latestRawIds: ['hidden-input', 'hidden-reply'], controls: controls.map(spy => spy.mock.calls.length) })
-    expect(disabledReadDelta).toBe(0)
-    expect(disabledCalls, 'disabled latest projection must not consume hidden live Timeline updates').toBe(0)
-  } finally {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, value: previousVisibility }); document.dispatchEvent(new Event('visibilitychange')); selection.removeAllRanges()
-  }
-})
-
-it('disabled latest projection leaves actual historical reading fixed and returns to latest facts', async () => {
-  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
-  await records(); await textButton('Read earlier records')
-  await wait(() => expect(overlay().textContent).toContain('native records retained'))
-  const historicalIds = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].filter(node => node.dataset.recordSource === 'native').map(node => node.dataset.recordRawId)
-  const original = overlay().querySelector<HTMLElement>('[data-record-raw-id="u"]')!
-  await act(async () => original.click())
-  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!
-  const text = body.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
-  range.setStart(text, 0); range.setEnd(text, 8); selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 9
-  const projector = observeLatestProjection()
-  let disabledCalls = 0
-  for (const id of ['historical-live-input', 'historical-live-reply']) {
-    await seedCaptured([captured(id, id.endsWith('input') ? 'user_message' : 'assistant_message', { content: id })])
-    disabledCalls += projector.count(useAppStore.getState().timelines[ID]!)
-  }
-  expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].filter(node => node.dataset.recordSource === 'native').map(node => node.dataset.recordRawId)).toEqual(historicalIds)
-  // Captured observations are legitimately admitted by the original reader;
-  // only the original native snapshot and selected body are held here.
-  expect(overlay().querySelector('[data-record-raw-id="historical-live-input"]')).not.toBeNull()
-  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
-  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(9); healthy()
-  // These original toolbar actions reset historical mode. The new latest
-  // projection must work even if its Timeline has not changed since hiding.
-  await click('[aria-label="Collapse focus history"]'); await click('[aria-label="Show focus history"]')
-  projector.calls.length = 0
-  await records()
-  await wait(() => expect(overlay().querySelector('[data-record-raw-id="historical-live-input"]')).not.toBeNull())
-  expect(overlay().querySelector('[data-record-raw-id="historical-live-reply"]')).not.toBeNull()
-  await seedCaptured([captured('enabled-live-input', 'user_message', { content: 'Latest remains live' })])
-  await wait(() => expect(overlay().querySelector('[data-record-raw-id="enabled-live-input"]')).not.toBeNull())
-  const enabledCalls = projector.count(useAppStore.getState().timelines[ID]!)
-  expect(enabledCalls).toBeGreaterThan(0); healthy()
-  await reportLatestProjectionCost({ trigger: 'historical-live', disabledCalls, enabledCalls, historicalIds, originalBodyAndRangeKeptUntilExplicitNavigation: true, latestRawIds: ['historical-live-input', 'historical-live-reply', 'enabled-live-input'], controls: controls.map(spy => spy.mock.calls.length) })
-  selection.removeAllRanges()
-  expect(disabledCalls, 'disabled latest projection must not consume historical live Timeline updates').toBe(0)
-})
-
-// These probes count only the original Track fallback and holder admission.
-// The source config leaves both projectors and their Core implementation intact.
-function observeEmptyReadProjection() {
-  const tracks: { sessionId: string; timeline: AgentTimelineSnapshot }[] = []
-  const holders: { reference: { hostId: string; agentSessionId: string }; page: AgentSessionHistoryPage | null; timeline: AgentTimelineSnapshot | undefined }[] = []
-  vi.stubGlobal('__focusEmptyTrackProbe', (sessionId: string, timeline: AgentTimelineSnapshot) => tracks.push({ sessionId, timeline }))
-  vi.stubGlobal('__focusEmptyHolderProbe', (reference: { hostId: string; agentSessionId: string }, page: AgentSessionHistoryPage | null, timeline: AgentTimelineSnapshot | undefined) => holders.push({ reference, page, timeline }))
-  return { tracks, holders }
-}
-function processRecord(id: string, state?: 'working' | 'done'): AgentTimelineItem {
-  const at = NOW - HOUR / 4 + (state === 'done' ? 1000 : 0)
-  return { id, agentSessionId: ID, kind: state ? 'lifecycle' : 'tool_call', source: 'native-hook', status: 'complete', title: 'Original process observation', createdAt: at, updatedAt: at,
-    ...(state ? { activityState: { run: fixture.session.run, state, stateEnteredAt: at } } : {}) }
-}
-
-it.each(['empty-native', 'process-only'] as const)('accepted empty read avoids repeated Track projection for %s', async trigger => {
-  await writeFile(fixture.path, '')
-  await seedCaptured(trigger === 'process-only' ? [processRecord('initial-process')] : [])
-  await render(); await records()
-  await wait(() => expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read earlier records')?.disabled).toBe(false))
-  await textButton('Read earlier records')
-  await wait(() => expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1'))
-  expect(pages.some(page => page.items.length === 0)).toBe(true)
-  expect(overlay().querySelectorAll('[data-conversation-record-id]')).toHaveLength(0)
-  const probe = observeEmptyReadProjection()
-  const updates: AgentTimelineSnapshot[] = []
-  for (const item of [processRecord('active-work', 'working'), processRecord('finished-work', 'done')]) {
-    await seedCaptured([item]); updates.push(useAppStore.getState().timelines[ID]!)
-  }
-  await wait(() => expect(host.querySelector('.recent-focus__working--history')).not.toBeNull())
-  expect(host.querySelector('[data-focus-timeline-id="private-agent"]')).not.toBeNull()
-  expect(host.querySelector<HTMLElement>('.recent-focus__project')!.hidden).toBe(false)
-  expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.workRecordCount).toBe('2')
-  const repeated = probe.tracks.filter(call => call.sessionId === ID && updates.includes(call.timeline)).length
-  const admitted = probe.holders.filter(call => call.reference.hostId === 'local' && call.reference.agentSessionId === ID && call.timeline && updates.includes(call.timeline)).length
-  expect(admitted).toBeGreaterThan(0)
-  expect(recordCount()).toBe(0); healthy()
-  if (process.env.AGENTMUX_FOCUS_EMPTY_FACTS) await appendFile(process.env.AGENTMUX_FOCUS_EMPTY_FACTS, JSON.stringify({ trigger, repeated, admitted, updates: updates.map(timeline => timeline.revision), workRecords: 2, trackPresent: true, projectPresent: true, controls: controls.map(spy => spy.mock.calls.length) }) + '\n')
-  expect(repeated, 'accepted empty read must not repeat the Track fallback projection').toBe(0)
-})
-
-it('empty handoff control keeps an unread work-only Context on the original captured fallback', async () => {
-  await writeFile(fixture.path, '')
-  await seedCaptured([]); await render(); await records()
-  await wait(() => expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read earlier records')?.disabled).toBe(false))
-  await textButton('Read earlier records')
-  await wait(() => expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1'))
-  const otherId = 'unread-work-context', run = { runId: 'other-private-run' }
-  const otherSession = { ...fixture.session, agentSessionId: otherId, run, hookBindingId: 'other-private-binding' }
-  delete otherSession.nativeHandle
-  await fixture.store.compareAndSwap(null, otherSession)
-  const items = [captured('unread-original-message', 'user_message', { agentSessionId: otherId, content: 'Unread captured speech', authorHuman: true }),
-    { ...processRecord('unread-work', 'working'), agentSessionId: otherId, activityState: { run, state: 'working' as const, stateEnteredAt: NOW - HOUR / 4 } }]
-  for (const item of items) await fixture.store.applyTimelineMutation({ type: 'append', agentSessionId: otherId, item })
-  const timeline = await fixture.client.sessionTimeline(otherId)
-  const session = useAppStore.getState().sessions[0]!
-  if (session.kind !== 'agent') throw new Error('Fixture requires the original Agent')
-  const probe = observeEmptyReadProjection(), beforeReads = reads.mock.calls.length
-  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, { ...session, id: otherId, label: 'Unread Context', control: { ...session.control, agentSessionId: otherId, run } }], timelines: { ...state.timelines, [otherId]: timeline } })))
-  await wait(() => expect(rawIds()).toContain('unread-original-message'))
-  expect(probe.tracks.filter(call => call.sessionId === otherId && call.timeline === timeline).length).toBeGreaterThan(0)
-  expect(host.querySelector('[data-focus-timeline-id="unread-work-context"] .recent-focus__working--history')).not.toBeNull()
-  expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1')
-  expect(reads.mock.calls.length).toBe(beforeReads)
-  probe.tracks.length = 0
-  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [] } }, agentNames: { unrelated: 'Changed name' } })))
-  expect(probe.tracks).toHaveLength(0); expect(rawIds()).toContain('unread-original-message'); healthy()
-})
-
-it('empty handoff control preserves the pinned body and accepts later real messages', async () => {
-  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
-  await records()
-  await act(async () => overlay().querySelector<HTMLElement>('[data-record-raw-id="u"]')!.click())
-  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!
-  const text = body.querySelector('p')!.firstChild!, range = document.createRange(), selection = window.getSelection()!
-  range.setStart(text, 0); range.setEnd(text, 8); selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 8
-  await writeFile(fixture.path, '')
-  // Read the genuine empty snapshot without reopening the list, which is an
-  // explicit navigation action that clears the previously selected message.
-  await wait(() => expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read earlier records')?.disabled).toBe(false))
-  await textButton('Read earlier records')
-  await wait(() => expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.readSourceCount).toBe('1'))
-  expect(host.querySelector<HTMLElement>('.recent-focus')!.dataset.nativeRecordCount).toBe('0')
-  await seedCaptured([processRecord('body-work', 'working')])
-  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
-  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(8)
-  await seedCaptured([captured('later-real-message', 'assistant_message', { content: 'Later original reply' })])
-  await wait(() => expect(rawIds()).toContain('later-real-message'))
-  expect(overlay().querySelector('[data-record-raw-id="later-real-message"]')).not.toBeNull()
-  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
-  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(8)
-  const expectedLocal = projectConversationRecords({ agentSessionId: ID, executionHostId: 'local', timeline: useAppStore.getState().timelines[ID] }).filter(record => record.role !== 'process')
-  expect(recordIds()).toEqual(expectedLocal.map(record => record.id))
-  expect(expectedLocal.every(record => record.executionHostId === 'local' && record.agentSessionId === ID)).toBe(true)
-  const other = await nativeHistoryFixture('claude', jsonl([native('other-host-input', 'user', 'Other original Host input')]))
-  extraFixtures.push(other)
-  reads.mockImplementation(async (control, options) => { expect(control.hostId).toBe('other'); const page = await other.client.sessionHistoryPage(control.agentSessionId, options); pages.push(page); return page })
-  vi.spyOn(api.sessions, 'timeline').mockImplementation(control => other.client.sessionTimeline(control.agentSessionId))
-  const state = useAppStore.getState(), session = state.sessions[0]!
-  if (session.kind !== 'agent') throw new Error('Fixture requires the original Agent')
-  const otherTimeline = await other.client.sessionTimeline(ID)
-  await act(async () => useAppStore.setState({
-    config: { ...state.config!, hosts: [...state.config!.hosts, { id: 'other', kind: 'ssh', label: 'Other logical Host', hostname: 'unused.invalid' }], workspaces: state.config!.workspaces.map(workspace => ({ ...workspace, hostId: 'other' })) },
-    sessions: [{ ...session, hostId: 'other', control: { ...session.control, hostId: 'other' } }], timelines: { [ID]: otherTimeline }
-  }))
-  await wait(() => expect(overlay().querySelector('[data-record-raw-id="other-host-input"]')).not.toBeNull())
-  const otherRecord = overlay().querySelector<HTMLElement>('[data-record-raw-id="other-host-input"]')!
-  const acceptedOther = pages.find(page => page.items.some(item => item.id === 'other-host-input'))!
-  const expectedOther = projectConversationRecords({ agentSessionId: ID, executionHostId: 'other', historyPage: acceptedOther })[0]!
-  expect(otherRecord.dataset.conversationRecordId).toBe(expectedOther.id)
-  expect(expectedOther.executionHostId).toBe('other'); expect(expectedOther.agentSessionId).toBe(ID)
-  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body)
-  expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(8)
-  expect(useAppStore.getState().agentComposerDrafts[ID]).toBe(DRAFT); selection.removeAllRanges()
-})

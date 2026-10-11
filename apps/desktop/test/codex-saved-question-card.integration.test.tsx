@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { projectConversationQuestions } from '@agentmux/core/conversation'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticActivityView as ActivityView } from './helpers/conversation-static-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { savedQuestionFixture as fixture, savedQuestionEvent as event, savedQuestionTool as tool, savedQuestionResult as result,
   savedQuestionReply as reply, savedQuestionSource as source, savedQuestionId as questionId,

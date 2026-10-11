@@ -9,7 +9,7 @@ import { promptReactionDefinitions, promptReactionMessage, PROMPT_REACTION_START
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationReactionActions } from '@agentmux/client-ui/components/ConversationReactionActions'
-import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { executeSettingsResourcesControl } from '../src/main/settings-resources-control'
 import { reactionPublicClientFixture } from './helpers/reaction-public-client-fixture'
