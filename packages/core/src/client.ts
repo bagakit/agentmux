@@ -1955,7 +1955,7 @@ export class AgentMuxClient {
 
   /** Current durable identities, without replacing the active registry or probing Runs. */
   async readAgentSessions(): Promise<AgentMuxAgentSession[]> {
-    const durable = await loadAgentSessionMetadata(this.store)
+    const durable = await Promise.all((await loadAgentSessionMetadata(this.store)).map(session => this.registry.readStartedResume(session)))
     // A prepared creation can have an actual started Run before its commit is acknowledged.
     // Expose that real projection as explicitly unconfirmed; durable identities always take precedence.
     return [...durable, ...this.registry.list().filter(session => session.creation?.persistence === 'unconfirmed' &&
@@ -4522,27 +4522,52 @@ export class AgentMuxClient {
     this.requireConnected()
     safeId(input.agentSessionId, 'Agent Session id')
     safeId(input.operationId, 'Agent continuity operation id')
-    const previous = this.agentContinuityTails.get(input.agentSessionId) ?? Promise.resolve()
-    let result!: AgentMuxAgentContinuityResult
-    const operation = previous.catch(() => {}).then(async () => {
-      result = await this.performAgentContinuity(input)
-    })
+    const result = await this.serializeAgentContinuity(input.agentSessionId, () => this.performAgentContinuity(input))
+    if (result.kind === 'resumed' || result.kind === 'reattachable') this.continuityInputs.track(this.registry.get(input.agentSessionId))
+    return result
+  }
+
+  private async serializeAgentContinuity<T>(agentSessionId: string, execute: () => Promise<T>): Promise<T> {
+    const previous = this.agentContinuityTails.get(agentSessionId) ?? Promise.resolve()
+    const operation = previous.catch(() => {}).then(execute)
     const tail = operation.then(() => {}, () => {})
-    this.agentContinuityTails.set(input.agentSessionId, tail)
-    try {
-      await operation
-      if (result.kind === 'resumed' || result.kind === 'reattachable') this.continuityInputs.track(this.registry.get(input.agentSessionId))
-      return result
-    } finally {
-      if (this.agentContinuityTails.get(input.agentSessionId) === tail) {
-        this.agentContinuityTails.delete(input.agentSessionId)
-      }
+    this.agentContinuityTails.set(agentSessionId, tail)
+    try { return await operation }
+    finally {
+      if (this.agentContinuityTails.get(agentSessionId) === tail) this.agentContinuityTails.delete(agentSessionId)
     }
   }
 
   async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxAgentSession> {
+    this.requireConnected()
     if (!input.prompt.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent resume prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
-    return await this.resumeAgentRun(input)
+    const lifecycleId = agentLifecycleOperationIdentity('resume', safeId(input.agentSessionId, 'Agent Session id'), safeId(input.operationId, 'Agent resume operation id'))
+    const requestDigest = agentCreationIntentDigest(input)
+    return await this.serializeAgentContinuity(input.agentSessionId, async () => {
+      const canonical = await this.store.readMetadata(input.agentSessionId)
+      if (!canonical || canonical.hostId !== 'local') throw new AgentMuxError('The original Session is unavailable on this Host.', 'UNKNOWN_AGENT_SESSION')
+      const reservation = await this.store.loadResumeCorrelation(input.agentSessionId, lifecycleId)
+      const prior = canonical.continuityOperations?.[input.operationId] ?? reservation?.preparedSession?.continuityOperations?.[input.operationId]
+      if (prior) {
+        if (prior.requestDigest !== requestDigest || !isDeepStrictEqual(prior.nativeTarget, canonical.nativeHandle)) throw new AgentMuxError(
+          'This original resume has another frozen request or native target. Its original Run and input are kept.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+        if (prior.errorCode) throw new AgentMuxError(prior.error ?? 'The original resume failed.', prior.errorCode)
+        if (prior.newRun && sameRun(prior.newRun, canonical.run) && prior.kind === 'resumed') {
+          await this.registry.refresh(input.agentSessionId)
+          const restored = prior.launchInput?.delivery === 'post-launch'
+            ? await this.settleContinuityPostLaunchInput(this.registry.get(input.agentSessionId), input.operationId) : this.registry.get(input.agentSessionId)
+          return this.projectSession(restored)
+        }
+        if (reservation?.preparedSession && sameRun(reservation.expectedRun, canonical.run)) {
+          const restored = await this.completePreparedResume(reservation, await this.kernel.list())
+          if (restored) return this.projectSession(restored)
+        }
+        throw new AgentMuxError('The original resume result is unconfirmed. Inspect the same operation; no Start or input was repeated.',
+          'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+      }
+      await this.registry.refresh(input.agentSessionId)
+      return await this.resumeAgentRun(input, canonical.run, undefined, undefined, requestDigest)
+    })
   }
 
   /** Explicitly continue an exact retired native conversation; reading history never calls this. */
@@ -4680,11 +4705,13 @@ export class AgentMuxClient {
     input: AgentMuxAgentResumeOperationInput,
     expectedRun?: AgentMuxRunRef,
     knownCapability?: AgentCapabilitySnapshot,
-    reopening?: AgentMuxAgentReopenInput
+    reopening?: AgentMuxAgentReopenInput,
+    directRequestDigest?: string
   ): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     const previous = reopening ? undefined : this.requireAgentSession(input.agentSessionId)
-    let continuity = previous?.continuity?.operationId === input.operationId ? structuredClone(previous.continuity) : undefined
+    let continuity = previous?.continuityOperations?.[input.operationId] ? structuredClone(previous.continuityOperations[input.operationId])
+      : previous?.continuity?.operationId === input.operationId ? structuredClone(previous.continuity) : undefined
     if (expectedRun && previous && !sameRun(previous.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before native resume.', 'STALE_AGENT_SESSION')
     }
@@ -4740,6 +4767,18 @@ export class AgentMuxClient {
       }
       if (oldRun?.state.type === 'running') {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
+      }
+      if (directRequestDigest) {
+        const now = Date.now()
+        continuity = { operationId: input.operationId, agentSessionId: current.agentSessionId, trigger: 'input',
+          policy: normalizeAgentContinuityPolicy(), previousRun: { ...current.run }, nativeTarget: structuredClone(current.nativeHandle),
+          admittedAt: now, observedAt: now, rechecks: 0, kind: 'starting', reason: 'explicit-request', requestDigest: directRequestDigest,
+          evidence: oldRun ? { kind: 'run-ended', state: oldRun.state.type as 'exited' | 'interrupted', observedAt: now } : { kind: 'run-missing', observedAt: now },
+          recoveryInputs: { reminder: '', continuation: '' } }
+        const directInput = prepareContinuityLaunchInput(continuity, this.providers.get(current.providerId).catalog,
+          lifecycleOperationId, { submissionId: `launch-prompt:${lifecycleOperationId}`, prompt: input.prompt ?? '',
+            ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }) })
+        if (directInput) continuity.launchInput = directInput
       }
       // Continuity already froze this configuration together with its capability probe.
       if (!knownCapability) input = await this.sessionExecutorOptions(current, input)
@@ -4806,9 +4845,10 @@ export class AgentMuxClient {
             evidence: { source: 'agentmux', run: { ...current.run }, observedAt: Date.now() } })
           return null
         }) : null
+      const launchEnvironment = this.agentEnvironment(plan.env, current.agentSessionId, current.providerId, current.executorId,
+        hookBinding, lifecycleOperationId, invocationCapability)
       if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {
-        if (continuity.launchInput) continuity.launchInput.launchPlan = { program: plan.command,
-          argsDigest: createHash('sha256').update(JSON.stringify(plan.args)).digest('base64url') }
+        if (continuity.launchInput) continuity.launchInput.launchPlan = this.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })
         reservation = await this.registry.prepareResume(reservation, { ...current, continuity,
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
@@ -4821,23 +4861,15 @@ export class AgentMuxClient {
         program: plan.command,
         args: plan.args,
         cwd: current.workspacePath,
-        env: this.agentEnvironment(
-          plan.env,
-          current.agentSessionId,
-          current.providerId,
-          current.executorId,
-          hookBinding,
-          lifecycleOperationId,
-          invocationCapability
-        ),
+        env: launchEnvironment,
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }).catch(error => {
-        if ((reopening || continuity?.operationId === input.operationId) && !(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
+        if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
           // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
           preserveUnconfirmedRun = true
           throw new AgentMuxError(`Continue start is unconfirmed. Read the original Session; no operation was resent. ${error instanceof Error ? error.message : String(error)}`,
-            'AGENT_REOPEN_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+            reopening ? 'AGENT_REOPEN_UNCONFIRMED' : 'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
         }
         throw error
       })
@@ -4919,6 +4951,13 @@ export class AgentMuxClient {
               // one clock tick or after a concurrent update of the failed binding.
               updatedAt: Math.max(Date.now(), failed.updatedAt + 1, next.updatedAt + 1)
               }
+              if (next.continuity) {
+                const failed = { ...next.continuity, kind: 'unavailable' as const, reason: 'process-exited',
+                  errorCode: failure instanceof AgentMuxError ? failure.code : 'AGENT_RESUME_FAILED',
+                  error: failure instanceof Error ? failure.message : String(failure) }
+                restored.continuity = failed
+                restored.continuityOperations = { ...previous.continuityOperations, [input.operationId]: failed }
+              }
               delete restored.nativePromptPredecessor
               return restored
             })
@@ -4943,8 +4982,7 @@ export class AgentMuxClient {
         readySession = await this.ensureTerminalHandshakeOrDegrade(
           retirement ? this.registry.get(current.agentSessionId) : readySession, run)
       } catch (error) {
-        if (!(error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED) &&
-          (persisted || reopening || continuity?.operationId === input.operationId)) {
+        if (!(error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED)) {
           const recoveredCommit = !persisted
           if (!persisted) {
             try {
@@ -4987,11 +5025,24 @@ export class AgentMuxClient {
               message: `The original conversation continued on Run ${run.runId}, but its Hook or terminal observation is unconfirmed. Keep this Run and refresh its observation. ${observationError instanceof Error ? observationError.message : String(observationError)}`,
               evidence: { source: 'agentmux', run: { ...next.run }, observedAt: Date.now() } })
           } else {
-            const failures: unknown[] = [error]
-            try { await hookBinding.close(); await this.retireUncommittedRun(run.runId); abandonedRun = runRef(run.runId) }
-            catch (cleanupError) { preserveUnconfirmedRun = true; failures.push(cleanupError) }
-            if (failures.length > 1) throw new AggregateError(failures, 'Continue preparation and cleanup are unconfirmed. Retained history is kept.')
-            throw error
+            preserveUnconfirmedRun = true
+            this.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+            if (reservation.kind !== 'resume') throw error
+            if (next.continuity) {
+              next.continuity = { ...next.continuity, reason: 'operation-unconfirmed',
+                error: `The original resume commit is unconfirmed. Keep its Run and inspect the same operation. ${error instanceof Error ? error.message : String(error)}` }
+              next.continuityOperations = { ...next.continuityOperations, [input.operationId]: next.continuity }
+            }
+            readySession = await this.registry.rememberStartedResume(reservation, next)
+            await this.restoreReopenObservation(readySession, run, lifecycleOperationId)
+            hookBound = this.hookBindings.has(run.runId)
+            try { readySession = await this.ensureTerminalHandshakeOrDegrade(readySession, run) }
+            catch (observationError) {
+              if (observationError instanceof AgentMuxError && observationError.code === AGENT_TERMINAL_HANDSHAKE_FAILED) throw observationError
+            }
+            this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
+              code: 'AGENT_RESUME_UNCONFIRMED', message: next.continuity?.error ?? 'The original resume commit is unconfirmed.',
+              evidence: { source: 'agentmux', run: { ...next.run }, observedAt: Date.now() } })
           }
         } else {
           await rollbackFailedResume(error)
@@ -5003,6 +5054,7 @@ export class AgentMuxClient {
       this.queueNativeIdentityCapture(readySession, input)
       this.publishSession(readySession)
       await this.publishCurrentRunState(readySession)
+      if (preserveUnconfirmedRun) return this.projectSession(readySession)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
       let promptConfirmed = await this.deliverPostLaunchPrompt(
@@ -5068,9 +5120,10 @@ export class AgentMuxClient {
     if (run.runId === reservation.expectedRun.runId || run.workspacePath !== prepared.workspacePath) {
       throw new AgentMuxError('Original resume Run does not match the prepared target.', 'AGENT_SESSION_RUN_MISMATCH')
     }
+    const observedAt = Date.now()
     const next: AgentMuxStoredAgentSession = { ...prepared, run: runRef(run.runId),
-      retiredRuns: [...prepared.retiredRuns, prepared.run], updatedAt: Math.max(Date.now(), prepared.updatedAt + 1),
-      nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt: Date.now() } }
+      retiredRuns: [...prepared.retiredRuns, prepared.run], updatedAt: Math.max(observedAt, prepared.updatedAt + 1),
+      nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt } }
     for (const key of ['observedNativeHandle', 'nativeSourceObservation', 'nativePromptPredecessor', 'hookReceipt', 'terminalHandshake',
       'terminalCapability', 'terminalPromptReadiness', 'promptCompletionAdmission', 'terminalPromptSubmission', 'terminalPromptDelivery',
       'terminalOutputChannel', 'semanticStatus', 'pendingInteraction'] as const) delete next[key]
@@ -5094,7 +5147,20 @@ export class AgentMuxClient {
       await this.registry.load('local')
     }
     await this.restoreReopenObservation(this.registry.get(next.agentSessionId), run, reservation.operationId)
-    const restored = this.registry.get(next.agentSessionId)
+    let restored = this.registry.get(next.agentSessionId)
+    try { restored = await this.ensureTerminalHandshakeOrDegrade(restored, run) }
+    catch (error) {
+      if (error instanceof AgentMuxError && error.code === AGENT_TERMINAL_HANDSHAKE_FAILED && restored.continuity) {
+        const operationId = restored.continuity.operationId
+        restored = await this.updateExactAgentSession(restored.agentSessionId, restored.run, value => {
+          const failed = { ...value.continuityOperations![operationId]!, kind: 'unavailable' as const, reason: 'process-exited', errorCode: error.code, error: error.message }
+          return { ...value, continuity: failed, continuityOperations: { ...value.continuityOperations, [operationId]: failed } }
+        })
+        this.publishSession(restored)
+        await this.publishCurrentRunState(restored)
+      }
+      throw error
+    }
     const carried = prepared.continuity && restored.continuityOperations?.[prepared.continuity.operationId]?.launchInput
     if (carried?.delivery === 'post-launch' && prepared.continuity) return await this.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)
     if (carried?.delivery === 'launch' && carried.state === 'launch-carried') {

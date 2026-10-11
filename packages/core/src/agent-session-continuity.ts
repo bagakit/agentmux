@@ -137,6 +137,10 @@ export type AgentMuxContinuityOperation = {
   evidence: AgentMuxAgentContinuityRunEvidence | { kind: 'unknown-session' } | { kind: 'agent-session-store' } | { kind: 'hook-ingress-owner' } | { kind: 'user-retired'; observedAt: number }
   nextActionAt?: number
   error?: string
+  /** Immutable explicit resume request; independent of its resolved Provider launch plan. */
+  requestDigest?: string
+  /** Original typed fatal result; text is diagnostic content, never a classifier. */
+  errorCode?: string
   /** New inputs, independent of old drafts and unknown earlier input; actual delivery has its own owner. */
   recoveryInputs?: { reminder: string; continuation: string }
   previousInput?: AgentMuxContinuityPreviousInput
@@ -174,6 +178,8 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     ![op.admittedAt, op.observedAt, op.rechecks, ...(op.nextActionAt === undefined ? [] : [op.nextActionAt])].every(value => Number.isSafeInteger(value) && value >= 0) ||
     !op.evidence || typeof op.evidence.kind !== 'string' || op.newRun && typeof op.newRun.runId !== 'string' ||
     op.nativeTarget && (op.nativeTarget.kind !== 'provider' || typeof op.nativeTarget.providerId !== 'string' || typeof op.nativeTarget.sessionId !== 'string') ||
+    op.requestDigest !== undefined && (typeof op.requestDigest !== 'string' || !op.requestDigest) ||
+    op.errorCode !== undefined && (typeof op.errorCode !== 'string' || !op.errorCode) ||
     op.recoveryInputs && (typeof op.recoveryInputs.reminder !== 'string' || typeof op.recoveryInputs.continuation !== 'string')) throw new TypeError('Invalid continuity operation.')
   if (op.launchInput) {
     const launched = normalizeAgentContinuityLaunchInput(op.launchInput)

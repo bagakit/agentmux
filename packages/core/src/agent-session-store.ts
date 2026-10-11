@@ -1866,6 +1866,11 @@ function assertReservationPrecondition(
   if (current.run.runId !== reservation.expectedRun?.runId) {
     throw new AgentMuxError('Agent Session changed before lifecycle reservation.', 'STALE_AGENT_SESSION')
   }
+  if (reservation.kind === 'resume' && reservation.preparedSession &&
+    ['hostId', 'providerId', 'executorId', 'workspacePath', 'nativeHandle', 'launchOptions'].some(key =>
+      !isDeepStrictEqual(current[key as keyof AgentMuxStoredAgentSession], reservation.preparedSession![key as keyof AgentMuxStoredAgentSession]))) {
+    throw new AgentMuxError('The original prepared resume target changed.', 'STALE_AGENT_SESSION')
+  }
 }
 
 function assertPreparedReopen(retirement: AgentMuxRetiredAgentSession, session: AgentMuxStoredAgentSession): void {
@@ -1995,6 +2000,17 @@ function assertLifecycleCommit(
       }
     }
     return
+  }
+  if (reservation.kind === 'resume' && reservation.preparedSession) {
+    const prepared = reservation.preparedSession, original = prepared.continuity, operation = next.continuity
+    if (['hostId', 'providerId', 'executorId', 'workspacePath', 'nativeHandle', 'hookBindingId', 'hookToken', 'capabilityHash'].some(
+      key => !isDeepStrictEqual(next[key as keyof AgentMuxStoredAgentSession], prepared[key as keyof AgentMuxStoredAgentSession])) ||
+      original && (!operation || operation.operationId !== original.operationId || operation.requestDigest !== original.requestDigest ||
+        !isDeepStrictEqual(operation.previousRun, original.previousRun) || !isDeepStrictEqual(operation.nativeTarget, original.nativeTarget) ||
+        original.launchInput && ['input', 'prompt', 'message', 'digest', 'delivery', 'lifecycleOperationId', 'launchPlan'].some(
+          key => !isDeepStrictEqual(operation.launchInput?.[key as keyof NonNullable<typeof operation.launchInput>], original.launchInput![key as keyof NonNullable<typeof original.launchInput>])))) {
+      throw new AgentMuxError('Resume commit changed its original prepared identity or input.', 'INVALID_AGENT_SESSION_STORE')
+    }
   }
   if (reservation.kind === 'create') return
   if (
