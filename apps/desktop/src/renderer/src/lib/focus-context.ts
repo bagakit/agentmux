@@ -130,13 +130,35 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
     : unknown ? 'Idle / Unknown' : 'Idle / Recovery'
   return { label, detail: `Idle ${idle} · Activity unknown ${unknown} · Recovery ${recovery}` }
 }
-/** Read-only Agent facts shared by Focus and the scoped Space directory. No eligibility policy or IO. */
-export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
-  const state = session.status.state, items = timeline?.items ?? []
+type FocusConversationFacts = {
+  revision: number | undefined; sourceHostId: string | undefined; agentSessionId: string | undefined; streamEpoch: string | undefined
+  recap: LauncherRecap | null
+  latest: { detail: string; text: string; currentResult: boolean; matchesRecap: boolean } | null
+}
+function sameConversationFacts(facts: FocusConversationFacts, timeline: AgentTimelineSnapshot | undefined): boolean {
+  return facts.revision === timeline?.revision && facts.sourceHostId === timeline?.sourceHostId && facts.agentSessionId === timeline?.agentSessionId && facts.streamEpoch === timeline?.stream?.epoch
+}
+function focusConversationFacts(timeline: AgentTimelineSnapshot | undefined, previous?: { timeline: AgentTimelineSnapshot | undefined; conversation: FocusConversationFacts | undefined }): FocusConversationFacts {
+  if (previous?.conversation && previous.timeline === timeline && sameConversationFacts(previous.conversation, timeline)) return previous.conversation
+  const items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
   const records = timeline ? projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline }) : []
   const latestRecord = records.filter(record => record.role === 'message' || record.role === 'observation').at(-1)
-  const result = (latestRecord?.role === 'observation' || latestRecord?.role === 'message' && latestRecord.author?.kind === 'agent') && latestRecord.rawId === latest?.id && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim() ? latestRecord : null
+  const recap = items.length ? launcherTimelineRecap(records) : null
+  const text = latestRecord?.content ? clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140) : ''
+  const label = latestRecord?.role === 'observation' ? COLLECTED_REPLY_TITLE : latestRecord?.author?.kind === 'agent' ? 'Response' : 'Prompt'
+  return { revision: timeline?.revision, sourceHostId: timeline?.sourceHostId, agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch, recap,
+    latest: latestRecord?.content ? { detail: `${label} · ${text}`, text,
+      currentResult: Boolean((latestRecord.role === 'observation' || latestRecord.role === 'message' && latestRecord.author?.kind === 'agent') && latestRecord.rawId === latest?.id && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim()),
+      matchesRecap: Boolean(recap && latestRecord.content.trim() && (recap.source === 'Last reply observation' ? latestRecord.role === 'observation' : latestRecord.role === 'message' && (recap.source === 'Last assistant message') === (latestRecord.author?.kind === 'agent'))) } : null }
+}
+/** Read-only Agent facts shared by Focus and the scoped Space directory. No eligibility policy or IO. */
+export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
+  return agentContextWithConversation(session, timeline, userName, workspace, topicId, focusConversationFacts(timeline))
+}
+function agentContextWithConversation(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null, conversation: FocusConversationFacts): FocusContext {
+  const state = session.status.state, items = timeline?.items ?? [], { recap, latest } = conversation
+  const result = latest?.currentResult
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
   const now = Date.now()
   const bucket = focusBucketForSession(session, Boolean(result), now)
@@ -153,7 +175,6 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, activityEntryTime(session), now)
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
-  const recap = items.length ? launcherTimelineRecap(records) : null
   let detail = 'No activity details observed', detailIsMessage = false
   let detailKind: FocusContext['detailKind'] = pending || bucket === 'attention' || state === 'disconnected' || state === 'exited' ? 'service' : 'activity'
   if (bucket === 'idle' && (session.runUnobserved || session.processState === 'interrupted')) {
@@ -172,17 +193,15 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
       ? 'Run is alive · Connection status unknown' : session.processState === 'interrupted'
         ? 'Run interrupted · Cause unknown' : 'Process exited · Cause unknown'
   } else if (result && (bucket === 'results' || bucket === 'idle' && state === 'running')) {
-    const response = clampStep(result.content!.replace(/\s+/g, ' ').trim(), 'head', 140)
-    detail = state === 'running' ? `${result.role === 'observation' ? COLLECTED_REPLY_TITLE : 'Response'} · ${response}` : response
+    detail = state === 'running' ? latest.detail : latest.text
     detailIsMessage = true
     detailKind = 'message'
   }
   else {
     const activity = sessionRecentActivity(session, items, session.workspacePath)
     if (activity !== state) detail = activity
-    else if (session.kind === 'agent' && latestRecord?.content) {
-      const label = latestRecord.role === 'observation' ? COLLECTED_REPLY_TITLE : latestRecord.author?.kind === 'agent' ? 'Response' : 'Prompt'
-      detail = `${label} · ${clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140)}`
+    else if (session.kind === 'agent' && latest) {
+      detail = latest.detail
       detailIsMessage = true
       detailKind = 'message'
     } else if (state === 'running') detail = session.kind === 'agent' ? 'Run is alive · No current work signal' : 'Terminal context · No task signal'
@@ -190,7 +209,7 @@ export function agentContextForSession(session: SessionSnapshot, timeline: Agent
   }
   // The latest non-lifecycle record can only be the recap's record if its kind matches
   // the helper's chosen kind and it is nonempty. A newer prompt is a different fact.
-  const detailIsRecap = Boolean(detailIsMessage && recap && latestRecord?.content.trim() && (recap.source === 'Last reply observation' ? latestRecord.role === 'observation' : latestRecord.role === 'message' && (recap.source === 'Last assistant message') === (latestRecord.author?.kind === 'agent')))
+  const detailIsRecap = Boolean(detailIsMessage && latest?.matchesRecap)
   const displayState = bucket === 'working' && activitySemantic === 'active' ? 'working'
     : state === 'working' && activitySemantic !== 'active' || bucket === 'idle' && activitySemantic === 'idle' && session.kind === 'agent' && session.currentActivity
       ? 'running' : state
@@ -219,7 +238,7 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
 }
 /** Stable presentation for a caller-owned workspace membership; no Focus lane policy or IO. */
 export function createWorkspaceAgentContextsSelector() {
-  const cache = new Map<string, { session: SessionSnapshot; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; semantic: AgentObservation['semantic'] | undefined; model: FocusContext }>()
+  const cache = new Map<string, { session: SessionSnapshot; timeline: AgentTimelineSnapshot | undefined; conversation: FocusConversationFacts; name: string | undefined; semantic: AgentObservation['semantic'] | undefined; model: FocusContext }>()
   let result: FocusContext[] = []
   return (sessions: readonly SessionSnapshot[], timelines: Record<string, AgentTimelineSnapshot | undefined>, names: Record<string, string | undefined>, workspace: WorkspaceRecord, topics: readonly ScratchTopicSnapshot[] | null): FocusContext[] => {
     const retained = new Set<string>(), now = Date.now()
@@ -229,9 +248,10 @@ export function createWorkspaceAgentContextsSelector() {
       const timeline = timelines[session.id], name = names[session.id]
       const semantic = session.kind === 'agent' ? observeAgentSession(session, now).semantic : undefined
       const topicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
-      if (old && old.semantic === semantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && old.name === name && old.model.workspace === workspace && old.model.topicId === topicId) return old.model
-      const model = agentContextForSession(session, timeline, name, workspace, topicId)
-      cache.set(key, { session, timeline, name, semantic, model })
+      if (old && old.semantic === semantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && sameConversationFacts(old.conversation, timeline) && old.name === name && old.model.workspace === workspace && old.model.topicId === topicId) return old.model
+      const conversation = focusConversationFacts(timeline, old)
+      const model = agentContextWithConversation(session, timeline, name, workspace, topicId, conversation)
+      cache.set(key, { session, timeline, conversation, name, semantic, model })
       return model
     })
     for (const key of cache.keys()) if (!retained.has(key)) cache.delete(key)
@@ -248,7 +268,7 @@ function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
 /** One existing per-surface cache owns execution rows and the separate PMO attention projection. */
 function createFocusProjectionCache() {
   let groupSequence = 0
-  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
+  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
   let previous: Inputs | undefined
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
   const select = (input: Inputs, active = true): FocusProjection => {
@@ -265,7 +285,7 @@ function createFocusProjectionCache() {
       retained.add(session.id)
       const activitySemantic = observeAgentSession(session, now).semantic
       const timeline = input.timelines[session.id], name = input.agentNames[session.id], old = cache.get(session.id)
-      if (old && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
+      if (old && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (!old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
         else if (old.lane === 'pmo' && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
         continue
@@ -275,11 +295,13 @@ function createFocusProjectionCache() {
       let group: { key: string; enteredAt: number | null; sequence: number } | null = null
       let model: FocusContext | null = null
       let laneModel: FocusContext | null = null
+      let conversation: FocusConversationFacts | undefined
       const lane = focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace))
       if (lane === 'pmo') {
         if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
       } else {
-        const next = agentContextForSession(session, timeline, name, workspace, topicId)
+        conversation = focusConversationFacts(timeline, old)
+        const next = agentContextWithConversation(session, timeline, name, workspace, topicId, conversation)
         if (lane === null) {
           next.detail = 'Mote identity is not confirmed · ' + next.detail
           next.detailIsRecap = false
@@ -293,12 +315,12 @@ function createFocusProjectionCache() {
         group = old?.group?.key === groupKey ? old.group : {
           key: groupKey, enteredAt: old ? now : initialEntry, sequence: groupSequence++
         }
-        model = old?.model && Object.keys(next).every(key => next[key as keyof FocusContext] === old.model![key as keyof FocusContext]) ? old.model : next
+        model = old?.model && Object.keys(next).length === Object.keys(old.model).length && Object.keys(next).every(key => next[key as keyof FocusContext] === old.model![key as keyof FocusContext]) ? old.model : next
         rows.push(model)
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
         laneRows.push(laneModel)
       }
-      cache.set(session.id, { group, session, activitySemantic, timeline, name, config: input.config, workspace, topicId, lane, model, laneModel })
+      cache.set(session.id, { group, session, activitySemantic, timeline, conversation, name, config: input.config, workspace, topicId, lane, model, laneModel })
     }
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
     // Only Focus card order changes. Lane facts keep their original input order and priorities.
