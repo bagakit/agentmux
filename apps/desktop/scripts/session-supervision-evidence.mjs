@@ -10,7 +10,9 @@ const definitions = {
   T001: { name: 'session-continuity-supervision', schema: 'agentmux.session-continuity-supervision-proof.v1', minimum: 37, mutants: 10 },
   T002: { name: 'session-continuity-control', schema: 'agentmux.session-continuity-control-proof.v1', minimum: 23, mutants: 11 },
   T003: { name: 'resume-context-observation', schema: 'agentmux.resume-context-observation-proof.v1', minimum: 33, mutants: 18 },
-  T006: { name: 'session-continuity-executor', schema: 'agentmux.session-continuity-executor-proof.v1', minimum: 16, mutants: 10 },
+  T006: { name: 'session-continuity-executor', schema: 'agentmux.session-continuity-executor-proof.v1', minimum: 16, mutants: 10,
+    consumerNames: ['sdk-no-owner', 'sdk-unrelated-owner', 'independent-core', 'initial-runtime-unknown', 'delay-restart',
+      'host-current-missing', 'host-current-malformed', 'unknown-sdk-missing', 'unknown-sdk-malformed', 'damaged-private-healthy-native', 'unknown-start', 'public-cli-hosted'] },
   T007: { name: 'initial-continuity-cancellation', schema: 'agentmux.initial-continuity-cancellation-proof.v1', minimum: 8, mutants: 6 }
 }
 
@@ -43,7 +45,20 @@ export async function readSupervisionCoreOwner(root, task, receiptFile) {
         'Original mutation failure identities and business assertions must match their raw report')
     }
   }
-  return { task, receipt: file, sha256: hash(bytes), sourceInputs, baselineCases: [...cases], loadedCounterexamples: mutations.length }
+  const consumerEvidence = []
+  if (definition.consumerNames) {
+    assert.ok(Array.isArray(receipt.consumerEvidence), 'Original executor consumer evidence is missing')
+    assert.deepEqual(receipt.consumerEvidence.map(one => one.name).sort(), [...definition.consumerNames].sort())
+    for (const entry of receipt.consumerEvidence) {
+      const original = await readFile(path.resolve(root, entry.path)), proof = JSON.parse(original)
+      assert.equal(hash(original), entry.sha256, 'Original executor consumer bytes changed')
+      assert.equal(proof.schema, 'agentmux.continuity-executor-consumer.v1'); assert.equal(proof.name, entry.name)
+      assert.equal(proof.userRuntimeTouched, false); assert.ok(proof.facts && Object.keys(proof.facts).length > 0)
+      consumerEvidence.push(entry)
+    }
+  }
+  return { task, receipt: file, sha256: hash(bytes), sourceInputs, baselineCases: [...cases], loadedCounterexamples: mutations.length,
+    ...(consumerEvidence.length ? { consumerEvidence } : {}) }
 }
 
 /** Main wire and full Store/UI producers retain their own loaded-source witness format. */
