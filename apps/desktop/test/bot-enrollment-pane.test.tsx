@@ -126,7 +126,7 @@ it('a delayed original list cannot regress the same setup after its real configu
     await act(async () => { release(); await gate })
     expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull()
     expect(dom.container.querySelector('[data-enrollment-code]')).toBeNull()
-    expect(dom.container.querySelector('.connector-diagnostics')?.textContent).toContain(String(saved.revision))
+    expect(dom.container.querySelector('.connector-enrollment > .connector-diagnostics')?.textContent).toContain(String(saved.revision))
     expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.poll).toHaveBeenCalledTimes(1)
   } finally { release() }
 })
