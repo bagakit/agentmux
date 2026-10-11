@@ -15,3 +15,14 @@
 .session-recovery-dialog .session-recovery-dialog__hint { font-size: var(--fs-meta); color: var(--text-3); line-height: 1.5; }
 .session-recovery-dialog footer { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-6); }
 .dialog-surface footer .session-recovery-dialog__confirm { background: var(--surface-3); color: var(--text); }
+
+.continuity-supervision { flex: 0 0 auto; min-width: 0; }
+.continuity-supervision__record { margin: var(--sp-3); color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; overflow-wrap: anywhere; }
+.continuity-supervision__record p { margin: var(--sp-3) 0; }
+.continuity-supervision__record dl { margin: var(--sp-3) 0; }
+.continuity-supervision__record dt { color: var(--text-3); font-size: var(--fs-meta); }
+.continuity-supervision__record dd { margin: 0 0 var(--sp-3); user-select: text; }
+.continuity-supervision__record pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.continuity-supervision__actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.continuity-supervision__actions label { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); font-size: var(--fs-meta); }
+.continuity-supervision__actions input { width: 54px; min-height: 28px; padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-2); font: inherit; }

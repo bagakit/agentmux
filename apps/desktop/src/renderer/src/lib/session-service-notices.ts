@@ -1,4 +1,5 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { continuitySupervisionPresentation } from './continuity-supervision'
 import type { AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queue-drain'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
@@ -37,7 +38,15 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
       cause: nativeSessionServiceCause(session, nativeService), notice })
   }
   if (session?.kind !== 'agent') return notices
-  for (const operation of Object.values(session.continuityOperations ?? {})) {
+  const recovery = continuitySupervisionPresentation(session)
+  if (recovery) notices.push({ id: 'continuity-supervision', occurrence: recovery.root.operationId,
+    cause: JSON.stringify([recovery.supervision.phase, recovery.supervision.activeAttemptOperationId, recovery.supervision.attemptCount,
+      recovery.supervision.attemptLimit, recovery.supervision.nextAttemptAt, recovery.supervision.observationError]),
+    observedAt: recovery.supervision.observedAt, notice: { kind: 'indeterminate', notice: {
+      step: recovery.title, mode: `${recovery.processDetail} ${recovery.detail} ${recovery.failure ?? ''}`,
+      restore: `${recovery.originalInput} ${recovery.initialInput} ${recovery.childInput ?? ''} Open the original Session recovery notice to re-read or control this exact intent.`
+    } } })
+  for (const operation of recovery ? [recovery.root] : Object.values(session.continuityOperations ?? {})) {
     const delivery = operation.recoveryDelivery
     if (delivery && delivery.key.expectedRun.runId === session.control.run.runId &&
       !['accepted', 'superseded'].includes(delivery.phase)) notices.push({
