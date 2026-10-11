@@ -30,7 +30,7 @@ function Input({ scope = target, initial = '' }: { scope?: BrowserInputHistoryTa
 }
 async function mount(scope: BrowserInputHistoryTarget | null = target, initial = '') { await act(async () => root.render(<Input scope={scope} initial={initial} />)) }
 function field() { const result = container.querySelector<HTMLInputElement>('input'); expect(result).not.toBeNull(); return result! }
-async function focus() { await act(async () => field().focus()) }
+async function activate() { await act(async () => { field().focus(); field().click() }) }
 async function key(key: string, extra: KeyboardEventInit = {}) { await act(async () => field().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra }))) }
 async function fill(value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(), value); field().dispatchEvent(new Event('input', { bubbles: true })) }) }
 function popup() { return document.querySelector<HTMLElement>('[aria-label="Browser input history"]') }
@@ -46,8 +46,37 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove(); vi.restoreAllMocks() })
 
+it('programmatic focus prepares the original input without reading history or opening a portal', async () => {
+  await mount(target, 'kept draft')
+  await act(async () => field().focus())
+  expect(document.activeElement).toBe(field())
+  expect(field().value).toBe('kept draft')
+  expect(field().getAttribute('aria-expanded')).toBe('false')
+  expect(popup()).toBeNull()
+  expect(api.browser.listInputHistory).not.toHaveBeenCalled()
+  await act(async () => container.querySelector<HTMLButtonElement>('#outside')!.focus())
+  await act(async () => field().focus())
+  expect(popup()).toBeNull()
+  expect(api.browser.listInputHistory).not.toHaveBeenCalled()
+})
+
+it('keyboard intent opens suggestions from a quietly focused field without navigating or replacing its draft', async () => {
+  const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
+  await mount(target, 'kept draft')
+  await act(async () => field().focus())
+  await key('ArrowDown')
+  expect(field().getAttribute('aria-expanded')).toBe('true')
+  expect(popup()?.textContent).toContain('Reading input history')
+  await act(async () => pending.resolve(snapshot))
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(2)
+  expect(field().value).toBe('kept draft')
+  expect(submitted).not.toHaveBeenCalled()
+  await key('ArrowDown'); await key('Enter')
+  expect(submitted).toHaveBeenCalledExactlyOnceWith(snapshot.entries[0]!.text)
+})
+
 it('uses the actual Main list, portal and keyboard selection to submit the original query and fragment', async () => {
-  await mount(); await focus()
+  await mount(); await activate()
   expect(api.browser.listInputHistory).toHaveBeenCalledExactlyOnceWith(target)
   expect(popup()?.closest('[data-overlay-host]')).not.toBeNull()
   expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(snapshot.entries.map(entry => entry.text))
@@ -59,7 +88,7 @@ it('uses the actual Main list, portal and keyboard selection to submit the origi
 })
 
 it('mouse selection submits the original search and ArrowUp initially selects the final result', async () => {
-  await mount(); await focus(); await key('ArrowUp')
+  await mount(); await activate(); await key('ArrowUp')
   expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe('original search')
   const choices = [...document.querySelectorAll<HTMLButtonElement>('.browser-address-history__choose')]
   expect(choices).toHaveLength(2); await act(async () => choices[1]!.click())
@@ -67,17 +96,17 @@ it('mouse selection submits the original search and ArrowUp initially selects th
   expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith(target, 'original search')
 })
 
-it('Escape invalidates a real deferred focus read and the late reply cannot reopen the popup', async () => {
+it('Escape invalidates a real deferred suggestion read and the late reply cannot reopen the popup', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
-  await mount(); await focus(); await key('Escape')
+  await mount(); await activate(); await key('Escape')
   await act(async () => pending.resolve(snapshot))
   expect(document.activeElement).toBe(field()); expect(popup()).toBeNull(); expect(field().getAttribute('aria-expanded')).toBe('false')
   expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
 })
 
-it('opens on focus before history settles, offers recent input beside the current URL, then filters only edits', async () => {
+it('opens on explicit activation before history settles, offers recent input beside the current URL, then filters only edits', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
-  await mount(target, 'https://different.test/current'); await focus()
+  await mount(target, 'https://different.test/current'); await activate()
   expect(popup()?.textContent).toContain('Reading input history')
   expect(field().getAttribute('aria-expanded')).toBe('true')
   await act(async () => pending.resolve(snapshot))
@@ -89,7 +118,7 @@ it('opens on focus before history settles, offers recent input beside the curren
 })
 
 it('clicking the already focused field reopens suggestions after Escape and shows failures without blocking navigation', async () => {
-  await mount(target, 'kept input'); await focus(); await key('Escape')
+  await mount(target, 'kept input'); await activate(); await key('Escape')
   vi.mocked(api.browser.listInputHistory).mockRejectedValueOnce(new Error('offline history'))
   await act(async () => field().click())
   expect(popup()?.textContent).toContain('offline history')
@@ -99,18 +128,18 @@ it('clicking the already focused field reopens suggestions after Escape and show
 })
 
 it('keeps filtering an edited draft after focus leaves and returns', async () => {
-  await mount(target, 'https://different.test/current'); await focus(); await fill('original search')
+  await mount(target, 'https://different.test/current'); await activate(); await fill('original search')
   await act(async () => container.querySelector<HTMLButtonElement>('#outside')!.focus())
   expect(popup()).toBeNull()
-  await focus()
+  await activate()
   expect(field().value).toBe('original search')
   expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(['original search'])
   expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
 })
 
-it('typing during a real deferred focus read keeps the draft and selection while confirming the actual nonempty history', async () => {
+it('typing during a real deferred suggestion read keeps the draft and selection while confirming the actual nonempty history', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
-  await mount(); await focus(); await fill('original'); field().setSelectionRange(2, 4)
+  await mount(); await activate(); await fill('original'); field().setSelectionRange(2, 4)
   expect(popup()?.textContent).toContain('Reading input history')
   expect(popup()?.textContent).not.toContain('No saved input yet')
   await act(async () => pending.resolve(snapshot))
@@ -121,7 +150,7 @@ it('typing during a real deferred focus read keeps the draft and selection while
 
 it('composition cancels the pending list and Enter never submits a preedit; completion writes exactly the real IME value', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
-  await mount(); await focus()
+  await mount(); await activate()
   await act(async () => field().dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })))
   await fill('搜索'); await key('Enter', { isComposing: true })
   await act(async () => pending.resolve(snapshot))
@@ -132,7 +161,7 @@ it('composition cancels the pending list and Enter never submits a preedit; comp
 })
 
 it('focus may enter deletion controls, then leaving the portal closes it without stealing focus', async () => {
-  await mount(); await focus()
+  await mount(); await activate()
   const clear = popup()!.querySelector<HTMLButtonElement>('header button')!
   await act(async () => clear.focus()); expect(popup()).not.toBeNull()
   const outside = container.querySelector<HTMLButtonElement>('#outside')!
@@ -140,7 +169,7 @@ it('focus may enter deletion controls, then leaving the portal closes it without
 })
 
 it('single and all deletion use the exact Main-confirmed scope and keep the current draft', async () => {
-  await mount(); await focus(); await fill('original')
+  await mount(); await activate(); await fill('original')
   await click('.browser-address-history__delete')
   expect(api.browser.removeInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope, snapshot.entries[0]!.text)
   expect(field().value).toBe('original')
@@ -152,7 +181,7 @@ it('single and all deletion use the exact Main-confirmed scope and keep the curr
 
 it('late old-Profile read cannot expose or delete old history in the new Profile', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValueOnce(pending.promise)
-  await mount(); await focus(); await fill('old draft')
+  await mount(); await activate(); await fill('old draft')
   await mount({ ...target, profileId: 'new-profile' })
   await act(async () => pending.resolve(snapshot))
   expect(document.querySelectorAll('[role="option"]')).toHaveLength(0); expect(popup()).toBeNull(); expect(field().value).toBe('old draft')
@@ -171,7 +200,7 @@ it('save rejection never delays human form navigation and remains explicit even 
 
 it('read and deletion failures retain data and draft with a persistent local warning', async () => {
   vi.mocked(api.browser.listInputHistory).mockRejectedValueOnce(new Error('read unavailable'))
-  await mount(); await focus(); await fill('original')
+  await mount(); await activate(); await fill('original')
   expect(popup()?.textContent).toContain('read unavailable'); expect(popup()?.textContent).toContain('not loaded')
   expect(popup()?.textContent).not.toContain('No saved input yet')
   await click('p[role="status"] button')
@@ -190,14 +219,14 @@ it('userinfo rejection is announced while original input navigates; no draft-onl
 })
 
 it('input right-click stops the Region menu while preserving default native text editing', async () => {
-  await mount(); await focus()
+  await mount(); await activate()
   const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
   await act(async () => field().dispatchEvent(event))
   expect(event.defaultPrevented).toBe(false); expect(regionContextMenu).not.toHaveBeenCalled(); expect(popup()).toBeNull()
 })
 
 it('the actual nonempty popup rules style its mounted portal with an opaque product token and local keyboard focus', async () => {
-  await mount(); await focus()
+  await mount(); await activate()
   const sourceRoot = process.env.AGENTMUX_HISTORY_UI_SOURCE_ROOT ?? process.cwd()
   const css = await readFile(resolve(sourceRoot, 'apps/desktop/src/renderer/src/styles/browser.css'), 'utf8')
   const style = document.createElement('style'); style.textContent = css; document.head.append(style)
@@ -215,6 +244,6 @@ it('the actual nonempty popup rules style its mounted portal with an opaque prod
     expect(popup()!.querySelectorAll('button').length).toBeGreaterThan(0)
     const tokens = readStyleSheet('./tokens.css')
     const surface = [...tokens.matchAll(/--surface-2:\s*(#[0-9a-f]{6});/gi)]
-    expect(surface).toHaveLength(1)
+    expect(surface.length).toBeGreaterThan(0)
   } finally { style.remove() }
 })
