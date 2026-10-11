@@ -20,7 +20,7 @@ it.each([['options', ['Keep the original work', 'Review the direction']], ['text
   expect(page.items[0]).toMatchObject({ id: 'original-tool-record', kind: 'activity', contentParts: [{ kind: 'tool-call', name: 'request_user_input_async' }] })
   expect(page.items[2]).toMatchObject({ id: 'original-tool-result', kind: 'activity', contentParts: [{ kind: 'tool-result', output: '{"accepted":true}' }] })
   expect(page.items[1]).toEqual({ id: f.recordId(1), kind: 'assistant-message', turnId: turn, startedAt: questionAt,
-    messagePhase: 'final', contentParts: [{ kind: 'text', text: prompt }], questionRequest: { delivery: 'async', questions: [
+    messagePhase: 'final', contentParts: [{ kind: 'text', text: prompt, contentEligibility: 'public' }], questionRequest: { delivery: 'async', questions: [
       { id: questionId, prompt, options: (options ?? []).map((label, n) => ({ id: String(n), label })), acceptsText: true }
     ] } })
   const [question] = projectConversationQuestions({ agentSessionId: page.agentSessionId, historyPage: page })
@@ -61,8 +61,8 @@ it('preserves every canonical content part and reads deferred original text thro
   const page = await f.client.sessionHistoryPage(f.session.agentSessionId), item = page.items[0]!, part = item.contentParts[0]!
   expect(item.questionRequest?.questions[0]?.id).toBe(questionId)
   if (part.kind !== 'resource' || part.resourceType !== 'text') throw new Error('Complete body must stay an exact deferred text resource.')
-  expect(await readSessionHistoryTextResource(part, 0, { source, recordId: item.id, turnId: turn }, input => f.client.sessionHistoryResource(f.session.agentSessionId, input))).toEqual({ kind: 'text', text })
-  expect(item.contentParts.slice(1)).toEqual([{ kind: 'resource', resourceType: 'image', reference: 'opaque:image' }, { kind: 'text', text: '{"type":"unknown-native-part","original":"untouched"}' }])
+  expect(await readSessionHistoryTextResource(part, 0, { source, recordId: item.id, turnId: turn }, input => f.client.sessionHistoryResource(f.session.agentSessionId, input))).toEqual({ kind: 'text', text, contentEligibility: 'public' })
+  expect(item.contentParts.slice(1)).toEqual([{ kind: 'resource', resourceType: 'image', reference: 'opaque:image', contentEligibility: 'public' }, { kind: 'text', text: '{"type":"unknown-native-part","original":"untouched"}', contentEligibility: 'unconfirmed' }])
   expect(await readCodexSavedSessionHistoryRecord({ ...f.context, recordId: item.id, turnId: turn })).toEqual(item)
   await f.unchanged()
 }, 30_000)
@@ -116,7 +116,7 @@ it('optional canonical question details cannot make an otherwise readable public
   expect(withdrawn.length).toBeGreaterThan(0)
   for (const [index, item] of page.items.entries()) {
     expect(item.id).toBe(f.recordId(index))
-    if (index > 0) expect(item.contentParts).toEqual([{ kind: 'text', text: rows[index]!.payload.item.content[0]!.text }])
+    if (index > 0) expect(item.contentParts).toEqual([{ kind: 'text', text: rows[index]!.payload.item.content[0]!.text, contentEligibility: 'public' }])
   }
   for (const item of withdrawn) {
     expect(item.questionDiagnostic).toMatchObject({ code: 'CODEX_QUESTION_REQUEST_DETAILS_UNAVAILABLE' })
@@ -127,7 +127,7 @@ it('optional canonical question details cannot make an otherwise readable public
   const originalResource = page.items[0]!.contentParts[0]!
   if (originalResource.kind !== 'resource' || originalResource.resourceType !== 'text') throw new Error('The original deferred body must remain a resource.')
   expect(await readSessionHistoryTextResource(originalResource, 0, { source, recordId: page.items[0]!.id, turnId: turn }, input => f.client.sessionHistoryResource(f.session.agentSessionId, input)))
-    .toEqual({ kind: 'text', text: rows[0]!.payload.item.content[0]!.text })
+    .toEqual({ kind: 'text', text: rows[0]!.payload.item.content[0]!.text, contentEligibility: 'public' })
   await f.unchanged()
 }, 30_000)
 
@@ -143,7 +143,7 @@ it('a single oversized question projection keeps the complete original record ac
   expect(item.id).toBe(f.recordId(0)); expect(item.turnId).toBe(turn)
   expect(item.questionRequest).toBeUndefined()
   expect(item.questionDiagnostic).toMatchObject({ code: 'CODEX_QUESTION_REQUEST_DETAILS_UNAVAILABLE' })
-  expect(item.contentParts).toEqual([{ kind: 'text', text: JSON.stringify(original.payload) }])
+  expect(item.contentParts).toEqual([{ kind: 'text', text: JSON.stringify(original.payload), contentEligibility: 'unconfirmed' }])
   expect(await readCodexSavedSessionHistoryRecord({ ...f.context, recordId: item.id, turnId: turn })).toEqual(item)
   const changes = await f.client.readSessionHistoryChanges(f.session.agentSessionId, { checkpoint, limit: 1 })
   expect(changes.items).toEqual(page.items)

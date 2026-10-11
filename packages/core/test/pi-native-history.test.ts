@@ -26,16 +26,16 @@ it('reads last durable Pi branch across pages, retaining pre-compaction history 
   ])
   const first = await f.client.sessionHistoryPage('private-agent', { limit: 2 })
   expect(first.items.map((item) => item.id)).toEqual(['new-user', 'last-durable'])
-  expect(first.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'before' },
-    { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,cGlj' }, { kind: 'text', text: 'after' }])
+  expect(first.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'before', contentEligibility: 'unconfirmed' },
+    { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,cGlj', contentEligibility: 'unconfirmed' }, { kind: 'text', text: 'after', contentEligibility: 'unconfirmed' }])
   expect(first.items[1]).not.toHaveProperty('startedAt')
   const second = await f.client.sessionHistoryPage('private-agent', { limit: 2, cursor: first.nextCursor! })
   expect(second.items.map((item) => item.id)).toEqual(['main-answer', 'compact'])
   expect(second.items[1]!.kind).toBe('activity')
-  expect(second.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'actual summary' }])
+  expect(second.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'actual summary', contentEligibility: 'private' }])
   const third = await f.client.sessionHistoryPage('private-agent', { limit: 2, cursor: second.nextCursor! })
   expect(third.items.map((item) => item.id)).toEqual(['root-user'])
-  expect(third.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'old user survives compaction' }])
+  expect(third.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'old user survives compaction', contentEligibility: 'unconfirmed' }])
   expect(third.nextCursor).toBeNull()
   expect(await f.bytes()).toEqual(f.before)
   expect(f.controls).toHaveLength(6)
@@ -51,9 +51,9 @@ it('preserves tool/custom/unknown native activities and exact text, without inve
   ])
   const page = await f.client.sessionHistoryPage('private-agent')
   expect(page.items.map((item) => [item.id, item.kind])).toEqual([['human', 'user-message'], ['tool', 'activity'], ['custom', 'activity'], ['unknown', 'activity']])
-  expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: '\n exact 中 \n' }])
-  expect(page.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'tool stdout' }])
-  expect(page.items[2]!.contentParts).toEqual([{ kind: 'text', text: 'extension notice' }])
+  expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: '\n exact 中 \n', contentEligibility: 'unconfirmed' }])
+  expect(page.items[1]!.contentParts).toEqual([{ kind: 'text', text: 'tool stdout', contentEligibility: 'public' }])
+  expect(page.items[2]!.contentParts).toEqual([{ kind: 'text', text: 'extension notice', contentEligibility: 'unconfirmed' }])
   expect(page.items[3]!.contentParts[0]!.kind).toBe('text')
   expect(page.items[3]).not.toHaveProperty('startedAt')
   for (const item of page.items) expect(item).not.toHaveProperty('completedAt')
@@ -138,17 +138,17 @@ it('preserves native reasoning, toolCall, and mixed assistant speech in exact bl
 
   // Mixed assistant maintains block order: reasoning -> text -> tool-call
   expect(page.items[1]!.contentParts).toEqual([
-    { kind: 'reasoning', text: 'Evaluating current workspace tree' },
-    { kind: 'text', text: 'Listing files...' },
-    { kind: 'tool-call', name: 'bash', input: '{"command":"ls -1"}', callId: 'call-bash-1' }
+    { kind: 'reasoning', text: 'Evaluating current workspace tree', contentEligibility: 'public' },
+    { kind: 'text', text: 'Listing files...', contentEligibility: 'public' },
+    { kind: 'tool-call', name: 'bash', input: '{"command":"ls -1"}', callId: 'call-bash-1', contentEligibility: 'public' }
   ])
 
   // Tool results preserve name, output, callId, and failed flag
   expect(page.items[2]!.contentParts).toEqual([
-    { kind: 'tool-result', output: 'fileA\nfileB', name: 'bash', callId: 'call-bash-1' }
+    { kind: 'tool-result', output: 'fileA\nfileB', name: 'bash', callId: 'call-bash-1', contentEligibility: 'public' }
   ])
   expect(page.items[3]!.contentParts).toEqual([
-    { kind: 'tool-result', output: 'permission denied', name: 'bash', callId: 'call-bash-2', failed: true }
+    { kind: 'tool-result', output: 'permission denied', name: 'bash', callId: 'call-bash-2', failed: true, contentEligibility: 'public' }
   ])
 
   expect(await f.bytes()).toEqual(f.before)
@@ -215,12 +215,12 @@ it('preserves empty legal thinking, signature, redacted flag, and raw malformed 
 
   // Empty thinking with signature and redacted preserved
   expect(page.items[0]!.contentParts).toEqual([
-    { kind: 'reasoning', text: '', signature: 'opaque-empty-replay', redacted: true }
+    { kind: 'reasoning', text: '', signature: 'opaque-empty-replay', redacted: true, contentEligibility: 'public' }
   ])
 
   // Malformed thinking without thinking: string preserves raw JSON text, no foreign text guessing
   expect(page.items[1]!.contentParts).toEqual([
-    { kind: 'text', text: '{"type":"thinking","text":"foreign fallback must not become reasoning","rawExtra":{"untouched":true}}' }
+    { kind: 'text', text: '{"type":"thinking","text":"foreign fallback must not become reasoning","rawExtra":{"untouched":true}}', contentEligibility: 'unconfirmed' }
   ])
 
   expect(await f.bytes()).toEqual(f.before)
@@ -249,8 +249,8 @@ it('preserves image-only toolResult message carrying tool metadata and outcome w
   expect(page.items).toHaveLength(1)
   expect(page.items[0]!.kind).toBe('activity')
   expect(page.items[0]!.contentParts).toEqual([
-    { kind: 'tool-result', output: '', name: 'image_only_tool', callId: 'image-only-call', failed: true },
-    { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,aW1hZ2Utb25seQ==' }
+    { kind: 'tool-result', output: '', name: 'image_only_tool', callId: 'image-only-call', failed: true, contentEligibility: 'public' },
+    { kind: 'resource', resourceType: 'image', reference: 'data:image/png;base64,aW1hZ2Utb25seQ==', contentEligibility: 'public' }
   ])
   expect(await f.bytes()).toEqual(f.before)
   for (const control of f.controls) expect(control).not.toHaveBeenCalled()

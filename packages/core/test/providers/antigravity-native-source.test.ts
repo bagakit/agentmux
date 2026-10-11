@@ -130,10 +130,10 @@ it('full-only file creation recovers compact truncation and invalidates without 
   const compactBefore = await readFile(f.path)
   const observed = await f.client.observeSessionHistory(SID, event => events.push(event))
   const initial = await f.client.sessionHistoryPage(SID)
-  expect(initial.items[0]!.contentParts).toContainEqual({ kind: 'text', text: '[Antigravity full transcript unavailable: omitted fields content]' })
+  expect(initial.items[0]!.contentParts).toContainEqual({ kind: 'text', text: '[Antigravity full transcript unavailable: omitted fields content]', contentEligibility: 'public' })
   await writeFile(f.full, jsonl([assistant(0, 'Full original answer')]))
   await vi.waitFor(() => expect(events.some(event => event.kind === 'invalidated')).toBe(true))
-  expect((await f.client.sessionHistoryPage(SID)).items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Full original answer' }])
+  expect((await f.client.sessionHistoryPage(SID)).items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Full original answer', contentEligibility: 'public' }])
   expect(await readFile(f.path)).toEqual(compactBefore); expect(await readFile(f.storePath)).toEqual(f.before); observed.dispose()
 })
 
@@ -144,7 +144,7 @@ it('full append through an already-open writer refreshes recovered fields and di
   const observed = await f.client.observeSessionHistory(SID, event => events.push(event))
   await writer.writeFile(jsonl([assistant(0, 'Full recovered answer')]))
   await vi.waitFor(() => expect(events.some(event => event.kind === 'invalidated')).toBe(true))
-  expect((await f.client.sessionHistoryPage(SID)).items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Full recovered answer' }])
+  expect((await f.client.sessionHistoryPage(SID)).items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Full recovered answer', contentEligibility: 'public' }])
   observed.dispose(); const afterDispose = events.length
   await writer.writeFile(jsonl([assistant(2, 'after dispose')]))
   await appendFile(f.path, jsonl([user(1, 'after dispose')]))
@@ -157,7 +157,7 @@ it('physical full replacement reports unavailable while the last public page rem
   const preserved = await f.client.sessionHistoryPage(SID), observed = await f.client.observeSessionHistory(SID, event => events.push(event))
   await rename(f.full, f.full + '.old'); await writeFile(f.full, jsonl([assistant(0, 'Replacement answer')]))
   await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ kind: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })))
-  expect(preserved.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Preserved answer' }]); expect(await readFile(f.storePath)).toEqual(f.before)
+  expect(preserved.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Preserved answer', contentEligibility: 'public' }]); expect(await readFile(f.storePath)).toEqual(f.before)
   observed.dispose()
 })
 
@@ -214,5 +214,5 @@ it('an existing full file without the truncated step keeps its exact compact con
   await writeFile(f.full, jsonl([assistant(1, 'Other real step')]))
   const page = await f.client.sessionHistoryPage(SID)
   expect(page.items).toHaveLength(1)
-  expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Kept compact body' }, { kind: 'text', text: '[Antigravity truncated fields: omitted fields content]' }])
+  expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: 'Kept compact body', contentEligibility: 'public' }, { kind: 'text', text: '[Antigravity truncated fields: omitted fields content]', contentEligibility: 'public' }])
 })

@@ -70,7 +70,7 @@ it('retains saved message times and structured turns through public pages, proje
   const originalBytes = await readFile(f.transcriptPath)
   const page = await f.client.sessionHistoryPage(f.session.agentSessionId, { limit: 1 })
   expect(page.items).toEqual([expect.objectContaining({ id: 'reply', kind: 'assistant-message', startedAt: AT,
-    turnId: 'original-turn', messagePhase: 'progress', contentParts: [{ kind: 'text', text: 'Original public progress reply.' }] })])
+    turnId: 'original-turn', messagePhase: 'progress', contentParts: [{ kind: 'text', text: 'Original public progress reply.', contentEligibility: 'public' }] })])
   expect(page.items[0]).not.toHaveProperty('completedAt')
   expect(projectConversationRecords({ agentSessionId: f.session.agentSessionId, historyPage: page })[0]).toMatchObject({ recordedAt: AT })
   expect(page.nextCursor).not.toBeNull()
@@ -133,7 +133,7 @@ it('keeps absent, malformed and negative recorded time unknown without hiding or
   expect(page.items.map(item => item.id)).toEqual(['unknown-0', 'unknown-1', 'unknown-2', 'unknown-3', 'unknown-4'])
   for (const item of page.items) {
     expect(item).not.toHaveProperty('startedAt')
-    expect(item.contentParts).toEqual([{ kind: 'text', text: 'Original public progress reply.' }])
+    expect(item.contentParts).toEqual([{ kind: 'text', text: 'Original public progress reply.', contentEligibility: 'public' }])
   }
 })
 
