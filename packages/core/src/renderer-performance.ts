@@ -47,8 +47,15 @@ export type RendererTabSwitchCost = {
   /** Monotonic elapsed from this handler; freezes when this occurrence ends. */
   elapsedMs: number
   pendingStage: 'selection' | 'placement' | 'terminal' | 'frame' | 'input-gate' | null
-  /** Wall-clock handler timestamp. Phase durations below use monotonic elapsed time. */
+  /** Wall-clock recorder begin; the handler's precise start uses the local monotonic clock below. */
   handlerAt: number
+  /** Same-Window trusted event timestamp, otherwise unknown. Never compare across processes. */
+  eventAtMonoMs: number | null
+  handlerStartMonoMs: number
+  /** Synchronous action tail; may follow selected/superseded elapsedMs. Returned includes normal refusal. */
+  actionEndedMs: number | null
+  actionResult: 'returned' | 'threw' | null
+  selectedSource: 'already-selected-handler' | 'layout-effect' | null
   inputDelayMs: number | null; selectedMs: number | null; placedMs: number | null; terminalMs: number | null
   /** First observed open input gate for this selection, not input response or acknowledgement. */
   inputReadyMs: number | null

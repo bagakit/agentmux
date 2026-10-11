@@ -7,7 +7,7 @@ import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { motePinnedTab, moteTabOrder, useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
-import { tabSwitchObservation } from '../lib/tab-switch-observation'
+import { tabSwitchEventTimestamp, tabSwitchObservation } from '../lib/tab-switch-observation'
 import { workbenchProjectionTabReference } from '../lib/workbench-projection'
 import { projectedNameRevision } from '../lib/name-authority'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -255,7 +255,7 @@ function SortableWorkbenchTab({
       : { displayWorkspaceId: workspaceId, groupId: group.id, tabId: tab.id, regionId: tab.layout.activeRegionId }) }),
   [projection, Boolean(mote?.floating), workspaceId, group.id, tab.id, tab.layout.activeRegionId])
   useLayoutEffect(() => {
-    if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget)
+    if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget, 'layout-effect')
   }, [visible, group.activeTabId, tab.id, switchTarget])
   const [pendingClose, setPendingClose] = useState<{
     tabIds: string[]
@@ -448,14 +448,19 @@ function SortableWorkbenchTab({
           {...nameTooltip.props}
           aria-current={mote && group.activeTabId === tab.id ? 'page' : undefined}
           onClick={event => {
+            const handlerStartMonoMs = performance.now()
             const selectedSurface = tab.regions[switchTarget.regionId]
             const mode = selectedSurface?.kind === 'agent' ? effectiveSessionViewMode(useAppStore.getState(), selectedSurface.sessionId)
               : selectedSurface?.kind === 'terminal' ? 'terminal' : selectedSurface ? 'other' : 'unknown'
-            tabSwitchObservation.begin(switchTarget, mode, event.nativeEvent.timeStamp)
-            if (projection) selectWorkbenchProjectionTab(projection, group.id, tab)
-            else if (mote) mote.selectTab(tab.id, group.id)
-            else activateTab(workspaceId, group.id, tab.id, 'local')
-            if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget)
+            const observationId = tabSwitchObservation.begin(switchTarget, mode, tabSwitchEventTimestamp(event.nativeEvent, window), handlerStartMonoMs)
+            let actionResult: 'returned' | 'threw' = 'threw'
+            try {
+              if (projection) selectWorkbenchProjectionTab(projection, group.id, tab)
+              else if (mote) mote.selectTab(tab.id, group.id)
+              else activateTab(workspaceId, group.id, tab.id, 'local')
+              actionResult = 'returned'
+            } finally { tabSwitchObservation.actionEnded(observationId, actionResult) }
+            if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget, 'already-selected-handler')
           }}
           {...attributes}
           {...listeners}
