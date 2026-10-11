@@ -17,7 +17,7 @@ afterEach(async () => { for (const root of directories.splice(0)) await rm(root,
 async function artifacts(task: 'T003' | 'T006' = 'T003') {
   const root = await mkdtemp(path.join(tmpdir(), 'supervision-evidence-')); directories.push(root)
   const gate = 'packages/core/scripts/verify-' + (task === 'T003' ? 'resume-context-observation' : 'session-continuity-executor') + '.mjs', owner = 'packages/core/src/client.ts'
-  const count = task === 'T003' ? 33 : 16, mutations = task === 'T003' ? 18 : 10
+  const count = task === 'T003' ? 33 : 16, mutations = task === 'T003' ? 18 : 11
   const put = async (file: string, body: any) => {
     await mkdir(path.dirname(path.join(root, file)), { recursive: true })
     await writeFile(path.join(root, file), typeof body === 'string' ? body : JSON.stringify(body))
@@ -59,7 +59,7 @@ it('refuses joined qualification when the required initial-cancellation owner is
 
 it('requires the original executor Native and public consumer files beyond their summary labels', async () => {
   const f = await artifacts('T006')
-  await expect(f.read()).rejects.toThrow('Original executor consumer evidence is missing')
+  await expect(f.read()).rejects.toThrow('Original recovery consumer evidence is missing')
 })
 
 it('rejects missing source pins and changed current owner bytes', async () => {
@@ -134,6 +134,16 @@ it('reads the original Main wire producer without treating it as a full UI proof
   const f = await consumerArtifacts(), read = await f.read()
   expect(read.task).toBe('T004-wire'); expect(read.baselineCases).toBe(3); expect(read.loadedCounterexamples).toBe(3)
   await expect(readSupervisionConsumerOwner(f.root, 'consumer', 'proof/receipt.json')).rejects.toThrow()
+})
+
+it('checks joined current sources while retaining the original consumer report location', async () => {
+  const f = await consumerArtifacts(), joined = await mkdtemp(path.join(tmpdir(), 'joined-consumer-')); directories.push(joined)
+  for (const [file, body] of [['apps/desktop/scripts/verify-session-continuity-control-wire.mjs', 'original consumer gate'],
+    ['apps/desktop/src/main/runtime-controller.ts', 'original Main owner']]) {
+    await mkdir(path.dirname(path.join(joined, file)), { recursive: true }); await writeFile(path.join(joined, file), body)
+  }
+  const read = await readSupervisionConsumerOwner(joined, 'wire', path.join(f.root, 'proof/receipt.json'))
+  expect(read.loadedCounterexamples).toBe(3); expect(read.sourceInputs).toBe(2)
 })
 
 it('rejects a rewritten consumer raw report even when its counts still agree', async () => {
