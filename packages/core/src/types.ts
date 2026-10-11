@@ -1679,6 +1679,8 @@ export type AgentMuxClientEvent = (
       evidence: AgentMuxEvidence
     }
   | { type: 'agent-input'; receipt: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
+  /** Invalidates an original mailbox read; it never creates a client-owned queued input. */
+  | { type: 'agent-input-recorded'; agentSessionId: string }
   | (import('./control-endpoint-state.js').AgentMuxControlEndpointState & {
       type: 'control-endpoint-state'
       evidence: AgentMuxEvidence

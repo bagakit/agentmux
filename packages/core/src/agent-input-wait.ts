@@ -105,6 +105,8 @@ export function agentInputSubmissionStatus(control: AgentInputWaitControl, admis
 }
 export type AgentInputWaitJournalRecord =
   | { kind: 'input-intent'; sequence: number; intent: AgentInputJournalIntent; at: number }
+  /** An original accepted claim, without controlled waiting or dispatch authority. */
+  | { kind: 'input-submission'; sequence: number; key: AgentPromptInputKey; at: number }
   | { kind: 'input-control'; sequence: number; control: AgentInputWaitControl }
   | { kind: 'input-stop'; sequence: number; receipt: AgentInputWaitStopReceipt }
 

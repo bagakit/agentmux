@@ -1,3 +1,4 @@
+import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-continuity-control.js'
 import { parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
 import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage } from './session-history-changes.js'
@@ -231,6 +232,7 @@ export async function connectHostedAgentMux(options: {
         : method === 'conversationCheckpoint' ? parseConversationCheckpointPage(decoded, expected)
         : parseConversationChangesPage(decoded, { ...expected, checkpoint: (input as import('./conversation-changes.js').ConversationChangesInput).checkpoint })
     }
+    if (method === 'readAgentInputMailbox') return parseAgentInputMailboxPage(decoded, wireArgs[0] as import('./agent-input-mailbox.js').AgentInputMailboxRead)
     if (method === 'readAgentSessionHistory') return parseAgentSessionHistoryReadPage(decoded, wireArgs[0] as AgentSessionHistoryReadInput)
     return decoded
   }

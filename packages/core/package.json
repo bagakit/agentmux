@@ -14,6 +14,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./agent-input-mailbox": {
+      "types": "./dist/agent-input-mailbox-codec.d.ts",
+      "import": "./dist/agent-input-mailbox-codec.js"
+    },
     "./note-merge": {
       "types": "./dist/note-merge.d.ts",
       "import": "./dist/note-merge.js"

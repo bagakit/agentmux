@@ -1,3 +1,4 @@
+import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { sanitizeHostedInputInvocation } from './performance-diagnostics.js'
 import { randomUUID } from 'node:crypto'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
@@ -19,7 +20,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor',
-  'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
+  'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
   'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'readDispatch', 'listDispatches'
@@ -241,6 +242,10 @@ export class AgentMuxHostedRuntimeService {
     if (invocation.method === 'readAgentSession' && (invocation.args.length !== 1 ||
         typeof invocation.args[0] !== 'string' || !/^[A-Za-z0-9_-]+$/u.test(invocation.args[0]))) throw new AgentMuxError(
       'Session metadata reading accepts one complete original Session ID.', 'INVALID_CONTROL_REQUEST')
+    if (invocation.method === 'readAgentInputMailbox') {
+      if (invocation.args.length !== 1) throw new AgentMuxError('Mailbox reading accepts one exact read; author authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[0] = parseAgentInputMailboxRead(invocation.args[0])
+    }
     const continuityControl = invocation.method === 'controlAgentContinuity'
     if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
     const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction'
@@ -332,7 +337,7 @@ export class AgentMuxHostedRuntimeService {
         return { identity, assertCurrent: (intent: import('./client.js').AgentMuxAgentInteractionInput) => port.assertInteractionCurrent!(structuredClone(identity), structuredClone(intent)) }
       })()
 
-      const pending = operation.apply(this.client, continuityControl ? [...invocation.args, {
+      const pending = operation.apply(this.client, invocation.method === 'readAgentInputMailbox' ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
       }] : controlledInput ? [...invocation.args, {
