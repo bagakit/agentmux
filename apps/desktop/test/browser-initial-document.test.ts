@@ -129,6 +129,42 @@ const url='https://fixture.invalid/original'
 async function started(f:ReturnType<typeof fixture>) { await vi.waitFor(()=>expect(f.entry().activity.operation?.steps.length).toBeGreaterThan(0)) }
 
 describe('the original initial Browser document',()=>{
+  it.each([
+    { name: 'responsive', viewport: 'responsive' as const },
+    { name: 'custom', viewport: { width: 820, height: 1180, screenPosition: 'mobile' as const } }
+  ])('keeps $name emulation off a new native view until its original document is ready', async ({ viewport }) => {
+    const f = fixture(), load = deferred()
+    native.Contents.beforeLoad = () => load.promise
+    const created = await f.manager.create('original-browser', url, 'workspace', undefined, 'normal', viewport)
+    const contents = f.views[0]!.webContents
+    const firstConsumer = f.manager.runScript('original-browser', 'return await js("document.body.innerText")')
+    try {
+      await started(f)
+      expect(created.viewport).toEqual(viewport)
+      expect(contents.disableDeviceEmulation).not.toHaveBeenCalled()
+      expect(contents.enableDeviceEmulation).not.toHaveBeenCalled()
+      expect(f.sendCommand).not.toHaveBeenCalled()
+      contents.commitDocument(url)
+      const report = await firstConsumer
+      expect(report.outcome.kind).toBe('completed')
+      expect(report.result).toMatchObject({ url })
+      expect(contents.setZoomFactor).toHaveBeenCalledWith(0.9)
+      if (viewport === 'responsive') {
+        expect(contents.disableDeviceEmulation).toHaveBeenCalledOnce()
+        expect(contents.enableDeviceEmulation).not.toHaveBeenCalled()
+      } else {
+        expect(contents.enableDeviceEmulation).toHaveBeenCalledWith(expect.objectContaining({
+          screenPosition: 'mobile', viewSize: { width: viewport.width, height: viewport.height }
+        }))
+        expect(contents.disableDeviceEmulation).not.toHaveBeenCalled()
+      }
+      expect(f.entry().navigationId).toBe(created.navigationId)
+      expect(f.entry().viewport).toEqual(viewport)
+    } finally {
+      load.resolve()
+      await firstConsumer
+    }
+  })
   it('detaches every ended budget request from one still-pending native document',async()=>{
     vi.useFakeTimers();const f=fixture(),load=deferred();native.Contents.beforeLoad=()=>load.promise
     await f.manager.create('original-browser',url,'workspace');const document=f.entry().initialDocument
