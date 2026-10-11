@@ -43,6 +43,12 @@ const variants = [
   { name: 'delegate-known-witness-normalization', path: 'packages/core/src/client.ts',
     from: 'witnessTargetMismatch ? normalizeNativeHook(provider.hook, envelope, context) : provider.normalizeHook(envelope, context)', to: 'provider.normalizeHook(envelope, context)',
     target: 'keeps an exact conflicting witness neutral before a custom Provider can declare main activity, readiness or cancellation', expected: 'to match object' },
+  { name: 'reject-waiting-input-enrichment', path: 'packages/core/src/agent-session-continuity-input.ts',
+    from: '!matchesProviderNativeSessionTarget(operation.nativeTarget, session.nativeHandle)', to: '!isDeepStrictEqual(session.nativeHandle, operation.nativeTarget)',
+    target: 'delivers the original waiting post-launch input once after Hook locator enrichment and exact native readiness', expected: "expected 'superseded' to be 'accepted'" },
+  { name: 'pretend-unknown-input-acknowledged', path: 'packages/core/src/agent-session-continuity-input.ts',
+    from: 'const accepted = claim?.acknowledged &&', to: 'const accepted = Boolean(claim) &&',
+    target: 'observes the same claimed post-launch input key after an actual Native Input ACK loss without replaying its bytes', expected: "expected 'accepted' to be 'unknown'" },
   { name: 'overwrite-known-witness-locator', path: 'packages/core/src/client.ts',
     from: '!matchesProviderNativeSessionTarget(session.nativeHandle, witness.handle) && !matchesProviderNativeSessionTarget(witness.handle, session.nativeHandle)', to: 'witness.handle.sessionId !== session.nativeHandle.sessionId',
     target: 'preserves a known canonical locator when its exact Native witness reports another locator: codex', expected: 'to deeply equal' },
@@ -180,7 +186,7 @@ try {
       failed: tests.numFailedTests, total: tests.numTotalTests, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 30 && tests.success, 'Actual nonempty Hook continuity baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 33 && tests.success, 'Actual nonempty Hook continuity baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
   const ts = require('typescript'), consumers = []
