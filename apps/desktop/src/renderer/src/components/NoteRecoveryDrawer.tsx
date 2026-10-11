@@ -66,7 +66,7 @@ export function NoteRecoveryDrawer({ tabId, surface, active, section, onSection,
       <div><button type="button" className="small-button" onClick={onExpand} aria-label={expanded ? 'Return to side panel' : 'Expand review'}>{expanded ? 'Return to side' : 'Expand'}</button>
       <Dialog.Close asChild><button type="button" className="small-button" aria-label="Close versions and recovery"><CloseIcon size={15} /></button></Dialog.Close></div>
     </header>
-    <Dialog.Description className="note-recovery-drawer__description">Review saved versions and kept input. Your current draft stays in the editor.</Dialog.Description>
+    <Dialog.Description hidden>Review saved versions and kept input. Your current draft stays in the editor.</Dialog.Description>
     <SurfaceModeSwitch value={section} onChange={onSection} active={active} ariaLabel="Versions and recovery section" options={[
       { value: 'versions', label: 'Versions' }, { value: 'drafts', label: `Drafts & recovery${drafts?.length ? ` (${drafts.length})` : ''}` }
     ]} />
@@ -74,7 +74,7 @@ export function NoteRecoveryDrawer({ tabId, surface, active, section, onSection,
       {section === 'versions' ? noteId ? <NoteVersionHistory tabId={tabId} regionId={surface.regionId} noteId={noteId} active={active} />
         : <p role="status">The original Note identity is unconfirmed. Inspect Source or your kept drafts; version history needs the original Note identity.</p>
         : <>
-          <h3>Drafts & recovery</h3>
+          <h3>Kept input</h3>
           {children}
           <NoteConflictReview tabId={tabId} regionId={surface.regionId} workspaceId={surface.workspaceId} path={surface.path} active={active} />
           {conflict ? <section className="note-recovery-replace"><h4>Replace saved content</h4>
