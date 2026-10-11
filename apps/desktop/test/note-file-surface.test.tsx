@@ -377,6 +377,8 @@ it('checks its real directory only on explicit refresh and leaves closed Note so
     { name: 'closed-source.note.md', path: 'closed-source.note.md', isDirectory: false, isSymlink: false }
   ])
   await mount(); expect(api.files.readDirectory).not.toHaveBeenCalled()
+  expect(dom.container.querySelector<HTMLDetailsElement>('.note-directory-sources')?.open).toBe(false)
+  expect(dom.container.querySelector('.note-directory-sources summary')?.textContent).toContain('Source coverage')
   const before = useAppStore.getState(), tabs = before.tabs, layouts = before.layouts, document = before.documents[sourceKey]
   await click('Refresh directory')
   expect(api.files.readDirectory).toHaveBeenCalledExactlyOnceWith('workspace', '')
