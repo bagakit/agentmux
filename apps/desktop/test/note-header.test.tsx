@@ -51,13 +51,18 @@ afterEach(async () => { stop(); files.dispose(); await rm(directory, { recursive
 async function menu() {
   const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Page options"]')!
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
-  await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull())
+  await vi.waitFor(() => expect(document.querySelector('[role="menu"][data-state="open"]')).not.toBeNull())
   return trigger
 }
 async function choose(label: string) {
   await menu()
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.getAttribute('aria-label') === label || node.textContent === label)
-  expect(item, label).toBeDefined(); await act(async () => item!.click())
+  let item: HTMLElement | undefined
+  await vi.waitFor(() => {
+    item = [...document.querySelectorAll<HTMLElement>('[role="menu"][data-state="open"] [role="menuitem"]')].find(node => node.getAttribute('aria-label') === label || node.textContent === label)
+    expect(item, label).toBeDefined()
+    expect(item!.getAttribute('aria-disabled')).not.toBe('true')
+  })
+  await act(async () => item!.click())
 }
 async function input(field: HTMLInputElement, value: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) })
@@ -101,6 +106,7 @@ it('preserves title commit/cancel and moves the exact original through the same 
   await act(async () => { destination.value = 'research'; destination.dispatchEvent(new Event('change', { bubbles: true })) })
   await act(async () => dom.container.querySelector<HTMLFormElement>('[aria-label="Move Note page"]')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   await vi.waitFor(async () => expect((await owner.read()).pages.original!.notebookId).toBe('research'))
+  await vi.waitFor(() => expect(title.disabled).toBe(false))
   await choose('Page activity')
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Page activity"]')?.textContent).toContain('Moved'))
   expect(title.value).toBe('A durable finding')
@@ -116,7 +122,7 @@ it('opens page options from a real pointer press and returns keyboard dismissal 
   await dom.render(<Page />)
   const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Page options"]')!
   await act(async () => trigger.dispatchEvent(new PointerEvent('pointerdown', { button: 0, pointerType: 'mouse', bubbles: true, cancelable: true })))
-  await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).not.toBeNull())
+  await vi.waitFor(() => expect(document.querySelector('[role="menu"][data-state="open"]')).not.toBeNull())
   const content = document.querySelector<HTMLElement>('[role="menu"]')!
   await act(async () => { content.focus(); content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
   await vi.waitFor(() => expect(document.querySelector('[role="menu"]')).toBeNull())

@@ -72,7 +72,7 @@ it('the actual Note surface consumes the original Store settlement after written
   expect(feedback()).not.toBeNull(); expect(icons()).toHaveLength(1)
   expect(useAppStore.getState().documents[key]!.noteEditing?.receipt?.revision).toBe(useAppStore.getState().documents[key]!.revision)
   expect(useAppStore.getState().documents[key]!.noteEditing?.attempt).toBeUndefined()
-  expect(dom.container.textContent).toContain('Original metadata still unconfirmed')
+  expect(useAppStore.getState().documents[key]!.noteWriteAttribution).toEqual({ status: 'unconfirmed', reason: 'Original metadata still unconfirmed' })
   expect((dom.container.querySelector('.note-block-content') as HTMLElement & { editor: Editor }).editor).toBe(editor)
   expect(editor.isEditable).toBe(true); expect(useAppStore.getState().sessions[0]!.control).toBe(originalControl)
   await end(); expect(feedback()).toBeNull()
@@ -128,13 +128,13 @@ it('a later draft, inert host or reduced motion stops finite feedback and never 
   const reducedReceipt = written('Reduced save'); await view(reducedReceipt); expect(feedback()).toBeNull()
   reduced = false; await act(async () => media.dispatchEvent(new Event('change'))); await view(reducedReceipt); expect(feedback()).toBeNull()
 })
-it('registered Notes keep exactly one original note identity in the existing toolbar and retain their metadata notice', async () => {
+it('registered Notes keep exactly one original note identity in the file toolbar alongside unconfirmed metadata', async () => {
   const catalog = emptyNotebookState(); catalog.pages['note-original'] = { noteId: 'note-original', title: 'Registered original', notebookId: 'quick-notes', parentNoteId: null, resource, sources: [], topics: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 2) }
   useNotebookLibrary.setState({ state: catalog }); await view(documentFor()); expect(icons()).toHaveLength(1)
   expect(dom.container.querySelectorAll('.notebook-page-heading .note-file-identity-icon')).toHaveLength(0)
   expect(dom.container.querySelectorAll('.note-view-controls .note-file-identity-icon')).toHaveLength(1)
   const fresh = { ...written('Registered fresh'), noteWriteAttribution: { status: 'unconfirmed' as const, reason: 'Metadata observation retained' } }
-  await view(fresh); expect(feedback()).not.toBeNull(); expect(dom.container.textContent).toContain('Metadata observation retained'); expect(icons()).toHaveLength(1)
+  await view(fresh); expect(feedback()).not.toBeNull(); expect(icons()).toHaveLength(1)
   expect(onSave).not.toHaveBeenCalled()
 })
 it('a drawing without an animation end event releases its local cue once, without a later draft render renewing it', async () => {

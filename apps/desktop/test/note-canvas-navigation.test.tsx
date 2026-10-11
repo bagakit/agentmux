@@ -24,7 +24,7 @@ const workspace = { id: 'canvas-original', hostId: 'local', path: join(tmpdir(),
 const path = 'original.note.md', docKey = documentKey(workspace.id, path)
 const spaceId = directoryIdentity(workspace.hostId, workspace.path), zoneId = homeZoneId(spaceId)
 const savedNote = newNoteDocument('Saved original body', scope.noteId, 'exact-original-block')
-savedNote.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'self-heading-link', text: 'Original Note #Exact original', target: { noteId: scope.noteId, blockId: 'exact-original-block' } } })
+savedNote.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'self-heading-link', text: 'Original Note #Exact original', target: { noteId: scope.noteId, blockId: 'exact-original-block' } }, content: [{ type: 'text', text: '[[Original Note #Exact original]]' }] })
 const saved = { path, revision: 'saved-original', content: serializeNoteDocument(savedNote) }
 const draft = { ...saved, content: saved.content.replace('Saved original body', 'Preserved unsaved draft') }
 const notebook = { notebookId: 'canvas-book', name: 'Original notebook', createdAt: _tailRefreshFixtureEpoch(0, 0, 1) }
