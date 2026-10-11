@@ -24,6 +24,8 @@
 
 Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。Core 原 Reader 持有有界接受窗口与跨批贡献，Desktop、Mobile 和 Focus 消费该 Reader 的完整窗口。
 
+Hook 声明由原 [`AgentManagedHookInstaller`](../../packages/core/src/managed-hook-installer.ts) 在受管创建／恢复时安装。安装器在原 receipt／backup owner 内保留按 Provider、准确目标及 merge 范围限定的实际新增声明；后续更新经 [`prepareMergedHookContent`](../../packages/core/src/hook-config-merge.ts) 只替换能够精确确认的旧自有声明，保留用户、手改及未知历史条目。目标和声明归属同时参与预览校验，同一准确目标的写入由文件锁互斥，并在锁内复核；写入前保留 pending 的前后哈希，重建实例据准确字节判定所属代次。竞争或归属未知保留原回调与具名问题，不阻断健康 Agent。该机制防止安装更新继续累加采集入口，不补造旧回复快照的消息关联，也不改变已有 Conversation 或原记录读取接口。
+
 | 来源／需求 | 原读取 owner |
 | --- | --- |
 | Provider 原生页、精确记录及资源 | `sessionHistoryPage`／Provider history 能力；精确回读保持原 Provider source 和签名资源引用 |
