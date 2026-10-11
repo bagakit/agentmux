@@ -11,6 +11,7 @@ import { MoteAvatarSeriesEditor, type MoteAvatarSeriesDraft } from './MoteAvatar
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { MoteAvatarCrop } from './MoteAvatarCrop'
+import { MoteAvatarImageGallery } from './MoteAvatarImageGallery'
 import { MoteFaceEditor } from './MoteFaceEditor'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
@@ -293,6 +294,11 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
               <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} imageTarget={target.imageTarget} avatarWorkspaceId={target.avatarTarget?.workspaceId}
                 avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.key} />
             </div>}
+            {target.avatarTarget ? <MoteAvatarImageGallery key={targetIdentity} visible={mode === 'alternative'} disabled={busy}
+              selectedImage={preview?.dataUrl ?? null} onChoose={dataUrl => {
+                localIntent.current = true; inputRequest.current = {}; setPreparing(false); setError(null); setPreviewReady(false)
+                setPreview(previous => ({ dataUrl, revision: (previous?.revision ?? 0) + 1 }))
+              }} /> : null}
             <label className="small-button mote-avatar-file"><ThemeActionAddImageIcon size={15} />Upload image
               <input aria-label={target.avatarTarget ? 'Choose Mote image' : `Choose image for ${target.name}`}  type="file" accept="image/png,image/jpeg" disabled={busy}
                 onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void prepare(file) }} />

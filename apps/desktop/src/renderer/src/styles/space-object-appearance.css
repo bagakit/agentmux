@@ -100,3 +100,13 @@
 }
 .mote-face-editor[hidden], .mote-avatar-alternative[hidden] { display: none; }
 .mote-avatar-alternative { display: grid; gap: var(--sp-3); }
+
+.mote-avatar-gallery { display: grid; gap: var(--sp-2); }
+.mote-avatar-gallery__choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.mote-avatar-gallery__choice { display: grid; justify-items: center; align-content: start; gap: var(--sp-1); min-width: 0; padding: var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.3; cursor: pointer; }
+.mote-avatar-gallery__choice img, .mote-avatar-gallery__placeholder { width: 40px; height: 40px; object-fit: contain; }
+.mote-avatar-gallery__placeholder { display: grid; place-items: center; color: var(--text-3); }
+.mote-avatar-gallery__choice:hover { background: var(--wash-1); color: var(--text); }
+.mote-avatar-gallery__choice[aria-pressed="true"] { background: var(--wash-2); color: var(--text); border-color: var(--green); }
+.mote-avatar-gallery__choice:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.mote-avatar-gallery__choice:disabled { cursor: default; opacity: .6; }
