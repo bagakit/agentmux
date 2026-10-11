@@ -189,6 +189,8 @@ Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Pr
 
 ## 设置页的信息架构
 
+Browser 设置承载统一页面资源目录及自动闲置回收偏好，复用原设置模块、搜索、保存和作用范围表达；状态栏 Performance 提供直达同一管理面的入口。Performance 仍是只读观测工具，释放及恢复由原 Browser 公共 owner 执行，不能把观测脚本变成清理脚本。目录的真实存续、进程归属、保护与动作回执只见[《Browser 工作面》](browser-workface.md#browser-工作面-1)，配置保存不立即关闭健康页面或绕过保护判定。
+
 用户新增要求：「对照下 `orca`、`paseo`、`deepseek-harness` 的设置界面研究下，整个设置页面结构可以更加优化」。设置的层级按用户任务、对象和真实作用范围组织；单个轻量偏好与复杂资源编辑要有合适的轻重，不能按组件或配置键逐个增加一级页面。重组须保留全部既有入口、未保存草稿、原保存范围、对象直达与搜索；GUI 的导航结构不改变 CLI 的对象、配置键或唯一 owner。对照结论和尚未实施的候选结构见 三项目设置结构研究（本机过程资料：`docs/reviews/settings-structure-references.md`），不把参考产品的作用域或插件平台自动变成 AgentMux 的运行时要求。
 
 用户最新反馈：「现在优化怎么样了？还剩下哪些优化要做？」「当前的品牌感我觉得还是偏弱，是不是给设置一个入口页面？」「上面可以有一些 banner 之类的好看的图，然后有一些好看的视觉动效」。品牌入口页、图像与动效是本次反馈方向；本轮 Root 经有限方案评审选择 Overview 作为普通入口，承认普通字号路径多一次点击；这是实施判断，不伪称用户已回复可选偏好。显式分区与对象直达不经 Overview。具体页面构图与动效仍须实际呈现评审，不能以方案批准代替审美验收，决定见 Overview 实施评审（本机过程资料：`docs/reviews/settings-overview-plan-root-review.md`）。任何品牌入口都保留原八个分区的直接访问、原搜索与精确 Executor ID；不能让对象直达先经过宣传页、要求完成初始化或等待图像／动画。切换入口与分区不丢已访问草稿、阅读位置或焦点，配置仍由原 owner 保存；不自动检测资源、启动或影响健康 Run。Settings 仍是辅助界面，原工作面、关闭方式和 status bar 的原操作归属保持，视觉密度引用密度 SSOT[《左下角导航与右下角工具组》](../presentation/spaces-and-layout.md#左下角导航与右下角工具组)。品牌、图像与动态保护约束归密度 SSOT[《Settings 控制工作面》](../presentation/settings-and-observation.md#settings-控制工作面)，具体提案见 品牌入口判断（本机过程资料：`docs/reviews/settings-brand-entry-intake.md`）。
