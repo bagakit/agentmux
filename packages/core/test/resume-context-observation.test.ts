@@ -12,7 +12,18 @@ const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_RESU
   ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_RESUME_CONTEXT_ENTRY) : { ...Source, ...await import('../src/public-rpc-server.js'), ...await import('../src/hosted-runtime-service.js') }
 if (process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT) expect(Reflect.get(core, 'AGENTMUX_RESUME_CONTEXT_MUTANT')).toBe(process.env.AGENTMUX_TEST_RESUME_CONTEXT_MUTANT)
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(async () => {
+  const errors: unknown[] = []
+  try {
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      try { await cleanup() } catch (error) { errors.push(error) }
+    }
+  } finally {
+    try { vi.restoreAllMocks() } catch (error) { errors.push(error) }
+    try { vi.unstubAllEnvs() } catch (error) { errors.push(error) }
+  }
+  if (errors.length) throw new AggregateError(errors, 'Continuity fixture cleanup failed.')
+})
 async function fixture(options: { shape?: 'explicit'; failFirst?: boolean; unsupported?: boolean; callbackFailure?: boolean; witnessPath?: boolean; direct?: boolean; originalPath?: boolean; witnessAlternative?: boolean; unresolvedSubject?: boolean; postLaunch?: boolean; customNormalization?: boolean; mutate?: 'context-to-cancel' | 'cancel-to-context' } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-context-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
