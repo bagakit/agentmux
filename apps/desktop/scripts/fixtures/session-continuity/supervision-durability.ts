@@ -139,6 +139,8 @@ export async function verifySupervisionDurability({ runtime, store, spatial, win
         (await output(session.run)).includes('codex-ready:') ? session : false
     }, 60000)
     const operation = root(working), child = working.continuityOperations[operation.supervision.activeAttemptOperationId]
+    assert.equal(working.agentSessionId, ids.working.sessionId)
+    assert.deepEqual(working.nativeHandle, ids.working.nativeHandle, 'The recovered process retains the exact original native conversation')
     assert.ok(child && child.intentOperationId === operation.operationId)
     assert.deepEqual(child.recoveryInputs, { reminder: '', continuation: '' }); assert.equal(child.launchInput, undefined)
     assert.deepEqual(operation.launchInput, previous.workingRoot.launchInput, 'Original input outcome is never rewritten or replayed')
@@ -154,6 +156,10 @@ export async function verifySupervisionDurability({ runtime, store, spatial, win
     assert.equal(text.includes('codex-launch-input:'), false); assert.equal(text.includes('codex-submit:'), false)
     const witness = JSON.parse(text.match(/codex-restored-context:([^\r\n]+)/u)?.[1] ?? 'null')
     assert.equal(witness?.nativeSessionId, ids.working.nativeHandle.sessionId)
+    const originalBodies = previous.native.working.split('\n').filter(Boolean).map((line: string) => JSON.parse(line))
+      .filter((one: any) => one.type === 'response_item' && one.payload?.type === 'message')
+      .map((one: any) => ({ role: one.payload.role, text: one.payload.content.map((part: any) => part.text ?? '').join('') }))
+    assert.deepEqual(witness.bodies, originalBodies, 'The actual native consumer reads the original retained conversation bodies')
     assert.ok(witness.bodies.some((one: any) => one.role === 'user' && one.text) && witness.bodies.some((one: any) => one.role === 'assistant' && one.text))
     result.supervision.recovered = { run: working.run, root: operation, child, nativeContextReadback: witness,
       processRunning: true, providerContextConfirmed: false, oldTaskContinuationConfirmed: false, oldInputReplayCount: 0 }
