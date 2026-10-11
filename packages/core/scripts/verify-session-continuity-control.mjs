@@ -45,6 +45,22 @@ const variants = [
     "name": "candidate"
   },
   {
+    "name": "reject-native-locator-enrichment",
+    "path": "packages/core/src/client.ts",
+    "from": "!root.nativeTarget || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle)",
+    "to": "!root.nativeTarget || !isDeepStrictEqual(root.nativeTarget, current.nativeHandle)",
+    "target": "accepts retained canonical locator enrichment while rejecting changed or lost known native targets",
+    "expected": "promise rejected"
+  },
+  {
+    "name": "accept-changed-attempt-locator",
+    "path": "packages/core/src/client.ts",
+    "from": "!matchesProviderNativeSessionTarget(active.nativeTarget, current.nativeHandle) ||",
+    "to": "false ||",
+    "target": "accepts retained canonical locator enrichment while rejecting changed or lost known native targets",
+    "expected": "promise resolved"
+  },
+  {
     "name": "changed-control-body",
     "path": "packages/core/src/agent-session-continuity-control.ts",
     "from": "a.action === b.action && a.additionalAttempts === b.additionalAttempts",
@@ -209,7 +225,7 @@ try {
       failed: tests.numFailedTests, total: tests.numTotalTests, semanticRed,
       bundleSha256: sha(await readFile(file)), failures: failed.map(test => ({ name: test.fullName, messages: test.failureMessages })) })
     await save()
-    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 22 && tests.numPendingTests === 0 && tests.success, 'Actual nonempty continuity control baseline failed: ' + report)
+    if (!variant.from) assert.ok(result.code === 0 && tests.numPassedTests === 23 && tests.numPendingTests === 0 && tests.success, 'Actual nonempty continuity control baseline failed: ' + report)
     else assert.ok(semanticRed, 'Loaded mutation did not produce its business failure: ' + variant.name)
   }
   for (const path of inputs.keys()) await bind(path)
