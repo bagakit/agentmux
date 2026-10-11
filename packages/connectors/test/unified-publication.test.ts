@@ -70,7 +70,7 @@ it('actual Core unified units carry authorized text, captured process and public
   const coverage = f.host.store.coverage(f.binding)
   expect(coverage.state).toBe('incomplete')
   expect(coverage.gaps.some(g => g.reason === 'public-content-unconfirmed' && g.part?.record.source.recordId === 'unqualified-user')).toBe(true)
-  expect(coverage.gaps.some(g => g.reason === 'transport-unsupported' && g.part?.record.source.recordId === 'media-gap')).toBe(true)
+  expect(coverage.gaps.some(g => g.reason === 'resource-unavailable' && g.part?.record.source.recordId === 'media-gap')).toBe(true)
   expect(f.host.store.checkpoint(f.binding, 'local')).not.toEqual(f.binding.sourceFrontier)
   expect(f.client.connect).not.toHaveBeenCalled()
 }, 20_000)
@@ -390,7 +390,7 @@ it('a separate original outbox process reopens the same vector cut, unknown froz
   expect(reopened.operations[0]).toMatchObject({ state: 'unknown', attempt: 1 })
   expect(reopened.operations[1].payload.text).toContain('Original immutable unknown request')
   expect(reopened.operations[1].payload.text).toContain('Original late content retained across process restart')
-  expect(reopened.coverage.gaps).toContainEqual(expect.objectContaining({ reason: 'transport-unsupported', part: expect.objectContaining({ record: expect.objectContaining({ source: expect.objectContaining({ recordId: 'reopened-original' }) }) }) }))
+  expect(reopened.coverage.gaps).toContainEqual(expect.objectContaining({ reason: 'resource-unavailable', part: expect.objectContaining({ record: expect.objectContaining({ source: expect.objectContaining({ recordId: 'reopened-original' }) }) }) }))
   expect(f.posts()).toHaveLength(0)
 }, 20_000)
 
