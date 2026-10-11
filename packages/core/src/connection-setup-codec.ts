@@ -53,11 +53,17 @@ export function parseConnectionSetupParams<M extends ConnectionSetupMethod>(meth
 }
 export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(method: M, value: unknown, input: ConnectionSetupParamsMap[M]): ConnectionSetupResultMap[M] {
   if (method === 'connection.setup.ls') {
-    const p = object(value, ['operations', 'next']), i = input as ConnectionSetupParamsMap['connection.setup.ls']
+    const p = object(value, ['operations', 'next', 'support']), i = input as ConnectionSetupParamsMap['connection.setup.ls']
     if (!Array.isArray(p.operations) || p.operations.length > (i.limit ?? 25)) fail()
     const operations = (p.operations as unknown[]).map(parseConnectionSetupOperation)
     if (operations.some(o => o.connectionId !== i.connectionId) || new Set(operations.map(o => o.operationId)).size !== operations.length) fail()
-    return { operations, next: p.next === null ? null : text(p.next) } as ConnectionSetupResultMap[M]
+    let support: ConnectionSetupResultMap['connection.setup.ls']['support'] = null
+    if (p.support !== null) {
+      const s = object(p.support, ['connectionRevision', 'capabilities'])
+      if (!Array.isArray(s.capabilities) || s.capabilities.length > 1) fail()
+      support = { connectionRevision: integer(s.connectionRevision), capabilities: (s.capabilities as unknown[]).map(value => choice(value, ['management-authentication'] as const)) }
+    }
+    return { operations, next: p.next === null ? null : text(p.next), support } as ConnectionSetupResultMap[M]
   }
   const p = object(value, ['operation', 'challenge', 'reason', 'continuation', 'receipt']), operation = p.operation === null ? null : parseConnectionSetupOperation(p.operation), challenge = p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge)
   if (operation && operation.operationId !== (input as { operationId: string }).operationId || !operation && (method === 'connection.setup.begin' || challenge !== null)) fail()
