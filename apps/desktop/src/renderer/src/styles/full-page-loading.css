@@ -40,11 +40,6 @@
 .full-page-loading__details dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
 .full-page-loading__actions + .full-page-loading__detail { margin-top: var(--sp-6); }
 .full-page-loading__actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: var(--sp-3); margin-top: var(--sp-6); }
-.startup-agent-check { max-width: 52ch; margin-top: var(--sp-6); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); font-size: var(--fs-meta); line-height: 1.5; }
-.startup-agent-check__heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-3); }
-.startup-agent-check__heading strong { font-weight: 500; color: var(--text); }
-.startup-agent-check__heading span, .startup-agent-check small { color: var(--text-3); }
-.startup-agent-check p { margin: var(--sp-2) 0; color: var(--text-2); overflow-wrap: anywhere; }
 .full-page-loading--failed .full-page-loading__mark { color: var(--red-text); }
 .full-page-loading--failed .full-page-loading__art { opacity: .48; }
 .full-page-loading--parked .full-page-loading__art { opacity: .58; }

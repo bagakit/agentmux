@@ -1045,7 +1045,6 @@ type AppState = {
   loading: boolean
   startupProgress: StartupProgress
   startupAgentAvailability: StartupAgentAvailability | null
-  continueStartup(): void
   error: string | null
   /** Last transient error remains available after dismissal/navigation for a deliberate reopen. */
   lastError: string | null
@@ -4422,10 +4421,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   loading: true,
   startupProgress: { step: 'saved-workspace' },
   startupAgentAvailability: null,
-  continueStartup() {
-    const check = get().startupAgentAvailability
-    if (check?.waiting) set({ startupAgentAvailability: { ...check, waiting: false } })
-  },
   runtimeOwnershipWarnings: undefined,
   runtimeEndpointWarnings: undefined,
   environmentWarning: undefined,
@@ -4675,7 +4670,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const availabilityTargets = Object.entries(config.executors).map(([id, executor]) => ({ id, providerId: executor.providerId, command: executor.command }))
       const startupAgents: StartupAgentAvailability | null = initialHost ? {
         hostId: initialHost.id, current: 0, total: initialHost.kind === 'local' ? Object.keys(config.executors).length : null,
-        pending: true, waiting: config.startup?.skipAgentAvailabilityCheckWait !== true
+        pending: true
       } : null
       set({
         restoredWorkbench: null,
@@ -4700,8 +4695,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } : null,
         errorDismissed: false
       })
-      // These observations run in parallel with recovery. Only the splash may wait;
-      // durable projection, input routes, the boot buffer and persistence keep their original boundary.
+      // Executable observations continue behind the usable workface. Publication and
+      // persistence above depend only on their own durable/configuration boundary.
       if (initialHost) {
         const updateProgress = () => {
           if (!observing || availabilityEpoch !== startupAvailabilityEpoch) return

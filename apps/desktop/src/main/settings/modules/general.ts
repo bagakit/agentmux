@@ -47,8 +47,6 @@ export const generalSettings = [
   },
   booleanSetting('copyPathsAsAbsolute', false, (config) => config.copyPathsAsAbsolute === true,
     (config, copyPathsAsAbsolute) => ({ ...config, copyPathsAsAbsolute })),
-  booleanSetting('startup.skipAgentAvailabilityCheckWait', false, (config) => config.startup?.skipAgentAvailabilityCheckWait === true,
-    (config, skipAgentAvailabilityCheckWait) => ({ ...config, startup: { ...config.startup, skipAgentAvailabilityCheckWait } })),
   enumSetting('projectRailDensity', PROJECT_RAIL_DENSITY_IDS, PROJECT_RAIL_DENSITY_DEFAULT,
     (config) => config.projectRailDensity ?? PROJECT_RAIL_DENSITY_DEFAULT,
     (config, projectRailDensity) => ({ ...config, projectRailDensity })),

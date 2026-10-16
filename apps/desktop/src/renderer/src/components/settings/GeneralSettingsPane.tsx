@@ -5,16 +5,14 @@ import type { CrashLogRevealResult } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 
-export type GeneralSettingsValues = { copyPathsAsAbsolute: boolean; skipAgentAvailabilityCheckWait: boolean }
+export type GeneralSettingsValues = { copyPathsAsAbsolute: boolean }
 
-export function GeneralSettingsPane({ copyPathsAsAbsolute, skipAgentAvailabilityCheckWait, onSave }: {
+export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave }: {
   copyPathsAsAbsolute: boolean | undefined
-  skipAgentAvailabilityCheckWait?: boolean | undefined
   onSave: (value: GeneralSettingsValues, expected: GeneralSettingsValues) => Promise<void>
 }) {
   const saved = copyPathsAsAbsolute === true
-  const startupSaved = skipAgentAvailabilityCheckWait === true
-  const draft = useSettingDraftRecord({ copyPathsAsAbsolute: saved, skipAgentAvailabilityCheckWait: startupSaved })
+  const draft = useSettingDraftRecord({ copyPathsAsAbsolute: saved })
   const saveState = useSettingsSave()
   const [reveal, setReveal] = useState<CrashLogRevealResult | null>(null)
   const [pending, setPending] = useState(false)
@@ -47,16 +45,6 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, skipAgentAvailability
           <span>
             <strong>Show and copy the full absolute path instead of <code>~</code></strong>
             <small>By default, project paths abbreviate your own home directory as <code>~/proj/app</code>. This preference also applies to tooltips and Copy Path actions. Remote paths and paths belonging to another user stay complete.</small>
-          </span>
-        </label>
-      </section>
-      <section className="settings-group" data-settings-field="startup-checks">
-        <header><span>Startup checks</span><small>Saved: {startupSaved ? 'Continue while checking' : 'Wait for Agent availability'}</small></header>
-        <label className="browser-automation-toggle">
-          <input type="checkbox" checked={draft.value.skipAgentAvailabilityCheckWait} onChange={(event) => draft.setField('skipAgentAvailabilityCheckWait', event.target.checked)} />
-          <span>
-            <strong>Continue startup without waiting for Agent availability</strong>
-            <small>By default, startup shows and waits for the Agent availability check. Enable this to finish the startup screen sooner while the check continues in the background. Applies on the next startup.</small>
           </span>
         </label>
       </section>
