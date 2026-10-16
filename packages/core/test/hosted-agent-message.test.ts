@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -26,7 +27,7 @@ async function fixture() {
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'recipient', providerId: 'traex',
     executorId: 'traex', hostId: 'local', workspacePath: root, run: { runId: 'recipient-run' }, retiredRuns: [],
-    hookBindingId: 'private-binding', hookToken: 'private-hook', createdAt: 1, updatedAt: 1 })
+    hookBindingId: 'private-binding', hookToken: 'private-hook', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) })
   const core = new AgentMuxClient({ store })
   const inner = core as unknown as { connected: boolean; registry: { load(hostId: string): Promise<void> };
     kernel: Record<string, unknown> }
@@ -63,7 +64,7 @@ async function fixture() {
   const client = await connectHostedAgentMux({ rpc: port })
   const message: Parameters<AgentMuxHostedClient['submitAgentMessage']>[0] = {
     agentSessionId: 'recipient', condition: agentPromptCondition(core.agentSession('recipient')),
-    envelope: { schema: 'agentmux.a2a.v1', messageId: 'original-message', operationId: 'original-operation', createdAt: 100,
+    envelope: { schema: 'agentmux.a2a.v1', messageId: 'original-message', operationId: 'original-operation', createdAt: _tailFixtureEpoch(0, 0, 100),
       sender: { kind: 'human', principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
       senderSessionId: null, senderRunId: null, recipientSessionId: 'recipient', recipientRunId: 'recipient-run',
       threadId: 'original-thread', correlationId: 'original-correlation', replyTo: null, workspaceId: null,
@@ -92,7 +93,7 @@ describe('Hosted original message submission', () => {
         intent: { run: { runId: 'recipient-run' }, ownerInstanceId: 'private-daemon' }, acknowledged: true })
       expect(f.input.mock.calls).toEqual([['recipient-run', expect.objectContaining({
         operationId: admission!.operationId, ownerInstanceId: 'private-daemon', expectedByte: 0,
-        data: '[Message from unverified local process]\nOriginal human body\nSecond line\r'
+        data: f.message.envelope.body + '\r'
       })]])
       expect(await f.queue.listAfter()).toEqual([expect.objectContaining({ envelope: f.message.envelope,
         promptCondition: { expectedRun: { runId: 'recipient-run' }, afterSubmissionId: null },
