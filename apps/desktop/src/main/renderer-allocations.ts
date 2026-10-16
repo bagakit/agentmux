@@ -13,7 +13,7 @@ import {
   type RendererV8ProfileTarget
 } from '@agentmux/core/control'
 
-/** Fixed V8 surviving-allocation sampling; never dumps objects or collects garbage. */
+/** Fixed V8 allocation sampling; no object dump or separate collectGarbage command. Engine sampling may trigger GC. */
 export class RendererAllocationSampler {
   private active: AbortController | null = null
   private disposed = false
