@@ -14,17 +14,20 @@ const prepare = process.argv.slice(2).includes('--prepare')
 assert.ok(process.argv.slice(2).every(value => value === '--prepare'), 'Use --prepare to produce the exact private proof; no arguments verify it.')
 const tests = ['apps/desktop/test/session-mailbox-author-boundary.test.tsx', 'apps/desktop/test/mailbox-a2a.test.tsx', 'apps/desktop/test/session-mailbox-a2a.test.tsx',
   'apps/desktop/test/session-messages-read.test.tsx', 'apps/desktop/test/session-mailbox.test.tsx',
-  'apps/desktop/test/session-mailbox-reading-flow.test.tsx', 'apps/desktop/test/session-mailbox-receipts.test.tsx']
+  'apps/desktop/test/session-mailbox-reading-flow.test.tsx', 'apps/desktop/test/session-mailbox-receipts.test.tsx',
+  'apps/desktop/test/conversation-message-wrapper.integration.test.tsx', 'apps/desktop/test/input-mailbox-body-boundary.test.tsx']
 const sources = [...new Set([...tests, ...mailboxMutations.map(item => item.file),
   'apps/desktop/src/renderer/src/components/MailboxReading.tsx',
   'apps/desktop/src/renderer/src/lib/session-mailbox-messages.ts',
   'apps/desktop/src/renderer/src/lib/use-service-notices.ts',
   'packages/client-ui/src/styles/composer.css',
   'packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/components/ConversationInputText.tsx',
+  'packages/client-ui/src/components/ConversationResourceText.tsx',
   'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/test/a2a-message-data-bridge.test.tsx', 'apps/desktop/test/vitest.a2a-message-data.config.mts',
   'apps/desktop/test/helpers/mailbox-journal-fixture.ts', 'apps/desktop/test/helpers/composer-dom-fixture.tsx',
+  'apps/desktop/scripts/fixtures/conversation-message-wrapper/inputs.mjs',
   'apps/desktop/scripts/fixtures/mailbox-reading-flow/vitest.config.mts',
   'apps/desktop/scripts/fixtures/mailbox-reading-flow/mutations.mjs',
   'apps/desktop/scripts/verify-mailbox-reading-flow.mjs'])]
@@ -98,7 +101,8 @@ if (prepare) {
   await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   await writeFile(receiptPath, JSON.stringify(receipt, null, 2) + '\n')
   assert.equal(receipt.prepared, true, receipt.failure?.message)
-  console.log(JSON.stringify({ prepared: true, receipt: receiptPath, productArtifact: receipt.productArtifact, review: 'Independent actual-image review remains required.' }))
+  console.log(JSON.stringify({ prepared: true, receipt: receiptPath, suites: tests.length, tests: receipt.baseline.tests, mutations: receipt.mutations.length,
+    productArtifact: receipt.productArtifact, review: 'Independent actual-image review remains required.' }))
 } else {
   const receipt = JSON.parse(await readFile(receiptPath, 'utf8'))
   assert.equal(receipt.schema, 'agentmux.a2a-mailbox-reading-proof.v1')
@@ -110,5 +114,6 @@ if (prepare) {
   assert.equal(hash(await readFile(artifact.path)), artifact.sha256, 'Keep the original actual-product receipt')
   const product = JSON.parse(await readFile(artifact.path, 'utf8'))
   await (await helper()).verifyA2aInboxProductProof(product, { root, scope: 'mailbox' })
-  console.log(JSON.stringify({ passed: true, receipt: receiptPath, sourceInputs: sources.length, mutations: receipt.mutations.length, productArtifact: artifact }))
+  console.log(JSON.stringify({ passed: true, receipt: receiptPath, sourceInputs: sources.length, suites: tests.length, tests: receipt.baseline.tests,
+    mutations: receipt.mutations.length, productArtifact: artifact }))
 }

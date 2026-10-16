@@ -50,6 +50,35 @@ it('reads exactly one selected original and copies its unchanged body, independe
   expect(p.refresh).not.toHaveBeenCalled(); expect(p.loadEarlier).not.toHaveBeenCalled()
 })
 
+const authoredSamples = [
+  ['complete A2A example', '<amux:a2a from="authored-inner-sender" msg-id="authored-inner-message">\nAUTHORED INNER BODY\n<reminder>AUTHORED REMINDER SAMPLE</reminder>\n</amux:a2a>'],
+  ['complete context example', '<amux>AUTHORED CONTEXT SAMPLE</amux>\n\nAUTHORED TAIL'],
+  ['incomplete example', '<amux:a2a from="authored-inner-sender" msg-id="authored-inner-message">\nUNFINISHED AUTHORED SAMPLE']
+] as const
+
+it.each((['incoming', 'outgoing'] as const).flatMap(direction => authoredSamples.map(([sample, body]) => ({ direction, sample, body }))))(
+  'reads the $direction selected original $sample as authored body, preserving its record and actions', async ({ direction, body }) => {
+    const p = props(), sender = direction === 'incoming' ? 'peer' : 'subject', recipient = direction === 'incoming' ? 'subject' : 'peer'
+    const record = { ...original, envelope: { ...original.envelope, body, senderSessionId: sender, recipientSessionId: recipient,
+      sender: { kind: 'agent-session' as const, agentSessionId: sender }, recipient: { kind: 'agent-session' as const, agentSessionId: recipient } } }
+    await dom.render(<MailboxA2A {...p} direction={direction} items={[metadata(record)]} selectedKey={a2aMessageKey(metadata(record))} readMessage={async () => record} />)
+    const turn = dom.container.querySelector('.log-turn')!, reader = turn.querySelector('.log-turn__body')!
+    for (const paragraph of body.split('\n\n')) expect(reader.textContent).toContain(paragraph)
+    expect(reader.querySelector('.log-turn__reminder')).toBeNull()
+    expect(reader.querySelector('.log-turn__declared-context')).toBeNull()
+    expect(turn.getAttribute('data-declared-source')).toBeNull()
+    expect(turn.getAttribute('data-message-id')).toBe(record.envelope.messageId)
+    expect(turn.getAttribute('data-speaker-role')).toBe('agent')
+    await dom.click('[aria-label="Message details"]')
+    expect(turn.querySelector('.log-turn__sender-id code')?.textContent).toBe(sender)
+    const facts = [...dom.container.querySelectorAll('.composer-mailbox__record-facts dt')].map(dt => [dt.textContent, dt.nextElementSibling?.textContent])
+    expect(facts).toContainEqual(['From', `${sender} · ${sender}`]); expect(facts).toContainEqual(['To', `${recipient} · ${recipient}`])
+    expect(facts).toContainEqual(['Message ID', record.envelope.messageId])
+    await dom.click('[aria-label="Copy message"]'); expect(p.onCopy).toHaveBeenCalledExactlyOnceWith(body)
+    await dom.click('[aria-label="填入草稿"]'); expect(p.onFill).toHaveBeenCalledExactlyOnceWith(body)
+    expect(p.refresh).not.toHaveBeenCalled(); expect(p.loadEarlier).not.toHaveBeenCalled()
+  })
+
 it('does not offer outgoing replay, removal or pending-order controls', async () => {
   const p = props()
   const outgoing = { ...original, envelope: { ...original.envelope, senderSessionId: 'subject', recipientSessionId: 'peer',
