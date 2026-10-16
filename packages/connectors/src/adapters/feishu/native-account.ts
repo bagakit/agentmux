@@ -134,8 +134,9 @@ function nodes(value: unknown, includeLocalScopes = true): Ast[] {
     if (p.type === 'BlockStatement' && (p.body as Ast[]).some(statement => windowBinding(statement) && statement.kind !== 'var')) return []
     if (p.type === 'CallExpression' && ['FunctionExpression', 'ArrowFunctionExpression'].includes(String(record(p.callee)?.type))) {
       const callee = record(p.callee)!, body = record(callee.body), local = body?.type === 'BlockStatement' ? body.body as Ast[] : []
-      const shadowed = isWindow(callee.id) || (callee.params as unknown[]).some(bindsWindow) || local.some(windowBinding) || hoistedWindow(local)
-      return [p as Ast, ...nodes(p.arguments, false), ...(shadowed ? [] : nodes(callee.body, false))]
+      const parameterShadowed = isWindow(callee.id) || (callee.params as unknown[]).some(bindsWindow)
+      const bodyShadowed = parameterShadowed || local.some(windowBinding) || hoistedWindow(local)
+      return [p as Ast, ...nodes(p.arguments, false), ...(parameterShadowed ? [] : nodes(callee.params, false)), ...(bodyShadowed ? [] : nodes(callee.body, false))]
     }
     if (p.type === 'ClassDeclaration' || p.type === 'ClassExpression') {
       const members = record(p.body)?.body as Ast[]
@@ -201,7 +202,9 @@ function bootstrap(html: string): { account: ConnectionSetupAccount; csrf: strin
         const e = record(s.expression), callee = record(e?.callee)
         if (e?.type === 'CallExpression' && callee?.type === 'FunctionExpression' && record(callee.body)?.type === 'BlockStatement') {
           const local = (record(callee.body)!.body as Ast[]).filter(meaningful)
-          if (isWindow(callee.id) || (callee.params as unknown[]).some(bindsWindow) || local.some(windowBinding) || hoistedWindow(local)) continue
+          const parameterShadowed = isWindow(callee.id) || (callee.params as unknown[]).some(bindsWindow)
+          if ((e.arguments as Ast[]).some(argument => identityWrites(argument).length > 0) || !parameterShadowed && (callee.params as Ast[]).some(parameter => identityWrites(parameter).length > 0)) throw new Error('Unqualified console identity input')
+          if (parameterShadowed || local.some(windowBinding) || hoistedWindow(local)) continue
           scriptBindings({ ...ast, body: local } as unknown as Program)
           if (!local.some(statement => identityWrites(statement).length > 0)) continue
           // Only the finite native literal initializer is a source; no code is executed.
@@ -209,10 +212,9 @@ function bootstrap(html: string): { account: ConnectionSetupAccount; csrf: strin
           fields(local)
           continue
         }
-        const loop = record(s.body)
-        // Stop at these known unreachable prefixes, without guessing whether other loops terminate.
-        if (s.type === 'ThrowStatement' || s.type === 'ForStatement' && s.test === null && (loop?.type === 'EmptyStatement' || loop?.type === 'BlockStatement' && (loop.body as unknown[]).length === 0)) break
-        const writes = identityWrites(s)
+        const writes = identityWrites(s), loop = record(s.body)
+        // Related argument/init writes are checked before an exact abrupt or empty-loop prefix.
+        if (!writes.length && (s.type === 'ReturnStatement' || s.type === 'ThrowStatement' || s.type === 'ForStatement' && s.test === null && (loop?.type === 'EmptyStatement' || loop?.type === 'BlockStatement' && (loop.body as unknown[]).length === 0))) break
         if (!writes.length) continue
         const left = record(e?.left), key = identityField(left)
         if (s.type !== 'ExpressionStatement' || e?.type !== 'AssignmentExpression' || e.operator !== '=' || !left || !isWindow(left.object) || left.computed || !key || writes.length !== 1) throw new Error('Unqualified console identity write')
