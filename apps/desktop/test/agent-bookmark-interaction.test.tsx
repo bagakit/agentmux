@@ -62,6 +62,27 @@ async function settle() { await act(async () => new Promise(resolve => setTimeou
 async function pointer(target: Element, type: string, id: number, x: number, y: number) {
   await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, isPrimary: true, pointerId: id, clientX: x, clientY: y })))
 }
+async function dragPinFromModal() {
+  const slot = await openFromModal(), original = panel(), anchor = agentInformationPreview.get()!.anchor
+  const reading = original.querySelector<HTMLElement>('.agent-information-reader__reading')!
+  const text = [...original.querySelectorAll<HTMLElement>('.focus-context-hover__prose p')].find(node => node.textContent === 'Original reply.')?.firstChild
+  expect(text).toBeDefined()
+  const range = document.createRange(); range.setStart(text!, 0); range.setEnd(text!, 8)
+  document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
+  reading.scrollTop = 37
+  vi.spyOn(original, 'getBoundingClientRect').mockImplementation(() => {
+    const x = parseFloat(original.style.left) || 0, y = parseFloat(original.style.top) || 0
+    const width = parseFloat(original.style.width) || 460, height = parseFloat(original.style.height) || 400
+    return { x, y, width, height, top: y, left: x, right: x + width, bottom: y + height, toJSON() {} }
+  })
+  const header = original.querySelector<HTMLElement>('.agent-information-reader__header')!
+  await pointer(header, 'pointerdown', 7, 100, 100)
+  await pointer(header, 'pointermove', 7, 145, 130)
+  expect(agentBookmarks.get().bookmarks).toHaveLength(1)
+  expect(original.dataset.pinned).toBe('true')
+  expect(slot.contains(original)).toBe(false)
+  return { slot, original, anchor, reading, text, header }
+}
 beforeEach(async () => {
   sourceModalOpenChange.mockClear()
   for (const bookmark of agentBookmarks.get().bookmarks) agentBookmarks.remove(bookmark.key)
@@ -107,6 +128,55 @@ it('returns Escape ownership to the original modal after pinning detaches the Re
   expect(panel()).toBe(original)
   expect(original.dataset.pinned).toBe('true')
   expect(original.closest('[data-overlay-modal-scope]')).toBeNull()
+})
+it('undoes a new drag-pin into its exact still-open modal slot without replacing or closing the original reading', async () => {
+  const sessions = useAppStore.getState().sessions, drafts = useAppStore.getState().agentComposerDrafts
+  const { slot, original, anchor, reading, text, header } = await dragPinFromModal()
+  const sourceScope = slot.closest<HTMLElement>('[data-overlay-modal-scope]')!
+  expect(Modal.getModalOverlayContainer(anchor)).toBe(slot)
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+  await act(async () => window.dispatchEvent(escape))
+  expect(escape.defaultPrevented).toBe(true)
+  expect(agentBookmarks.get().bookmarks).toHaveLength(0)
+  expect(original.dataset.pinned).toBeUndefined()
+  expect(panel()).toBe(original)
+  expect(slot.contains(original)).toBe(true)
+  expect(original.closest('[data-overlay-modal-scope]')).toBe(sourceScope)
+  expect(sourceScope.hidden).toBe(false)
+  expect(original.querySelector('.agent-information-reader__reading')).toBe(reading)
+  expect(reading.contains(text!)).toBe(true)
+  expect(reading.scrollTop).toBe(37)
+  expect(document.getSelection()!.toString()).toBe('Original')
+  expect(sourceModalOpenChange).not.toHaveBeenCalled()
+  await pointer(header, 'pointerup', 7, 145, 130)
+  await act(async () => original.querySelector<HTMLButtonElement>('.agent-information-reader__close')!.click())
+  expect(document.querySelector('.agent-information-reader')).toBeNull()
+  expect(sourceScope.hidden).toBe(false)
+  expect(sourceModalOpenChange).not.toHaveBeenCalled()
+  expect(useAppStore.getState().sessions).toBe(sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+})
+it('does not resurrect a source modal that closed before a new drag-pin is cancelled', async () => {
+  const sessions = useAppStore.getState().sessions
+  const { slot, original, anchor, reading, text, header } = await dragPinFromModal()
+  await retireSourceModal('close')
+  expect(Modal.getModalOverlayContainer(anchor)).toBeNull()
+  expect(panel()).toBe(original)
+  await pointer(header, 'pointercancel', 7, 145, 130)
+  expect(agentBookmarks.get().bookmarks).toHaveLength(0)
+  expect(original.dataset.pinned).toBeUndefined()
+  expect(panel()).toBe(original)
+  expect(slot.contains(original)).toBe(false)
+  expect(original.closest('[data-overlay-modal-scope]')).toBeNull()
+  expect(Modal.getModalOverlayContainer(anchor)).toBeNull()
+  expect(original.querySelector('.agent-information-reader__reading')).toBe(reading)
+  expect(reading.contains(text!)).toBe(true)
+  expect(reading.scrollTop).toBe(37)
+  expect(document.getSelection()!.toString()).toBe('Original')
+  expect(sourceModalOpenChange).not.toHaveBeenCalled()
+  await pointer(header, 'pointerup', 7, 145, 130)
+  expect(agentBookmarks.get().bookmarks).toHaveLength(0)
+  expect(useAppStore.getState().sessions).toBe(sessions)
 })
 it.each(['close', 'presentation failure'] as const)('keeps a transient global reader in its exact source modal and dismisses it on %s', async mode => {
   const sessions = useAppStore.getState().sessions, drafts = useAppStore.getState().agentComposerDrafts
