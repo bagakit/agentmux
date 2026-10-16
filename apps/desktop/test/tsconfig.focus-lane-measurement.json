@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "../src/renderer/src/global.d.ts",
+    "focus-lane-measurement.test.tsx",
+    "focus-lane-height-balance.test.tsx",
+    "focus-lane-content-density.test.tsx",
+    "vitest.focus-lane-measurement.config.mts"
+  ]
+}

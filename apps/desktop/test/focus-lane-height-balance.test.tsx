@@ -52,7 +52,10 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class {
     entry: typeof observers[number]
     constructor(callback: ResizeObserverCallback) { this.entry = { callback, observe: vi.fn(), disconnect: vi.fn() }; observers.push(this.entry) }
-    observe = (element: Element) => this.entry.observe(element)
+    observe = (element: Element) => {
+      this.entry.observe(element)
+      queueMicrotask(() => { if (!this.entry.disconnect.mock.calls.length) notify(this.entry) })
+    }
     disconnect = () => this.entry.disconnect()
   })
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('focus-project-lanes__rows') ? Math.round(measuredWidth) : 0 })
@@ -74,6 +77,9 @@ const columns = () => ['attention', 'working', 'results', 'idle'].map(bucket => 
 const titleState = (bucket: string) => container.querySelector<HTMLElement>(`.focus-project-board__live .focus-project-lanes__status-rail [data-bucket="${bucket}"]`)!
 const card = (id: string) => container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`)!
 const listObservers = () => observers.filter(observer => observer.observe.mock.calls.some(([element]) => (element as HTMLElement).classList.contains('focus-project-lanes__rows')))
+const notify = (observer: typeof observers[number]) => observer.callback(observer.observe.mock.calls.map(([target]) => ({
+  target, contentRect: new DOMRect(0, 0, measuredWidth, 600)
+} as ResizeObserverEntry)), {} as ResizeObserver)
 
 it('matches an independently enumerated optimum across nonempty integer budgets', () => {
   let checked = 0
@@ -93,7 +99,7 @@ it('actual Global projects 12/5/1 into optimal five, six and seven readable slot
   const counts = [0, 12, 5, 1] as const
   for (const slots of [5, 6, 7]) {
     measuredWidth = metrics(counts, slots).width
-    await act(async () => observers[0]!.callback([], {} as ResizeObserver))
+    await act(async () => notify(listObservers()[0]!))
     expect(Number(groups().dataset.focusCardSlots)).toBe(slots)
     expect(actualRows(counts, columns())).toBe(oracle(counts, slots))
     expect(groups().querySelectorAll('.focus-context')).toHaveLength(18)
@@ -189,7 +195,7 @@ it('actual Global preserves the fractional group budget through its production m
   const list = listObservers(); expect(list).toHaveLength(1)
   for (const width of [729, 729.5, 730, 730.5, 731, 999.5, 1000, 1000.5, 1000.75]) {
     measuredWidth = width
-    await act(async () => list[0]!.callback([], {} as ResizeObserver))
+    await act(async () => notify(list[0]!))
     expect(widths().reduce((sum, w) => sum + w, 2), 'actual group widths plus gap must fit the fractional content width').toBeLessThanOrEqual(width - 4)
     expect(columns()).toEqual(width < 730 ? [0, 2, 1, 0] : [0, 3, 1, 0])
     expect(groups().querySelectorAll('.focus-context')).toHaveLength(10)
@@ -198,7 +204,7 @@ it('actual Global preserves the fractional group budget through its production m
   await act(async () => original.focus())
   const compute = vi.spyOn(allocator, 'allocateFocusLaneColumns')
   measuredWidth = 1000.625
-  await act(async () => list[0]!.callback([], {} as ResizeObserver))
+  await act(async () => notify(list[0]!))
   expect(compute).toHaveBeenCalledOnce()
   expect(widths().reduce((sum, w) => sum + w, 2)).toBeLessThanOrEqual(measuredWidth - 4)
   expect(document.activeElement).toBe(original)

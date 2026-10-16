@@ -1,81 +1,138 @@
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
-import { allocateFocusLaneColumns } from '../src/renderer/src/lib/focus-lane-layout'
+import * as allocator from '../src/renderer/src/lib/focus-lane-layout'
 
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 const initial = useAppStore.getState()
-let root: Root, container: HTMLDivElement, width: number
-const observers: Array<{ notify: () => void; target?: Element; disconnected: boolean }> = []
+type Observer = { callback: ResizeObserverCallback; target?: Element; disconnected: boolean }
+let root: Root, container: HTMLDivElement, style: HTMLStyleElement, documentVisible: boolean
+const observers: Observer[] = [], geometryReads: Element[] = [], styleReads: Element[] = []
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  width = 1000; observers.length = 0
+  observers.length = 0; geometryReads.length = 0; styleReads.length = 0; documentVisible = true
+  vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => documentVisible ? 'visible' : 'hidden')
   vi.stubGlobal('ResizeObserver', class {
-    record: typeof observers[number]
-    constructor(notify: () => void) { this.record = { notify, disconnected: false }; observers.push(this.record) }
+    record: Observer
+    constructor(callback: ResizeObserverCallback) { this.record = { callback, disconnected: false }; observers.push(this.record) }
     observe(target: Element) { this.record.target = target }
     disconnect() { this.record.disconnected = true }
   })
-  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function () { return width })
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, width, 500))
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    if (this.matches('.focus-project-lanes__rows, .focus-project-lanes__groups')) geometryReads.push(this)
+    return 17
+  })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.matches('.focus-project-lanes__rows, .focus-project-lanes__groups')) geometryReads.push(this)
+    return new DOMRect(0, 0, 17, 500)
+  })
+  const computedStyle = globalThis.getComputedStyle
+  vi.spyOn(globalThis, 'getComputedStyle').mockImplementation((node, pseudo) => {
+    if (node.matches('.focus-project-lanes__groups, .focus-context-group__cards')) styleReads.push(node)
+    return computedStyle(node, pseudo)
+  })
+  style = document.createElement('style')
+  style.textContent = '.focus-project-lanes__groups { padding-left: 3.5px; padding-right: 4.5px; column-gap: 3px } .focus-context-group__cards { column-gap: 5px }'
+  document.head.append(style)
   const config = await api.config.get(), snapshot = await api.sessions.snapshot()
   const base = snapshot.sessions.find(session => session.kind === 'agent')!
   const workspace = { id: 'project', name: 'Original project', hostId: 'local', path: fixturePath('project'), kind: 'folder' as const }
-  const session = { ...base, id: 'original', workspacePath: workspace.path, hostId: 'local',
-    control: { ...base.control, agentSessionId: 'original' } }
+  const session = { ...base, id: 'original', workspacePath: workspace.path, hostId: 'local', control: { ...base.control, agentSessionId: 'original' } }
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path })
   useAppStore.setState({ config: { ...config, workspaces: [workspace] }, sessions: [session], timelines: {}, tabs: {}, layouts: {}, agentNames: {}, scratchTopicSnapshots: {},
     mainSurface: 'agents', agentComposerDrafts: { original: 'Original unsent draft' },
     agentFocus: { execution: { sessionId: null, history: [{ sessionId: 'original', focusedAt: Date.now(), identity: { kind: 'agent', name: 'Original investigation', providerId: 'codex', hostId: 'local', workspacePath: workspace.path, project: { id: workspace.id, name: workspace.name } } }] }, pmo: { sessionId: null } } })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); style.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const groups = () => container.querySelector<HTMLElement>('.focus-project-lanes__groups')!
-const render = () => act(async () => root.render(createElement(GlobalFocusSurface)))
+const activeObservers = () => observers.filter(observer => !observer.disconnected && observer.target?.matches('.focus-project-lanes__rows'))
+const render = (visible = true) => act(async () => root.render(<GlobalFocusSurface visible={visible} />))
+const deliver = (observer: Observer, width: number) => observer.callback([{ target: observer.target!,
+  contentRect: new DOMRect(0, 0, width, 500), borderBoxSize: [{ inlineSize: width + 20, blockSize: 500 }] } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+const resize = (width: number) => act(async () => { for (const observer of activeObservers()) deliver(observer, width) })
 
 it('keeps provisional cards readable until a real positive width exists', () => {
   const counts = [0, 1, 8, 2] as const, metrics = { width: 0, padding: 4, gap: 2, cardGap: 2 }
-  expect(allocateFocusLaneColumns(counts, metrics).widths).toEqual([0, 180, 180, 180])
-  expect(allocateFocusLaneColumns(counts, { ...metrics, width: 176 }).widths).toEqual([0, 172, 172, 172])
-  expect(allocateFocusLaneColumns(counts, { ...metrics, width: 500 }).widths).toEqual([0, 247, 247, 320])
+  expect(allocator.allocateFocusLaneColumns(counts, metrics).widths).toEqual([0, 180, 180, 180])
+  expect(allocator.allocateFocusLaneColumns(counts, { ...metrics, width: 176 }).widths).toEqual([0, 172, 172, 172])
+  expect(allocator.allocateFocusLaneColumns(counts, { ...metrics, width: 500 }).widths).toEqual([0, 247, 247, 320])
 })
 
-it('measures late cards after retained-only headings without needing a resize callback', async () => {
-  const sessions = useAppStore.getState().sessions
-  useAppStore.setState({ sessions: [] })
+it('waits for initial RO content sizes and reads actual CSS gaps without mount/reveal geometry flushes', async () => {
+  const compute = vi.spyOn(allocator, 'allocateFocusLaneColumns')
   await render()
-  expect(container.querySelector('.focus-project-lanes__rows')).not.toBeNull()
-  expect(groups()).toBeNull()
-  await act(async () => useAppStore.setState({ sessions }))
-  expect(Number(groups().dataset.focusCardSlots)).toBeGreaterThan(1)
   const card = container.querySelector('[data-session-id="original"]')
-  const active = observers.filter(observer => !observer.disconnected && observer.target?.matches('.focus-project-lanes__rows'))
-  expect(active).toHaveLength(1)
-  width = 500
-  await act(async () => active[0]!.notify())
-  expect(groups().dataset.focusCardSlots).toBe('2')
+  expect(card).not.toBeNull(); expect(groups().dataset.focusCardSlots).toBe('0')
+  expect(geometryReads, 'Visible mount synchronous lane geometry').toHaveLength(0)
+  expect(styleReads, 'Visible mount synchronous computed styles').toHaveLength(0)
+  expect(activeObservers()).toHaveLength(1)
+  await resize(1000.5)
+  expect(compute.mock.calls.at(-1)![1]).toEqual({ width: 1000.5, padding: 8, gap: 3, cardGap: 5 })
+  expect(groups().dataset.focusCardSlots).toBe('5')
+  await resize(363.5) // Content box excludes the observer's deliberately wider scroll-bar border box.
+  expect(groups().dataset.focusCardSlots).toBe('1')
+  expect(compute.mock.calls.at(-1)![1].width).toBe(363.5)
+  style.textContent = '.focus-project-lanes__groups { padding-left: 10px; padding-right: 12px; column-gap: 7px } .focus-context-group__cards { column-gap: 9px }'
+  await resize(500.25)
+  expect(compute.mock.calls.at(-1)![1]).toEqual({ width: 500.25, padding: 22, gap: 7, cardGap: 9 })
+  compute.mockClear(); const slots = groups().dataset.focusCardSlots, styles = styleReads.length
+  await resize(0); await resize(500.25)
+  expect(compute).not.toHaveBeenCalled(); expect(groups().dataset.focusCardSlots).toBe(slots)
+  expect(styleReads.length).toBe(styles + 2)
+  expect(geometryReads).toHaveLength(0)
   expect(container.querySelector('[data-session-id="original"]')).toBe(card)
-  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Original unsent draft')
 })
 
-it('starts observation when an empty scan gains cards and resumes it when shown again', async () => {
+it('starts first-size observation when retained-only headings or an empty scan gains real cards', async () => {
   const sessions = useAppStore.getState().sessions
-  useAppStore.setState({ sessions: [], agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
-  await render()
-  expect(groups()).toBeNull()
+  useAppStore.setState({ sessions: [] }); await render()
+  expect(container.querySelector('.focus-project-lanes__rows')).not.toBeNull(); expect(groups()).toBeNull()
+  expect(activeObservers()).toHaveLength(0)
   await act(async () => useAppStore.setState({ sessions }))
-  expect(Number(groups().dataset.focusCardSlots)).toBeGreaterThan(1)
+  expect(groups().dataset.focusCardSlots).toBe('0'); expect(activeObservers()).toHaveLength(1)
+  await resize(1000.5); expect(groups().dataset.focusCardSlots).toBe('5')
   const card = container.querySelector('[data-session-id="original"]')
   await act(async () => useAppStore.setState({ mainSurface: 'workbench' }))
-  expect(observers.filter(observer => !observer.disconnected && observer.target?.matches('.focus-project-lanes__rows'))).toHaveLength(0)
-  width = 500
+  expect(activeObservers()).toHaveLength(0)
   await act(async () => useAppStore.setState({ mainSurface: 'agents' }))
-  expect(groups().dataset.focusCardSlots).toBe('2')
+  expect(groups().dataset.focusCardSlots).toBe('5')
+  await resize(500); expect(groups().dataset.focusCardSlots).toBe('2')
   expect(container.querySelector('[data-session-id="original"]')).toBe(card)
+  expect(geometryReads).toHaveLength(0)
+})
+
+it('hidden surfaces and documents disconnect observers and reject queued sizes while retaining the original workface', async () => {
+  await render(false); expect(activeObservers()).toHaveLength(0)
+  await render(); await resize(1000.5)
+  const card = container.querySelector<HTMLElement>('[data-session-id="original"]')!, rows = groups().closest<HTMLElement>('.focus-project-lanes__rows')!
+  await act(async () => card.focus()); rows.scrollTop = 34; rows.scrollLeft = 12
+  const reading = document.createRange(); reading.selectNodeContents(card); const selection = window.getSelection()!
+  selection.removeAllRanges(); selection.addRange(reading); const selectedText = selection.toString()
+  expect(selectedText.length).toBeGreaterThan(0)
+  const before = useAppStore.getState(), active = activeObservers(), slots = groups().dataset.focusCardSlots
+  await render(false); styleReads.length = 0
+  await act(async () => { for (const observer of active) { deliver(observer, 0); deliver(observer, 363.5) } })
+  expect(activeObservers()).toHaveLength(0); expect(styleReads).toHaveLength(0)
+  expect(groups().dataset.focusCardSlots).toBe(slots)
+  await render(); expect(groups().dataset.focusCardSlots).toBe(slots)
+  const revealed = activeObservers()
+  await act(async () => { documentVisible = false; document.dispatchEvent(new Event('visibilitychange')) })
+  expect(activeObservers()).toHaveLength(0)
+  await act(async () => { for (const observer of revealed) deliver(observer, 363.5) })
+  expect(styleReads).toHaveLength(0); expect(groups().dataset.focusCardSlots).toBe(slots)
+  await act(async () => { documentVisible = true; document.dispatchEvent(new Event('visibilitychange')) })
+  expect(activeObservers()).toHaveLength(1); expect(groups().dataset.focusCardSlots).toBe(slots)
+  await resize(500); expect(groups().dataset.focusCardSlots).toBe('2')
+  expect(container.querySelector('[data-session-id="original"]')).toBe(card)
+  expect([rows.scrollTop, rows.scrollLeft]).toEqual([34, 12]); expect(selection.toString()).toBe(selectedText)
+  expect(document.activeElement).toBe(card); expect(geometryReads).toHaveLength(0)
+  expect(useAppStore.getState().sessions).toBe(before.sessions); expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
