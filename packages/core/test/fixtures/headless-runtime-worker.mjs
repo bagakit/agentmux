@@ -3,6 +3,24 @@ import { join } from 'node:path'
 import { startHeadlessAgentMux, AgentProviderRegistry, AgentMuxError, AgentMuxMemoryAgentSessionStore } from '../../dist/index.js'
 const original = new AgentProviderRegistry().get('codex')
 const fixture = { ...original,
+  prepareManagedLaunch: async (...args) => {
+    const prepared = await original.prepareManagedLaunch(...args)
+    if (!prepared.nativeActor || !existsSync(join(process.env.AGENTMUX_STATE_DIRECTORY, 'frontend-control-absent'))) return prepared
+    const { frontendControl: _frontendControl, ...nativeActor } = prepared.nativeActor
+    return { ...prepared, nativeActor }
+  },
+  observeTerminalFrontend: async context => {
+    if (existsSync(join(process.env.AGENTMUX_STATE_DIRECTORY, 'frontend-call-log'))) {
+      appendFileSync(join(process.env.AGENTMUX_STATE_DIRECTORY, 'frontend-call-log'), 'observe\n')
+    }
+    return await original.observeTerminalFrontend(context)
+  },
+  reconnectTerminalFrontend: async (...args) => {
+    if (existsSync(join(process.env.AGENTMUX_STATE_DIRECTORY, 'frontend-call-log'))) {
+      appendFileSync(join(process.env.AGENTMUX_STATE_DIRECTORY, 'frontend-call-log'), 'reconnect\n')
+    }
+    return await original.reconnectTerminalFrontend(...args)
+  },
   probeCapabilities: async (...args) => {
     if (existsSync(join(process.env.AGENTMUX_STATE_DIRECTORY, 'probe-failure'))) throw new Error('fixture Provider probe failed')
     return await original.probeCapabilities(...args)
