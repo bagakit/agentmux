@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -8,15 +9,27 @@ import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessio
 import { useAppStore, type AgentSteerQueueEntry } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { AgentSessionUserMessage, ContinuousProgressLoop } from '@agentmux/core'
-import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { composerDOM, composerSession as processSession } from './helpers/composer-dom-fixture'
+import { journalMessage, mailboxJournal } from './helpers/mailbox-journal-fixture'
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
 import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state'
 
+function composerSession(...args: Parameters<typeof processSession>) {
+  const original = processSession(...args)
+  return { ...original, status: { state: 'done' as const, source: 'native-hook' as const, observedAt: _tailFixtureEpoch(0, 0, 1) } }
+}
+// Install the native input-observation port before composerDOM changes its original draft.
+beforeEach(() => { vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue() })
 const dom = composerDOM()
+let journal: ReturnType<typeof mailboxJournal>
+beforeEach(() => {
+  journal = mailboxJournal()
+  vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
+})
 let disposeBootstrap: (() => void) | undefined
-beforeAll(async () => { disposeBootstrap = await useAppStore.getState().initialize() })
+beforeAll(async () => { vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(); disposeBootstrap = await useAppStore.getState().initialize() })
 afterAll(() => disposeBootstrap?.())
 afterEach(() => vi.useRealTimers())
 const session = () => ({ ...composerSession(), terminalPromptDelivery: {
@@ -115,7 +128,7 @@ it.each(['status', 'live'] as const)('moves Timeline observation ownership from 
   }
 })
 
-it.each([0, 1, 9, 10, 12, 99, 100, 123])('shows %i Inbox unread separately from Notices attention, Outbox pending and Progress', async (count) => {
+it.each([0, 1, 9, 10, 12, 99, 100, 123])('shows %i Inbox unread separately from Notices attention, User Messages pending and Progress', async (count) => {
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([progressLoop()])
   useAppStore.setState({ sessions: [session()], timelines: {
     'agent-1': { agentSessionId: 'agent-1', revision: 1, items: Array.from({ length: count }, (_, i) => delivered(`count-${i}`, 'peer')) }
@@ -123,8 +136,18 @@ it.each([0, 1, 9, 10, 12, 99, 100, 123])('shows %i Inbox unread separately from 
     { operationId: 'pending-a', runId: 'run-agent-1', text: 'First original pending intent', status: 'queued' },
     { operationId: 'pending-b', runId: 'run-agent-1', text: 'Second original pending intent', status: 'queued' }
   ] } })
+  const fresh = Array.from({ length: count }, (_, i) => journalMessage({ id: `count-${i}`, sequence: 1000 + i, sender: 'peer' }))
+  journal.set(count > 25 ? fresh.map((record, index) => journalMessage({ id: `prior-${index}`, sequence: index + 1, sender: 'peer' })) : fresh)
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  const label = `Mailbox: Inbox ${count} unread, Outbox 2 pending, Notices 1 need attention. Continuous progress: active`
+  if (count > 25) {
+    await toggle('open')
+    for (let page = 1; page < Math.ceil(count / 25); ++page) {
+      const earlier = [...mailbox().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read earlier messages')!
+      expect(earlier).toBeDefined(); await act(async () => earlier.click())
+    }
+    await toggle('closed'); await journal.publish(fresh)
+  }
+  const label = `Mailbox: A2A Inbox ${count} unread in loaded messages, User Messages 2 pending, Notices 1 need attention. Continuous progress: active`
   await vi.waitFor(() => {
     expect(trigger().dataset.progressState).toBe('active')
     expect(trigger().getAttribute('aria-label')).toBe(label)
@@ -136,36 +159,15 @@ it.each([0, 1, 9, 10, 12, 99, 100, 123])('shows %i Inbox unread separately from 
   expect(trigger().querySelector('.composer-mailbox__attention')).not.toBeNull()
   expect(trigger().querySelector('.composer-mailbox__progress')).not.toBeNull()
   expect(trigger().querySelector(':scope > span:not([class])')).toBeNull()
-  expect(mailbox().querySelector('[id$="-outbox-tab"]')!.getAttribute('aria-label')).toBe('Outbox: 2 pending')
-  expect(mailbox().querySelector('[id$="-outbox-tab"] .composer-mailbox__count')!.textContent).toBe('2')
+  expect(mailbox().querySelector('[id$="-user-tab"]')!.getAttribute('aria-label')).toBe('User Messages: 2 pending')
+  expect(mailbox().querySelector('[id$="-user-tab"] .composer-mailbox__count')!.textContent).toBe('2')
   expect(useAppStore.getState().agentSteerQueues['agent-1']!.map(entry => entry.text)).toEqual(['First original pending intent', 'Second original pending intent'])
-  expect(useAppStore.getState().noticeReadReceipts).toEqual({})
+  const read = useAppStore.getState().noticeReadReceipts['mail:agent-1'] ?? {}
+  expect(Object.keys(read).every(key => key.includes('prior-'))).toBe(true)
   expect(dom.draft()).toBe('Keep my draft')
 })
-/**
- * 打开之前先把指纹等出来。
- *
- * `useMessageFingerprints` 走异步的 `crypto.subtle.digest`，而**打开时落在哪个文件夹**正是由它
- * 决定的：`openFolder()` 读 `receipts.unread.length`，指纹没算完时它是空的，于是本该停在 Inbox 的
- * 一次打开落到了 System。并行满载下这个微任务经常输、单跑则赢——看着像 flake，其实每一次
- * `toggle('open')` 都在赌同一场竞争。
- *
- * 上一轮我只给其中一条断言补了 `vi.waitFor`，那是打地鼠：这个文件有 15 处 `toggle('open')`。
- * 等待放进 toggle 自己，一次覆盖全部。等的是 digest 自己那些 promise（兄弟文件
- * `session-mailbox-receipts.test.tsx` 用的也是这个），不是数几个微任务——数微任务是赌实现细节。
- *
- * 装在 `beforeEach` 而不是模块顶层：`composerDOM()` 的 `afterEach` 会 `vi.restoreAllMocks()`，
- * 顶层那一枚从第二条用例起就被卸掉了。实测过——16 个打开点上 `digest.mock.calls.length` 全是 0，
- * 于是 `Promise.all([])` 立刻 resolve，这个等待**看着在等，其实一步没等**。
- */
-let digest: { mock: { results: { value: unknown }[] } }
-beforeEach(() => { digest = vi.spyOn(crypto.subtle, 'digest') })
-async function settleFingerprints() {
-  await act(async () => { await Promise.all(digest.mock.results.map((result) => result.value)) })
-}
 // happy-dom has no native popover toggle. Dispatch the browser's state event, not React internals.
 async function toggle(state: 'open' | 'closed') {
-  if (state === 'open') await settleFingerprints()
   const event = new Event('toggle')
   Object.defineProperty(event, 'newState', { value: state })
   await act(async () => mailbox().dispatchEvent(event))
@@ -175,7 +177,7 @@ async function readRecord(key: string) {
   expect(row).toBeDefined(); await act(async () => row!.click())
 }
 async function backToRows() { const button = mailbox().querySelector<HTMLButtonElement>('.composer-mailbox__back button'); expect(button).not.toBeNull(); await act(async () => button!.click()) }
-async function folder(name: 'inbox' | 'outbox' | 'system' | 'progress') {
+async function folder(name: 'inbox' | 'outbox' | 'user' | 'system' | 'progress') {
   await dom.click(`[role="tab"][id$="-${name}-tab"]`)
 }
 
@@ -284,6 +286,7 @@ it.each(['entry', 'content'] as const)('pins the hover preview through %s intera
 })
 
 it('orders mixed recorded and captured history by original time, keeping equal/missing times stable and queue order untouched', async () => {
+  journal.set([journalMessage({ id: 'in-old', sender: 'peer', body: 'Body in-old', sequence: 1 }), journalMessage({ id: 'in-new', sender: 'peer', body: 'Body in-new', sequence: 2 })])
   const native = (id: string, recordedAt?: number): AgentSessionUserMessage => ({ id, rawId: id, agentSessionId: 'agent-1',
     source: { kind: 'native', providerId: 'codex', nativeSessionId: 'native-session', recordId: id },
     author: { kind: 'unknown' }, content: id, contentParts: [{ kind: 'text', text: id }],
@@ -297,17 +300,17 @@ it('orders mixed recorded and captured history by original time, keeping equal/m
   const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
   const render = () => dom.render(<SessionMailbox system={system} queued={queued}
     timeline={{ agentSessionId: 'agent-1', revision: 1, items }} userMessages={userMessages} />)
-  await render(); await toggle('open'); await folder('outbox')
+  await render(); await toggle('open'); await folder('user')
   const contents = (name: string) => [...mailbox().querySelectorAll<HTMLButtonElement>(`[id$="-${name}"] .composer-mailbox__row`)].filter(row => !row.dataset.recordKey?.startsWith('queue:')).map(row => row.querySelector('.composer-mailbox__preview')!.textContent)
-  expect(contents('outbox')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'missing-a', 'missing-b'])
+  expect(contents('user')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'missing-a', 'missing-b'])
   await folder('inbox')
   expect(contents('inbox')).toEqual(['Body in-new', 'Body in-old'])
-  await folder('outbox')
+  await folder('user')
   expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map(el => el.textContent)).toEqual(['First intention', 'Second intention'])
   expect(items.map(item => item.content)).toEqual(['Body old', 'Body tie-a', 'Body tie-b', 'Body in-old', 'Body in-new'])
   userMessages = [...userMessages, native('loaded-earlier', _reshape_fixtureEpoch(0, 0, 5))]
   await render()
-  expect(contents('outbox')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'loaded-earlier', 'missing-a', 'missing-b'])
+  expect(contents('user')).toEqual(['native-new', 'Body tie-a', 'Body tie-b', 'native-tie', 'Body old', 'loaded-earlier', 'missing-a', 'missing-b'])
 })
 
 it('uses the selected System owner time, keeps unknown times last, and never makes a time-only update unread', async () => {
@@ -318,12 +321,12 @@ it('uses the selected System owner time, keeps unknown times last, and never mak
   current.status = { ...current.status, state: 'disconnected', observedAt: _reshape_fixtureEpoch(0, 0, 2000) }
   const queue: AgentSteerQueueEntry[] = [{ operationId: 'unknown-time', text: 'Kept', runId: 'run-agent-1', status: 'failed', enqueuedAt: _reshape_fixtureEpoch(0, 0, 9000) }]
   expect(sessionServiceNotices(current, queue).map(item => [item.id, item.observedAt])).toEqual([
-    ['connection', 20], ['delivery', 30], ['queue', undefined]])
+    ['activity-observation', undefined], ['connection', _tailFixtureEpoch(0, 0, 20)], ['delivery', _tailFixtureEpoch(0, 0, 30)], ['queue', undefined]])
   await act(async () => useAppStore.setState({ sessions: [current], agentSteerQueues: { 'agent-1': queue } }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open'); await folder('system')
   const steps = () => [...mailbox().querySelectorAll('.composer-notice .composer-mailbox__row strong')].map(el => el.textContent)
-  expect(steps()).toEqual(['Screen confirmation from retained terminal output didn’t complete', 'Checking terminal capabilities didn’t complete', 'A queued message has not been sent'])
+  expect(steps()).toEqual(['Screen confirmation from retained terminal output didn’t complete', 'Checking terminal capabilities didn’t complete', 'Activity not confirmed', 'The original message delivery is still unconfirmed'])
   expect([...mailbox().querySelectorAll('.composer-notice time')].map(el => el.getAttribute('datetime'))).toEqual([
     new Date(_reshape_fixtureEpoch(0, 0, 30)).toISOString(), new Date(_reshape_fixtureEpoch(0, 0, 20)).toISOString()])
   await dom.click('[data-record-key^="notice:queue:"]');expect(mailbox().textContent).toContain('Time not recorded');await backToRows()
@@ -332,10 +335,10 @@ it('uses the selected System owner time, keeps unknown times last, and never mak
     terminalCapability: { ...current.terminalCapability!, observedAt: _reshape_fixtureEpoch(0, 0, 40) } }] }))
   expect(unread()).toBe('false')
   await toggle('open'); await folder('system')
-  expect(steps()).toEqual(['Checking terminal capabilities didn’t complete', 'Screen confirmation from retained terminal output didn’t complete', 'A queued message has not been sent'])
+  expect(steps()).toEqual(['Checking terminal capabilities didn’t complete', 'Screen confirmation from retained terminal output didn’t complete', 'Activity not confirmed', 'The original message delivery is still unconfirmed'])
   const output = { ...current, terminalCapability: undefined }
-  expect(sessionServiceNotices(output).map(item => [item.id, item.observedAt])).toEqual([['connection', 1000], ['delivery', 30]])
-  expect(sessionServiceNotices({ ...output, terminalOutputChannel: undefined }).map(item => [item.id, item.observedAt])).toEqual([['connection', 2000], ['delivery', 30]])
+  expect(sessionServiceNotices(output).map(item => [item.id, item.observedAt])).toEqual([['activity-observation', undefined], ['connection', _tailFixtureEpoch(0, 0, 1000)], ['delivery', _tailFixtureEpoch(0, 0, 30)]])
+  expect(sessionServiceNotices({ ...output, terminalOutputChannel: undefined }).map(item => [item.id, item.observedAt])).toEqual([['activity-observation', undefined], ['connection', _tailFixtureEpoch(0, 0, 2000)], ['delivery', _tailFixtureEpoch(0, 0, 30)]])
 })
 
 it('uses one right Session mailbox, clears Notices attention on read and keeps the Core fact', async () => {
@@ -352,7 +355,7 @@ it('uses one right Session mailbox, clears Notices attention on read and keeps t
   expect(unread()).toBe('false')
   expect(trigger().querySelector('.composer-mailbox__unread')).toBeNull()
   expect(trigger().querySelector('.composer-mailbox__attention')).toBeNull()
-  expect(trigger().title).toBe('Mailbox: Inbox 0 unread, Outbox 0 pending, Notices 0 need attention. Continuous progress: inactive (not enabled)')
+  expect(trigger().title).toBe('Mailbox: A2A Inbox 0 unread in loaded messages, User Messages 0 pending, Notices 0 need attention. Continuous progress: inactive (not enabled)')
   expect(trigger().getAttribute('aria-label')).toBe(trigger().title)
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
   expect(mailbox().textContent).toContain('screen confirmation')
@@ -367,17 +370,17 @@ it('uses one right Session mailbox, clears Notices attention on read and keeps t
   expect(mailbox().textContent).toContain('screen confirmation')
 })
 
-it('prioritizes unread on opening but never switches an open outbox for new notices', async () => {
+it('prioritizes unread on opening but never switches an open User Messages for new notices', async () => {
   useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [
     { operationId: 'q', runId: 'run-agent-1', text: 'pending', status: 'queued' }
   ] } })
   const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
-  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-outbox-tab$/)
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-user-tab$/)
   await act(async () => useAppStore.setState({ sessions: [session()] }))
   expect(unread()).toBe('true')
-  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-outbox-tab$/)
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-user-tab$/)
   await toggle('closed')
   await toggle('open')
   expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-system-tab$/)
@@ -423,7 +426,7 @@ it('remains accessible in every mode with input disabled and scopes read receipt
   expect(useAppStore.getState().noticeReadReceipts['agent-1']?.delivery).toBeTruthy()
 })
 
-it('shows ordered outgoing messages and wires retry, copy and removal without sending on read', async () => {
+it('shows ordered User Messages and wires retry, exact Copy and archive without sending on read', async () => {
   const queued = [{ operationId: 'queued-1', runId: 'run-agent-1', text: 'First exact words',
     status: 'deferred' as const, error: 'Input confirmation pending. Diagnostic: private-cursor=123' },
   { operationId: 'queued-2', runId: 'run-agent-1', text: 'Second exact words', status: 'queued' as const }]
@@ -438,7 +441,7 @@ it('shows ordered outgoing messages and wires retry, copy and removal without se
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(2)
   expect(mailbox().textContent).not.toContain('private-cursor')
   await dom.click('[data-record-key^="notice:queue:"]') // Read the queue notice.
-  await dom.click('.composer-notice__body button') // View outbox
+  await dom.click('.composer-notice__body button') // View User Messages
   expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('First exact words')
   expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map((item) => item.textContent))
     .toEqual(['First exact words', 'Second exact words'])
@@ -449,13 +452,16 @@ it('shows ordered outgoing messages and wires retry, copy and removal without se
   }
   await action('Send queued message')
   expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', 'queued-1')
-  await action('Copy all')
-  expect(copy).toHaveBeenCalledExactlyOnceWith('First exact words\n\nSecond exact words')
-  await readRecord('queue:queued-1'); await action('Remove')
-  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([queued[1]])
+  const copies = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox__actions [aria-label="复制这条待发消息"]')]
+  expect(copies).toHaveLength(2)
+  for (const button of copies) await act(async () => button.click())
+  expect(copy.mock.calls).toEqual([['First exact words'], ['Second exact words']])
+  await readRecord('queue:queued-1'); await action('归档这条待发消息')
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([{ ...queued[0], archived: true }, queued[1]])
+  expect(mailbox().querySelector('li[data-operation-id="queued-1"] [aria-label="恢复为待发"]')).not.toBeNull()
   await folder('system'); expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(1)
   expect(trigger().textContent).toBe('')
-    expect(mailbox().querySelector('[id$="-outbox-tab"] .composer-mailbox__count')!.textContent).toBe('1')
+    expect(mailbox().querySelector('[id$="-user-tab"] .composer-mailbox__count')!.textContent).toBe('1')
 })
 
 it.each(['queued', 'restoring'] as const)('shows exact nonempty %s, deferred, failed and old-Run facts without executing on read', async (status) => {
@@ -473,23 +479,34 @@ it.each(['queued', 'restoring'] as const)('shows exact nonempty %s, deferred, fa
   const recover = vi.spyOn(api.sessions, 'recover')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
-  await folder('outbox')
+  await folder('user')
   const rows = [...mailbox().querySelectorAll<HTMLLIElement>('.composer-outbox li')]
   expect(rows.map(row => row.querySelector('.composer-mailbox__preview')?.textContent)).toEqual([
     'Exact active request', 'Exact deferred request', 'Exact failed request', 'Exact old Run request'
   ])
   expect(rows.map(row => row.dataset.state)).toEqual([status, 'deferred', 'failed', 'queued'])
-  const explanations = [status === 'restoring' ? 'Restoring the Agent. This message has not been dispatched.' : 'Sending. Waiting for delivery confirmation.',
-    'Provider is not ready.', 'Input was refused.', 'Its delivery result is unknown; it will not be replayed on another Run.']
+  const explanations = ['正在准备本次发送',
+    'Provider is not ready.', 'Input was refused.', '绑定的 Run 不可用或已改变']
   for (let index = 0; index < queued.length; index++) {
     await readRecord(`queue:${queued[index]!.operationId}`)
     await dom.click('[aria-label="Message details"]')
-    const detail = mailbox().querySelector('.composer-outbox')!
+    const detail = mailbox().querySelector<HTMLElement>(`li[data-operation-id="${queued[index]!.operationId}"]`)!
     expect(detail.textContent).toContain(explanations[index])
-    expect(detail.textContent).not.toContain('private-helper')
-    expect(detail.textContent).not.toContain('private-failure')
-    if (index === 0) expect([...detail.querySelectorAll<HTMLButtonElement>('button')].filter(button => ['Move up', 'Move down', 'Remove', 'Send queued message'].includes(button.getAttribute('aria-label') ?? button.textContent!)).map(button => button.disabled)).toEqual([true, true, true, true])
-    await backToRows()
+    if (queued[index]!.error) {
+      const failure = detail.querySelector<HTMLElement>('.message-delivery-failure')!
+      expect(failure.querySelector('.message-delivery-failure__heading')!.textContent).not.toMatch(/private-helper|private-failure/)
+      expect(failure.querySelector<HTMLDetailsElement>('.message-delivery-failure__details')!.open).toBe(false)
+      expect(failure.querySelector('.message-delivery-failure__details')!.textContent).toContain(queued[index]!.error)
+    }
+    if (index === 0) {
+      const controls = ['Move up', 'Move down', '归档这条待发消息', 'Send queued message']
+      for (const label of controls) {
+        const button = detail.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
+        expect(button, label).not.toBeNull(); expect(button.disabled, label).toBe(true)
+      }
+    }
+    expect(mailbox().querySelectorAll('.composer-outbox > ol > li')).toHaveLength(4)
+    expect(mailbox().querySelector('.composer-mailbox__back')).toBeNull()
   }
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual(queued)
   expect(submit).not.toHaveBeenCalled()
@@ -510,13 +527,13 @@ it('explicit mailbox Send retries the real Store with the same exact operation a
   const recover = vi.spyOn(api.sessions, 'recover')
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
-  await folder('outbox')
+  await folder('user')
   expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map(row => row.textContent))
     .toEqual([pending.text, old.text])
   expect(submit).not.toHaveBeenCalled()
   expect(recover).not.toHaveBeenCalled()
   const clickSend = async () => {
-    const send = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox > button')]
+    const send = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox button')]
       .find(button => button.getAttribute('aria-label') === 'Send queued message')
     expect(send).toBeDefined()
     await act(async () => send!.click())
@@ -527,13 +544,13 @@ it('explicit mailbox Send retries the real Store with the same exact operation a
   ])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([
     { operationId: pending.operationId, runId: pending.runId, promptCondition: pending.promptCondition, text: pending.text, status: 'deferred',
-      error: 'Provider is still preparing. Diagnostic: private-helper=93' }, old
+      awaitingExplicitSend: true, logId: expect.any(String), error: 'Provider is still preparing. Diagnostic: private-helper=93' }, old
   ])
   await readRecord('queue:restored-intent')
   await dom.click('[aria-label="Message details"]')
   expect(mailbox().querySelector('.composer-outbox')?.textContent).toContain('Provider is still preparing.')
-  await backToRows()
-  expect(mailbox().textContent).not.toContain('private-helper')
+  expect(mailbox().querySelector('.composer-mailbox__back')).toBeNull()
+  expect([...mailbox().querySelectorAll('.composer-mailbox__preview, .message-delivery-failure__heading')].map(element => element.textContent).join(' ')).not.toContain('private-helper')
   await clickSend()
   expect(submit.mock.calls.map(call => [call[0], call[1], call[2]])).toEqual([
     [composerSession().control, pending.text, pending.operationId],
@@ -541,7 +558,8 @@ it('explicit mailbox Send retries the real Store with the same exact operation a
   ])
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([old])
   expect([...mailbox().querySelectorAll('.composer-outbox .composer-mailbox__preview')].map(row => row.textContent)).toEqual([old.text])
-  expect(mailbox().querySelectorAll('.composer-outbox > button')).toHaveLength(1) // Copy only; no Send to another Run.
+  expect(useAppStore.getState().agentSteerQueues['agent-1']![0]).toEqual(old)
+  expect(submit).toHaveBeenCalledTimes(2) // Reading retained old work never submits it or changes its Run.
   expect(recover).not.toHaveBeenCalled()
 })
 
@@ -552,12 +570,12 @@ it('does not confuse a healthy pending count with unread notices and supports ke
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect(unread()).toBe('false')
   expect(trigger().textContent).toBe('')
-    expect(mailbox().querySelector('[id$="-outbox-tab"] .composer-mailbox__count')!.textContent).toBe('1')
+    expect(mailbox().querySelector('[id$="-user-tab"] .composer-mailbox__count')!.textContent).toBe('1')
   await toggle('open')
-  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('Outbox: 1 pending')
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('aria-label')).toBe('User Messages: 1 pending')
   await act(async () => mailbox().querySelector('[role="tab"][aria-selected="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })))
-  expect(document.activeElement?.getAttribute('aria-label')).toBe('Inbox: 0 unread')
-  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toBe('No Agent messages')
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('A2A Inbox: 0 unread in loaded messages')
+  expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('No A2A messages received')
 })
 
 it('retains receipts through empty startup snapshots but alerts for a new Run', async () => {
@@ -580,7 +598,7 @@ it('retains receipts through empty startup snapshots but alerts for a new Run', 
   expect(unread()).toBe('true')
 })
 
-it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox and clears it on success', async (kind) => {
+it.each(['copy', 'retry'] as const)('keeps a User Messages %s failure in this mailbox and clears it on success', async (kind) => {
   const queued = { operationId: 'q-local', runId: 'run-agent-1', text: 'Keep this pending message', status: 'queued' as const }
   useAppStore.setState({ sessions: [composerSession()], agentSteerQueues: { 'agent-1': [queued] } })
   const action = kind === 'copy'
@@ -589,7 +607,7 @@ it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox 
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
   const clickAction = async () => {
-    const label = kind === 'copy' ? 'Copy message' : 'Send queued message'
+    const label = kind === 'copy' ? '复制这条待发消息' : 'Send queued message'
     const button = [...mailbox().querySelectorAll<HTMLButtonElement>('.composer-outbox button')].find((item) => (item.getAttribute('aria-label') ?? item.textContent?.trim()) === label)
     expect(button).toBeDefined()
     await act(async () => button!.click())
@@ -600,7 +618,7 @@ it.each(['copy', 'retry'] as const)('keeps an outbox %s failure in this mailbox 
   expect(mailbox().querySelector('.composer-notice')?.textContent).toContain('unavailable')
   expect(useAppStore.getState().error).toBeNull()
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([queued])
-  await folder('outbox'); await clickAction()
+  await folder('user'); await clickAction()
   await folder('system')
   expect(action).toHaveBeenCalledTimes(2)
   expect(mailbox().querySelectorAll('.composer-notice')).toHaveLength(0)
@@ -613,47 +631,44 @@ function delivered(id: string, authorAgentSessionId?: string) {
     ...(authorAgentSessionId ? { authorAgentSessionId } : {}) }
 }
 it('separates actual incoming Agent messages, sent user history and system facts; reading survives restart', async () => {
+  journal.set([journalMessage({ id: 'in', sender: 'reviewer', body: 'Body in' })])
   const items = [delivered('in', 'reviewer'), delivered('sent')]
   useAppStore.setState({ timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 2, items } },
     agentSteerQueues: { 'agent-1': [{ operationId: 'sent', runId: 'run-agent-1', text: 'Body sent', status: 'queued' }] } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-  expect([...mailbox().querySelectorAll('[role="tab"]')].map((el) => el.getAttribute('aria-label'))).toEqual(['Inbox: 1 unread', 'Outbox: 0 pending', 'Notices: 1 unread', 'Continuous progress: inactive (not enabled)'])
+  expect([...mailbox().querySelectorAll('[role="tab"]')].map((el) => el.getAttribute('aria-label'))).toEqual(['A2A Inbox: 1 unread in loaded messages', 'A2A Outbox', 'User Messages: 0 pending', 'Notices: 1 unread', 'Supervised collaboration', 'Continuous progress: inactive (not enabled)'])
   expect(trigger().querySelector(':scope > span:not([class])')).toBeNull() // Durable sent item is never shown as pending again; unread is separate.
   await toggle('open')
-  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Inbox')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('A2A Inbox')
   expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('Body in')
   expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).not.toContain('screen confirmation')
   expect(unread()).toBe('true') // System was not read by opening Inbox.
   await folder('system')
   expect(unread()).toBe('false')
   const persisted = JSON.parse(JSON.stringify(useAppStore.persist.getOptions().partialize!(useAppStore.getState())))
-  expect(persisted.noticeReadReceipts['mail:agent-1']['prompt:in']).toBeTruthy()
+  expect(persisted.noticeReadReceipts['mail:agent-1'][JSON.stringify(['local','in'])]).toBeTruthy()
   expect(persisted.noticeReadReceipts['agent-1'].delivery).toBeTruthy()
   await dom.render(null)
   await act(async () => useAppStore.setState({ noticeReadReceipts: persisted.noticeReadReceipts }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect(unread()).toBe('false')
   await toggle('open')
-  expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Outbox: 0 pending')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('User Messages: 0 pending')
   expect(mailbox().querySelector('[role="tabpanel"]:not([hidden])')?.textContent).toContain('Body sent')
   expect(useAppStore.getState().timelines['agent-1']?.items).toEqual(items)
 })
-it('does not switch folders or consume new incoming messages while reading the Outbox', async () => {
+it('does not switch folders or consume new incoming messages while reading User Messages', async () => {
   useAppStore.setState({ sessions: [composerSession()], timelines: { 'agent-1': {
     agentSessionId: 'agent-1', revision: 1, items: [delivered('sent')] } } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
-  await act(async () => useAppStore.setState({ timelines: { 'agent-1': {
-    agentSessionId: 'agent-1', revision: 2, items: [delivered('sent'), delivered('new', 'other')] } } }))
-  expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Outbox: 0 pending')
-  // 未读要等指纹算完：`useMessageFingerprints` 走的是异步的 `crypto.subtle.digest`，
-  // `setState` 返回时 `receipts.unread` 还是空的。并行跑时这个微任务会输掉竞争，于是这一行
-  // 在满载下 2/3 的概率读到 'false'，单跑必绿——看着像 flake，其实是漏了一次等待。
-  // 兄弟文件 session-mailbox-receipts.test.tsx 全程用的就是 `vi.waitFor`。
+  const arrival = journalMessage({ id: 'new', sender: 'other', body: 'Body new', sequence: 2 })
+  journal.set([arrival]); await journal.changed(arrival)
+  expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('User Messages: 0 pending')
   await vi.waitFor(() => expect(unread()).toBe('true'))
   await toggle('closed')
   await toggle('open')
-  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('Inbox')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.textContent).toBe('A2A Inbox')
   expect(unread()).toBe('false')
   const receipt = useAppStore.getState().noticeReadReceipts['mail:agent-1']
   await dom.render(null)
@@ -689,19 +704,19 @@ it('projects loop status without adding unread or pending mail, switching pages,
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   expect(trigger().getAttribute('data-progress-state')).toBe('unconfirmed')
   expect(trigger().getAttribute('aria-label')).toContain('0 unread')
-  expect(trigger().getAttribute('aria-label')).toContain('Outbox 1 pending')
+  expect(trigger().getAttribute('aria-label')).toContain('User Messages 1 pending')
   await act(async () => resolveList([]))
   expect(trigger().getAttribute('data-progress-state')).toBe('inactive')
   expect(mailbox().querySelector('[id$="-progress"] .continuous-progress-control__heading')?.textContent).toContain('Not enabled')
   await toggle('open')
-  expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Outbox: 1 pending')
+  expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('User Messages: 1 pending')
   for (const loop of [progressLoop(), progressLoop('paused'), { ...progressLoop('paused'), lastOutcome: 'unknown' as const }]) {
     await act(async () => changed(loop))
-    expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('Outbox: 1 pending')
+    expect(mailbox().querySelector('[aria-selected="true"]')?.getAttribute('aria-label')).toBe('User Messages: 1 pending')
     expect(trigger().getAttribute('data-progress-state')).toBe(loop.lastOutcome === 'unknown' ? 'unconfirmed' : loop.status)
     expect(unread()).toBe('false')
     expect(trigger().textContent).toBe('')
-    expect(mailbox().querySelector('[id$="-outbox-tab"] .composer-mailbox__count')!.textContent).toBe('1')
+    expect(mailbox().querySelector('[id$="-user-tab"] .composer-mailbox__count')!.textContent).toBe('1')
   }
   await folder('progress')
   await act(async () => changed({ ...progressLoop(), workspacePath: _hygiene_fixturePath("unrelated") }))
