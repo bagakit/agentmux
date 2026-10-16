@@ -41,12 +41,14 @@ if (args.includes('app-server')) {
       if (request.method === 'initialize') return reply({ userAgent: 'AgentMux private synthetic actor' })
       if (request.params?.threadId !== nativeId) return reject(-32602, 'The original native thread is required')
       if (request.method === 'thread/read' || request.method === 'thread/resume') {
-        if (existsSync(controlPath) && JSON.parse(readFileSync(controlPath, 'utf8')).effect === 'unavailable') { unlinkSync(controlPath); return reply({ thread: { id: nativeId, sessionId: nativeId, canAcceptDirectInput: false } }) }
+        // Availability is a level, unlike the one-shot turn faults below. Core
+        // may probe the same actor repeatedly before committing an input intent.
+        if (existsSync(controlPath) && JSON.parse(readFileSync(controlPath, 'utf8')).effect === 'unavailable') return reply({ thread: { id: nativeId, sessionId: nativeId, canAcceptDirectInput: false } })
         return reply({ thread: { id: nativeId, sessionId: nativeId, canAcceptDirectInput: true } })
       }
       if (!['turn/start', 'turn/steer'].includes(request.method)) return reject(-32601, 'This private native protocol method is unsupported')
       let fault
-      if (existsSync(controlPath)) { fault = JSON.parse(readFileSync(controlPath, 'utf8')); unlinkSync(controlPath) }
+      if (existsSync(controlPath)) { fault = JSON.parse(readFileSync(controlPath, 'utf8')); if (fault.effect !== 'unavailable') unlinkSync(controlPath) }
       if (fault?.effect === 'reject') return reject(-32602, 'Explicit private native input rejection')
       const text = request.params.input?.map(part => { assert.equal(part.type, 'text'); return part.text }).join('')
       assert.equal(typeof text, 'string'); assert.equal(typeof request.params.clientUserMessageId, 'string')
