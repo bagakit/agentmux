@@ -14,6 +14,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/focus-conversation-read
       const replacements: Record<string, [string, string]> = {
         'failure-remains-pending': ['const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError || !readingWindow.historical && userMessageRead?.error)', 'const emptyReadFailed = false'],
         'decorate-source-failure': ['{!emptyReadFailed ? <div className="full-page-loading__light activity-feed__reading-light"', '{true ? <div className="full-page-loading__light activity-feed__reading-light"'],
+        'ignore-hidden-reading-motion': ["style={{ animationPlayState: documentVisible ? undefined : 'paused' }}", 'style={{ animationPlayState: undefined }}'],
         'hide-retained-reading-feedback': ['pending={readPending && !earlierReadPending}', 'pending={false}']
       }
       const change = replacements[mutation]
