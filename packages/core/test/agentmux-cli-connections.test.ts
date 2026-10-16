@@ -120,6 +120,57 @@ it('authenticates original Agents and refuses foreign receipts, global policy an
   expect((await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId })).operation).toEqual(original.operation)
 }, 30_000)
 
+it('keeps configured application authority with its original Agent across same-application edits and rejects changed targets', async () => {
+  const f = await fixture(), other = { AGENTMUX_AGENT_SESSION_ID: 'other', AGENTMUX_AGENT_CAPABILITY: f.otherCapability }
+  let view = result(await f.cli(['connection', 'enrollment', 'begin', '--input', '-'], f.input)) as ConnectionEnrollmentView
+  for (const kind of ['continue-authentication', 'confirm-account', 'create'] as const)
+    view = result(await f.cli(['connection', 'enrollment', 'advance', '--input', '-'], action(view, kind)))
+  const configured = view.operation!.configured!.connection
+  const own = () => f.cli(['connection', 'inspect', '--connection', f.input.connectionId])
+  const foreign = () => f.cli(['connection', 'inspect', '--connection', f.input.connectionId], undefined, other)
+  expect(result(await own()).connection.config.connectionId).toBe(f.input.connectionId)
+  expect((await foreign()).code).not.toBe(0)
+  expect(result(await f.cli(['connection', 'ls'], undefined, other)).connections).toEqual([])
+
+  const credential = await f.services.secrets.store({ operationId: 'same-application-credential', secret: 'private-rotated-app-secret' })
+  const updated = await f.human.call('connection.configure', { operationId: 'same-application-edit', expectedRevision: configured.revision,
+    connection: { ...configured.config, label: 'Updated original application', credentialRef: credential.credentialRef } })
+  expect(updated.connection.revision).toBeGreaterThan(configured.revision)
+  expect(result(await own()).connection).toEqual(updated.connection)
+  const setup = { operationId: 'same-application-management', connectionId: f.input.connectionId, expectedConnectionRevision: updated.connection.revision,
+    goal: { kind: 'agent-conversation', interaction: 'messages' } }
+  const before = [...f.effects]
+  expect((await f.cli(['connection', 'setup', 'begin', '--input', '-'], setup, other)).code).not.toBe(0)
+  expect(f.effects).toEqual(before)
+  expect(result(await f.cli(['connection', 'setup', 'begin', '--input', '-'], setup)).challenge.qrPayload).toBe('private-setup-qr')
+  await f.reopen()
+  expect(result(await own()).connection).toEqual(updated.connection)
+  expect((await foreign()).code).not.toBe(0)
+
+  // Synthetic authoritative target changes exercise the public authorization boundary;
+  // ordinary configuration correctly forbids reassigning an existing application identity.
+  const database = f.services.database!, original = JSON.stringify(updated.connection.config)
+  try {
+    for (const changed of [
+      { ...updated.connection.config, adapterId: 'another-adapter' },
+      { ...updated.connection.config, application: { ...updated.connection.config.application, domain: 'another.example' } },
+      { ...updated.connection.config, application: { ...updated.connection.config.application, appId: 'another-app' } }
+    ]) {
+      database.prepare('UPDATE connection_configuration SET config_json=? WHERE connection_id=?').run(JSON.stringify(changed), f.input.connectionId)
+      expect((await f.human.call('connection.inspect', { connectionId: f.input.connectionId })).connection?.config).toEqual(changed)
+      expect((await own()).code).not.toBe(0)
+      expect(result(await f.cli(['connection', 'ls'])).connections).toEqual([])
+    }
+  } finally { database.prepare('UPDATE connection_configuration SET config_json=? WHERE connection_id=?').run(original, f.input.connectionId) }
+  expect(result(await own()).connection).toEqual(updated.connection)
+  const pending = { ...f.input, operationId: 'unconfigured-enrollment', connectionId: 'unconfigured-connection' }
+  result(await f.cli(['connection', 'enrollment', 'begin', '--input', '-'], pending))
+  await f.human.call('connection.configure', { operationId: 'independent-connection-save', expectedRevision: null,
+    connection: { ...updated.connection.config, connectionId: pending.connectionId } })
+  expect((await f.cli(['connection', 'inspect', '--connection', pending.connectionId])).code).not.toBe(0)
+  expect(result(await f.cli(['connection', 'ls'])).connections.map((connection: any) => connection.config.connectionId)).toEqual([f.input.connectionId])
+}, 30_000)
+
 it('generated action help and module skill explain actual Agent input, original authority and platform scan boundaries', async () => {
   const f = await fixture()
   const enrollment = await f.cli(['connection', 'enrollment', 'begin', '--help'])
