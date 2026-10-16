@@ -38,7 +38,7 @@ it('keeps the original address and real leave controls while restore remains unc
   await act(async () => address().form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   expect(navigate).not.toHaveBeenCalled(); expect(reload).not.toHaveBeenCalled(); expect(container.textContent).toContain('Your input is kept')
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close split"]')!.click()); expect(close).toHaveBeenCalledOnce()
-  expect(restore).toHaveBeenCalledExactlyOnceWith(page.id, { workspaceId: 'original-workspace', profileId: page.profileId, viewport: page.viewport })
+  expect(restore).toHaveBeenCalledExactlyOnceWith(page.id, { workspaceId: 'original-workspace', profileId: page.profileId, mode: page.mode, viewport: page.viewport })
   await act(async () => waiting.resolve(page)); expect(address().value).toBe('keep this human draft')
 })
 it('retains the exact failure and explicitly retries the same owner without reloading or losing a draft', async () => {
