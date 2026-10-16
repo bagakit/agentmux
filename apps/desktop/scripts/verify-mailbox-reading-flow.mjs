@@ -15,7 +15,8 @@ assert.ok(process.argv.slice(2).every(value => value === '--prepare'), 'Use --pr
 const tests = ['apps/desktop/test/session-mailbox-author-boundary.test.tsx', 'apps/desktop/test/mailbox-a2a.test.tsx', 'apps/desktop/test/session-mailbox-a2a.test.tsx',
   'apps/desktop/test/session-messages-read.test.tsx', 'apps/desktop/test/session-mailbox.test.tsx',
   'apps/desktop/test/session-mailbox-reading-flow.test.tsx', 'apps/desktop/test/session-mailbox-receipts.test.tsx',
-  'apps/desktop/test/conversation-message-wrapper.integration.test.tsx', 'apps/desktop/test/input-mailbox-body-boundary.test.tsx']
+  'apps/desktop/test/conversation-message-wrapper.integration.test.tsx', 'apps/desktop/test/input-mailbox-body-boundary.test.tsx',
+  'apps/desktop/test/input-history-agent-aliases.test.tsx']
 const sources = [...new Set([...tests, ...mailboxMutations.map(item => item.file),
   'apps/desktop/src/renderer/src/components/MailboxReading.tsx',
   'apps/desktop/src/renderer/src/lib/session-mailbox-messages.ts',
@@ -23,6 +24,7 @@ const sources = [...new Set([...tests, ...mailboxMutations.map(item => item.file
   'packages/client-ui/src/styles/composer.css',
   'packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/components/ConversationInputText.tsx',
   'packages/client-ui/src/components/ConversationResourceText.tsx',
+  'packages/client-ui/src/lib/use-agent-input-history.ts',
   'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/lib/api.ts',
   'apps/desktop/test/a2a-message-data-bridge.test.tsx', 'apps/desktop/test/vitest.a2a-message-data.config.mts',
