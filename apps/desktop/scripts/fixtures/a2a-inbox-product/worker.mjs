@@ -29,7 +29,7 @@ const originalConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify(originalConfig))
 const children = new Set(), sessions = [], frames = [], cliCalls = []
-const facts = { frames, chain: { scenarios: [] }, mailbox: {}, restart: {}, cleanup: { userRunTouched: false, processesReaped: false },
+const facts = { frames, chain: { scenarios: [], cliCalls }, mailbox: {}, restart: {}, cleanup: { userRunTouched: false, processesReaped: false },
   syntheticNativeBoundary: 'Authenticated Codex 0.163 actor-shaped fixture, exact native UserMessage/client_id persisted by that actor. No model or vendor acceptance claim.' }
 let client, daemon, rpc, failure
 assert.equal(process.platform, 'darwin', 'This private native actor proof qualifies the current macOS product')
@@ -65,10 +65,11 @@ async function cli(args, caller = null, expectSuccess = true) {
   await waitFor('actual public CLI exit', () => ended(child), 35_000); children.delete(child)
   const lines = (stdout + '\n' + stderr).split('\n').filter(line => line.startsWith('{'))
   assert.ok(lines.length, 'The public CLI returns a structured operation receipt')
-  const receipt = JSON.parse(lines.at(-1)); cliCalls.push({ args, code: child.exitCode, receipt })
-  if (expectSuccess) { assert.equal(child.exitCode, 0, stderr); assert.equal(receipt.ok, true, JSON.stringify(receipt)) }
-  else if (expectSuccess === false) { assert.equal(child.exitCode, 1); assert.equal(receipt.ok, false) }
-  else { assert.ok([0, 1].includes(child.exitCode)); assert.equal(receipt.ok, child.exitCode === 0) }
+  const receipt = JSON.parse(lines.at(-1)); cliCalls.push({ args, code: child.exitCode, receipt, stderr })
+  const diagnostic = JSON.stringify(receipt) + '\n' + stderr
+  if (expectSuccess) { assert.equal(child.exitCode, 0, diagnostic); assert.equal(receipt.ok, true, diagnostic) }
+  else if (expectSuccess === false) { assert.equal(child.exitCode, 1, diagnostic); assert.equal(receipt.ok, false, diagnostic) }
+  else { assert.ok([0, 1].includes(child.exitCode), diagnostic); assert.equal(receipt.ok, child.exitCode === 0, diagnostic) }
   return receipt
 }
 async function cdpConnect(url) {
@@ -321,7 +322,6 @@ try {
   await waitFor('same healthy Run accepts manual input', async () => (await nativeRequests(recipient)).some(row => row.manualInput?.includes(marker)))
   facts.restart.healthyManualInput = true
   second.cdp.close(); await stop(second.child, 'SIGKILL')
-  facts.chain.cliCalls = cliCalls
 } catch (error) { failure = error; facts.error = { message: error.message, stack: error.stack } }
 finally {
   try { await rpc?.dispose() } catch {}
@@ -334,4 +334,6 @@ finally {
   if (!facts.cleanup.processesReaped) { failure ??= new Error('Private A2A product process cleanup was not confirmed'); facts.error ??= { message: failure.message } }
   await writeFile(join(evidence, 'facts.json'), JSON.stringify(facts, null, 2) + '\n')
 }
-if (failure) { console.error(failure.stack); process.exitCode = 1 }
+if (failure) await new Promise(done => process.stderr.write(failure.stack + '\n', done))
+// All original private children are stopped and facts are durable before ending this worker.
+process.exit(failure ? 1 : 0)
