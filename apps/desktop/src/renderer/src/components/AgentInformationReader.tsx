@@ -34,6 +34,7 @@ import { getModalOverlayContainer, ModalAttachmentDismissal, MODAL_OVERLAY_SLOT_
 const DetailsIcon = semanticIconComponent('action.more')
 const CloseIcon = semanticIconComponent('action.close')
 const DragIcon = semanticIconComponent('action.drag')
+const ResizeIcon = semanticIconComponent('layout.resize-window')
 const ResetIcon = semanticIconComponent('action.reset-view')
 const OpenIcon = semanticIconComponent('action.open-external')
 const PinIcon = semanticIconComponent('action.pin')
@@ -435,7 +436,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       }}><OpenIcon size={13} aria-hidden="true" /></button>
       <button type="button" className="agent-information-reader__close" onClick={() => close(true)} aria-label="Close Agent reading" title="Close · Esc"><CloseIcon size={15} aria-hidden="true" /></button>
       {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag corner or use Arrow keys to resize" {...bookmarkWindow.resize}>
-        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true"><path d="m3 9 6-6m-2 6 2-2" /></svg>
+        <ResizeIcon size={14} aria-hidden="true" />
       </button> : null}
     </footer>
   </div><ModalAttachmentDismissal active={attachedToModal} targetRef={panel} onEscapeKeyDown={escapeReading} /></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>, readingHost)
