@@ -32,7 +32,7 @@ async function pause(milliseconds = 1700) {
 it('automatically follows the original Mote sign-in through pending and scanned states, then requires both account and creation confirmation', async () => {
   const views = observeViews(), pending = [1, 1, 2], native = f.registration.getMockImplementation()!
   f.registration.mockImplementation(async (url, input) => {
-    if (String(url).endsWith('/accounts/qrlogin/polling')) {
+    if (new URL(String(url)).pathname === '/accounts/qrlogin/polling') {
       const previous = views.at(-1)!
       expect(Date.now()).toBeGreaterThanOrEqual(previous.challenge!.nextPollAt)
       expect(new Headers(input?.headers).get('cookie')).toContain('mote-session=1')
@@ -87,7 +87,7 @@ it.each(['close', 'target'] as const)('stops queued authentication after changin
 
 it('stops on an unknown native result and reads the same recorded request without restarting authentication', async () => {
   const native = f.registration.getMockImplementation()!
-  f.registration.mockImplementation(async (url, input) => String(url).endsWith('/accounts/qrlogin/polling')
+  f.registration.mockImplementation(async (url, input) => new URL(String(url)).pathname === '/accounts/qrlogin/polling'
     ? Response.json({ code: 0, data: { next_step: 'unrecognized_machine_step', step_info: { status: 99 } } })
     : native(url, input))
   await create()
@@ -97,9 +97,11 @@ it('stops on an unknown native result and reads the same recorded request withou
   await pause()
   expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')).toHaveLength(count)
   expect(f.creationCount).toBe(0); expect(f.beginCount).toBe(1)
-  await f.click('Original setup details'); await f.click('View original result')
+  const platformRequests = f.registration.mock.calls.length
+  await f.click('Original setup details'); await f.click('Check saved progress')
   await pause(50)
   expect(parent().operationId).toBe(id)
-  expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')).toHaveLength(count)
+  expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')).toHaveLength(count + 1)
+  expect(f.registration.mock.calls).toHaveLength(platformRequests)
   expect(f.beginCount).toBe(1)
 })
