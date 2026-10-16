@@ -5,6 +5,8 @@ import { useMoteBotSetup } from '../lib/use-mote-bot-setup'
 import { SelectionField } from './SelectionField'
 import { BotConfirmationCode } from './BotConfirmationCode'
 import { ConnectionProfileResult } from './ConnectionProfileResult'
+import { BotSetupGuide, type BotSetupGuideStage } from './settings/BotSetupGuide'
+import '../styles/connector-experience.css'
 
 const enrollmentActionLabel: Record<ConnectionEnrollmentActionKind, string> = {
   'continue-authentication': 'Check sign-in',
@@ -23,7 +25,8 @@ export function MoteBotSetup({
   onChoose,
   onCurrent,
   createOnOpen = false,
-  onCreateIntentConsumed
+  onCreateIntentConsumed,
+  onContinue
 }: {
   target: MotePreferencesTarget | null
   topicId: string
@@ -33,6 +36,7 @@ export function MoteBotSetup({
   onCurrent(): void
   createOnOpen?: boolean
   onCreateIntentConsumed?: (() => void) | undefined
+  onContinue?: ((record: ConnectionRecord, source: { kind: 'enrollment'; operationId: string; expectedRevision: number }) => void) | undefined
 }) {
   const setup = useMoteBotSetup(target, topicId),
     [avatar, setAvatar] = useState(true),
@@ -90,7 +94,7 @@ export function MoteBotSetup({
     ? {
         'continue-authentication': 'Sign in to your account',
         'confirm-account': 'Check the account and enterprise',
-        'renew-authentication': 'Sign in again to continue',
+        'renew-authentication': enrollment?.authentication?.stage === 'expired' ? 'Sign-in code expired' : 'Sign-in result not confirmed',
         create: 'Ready to create this bot',
         'read-credential': 'Finish saving this bot',
         'recover-local': 'Check the original save'
@@ -101,6 +105,17 @@ export function MoteBotSetup({
         (item) => item.adapterId === enrollment.adapterId && item.domain === enrollment.domain
       )?.label ?? enrollment.domain)
     : ''
+  const savedConnection = enrollment?.configured?.connection
+  const originalImage = setup.profile?.source.expectedAvatarRevision === operation?.source.expectedAvatarRevision &&
+    setup.profile?.source.expectedTopicRevision === operation?.source.expectedTopicRevision ? setup.profile?.image : null
+  const hasCurrentAction = !!primaryEnrollmentAction || !!savedConnection && !!onContinue
+  const guideStage: BotSetupGuideStage = !selected ? 'prepare'
+    : savedConnection ? operation?.defaultLink.state === 'saved' ? 'ready' : 'bind'
+    : primaryEnrollmentAction?.kind === 'confirm-account' ? 'account'
+    : primaryEnrollmentAction?.kind === 'create' ? 'create'
+    : challenge || primaryEnrollmentAction?.kind === 'continue-authentication' ? 'scan'
+    : primaryEnrollmentAction?.kind === 'read-credential' || enrollment?.application ? 'connect'
+    : 'attention'
   const originalResults = operation ? (
     <dl className="mote-bot-stages" aria-label="Original bot setup results">
       {operation.enrollment ? (
@@ -153,13 +168,6 @@ export function MoteBotSetup({
       >
         {busy ? 'Checking setup…' : 'Check saved progress'}
       </button>
-      <button
-        type="button"
-        className="small-button"
-        onClick={() => void setup.check(operation.operationId)}
-      >
-        View original result
-      </button>
     </div>
   ) : null
   const setupFeedback = setup.issue ? (
@@ -175,7 +183,10 @@ export function MoteBotSetup({
     </p>
   ) : null
   return (
-    <section className="mote-bot-setup" aria-label="Mote bot profile">
+    <section className="mote-bot-setup" aria-label="Mote bot profile" data-bot-journey-stage={guideStage}>
+      <div className="mote-bot-task">
+      <BotSetupGuide stage={guideStage} />
+      <div className="mote-bot-task__content">
       {!selected ? (
         <>
           {setup.profile ? (
@@ -320,6 +331,9 @@ export function MoteBotSetup({
                 : 'Bot creation')}
             </span>
           </div>
+          {primaryEnrollmentAction?.kind === 'renew-authentication' ? <p className="mote-details__hint">{enrollment?.authentication?.stage === 'expired'
+            ? 'Get a new sign-in code to continue this setup. This does not create another bot.'
+            : 'Your original sign-in result is kept. A new sign-in continues this setup; it does not create another bot.'}</p> : null}
           {challenge ? (
             <div className="mote-bot-confirmation" data-mote-bot-code>
               <BotConfirmationCode
@@ -345,6 +359,14 @@ export function MoteBotSetup({
               · {setup.enrollmentView.account.tenantName ?? setup.enrollmentView.account.tenantId}
             </p>
           ) : null}
+          {primaryEnrollmentAction?.kind === 'create' && operation ? <div className="mote-bot-creation" aria-label="Bot to create">
+            <div className="mote-bot-profile">
+              {originalImage ? <img width={48} height={48} src={originalImage} alt="Avatar chosen for this bot" /> : null}
+              <div><span className="mote-details__hint">Your new bot</span><strong>{operation.snapshot.name}</strong>{operation.snapshot.description ? <p>{operation.snapshot.description}</p> : null}</div>
+            </div>
+            {!originalImage ? <p className="mote-details__hint">The avatar chosen for the original setup is kept. Its preview is unavailable.</p> : null}
+            <p className="mote-details__hint">Creates one bot and saves its connection securely here. Message settings and publishing are confirmed separately.</p>
+          </div> : null}
           {enrollmentActions.length ? (
             <div className="mote-bot-actions mote-bot-auth-actions">
               {enrollmentActions.map(action => (
@@ -362,12 +384,20 @@ export function MoteBotSetup({
             </div>
           ) : null}
           {setup.driving && !setup.issue ? <p role="status" className="mote-details__hint">Waiting for your phone confirmation…</p> : null}
+          {enrollment?.diagnostic?.stage === 'authentication' ? <p className="mote-details__hint" role="status">The platform sign-in could not be confirmed. Your original setup is kept; use the available action to continue.</p> : null}
           {setupFeedback}
           {operation ? (
             <>
-              {!primaryEnrollmentAction ? originalResults : null}
+              {savedConnection && onContinue ? <div className="mote-bot-next">
+                <strong>Identity saved. Connect your bot.</strong>
+                <p>Continue with this bot’s saved sign-in to review message settings and publish it.</p>
+                <button type="button" className="primary-button" data-mote-bot-continue onClick={() => onContinue(savedConnection, { kind: 'enrollment', operationId: enrollment!.operationId, expectedRevision: enrollment!.revision })}>Continue bot setup</button>
+              </div> : null}
+              {!hasCurrentAction ? originalResults : null}
               {operation.profile ? (
+                <details className="bot-profile-details"><summary>Profile sync result</summary>
                 <ConnectionProfileResult operation={operation.profile} />
+                </details>
               ) : operation.connection ? (
                 <p className="mote-details__hint">
                   The profile update has not been confirmed yet. The saved connection is kept.
@@ -380,10 +410,10 @@ export function MoteBotSetup({
                   saved bot explicitly to make a new association; its existing setup is kept.
                 </p>
               ) : null}
-              {!primaryEnrollmentAction ? originalActions : null}
+              {!hasCurrentAction ? originalActions : null}
               <details className="bot-profile-details">
                 <summary>Original setup details</summary>
-                {primaryEnrollmentAction ? <>{originalResults}{originalActions}</> : null}
+                {hasCurrentAction ? <>{originalResults}{originalActions}</> : null}
                 <dl>
                   <div>
                     <dt>Original request</dt>
@@ -415,6 +445,7 @@ export function MoteBotSetup({
                       <dd>{operation.issue}</dd>
                     </div>
                   ) : null}
+                  {enrollment?.diagnostic ? <div><dt>Platform check</dt><dd>{enrollment.diagnostic.stage} · {enrollment.diagnostic.code}{enrollment.diagnostic.stage === 'authentication' && enrollment.diagnostic.step ? ` · ${enrollment.diagnostic.step}` : ''}{'httpStatus' in enrollment.diagnostic && enrollment.diagnostic.httpStatus ? ` · HTTP ${enrollment.diagnostic.httpStatus}` : ''}</dd></div> : null}
                 </dl>
               </details>
             </>
@@ -437,6 +468,8 @@ export function MoteBotSetup({
           )}
         </>
       )}
+      </div>
+      </div>
       {resumeId || selected ? (
         <details className="mote-bot-history">
           <summary>Create another bot</summary>

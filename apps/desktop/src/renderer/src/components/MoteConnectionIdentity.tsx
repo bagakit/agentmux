@@ -7,7 +7,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, sameMotePreferencesTarget,
   type MoteConnectionPreferencesReadResult, type MoteConnectionPreferencesSaveParams,
   type MoteConnectionPreferencesSaveResult, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import type { ConnectionRecord } from '@agentmux/core/connections'
+import type { ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { api } from '../lib/api'
 import { clearMoteConnectionSaveIntent, retainMoteConnectionSaveIntent, useAppStore } from '../store'
@@ -80,8 +80,8 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
 }
 
 /** The same original preference and operation window in Settings and the Mote dialog. */
-export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved, createOnOpen = false, inSettings = false, onCreateIntentConsumed, onManageConnection }: {
-  target: MotePreferencesTarget | null; topicId: string; moteName: string; onRead(value: Snapshot): void; onSaved?(): void; createOnOpen?: boolean; inSettings?: boolean; onCreateIntentConsumed?: (() => void) | undefined; onManageConnection?: ((record: ConnectionRecord) => void) | undefined
+export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved, createOnOpen = false, inSettings = false, onCreateIntentConsumed, onManageConnection, onContinueSetup }: {
+  target: MotePreferencesTarget | null; topicId: string; moteName: string; onRead(value: Snapshot): void; onSaved?(): void; createOnOpen?: boolean; inSettings?: boolean; onCreateIntentConsumed?: (() => void) | undefined; onManageConnection?: ((record: ConnectionRecord) => void) | undefined; onContinueSetup?: ((record: ConnectionRecord, source: ConnectionSetupEnrollmentSource) => void) | undefined
 }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [selection, setSelection] = useState(''), fieldId = useId()
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
@@ -154,7 +154,10 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
         <div className="mote-connection-dialog__body">
           {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={choose}>Review saved bot</button></section> : null}
           <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
-            createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} />
+            createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} onContinue={onContinueSetup ?? (settings ? (record, source) => {
+              onSaved?.()
+              settings.openMoteConnector({ target, topicId, moteName, setup: { connectionId: record.config.connectionId, source } })
+            } : undefined)} />
           <details ref={identityOptions} className="mote-identity-options"><summary>Identity options</summary>
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}

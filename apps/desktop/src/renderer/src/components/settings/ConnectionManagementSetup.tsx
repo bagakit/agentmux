@@ -4,13 +4,14 @@ import { BotConfirmationCode } from '../BotConfirmationCode'
 import type { ConnectionManagementModel } from './useConnectionManagementSetup'
 import { ConnectionGuidedTask } from './ConnectionGuidedTask'
 import { ConnectionManagementConfiguration } from './ConnectionManagementConfiguration'
+import { BotSetupGuide, type BotSetupGuideStage } from './BotSetupGuide'
 
 const titles = { checking: 'Checking your sign-in', waiting: 'Scan to sign in', scanned: 'Confirm on your phone', handoff: 'Reading your account', account: 'Is this the right account?', confirmed: 'Account confirmed', expired: 'This sign-in code expired', unknown: 'Sign-in result not confirmed', revised: 'This application changed' } as const
 const summaries = {
   checking: 'Reading this original request. You can leave and check it again later.',
   scanned: 'Finish the sign-in confirmation on your phone. Keep this page open to continue.',
   handoff: 'Your original sign-in is being checked. You can leave and return to it.', account: 'Use this account and enterprise for this application’s setup.',
-  confirmed: 'Platform configuration still needs to be completed in the developer console. Return here to check the connection.',
+  confirmed: 'Review this bot’s settings, then publish the changes when you are ready.',
   expired: 'Show a new code to continue this same sign-in. This does not create another bot.', unknown: 'Your original request is kept. Check its result before continuing.',
   revised: 'The original request is kept. Return to the current application before starting a new sign-in.'
 } as const
@@ -32,9 +33,11 @@ export function ConnectionManagementSetup({ record, model, platformLabel, onBack
   const initial = stage === 'initial', showStart = initial && (!choices.length || model.fresh)
   const configuration = stage === 'confirmed'
   const guided = configuration && model.task.kind !== 'publication'
+  const guideStage: BotSetupGuideStage = stage === 'account' ? 'account' : configuration ? 'connect' : ['waiting', 'scanned', 'handoff', 'checking'].includes(stage) ? 'scan' : initial ? 'prepare' : 'attention'
   const hasConfigurationActivity = !!view?.applicationInspection?.selected || !!view?.applicationConfiguration?.selected || !!view?.applicationInspection?.observations.length || !!view?.applicationConfiguration?.effects.length || !!view?.applicationConfiguration?.unresolved
   return <section className="connector-setup connector-management" data-management-setup={record.config.connectionId} data-management-stage={stage}>
     <button type="button" className="connector-back small-button" data-management-back onClick={onBack}>Back to connection</button>
+    {!guided ? <BotSetupGuide stage={guideStage} description={initial ? 'Sign in with the account that manages this saved bot.' : stage === 'scanned' ? 'Confirm the sign-in on your phone, then return to this bot.' : stage === 'handoff' || stage === 'checking' ? 'Your original sign-in is being checked. Keep this setup to continue.' : undefined} /> : null}
     <header className="connector-enrollment__heading">
       <p className="connector-management__context">{record.config.label} · {platformLabel}</p>
       <h3 ref={heading} tabIndex={-1} className="connector-editor-title">{configuration ? 'Prepare your bot for conversations' : setupReadFailed ? 'Setup check interrupted' : (initial ? showStart ? 'Confirm your account' : 'Continue your sign-in' : titles[stage])}</h3>
