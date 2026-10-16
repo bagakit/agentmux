@@ -1,6 +1,10 @@
 import { join } from 'node:path'
 import { runA2aProof } from './lib/a2a-proof.mjs'
 
+// Verify the Progress producer first so its private Main/Core seam fails before
+// the broader discovery and recovery mutation proof.
+await import('../../../apps/desktop/scripts/verify-injected-context-progress.mjs')
+
 const discovery = ['packages/core/test/agent-messaging-guidance.test.ts']
 const context = ['packages/core/test/agent-messaging-context.test.ts']
 const continuity = ['packages/core/test/session-continuity-launch-input.test.ts']
@@ -86,6 +90,3 @@ await runA2aProof({
   ]
 })
 
-// Progress is an existing platform-context producer too. Its own proof owns the
-// real claim→RuntimeController→Core chain and original pending/future identities.
-await import('../../../apps/desktop/scripts/verify-injected-context-progress.mjs')
