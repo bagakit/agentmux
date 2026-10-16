@@ -20,6 +20,12 @@
 
 共同输入消费直接使用该投影的 `inputs` 实体列表，保留 canonical event、revision、作者与全部原贡献；原 `record.input` 仍供单来源详情使用。Desktop 的 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts) 与 Agent 卡片 Recent inputs 直接消费实体。Desktop Composer 和 Mobile 邮箱的原来源检索则以 `originalRecords` 中的 raw inputs 作为种子，与原 `agent.history` 的原记录身份对应；不把实体 ID 混入来源分页。固定预览补入原在途实体时经 Core 的纯 `retainConversationInputs` 按准确当前 coalescence 保留已显示实体及原阅读版本，不按 native 原记录 ID 再拼一次消息列表。
 
+## 可读信封与原输入
+
+Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 生成无 `from` 属性的 `<amux>` 平台说明；[`agent-message-render`](../../packages/core/src/agent-message-render.ts) 生成并共享解析 `amux:a2a` 的 canonical `from`、稳定 `msg-id`、原正文及末尾 Core reminder。该 codec 无 Node 或 UI 依赖；精确语法由[协议](../specs/conversation-protocol.md#readable-agentmux-envelopes)唯一持有。外部来源继续保其 typed participant，人工／未核原文不会被格式化成 Agent 身份。客户端读取声明不改变原作者、投递和权限事实；共同呈现与完整资源展开的接线单独验收。
+
+原输入 coordinator 的 admission intent 保存实际 wire 与 producer 事实。`AgentMuxClient` 重试已保存 A2A Input 时复用该原配方；人工 note 的重试还需原显式正文、平台内容及来源一致。原 claim、条件和当前授权继续核验，unknown 不因格式更新获得第二次发送。Connector publication 沿原 captured writer 的 typed `inputRef`／`publicContent` 核对来源，不重算当前显示模板比较历史 wire；普通正文编辑仍由原 reducer 取消该已核边界。
+
 ## 三种来源怎样读取
 
 Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。Core 原 Reader 持有有界接受窗口与跨批贡献，Desktop、Mobile 和 Focus 消费该 Reader 的完整窗口。

@@ -50,7 +50,7 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 | `<amux:reaction … />` | 用户显式选择的 reaction 快捷回复 | [reaction 快捷回复](conversation-input.md#回复卡片的-reaction-快捷回复) | [Core prompt reaction](../../../packages/core/src/prompt-reaction.ts) |
 | `amux://<kind>/<ID>`；`--- amux : File/Browser ---` … `-----` | 可复制的对象链接与内容分享 | [寻址与复制](public-control.md#对象地址分享与方向) | [Core `formatAmuxObjectLink`／`parseAmuxObjectLink` 及内容格式器](../../../packages/core/src/sharing.ts) |
 
-此表定义统一后的要求，不代签代码已兑现。当前生成与共享 parser 仍使用旧平台属性及方括号 A2A 来源头；新合同的实现必须同时接通生成、结构化来源、对话阅读与完整复制。协议族导航不要求把对象 URI、内容分享或原生控制回执改造成同一种信封，也不从可读标签触发运行操作。
+此表定义统一后的要求；实际生成与共享解析机制见[对话架构](../../architecture/conversation.md#可读信封与原输入)，精确文本边界见[公共协议](../../specs/conversation-protocol.md#readable-agentmux-envelopes)。各客户端的实际接线与验收沿原任务记录，不由格式表代签。协议族导航不要求把对象 URI、内容分享或原生控制回执改造成同一种信封，也不从可读标签触发运行操作。
 
 ## AgentMux 注入上下文
 
