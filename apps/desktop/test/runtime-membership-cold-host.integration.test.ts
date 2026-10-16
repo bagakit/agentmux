@@ -250,6 +250,133 @@ it('cold actual Host/Main delivers original Agent and Terminal attachments befor
     attachmentProofs, inputCalls: input.mock.calls.length, startCalls: start.mock.calls.length }))
 }, 60_000)
 
+it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pending and failed recovery without replaying an unknown creation', async () => {
+  const scope = await headlessFixture(); cleanup.push(scope.cleanup); await scope.stopOwner()
+  for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
+  for (const [key, value] of Object.entries(scope.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, value!)
+  const store = new AgentMuxFileAgentSessionStore(scope.env.AGENTMUX_AGENT_SESSION_STORE!)
+  const providers = [new AgentProviderRegistry().get('codex')]
+  const cli = join(scope.root, 'creation-output.mjs')
+  await writeFile(cli, `#!/usr/bin/env node
+    import { readFileSync } from 'node:fs'
+    let emitted = ''
+    setInterval(() => {
+      try { const value = readFileSync(process.env.PRIVATE_OUTPUT_FILE || process.argv[3], 'utf8')
+        if (value !== emitted) { emitted = value; process.stdout.write('\\r\\n' + value + '\\r\\n') }
+      } catch (error) { if (error.code !== 'ENOENT') throw error }
+    }, 10)
+    if (process.argv[2] === 'private-raw') process.stdin.resume()
+    else await import(${JSON.stringify(pathToFileURL(resolve('packages/core/test/fixtures/fake-codex-cli.mjs')).href)})
+  `, { mode: 0o700 })
+  const seed = await startAgentMuxHost({ store, providers, socketPath: defaultAgentMuxControlSocketPath() }); cleanup.push(seed.dispose)
+  await seed.client.connect()
+  const seedKernel = (seed.client as unknown as { kernel: { input: (...args: unknown[]) => Promise<unknown> } }).kernel
+  const missed = vi.spyOn(seedKernel, 'input').mockRejectedValueOnce(new AgentMuxError(
+    'Private original handshake was not dispatched.', 'CTXMUX_io', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 }))
+  const sibling = await seed.client.createAgent({ providerId: 'codex', executorId: 'codex', workspacePath: scope.root,
+    agentSessionId: 'private-creation-sibling', createOperationId: 'private-creation-sibling-op', commandOverride: cli,
+    args: [], env: { AGENTMUX_FAKE_READY_MODE: 'before', PRIVATE_OUTPUT_FILE: join(scope.root, 'sibling-output') }, injectAgentMuxGuide: false })
+  missed.mockRestore()
+  const original = (await store.readMetadata(sibling.agentSessionId))!
+  expect(original.terminalHandshake?.acknowledged).toBe(false)
+  const native = seed.client.runtimeIdentity(), nativePid = scope.nativeProcessId
+  await seed.client.writeTerminal(sibling.run, { ownerInstanceId: native.instanceId, operationId: 'private-sibling-original-input',
+    expectedByte: 0, data: 'Original authorized private input\r' })
+  const siblingBefore = await seed.client.statusAgent(sibling.agentSessionId)
+  await seed.dispose()
+  const entered = deferred(), release = deferred(); cleanup.push(async () => { release.resolve() })
+  const claim = store.claimStaleLifecycles.bind(store)
+  vi.spyOn(store, 'claimStaleLifecycles').mockImplementationOnce(async (...args) => { entered.resolve(); await release.promise; return await claim(...args) })
+  const host = await startAgentMuxHost({ store, providers, socketPath: defaultAgentMuxControlSocketPath() }); cleanup.push(host.dispose)
+  await entered.promise
+  expect(host.client.agentSessions()).toEqual([])
+  const kernel = (host.client as unknown as { kernel: { input: (...args: unknown[]) => Promise<unknown>; start: (...args: unknown[]) => Promise<unknown> } }).kernel
+  const input = vi.spyOn(kernel, 'input'), start = vi.spyOn(kernel, 'start')
+  const fullConnect = deferred(), connect = host.client.connect.bind(host.client)
+  const observation = vi.spyOn(host.client, 'connect').mockImplementation(() => { fullConnect.resolve(); return connect() })
+  const controller = new RuntimeController(store, connectDesktopAgentMuxHost); cleanup.push(() => controller.dispose())
+  const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private creation owner' }],
+    workspaces: [{ id: 'private-create-workspace', hostId: 'local', kind: 'folder', name: 'Private', path: scope.root }] }
+  controller.commit(await controller.prepare(config))
+  const delivered: RuntimeEvent[] = []
+  const contents = Object.assign(new EventEmitter(), { id: 74, isDestroyed: () => false,
+    send: (_channel: string, event: RuntimeEvent) => delivered.push(event) }) as unknown as WebContents
+  cleanup.push(controller.attach(contents))
+  // The real receipt owner loses only the final delivery-metadata write. The
+  // prepared seed/Run/unknown prompt remain genuine, rather than forged fields.
+  const save = store.compareAndSwapMetadata.bind(store)
+  const receiptFaults: string[] = []
+  vi.spyOn(store, 'compareAndSwapMetadata').mockImplementation(async (...args) => {
+    const next = args[1]
+    if (next?.agentSessionId.startsWith('private-created-') && next.creation?.initialPrompt === 'confirmed') {
+      receiptFaults.push(next.agentSessionId); throw new Error('Private final creation receipt acknowledgement unavailable')
+    }
+    return await save(...args)
+  })
+  const proofs: unknown[] = []
+  for (const phase of ['pending', 'failed'] as const) {
+    const agentFile = join(scope.root, phase + '-agent'), rawFile = join(scope.root, phase + '-raw')
+    await writeFile(agentFile, `private-${phase}-agent-initial`); await writeFile(rawFile, `private-${phase}-raw-initial`)
+    config.executors.codex = { ...config.executors.codex!, command: cli, args: [], injectAgentMuxGuide: false,
+      env: { AGENTMUX_FAKE_READY_MODE: 'before', PRIVATE_OUTPUT_FILE: agentFile } }
+    const request = { hostId: 'local', executorId: 'codex', workspacePath: scope.root,
+      agentSessionId: `private-created-${phase}`, createOperationId: `private-created-operation-${phase}`, prompt: 'Original private task', cols: 80, rows: 24 }
+    const creating = controller.launchAgent(request, config).then(value => ({ value }), error => ({ error }))
+    const result = phase === 'pending' ? await Promise.race([creating, fullConnect.promise.then(() => ({ unrelatedRecovery: true }))]) : await creating
+    if (!('value' in result)) { release.resolve(); await creating }
+    if ('error' in result) throw result.error
+    expect(result, 'new Main Agent must not wait for unrelated full recovery').toHaveProperty('value')
+    if (!('value' in result)) throw new Error('Private Main Agent creation unavailable')
+    const created = result.value.created
+    expect(created).toMatchObject({ agentSessionId: request.agentSessionId, creation: { createOperationId: request.createOperationId } })
+    expect((await store.readMetadata(created.agentSessionId))!.creation?.initialPrompt).toBe('unknown')
+    expect(receiptFaults).toContain(created.agentSessionId)
+    const raw = await controller.launchTerminal({ hostId: 'local', workspacePath: scope.root, createOperationId: `private-created-raw-${phase}`,
+      shellCommand: `${process.execPath} ${JSON.stringify(cli)} private-raw ${JSON.stringify(rawFile)}`, cols: 80, rows: 24 }, config)
+    const starts = start.mock.calls.length, inputs = input.mock.calls.length
+    expect((await controller.launchAgent(request, config)).created).toMatchObject({ agentSessionId: created.agentSessionId, run: created.run,
+      creation: { initialPrompt: 'unknown' } })
+    expect(await controller.agentCreation('local', created.agentSessionId)).toMatchObject({ run: created.run, creation: { initialPrompt: 'unknown' } })
+    await expect(controller.launchAgent({ ...request, prompt: 'Changed private task' }, config)).rejects.toMatchObject({ code: 'AGENT_FORK_OPERATION_CONFLICT' })
+    expect(start).toHaveBeenCalledTimes(starts); expect(input).toHaveBeenCalledTimes(inputs)
+    for (const target of [{ id: created.agentSessionId, run: created.run, file: agentFile, initial: `private-${phase}-agent-initial` },
+      { id: raw.id, run: raw.control.run, file: rawFile, initial: `private-${phase}-raw-initial` }]) {
+      const run = (await host.client.listRuns()).find(run => run.runId === target.run.runId)!
+      expect(run.pid).toBeGreaterThan(1); expect(run.state).toBe('running')
+      await until(() => host.client.readRunReplay(target.run), replay => replay.replay.map(chunk => chunk.data).join('').includes(target.initial), 'new private known output')
+      const session = (await controller.snapshot(config)).sessions.find(session => session.id === target.id)!
+      const attached = await controller.attachSession(contents.id, session.control, 0, config)
+      try {
+        const initial = attached.terminal.type === 'basic-vt' ? new TextDecoder().decode(attached.terminal.restoreBytes) : ''
+        expect(initial + attached.replay.map(chunk => chunk.data).join('')).toContain(target.initial)
+        const from = delivered.length, marker = `private-${phase}-${target.id}-later`
+        await writeFile(target.file, marker)
+        const output = await until(() => delivered.slice(from).flatMap(event => event.type === 'core' && event.event.type === 'terminal-output' &&
+          event.event.run.runId === target.run.runId ? [event.event] : []), output => output.map(event => event.data).join('').includes(marker), 'new Main ordered output')
+        let cursor = attached.session.latestOutputBytes
+        for (const event of output) { expect(event.evidence.outputByteRange.startByte).toBe(cursor)
+          expect(event.evidence.outputByteRange.endByte - cursor).toBe(event.dataBytes.length); cursor = event.evidence.outputByteRange.endByte }
+        proofs.push({ phase, id: target.id, runId: run.runId, pid: run.pid, initialBytes: Buffer.byteLength(initial), liveBytes: cursor - attached.session.latestOutputBytes })
+      } finally { await controller.detachSession(contents.id, attached.attachmentId) }
+    }
+    expect(host.client.runtimeIdentity()).toEqual(native); expect(scope.nativeProcessId).toBe(nativePid)
+    if (phase === 'pending') {
+      expect(observation).not.toHaveBeenCalled(); observation.mockRestore()
+      await controller.rpcClients()[0]!.client.connect()
+      const recovering = host.client.connect().then(() => null, error => error); release.resolve()
+      expect(await recovering).toMatchObject({ code: 'CTXMUX_input_cursor_mismatch' })
+    }
+  }
+  expect(start).toHaveBeenCalledTimes(4)
+  expect(input.mock.calls.filter(call => call[0] === sibling.run.runId)).toHaveLength(1) // original failed recovery only
+  expect((await host.client.statusAgent(sibling.agentSessionId)).run).toMatchObject({ runId: sibling.run.runId, pid: siblingBefore.run.pid,
+    acceptedInputBytes: siblingBefore.run.acceptedInputBytes, state: 'running' })
+  expect((await store.readMetadata(sibling.agentSessionId))!.terminalHandshake).toEqual(original.terminalHandshake)
+  expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ scope: 'observation', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED' }))
+  console.info('PRIVATE_NEW_CREATIONS=' + JSON.stringify({ nativePid, nativeInstanceId: native.instanceId, proofs, receiptFaults,
+    startCalls: start.mock.calls.length, siblingInputCalls: input.mock.calls.filter(call => call[0] === sibling.run.runId).length }))
+}, 60_000)
+
 it('Main consumes an original owner resume completed during its delayed metadata/Native read without publishing the new Run as a Terminal', async () => {
   const scope = await headlessFixture(); cleanup.push(scope.cleanup); await scope.stopOwner()
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)

@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -8,6 +9,7 @@ import { AgentMuxCreationAuthority, agentCreationIntentDigest } from '../src/age
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
+import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 
 const roots: string[] = [], clients: AgentMuxClient[] = []
 afterEach(async () => {
@@ -20,7 +22,7 @@ const input: AgentMuxHostAgentCreateInput = { agentSessionId: 'original-session'
 function session(): AgentMuxStoredAgentSession {
   return { kind: 'agent', agentSessionId: input.agentSessionId!, hostId: 'local', providerId: 'claude', executorId: input.executorId,
     workspacePath: input.workspacePath, run: { runId: 'original-run' }, retiredRuns: [], hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43),
-    capabilityHash: 'c'.repeat(43), createdAt: 1, updatedAt: 1,
+    capabilityHash: 'c'.repeat(43), createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     creation: { createOperationId: input.createOperationId!, intentDigest: hostAgentCreationIntent(input), executorRevision: input.executorRevision,
       initialPrompt: 'unknown', agentMuxContext: 'unknown' } }
 }
@@ -42,6 +44,22 @@ async function fixture(kind: 'memory' | 'file') {
 }
 
 describe.each(['memory', 'file'] as const)('exact creation reads through the %s Store', kind => {
+  it('Hosted reads the original receipt and UNKNOWN without connecting an unavailable Native', async () => {
+    const f = await fixture(kind), original = session()
+    await f.store.compareAndSwap(null, original)
+    const native = vi.spyOn(f.inner.kernel, 'connect').mockRejectedValue(new Error('Private Native is unavailable'))
+    vi.spyOn(f.inner.kernel, 'isConnected').mockReturnValue(false)
+    const load = vi.spyOn(f.inner.registry, 'load')
+    const h = await hostedTestClient(f.client)
+    native.mockClear()
+    try {
+      expect(await h.sdk.inspectAgentCreation(original.agentSessionId)).toMatchObject({ run: original.run, creation: original.creation })
+      await expect(h.sdk.inspectAgentCreation('unknown-operation-session')).rejects.toMatchObject({ code: 'AGENT_CREATION_UNKNOWN' })
+      expect(native).not.toHaveBeenCalled(); expect(load).not.toHaveBeenCalled()
+      expect(f.start).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+    } finally { await h.dispose() }
+  })
+
   it('reads the original Host creation and inspection once each without the catalogue', async () => {
     const f = await fixture(kind), original = session()
     await f.store.compareAndSwap(null, original)

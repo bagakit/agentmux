@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { mkdtemp, rm, symlink } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
@@ -13,6 +14,8 @@ import { issueAgentCapability, hashAgentCapability } from '../src/agent-capabili
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../src/types.js'
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
+import { hostedTestClient } from './helpers/hosted-runtime-port.js'
+import { AgentMuxError } from '../src/errors.js'
 
 const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_REMOTE_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_REMOTE_CLIENT)).AgentMuxClient : DefaultClient
@@ -32,7 +35,7 @@ async function fixture() {
   const capability = issueAgentCapability()
   await sourceStore.compareAndSwap(null, { kind: 'agent', agentSessionId: 'source-session', providerId: 'claude', executorId: 'claude',
     hostId: 'local', workspacePath: root, run: { runId: 'source-run' }, retiredRuns: [],
-    hookBindingId: 'source-binding', hookToken: 'source-token', capabilityHash: hashAgentCapability(capability), createdAt: 1, updatedAt: 1 })
+    hookBindingId: 'source-binding', hookToken: 'source-token', capabilityHash: hashAgentCapability(capability), createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) })
   const sourceAuthority = new AgentMuxCreationAuthority({ stateDirectory: join(root, 'source'), runtimeId: 'source-runtime' })
   const targetAuthority = new AgentMuxCreationAuthority({ stateDirectory: join(root, 'target'), runtimeId: 'target-runtime' })
   const source = new AgentMuxClient({ store: sourceStore, creationAuthority: sourceAuthority }); clients.push(source)
@@ -72,6 +75,81 @@ async function fixture() {
 }
 
 describe('remote initial creation admission', () => {
+  it('Hosted direct createAgent retains the original prepared start and unknown prompt without global recovery or replay', async () => {
+    const f = await fixture(), global = vi.spyOn(f.target, 'connect').mockRejectedValue(new Error('Unrelated private recovery is unavailable'))
+    const input = vi.spyOn((f.target as any).kernel, 'input').mockRejectedValue(new Error('Creation retries must not input'))
+    const h = await hostedTestClient(f.target)
+    const launch = f.start.getMockImplementation()!
+    f.start.mockImplementationOnce(async input => { await launch(input); throw new Error('Private original start acknowledgement lost') })
+    const request = { agentSessionId: 'direct-created-session', createOperationId: 'direct-original-operation',
+      providerId: 'claude', executorId: 'target-executor', workspacePath: f.root, injectAgentMuxGuide: false, prompt: 'Original direct task' }
+    try {
+      await expect(h.sdk.createAgent(request)).rejects.toMatchObject({ code: 'AGENT_CREATION_UNCONFIRMED' })
+      expect(await f.targetStore.readMetadata(request.agentSessionId)).toBeNull()
+      const prepared = await f.targetStore.loadCreationCorrelation(request.agentSessionId)
+      expect(prepared?.preparedCreation?.creation?.initialPrompt).toBe('unknown')
+      const original = await h.sdk.createAgent(request)
+      expect(original).toMatchObject({ agentSessionId: request.agentSessionId, run: { runId: 'target-run' }, creation: { initialPrompt: 'unknown' } })
+      expect((await h.sdk.createAgent(request)).run).toEqual(original.run)
+      await expect(h.sdk.createAgent({ ...request, prompt: 'Changed original task' })).rejects.toMatchObject({ code: 'AGENT_FORK_OPERATION_CONFLICT' })
+      expect(f.start).toHaveBeenCalledOnce(); expect(input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled(); expect(global).not.toHaveBeenCalled()
+    } finally { await h.dispose() }
+  })
+
+  it('Hosted target creation and source attest retain original authority under unavailable Native observation', async () => {
+    const f = await fixture(); await f.pin()
+    const sourceInner = f.source as any
+    const native = vi.spyOn(sourceInner.kernel, 'connect').mockRejectedValue(new Error('Private source Native is unavailable'))
+    vi.spyOn(sourceInner.kernel, 'isConnected').mockReturnValue(false)
+    const global = vi.spyOn(f.target, 'connect').mockRejectedValue(new Error('Unrelated private target recovery is unavailable'))
+    const source = await hostedTestClient(f.source), target = await hostedTestClient(f.target)
+    native.mockClear()
+    const attest = () => source.sdk.attestAgentCreation({ caller: { agentSessionId: 'source-session', capability: f.capability },
+      target: { runtimeId: 'target-runtime', intentDigest: hostAgentCreationIntent(f.input) } })
+    try {
+      const request = { ...f.input, initialMessageAdmission: await attest() }
+      const created = await target.sdk.createHostAgentWithDelivery(request)
+      expect(created.session.creation?.initialMessageOrigin?.source).toMatchObject({ runtimeId: 'source-runtime', agentSessionId: 'source-session', runId: 'source-run' })
+      expect((await target.sdk.createHostAgentWithDelivery(request)).session.run).toEqual(created.session.run)
+      await expect(target.sdk.createHostAgentWithDelivery({ ...request, executorRevision: '0'.repeat(64) })).rejects.toBeInstanceOf(Error)
+      await expect(source.sdk.attestAgentCreation({ caller: { agentSessionId: 'source-session', capability: 'forged' },
+        target: { runtimeId: 'target-runtime', intentDigest: hostAgentCreationIntent(f.input) } })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+      const old = (await f.sourceStore.readMetadata('source-session'))!
+      await f.sourceStore.compareAndSwapMetadata(old, { ...old, run: { runId: 'replacement-source-run' }, retiredRuns: [old.run], capabilityHash: hashAgentCapability(issueAgentCapability()), updatedAt: old.updatedAt + 1 })
+      await expect(attest()).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+      expect(native).not.toHaveBeenCalled(); expect(global).not.toHaveBeenCalled(); expect(f.start).toHaveBeenCalledOnce(); expect(f.stop).not.toHaveBeenCalled()
+    } finally { await source.dispose(); await target.dispose() }
+  })
+
+  it('Hosted prepared inspection connects only its original Runtime after a real lost start receipt, preserving failure and never replaying', async () => {
+    const f = await fixture(); await f.pin()
+    const request = { ...f.input, initialMessageAdmission: await f.attest() }, launch = f.start.getMockImplementation()!
+    f.start.mockImplementationOnce(async input => { await launch(input); throw new Error('Private original start acknowledgement lost') })
+    await expect(f.target.createHostAgentWithDelivery(request)).rejects.toMatchObject({ code: 'AGENT_CREATION_UNCONFIRMED' })
+    const seed = await f.targetStore.loadCreationCorrelation(request.agentSessionId!)
+    expect(seed?.preparedCreation?.creation?.initialPrompt).toBe('unknown')
+    const inner = f.target as any
+    inner.connected = false
+    let connected = false
+    vi.spyOn(inner.kernel, 'isConnected').mockImplementation(() => connected)
+    const native = vi.spyOn(inner.kernel, 'connect').mockRejectedValue(new AgentMuxError('Private original Native temporarily unavailable', 'CTXMUX_io'))
+    const list = vi.spyOn(inner.kernel, 'list')
+    const input = vi.spyOn(inner.kernel, 'input').mockRejectedValue(new Error('Inspection must not input'))
+    const global = vi.spyOn(f.target, 'connect').mockRejectedValue(new Error('Unrelated private recovery is unavailable'))
+    const h = await hostedTestClient(f.target)
+    native.mockClear(); list.mockClear()
+    try {
+      await expect(h.sdk.inspectAgentCreation(request.agentSessionId!)).rejects.toThrow('Private original Native temporarily unavailable')
+      expect(await f.targetStore.loadCreationCorrelation(request.agentSessionId!)).toEqual(seed)
+      expect(list).not.toHaveBeenCalled()
+      native.mockImplementation(async () => { connected = true })
+      const recovered = await h.sdk.inspectAgentCreation(request.agentSessionId!)
+      expect(recovered).toMatchObject({ agentSessionId: request.agentSessionId, run: { runId: 'target-run' }, creation: { initialPrompt: 'unknown' } })
+      expect(native).toHaveBeenCalledTimes(2); expect(list).toHaveBeenCalledOnce()
+      expect(f.start).toHaveBeenCalledOnce(); expect(input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled(); expect(global).not.toHaveBeenCalled()
+    } finally { await h.dispose() }
+  })
+
   it('starts against the target registry without a source Session there; keeps sourced task and original receipt once', async () => {
     const f = await fixture(); await f.pin()
     const request = { ...f.input, initialMessageAdmission: await f.attest() }
@@ -153,7 +231,7 @@ describe('remote initial creation admission', () => {
     const f = await fixture()
     const previous = (await f.sourceStore.load())[0] as AgentMuxStoredAgentSession
     await f.sourceStore.compareAndSwap(previous, { ...previous, run: { runId: 'replacement-source-run' },
-      retiredRuns: [previous.run], capabilityHash: hashAgentCapability(issueAgentCapability()), updatedAt: 2 })
+      retiredRuns: [previous.run], capabilityHash: hashAgentCapability(issueAgentCapability()), updatedAt: _tailFixtureEpoch(0, 0, 2) })
     await expect(f.attest()).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     expect(f.start).not.toHaveBeenCalled()
   })
