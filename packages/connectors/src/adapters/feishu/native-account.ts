@@ -272,7 +272,7 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
             failure = 'redirect-unconfirmed'
             state.url = url(cross, CROSS_LOGIN_HOSTS).href; state.phase = 'cross-login'
           }
-        } else if (polling && info && Number.isSafeInteger(info.status) && [1, 2].includes(Number(info.status))) stage = info.status === 2 ? 'scanned' : 'waiting'
+        } else if (polling && info && Number.isSafeInteger(info.status) && [0, 1, 2].includes(Number(info.status))) stage = info.status === 2 ? 'scanned' : 'waiting'
         else return failed()
       } else if (state.phase === 'cross-login') {
         // Finish the cross-login chain before the original fixed landing, even on the same host.
