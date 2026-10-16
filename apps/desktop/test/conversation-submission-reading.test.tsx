@@ -108,7 +108,7 @@ it('a real failed original read stops submission activity and preserves the orig
   await wait(() => { expect(s.host.textContent).toContain('Original submission source read failed.'); expect(s.row().querySelector('[data-icon-animation]')).toBeNull() })
   expect(s.row().querySelector('.log-turn__body')).toBe(body)
   expect(getSelection()!.toString()).toBe('selected words')
-  expect([...s.host.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent === 'Retry' && !button.disabled)).toBe(true)
+  expect([...s.host.querySelectorAll<HTMLButtonElement>('button')].some(button => button.textContent === 'Retry conversation records' && !button.disabled)).toBe(true)
   expect(s.row('unknown-submission').querySelector('[data-icon-animation]')).toBeNull()
   let release!: () => void
   const real = s.bridge.readConversationChanges
@@ -116,7 +116,7 @@ it('a real failed original read stops submission activity and preserves the orig
     const result = await real(input, options); await new Promise<void>(resolve => { release = resolve }); return result
   })
   closes.push(() => release?.())
-  await act(async () => [...s.host.querySelectorAll<HTMLButtonElement>('.activity-feed__read-notice button')].find(button => button.textContent === 'Retry')!.click())
+  await act(async () => [...s.host.querySelectorAll<HTMLButtonElement>('.conversation-read-issues button')].find(button => button.textContent === 'Retry conversation records')!.click())
   await wait(() => expect(s.row().querySelector('[data-icon-animation="spin"]')).not.toBeNull())
   expect(s.host.textContent).toContain('Original submission source read failed.')
   expect(s.row().querySelector('.log-turn__body')).toBe(body); expect(getSelection()!.getRangeAt(0)).toBe(range)

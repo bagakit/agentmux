@@ -64,6 +64,40 @@ it('unrelated Sessions do not expand sharing reads and a failed exact read retai
   expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
 }, 25_000)
 
+it('sharing recovery re-reads only the selected original audience and retains its issue and draft until that read succeeds', async () => {
+  await f.mount(); await bindExisting()
+  const region = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"]')!
+  const neighbor = document.querySelector<HTMLElement>('[data-workbench-region-id="other-region"]')!
+  const editor = input(), draft = useAppStore.getState().agentComposerDrafts['original-agent']
+  let failed = true, release: (() => void) | undefined
+  const targets: unknown[] = []
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
+    if (method === 'connection.binding.ls') {
+      targets.push(structuredClone(params))
+      if (!failed) await new Promise<void>(done => { release = done })
+      if (failed) throw new Error('Original audience read unavailable')
+    }
+    return f.forward<M>(method, params)
+  })
+  await act(async () => { editor.focus(); invalidateConnectorTarget(target) })
+  await wait(() => expect(document.querySelectorAll('[aria-label="View service notice: Sharing status unconfirmed"]')).toHaveLength(2))
+  targets.length = 0; failed = false
+  const refresh = region.querySelector<HTMLButtonElement>('[aria-label="Refresh sharing status"]')!
+  await act(async () => refresh.click())
+  expect(targets).toEqual([{ executionHostId: 'local', agentSessionId: 'original-agent' }])
+  expect(refresh.disabled).toBe(true); expect(refresh.getAttribute('aria-busy')).toBe('true')
+  expect(region.querySelector('[aria-label="View service notice: Sharing status unconfirmed"]')).not.toBeNull()
+  expect(region.querySelector('.connector-sharing__group')?.textContent).toContain('Last known group')
+  await act(async () => release!())
+  await wait(() => expect(region.querySelector('[aria-label="View service notice: Sharing status unconfirmed"]')).toBeNull())
+  expect(neighbor.querySelector('[aria-label="View service notice: Sharing status unconfirmed"]')).not.toBeNull()
+  expect(region.querySelector('.connector-sharing__group')?.textContent).toContain('Shared group')
+  expect(input()).toBe(editor); expect(document.activeElement).toBe(editor)
+  expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe(draft)
+  expect(f.calls.some(call => call.method === 'connection.delivery.retry')).toBe(false)
+  expect(f.original.create).not.toHaveBeenCalled(); await f.original.unchanged()
+}, 25_000)
+
 it('the Composer group link opens original details and observes bounded delivery without sending or retrying', async () => {
   await f.mount(); const binding = await bindExisting()
   const before = f.calls.filter(call => ['connection.room.create', 'connection.bind', 'connection.grant'].includes(call.method)).length

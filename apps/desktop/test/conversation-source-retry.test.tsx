@@ -26,9 +26,9 @@ async function captured(f: Fixture, id: string) {
   { source: 'agentmux', observedAt: _tailFixtureEpoch(0, 0, 1) }, 'local')
 }
 function retryButton(host: HTMLElement) {
-  return [...host.querySelectorAll<HTMLButtonElement>('.activity-feed__read-notice button')].find(button => button.textContent === 'Retry')
+  return [...host.querySelectorAll<HTMLButtonElement>('.conversation-read-issues button')].find(button => button.textContent === 'Retry conversation records')
 }
-const notice = (host: HTMLElement) => [...host.querySelectorAll('.activity-feed__read-notice')].map(node => node.textContent).join('\n')
+const notice = (host: HTMLElement) => [...host.querySelectorAll('.conversation-read-issues')].map(node => node.textContent).join('\n')
 function sourceCut(page: ConversationChangesPage, kind: 'native' | 'captured') {
   return page.checkpoint.frontier.cuts.find(cut => cut.kind === kind)
 }
