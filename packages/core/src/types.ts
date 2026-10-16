@@ -1695,6 +1695,9 @@ export type AgentMuxObservationOrigin =
   | { kind: 'runtime-connection'; boundary: 'core-ctxmux' | 'consumer-core' }
 
 export type AgentMuxClientEvent = (
+  | { type: 'agent-message-changed'; messageId: string; sequence: number; senderSessionId: string; recipientSessionId: string }
+  /** Derived journal observation for human reading; never Input or Agent consumption authority. */
+  | { type: 'agent-message-observation'; state: 'available' | 'unavailable'; code?: string; message?: string }
   | {
       /** Durable communication changed. Consumers re-read the exact source; this is no Task verdict. */
       type: 'dispatch-changed'

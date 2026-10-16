@@ -939,6 +939,7 @@ export type AgentSessionControl = {
 /** Reading a retained conversation needs identity, never a live Run lease. */
 export type SessionHistoryReference = Pick<AgentSessionControl, 'hostId' | 'agentSessionId'>
 export type SessionDispatchPageOptions = Pick<AgentMuxRpcParams<'message.dispatch.ls'>, 'afterSourceMessageId' | 'limit'>
+export type SessionMessagePageOptions = Pick<AgentMuxRpcParams<'message.ls'>, 'direction' | 'beforeSequence' | 'limit'>
 
 // Not exported, unlike its sibling `AgentSessionControl` (11 external narrowing sites): the two
 // consumers are the `SessionControl` union below and the terminal arm of the Session union.
@@ -1896,6 +1897,8 @@ export type AgentMuxDesktopApi = {
     timeline(session: SessionHistoryReference): Promise<AgentTimelineSnapshot>
     dispatches(session: SessionHistoryReference, options?: SessionDispatchPageOptions): Promise<AgentMuxRpcResult<'message.dispatch.ls'>>
     dispatch(session: SessionHistoryReference, sourceMessageId: string): Promise<AgentMuxRpcResult<'message.dispatch.read'>>
+    listMessages(session: SessionHistoryReference, options: SessionMessagePageOptions): Promise<AgentMuxRpcResult<'message.ls'>>
+    readMessage(session: SessionHistoryReference, messageId: string): Promise<AgentMuxRpcResult<'message.read'>>
     historyPage(session: SessionHistoryReference, options?: SessionHistoryPageOptions): Promise<AgentSessionHistoryPage>
     readHistory(session: SessionHistoryReference, options: Omit<import('@agentmux/core').AgentSessionHistoryReadInput, 'hostId' | 'agentSessionId'>,
       context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').AgentSessionHistoryReadPage>

@@ -2469,6 +2469,18 @@ export class RuntimeController {
     return original
   }
 
+  /** Original A2A reads require a retained participant, never a live Run or Input. */
+  async sessionMessages(reference: SessionHistoryReference, options: import('../shared/contracts.js').SessionMessagePageOptions) {
+    return { ...await this.configuredClient(reference.hostId).listMessages({ ...options, participantSessionId: reference.agentSessionId }), hostId: reference.hostId }
+  }
+
+  async sessionMessage(reference: SessionHistoryReference, messageId: string) {
+    const message = await this.configuredClient(reference.hostId).readMessage({ messageId })
+    if (message && message.envelope.senderSessionId !== reference.agentSessionId && message.envelope.recipientSessionId !== reference.agentSessionId) throw new AgentMuxError(
+      'This original message belongs to another participant. The current Session and reading window are retained.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    return { message, hostId: reference.hostId }
+  }
+
   async observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>> {
     const subject = await (await this.connectedClient(hostId, 'runtime')).runtimeSubject({ kind: 'terminal-run', runId })
     return { runId: subject.run.runId, state: subject.run.state }

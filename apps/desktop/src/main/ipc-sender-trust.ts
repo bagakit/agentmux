@@ -104,6 +104,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'search:cancel': 'global search read cancellation',
   'sessions:readHistory': 'input history query',
   'sessions:inputMailbox': 'original input mailbox reading',
+  'sessions:messages': 'original A2A participant message reading',
+  'sessions:message': 'original A2A message body reading',
   'sessions:cancelHistoryRead': 'history read cancellation',
   'sessions:releaseHistoryObservation': 'history observation',
   'continuousProgress:list': 'continuous progress',
