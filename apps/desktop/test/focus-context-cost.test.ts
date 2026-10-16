@@ -25,13 +25,13 @@ it('skips unrelated Store writes and derives only one changed context at both in
     expect(renamed.laneContexts).toBe(before.laneContexts)
     expect(renamed.contexts.slice(1)).toEqual(before.contexts.slice(1))
     expect(pathReads).toBe(1) // Existing scratch snapshot scope checks this one retained workspace.
-    expect(timelineReads).toEqual({'session-0':2})
+    expect(timelineReads).toEqual({'session-0':3}) // One extra identity read at the changed row's conversation cache boundary.
     pathReads=0;for(const id of Object.keys(timelineReads))delete timelineReads[id]
     const changed=select({...input,agentNames:{'session-0':'Changed only this task'},sessions:sessions.map((session,index)=>index===0?{...session,status:{...session.status,state:'done' as const}}:session)})
     expect(changed.contexts[0]!.bucket).toBe('idle')
     expect(changed.laneContexts).not.toBe(renamed.laneContexts)
     expect(changed.laneContexts.slice(1)).toEqual(renamed.laneContexts.slice(1))
-    expect(pathReads).toBe(1);expect(timelineReads).toEqual({'session-0':2})
+    expect(pathReads).toBe(1);expect(timelineReads).toEqual({'session-0':3})
   }
 })
 
