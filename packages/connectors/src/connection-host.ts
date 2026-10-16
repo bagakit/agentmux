@@ -81,40 +81,28 @@ export class ConnectionHost implements ConnectionPort {
       catch { throw new AgentMuxError('Profile storage is unavailable. Existing connections remain available; retry this original profile operation.', 'CONNECTION_PROFILE_UNAVAILABLE') }
     }
     this.profile = { get: async (input, context) => profile().get(input, context), sync: async (input, context) => profile().sync(input, context), advance: async (input, context) => profile().advance(input, context), inspect: async (input, context) => profile().inspect(input, context), list: async (input, context) => profile().list(input, context) }
-    const enrollment = (): ConnectionEnrollmentHost => {
-      if (this.closed) throw new AgentMuxError('The original enrollment owner is closed. Inspect the original operation on its Host.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
-      if (this.enrollmentHost) return this.enrollmentHost
-      const secrets = options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
-      try {
-        return this.enrollmentHost = new ConnectionEnrollmentHost({ connections: this, ...(typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? { secrets: secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets } : {}) })
-      } catch {
-        throw new AgentMuxError('Application enrollment storage is unavailable. Existing connections remain available; retry this original enrollment after restoring storage access.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
-      }
-    }
     const setup = (): ConnectionSetupHost => {
       if (this.closed) throw new AgentMuxError('The original management owner is closed. Inspect the same request on its Host.', 'CONNECTION_SETUP_UNCONFIRMED')
       if (this.setupHost) return this.setupHost
       const secrets = options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
       try {
-        return this.setupHost = new ConnectionSetupHost(this, typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets : undefined, (source, target, context) => enrollment().setupSource(source, target, context))
+        return this.setupHost = new ConnectionSetupHost(this, typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets : undefined, (source, target, context) => this.enrollmentOwner().setupSource(source, target, context))
       } catch { throw new AgentMuxError('Original management request storage is unavailable. Existing bots and Agents remain available; restore storage and inspect the same request.', 'CONNECTION_SETUP_UNCONFIRMED') }
     }
     this.setup = { begin: (input, context) => setup().begin(input, context), advance: (input, context) => setup().advance(input, context), inspect: (input, context) => setup().inspect(input, context), list: (input, context) => setup().list(input, context) }
-    this.enrollment = { begin: async (input, context) => enrollment().begin(input, context), advance: async (input, context) => enrollment().advance(input, context), inspect: async (input, context) => enrollment().inspect(input, context), list: async (input, context) => enrollment().list(input, context) }
+    this.enrollment = { begin: async (input, context) => this.enrollmentOwner().begin(input, context), advance: async (input, context) => this.enrollmentOwner().advance(input, context), inspect: async (input, context) => this.enrollmentOwner().inspect(input, context), list: async (input, context) => this.enrollmentOwner().list(input, context) }
   }
-  async ownsEnrollmentConnection(connectionId: string, agentSessionId: string): Promise<boolean> {
-    // Initialize the original journal through its existing owner before reading its exact key.
-    if (!this.enrollmentHost) await this.enrollment!.list({ limit: 1 }, { actor: { kind: 'agent', id: agentSessionId } })
-    return this.safe(() => {
-      const row = this.database.prepare('SELECT record_json FROM connection_enrollment WHERE connection_id=?').get(connectionId)
-      if (!row) return false
-      const saved = JSON.parse(String(row.record_json))
-      const current = this.readConfiguration(connectionId), original = saved.operation?.configured?.connection
-      return saved.actor?.kind === 'agent' && saved.actor.id === agentSessionId && saved.operation?.configuration === 'configured' &&
-        !!current && !!original && current.config.adapterId === original.config.adapterId &&
-        current.config.application.domain === original.config.application.domain && current.config.application.appId === original.config.application.appId
-    })
+  private enrollmentOwner(): ConnectionEnrollmentHost {
+    if (this.closed) throw new AgentMuxError('The original enrollment owner is closed. Inspect the original operation on its Host.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
+    if (this.enrollmentHost) return this.enrollmentHost
+    const secrets = this.options.secrets as Partial<import('./connection-enrollment-adapter.js').EnrollmentSecrets>
+    try {
+      return this.enrollmentHost = new ConnectionEnrollmentHost({ connections: this, ...(typeof secrets.store === 'function' && typeof secrets.inspect === 'function' && typeof secrets.assertAvailable === 'function' ? { secrets: secrets as import('./connection-enrollment-adapter.js').EnrollmentSecrets } : {}) })
+    } catch {
+      throw new AgentMuxError('Application enrollment storage is unavailable. Existing connections remain available; retry this original enrollment after restoring storage access.', 'CONNECTION_ENROLLMENT_UNAVAILABLE')
+    }
   }
+  async ownsEnrollmentConnection(connectionId: string, agentSessionId: string): Promise<boolean> { return this.enrollmentOwner().ownsConnection(connectionId, agentSessionId) }
   private read(connectionId: string, includeReceiver = true): ConnectionRecord | null {
     const row = this.database.prepare('SELECT config_json, revision FROM connection_configuration WHERE connection_id = ?').get(connectionId)
     if (!row) return null

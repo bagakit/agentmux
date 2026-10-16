@@ -99,6 +99,14 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
   private current(): void {
     if (this.closed) throw issue('CONNECTION_ENROLLMENT_UNAVAILABLE')
   }
+  ownsConnection(connectionId: string, agentSessionId: string): boolean {
+    this.current()
+    const row = this.store.readByConnection(connectionId)
+    if (!row || !sameEnrollmentActor(row.actor, { kind: 'agent', id: agentSessionId }) || row.operation.configuration !== 'configured') return false
+    const current = this.options.connections.readConfiguration(connectionId), original = row.operation.configured?.connection
+    return !!current && !!original && current.config.adapterId === original.config.adapterId &&
+      current.config.application.domain === original.config.application.domain && current.config.application.appId === original.config.application.appId
+  }
   private async authority(
     row: EnrollmentRow | null,
     context: ConnectionEnrollmentCallContext
