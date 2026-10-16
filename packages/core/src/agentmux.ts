@@ -43,9 +43,9 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
   if (['space.focus', 'goal.focus', 'app.focus'].includes(method) && body.partial === true) return true
-  if (method === 'file.share' && body.status !== 'committed') return true
+  if ((method === 'file.share' || method === 'file.share.undo') && body.status !== 'committed') return true
   if (method === 'file.share.inspect') {
-    if (body.mode === 'request') { if ((body.result as { status?: string })?.status !== 'committed') return true }
+    if ((body.mode === 'request' || body.mode === 'undo')) { if ((body.result as { status?: string })?.status !== 'committed') return true }
     else if ((body.declaration as { status?: string })?.status !== 'confirmed' || ['create', 'source', 'destination'].some(key => {
       const phase = body[key] as { status?: string; event?: { status?: string } } | undefined
       return phase?.status !== 'read' || phase.event?.status !== 'committed'

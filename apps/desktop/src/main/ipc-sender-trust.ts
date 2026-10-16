@@ -43,6 +43,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'files:readPublic': 'original file read',
   'files:historyPublic': 'original Note history read',
   'files:restorePublic': 'original Note history restore',
+  'files:shareUndoPublic': 'original shared Markdown undo',
   'files:sharePublic': 'original shared Markdown save',
   'files:inspectSharePublic': 'original shared Markdown save inspection',
   'files:undoPublic': 'original Note history undo',

@@ -1,4 +1,4 @@
-import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult } from './public-rpc-file-share.js'
+import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult, parseFileShareUndoParams, parseFileShareUndoResult } from './public-rpc-file-share.js'
 import { assertAgentConnectionAccess } from './connection-agent-access.js'
 import { parseRendererAllocationsResult } from './renderer-allocations.js'
 import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
@@ -215,7 +215,17 @@ export function boundedFileShareResult(parsed: import('./public-rpc-file-share.j
     return write
   }
   const observe = (read: import('./public-rpc-files.js').FileReadResult): import('./public-rpc-files.js').FileReadResult => read.result.status === 'read' ? { resource: read.resource, result: { status: 'unknown' as const, code: 'NOTE_SHARE_CONTENT_SEPARATE', message: 'Read the same original File separately; combined shared-save observations exceed one RPC frame.' } } : read
-  return { ...parsed, promotions: parsed.promotions.map(p => ({ ...p, shared: compact(p.shared), source: compact(p.source), ...(p.currentShared ? { currentShared: observe(p.currentShared) } : {}), ...(p.currentSource ? { currentSource: observe(p.currentSource) } : {}) })), destination: compact(parsed.destination), ...(parsed.currentDestination ? { currentDestination: observe(parsed.currentDestination) } : {}) }
+  return { ...parsed, promotions: parsed.promotions.map(p => ({ ...p, shared: compact(p.shared), source: compact(p.source), ...(p.currentShared ? { currentShared: observe(p.currentShared) } : {}), ...(p.currentSource ? { currentSource: observe(p.currentSource) } : {}) })), destination: compact(parsed.destination), ...(parsed.undo ? { undo: boundedFileShareUndoResult(parsed.undo, responseId, false, true) } : {}), ...(parsed.currentDestination ? { currentDestination: observe(parsed.currentDestination) } : {}) }
+}
+export function boundedFileShareUndoResult(parsed: import('./public-rpc-file-share.js').FileShareUndoResult, responseId: JSONRPCID = null, inspection = false, force = false): import('./public-rpc-file-share.js').FileShareUndoResult {
+  try { if (!force) { rpcEncode({ jsonrpc: '2.0', id: responseId, result: inspection ? { mode: 'undo', result: parsed } : parsed }); return parsed } }
+  catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'CONTROL_PROTOCOL_ERROR') throw error }
+  const compact = (write: FileWriteResult | null): FileWriteResult | null => {
+    if (write?.result.status === 'written') { const { content: _body, noteProvenance: _provenance, noteAttribution: _attribution, noteTitleProjection: _title, ...receipt } = write.result; return { resource: write.resource, result: { ...receipt, contentUnavailable: 'The original undo phase was saved. Read the exact file or original history separately for its canonical body.' } } }
+    if (write?.result.status === 'conflict' && write.result.noteConflict) { const { noteConflict: _bodies, ...receipt } = write.result; return { resource: write.resource, result: { ...receipt, noteConflictUnavailable: 'The original conflict is confirmed. Read this exact file and original history separately for its bodies.' } } }
+    return write
+  }
+  return { ...parsed, destination: compact(parsed.destination), collections: parsed.collections.map(item => ({ ...item, source: compact(item.source) })) }
 }
 const NATIVE_FIELDS = {
   'goal.delegation.prepare': ['goalId', 'intent', 'materials'], 'goal.delegation.bind': ['goalId', 'intent'], 'goal.delegate': ['goalId', 'intent', 'materials'],
@@ -853,6 +863,13 @@ export class AgentMuxRpcService {
           : await this.ports.fileUploads.inspect(input)
         return parseFileUploadResult(result, input) as AgentMuxRpcResult<M>
       }
+      if (method === 'file.share.undo') {
+        const input = parseFileShareUndoParams(params)
+        context.signal?.throwIfAborted()
+        if (!this.ports.files?.undoShare && !this.ports.forwardControl) throw new AgentMuxError('The original shared undo owner is unavailable. Ordinary Files remain available.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files?.undoShare ? await this.ports.files.undoShare(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.share.undo', input, context)
+        return boundedFileShareUndoResult(parseFileShareUndoResult(result, input), context.responseId) as AgentMuxRpcResult<M>
+      }
       if (method === 'file.share') {
         const input = parseFileShareParams(params)
         context.signal?.throwIfAborted()
@@ -866,7 +883,7 @@ export class AgentMuxRpcService {
         if (!this.ports.files?.inspectShare && !this.ports.forwardControl) throw new AgentMuxError('The original shared Markdown inspector is unavailable. Original files remain readable.', 'CONTROL_UNAVAILABLE')
         const result = this.ports.files?.inspectShare ? await this.ports.files.inspectShare(input, { actor: caller ? { kind: 'agent', id: caller.agentSessionId } : context.principal }) : await this.ports.forwardControl!('file.share.inspect', input, context)
         const parsed = parseFileShareInspectResult(result, input)
-        return (parsed.mode === 'request' ? { mode: 'request', result: boundedFileShareResult(parsed.result, context.responseId, true) } : parsed) as AgentMuxRpcResult<M>
+        return (parsed.mode === 'request' ? { mode: 'request', result: boundedFileShareResult(parsed.result, context.responseId, true) } : parsed.mode === 'undo' ? { mode: 'undo', result: boundedFileShareUndoResult(parsed.result, context.responseId, true) } : parsed) as AgentMuxRpcResult<M>
       }
 
       if (method === 'file.create') {

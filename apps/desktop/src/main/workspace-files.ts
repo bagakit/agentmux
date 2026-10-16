@@ -12,6 +12,7 @@ import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import type { ExecutionHost } from '@agentmux/core'
+import type { NoteFileWitness } from '@agentmux/core/note-history'
 import {
   WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES,
   type WorkspaceFileByteRead, type WorkspaceFileByteReadOptions, type WorkspaceFileReadBudget
@@ -53,6 +54,11 @@ type LocalWorkerRequest =
     }
   | { action: 'create'; name: string; kind: 'file' | 'directory' }
   | { action: 'delete'; name: string }
+  | { action: 'delete-exact'; name: string; expectedRevision: string; witness: NoteFileWitness; claim: string; fault: string }
+
+export type WorkspaceFileDeleteExactResult =
+  | { status: 'deleted' }
+  | { status: 'conflict' | 'unknown' | 'error'; code: string; message: string; retainedPath?: string }
 
 type LocalExistingPath = {
   root: string
@@ -78,6 +84,9 @@ export type WorkspaceFilesOptions = {
   localMoveHelperPath?: string
   beforeLocalMoveCommit?: () => Promise<void>
   afterLocalMoveCommit?: () => Promise<void>
+  beforeLocalDeleteClaim?: () => Promise<void>
+  afterLocalDeleteClaim?: () => Promise<void>
+  localDeleteFault?: 'sync' | 'receipt'
   onReadDirectoryStart?: (workspace: WorkspaceRecord, requestedPath: string) => void
 }
 
@@ -295,13 +304,18 @@ async function runLocalWorker(
   root: string,
   request: LocalWorkerRequest,
   input?: string | Uint8Array,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  deleteBarriers?: { before?: () => Promise<void>; after?: () => Promise<void> }
 ): Promise<Buffer> {
   signal?.throwIfAborted()
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   delete environment.NODE_OPTIONS
   const native = request.action !== 'observe' && request.action !== 'list-files'
-  const args = native ? [
+  const args = request.action === 'delete-exact' ? [
+    '--workspace-file', request.action, root, request.name, request.expectedRevision,
+    request.witness.device, request.witness.inode, request.witness.size, request.witness.ctimeNs,
+    request.witness.mtimeNs, request.claim, request.fault
+  ] : native ? [
     '--workspace-file', request.action, root, 'name' in request ? request.name ?? '' : '',
     request.action === 'write' ? request.expectedRevision ?? 'null' : request.action === 'create' ? request.kind : 'null',
     request.action === 'write' && request.exclusive ? '1' : '0',
@@ -321,23 +335,36 @@ async function runLocalWorker(
   const child = spawn(native ? WORKSPACE_MOVE_HELPER : process.execPath, args, {
     cwd,
     env: environment,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: deleteBarriers ? ['pipe', 'pipe', 'pipe', deleteBarriers.before ? 'pipe' : 'ignore',
+      deleteBarriers.before ? 'pipe' : 'ignore', deleteBarriers.after ? 'pipe' : 'ignore', deleteBarriers.after ? 'pipe' : 'ignore'] : ['pipe', 'pipe', 'pipe'],
     ...(signal ? { signal } : {})
   })
   const stdout: Buffer[] = []
   let stderr = ''
   let inputSent = false
   let inputError: Error | undefined
+  let barrierError: Error | undefined, claimed = false
+  for (const [index, hook] of [[3, deleteBarriers?.before], [5, deleteBarriers?.after]] as const) {
+    if (!hook) continue
+    const ready = child.stdio.at(index) as Readable, release = child.stdio.at(index + 1) as Writable
+    release.on('error', error => { barrierError ??= error })
+    ready.once('data', () => {
+      if (index === 5) claimed = true
+      void hook().then(() => release.end('G'), error => {
+        barrierError = error instanceof Error ? error : new Error(String(error)); child.kill('SIGTERM')
+      })
+    })
+  }
   // Cancellation or an early worker exit can close this pipe before READY is consumed.
   // Keep its failure on this original request, including after the child emits AbortError.
-  child.stdin.on('error', error => { inputError = error })
-  child.stdout.on('data', (chunk: Buffer) => stdout.push(Buffer.from(chunk)))
-  child.stderr.setEncoding('utf8')
-  child.stderr.on('data', (chunk: string) => {
+  child.stdin!.on('error', error => { inputError = error })
+  child.stdout!.on('data', (chunk: Buffer) => stdout.push(Buffer.from(chunk)))
+  child.stderr!.setEncoding('utf8')
+  child.stderr!.on('data', (chunk: string) => {
     stderr += chunk
     if (!inputSent && stderr.split('\n').includes(LOCAL_WORKER_READY)) {
       inputSent = true
-      child.stdin.end(input ?? '')
+      child.stdin!.end(input ?? '')
     }
   })
 
@@ -345,21 +372,26 @@ async function runLocalWorker(
     child.once('error', reject)
     child.once('close', (code, signal) => resolve({ code, signal }))
   })
-  if (result.code === 0 && !inputError) return Buffer.concat(stdout)
+  if (result.code === 0 && !inputError && !barrierError) return Buffer.concat(stdout)
   const record = stderr.split('\n').find((line) => line.startsWith(LOCAL_WORKER_ERROR))
   if (record) {
     const detail = JSON.parse(record.slice(LOCAL_WORKER_ERROR.length)) as {
       message: string
       code: string | null
       writeOutcomeUnknown?: boolean
+      retainedPath?: string
       readCost?: WorkspaceFileByteRead['readCost']
     }
     throw Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {},
-      detail.writeOutcomeUnknown ? { writeOutcomeUnknown: true } : {}, detail.readCost ? { readCost: detail.readCost } : {})
+      detail.writeOutcomeUnknown ? { writeOutcomeUnknown: true } : {}, detail.readCost ? { readCost: detail.readCost } : {},
+      detail.retainedPath ? { retainedPath: detail.retainedPath } : {})
   }
-  throw Object.assign(inputError ?? new Error(
+  throw Object.assign(barrierError ?? inputError ?? new Error(
     `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
-  ), request.action === 'write' && inputSent ? { code: 'WORKSPACE_FILE_RESULT_UNKNOWN', writeOutcomeUnknown: true } : {})
+  ), (request.action === 'write' || request.action === 'delete-exact') && inputSent ? {
+    code: 'WORKSPACE_FILE_RESULT_UNKNOWN', writeOutcomeUnknown: true,
+    ...(request.action === 'delete-exact' && claimed ? { retainedPath: request.claim } : {})
+  } : {})
 }
 
 type AtomicMoveError = Error & {
@@ -1503,6 +1535,47 @@ export class WorkspaceFiles {
     } catch (error) {
       return moveError(error, 'source')
     }
+  }
+
+  /** Main-only, exact original regular-file collection; never recursive or a missing-file replay. */
+  async deleteExact(workspace: WorkspaceRecord, input: {
+    path: string; expectedRevision: string; witness: NoteFileWitness; operationId: string
+  }): Promise<WorkspaceFileDeleteExactResult> {
+    if (!/^sha256:[a-f0-9]{64}$/.test(input.expectedRevision) || !input.operationId ||
+        /[\0\r\n]/u.test(input.operationId) || !input.witness ||
+        !['device', 'inode', 'size', 'ctimeNs', 'mtimeNs'].every(key => {
+          const value = input.witness[key as keyof NoteFileWitness]
+          return typeof value === 'string' && /^\d{1,20}$/.test(value) && BigInt(value) <= 18446744073709551615n
+        })) return { status: 'error', code: 'WORKSPACE_FILE_INVALID_REQUEST', message: 'Exact deletion requires the original revision, creation generation and operation.' }
+    const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
+    return await this.serializeWrite(this.writeRequestTails, requestKey, async () => {
+      try {
+        if (this.hostFor(workspace.hostId).kind !== 'local') return {
+          status: 'error', code: 'REMOTE_WORKSPACE_FILE_DELETE_EXACT_UNSUPPORTED', message: 'Exact regular-file collection is unavailable on this remote Host.'
+        }
+        const resolved = await localMutablePathWithin(workspace, input.path)
+        const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
+        return await this.serializeWrite(this.writeTails, key, async () => {
+          const token = createHash('sha256').update(JSON.stringify([requestKey, input.operationId])).digest('hex')
+          const claim = `.agentmux-reclaim-${token}.note.md`
+          const before = this.options.beforeLocalDeleteClaim, after = this.options.afterLocalDeleteClaim
+          try {
+            const result = JSON.parse((await runLocalWorker(resolved.parent, resolved.root, {
+              action: 'delete-exact', name: resolved.name, expectedRevision: input.expectedRevision, witness: input.witness, claim,
+              fault: [before ? 'before-claim' : '', after ? 'after-claim' : '', this.options.localDeleteFault ?? ''].join(',')
+            }, undefined, undefined, before || after ? { ...(before ? { before } : {}), ...(after ? { after } : {}) } : undefined)).toString('utf8')) as WorkspaceFileDeleteExactResult
+            return result
+          } catch (error) {
+            const detail = resultError(error), extra = error as { writeOutcomeUnknown?: boolean; retainedPath?: string }
+            return { ...detail, ...(extra.writeOutcomeUnknown ? { status: 'unknown' as const } : {}),
+              ...(extra.retainedPath ? { retainedPath: extra.retainedPath } : extra.writeOutcomeUnknown ? {
+                // A recovery candidate, never evidence that the claim exists or that deletion applied.
+                retainedPath: posix.join(posix.dirname(input.path), claim)
+              } : {}) }
+          }
+        })
+      } catch (error) { return resultError(error) }
+    })
   }
 
   async delete(workspace: WorkspaceRecord, requestedPath: string): Promise<void> {

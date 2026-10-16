@@ -8,7 +8,7 @@ import { mergeNoteTextInWorker } from '@agentmux/core/note-merge-node'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
 import type { WorkspaceRecord, WorkspaceFileReadResult, WorkspaceFileWriteInput, WorkspaceFileWriteResult, WorkspaceFileRestoreInput, WorkspaceFileUndoInput } from '../shared/contracts.js'
 
-export type NoteHistoryWriteAction = { operation: 'restore' | 'undo'; noteId: string; source: NoteHistorySource; fingerprint: string; historicalBlocks?: Record<string, NoteBlockProvenance> }
+export type NoteHistoryWriteAction = { operation: 'edit' | 'restore' | 'undo'; noteId: string; source?: NoteHistorySource; fingerprint: string; historicalBlocks?: Record<string, NoteBlockProvenance>; draft?: true }
 type ActionInput = WorkspaceFileRestoreInput | WorkspaceFileUndoInput
 type Metadata = Pick<AgentMuxNotebookStore, 'readHistoryOperation' | 'readHistoryBatch' | 'readHistory' | 'readProvenance' | 'recordHistory' | 'runWithWriteLease'>
 const resourceOf = (workspace: WorkspaceRecord, path: string) => ({ hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path })
@@ -44,7 +44,7 @@ export class NoteHistoryActions {
       let base: string | undefined, proposed: string, first: NoteHistoryRecord | undefined, creatorSource: { content: string; revision: string } | undefined
       if ('eventId' in input) {
         const selected = await this.metadata.readHistoryOperation(input.eventId)
-        if (!selected || !original(selected) || selected.status !== 'committed') return { status: 'error', code: 'NOTE_HISTORY_SOURCE_INVALID', message: 'Select one committed event of this exact original Note and resource.' }
+        if (!selected || !original(selected) || selected.status !== 'committed' || selected.operation === 'delete') return { status: 'error', code: 'NOTE_HISTORY_SOURCE_INVALID', message: 'Select one committed event of this exact original Note and resource.' }
         proposed = selected.content
         creatorSource = { content: selected.content, revision: selected.revision }
         if (selected.provenance) action.historicalBlocks = selected.provenance.blocks
@@ -55,7 +55,7 @@ export class NoteHistoryActions {
         if (entries.some((entry, index) => entry.status !== 'committed' || entry.operation !== 'edit' || entry.actor?.kind !== author?.kind || entry.actor?.id !== author?.id || index > 0 && (entry.parentEventId !== entries[index - 1]!.eventId || entry.baseRevision !== entries[index - 1]!.revision))) return { status: 'error', code: 'NOTE_HISTORY_BATCH_INVALID', message: 'The full batch is not a confirmed continuous original edit activity.' }
         first = await this.metadata.readHistoryOperation(entries[0]!.eventId)
         const last = await this.metadata.readHistoryOperation(tail.eventId)
-        if (!first || !last || !original(first) || !original(last) || first.status !== 'committed' || last.status !== 'committed') return unknown('NOTE_HISTORY_SOURCE_UNCONFIRMED', 'The original batch endpoints are unavailable.')
+        if (!first || !last || first.operation === 'delete' || last.operation === 'delete' || !original(first) || !original(last) || first.status !== 'committed' || last.status !== 'committed') return unknown('NOTE_HISTORY_SOURCE_UNCONFIRMED', 'The original batch endpoints are unavailable.')
         if (first.beforeContent === null && first.parentEventId !== null) return unknown('NOTE_HISTORY_SOURCE_UNCONFIRMED', 'The missing prior body is not a confirmed original creation.')
         if (first.parentEventId !== null) {
           const prior = await this.metadata.readHistoryOperation(first.parentEventId)
@@ -75,7 +75,7 @@ export class NoteHistoryActions {
       if (observed.document.revision !== input.expectedRevision) return this.reject(workspace, input, action, observed, proposed, context)
       if (base !== undefined) {
         if (first!.beforeContent === null) {
-          const initial = readNoteDocument(first!.content)
+          const initial = readNoteDocument(first!.content!)
           let blockId: string | undefined
           const visit = (node: NoteDocument['content']) => { if (!blockId && typeof node.attrs?.blockId === 'string') blockId = node.attrs.blockId; node.content?.forEach(visit) }
           if (initial.status === 'valid') visit(initial.note.content)
@@ -120,7 +120,7 @@ export class NoteHistoryActions {
     try {
       const resource = resourceOf(workspace, input.path)
       await this.metadata.recordHistory({ eventId: input.operationId, batchId: input.operationId, sequence: 0, noteId: input.noteId, resource, originalResource: resource,
-        operation: action.operation, source: action.source, requestFingerprint: action.fingerprint, actor: context?.actor ?? null, status: 'not-applied', at: Date.now(), parentEventId: null,
+        operation: action.operation, ...(action.source ? { source: action.source } : {}), requestFingerprint: action.fingerprint, actor: context?.actor ?? null, status: 'not-applied', at: Date.now(), parentEventId: null,
         baseRevision: current?.document.revision ?? null, beforeContent: current?.document.content ?? null, revision: noteHistoryRevision(proposed), content: proposed })
       return { ...result, noteHistory: { status: 'not-applied', eventId: input.operationId, batchId: input.operationId } }
     } catch (error) { return { ...result, noteHistory: { status: 'unconfirmed', eventId: input.operationId, reason: error instanceof Error ? error.message : String(error) } } }

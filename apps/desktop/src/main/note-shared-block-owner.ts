@@ -1,3 +1,7 @@
+import type { NoteSharedUndoOwner } from './note-shared-undo-owner.js'
+import type { FileShareUndoParams, FileShareUndoResult } from '@agentmux/core/files'
+import type { NoteHistoryWriteAction } from './note-history-actions.js'
+import type { NoteBlockProvenance } from '@agentmux/core/note-provenance'
 import { AgentMuxError } from '@agentmux/core'
 import { fileShareCreateOperation, fileShareSourceOperation, parseFileShareParams, type FileCreateParams, type FileReadParams, type FileReadResource, type FileReadResult, type FileShareParams, type FileShareInspectParams, type FileShareInspectResult, type FileSharedInspection, type FileShareEventObservation, type FileSharePromotion, type FileShareResult, type FileWriteContext, type FileWriteParams, type FileWriteResult } from '@agentmux/core/files'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
@@ -47,15 +51,43 @@ function replace(note: NoteDocument, promotion: FileSharePromotion): NoteDocumen
 /** Only Markdown owns the new entity. Existing history proves each separate file write, never an atomic cross-file commit. */
 export class NoteSharedBlockOwner {
   constructor(private readonly ports: {
-    files: { read(params: FileReadParams): Promise<FileReadResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; createShared(params: FileCreateParams, operationId: string, context?: FileWriteContext, source?: FileWriteParams): Promise<FileWriteResult> }
+    undo?: NoteSharedUndoOwner
+    files: { read(params: FileReadParams): Promise<FileReadResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; writeInverse?(params: FileWriteParams, context: FileWriteContext | undefined, action: NoteHistoryWriteAction, transferred?: Record<string, NoteBlockProvenance>): Promise<FileWriteResult>; createShared(params: FileCreateParams, operationId: string, context?: FileWriteContext, source?: FileWriteParams): Promise<FileWriteResult> }
     historyOperation(operationId: string): Promise<NoteHistoryRecord | undefined | null>
     withWriteLease<T>(work: () => Promise<T>): Promise<T>
     /** Phase faults exercise real interruption boundaries; production supplies no hook. */
     afterStage?(stage: 'shared' | 'source' | 'destination', operationId: string): Promise<void>
   }) {}
-  async share(input: FileShareParams, context?: FileWriteContext): Promise<FileShareResult> { return this.run(input, context, false) }
+  async share(input: FileShareParams, context?: FileWriteContext): Promise<FileShareResult> { return input.undoReferenceIds?.length ? this.combined(input, context, false) : this.run(input, context, false) }
+  private async combined(input: FileShareParams, context: FileWriteContext | undefined, inspect: boolean): Promise<FileShareResult> {
+    if (!this.ports.undo || !this.ports.files.writeInverse) throw new AgentMuxError('The original shared inverse owner is unavailable.', 'CONTROL_UNAVAILABLE')
+    const request: FileShareUndoParams = { destination: input.destination, referenceIds: input.undoReferenceIds!, ...(input.preserveNoteIds ? { preserveNoteIds: input.preserveNoteIds } : {}) }
+    let result: FileShareResult | undefined
+    const sharedFingerprint = noteHistoryRevision(JSON.stringify(['agentmux.note.shared-save.v1', input, context?.actor ?? null]))
+    let inverse: { action: NoteHistoryWriteAction; transferred: Record<string, NoteBlockProvenance> } | undefined
+    const undo = await this.ports.undo.apply(request, context, inspect, async (destination, action, transferred) => {
+      inverse = { action, transferred }
+      result = await this.run({ ...input, destination }, context, false, { ...inverse, fingerprint: sharedFingerprint })
+      return result.destination ? { ...result.destination, relatedWrites: result.promotions.flatMap(p => [p.shared, p.source].filter((r): r is FileWriteResult => !!r)) } : { resource: input.destination.expectedResource, result: { status: 'unknown', code: result.code ?? 'NOTE_SHARE_UNCONFIRMED', message: result.message ?? 'An original shared-save phase is unconfirmed.' } }
+    })
+    if (!result) {
+      const event = await this.ports.historyOperation(input.destination.operationId!)
+      const actor = event?.actor ? { actor: event.actor } : context
+      const action: NoteHistoryWriteAction = { operation: event?.operation === 'edit' ? 'edit' : 'undo', noteId: parsed(input.destination.content).noteId, ...(event?.source ? { source: event.source } : {}), fingerprint: noteHistoryRevision(JSON.stringify(['agentmux.note.shared-undo.v1', request, actor?.actor ?? null])) }
+      result = await this.run(input, actor, true, { action, transferred: {}, fingerprint: noteHistoryRevision(JSON.stringify(['agentmux.note.shared-save.v1', input, actor?.actor ?? null])) })
+    }
+    return { ...result, undo, status: result.status === 'committed' && (undo.status === 'committed' || undo.status === 'partial') ? undo.status : 'unknown' }
+  }
+  async undoShare(input: FileShareUndoParams, context?: FileWriteContext): Promise<FileShareUndoResult> {
+    if (!this.ports.undo) throw new AgentMuxError('The original shared undo owner is unavailable; ordinary files remain available.', 'CONTROL_UNAVAILABLE')
+    return this.ports.undo.apply(input, context)
+  }
   async inspectShare(input: FileShareInspectParams, context?: FileWriteContext): Promise<FileShareInspectResult> {
-    if (input.mode === 'request') return { mode: 'request', result: await this.run(input.request, context, true) }
+    if (input.mode === 'undo') {
+      if (!this.ports.undo) throw new AgentMuxError('The original shared undo inspector is unavailable.', 'CONTROL_UNAVAILABLE')
+      return { mode: 'undo', result: await this.ports.undo.apply(input.request, context, true) }
+    }
+    if (input.mode === 'request') return { mode: 'request', result: input.request.undoReferenceIds?.length ? await this.combined(input.request, context, true) : await this.run(input.request, context, true) }
     return this.inspectSharedFile(input.shared)
   }
   private async inspectSharedFile(input: FileReadParams): Promise<FileSharedInspection> {
@@ -63,7 +95,7 @@ export class NoteSharedBlockOwner {
     const current = await this.ports.files.read(input)
     const result: FileSharedInspection = { mode: 'shared', current, declaration: { status: 'unconfirmed', message: 'The original shared Markdown declaration is unconfirmed.' }, create: unknown('The creation declaration is unconfirmed.'), source: unknown('The exact original source phase is unconfirmed.'), destination: unknown('The exact original destination phase is unconfirmed.'), batch: { status: 'unknown', message: 'This Markdown entity can locate its own original phases. It cannot reconstruct an absent whole save payload or certify every promotion and unsaved draft in that batch.' } }
     const event = async (operationId: string): Promise<NoteHistoryRecord | null | undefined> => { try { return await this.ports.historyOperation(operationId) ?? null } catch { return undefined } }
-    const summary = (value: NoteHistoryRecord): FileShareEventObservation => ({ status: 'read', event: { eventId: value.eventId, noteId: value.noteId, resource: value.resource, status: value.status, baseRevision: value.baseRevision, revision: value.revision } })
+    const summary = (value: NoteHistoryRecord): FileShareEventObservation => value.operation === 'delete' ? unknown('This original stage is a deletion, not the selected sharing write.') : ({ status: 'read', event: { eventId: value.eventId, noteId: value.noteId, resource: value.resource, status: value.status, baseRevision: value.baseRevision, revision: value.revision } })
     if (current.result.status !== 'read' || !current.resource) return result
     const header = readNoteMarkdownHeader(current.result.document.content)
     if (header.status !== 'valid' || header.kind !== 'shared-block' || !header.origin) return result
@@ -95,8 +127,8 @@ export class NoteSharedBlockOwner {
     result.destination = await phase(created.origin.destination?.operationId, created.origin.destination?.noteId, created.origin.destination?.path)
     return result
   }
-  private plan(params: FileShareParams, context?: FileWriteContext): Plan {
-    const fingerprint = noteHistoryRevision(JSON.stringify(['agentmux.note.shared-save.v1', params, context?.actor ?? null]))
+  private plan(params: FileShareParams, context?: FileWriteContext, originalFingerprint?: string): Plan {
+    const fingerprint = originalFingerprint ?? noteHistoryRevision(JSON.stringify(['agentmux.note.shared-save.v1', params, context?.actor ?? null]))
     const destinationNote = parsed(params.destination.content), shared = new Map<string, { request: FileCreateParams; promotion: FileSharePromotion }>(), groups = new Map<string, SourcePlan>()
     for (const promotion of params.promotions) {
       const original = parsed(promotion.source.content, promotion.sourceNoteId), selected = findBlock(original, promotion.sourceBlockId)
@@ -137,7 +169,7 @@ export class NoteSharedBlockOwner {
     }
     return { params, fingerprint, shared, sources: [...groups.values()], destination }
   }
-  private async run(input: FileShareParams, context: FileWriteContext | undefined, inspect: boolean): Promise<FileShareResult> {
+  private async run(input: FileShareParams, context: FileWriteContext | undefined, inspect: boolean, inverse?: { action: NoteHistoryWriteAction; transferred: Record<string, NoteBlockProvenance>; fingerprint: string }): Promise<FileShareResult> {
     const params = structuredClone(parseFileShareParams(input))
     let actor = context ? structuredClone(context) : undefined
     const result: FileShareResult = { operationId: params.operationId, status: 'unknown', promotions: params.promotions.map(p => ({ operationId: p.operationId, shared: null, source: null })), destination: null }
@@ -152,10 +184,10 @@ export class NoteSharedBlockOwner {
           if (event) { actor = event.actor ? { actor: event.actor } : undefined; break }
         }
       }
-      const plan = this.plan(params, actor)
+      const plan = this.plan(params, actor, inverse?.fingerprint)
       return await this.ports.withWriteLease(async () => {
         if (inspect) {
-          await this.observe(plan, result, actor)
+          await this.observe(plan, result, actor, inverse?.action)
           result.status = this.completed(result) ? 'committed' : 'unknown'
           if (result.status !== 'committed') { result.code = 'NOTE_SHARE_INSPECTION'; result.message = 'Per-file original receipts and current observations are separate. Missing or unconfirmed receipts do not certify an earlier multi-file commit.' }
           return result
@@ -184,7 +216,7 @@ export class NoteSharedBlockOwner {
           await this.ports.afterStage?.('source', source.request.operationId!)
         }
         const destinationId = parsed(plan.destination.content).noteId
-        result.destination = await this.original(plan.destination, destinationId, plan.destination.operationId!, actor) ?? await this.ports.files.write(plan.destination, actor)
+        result.destination = await this.original(plan.destination, destinationId, plan.destination.operationId!, actor, inverse?.action) ?? (inverse ? await this.ports.files.writeInverse!(plan.destination, actor, inverse.action, inverse.transferred) : await this.ports.files.write(plan.destination, actor))
         for (const source of plan.sources) if (key(source.original) === key(params.destination)) for (const promotion of source.promotions) result.promotions[params.promotions.indexOf(promotion)]!.source = result.destination
         if (!this.confirmed(result.destination)) return this.failed(result, result.destination)
         await this.ports.afterStage?.('destination', plan.destination.operationId!)
@@ -200,26 +232,26 @@ export class NoteSharedBlockOwner {
     const outcome = receipt.result
     return this.stop(result, outcome.status === 'conflict' ? 'conflict' : outcome.status === 'error' ? 'error' : 'unknown', 'NOTE_SHARE_PHASE_UNCONFIRMED', 'The shared save stopped at this original per-file outcome. Keep all staged inputs and IDs; inspect each original stage before deciding recovery.')
   }
-  private async original(request: FileWriteParams | FileCreateParams, noteId: string, operationId: string, context?: FileWriteContext): Promise<FileWriteResult | null> {
+  private async original(request: FileWriteParams | FileCreateParams, noteId: string, operationId: string, context?: FileWriteContext, inverse?: NoteHistoryWriteAction): Promise<FileWriteResult | null> {
     const event = await this.ports.historyOperation(operationId)
     if (!event) return null
     const resource = { hostId: request.expectedResource.hostId, workspaceId: request.expectedResource.workspaceId, workspacePath: request.expectedResource.workspacePath, path: request.expectedResource.path }
-    const fingerprint = noteHistoryRevision(JSON.stringify([resource, noteId, request.expectedRevision, request.content, context?.actor ?? null]))
-    if (event.noteId !== noteId || event.operation !== 'edit' || noteProvenanceResourceKey(event.resource) !== noteProvenanceResourceKey(resource) || event.requestFingerprint !== fingerprint || !sameActor(event.actor, context?.actor ?? null)) throw new AgentMuxError('A phase operation ID belongs to another original request, resource or actor. The original file and draft are retained.', 'NOTE_SHARE_OPERATION_CONFLICT')
+    const fingerprint = inverse?.fingerprint ?? noteHistoryRevision(JSON.stringify([resource, noteId, request.expectedRevision, request.content, context?.actor ?? null]))
+    if (event.noteId !== noteId || event.operation !== (inverse?.operation ?? 'edit') || noteProvenanceResourceKey(event.resource) !== noteProvenanceResourceKey(resource) || event.requestFingerprint !== fingerprint || !sameActor(event.actor, context?.actor ?? null)) throw new AgentMuxError('A phase operation ID belongs to another original request, resource or actor. The original file and draft are retained.', 'NOTE_SHARE_OPERATION_CONFLICT')
     if (event.status === 'committed') return { resource: request.expectedResource, result: { status: 'written', content: event.content, revision: event.revision, noteHistory: { status: 'committed', eventId: event.eventId, batchId: event.batchId, replayed: true }, ...(event.provenance ? { noteProvenance: { ...event.provenance, status: 'recorded' as const } } : {}) } }
     return { resource: request.expectedResource, result: { status: event.status === 'not-applied' ? 'error' : 'unknown', code: event.status === 'not-applied' ? 'NOTE_OPERATION_NOT_APPLIED' : 'NOTE_OPERATION_UNCONFIRMED', message: 'This original per-file event was not confirmed committed; it was not replayed.', noteHistory: { status: event.status, eventId: event.eventId, batchId: event.batchId } } }
   }
-  private async observe(plan: Plan, result: FileShareResult, context?: FileWriteContext) {
+  private async observe(plan: Plan, result: FileShareResult, context?: FileWriteContext, inverse?: NoteHistoryWriteAction) {
     for (const [index, promotion] of plan.params.promotions.entries()) {
       const progress = result.promotions[index]!, shared = plan.shared.get(promotion.operationId)!
       progress.shared = await this.original(shared.request, promotion.shared.noteId, fileShareCreateOperation(promotion), context)
       progress.currentShared = await this.ports.files.read(readParams(promotion.shared))
       const source = plan.sources.find(source => source.promotions.includes(promotion))!
       const ownDestination = key(source.original) === key(plan.params.destination)
-      progress.source = await this.original(ownDestination ? plan.destination : source.request, source.noteId, ownDestination ? plan.destination.operationId! : source.request.operationId!, context)
+      progress.source = await this.original(ownDestination ? plan.destination : source.request, source.noteId, ownDestination ? plan.destination.operationId! : source.request.operationId!, context, ownDestination ? inverse : undefined)
       progress.currentSource = await this.ports.files.read(readParams(source.original))
     }
-    result.destination = await this.original(plan.destination, parsed(plan.destination.content).noteId, plan.destination.operationId!, context)
+    result.destination = await this.original(plan.destination, parsed(plan.destination.content).noteId, plan.destination.operationId!, context, inverse)
     result.currentDestination = await this.ports.files.read(readParams(plan.destination))
   }
 }

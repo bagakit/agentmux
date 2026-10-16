@@ -8,6 +8,9 @@
 static int workspace_write_published = 0;
 static char *workspace_temporary = NULL;
 static long long workspace_read_cost = -1;
+/* A claimed original remains an ordinary Markdown file until deletion is confirmed. */
+static const char *workspace_retained = NULL;
+static const char *workspace_claim_root = NULL;
 
 static void workspace_json_string(FILE *output, const char *text) {
   fputc('"', output);
@@ -25,6 +28,16 @@ static _Noreturn void workspace_error(const char *code, const char *message) {
   workspace_json_string(stderr, message);
   fprintf(stderr, ",\"code\":"); workspace_json_string(stderr, code);
   fprintf(stderr, ",\"writeOutcomeUnknown\":%s", workspace_write_published ? "true" : "false");
+  if (workspace_retained) {
+    char current[PATH_MAX], location[PATH_MAX * 2];
+    if (getcwd(current, sizeof(current))) {
+      const size_t prefix = workspace_claim_root ? strlen(workspace_claim_root) : 0;
+      const char *parent = prefix && !strncmp(current, workspace_claim_root, prefix) && current[prefix] == '/'
+        ? current + prefix + 1 : prefix && !strcmp(current, workspace_claim_root) ? "" : current;
+      snprintf(location, sizeof(location), "%s%s%s", parent, *parent ? "/" : "", workspace_retained);
+      fprintf(stderr, ",\"retainedPath\":"); workspace_json_string(stderr, location);
+    }
+  }
   if (workspace_read_cost >= 0) fprintf(stderr, ",\"readCost\":{\"payloadBytes\":%lld}", workspace_read_cost);
   fprintf(stderr, "}\n");
   exit(1);
@@ -69,7 +82,7 @@ static unsigned char *workspace_input(int fd, size_t *length) {
 }
 
 static int workspace_regular(const char *name) {
-  const int fd = open(name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  const int fd = open(name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
   if (fd < 0) return fd;
   struct stat info;
   if (fstat(fd, &info)) { const int value = errno; close(fd); errno = value; return -1; }
@@ -88,6 +101,52 @@ static void workspace_digest(const unsigned char *bytes, size_t length, char *re
   CC_SHA256_Final(digest, &context);
   strcpy(revision, "sha256:");
   for (size_t index = 0; index < sizeof(digest); index++) snprintf(revision + 7 + index * 2, 3, "%02x", digest[index]);
+}
+
+static long long workspace_ctime(const struct stat *info) {
+  return (long long)info->st_ctimespec.tv_sec * 1000000000LL + info->st_ctimespec.tv_nsec;
+}
+
+static long long workspace_mtime(const struct stat *info) {
+  return (long long)info->st_mtimespec.tv_sec * 1000000000LL + info->st_mtimespec.tv_nsec;
+}
+
+static int workspace_same_file(const struct stat *a, const struct stat *b) {
+  return S_ISREG(b->st_mode) && a->st_dev == b->st_dev && a->st_ino == b->st_ino &&
+    a->st_size == b->st_size && workspace_ctime(a) == workspace_ctime(b) && workspace_mtime(a) == workspace_mtime(b);
+}
+
+/* Hash the pinned object and reject concurrent writes, including a same-byte rewrite. */
+static int workspace_fd_revision(int fd, char *revision, struct stat *info, off_t expected_size) {
+  struct stat after;
+  if (fstat(fd, info) || lseek(fd, 0, SEEK_SET) < 0) workspace_errno();
+  if (expected_size < 0 || info->st_size != expected_size) return 0;
+  CC_SHA256_CTX context; CC_SHA256_Init(&context);
+  unsigned char block[65536], digest[CC_SHA256_DIGEST_LENGTH];
+  uint64_t length = 0;
+  while (length < (uint64_t)expected_size) {
+    const size_t wanted = (uint64_t)expected_size - length > sizeof(block) ? sizeof(block) : (size_t)((uint64_t)expected_size - length);
+    const ssize_t count = read(fd, block, wanted);
+    if (count < 0) { if (errno == EINTR) continue; workspace_errno(); }
+    if (!count) return 0;
+    CC_SHA256_Update(&context, block, (CC_LONG)count);
+    length += (uint64_t)count;
+  }
+  ssize_t extra;
+  do { extra = read(fd, block, 1); } while (extra < 0 && errno == EINTR);
+  if (extra < 0) workspace_errno();
+  if (extra) return 0;
+  if (fstat(fd, &after)) workspace_errno();
+  if (!workspace_same_file(info, &after)) return 0;
+  CC_SHA256_Final(digest, &context); strcpy(revision, "sha256:");
+  for (size_t i = 0; i < sizeof(digest); i++) snprintf(revision + 7 + i * 2, 3, "%02x", digest[i]);
+  return 1;
+}
+
+static void workspace_witness(const struct stat *info) {
+  printf("{\"device\":\"%llu\",\"inode\":\"%llu\",\"size\":\"%lld\",\"ctimeNs\":\"%lld\",\"mtimeNs\":\"%lld\"}",
+    (unsigned long long)info->st_dev, (unsigned long long)info->st_ino, (long long)info->st_size,
+    workspace_ctime(info), workspace_mtime(info));
 }
 
 static void workspace_byte_range(const char *name, size_t offset, size_t max_bytes,
@@ -205,7 +264,7 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   char *temporary = malloc(strlen(name) + 64);
   if (!temporary) workspace_errno();
   sprintf(temporary, ".%s.agentmux-%d-%s", name, getpid(), token);
-  const int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
+  const int fd = open(temporary, (exclusive ? O_RDWR : O_WRONLY) | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
   if (fd < 0) workspace_errno();
   workspace_temporary = temporary;
   if (exists && fchmod(fd, mode)) workspace_errno();
@@ -214,7 +273,7 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   }
   workspace_write_all(fd, bytes, length);
   if (fsync(fd)) { const int value = errno; close(fd); unlink(temporary); errno = value; workspace_errno(); }
-  close(fd);
+  if (!exclusive) close(fd);
   const int current = workspace_current(name, revision, &mode, &binary);
   if ((text_only && binary) || !workspace_expect(current, revision, expected)) {
     unlink(temporary); workspace_temporary = NULL; free(temporary);
@@ -240,7 +299,111 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   workspace_write_published = 1;
   if (!strcmp(fault, "receipt")) workspace_error("INJECTED_WRITE_RECEIPT", "Write was published but its receipt failed");
   workspace_digest(bytes, length, revision);
-  printf("{\"status\":\"written\",\"revision\":"); workspace_json_string(stdout, revision); printf("}");
+  struct stat published_info, visible;
+  if (exclusive) {
+    char observed[72];
+    const int parent = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (parent < 0 || fsync(parent)) workspace_errno(); close(parent);
+    if (!workspace_fd_revision(fd, observed, &published_info, (off_t)length) || strcmp(observed, revision) ||
+        fstatat(AT_FDCWD, name, &visible, AT_SYMLINK_NOFOLLOW) || !workspace_same_file(&published_info, &visible))
+      workspace_error("WORKSPACE_FILE_PUBLISHED_CHANGED", "The newly published file changed before its receipt was confirmed");
+    close(fd);
+  }
+  printf("{\"status\":\"written\",\"revision\":"); workspace_json_string(stdout, revision);
+  if (exclusive) { printf(",\"fileWitness\":"); workspace_witness(&published_info); }
+  printf("}");
+}
+
+static void workspace_delete_refused(const char *code, const char *message) {
+  printf("{\"status\":\"conflict\",\"code\":"); workspace_json_string(stdout, code);
+  printf(",\"message\":"); workspace_json_string(stdout, message); printf("}");
+}
+
+/* Restore only our claimed entry; a new public entry is never overwritten. */
+static void workspace_restore_delete_claim(int parent, const char *claim, const char *name, const struct stat *expected, const char *message) {
+  struct stat actual;
+  if (fstatat(parent, claim, &actual, AT_SYMLINK_NOFOLLOW) || actual.st_dev != expected->st_dev || actual.st_ino != expected->st_ino)
+    workspace_error("WORKSPACE_FILE_DELETE_RETAINED", "The claim location changed; no replacement was removed or moved");
+  if (atomic_move_no_replace(parent, claim, name))
+    workspace_error("WORKSPACE_FILE_DELETE_RETAINED", "The claimed file was retained at its reported path because the original name is occupied");
+  workspace_retained = NULL;
+  if (fsync(parent)) workspace_errno();
+  workspace_write_published = 0;
+  workspace_delete_refused("WORKSPACE_FILE_DELETE_CHANGED", message);
+}
+
+static int workspace_delete_parent_matches(const char *root, const char *path, const struct stat *parent, const struct stat *root_info) {
+  char current[PATH_MAX]; struct stat visible_parent, visible_root;
+  return getcwd(current, sizeof(current)) && !strcmp(current, path) &&
+    !lstat(path, &visible_parent) && S_ISDIR(visible_parent.st_mode) &&
+    visible_parent.st_dev == parent->st_dev && visible_parent.st_ino == parent->st_ino &&
+    !lstat(root, &visible_root) && S_ISDIR(visible_root.st_mode) &&
+    visible_root.st_dev == root_info->st_dev && visible_root.st_ino == root_info->st_ino;
+}
+
+static void workspace_delete_exact(const char *root, const char *name, const char *parent_path,
+                                   const struct stat *parent_info, const struct stat *root_info, char **argv) {
+  const char *expected = argv[5], *claim = argv[11], *fault = argv[12];
+  if (!*claim || strchr(claim, '/') || !strcmp(name, claim) || strncmp(claim, ".agentmux-reclaim-", 18))
+    workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Invalid exact-delete claim basename");
+  const int parent = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (parent < 0) workspace_errno();
+  if (!workspace_delete_parent_matches(root, parent_path, parent_info, root_info)) {
+    close(parent); workspace_delete_refused("WORKSPACE_FILE_DELETE_CHANGED", "The original file parent or Workspace root changed"); return;
+  }
+  const int fd = workspace_regular(name);
+  if (fd < 0) {
+    if (errno == ENOENT || errno == ELOOP || errno == EINVAL) {
+      workspace_delete_refused("WORKSPACE_FILE_DELETE_CHANGED", "The original regular file is missing or its kind changed"); close(parent); return;
+    }
+    workspace_errno();
+  }
+  struct stat original, visible, claimed;
+  char revision[72];
+  if (fstat(fd, &original)) workspace_errno();
+  if (original.st_nlink != 1 || (unsigned long long)original.st_dev != parse_identity(argv[6], "device") ||
+      (unsigned long long)original.st_ino != parse_identity(argv[7], "inode") ||
+      (unsigned long long)original.st_size != parse_identity(argv[8], "size") ||
+      (unsigned long long)workspace_ctime(&original) != parse_identity(argv[9], "ctime") ||
+      (unsigned long long)workspace_mtime(&original) != parse_identity(argv[10], "mtime") ||
+      !workspace_fd_revision(fd, revision, &visible, original.st_size) || !workspace_same_file(&original, &visible) || strcmp(expected, revision) ||
+      fstatat(parent, name, &visible, AT_SYMLINK_NOFOLLOW) || !workspace_same_file(&original, &visible)) {
+    close(fd); close(parent);
+    workspace_delete_refused("WORKSPACE_FILE_DELETE_CHANGED", "The original file revision or creation generation changed"); return;
+  }
+  commit_barrier(strstr(fault, "before-claim") != NULL, 3, 4, "before-delete-claim");
+  if (!workspace_delete_parent_matches(root, parent_path, parent_info, root_info)) {
+    close(fd); close(parent); workspace_delete_refused("WORKSPACE_FILE_DELETE_CHANGED", "The original file parent or Workspace root moved before collection"); return;
+  }
+  if (atomic_move_no_replace(parent, name, claim)) {
+    if (errno == EEXIST || errno == ENOENT) {
+      close(fd); close(parent); workspace_delete_refused("WORKSPACE_FILE_DELETE_CHANGED", "The original entry or operation claim changed"); return;
+    }
+    workspace_errno();
+  }
+  workspace_write_published = 1; workspace_retained = claim; workspace_claim_root = root;
+  /* Rename updates ctime. Compare its inode and original data generation first,
+     then use the post-rename stat for the final checked claim. */
+  if (fstatat(parent, claim, &claimed, AT_SYMLINK_NOFOLLOW)) workspace_errno();
+  if (!S_ISREG(claimed.st_mode) ||
+      original.st_dev != claimed.st_dev || original.st_ino != claimed.st_ino || original.st_size != claimed.st_size ||
+      workspace_mtime(&original) != workspace_mtime(&claimed)) {
+    workspace_restore_delete_claim(parent, claim, name, &claimed, "The claimed entry was replaced or modified before collection"); close(fd); close(parent); return;
+  }
+  if (fsync(parent)) workspace_errno();
+  commit_barrier(strstr(fault, "after-claim") != NULL, 5, 6, "after-delete-claim");
+  if (!workspace_delete_parent_matches(root, parent_path, parent_info, root_info))
+    workspace_error("WORKSPACE_FILE_DELETE_RETAINED", "The original parent moved after the claim; the retained location is reported for inspection");
+  if (!workspace_fd_revision(fd, revision, &visible, claimed.st_size) || strcmp(expected, revision) || !workspace_same_file(&claimed, &visible) ||
+      fstatat(parent, claim, &visible, AT_SYMLINK_NOFOLLOW) || !workspace_same_file(&claimed, &visible)) {
+    workspace_restore_delete_claim(parent, claim, name, &claimed, "The claimed original changed before its final deletion"); close(fd); close(parent); return;
+  }
+  if (unlinkat(parent, claim, 0)) workspace_errno();
+  workspace_retained = NULL; close(fd);
+  if (strstr(fault, "sync")) { errno = EIO; workspace_errno(); }
+  if (fsync(parent)) workspace_errno(); close(parent);
+  if (strstr(fault, "receipt")) workspace_error("INJECTED_DELETE_RECEIPT", "Deletion completed but its receipt was lost");
+  printf("{\"status\":\"deleted\"}");
 }
 
 static void workspace_delete(int parent, const char *name) {
@@ -368,7 +531,9 @@ static int workspace_file_operation(int argc, char **argv) {
   if (strcmp(action, "list") && !( !strcmp(action, "reveal") && !*name) &&
       (!*name || strchr(name, '/') || !strcmp(name, ".") || !strcmp(name, "..")))
     workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Invalid local file basename");
-  char cwd[PATH_MAX]; workspace_cwd(root, cwd);
+  char cwd[PATH_MAX], original_cwd[PATH_MAX]; workspace_cwd(root, cwd); strcpy(original_cwd, cwd);
+  struct stat original_parent, original_root;
+  if (!strcmp(action, "delete-exact") && (stat(".", &original_parent) || lstat(root, &original_root))) workspace_errno();
   fprintf(stderr, "AGENTMUX_WORKSPACE_READY\n"); fflush(stderr);
   size_t length; unsigned char *input = workspace_input(STDIN_FILENO, &length);
   workspace_cwd(root, cwd);
@@ -388,6 +553,8 @@ static int workspace_file_operation(int argc, char **argv) {
       (size_t)parse_identity(argv[10], "byte length"), (size_t)parse_identity(argv[11], "file byte limit"), argv[12]);
   } else if (!strcmp(action, "write")) {
     workspace_write(name, argv[5], !strcmp(argv[6], "1"), !strcmp(argv[7], "1"), argv[8], input, length);
+  } else if (!strcmp(action, "delete-exact")) {
+    workspace_delete_exact(root, name, original_cwd, &original_parent, &original_root, argv);
   } else if (!strcmp(action, "list")) {
     workspace_list();
   } else if (!strcmp(action, "reveal")) {

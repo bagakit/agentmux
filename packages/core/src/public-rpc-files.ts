@@ -4,7 +4,7 @@ import { rpcRecord } from './rpc-data.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
 import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
-import type { FileShareParams, FileShareResult, FileShareInspectParams, FileShareInspectResult, AgentMuxRpcFileShareOwner } from './public-rpc-file-share.js'
+import type { FileShareParams, FileShareResult, FileShareInspectParams, FileShareInspectResult, FileShareUndoParams, FileShareUndoResult, AgentMuxRpcFileShareOwner } from './public-rpc-file-share.js'
 export * from './public-rpc-file-share.js'
 import { parseFileHistoryParams, type FileHistoryParams, type FileHistoryResult } from './public-rpc-file-history.js'
 export { parseFileHistoryParams, parseFileHistoryResult, type FileHistoryParams, type FileHistoryResult } from './public-rpc-file-history.js'
@@ -67,14 +67,14 @@ export interface AgentMuxRpcFileUploadsOwner {
   upload(params: FileUploadParams): Promise<FileUploadResult>
   inspect(params: FileUploadIdentity): Promise<FileUploadResult>
 }
-export type FileParameterMap = { 'file.share': FileShareParams; 'file.share.inspect': FileShareInspectParams; 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams; 'file.restore': FileRestoreParams; 'file.undo': FileUndoParams;
+export type FileParameterMap = { 'file.share.undo': FileShareUndoParams; 'file.share': FileShareParams; 'file.share.inspect': FileShareInspectParams; 'file.read': FileReadParams; 'file.list': FileListParams; 'file.history': FileHistoryParams; 'file.write': FileWriteParams; 'file.create': FileCreateParams; 'file.restore': FileRestoreParams; 'file.undo': FileUndoParams;
   'file.upload': FileUploadParams; 'file.upload.inspect': FileUploadIdentity }
-export type FileResultMap = { 'file.share': FileShareResult; 'file.share.inspect': FileShareInspectResult; 'file.read': FileReadResult; 'file.list': FileListResult; 'file.history': FileHistoryResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult; 'file.restore': FileRestoreResult; 'file.undo': FileUndoResult;
+export type FileResultMap = { 'file.share.undo': FileShareUndoResult; 'file.share': FileShareResult; 'file.share.inspect': FileShareInspectResult; 'file.read': FileReadResult; 'file.list': FileListResult; 'file.history': FileHistoryResult; 'file.write': FileWriteResult; 'file.create': FileCreateResult; 'file.restore': FileRestoreResult; 'file.undo': FileUndoResult;
   'file.upload': FileUploadResult; 'file.upload.inspect': FileUploadResult }
 export type FileMethod = keyof FileParameterMap
 export interface AgentMuxRpcFilesOwner extends Partial<AgentMuxRpcFileShareOwner> { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; history?(params: FileHistoryParams): Promise<FileHistoryResult>; write(params: FileWriteParams, context?: FileWriteContext): Promise<FileWriteResult>; create(params: FileCreateParams, context?: FileWriteContext): Promise<FileCreateResult>;
   restore?(params: FileRestoreParams, context?: FileWriteContext): Promise<FileRestoreResult>; undo?(params: FileUndoParams, context?: FileWriteContext): Promise<FileUndoResult> }
-export const AGENTMUX_RPC_FILE_METHODS = { 'file.share': 'long', 'file.share.inspect': 'long', 'file.read': 'short', 'file.list': 'long', 'file.history': 'long', 'file.write': 'long', 'file.create': 'long', 'file.restore': 'long', 'file.undo': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
+export const AGENTMUX_RPC_FILE_METHODS = { 'file.share.undo': 'long', 'file.share': 'long', 'file.share.inspect': 'long', 'file.read': 'short', 'file.list': 'long', 'file.history': 'long', 'file.write': 'long', 'file.create': 'long', 'file.restore': 'long', 'file.undo': 'long', 'file.upload': 'long', 'file.upload.inspect': 'long' } as const
 export function isFileMethod(value: unknown): value is FileMethod { return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_FILE_METHODS, value) }
 
 const uploadFields = ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'name', 'mimeType', 'byteLength', 'revision'] as const

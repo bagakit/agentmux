@@ -58,9 +58,9 @@ function historyBody(db: DatabaseSync, revision: string): string {
 function historyMetadata(row: Record<string, unknown>): Omit<NoteHistoryRecord, 'beforeContent' | 'content'> {
   const value = JSON.parse(String(row.json)) as Omit<NoteHistoryRecord, 'beforeContent' | 'content'>
   if (row.note_id !== value.noteId || row.resource !== noteProvenanceResourceKey(value.resource) || row.event_id !== value.eventId || row.batch_id !== value.batchId ||
-      !Number.isSafeInteger(row.sequence) || Number(row.sequence) < 1 || !/^sha256:[a-f0-9]{64}$/u.test(value.revision) ||
+      !Number.isSafeInteger(row.sequence) || Number(row.sequence) < 1 || (value.operation === 'delete' ? value.revision !== null : !/^sha256:[a-f0-9]{64}$/u.test(value.revision!)) ||
       value.baseRevision !== null && !/^sha256:[a-f0-9]{64}$/u.test(value.baseRevision) ||
-      !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(value.status) || !['edit', 'restore', 'undo'].includes(value.operation) ||
+      !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(value.status) || !['edit', 'restore', 'undo', 'delete'].includes(value.operation) ||
       !Number.isSafeInteger(value.at) || value.at < 0 || !value.requestFingerprint ||
       value.actor !== null && (!['user', 'agent', 'device'].includes(value.actor.kind) || typeof value.actor.id !== 'string' || !value.actor.id || /[\0\r\n]/u.test(value.actor.id))) throw failure('The original history event identity cannot be confirmed.')
   parseNoteHistorySource(value.operation, value.source)
@@ -68,21 +68,21 @@ function historyMetadata(row: Record<string, unknown>): Omit<NoteHistoryRecord, 
 }
 function historyRecord(db: DatabaseSync, row: Record<string, unknown>): NoteHistoryRecord {
   const value = historyMetadata(row)
-  return parseNoteHistoryRecord({ ...value, beforeContent: value.baseRevision === null ? null : historyBody(db, value.baseRevision), content: historyBody(db, value.revision) })
+  return parseNoteHistoryRecord({ ...value, beforeContent: value.baseRevision === null ? null : historyBody(db, value.baseRevision), content: value.revision === null ? null : historyBody(db, value.revision) } as NoteHistoryRecord)
 }
 function putHistory(db: DatabaseSync, candidate: NoteHistoryRecord): NoteHistoryRecord {
   const value = parseNoteHistoryRecord(candidate), key = noteProvenanceResourceKey(value.resource)
   const oldRow = db.prepare('SELECT * FROM note_history_event WHERE note_id=? AND resource=? AND event_id=?').get(value.noteId, key, value.eventId)
   if (oldRow) {
     const old = historyRecord(db, oldRow)
-    const immutable = ({ sequence: _sequence, status: _status, provenance: _provenance, ...entry }: NoteHistoryRecord) => notebookFingerprint(entry)
+    const immutable = (record: NoteHistoryRecord) => { const { sequence: _sequence, status: _status, provenance: _provenance, fileWitness: _fileWitness, ...entry } = record; if (entry.operation === 'delete') delete entry.retainedPath; return notebookFingerprint(entry) }
     if (immutable(old) !== immutable(value) || value.sequence !== old.sequence ||
-        ['committed', 'not-applied'].includes(old.status) && (old.status !== value.status || notebookFingerprint(old.provenance ?? null) !== notebookFingerprint(value.provenance ?? null))) {
+        ['committed', 'not-applied'].includes(old.status) && (old.status !== value.status || notebookFingerprint(old.provenance ?? null) !== notebookFingerprint(value.provenance ?? null) || notebookFingerprint(old.fileWitness ?? null) !== notebookFingerprint(value.fileWitness ?? null))) {
       throw new AgentMuxError('This original history operation already records another request or terminal result. Its body and event are retained.', 'NOTE_HISTORY_OPERATION_CONFLICT')
     }
   }
   const content = db.prepare('INSERT OR IGNORE INTO note_history_content VALUES (?,?)')
-  content.run(value.revision, gzipSync(value.content))
+  if (value.content !== null) content.run(value.revision, gzipSync(value.content))
   if (value.beforeContent !== null) content.run(value.baseRevision, gzipSync(value.beforeContent))
   const { sequence, beforeContent: _before, content: _content, ...metadata } = value
   if (oldRow) db.prepare('UPDATE note_history_event SET json=? WHERE sequence=?').run(JSON.stringify(metadata), sequence)

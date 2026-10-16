@@ -648,7 +648,7 @@ export type WorkspaceFileRestoreInput = { path: string; noteId: string; expected
 export type WorkspaceFileUndoInput = Omit<WorkspaceFileRestoreInput, 'eventId'> & { batchId: string; batchLastEventId: string }
 
 export type WorkspaceFileWriteResult =
-  ( { status: 'written'; revision: string; content?: string; contentUnavailable?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot; noteTitleProjection?: import('@agentmux/core/note-title').NoteTitleProjection }
+  ( { status: 'written'; revision: string; fileWitness?: import('@agentmux/core/note-history').NoteFileWitness; content?: string; contentUnavailable?: string; noteAttribution?: import('@agentmux/core').NoteWriteAttribution; noteProvenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot; noteTitleProjection?: import('@agentmux/core/note-title').NoteTitleProjection }
   | { status: 'conflict'; observedRevision: string | null; noteConflict?: import('@agentmux/core/files').NoteWriteConflict; noteConflictUnavailable?: string }
   | { status: 'error'; code: string; message: string }
   | { status: 'unknown'; code: string; message: string }) & { noteHistory?: import('@agentmux/core/note-history').NoteHistoryReceipt }
@@ -1684,6 +1684,7 @@ export type AgentMuxDesktopApi = {
   }
   files: {
     sharePublic(params: import('@agentmux/core/files').FileShareParams): Promise<import('@agentmux/core/files').FileShareResult>
+    shareUndoPublic(params: import('@agentmux/core/files').FileShareUndoParams): Promise<import('@agentmux/core/files').FileShareUndoResult>
     inspectSharePublic(params: import('@agentmux/core/files').FileShareInspectParams): Promise<import('@agentmux/core/files').FileShareInspectResult>
     readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
     createPublic(params: AgentMuxRpcParams<'file.create'>): Promise<AgentMuxRpcResult<'file.create'>>

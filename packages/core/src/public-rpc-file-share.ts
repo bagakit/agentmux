@@ -6,26 +6,28 @@ import { fileUploadRevision, parseFileWriteParams, parseFileCreateParams, parseF
 /** A first reuse is staged in the editor; only an explicit save submits these original bytes. */
 export type FileShareTarget = Omit<FileReadParams, 'maxBytes' | 'expectedResource'> & { expectedResource: FileReadResource; noteId: string; title?: string }
 export type FileSharePromotion = { operationId: string; source: FileWriteParams; sourceNoteId: string; sourceBlockId: string; shared: FileShareTarget; referenceId: string }
-export type FileShareParams = { operationId: string; destination: FileWriteParams; promotions: FileSharePromotion[] }
+export type FileShareParams = { operationId: string; destination: FileWriteParams; promotions: FileSharePromotion[]; undoReferenceIds?: string[]; preserveNoteIds?: string[] }
 /** null is no confirmed receipt. Current reads never stand in for an original commit receipt. */
 export type FileShareProgress = { operationId: string; shared: FileWriteResult | null; source: FileWriteResult | null; currentShared?: FileReadResult; currentSource?: FileReadResult }
-export type FileShareResult = { operationId: string; status: 'committed' | 'partial' | 'conflict' | 'unknown' | 'error'; promotions: FileShareProgress[]; destination: FileWriteResult | null; currentDestination?: FileReadResult; code?: string; message?: string }
-export type FileShareInspectParams = { mode: 'request'; request: FileShareParams } | { mode: 'shared'; shared: FileReadParams }
+export type FileShareResult = { operationId: string; status: 'committed' | 'partial' | 'conflict' | 'unknown' | 'error'; promotions: FileShareProgress[]; destination: FileWriteResult | null; undo?: FileShareUndoResult; currentDestination?: FileReadResult; code?: string; message?: string }
+export type FileShareInspectParams = { mode: 'request'; request: FileShareParams } | { mode: 'shared'; shared: FileReadParams } | { mode: 'undo'; request: FileShareUndoParams }
 export type FileShareEventObservation = { status: 'unknown'; code: string; message: string } | { status: 'missing' } | { status: 'read'; event: { eventId: string; noteId: string; resource: import('./notebook-catalog.js').NoteResource; status: import('./note-history.js').NoteHistoryRecord['status']; baseRevision: string | null; revision: string } }
 export type FileSharedInspection = { mode: 'shared'; current: FileReadResult; declaration: { status: 'confirmed'; noteId: string; origin: NoteSharedOrigin } | { status: 'unconfirmed'; message: string }; create: FileShareEventObservation; source: FileShareEventObservation; destination: FileShareEventObservation; batch: { status: 'unknown'; message: string } }
-export type FileShareInspectResult = { mode: 'request'; result: FileShareResult } | FileSharedInspection
-export interface AgentMuxRpcFileShareOwner { share(params: FileShareParams, context?: FileWriteContext): Promise<FileShareResult>; inspectShare(params: FileShareInspectParams, context?: FileWriteContext): Promise<FileShareInspectResult> }
+export type FileShareInspectResult = { mode: 'request'; result: FileShareResult } | FileSharedInspection | { mode: 'undo'; result: FileShareUndoResult }
+export interface AgentMuxRpcFileShareOwner { share(params: FileShareParams, context?: FileWriteContext): Promise<FileShareResult>; undoShare?(params: FileShareUndoParams, context?: FileWriteContext): Promise<FileShareUndoResult>; inspectShare(params: FileShareInspectParams, context?: FileWriteContext): Promise<FileShareInspectResult> }
 const text = (value: unknown, code = 'INVALID_CONTROL_REQUEST') => { if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value)) throw new AgentMuxError('The exact original shared-block identity is required.', code) }
 export function fileShareSourceOperation(params: FileShareParams, source: FileWriteParams): string {
   return params.operationId + ':source:' + fileUploadRevision(new TextEncoder().encode(JSON.stringify([source.expectedResource.hostId, source.expectedResource.workspaceId, source.expectedResource.workspacePath, source.expectedResource.path]))).slice(7)
 }
 export const fileShareCreateOperation = (promotion: FileSharePromotion) => promotion.operationId + ':create'
 export function parseFileShareParams(value: unknown): FileShareParams {
-  const p = rpcRecord(value, ['operationId', 'destination', 'promotions'], 'INVALID_CONTROL_REQUEST')
+  const p = rpcRecord(value, ['operationId', 'destination', 'promotions', 'undoReferenceIds', 'preserveNoteIds'], 'INVALID_CONTROL_REQUEST')
   text(p.operationId)
   const destination = parseFileWriteParams(p.destination)
   if (destination.baseContent === undefined || destination.operationId === undefined || !destination.path.endsWith(NOTE_FILE_EXTENSION)) throw new AgentMuxError('A shared save requires the original Note destination baseline and operation.', 'INVALID_CONTROL_REQUEST')
   if (!Array.isArray(p.promotions) || !p.promotions.length) throw new AgentMuxError('Submit the surviving staged shared-block occurrences with this save.', 'INVALID_CONTROL_REQUEST')
+  if (p.undoReferenceIds !== undefined) idsList(p.undoReferenceIds)
+  if (p.preserveNoteIds !== undefined) idsList(p.preserveNoteIds, true)
   const ids = new Set<string>(), blocks = new Set<string>(), targets = new Set<string>()
   for (const raw of p.promotions) {
     const item = rpcRecord(raw, ['operationId', 'source', 'sourceNoteId', 'sourceBlockId', 'shared', 'referenceId'], 'INVALID_CONTROL_REQUEST')
@@ -50,7 +52,7 @@ export function parseFileShareParams(value: unknown): FileShareParams {
   return p as FileShareParams
 }
 export function parseFileShareResult(value: unknown, params: FileShareParams): FileShareResult {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId', 'status', 'promotions', 'destination', 'currentDestination', 'code', 'message'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId', 'status', 'promotions', 'destination', 'currentDestination', 'undo', 'code', 'message'], code)
   if (p.operationId !== params.operationId || !['committed', 'partial', 'conflict', 'unknown', 'error'].includes(p.status as string) || !Array.isArray(p.promotions) || p.promotions.length !== params.promotions.length) throw new AgentMuxError('The original shared save receipt is unconfirmed.', code)
   const check = (receipt: unknown, target: FileWriteParams | FileShareTarget, noteId: string, operationId: string) => {
     if (receipt === null) return
@@ -77,22 +79,27 @@ export function parseFileShareResult(value: unknown, params: FileShareParams): F
   }
   const destinationHeader = readNoteMarkdownHeader(params.destination.content)
   check(p.destination, params.destination, destinationHeader.status === 'valid' ? destinationHeader.noteId : '', params.destination.operationId!)
+  if (p.undo !== undefined) parseFileShareUndoResult(p.undo, { destination: params.destination, referenceIds: params.undoReferenceIds ?? [], ...(params.preserveNoteIds ? { preserveNoteIds: params.preserveNoteIds } : {}) })
   if (p.currentDestination !== undefined) parseFileReadResult(p.currentDestination, params.destination)
   if (p.code !== undefined) text(p.code, code)
   if (p.message !== undefined && typeof p.message !== 'string') throw new AgentMuxError('The original shared save diagnostic must remain text.', code)
-  if (p.status === 'committed' && (p.destination === null || (p.destination as FileWriteResult).result.status !== 'written' || (p.destination as FileWriteResult).result.noteHistory?.status !== 'committed' || (p.promotions as FileShareProgress[]).some(x => x.shared?.result.status !== 'written' || x.shared.result.noteHistory?.status !== 'committed' || x.source?.result.status !== 'written' || x.source.result.noteHistory?.status !== 'committed'))) throw new AgentMuxError('A multi-file commit requires each original resource receipt.', code)
+  if (p.status === 'committed' && params.undoReferenceIds?.length && (!p.undo || (p.undo as FileShareUndoResult).status !== 'committed')) throw new AgentMuxError('The combined save requires its complete original undo receipt.', code)
+  if (p.status === 'partial' && params.undoReferenceIds?.length && (!p.undo || (p.undo as FileShareUndoResult).status !== 'partial')) throw new AgentMuxError('A known partial combined save requires its original partial undo facts.', code)
+  if ((p.status === 'committed' || p.status === 'partial' && params.undoReferenceIds?.length) && (p.destination === null || (p.destination as FileWriteResult).result.status !== 'written' || (p.destination as FileWriteResult).result.noteHistory?.status !== 'committed' || (p.promotions as FileShareProgress[]).some(x => x.shared?.result.status !== 'written' || x.shared.result.noteHistory?.status !== 'committed' || x.source?.result.status !== 'written' || x.source.result.noteHistory?.status !== 'committed'))) throw new AgentMuxError('A multi-file commit requires each original resource receipt.', code)
   return p as FileShareResult
 }
 
 export function parseFileShareInspectParams(value: unknown): FileShareInspectParams {
   const p = rpcRecord(value, undefined, 'INVALID_CONTROL_REQUEST')
   if (p.mode === 'request') { rpcRecord(p, ['mode', 'request'], 'INVALID_CONTROL_REQUEST'); parseFileShareParams(p.request) }
+  else if (p.mode === 'undo') { rpcRecord(p, ['mode', 'request'], 'INVALID_CONTROL_REQUEST'); parseFileShareUndoParams(p.request) }
   else if (p.mode === 'shared') { rpcRecord(p, ['mode', 'shared'], 'INVALID_CONTROL_REQUEST'); parseFileReadParams(p.shared) }
   else throw new AgentMuxError('Choose request inspection or one exact shared Markdown file.', 'INVALID_CONTROL_REQUEST')
   return p as FileShareInspectParams
 }
 export function parseFileShareInspectResult(value: unknown, params: FileShareInspectParams): FileShareInspectResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, undefined, code)
+  if (params.mode === 'undo') { rpcRecord(p, ['mode', 'result'], code); if (p.mode !== 'undo') throw new AgentMuxError('The original undo inspection mode changed.', code); parseFileShareUndoResult(p.result, params.request); return p as FileShareInspectResult }
   if (params.mode === 'request') {
     rpcRecord(p, ['mode', 'result'], code)
     if (p.mode !== 'request') throw new AgentMuxError('The original shared-save inspection mode changed.', code)
@@ -130,4 +137,67 @@ export function parseFileShareInspectResult(value: unknown, params: FileShareIns
     if (shared.create.status !== 'read' || shared.create.event.status !== 'committed' || shared.create.event.noteId !== declaration.noteId || shared.create.event.baseRevision !== null) throw new AgentMuxError('A confirmed declaration requires its original committed creation.', code)
   }
   return p as FileShareInspectResult
+}
+
+/** The ordinary proposed save remains intact; only these saved occurrences are selected for collection. */
+export type FileShareUndoParams = { destination: FileWriteParams; referenceIds: string[]; preserveNoteIds?: string[] }
+export type FileShareDeleteResult = { resource: FileReadResource; result: { status: 'deleted' | 'conflict' | 'unknown' | 'error'; code?: string; message?: string; retainedPath?: string; noteHistory?: import('./note-history.js').NoteHistoryReceipt } }
+export type FileShareCollection = { noteId: string; referenceIds: string[]; resource: FileReadResource | null; source: FileWriteResult | null; deletion: FileShareDeleteResult | null; retainedReason?: { code: string; message: string } }
+export type FileShareUndoResult = { operationId: string; status: 'committed' | 'partial' | 'unknown' | 'conflict' | 'error'; destination: FileWriteResult | null; collections: FileShareCollection[]; code?: string; message?: string }
+export function fileShareUndoStageOperation(operation: string, stage: 'source' | 'delete', identity: string): string { return operation + ':' + stage + ':' + fileUploadRevision(new TextEncoder().encode(identity)).slice(7) }
+function idsList(value: unknown, empty = false): asserts value is string[] {
+  if (!Array.isArray(value) || !empty && !value.length || new Set(value).size !== value.length) throw new AgentMuxError('Select unique saved reference identities.', 'INVALID_CONTROL_REQUEST')
+  value.forEach(id => text(id))
+}
+export function parseFileShareUndoParams(value: unknown): FileShareUndoParams {
+  const p = rpcRecord(value, ['destination', 'referenceIds', 'preserveNoteIds'], 'INVALID_CONTROL_REQUEST'), request = parseFileWriteParams(p.destination)
+  if (request.baseContent === undefined || request.operationId === undefined || !request.path.endsWith(NOTE_FILE_EXTENSION)) throw new AgentMuxError('Shared undo preserves the original Note save baseline and operation.', 'INVALID_CONTROL_REQUEST')
+  idsList(p.referenceIds); if (p.preserveNoteIds !== undefined) idsList(p.preserveNoteIds, true)
+  return p as FileShareUndoParams
+}
+export function parseFileShareUndoResult(value: unknown, params: FileShareUndoParams): FileShareUndoResult {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId', 'status', 'destination', 'collections', 'code', 'message'], code)
+  if (p.operationId !== params.destination.operationId || !['committed', 'partial', 'unknown', 'conflict', 'error'].includes(p.status as string) || !Array.isArray(p.collections)) throw new AgentMuxError('The original shared undo receipt is invalid.', code)
+  const written = (value: unknown, original?: FileWriteParams) => {
+    const receipt = value as FileWriteResult
+    if (!receipt || !receipt.resource) throw new AgentMuxError('A derived write requires its accurate file resource.', code)
+    const r = receipt.resource, prefix = r.logicalDirectory ?? (r.zonePath === r.workspacePath ? '' : r.zonePath.slice(r.workspacePath.length + 1))
+    const outcome = receipt.result, content = outcome.status === 'written' && outcome.content !== undefined ? outcome.content : original?.content ?? ''
+    parseFileWriteResult(receipt, { ...(original ?? { zoneId: r.zoneId, path: prefix ? r.path.slice(prefix.length + 1) : r.path, expectedResource: r, expectedRevision: 'sha256:' + '0'.repeat(64) }), content, ...(!original && outcome.status === 'written' && outcome.noteHistory?.eventId ? { operationId: outcome.noteHistory.eventId } : {}) } as FileWriteParams)
+  }
+  if (p.destination !== null) written(p.destination, params.destination)
+  const seen = new Set<string>(), references = new Set<string>()
+  const checkedResource = (value: unknown): FileReadResource => {
+    const r = rpcRecord(value, ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'], code) as FileReadResource
+    for (const key of ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path'] as const) text(r[key], code)
+    const prefix = r.logicalDirectory ?? (r.zonePath === r.workspacePath ? '' : r.zonePath?.slice(r.workspacePath.length + 1))
+    parseFileReadResult({ resource: r, result: { status: 'directory' } }, { zoneId: r.zoneId, path: prefix ? r.path?.slice(prefix.length + 1) : r.path, expectedResource: { hostId: r.hostId, workspaceId: r.workspaceId, workspacePath: r.workspacePath } }); return r
+  }
+  for (const raw of p.collections) {
+    const item = rpcRecord(raw, ['noteId', 'referenceIds', 'resource', 'source', 'deletion', 'retainedReason'], code)
+    text(item.noteId, code); if (seen.has(item.noteId as string)) throw new AgentMuxError('A shared entity has duplicate collection receipts.', code); seen.add(item.noteId as string)
+    idsList(item.referenceIds)
+    for (const ref of item.referenceIds) { if (!params.referenceIds.includes(ref) || references.has(ref)) throw new AgentMuxError('Collection receipts must cover each selected occurrence once.', code); references.add(ref) }
+    if (item.resource !== null) checkedResource(item.resource)
+    if (item.source !== null) {
+      const source = item.source as FileWriteResult; if (source.resource) { const r = checkedResource(source.resource); const identity = JSON.stringify([r.hostId, r.workspaceId, r.workspacePath, r.path]); const own = identity === JSON.stringify([params.destination.expectedResource.hostId, params.destination.expectedResource.workspaceId, params.destination.expectedResource.workspacePath, params.destination.expectedResource.path]); const expected = own ? params.destination.operationId! : fileShareUndoStageOperation(params.destination.operationId!, 'source', identity); if (source.result.noteHistory?.eventId !== expected) throw new AgentMuxError('The source undo receipt belongs to another original stage.', code) }
+      written(item.source)
+    }
+    if (item.retainedReason !== undefined) { const reason = rpcRecord(item.retainedReason, ['code', 'message'], code); text(reason.code, code); text(reason.message, code) }
+    if (item.deletion !== null) {
+      const receipt = rpcRecord(item.deletion, ['resource', 'result'], code), deletion = rpcRecord(receipt.result, ['status', 'code', 'message', 'retainedPath', 'noteHistory'], code)
+      if (!['deleted', 'conflict', 'unknown', 'error'].includes(deletion.status as string) || JSON.stringify(receipt.resource) !== JSON.stringify(item.resource)) throw new AgentMuxError('The exact shared deletion outcome is invalid.', code)
+      checkedResource(receipt.resource)
+      const history = deletion.noteHistory === undefined ? undefined : rpcRecord(deletion.noteHistory, ['status', 'eventId', 'batchId', 'replayed', 'reason'], code)
+      if (history) {
+        if (history.status !== 'unconfirmed') { text(history.eventId, code); text(history.batchId, code) }
+        else if (history.eventId === undefined && typeof history.reason !== 'string') throw new AgentMuxError('An unconfirmed deletion needs its original diagnostic.', code)
+        if (history.eventId !== undefined && history.eventId !== fileShareUndoStageOperation(params.destination.operationId!, 'delete', item.noteId as string) || !['prepared', 'committed', 'not-applied', 'unconfirmed'].includes(history.status as string) || history.replayed !== undefined && history.replayed !== true) throw new AgentMuxError('The deletion receipt belongs to another original stage.', code)
+      }
+      if (deletion.status === 'deleted' && (history?.status !== 'committed' || item.source === null)) throw new AgentMuxError('Deletion requires its original committed history.', code)
+    }
+  }
+  if ((p.status === 'committed' || p.status === 'partial') && (references.size !== params.referenceIds.length || p.destination === null || (p.destination as FileWriteResult).result.status !== 'written' || (p.destination as FileWriteResult).result.noteHistory?.status !== 'committed' || (p.collections as FileShareCollection[]).some(item => !item.retainedReason && item.deletion?.result.status !== 'deleted' || item.source && (item.source.result.status !== 'written' || item.source.result.noteHistory?.status !== 'committed') || item.deletion?.result.status === 'unknown' || item.deletion?.result.noteHistory && !['committed', 'not-applied'].includes(item.deletion.result.noteHistory.status)))) throw new AgentMuxError('Every shared undo phase needs an accurate terminal receipt.', code)
+  if (p.status === 'partial' && !(p.collections as FileShareCollection[]).some(item => item.retainedReason && item.source?.result.status === 'written')) throw new AgentMuxError('A known partial undo must retain its committed source-restoration receipt.', code)
+  return p as FileShareUndoResult
 }
