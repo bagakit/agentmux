@@ -224,7 +224,14 @@ try {
     detached: true, env: process.env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
   children.add(daemon); let ready = ''; daemon.stdio[3].on('data', bytes => { ready += bytes }); daemon.stderr.resume()
   await waitFor('actual private ctxmux readiness', async () => ready.includes('\n') && (await stat(join(runtime, 'ctxmux.sock'))).isSocket())
-  client = await core.connectLocalAgentMux({ store: new core.AgentMuxFileAgentSessionStore(storePath) })
+  // The real Desktop starts the sole semantic Host. This worker is a public
+  // Hosted consumer, so it cannot compete with that Host for Hook ownership.
+  const first = await launch('first')
+  rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: core.defaultAgentMuxControlSocketPath() } })
+  client = await core.connectHostedAgentMux({ rpc, expectedStorePath: storePath })
+  const owner = client.runtimeOwnerIdentity()
+  assert.equal(owner.availability, 'connected'); assert.notEqual(owner.processId, process.pid)
+  facts.semanticOwner = { workerPid: process.pid, owner, boundary: 'Public Hosted consumer of the original product Host; no worker-local semantic Core' }
   for (const label of ['Author', 'Recipient', 'Other recipient']) {
     const session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'proof', providerId: 'codex', workspacePath: workspace,
       commandOverride: executable, env: { HOME: process.env.HOME, CODEX_HOME: nativeHome, AGENTMUX_A2A_PROOF_DIRECTORY: controls }, injectAgentMuxGuide: false, cols: 100, rows: 30 })
@@ -232,8 +239,6 @@ try {
     await waitFor('actual native source bound', async () => (await client.refreshAgentSession(session.agentSessionId, session.run)).nativeHandle)
   }
   const [author, recipient, other] = sessions
-  const first = await launch('first')
-  rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: endpoint } })
   const catalog = first.isolation.catalog
   const zone = catalog.zones.find(zone => zone.workspaceId === 'proof-workspace'); assert.ok(zone, 'The private configured workspace has its actual Zone')
   const open = async session => (await cli(['agent', 'open', '--session', session.agentSessionId, '--zone', zone.zoneId, '--new-tab', '--focus'])).result
@@ -457,11 +462,11 @@ try {
   second.main.close(); second.cdp.close(); await stop(second.child, 'SIGKILL')
 } catch (error) { failure = error; facts.error = { message: error.message, stack: error.stack } }
 finally {
-  try { await rpc?.dispose() } catch {}
   if (client) {
     for (const session of sessions) { try { await client.stopAgent(session.agentSessionId, session.run) } catch (error) { facts.cleanup.stopError ??= error.message } }
     try { await client.dispose() } catch {}
   }
+  try { await rpc?.dispose() } catch {}
   for (const child of [...children].reverse()) { try { await stop(child, 'SIGKILL') } catch (error) { facts.cleanup.processError ??= error.message } }
   facts.cleanup.processesReaped = !facts.cleanup.stopError && !facts.cleanup.processError && [...children].every(ended)
   if (!facts.cleanup.processesReaped) { failure ??= new Error('Private A2A product process cleanup was not confirmed'); facts.error ??= { message: failure.message } }

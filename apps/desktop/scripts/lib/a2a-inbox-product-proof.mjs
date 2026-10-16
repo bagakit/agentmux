@@ -187,6 +187,8 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
   assert.equal(a2aProofSha(await readFile(join(product.privateRoot, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch, 'manifest.json'))), product.ctxmux.manifest)
   assert.equal(product.cleanup.processesReaped, true); assert.equal(product.cleanup.outerProcessesReaped, true); assert.equal(product.workerOutcome.exitConfirmed, true); assert.equal(product.workerOutcome.originalExitCode, 0); assert.equal(product.cleanup.userRunTouched, false)
   assert.equal(product.homeIsolation.privateHome, join(product.privateRoot, 'home'))
+  assert.equal(product.semanticOwner.owner.availability, 'connected')
+  assert.notEqual(product.semanticOwner.owner.processId, product.semanticOwner.workerPid)
   assert.deepEqual(product.homeIsolation.launches.map(launch => launch.label), ['first', 'second'])
   for (const launch of product.homeIsolation.launches) {
     assert.equal(launch.home, product.homeIsolation.privateHome); assert.equal(launch.nativeHome, launch.home)
