@@ -47,3 +47,33 @@ it('a stored old init cannot qualify any current unknown, unstored or dispatchin
     }
   }
 })
+
+it('private child evidence may be saved or locally recovered while business confirmation stays unknown', () => {
+  const readInput = { operationId: input.operationId, expectedRevision: 11, decision: { actionId: 'setup-inspect:original', value: 'continue' as const } }
+  const read = { stepId: 'original-read-child', input: readInput, request: 'unknown' as const, secureStorage: 'stored' as const }
+  const writeInput = { ...readInput, decision: { actionId: 'setup-enable:original', value: 'confirm' as const } }
+  const write = { effect: 'enable-messaging' as const, stepId: 'original-effect-child', sourceStepId: read.stepId, input: writeInput, request: 'unknown' as const, secureStorage: 'stored' as const }
+  const confirmed = { ...reply({ ...authentication, stage: 'confirmed' }), challenge: null }
+  const inspection: ConnectionSetupView = { ...confirmed, applicationInspection: { observations: [read], selected: read, next: null, applicationInfoReadPermission: 'unknown', actions: [] } }
+  const configuration: ConnectionSetupView = { ...confirmed, applicationConfiguration: { effect: 'enable-messaging', subject: 'bot-settings', effects: [write], selected: write, next: null, capability: 'unknown', source: null, actions: [] } }
+  const readSelector = { ...input, applicationInspection: {} }, writeSelector = { ...input, applicationConfiguration: { effect: 'enable-messaging' as const } }
+  for (const decode of decoders) {
+    expect(decode('connection.setup.inspect', inspection, readSelector)).toEqual(inspection)
+    expect(decode('connection.setup.inspect', configuration, writeSelector)).toEqual(configuration)
+    const readRecovery: ConnectionSetupView = { ...inspection, applicationInspection: { ...inspection.applicationInspection!, observations: [], selected: { ...read, secureStorage: 'unknown' }, actions: [{ kind: 'recover-application-inspection', actionId: 'original-read-recover', expectedRevision: 11 }] } }
+    const writeRecovery: ConnectionSetupView = { ...configuration, applicationConfiguration: { ...configuration.applicationConfiguration!, effects: [], selected: { ...write, secureStorage: 'unknown' }, actions: [{ kind: 'recover-configuration-effect', actionId: 'original-effect-recover', expectedRevision: 11 }] } }
+    expect(decode('connection.setup.inspect', readRecovery, readSelector)).toEqual(readRecovery)
+    expect(decode('connection.setup.inspect', writeRecovery, writeSelector)).toEqual(writeRecovery)
+    expect(() => decode('connection.setup.inspect', { ...inspection, applicationInspection: { ...inspection.applicationInspection!, applicationInfoReadPermission: 'confirmed' } }, readSelector)).toThrow()
+    const readSubject = { ...read, subject: 'bot-settings' as const }
+    const readable: ConnectionSetupView = { ...inspection, applicationInspection: { ...inspection.applicationInspection!, observations: [], selected: readSubject } }
+    expect(decode('connection.setup.inspect', readable, readSelector)).toEqual(readable)
+    expect(() => decode('connection.setup.inspect', { ...readable, applicationInspection: { ...readable.applicationInspection!, readResult: { subject: 'bot-settings' } } }, readSelector)).toThrow()
+    expect(decode('connection.setup.inspect', { ...readable, applicationInspection: { ...readable.applicationInspection!, selected: { ...readSubject, request: 'confirmed' }, readResult: { subject: 'bot-settings' } } }, readSelector).applicationInspection?.readResult).toEqual({ subject: 'bot-settings' })
+    expect(() => decode('connection.setup.inspect', { ...configuration, applicationConfiguration: { ...configuration.applicationConfiguration!, capability: 'enabled' } }, writeSelector)).toThrow()
+    for (const request of ['dispatching', 'refused', 'not-dispatched']) {
+      expect(() => decode('connection.setup.inspect', { ...inspection, applicationInspection: { ...inspection.applicationInspection!, observations: [], selected: { ...read, request } } }, readSelector)).toThrow()
+      expect(() => decode('connection.setup.inspect', { ...configuration, applicationConfiguration: { ...configuration.applicationConfiguration!, effects: [], selected: { ...write, request } } }, writeSelector)).toThrow()
+    }
+  }
+})
