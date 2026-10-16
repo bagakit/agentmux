@@ -53,6 +53,8 @@ export type ConnectionEnrollmentDiagnostic =
       /** Safe machine facts only; QR payloads, URLs, cookies and native messages remain private. */
       step?: 'initialize' | 'poll' | 'cross-login' | 'landing' | 'console' | 'account'
       failure?: 'transport-unconfirmed' | 'http-status' | 'platform-error' | 'invalid-response' | 'redirect-unconfirmed' | 'bootstrap-unconfirmed' | 'invalid-state'
+      /** Exact failed protocol boundary; never raw native values or authority to retry. */
+      boundary?: 'saved-state' | 'request-target' | 'response-target' | 'cookie-update' | 'json' | 'envelope' | 'transition' | 'handoff' | 'bootstrap' | 'snapshot'
       httpStatus?: number
       nativeCode?: number
     }
