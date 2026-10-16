@@ -71,10 +71,10 @@ function nativeRoute(options: { scanned?: boolean; poll?: () => Response | Promi
   return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const target = new URL(String(url)); native.push({ url: target.href, at: Date.now(), init })
     expect(init?.redirect).toBe('manual')
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: {
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: {
       'x-flow-key': FLOW, 'set-cookie': 'session=fixture-settings-configuration-private-cookie; Domain=.feishu.cn; Path=/; Secure; HttpOnly'
     } })
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') {
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') {
       expect(new Headers(init?.headers).get('x-flow-key')).toBe(FLOW)
       expect(JSON.parse(String(init?.body))).toEqual({ biz_type: null })
       if (options.poll) return await options.poll()
@@ -214,7 +214,7 @@ it('original mounted Settings reads the exact bot, explicitly enables once and c
   const accepted = await clickAction('[data-management-enable]', 'enable-messaging')
   expect(effect(accepted)).toMatchObject({ input: offered, request: 'confirmed', secureStorage: 'stored' })
   await ready(() => expect(currentView().applicationConfiguration?.capability).toBe('unknown'))
-  expect(panel()?.textContent).toMatch(/request accepted/iu)
+  expect(configuration()?.querySelector('[data-management-current-setting]')?.textContent).toBe('Check current setting')
   expect(configuration()?.querySelector('[data-management-enable]')).toBeNull()
   expect(writes()).toHaveLength(1)
   expect(writes()[0].url).toBe('https://open.feishu.cn/developers/v1/robot/switch/' + saved.connection.config.application.appId)
@@ -222,14 +222,14 @@ it('original mounted Settings reads the exact bot, explicitly enables once and c
   await settle(); expect(business()).toHaveLength(2)
   await clickAction('[data-management-current-setting]', 'read-bot-settings')
   expect(currentView().applicationConfiguration?.capability).toBe('disabled')
-  expect(panel()?.querySelector('h3')?.textContent).toBe('Bot messages are off')
+  expect(panel()?.querySelector('h3')?.textContent).toBe('Prepare your bot for conversations')
   expect(effect(currentView())).toEqual(effect(accepted))
   expect(configuration()?.querySelector('[data-management-enable]')).toBeNull()
   expect(writes()).toHaveLength(1); expect(business()).toHaveLength(3)
   enabled = true
   await clickAction('[data-management-current-setting]', 'read-bot-settings')
   await ready(() => expect(currentView().applicationConfiguration?.capability).toBe('enabled'))
-  expect(panel()?.textContent).toMatch(/bot messages are on/iu)
+  expect(configuration()?.querySelector('[data-management-current-setting]')?.textContent).toBe('Check current setting')
   expect(panel()?.textContent).not.toMatch(/connection ready|setup complete|ready to chat/iu)
   expect(configuration()?.querySelector('[data-management-enable]')).toBeNull(); expect(writes()).toHaveLength(1)
   expect(business().map(value => new URL(value.url).pathname)).toEqual(['/developers/v1/robot/' + saved.connection.config.application.appId, '/developers/v1/robot/switch/' + saved.connection.config.application.appId, '/developers/v1/robot/' + saved.connection.config.application.appId, '/developers/v1/robot/' + saved.connection.config.application.appId])

@@ -68,14 +68,14 @@ function native(f?: Fixture, overrides: { poll?: () => Promise<Response>; create
       claims.push({ attemptId: original.attemptId, kind: String(claimed.kind), state: claimed.state, previousState })
     }
     calls.push({ path: target.pathname, options })
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: { 'x-flow-key': FLOW, 'set-cookie': `session=${SESSION}; Domain=.feishu.cn; Path=/; Secure; HttpOnly` } })
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') return overrides.poll ? await overrides.poll() : Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: { 'x-flow-key': FLOW, 'set-cookie': `session=${SESSION}; Domain=.feishu.cn; Path=/; Secure; HttpOnly` } })
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') return overrides.poll ? await overrides.poll() : Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
     if (target.href === 'https://accounts.feishu.cn/cross') return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
     if (target.href === 'https://ask.feishu.cn/') return new Response('Landing content does not establish identity')
     if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: USER, tenantId: TENANT, name: 'Original account', tenantName: 'Original enterprise' })};window.csrfToken=${JSON.stringify(CSRF)};</script>`, { headers: { 'content-type': 'text/html' } })
     expect(target.origin).toBe('https://open.feishu.cn'); expect(options.method).toBe('POST'); expect(headers.get('x-csrf-token')).toBe(CSRF); expect(headers.get('cookie')).toContain(SESSION)
     if (target.pathname === '/developers/v1/app/upload/image') return Response.json({ code: 0, data: { url: 'https://images.example.test/original.png' } })
-    if (target.pathname === '/developers/v1/app/create') return overrides.create ? await overrides.create() : Response.json({ code: 0, data: { ClientID: APP.appId } })
+    if (target.pathname === '/developers/v1/manifest/upsert_by_template' || target.pathname === '/developers/v1/app/create') return overrides.create ? await overrides.create() : Response.json({ code: 0, data: { ClientID: APP.appId } })
     if (target.pathname === '/developers/v1/secret/' + APP.appId) return overrides.credential ? await overrides.credential() : Response.json({ code: 0, data: { secret: SECRET } })
     throw new Error('Unexpected native enrollment route')
   })
@@ -110,6 +110,7 @@ async function safeDiscovery(f: Fixture, view: ConnectionEnrollmentView) {
 it('compiled CLI and SDK confirm the original account, explicitly create, and save the exact app through separately claimed native steps', async () => {
   const f = await fixture(), network = native(f)
   let view = result(await f.cli(['begin', '--input', '-'], f.input))
+  expect(row(f).adapterProtocolId).toBe('developer-console-template-v1')
   expect(view.challenge?.qrPayload).toContain(TOKEN); expect(view.operation?.application).toBeNull()
   expect((await f.sdk.call('connection.ls', {})).connections).toEqual([])
   view = await account(f, view)
@@ -121,7 +122,7 @@ it('compiled CLI and SDK confirm the original account, explicitly create, and sa
   view = result(await f.cli(['advance', '--input', '-'], create))
   expect(view.operation).toMatchObject({ application: APP, authorization: 'authorized', credential: 'stored', configuration: 'configured', creation: { upload: 'confirmed', create: 'confirmed' } })
   expect(view.operation!.configured).toMatchObject({ status: 'configured', connection: { revision: 1, config: { connectionId: f.input.connectionId, application: APP, enabled: true }, observation: { transport: { state: 'unknown' }, intake: { state: 'unknown' }, delivery: { state: 'unknown' } } } })
-  expect(network.calls.map(c => c.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/app/create', '/developers/v1/secret/' + APP.appId])
+  expect(network.calls.map(c => c.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
   expect(network.claims.map(c => c.kind)).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential'])
   expect(new Set(network.claims.map(c => c.attemptId)).size).toBe(8)
   expect(network.claims.map(c => c.state)).toEqual(Array(8).fill('claimed'))
@@ -130,7 +131,7 @@ it('compiled CLI and SDK confirm the original account, explicitly create, and sa
   expect([...form.keys()]).toEqual(['file', 'uploadType', 'isIsv', 'scale'])
   expect(Buffer.from(await (form.get('file') as File).arrayBuffer())).toEqual(Buffer.from(PNG.slice(22), 'base64'))
   expect([form.get('uploadType'), form.get('isIsv'), form.get('scale')]).toEqual(['4', 'false', '{"width":1,"height":1}'])
-  expect(JSON.parse(String(network.calls[6]!.options.body))).toEqual({ appSceneType: 0, name: f.input.preset.name, desc: f.input.preset.description, avatar: 'https://images.example.test/original.png', i18n: { zh_cn: { name: f.input.preset.name, description: f.input.preset.description } }, primaryLang: 'zh_cn' })
+  expect(JSON.parse(String(network.calls[6]!.options.body))).toEqual({ appManifestTemplateID: 'developer_console', createAppUserCustomField: { avatar: 'https://images.example.test/original.png', i18n: { zh_cn: { name: f.input.preset.name, description: f.input.preset.description } }, primaryLang: 'zh_cn' }, cid: network.claims[6]!.attemptId, HTTPHead: {} })
   expect(network.calls[7]!.options.body).toBe('{}')
   const snapshots = encrypted(f).map(r => { try { return JSON.parse(f.encryption.decryptString(r.bytes)) } catch { return null } }).filter(r => r?.operationId === f.input.operationId && r.receipt)
   expect(snapshots.map(s => s.kind).sort()).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential'].sort())
@@ -193,8 +194,8 @@ it.each(['inflight-create', 'secure-created'] as const)('preserves the original 
   const work = cli(['advance', '--input', '-'], create)
   await reached; child.kill('SIGKILL'); await once(child, 'exit'); expect((await work).code).not.toBe(0)
   const effects = async () => (await readFile(join(root, 'native-effects.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { path: string; attemptId: string })
-  const before = await effects(); expect(before.filter(e => e.path === '/developers/v1/app/create')).toHaveLength(1)
-  const originalCreateAttempt = before.find(e => e.path === '/developers/v1/app/create')!.attemptId
+  const before = await effects(); expect(before.filter(e => e.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
+  const originalCreateAttempt = before.find(e => e.path === '/developers/v1/manifest/upsert_by_template')!.attemptId
   const replacement = await start(mode === 'inflight-create' ? 'observe-only' : 'credential-only')
   const reopened = result(await cli(['inspect', '--operation-id', input.operationId]))
   expect(reopened.operation?.operationId).toBe(input.operationId); expect(reopened.operation?.connectionId).toBe(input.connectionId)
@@ -253,7 +254,7 @@ it('offers an explicit same-app credential read after a failed read without repl
   const saved = await advance(f, await inspect(f), 'read-credential')
   expect(saved.operation).toMatchObject({ application: APP, configuration: 'configured' })
   expect(network.calls.slice(before).map(c => c.path)).toEqual(['/developers/v1/secret/' + APP.appId])
-  expect(network.calls.filter(c => c.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(network.calls.filter(c => c.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
 }, 20_000)
 
 it('continues the exact known app after its create snapshot store failed and a replacement Host has lost all unsettled memory', async () => {
@@ -264,6 +265,8 @@ it('continues the exact known app after its create snapshot store failed and a r
     if (fail && envelope?.kind === 'create') { blockedSnapshots++; throw new AgentMuxError('Original private create snapshot was not secured.', 'CONNECTION_CREDENTIAL_UNAVAILABLE') }
     return await store.call(this, input)
   })
+
+
   const unknown = await advance(f, await confirmed(f), 'create')
   expect(blockedSnapshots).toBe(1)
   expect(unknown.operation?.application).toEqual(APP); expect(unknown.operation?.configuration).not.toBe('configured')
@@ -275,7 +278,7 @@ it('continues the exact known app after its create snapshot store failed and a r
   const recovered = await advance(f, reopened, 'read-credential')
   expect(recovered.operation).toMatchObject({ application: APP, configuration: 'configured', credential: 'stored' })
   expect(network.calls.slice(calls).map(c => c.path)).toEqual(['/developers/v1/secret/' + APP.appId])
-  expect(network.calls.filter(c => c.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(network.calls.filter(c => c.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
   expect(network.calls.filter(c => c.path === '/developers/v1/app/upload/image')).toHaveLength(1)
 }, 20_000)
 
@@ -315,7 +318,7 @@ it('preserves a late exact create receipt while rejecting the former transport a
   expect(network.calls.filter(c => c.path.startsWith('/developers/v1/secret/'))).toEqual([])
   const saved = await advance(f, known, 'read-credential')
   expect(saved.operation?.configuration).toBe('configured')
-  expect(network.calls.filter(c => c.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(network.calls.filter(c => c.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
 }, 20_000)
 
 it('rechecks the original transport after resolving private account bytes without deleting the original receipt', async () => {
@@ -386,4 +389,28 @@ it('refuses an unadmitted competing local action instead of returning the in-fli
   await expect(f.sdk.call('connection.enrollment.advance', competing)).rejects.toMatchObject({ code: 'CONNECTION_REVISION_CONFLICT' })
   expect((await f.sdk.call('connection.enrollment.advance', create)).receipt?.actionId).toBe(create.decision.actionId)
   expect(network.calls).toHaveLength(calls)
+}, 20_000)
+
+it('keeps a durable ordinary-creation intent on its original route through same-intent authentication renewal', async () => {
+  const f = await fixture()
+  let expired = true
+  const network = native(f, { poll: async () => expired
+    ? Response.json({ code: 0, data: { next_step: null, step_info: { status: 5 } } })
+    : Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } }) })
+  let view = await f.sdk.call('connection.enrollment.begin', f.input)
+  // Exact persisted pre-template format: the original record had no protocol selection field.
+  const legacy = row(f); delete legacy.adapterProtocolId
+  f.services.database!.prepare('UPDATE connection_enrollment SET record_json=? WHERE operation_id=?').run(JSON.stringify(legacy), f.input.operationId)
+  if (view.challenge && view.challenge.nextPollAt > Date.now()) await delay(view.challenge.nextPollAt - Date.now())
+  view = await advance(f, view, 'continue-authentication')
+  expect(view.operation?.authentication?.stage).toBe('expired')
+  expired = false
+  view = await advance(f, view, 'renew-authentication')
+  expect(row(f).adapterProtocolId).toBeUndefined()
+  view = await account(f, view)
+  view = await advance(f, view, 'confirm-account')
+  view = await advance(f, view, 'create')
+  expect(view.operation?.configuration).toBe('configured')
+  expect(network.calls.filter(call => call.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(network.calls.filter(call => call.path === '/developers/v1/manifest/upsert_by_template')).toEqual([])
 }, 20_000)

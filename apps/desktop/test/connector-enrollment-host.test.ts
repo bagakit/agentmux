@@ -90,7 +90,7 @@ beforeEach(async () => {
         path: target.pathname,
         preclaimed: claim?.state === 'claimed' && claim.operation_id === input.operationId
       })
-      if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init')
+      if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init')
         return Response.json(
           { code: 0, data: { step_info: { token: privateToken } } },
           {
@@ -100,7 +100,7 @@ beforeEach(async () => {
             }
           }
         )
-      if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling')
+      if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling')
         return Response.json({
           code: 0,
           data: authorize
@@ -120,7 +120,7 @@ beforeEach(async () => {
         )
       if (target.pathname === '/developers/v1/app/upload/image')
         return Response.json({ code: 0, data: { url: 'https://images.example.test/original.png' } })
-      if (target.pathname === '/developers/v1/app/create')
+      if (target.pathname === '/developers/v1/manifest/upsert_by_template')
         return Response.json({ code: 0, data: { ClientID: feishuConfig.application.appId } })
       if (target.pathname === '/developers/v1/secret/' + feishuConfig.application.appId)
         return Response.json({ code: 0, data: { secret: applicationSecret } })

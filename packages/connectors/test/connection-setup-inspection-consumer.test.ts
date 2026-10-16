@@ -1,6 +1,7 @@
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
+import { CONNECTION_SETUP_READ_ACTIONS } from '@agentmux/core/connections'
 import type { ConnectionConfig, ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupView } from '@agentmux/core/connections'
 import { fork, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
@@ -51,11 +52,11 @@ function nativeRoute(observe: (url: URL, init: RequestInit) => Promise<Response>
   const route = async (url: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const target = new URL(String(url))
     expect(init.redirect).toBe('manual')
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: [
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: [
       ['x-flow-key', FLOW], ['set-cookie', `session=${SESSION}; Domain=.feishu.cn; Path=/; Secure; HttpOnly`],
       ['set-cookie', 'pollOnly=fixture-poll-only; Path=/accounts/qrlogin; Secure']
     ] })
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross-login' } } })
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross-login' } } })
     if (target.href === 'https://accounts.feishu.cn/cross-login') return new Response('', { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
     if (target.href === 'https://ask.feishu.cn/') return new Response('Landing is not identity', { headers: { 'set-cookie': 'askOnly=fixture-ask-only; Path=/; Secure' } })
     if (target.href === 'https://open.feishu.cn/app') {
@@ -252,7 +253,7 @@ it('an unrecoverable original result after reopen stays unknown but cannot suppr
   const calls = fetch.mock.calls.length
   await f.close(); await f.reopen()
   const local = await inspect(f, { selectedStepId: original.stepId }), recover = inputFor(local, 'recover-application-inspection')
-  expect(local.applicationInspection?.actions.map(action => action.kind).sort()).toEqual(['inspect-application', 'recover-application-inspection', 'read-application-details', 'read-event-settings', 'read-callback-settings', 'read-bot-settings'].sort())
+  expect(local.applicationInspection?.actions.map(action => action.kind).sort()).toEqual(['inspect-application', 'recover-application-inspection', ...Object.values(CONNECTION_SETUP_READ_ACTIONS)].sort())
   const stillUnknown = await f.sdk.call('connection.setup.advance', recover)
   expect(selected(stillUnknown)).toEqual(original); expect(stillUnknown.applicationInspection?.applicationInfoReadPermission).toBe('unknown')
   expect(fetch).toHaveBeenCalledTimes(calls)
@@ -393,7 +394,7 @@ it('actual SDK and compiled CLI decoders reject malformed selected-child results
   const f = await fixture(), fetch = vi.fn(nativeRoute().route); vi.stubGlobal('fetch', fetch)
   await confirmed(f); await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
   const valid = await inspect(f), wire = await wireFault(f), calls = fetch.mock.calls.length, before = changes(f)
-  expect(valid.applicationInspection?.actions.map(action => action.kind)).toEqual(['inspect-application', 'read-application-details', 'read-event-settings', 'read-callback-settings', 'read-bot-settings'])
+  expect(valid.applicationInspection?.actions.map(action => action.kind)).toEqual(['inspect-application', ...Object.values(CONNECTION_SETUP_READ_ACTIONS)])
   expect(await wire.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: {} })).toEqual(valid)
   const faults = [
     (value: ConnectionSetupView) => ({ ...value, applicationInspection: { ...value.applicationInspection!, selected: { ...selected(value), privateRef: 'fixture-forbidden-inspection-private-ref' } } }),

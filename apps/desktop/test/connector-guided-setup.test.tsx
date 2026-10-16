@@ -19,11 +19,11 @@ const APP = 'cli_guided_setup', VERSION = 'guided-original-version'
 let app: ReturnType<typeof createMoteApp>
 const dom = { get container() { return document.body } }
 const SCOPES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only']
-let bot: boolean, mode: number, permissions: boolean, reception: boolean, submitted: boolean
+let bot: boolean, mode: number, callbackMode: number, cards: boolean, permissions: boolean, reception: boolean, submitted: boolean
 let directory: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
 let failObservation: boolean, accept: boolean, native: Array<{ path: string; body: unknown }>, calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
 beforeEach(async () => {
-  app = createMoteApp(); bot = false; mode = 1; permissions = false; reception = false; submitted = false;
+  app = createMoteApp(); bot = false; mode = 1; callbackMode = 1; cards = false; permissions = false; reception = false; submitted = false;
   failObservation = false; accept = true; native = []; calls = []
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-publication-transport-'))
@@ -64,6 +64,9 @@ beforeEach(async () => {
     if (target.pathname === '/developers/v1/event/switch/' + APP) { mode = 4; return Response.json({ code: 0, data: {} }) }
     if (target.pathname === '/developers/v1/event/all/' + APP) return Response.json({ code: 0, data: { events: [{ items: [{ id: 'im.message.receive_v1', supportIdentityTypes: [2] }] }] } })
     if (target.pathname === '/developers/v1/event/update/' + APP) { reception = true; return Response.json({ code: 0, data: {} }) }
+    if (target.pathname === '/developers/v1/callback/' + APP) return Response.json({ code: 0, data: { callbackMode, callbacks: cards ? ['unrelated.callback', 'card.action.trigger'] : ['unrelated.callback'] } })
+    if (target.pathname === '/developers/v1/callback/switch/' + APP) { callbackMode = 4; return Response.json({ code: 0, data: {} }) }
+    if (target.pathname === '/developers/v1/callback/update/' + APP) { cards = true; return Response.json({ code: 0, data: {} }) }
     if (target.pathname === '/developers/v1/scope/all/' + APP) return Response.json({ code: 0, data: { scopes: SCOPES.map((name, index) => ({ name, id: index + 1, scopeType: [2] })) } })
     if (target.pathname === '/developers/v1/scope/applied/' + APP) return Response.json({ code: 0, data: { scopes: permissions ? SCOPES.map((_, index) => ({ id: index + 1, scopeIdentityType: 2 })) : [] } })
     if (target.pathname === '/developers/v1/scope/update/' + APP) { permissions = true; return Response.json({ code: 0, data: { needConfigurePrivilege: false } }) }
@@ -94,7 +97,7 @@ async function click(selector: string) {
   expect(button!.closest('[hidden], [inert]')).toBeNull()
   await act(async () => button!.click())
 }
-const writes = () => native.filter(call => ['/robot/switch/', '/event/switch/', '/scope/update/', '/event/update/', '/app_version/create/', '/publish/commit/'].some(path => call.path.includes(path)))
+const writes = () => native.filter(call => ['/robot/switch/', '/event/switch/', '/scope/update/', '/event/update/', '/callback/switch/', '/callback/update/', '/app_version/create/', '/publish/commit/'].some(path => call.path.includes(path)))
 async function idle() { await ready(() => expect(document.querySelector('[data-management-setup] > .connector-enrollment__action')?.getAttribute('aria-busy')).toBe('false')) }
 function firstLayerPrimaries() { return [...document.querySelectorAll('[data-management-setup] .primary-button')].filter(button => !button.closest('details:not([open])')) }
 function current() { return calls.filter(call => (call.result as ConnectionSetupView)?.applicationConfiguration).at(-1)?.result as ConnectionSetupView }
@@ -103,8 +106,11 @@ async function open() {
   await click('[aria-label="Settings"]'); await click('nav [data-settings-target="chat-connections"]')
   await click('[data-connection="settings-publication-bot"] button'); await click('[data-management-open]'); await click('[data-management-start]')
   await ready(() => expect(dom.container.querySelector('[data-management-confirm]')).not.toBeNull())
+  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('account')
   await click('[data-management-confirm]')
   await ready(() => expect(dom.container.querySelector('[data-guided-primary]')).not.toBeNull())
+  expect(dom.container.querySelectorAll('[data-bot-setup-guide]')).toHaveLength(1)
+  expect(dom.container.querySelector('[data-guided-task] [data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('connect')
 }
 
 async function fill(label: string, value: string) {
@@ -163,18 +169,28 @@ it('the actual App keeps one guided task, reads only this bot and explicitly con
   await click('[data-guided-primary]')
   await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
   await click('[data-guided-primary]')
-  await ready(() => expect(document.querySelector('[aria-label="Publication version"]')).not.toBeNull())
+  await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Connect card interactions'))
   expect(writes()).toHaveLength(4)
+  await click('[data-guided-primary]')
+  await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
+  await click('[data-guided-primary]')
+  await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Enable card replies'))
+  expect(writes()).toHaveLength(5)
+  await click('[data-guided-primary]')
+  await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
+  await click('[data-guided-primary]')
+  await ready(() => expect(document.querySelector('[aria-label="Publication version"]')).not.toBeNull())
+  expect(writes()).toHaveLength(6)
   await reviewCreation(); await click('[data-publication-confirm]')
   await ready(() => expect(document.querySelector('[data-publication-review-created]')).not.toBeNull())
   await click('[data-publication-review-created]')
   await ready(() => expect(document.querySelector('[data-publication-confirm]')).not.toBeNull())
   await click('[data-publication-confirm]')
   await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Check version status'))
-  expect(writes()).toHaveLength(6)
+  expect(writes()).toHaveLength(8)
   await click('[data-guided-primary]')
   await ready(() => expect(document.querySelector('[data-guided-task]')?.textContent).toContain('Waiting for platform review'))
-  expect(writes()).toHaveLength(6); expect(app.launch).not.toHaveBeenCalled()
+  expect(writes()).toHaveLength(8); expect(app.launch).not.toHaveBeenCalled()
 }, 30_000)
 
 it('a failed settings check stops its finite reads, removes prior authority and retries the same setup without calling the failure a sign-in result', async () => {
@@ -224,7 +240,7 @@ it.each(['close', 'another-bot'] as const)('a late settings result after %s cann
     if (change === 'close') await click('[aria-label="Close settings"]')
     else {
       await click('[data-management-back]')
-      const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'All applications')!
+      const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'All identities')!
       await act(async () => all.click())
       await click('[data-connection="another-bot"] button')
     }
@@ -472,10 +488,10 @@ it('a later bot-list response cannot replace the application the user selected w
     })
   })
   expect(document.querySelector('.connector-editor-title')?.textContent).toBe('Another bot')
-  const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'All applications')!
+  const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'All identities')!
   await act(async () => all.click())
   hideOriginal = false
-  const refresh = [...document.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent === 'Refresh')!
+  const refresh = [...document.querySelectorAll<HTMLButtonElement>('.connector-saved-identities header button')].find(button => button.textContent === 'Refresh')!
   const before = calls.filter(call => call.method === 'connection.ls').length
   await act(async () => refresh.click())
   await ready(() => expect(calls.filter(call => call.method === 'connection.ls').length).toBeGreaterThan(before))
@@ -505,7 +521,7 @@ it('a later original-bot response preserves the new bot setup the user explicitl
     })
   }, false)
   block = true
-  const refresh = [...document.querySelectorAll<HTMLButtonElement>('.settings-pane-toolbar button')].find(button => button.textContent === 'Refresh')!
+  const refresh = [...document.querySelectorAll<HTMLButtonElement>('.connector-saved-identities header button')].find(button => button.textContent === 'Refresh')!
   try {
     await act(async () => refresh.click())
     await click('[data-enrollment-new]')

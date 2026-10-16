@@ -43,12 +43,12 @@ beforeEach(async () => {
     const target = new URL(String(url))
     platformCalls.push(target.pathname)
     expect(init?.redirect).toBe('manual')
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') {
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') {
       const response = Response.json({ code: 0, data: { step_info: { token: privateCode } } }, { headers: { 'x-flow-key': 'private-setup-flow' } })
       response.headers.append('set-cookie', 'session=private-setup-cookie; Domain=.feishu.cn; Path=/; Secure; HttpOnly')
       return response
     }
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
     if (target.href === 'https://accounts.feishu.cn/cross') return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
     if (target.href === 'https://ask.feishu.cn/') return new Response('No account authority here')
     if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: 'setup-user', tenantId: 'setup-enterprise', name: 'Setup owner' })};window.csrfToken="private-setup-csrf";</script>`, { headers: { 'content-type': 'text/html' } })
@@ -56,7 +56,7 @@ beforeEach(async () => {
     expect(new Headers(init?.headers).get('x-csrf-token')).toBe('private-setup-csrf')
     expect(new Headers(init?.headers).get('cookie')).toContain('session=private-setup-cookie')
     if (target.pathname === '/developers/v1/app/upload/image') return Response.json({ code: 0, data: { url: 'https://images.example.test/setup-bot.png' } })
-    if (target.pathname === '/developers/v1/app/create') return Response.json({ code: 0, data: { ClientID: feishuConfig.application.appId } })
+    if (target.pathname === '/developers/v1/manifest/upsert_by_template') return Response.json({ code: 0, data: { ClientID: feishuConfig.application.appId } })
     if (target.pathname === '/developers/v1/secret/' + feishuConfig.application.appId) return Response.json({ code: 0, data: { secret: credential } })
     throw new Error('Unexpected continuation Web request')
   }))
@@ -86,8 +86,15 @@ async function mount() {
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-connector-settings]')).not.toBeNull() })
 }
 async function click(selector: string) {
+  if (selector === '[data-enrollment-create]') {
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector(selector) ?? dom.container.querySelector('[data-enrollment-new]')).not.toBeNull() })
+    if (!dom.container.querySelector(selector)) await click('[data-enrollment-new]')
+  }
   let target: HTMLElement | null = null
   await vi.waitFor(async () => { await act(async () => {}); target = dom.container.querySelector(selector); expect(target, selector).not.toBeNull(); if (target!.matches('button')) expect((target as HTMLButtonElement).disabled).toBe(false) })
+  const disclosures: HTMLDetailsElement[] = []
+  for (let node = target!.parentElement; node; node = node.parentElement) if (node.matches('details:not([open])') && !(target!.matches('summary') && node === target!.parentElement)) disclosures.push(node as HTMLDetailsElement)
+  for (const disclosure of disclosures.reverse()) await act(async () => disclosure.querySelector<HTMLElement>('summary')!.click())
   const hiddenBy = target!.matches('summary') ? target!.parentElement?.parentElement?.closest('details:not([open])') : target!.closest('details:not([open])')
   expect(hiddenBy ?? null, 'Use the control through its visible disclosure').toBeNull()
   await act(async () => target!.click())
@@ -111,7 +118,7 @@ async function createAndSave() {
   const operation = (await services.connections.enrollment!.list({})).operations[0]!
   await click('[data-enrollment-action="confirm-account"]')
   await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-action="create"]')).not.toBeNull())
-  expect(platformCalls.filter(path => path === '/developers/v1/app/create')).toHaveLength(0)
+  expect(platformCalls.filter(path => path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(0)
   await click('[data-enrollment-action="create"]')
   await vi.waitFor(async () => { await act(async () => {}); expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configuration).toBe('configured') })
   return (await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation!
@@ -157,7 +164,7 @@ it('continues the original creation through current Host reads, explicit checks 
   await click('[data-connection-check]')
   await vi.waitFor(() => expect(stages()).toEqual({ authentication: 'ready', transport: 'ready', intake: 'ready', delivery: 'unknown' }))
   expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
-  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/app/create', '/developers/v1/secret/' + feishuConfig.application.appId])
+  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + feishuConfig.application.appId])
   expect(trusted.mock.calls.map(call => call[0])).toContain('connections:call')
   expect(calls.filter(call => call.method.startsWith('connection.room.') || call.method.startsWith('connection.binding.') || call.method.startsWith('connection.profile.'))).toEqual([])
   expect(api.connections.storeCredential).not.toHaveBeenCalled()
@@ -216,7 +223,7 @@ it('keeps the saved creation and usable check when a current lookup or explicit 
   await vi.waitFor(() => expect(stages().transport).toBe('ready'))
   expect(result()?.textContent).not.toContain('Controlled check reply gap')
   expectNoAdditionalWrites()
-  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/app/create', '/developers/v1/secret/' + feishuConfig.application.appId])
+  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + feishuConfig.application.appId])
   expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
 })
 
