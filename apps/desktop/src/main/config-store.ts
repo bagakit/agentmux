@@ -291,6 +291,7 @@ const configSchema = z
       try { normalizeAgentContinuityPolicy(authored as AppConfig['continuity']) }
       catch { context.addIssue({ code: 'custom', message: 'Invalid continuity policy. The maximum retry base delay must be at least the initial retry base delay.' }) }
     }),
+    // Preserve authored historical data; this retired preference has no loading effect.
     startup: z.object({ skipAgentAvailabilityCheckWait: z.boolean().optional() }).strict().optional(),
     profile: z.object({
       displayName: z.string().max(USER_PROFILE_NAME_LIMIT).refine(value => !/[\r\n\x00-\x1f]/.test(value)),

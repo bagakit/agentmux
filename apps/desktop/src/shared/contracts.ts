@@ -561,7 +561,7 @@ export type AppConfig = {
   goals?: import('./goals-preferences').GoalsPreferences
   /** Authored continuity preferences; Core resolves defaults when a new recovery intent is admitted. */
   continuity?: Partial<import('@agentmux/core').AgentMuxContinuityPolicy>
-  /** Next-startup preference; absence waits for Agent availability without back-filling. */
+  /** Retained historical preference data. Availability observation never gates startup. */
   startup?: { skipAgentAvailabilityCheckWait?: boolean }
   // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the
   // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read

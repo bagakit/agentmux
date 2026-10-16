@@ -8,7 +8,6 @@ export type StartupAgentAvailability = {
   current: number
   total: number | null
   pending: boolean
-  waiting: boolean
 }
 
 export function startupProgressDetail(progress: StartupProgress): string {

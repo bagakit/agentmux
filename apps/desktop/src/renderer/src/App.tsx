@@ -101,8 +101,6 @@ function DesktopApp() {
   const loading = useAppStore((state) => state.loading)
   useWorkbenchWindows(!loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
-  const startupAgentAvailability = useAppStore(state => state.startupAgentAvailability)
-  const continueStartup = useAppStore(state => state.continueStartup)
   const error = useAppStore((state) => state.error)
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -540,11 +538,9 @@ function DesktopApp() {
     return () => { unsubscribe(); for (const doc of attached) doc.removeEventListener('keydown', onKeyDown, true) }
   }, [])
 
-  if (loading || startupAgentAvailability?.pending && startupAgentAvailability.waiting) {
-    return <StartupLoadingSurface loading={loading} progress={startupProgress} agents={startupAgentAvailability}
-      hostLabel={config?.hosts.find(host => host.id === startupAgentAvailability?.hostId)?.label}
-      detailSuffix={!config && initialTheme?.status === 'unavailable' ? '\n' + initialTheme.message : ''}
-      onContinue={continueStartup} />
+  if (loading) {
+    return <StartupLoadingSurface progress={startupProgress}
+      detailSuffix={!config && initialTheme?.status === 'unavailable' ? '\n' + initialTheme.message : ''} />
   }
 
   if (!config && error) {
