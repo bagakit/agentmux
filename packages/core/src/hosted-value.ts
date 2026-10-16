@@ -191,7 +191,7 @@ export function parseHostedBootstrap(value: unknown): import('./hosted-client-co
   for (const session of p.sessions) parseHostedAgentSessionRead(session, (session as { agentSessionId: string }).agentSessionId)
   for (const entry of p.catalog) {
     const route = (entry as import('./types.js').AgentCatalogEntry | null)?.capabilities?.asyncQuestionReply
-    if (route !== undefined && route !== 'terminal') throw new AgentMuxError(
+    if (route !== undefined && route !== 'native-input') throw new AgentMuxError(
       'Provider asynchronous question reply route is malformed.', 'CONTROL_PROTOCOL_ERROR')
   }
   if (p.connection !== null) parseHostedNativeConnection(p.connection)

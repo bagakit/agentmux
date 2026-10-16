@@ -1,3 +1,4 @@
+import { planCodexQuestionReply } from './codex-question.js'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
 import { listCodexNativeSessions, assertCodexNativeResumeSource } from './codex-native-catalog.js'
@@ -181,6 +182,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
   return defineAgentProvider({
     prepareManagedLaunch: prepareCodexManagedLaunch,
     prepareNativeInput: prepareCodexNativeInput,
+    planQuestionReply: planCodexQuestionReply,
     observeTerminalFrontend: observeCodexTerminalFrontend,
     reconnectTerminalFrontend: reconnectCodexTerminalFrontend,
     planManagedHooks: ({ workspacePath }) => createCodexManagedHookPlan(workspacePath),
@@ -194,7 +196,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, nativeInterruption: true, replyCorrelation: 'none', nativeConversationInput: { managedRuns: true },
-        asyncQuestionReply: 'terminal',
+        asyncQuestionReply: 'native-input',
         providerFork: { current: true },
         promptExecution: { immediate: 'terminal-submit' },
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }

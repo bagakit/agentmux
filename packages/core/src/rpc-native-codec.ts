@@ -89,7 +89,7 @@ function agentCapabilities(value: unknown): void {
   promptExecution(capabilities.promptExecution)
   if (capabilities.nativeConversationInput !== undefined && record(capabilities.nativeConversationInput, ['managedRuns']).managedRuns !== true) fail()
   if (capabilities.nativeInterruption !== undefined && capabilities.nativeInterruption !== true) fail()
-  if (capabilities.asyncQuestionReply !== undefined) member(capabilities.asyncQuestionReply, ['terminal'])
+  if (capabilities.asyncQuestionReply !== undefined) member(capabilities.asyncQuestionReply, ['native-input'])
   if (capabilities.terminal !== true) fail()
   member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
   member(capabilities.permission, ['none', 'observe', 'respond']); bool(capabilities.providerResume)
