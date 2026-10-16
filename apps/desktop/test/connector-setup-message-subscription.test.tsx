@@ -81,7 +81,9 @@ it('original Delivery reviews current mode and the directory under one consent, 
   await open(); await click('[data-management-review-reception]')
   await ready(() => expect(dom.container.querySelector('[data-reception-add]')).not.toBeNull())
   expect(native.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/event/' + APP, '/developers/v1/event/all/' + APP])
-  expect(dom.container.querySelectorAll('[data-surface-mode]')).toHaveLength(3)
+  expect([...dom.container.querySelectorAll('[data-surface-mode]')].map(item => item.getAttribute('data-surface-mode'))).toEqual([
+    'enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'use-persistent-callback'
+  ])
   expect(dom.container.querySelector('[data-surface-mode="use-persistent-connection"]')?.getAttribute('aria-selected')).toBe('true')
   expect(dom.container.textContent).toContain('last checked persistent delivery mode')
   expect(dom.container.textContent).toContain('Other event consumers may be affected')
@@ -89,12 +91,14 @@ it('original Delivery reviews current mode and the directory under one consent, 
   await click('[data-reception-add]')
   await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
   expect(writes()).toEqual([{ path: '/developers/v1/event/update/' + APP, body: { events: [], appEvents: [EVENT], userEvents: [], operation: 'add', eventMode: 4 } }])
-  expect(dom.container.textContent).toContain('Message reception request accepted')
+  const selected = current().applicationConfiguration!.selected!
+  expect(selected).toMatchObject({ effect: 'add-message-reception', request: 'confirmed', secureStorage: 'stored' })
+  expect(dom.container.querySelector('[data-reception-result="' + selected.stepId + '"] span')?.textContent).toBe('Accepted result saved')
   expect(dom.container.querySelector('[data-reception-partial]')).toBeNull()
   expect(current().applicationConfiguration!.capability).toBe('unknown')
   settings = { eventMode: 4, appEventDetails: [{ items: [{ id: EVENT }] }] }
   await click('[data-reception-review]')
-  await ready(() => expect(dom.container.textContent).toContain('Message reception is configured'))
+  await ready(() => expect(dom.container.querySelector('[data-reception-review-result] strong')?.textContent).toBe('Required message event is configured'))
   expect(dom.container.querySelector('[data-reception-add]')).toBeNull()
   expect(writes()).toHaveLength(1)
   expect(dom.draft('agent-1')).toBe('Keep my draft')
@@ -141,12 +145,14 @@ it('accepted reception with a lost local ACK prioritizes same-child saving witho
   })
   await click('[data-reception-add]')
   await ready(() => expect(dom.container.querySelector('[data-reception-recover].primary-button')).not.toBeNull())
-  expect(dom.container.textContent).toContain('Finish saving the accepted reception request')
+  expect(dom.container.querySelector('[data-reception-recover]')?.textContent).toBe('Finish saving original result')
   expect(dom.container.querySelector('[data-reception-partial]')).toBeNull()
   const actions = [...dom.container.querySelectorAll('[data-management-reception] button')]
   expect(actions.indexOf(dom.container.querySelector('[data-reception-recover]')!)).toBeLessThan(actions.indexOf(dom.container.querySelector('[data-reception-review]')!))
   expect(dom.container.querySelector('[data-reception-review].primary-button')).toBeNull()
   const original = current().applicationConfiguration!.selected!, before = [...native]
+  expect(original).toMatchObject({ effect: 'add-message-reception', request: 'confirmed', secureStorage: 'unknown' })
+  expect(dom.container.querySelector('[data-reception-result="' + original.stepId + '"] span')?.textContent).toBe('Accepted result needs saving')
   await click('[data-reception-recover]')
   await ready(() => expect(current().applicationConfiguration!.selected).toEqual({ ...original, secureStorage: 'stored' }))
   expect(native).toEqual(before)

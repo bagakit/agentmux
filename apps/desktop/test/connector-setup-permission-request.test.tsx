@@ -92,7 +92,9 @@ it('original Settings reviews both sources with one consent then explicitly requ
   await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
   expect(current().applicationConfiguration!.selected!.input).toEqual({ operationId: current().operation!.operationId, expectedRevision: offered.expectedRevision, decision: { actionId: offered.actionId, value: 'confirm' } })
   expect(writes()).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
-  expect(dom.container.textContent).toContain('Permission request accepted')
+  const selected = current().applicationConfiguration!.selected!
+  expect(selected).toMatchObject({ effect: 'add-application-permissions', request: 'confirmed', secureStorage: 'stored' })
+  expect(dom.container.querySelector('[data-permission-result="' + selected.stepId + '"] span')?.textContent).toBe('Accepted result saved')
   expect(dom.container.textContent).toContain('data-range configuration is still needed')
   expect(current().applicationConfiguration!.capability).toBe('unknown')
   applied = { scopes: IDS.slice(0, 7).map(id => ({ id, scopeIdentityType: 2 })) }
@@ -147,13 +149,14 @@ it('a known accepted request with a lost local ACK makes same-child saving the p
   })
   await click('[data-permission-add]')
   await ready(() => expect(dom.container.querySelector('[data-permission-recover].primary-button')).not.toBeNull())
-  expect(dom.container.textContent).toContain('Finish saving the accepted request')
+  expect(dom.container.querySelector('[data-permission-recover]')?.textContent).toBe('Finish saving original result')
   expect(dom.container.querySelector('[data-permission-partial]')).toBeNull()
   const actions = [...dom.container.querySelectorAll('[data-management-permissions] button')], recover = dom.container.querySelector('[data-permission-recover]')!, review = dom.container.querySelector('[data-permission-review]')!
   expect(actions.indexOf(recover)).toBeLessThan(actions.indexOf(review))
   expect(review.classList.contains('primary-button')).toBe(false)
   const original = current().applicationConfiguration!.selected!
   expect(original).toMatchObject({ request: 'confirmed', secureStorage: 'unknown' })
+  expect(dom.container.querySelector('[data-permission-result="' + original.stepId + '"] span')?.textContent).toBe('Accepted result needs saving')
   expect(dom.container.querySelector('[data-permission-original]')).toBeNull()
   expect(writes()).toHaveLength(1)
   const before = [...native]
