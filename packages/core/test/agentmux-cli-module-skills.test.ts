@@ -123,6 +123,18 @@ describe('local progressive AgentMux module skills', () => {
     expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
   }, 30_000)
 
+  it('actual Note help and Files skill agree on first-use shared Markdown and both read-only inspection modes', async () => {
+    const note = await run(['--endpoint', endpoint, 'notebook', '--help'])
+    const file = await run(['--endpoint', endpoint, 'file', '--skill'])
+    expect(note.code, note.stderr).toBe(0); expect(file.code, file.stderr).toBe(0)
+    for (const contract of ['::note-include', 'kind: shared-block', 'Copy/hover never creates an entity', 'forwardedBlockIds', 'mode:"request"', 'mode:"shared"', 'An absent whole batch stays unknown']) expect(note.stdout).toContain(contract)
+    expect(note.stdout).not.toContain('A block stays inside its original file when referenced')
+    expect(file.stdout).toContain('amux file share --help')
+    expect(file.stdout).toContain('A current matching file cannot certify')
+    expect(connections).toBe(0)
+    expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
+  })
+
   it('actual compiled base discovery lists roots and delegates domain guidance without connecting', async () => {
     const result = await run(['--endpoint', endpoint, '--skill'])
     expect(result.code, result.stderr).toBe(0)
