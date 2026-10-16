@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { parseConnectionSetupResult as decodePublicResult, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
+import { parseConnectionEnrollmentDiagnostic, parseConnectionSetupResult as decodePublicResult, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
 import { parseConnectionSetupResult } from '../src/connection-setup-codec.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
@@ -76,4 +76,15 @@ it('private child evidence may be saved or locally recovered while business conf
       expect(() => decode('connection.setup.inspect', { ...configuration, applicationConfiguration: { ...configuration.applicationConfiguration!, effects: [], selected: { ...write, request } } }, writeSelector)).toThrow()
     }
   }
+})
+
+
+it('authentication diagnostics retain bounded failure locations and keep historical observations readable', () => {
+  const original = { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: 'invalid-response', httpStatus: 200 }
+  expect(parseConnectionEnrollmentDiagnostic(original)).toEqual(original)
+  for (const boundary of ['json', 'transition', 'handoff']) {
+    expect(parseConnectionEnrollmentDiagnostic({ ...original, boundary })).toEqual({ ...original, boundary })
+  }
+  expect(() => parseConnectionEnrollmentDiagnostic({ ...original, boundary: 'https://private.example/token' })).toThrow()
+  expect(() => parseConnectionEnrollmentDiagnostic({ stage: 'response', code: 'invalid-response', boundary: 'json' })).toThrow()
 })
