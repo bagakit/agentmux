@@ -881,41 +881,61 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const projects = useMemo(() => orderFocusTimelineProjects(groupFocusTimeline(contexts, lanes ?? [], tracks, visibleInputTracks), timelineOrder), [contexts, lanes, tracks, visibleInputTracks, timelineOrder])
 
   const ticks = useMemo(() => focusRulerTicks(range, displayedRuler), [range, displayedRuler])
-  const tickLabels = useMemo(() => focusRulerLabels(ticks, range, scaleWidth), [ticks, range, scaleWidth])
+  // Keep the first labels measurable before the first scale RO. Its actual
+  // width selects the same density set below, before any label is revealed.
+  const tickLabels = useMemo(() => scaleWidth > 0 ? focusRulerLabels(ticks, range, scaleWidth) : new Set(ticks.map(tick => tick.instant)), [ticks, range, scaleWidth])
   useLayoutEffect(() => {
     if (!documentVisible || mode === 'collapsed') return
     const scale = viewportRef.current?.querySelector<HTMLElement>('.recent-focus__time-scale')
     if (!scale || typeof ResizeObserver === 'undefined') return
     const labels = [...scale.querySelectorAll<HTMLTimeElement>('.recent-focus__tick > time')]
     const priority = { major: 0, short: 1, shorter: 2, fine: 3 }
-    let active = true, width = 0
+    const widths = new Map<Element, number>()
+    let active = true
     const update: ResizeObserverCallback = entries => {
       if (!active || document.visibilityState === 'hidden') return
-      const entry = entries.find(entry => entry.target === scale)
-      if (entry) width = entry.borderBoxSize[0]?.inlineSize ?? entry.contentRect.width
+      for (const entry of entries) {
+        const borderBox = entry.borderBoxSize?.[0]
+        const style = borderBox ? null : getComputedStyle(entry.target)
+        const edges = style ? (['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'] as const)
+          .reduce((sum, key) => sum + (parseFloat(style[key]) || 0), 0) : 0
+        widths.set(entry.target, borderBox?.inlineSize ?? entry.contentRect.width + edges)
+      }
+      const width = widths.get(scale) ?? 0
       if (width <= 0) return
-      setScaleWidth(width)
-      const bounds = scale.getBoundingClientRect()
-      // Read every candidate first, including density-hidden text. Visibility
-      // preserves border-box size, so these writes do not feed back into resize.
-      const measured = labels.map(node => ({ node, rect: node.getBoundingClientRect(),
-        tier: node.parentElement!.dataset.tier as keyof typeof priority,
-        instant: Number(node.parentElement!.dataset.tickAt)
-      })).sort((a, b) => priority[a.tier] - priority[b.tier] || a.instant - b.instant)
-      const accepted: DOMRect[] = []
-      for (const row of measured) {
-        const fits = row.rect.width > 0 && row.rect.left >= bounds.left && row.rect.right <= bounds.right && accepted.every(before => row.rect.right <= before.left || row.rect.left >= before.right)
-        if (fits) accepted.push(row.rect)
-        row.node.style.visibility = fits ? '' : 'hidden'
-        if (fits) row.node.removeAttribute('aria-hidden')
+      if (labels.some(label => !widths.has(label))) return
+      const candidates = focusRulerLabels(ticks, range, width)
+      // The RO border boxes include real font/padding widths, even for
+      // visibility-hidden text. One placement owns both the CSS offset and
+      // collision geometry; applying transforms cannot change these sizes.
+      const measured = labels.map(node => {
+        const tick = node.parentElement!, labelWidth = widths.get(node) ?? 0
+        const instant = Number(tick.dataset.tickAt), tickX = focusTimePosition(instant, range) * width / 100
+        const left = Math.max(0, Math.min(width - labelWidth, tickX - labelWidth / 2))
+        return { node, left, right: left + labelWidth, width: labelWidth, offset: left - tickX,
+          tier: tick.dataset.tier as keyof typeof priority, instant }
+      }).sort((a, b) => priority[a.tier] - priority[b.tier] || a.instant - b.instant)
+      const accepted: Array<{ left: number; right: number }> = []
+      const placements = measured.map(row => {
+        const fits = candidates.has(row.instant) && row.width > 0 && row.left >= 0 && row.right <= width && accepted.every(before => row.right <= before.left || row.left >= before.right)
+        if (fits) accepted.push(row)
+        return { ...row, fits }
+      })
+      for (const row of placements) {
+        row.node.style.setProperty('--focus-label-offset', `${row.offset}px`)
+        row.node.style.visibility = row.fits ? 'visible' : 'hidden'
+        if (row.fits) row.node.removeAttribute('aria-hidden')
         else row.node.setAttribute('aria-hidden', 'true')
       }
+      // Publish only after the complete initial measurement: pruning the DOM
+      // on a scale-only delivery would defer the first labels another frame.
+      setScaleWidth(width)
     }
     const observer = new ResizeObserver(update)
     observer.observe(scale, { box: 'border-box' })
     for (const label of labels) observer.observe(label, { box: 'border-box' })
     return () => { active = false; observer.disconnect() }
-  }, [documentVisible, mode, tickLabels, time])
+  }, [documentVisible, mode, tickLabels, time, range, ticks])
   const gridPaths = useMemo(() => (['major', 'short', 'shorter', 'fine'] as const).map(tier => ({ tier,
     path: ticks.filter(tick => tick.tier === tier).map(tick => `M${focusTimePosition(tick.instant, range)} 0V1`).join(' ')
   })), [ticks, range])
@@ -999,7 +1019,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         <svg className="recent-focus__grid" viewBox="0 0 100 1" preserveAspectRatio="none" aria-hidden="true">{gridPaths.filter(item => item.path).map(item => <path key={item.tier} data-tier={item.tier} d={item.path} vectorEffect="non-scaling-stroke" />)}</svg>
         <div className="recent-focus__ruler" aria-label="Focus time ruler"><span className="recent-focus__gutter" title={time.zone}>Context</span><div className="recent-focus__time-scale" title={`Scroll horizontally or Shift+scroll to browse time · ${time.zone}`}>{ticks.map(tick => {
           const position = focusTimePosition(tick.instant, range)
-          return <span key={tick.instant} className="recent-focus__tick" data-tier={tick.tier} data-tick-at={tick.instant} title={time.detailed(tick.instant)} style={{ left: `${position}%`, '--focus-tick-x': `${position * scaleWidth / 100}px`, '--focus-time-scale-width': `${scaleWidth}px` } as CSSProperties}>{tickLabels.has(tick.instant) ? <time dateTime={new Date(tick.instant).toISOString()}>{time.ruler(tick.instant)}{tick.repeated ? <small>{focusUtcOffset(tick.offset)}</small> : null}</time> : null}</span>
+          return <span key={tick.instant} className="recent-focus__tick" data-tier={tick.tier} data-tick-at={tick.instant} title={time.detailed(tick.instant)} style={{ left: `${position}%` }}>{tickLabels.has(tick.instant) ? <time dateTime={new Date(tick.instant).toISOString()}>{time.ruler(tick.instant)}{tick.repeated ? <small>{focusUtcOffset(tick.offset)}</small> : null}</time> : null}</span>
         })}{position >= 0 && position <= 100 ? <span className="recent-focus__playhead recent-focus__playhead--ruler" data-now={now} style={{ left: `${position}%` }} aria-label={`Current time ${clock(now)}`} /> : null}</div></div>
         <div className="recent-focus__tracks">
           {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentContext={currentContext} onCurrentPresence={onCurrentPresence} onEvent={inspectEvent} onEventChanged={eventChanged} messagesByTrack={messagesByTrack} messagesByReference={messagesByReference} recordedMessageTracks={recordedMessageTracks} workByReference={workByReference} observeWork={nativeWindow.observeWork} observing={documentVisible} window={range} now={now} scaleWidth={scaleWidth} lanesByContext={lanesByContext} time={time} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} onInspectWork={inspectWorkObservation} />)}
