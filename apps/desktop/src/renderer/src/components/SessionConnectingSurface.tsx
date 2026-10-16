@@ -51,6 +51,7 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
   return <FullPageLoadingSurface
     className="session-connecting"
     scope="region"
+    visible={visible}
     phase={unknownTerminalCreation ? 'parked' : phase === 'restore' ? 'recovering' : 'loading'}
     eyebrow={unknownTerminalCreation ? 'Terminal retained' : phase === 'launch' ? 'Launch request' : 'Session connection'}
     title={title}
