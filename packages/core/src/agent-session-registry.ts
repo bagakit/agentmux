@@ -320,6 +320,27 @@ export class AgentMuxAgentSessionRegistry {
     return reservation
   }
 
+  async reserveRestart(agentSessionId: string, expectedRun: AgentMuxRunRef, operationId: string,
+    restart: NonNullable<Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>['restart']>) {
+    const session = this.get(agentSessionId)
+    if (!sameRun(session.run, expectedRun)) throw new AgentMuxError('Agent Session changed before restart admission.', 'STALE_AGENT_SESSION')
+    const reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> = {
+      reservationId: randomUUID(), ownerId: this.lifecycleOwnerId, ownerPid: process.pid, agentSessionId,
+      operationId, expectedRun: { ...expectedRun }, kind: 'resume', restart: structuredClone(restart),
+      expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs }
+    await this.store.reserveLifecycle(reservation)
+    return reservation
+  }
+
+  async claimRestart(agentSessionId: string, operationId: string) {
+    return await this.store.claimRestart(agentSessionId, operationId, { ownerId: this.lifecycleOwnerId, ownerPid: process.pid,
+      now: Date.now(), expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs })
+  }
+
+  async recordRestartStartNotApplied(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, failure: { code: string; message: string; observedAt: number }) {
+    return await this.store.recordRestartStartNotApplied(reservation, failure)
+  }
+
   async prepareResume(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, session: AgentMuxStoredAgentSession) {
     return await this.store.prepareResume(reservation, session)
   }
@@ -373,7 +394,7 @@ export class AgentMuxAgentSessionRegistry {
   async readStartedResume(canonical: AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession> {
     const started = this.sessions.get(canonical.agentSessionId), operation = started?.continuity
     if (!started || sameRun(started.run, canonical.run) || operation?.reason !== 'operation-unconfirmed') return canonical
-    const reservation = await this.store.loadResumeCorrelation(canonical.agentSessionId, agentLifecycleOperationIdentity('resume', canonical.agentSessionId, operation.operationId))
+    const reservation = await this.store.loadResumeCorrelation(canonical.agentSessionId, agentLifecycleOperationIdentity(operation.action === 'restart' ? 'restart' : 'resume', canonical.agentSessionId, operation.operationId))
     return reservation && this.matchesStartedResume(reservation, started, canonical) ? structuredClone(started) : canonical
   }
 

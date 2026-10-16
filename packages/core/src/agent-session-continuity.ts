@@ -205,6 +205,10 @@ export type AgentMuxContinuityOperation = {
   error?: string
   /** Immutable explicit resume request; independent of its resolved Provider launch plan. */
   requestDigest?: string
+  /** Explicit restart owns stopping only its original Run; ordinary continuity never does. */
+  action?: 'restart'
+  /** Exact no-input restart launch, frozen before the original Start. */
+  restartLaunch?: { program: string; argsDigest: string }
   /** Original typed fatal result; text is diagnostic content, never a classifier. */
   errorCode?: string
   /** New inputs, independent of old drafts and unknown earlier input; actual delivery has its own owner. */
@@ -246,6 +250,8 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     ![op.admittedAt, op.observedAt, op.rechecks, ...(op.nextActionAt === undefined ? [] : [op.nextActionAt])].every(value => Number.isSafeInteger(value) && value >= 0) ||
     !op.evidence || typeof op.evidence.kind !== 'string' || op.newRun && typeof op.newRun.runId !== 'string' ||
     op.nativeTarget && (op.nativeTarget.kind !== 'provider' || typeof op.nativeTarget.providerId !== 'string' || !op.nativeTarget.providerId || typeof op.nativeTarget.sessionId !== 'string' || !op.nativeTarget.sessionId) ||
+    op.restartLaunch && (typeof op.restartLaunch.program !== 'string' || !op.restartLaunch.program || typeof op.restartLaunch.argsDigest !== 'string' || !op.restartLaunch.argsDigest || op.action !== 'restart') ||
+    op.action !== undefined && op.action !== 'restart' ||
     op.requestDigest !== undefined && (typeof op.requestDigest !== 'string' || !op.requestDigest) ||
     op.errorCode !== undefined && (typeof op.errorCode !== 'string' || !op.errorCode) ||
     op.recoveryInputs && (typeof op.recoveryInputs.reminder !== 'string' || typeof op.recoveryInputs.continuation !== 'string')) throw new TypeError('Invalid continuity operation.')

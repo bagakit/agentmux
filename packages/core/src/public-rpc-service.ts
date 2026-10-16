@@ -87,6 +87,7 @@ import { normalizeOperationDevice } from './operation-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { parseRpcNativeResult } from './rpc-native-codec.js'
 import { parseNativeHistoryParams, parseNativeHistoryResult, parseNativeHistoryResourceParams, parseNativeHistoryResourceResult } from './public-rpc-native-history.js'
+import { parseAgentRestartInput } from './agent-session-restart.js'
 import { observeHostRuntime } from './host-runtime-observation.js'
 import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
@@ -96,7 +97,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'restartAgent' | 'inspectAgentRestart' | 'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
@@ -213,6 +214,8 @@ const NATIVE_FIELDS = {
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
   'agent.continuity.control': ['agentSessionId', 'intentOperationId', 'expectedRun', 'operationId', 'action', 'additionalAttempts'],
+  'agent.restart': ['agentSessionId', 'expectedRun', 'operationId'],
+  'agent.restart.inspect': ['agentSessionId', 'expectedRun', 'operationId'],
   'agent.refresh': ['agentSessionId'],
   'agent.native.confirm': ['agentSessionId', 'expectedRun', 'expectedNativeHandle', 'candidateNativeHandle', 'expectedObservationAt', 'operationId'],
   'agent.native.ls': ['hostId', 'executorId', 'workspacePath'],
@@ -720,6 +723,20 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted()
       if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.native.confirm', input, context) as AgentMuxRpcResult<M>
       return await scope.client.confirmAgentNativeSession(input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.restart' || method === 'agent.restart.inspect') {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {
+        throw new AgentMuxError('Restarting a conversation requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const input = parseAgentRestartInput(params, true)
+      const selected = await this.owner(input.agentSessionId)
+      if (selected.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Restart requires the complete original Session ID.', 'INVALID_AGENT_RESTART')
+      context.signal?.throwIfAborted()
+      await context.assertCurrent?.()
+      if (selected.client.forwardRpc) return await selected.client.forwardRpc(method, input as AgentMuxRpcParams<typeof method>, context) as AgentMuxRpcResult<M>
+      const result = method === 'agent.restart' ? { session: await selected.client.restartAgent(input) }
+        : await selected.client.inspectAgentRestart(input)
+      return parseRpcNativeResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.reopen' || method === 'agent.reopen.check') {
       if (context.caller !== undefined || !context.principal ||

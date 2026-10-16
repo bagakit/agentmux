@@ -1,4 +1,5 @@
 import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './agent-terminal-frontend.js'
+import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './agent-session-restart.js'
 import { AgentSessionContinuitySupervisor } from './agent-session-continuity-supervisor.js'
 import { inspectAgentSessionInterruption } from './agent-session-interruption.js'
 import { confirmNativeInputAdoption, confirmNativeInputAdoptions } from './native-input-adoption.js'
@@ -873,6 +874,8 @@ export class AgentMuxClient {
     fact?: AgentCurrentActivity; invalidated?: boolean; conflicted?: boolean
   }>()
   private readonly pendingLifecycleBindings = new Map<string, AgentHookBinding>()
+  private readonly executingRestarts = new Set<string>()
+  private readonly restartSettlements = new Map<string, Promise<void>>()
   private readonly executingReopens = new Set<string>()
   private readonly reopenSettlements = new Map<string, Promise<void>>()
   private reopensDisposed = false
@@ -1904,7 +1907,7 @@ export class AgentMuxClient {
       for (const resource of resources) resource.controller.abort(new AgentMuxError(
         'History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     }
-    await Promise.allSettled([...this.reopenSettlements.values()])
+    await Promise.allSettled([...this.reopenSettlements.values(), ...this.restartSettlements.values()])
     await Promise.allSettled(this.hookRestorations.values())
     await this.hookServer.stop()
     this.disconnect()
@@ -4952,6 +4955,125 @@ export class AgentMuxClient {
     return await this.continuitySupervisor.serialize(agentSessionId, execute)
   }
 
+  /** Stop only the explicitly named generation, then restore its exact native conversation without input. */
+  async restartAgent(value: AgentMuxAgentRestartInput): Promise<AgentMuxAgentSession> {
+    const input = parseAgentRestartInput(value)
+    if (this.reopensDisposed) throw new AgentMuxError('This restart owner has been disposed. Use the current Core owner and the original operation.', 'AGENT_RESTART_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    this.requireConnected()
+    const operation = agentLifecycleOperationIdentity('restart', input.agentSessionId, input.operationId)
+    let digest = agentCreationIntentDigest({ ...input, action: 'restart' })
+    const identityOnly = !['args', 'env', 'commandOverride', 'cols', 'rows'].some(key => Object.hasOwn(input, key))
+    if (this.executingRestarts.has(operation)) throw new AgentMuxError('The original restart is still executing. Inspect that operation.',
+      'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+    this.executingRestarts.add(operation)
+    let settle!: () => void
+    this.restartSettlements.set(operation, new Promise<void>(resolve => { settle = resolve }))
+    try {
+      await this.resolveRawAgentSession(input.agentSessionId)
+      const canonical = await this.registry.refresh(input.agentSessionId)
+      const prior = canonical.continuityOperations?.[input.operationId]
+      if (identityOnly && prior?.action === 'restart' && prior.requestDigest) digest = prior.requestDigest
+      if (prior) {
+        if (prior.action !== 'restart' || prior.requestDigest !== digest || !sameRun(prior.previousRun, input.expectedRun)) {
+          throw new AgentMuxError('The original restart request changed. Keep its operation and original Run.', 'AGENT_RESTART_CONFLICT')
+        }
+        if (prior.newRun && prior.kind === 'unavailable' && prior.errorCode === AGENT_TERMINAL_HANDSHAKE_FAILED) {
+          throw new AgentMuxError(prior.error ?? 'The original restart replacement exited during startup.', prior.errorCode)
+        }
+        if (prior.newRun && prior.kind === 'resumed') {
+          if (!sameRun(prior.newRun, canonical.run)) throw new AgentMuxError('The restart completed on its original successor, and this Session has since changed. Inspect the original restart.', 'STALE_AGENT_SESSION')
+          return this.projectSession(canonical)
+        }
+      }
+      if (!sameRun(canonical.run, input.expectedRun)) throw new AgentMuxError('Agent Session changed before explicit restart. The current Run was kept.', 'STALE_AGENT_SESSION', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+      let reservation = await this.store.loadResumeCorrelation(input.agentSessionId, operation)
+      if (reservation) {
+        if (identityOnly && !prior && reservation.restart) digest = reservation.restart.requestDigest
+        if (!reservation.restart || reservation.restart.requestDigest !== digest ||
+          !matchesProviderNativeSessionTarget(reservation.restart.nativeTarget, canonical.nativeHandle)) {
+          throw new AgentMuxError('The original restart has another frozen request or native target.', 'AGENT_RESTART_CONFLICT')
+        }
+        reservation = await this.registry.claimRestart(input.agentSessionId, operation)
+        if (!reservation) throw new AgentMuxError('The original restart reservation is unconfirmed.', 'AGENT_RESTART_UNCONFIRMED')
+        if (reservation.preparedSession) {
+          const restored = await this.completePreparedResume(reservation, await this.kernel.list())
+          if (restored) return this.projectSession(restored)
+          throw new AgentMuxError('The original restart Start has no single confirmed Run. Inspect the same operation; no Start was repeated.',
+            'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+        }
+      } else {
+        if (prior) throw new AgentMuxError('The original restart reservation is unavailable. Keep its original intent and inspect it.', 'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+        const provider = this.providers.get(canonical.providerId)
+        if (!canonical.nativeHandle || canonical.nativeHandle.kind !== 'provider' || provider.catalog.resumeStrategy.kind !== 'provider-native' ||
+          canonical.observedNativeHandle && !matchesProviderNativeSessionTarget(canonical.nativeHandle, canonical.observedNativeHandle)) {
+          throw new AgentMuxError('Restart needs the exact verified native conversation and Provider resume support. The original Run was kept.',
+            'AGENT_RESUME_UNAVAILABLE', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+        }
+        // Resolve the real replacement before interrupting useful work. Freeze these exact options in the original durable operation.
+        const frozen = parseAgentRestartInput({ ...input, ...await this.sessionExecutorOptions(canonical, input) })
+        const { plan } = this.buildResumePlan(canonical, frozen)
+        const capability = await this.probeAgent(canonical.providerId, plan.command, { workspacePath: canonical.workspacePath, env: terminalEnvironment(plan.env) })
+        if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command))) throw executorUnavailableError(provider.label, capability)
+        await this.requireHookIngressOwner()
+        const stopOperation = await this.kernel.prepareStop(input.expectedRun.runId, operation + '-stop')
+        reservation = await this.registry.reserveRestart(input.agentSessionId, input.expectedRun, operation,
+          { requestDigest: digest, request: frozen, nativeTarget: structuredClone(canonical.nativeHandle), stopOperation })
+      }
+      if (!prior) {
+        const observedAt = Date.now()
+        const admitted: AgentMuxContinuityOperation = { operationId: input.operationId, agentSessionId: input.agentSessionId,
+          action: 'restart', trigger: 'manual', policy: normalizeAgentContinuityPolicy(), previousRun: { ...input.expectedRun },
+          nativeTarget: structuredClone(reservation.restart!.nativeTarget), requestDigest: digest,
+          admittedAt: observedAt, observedAt, rechecks: 0, kind: 'starting', reason: 'restart-stopping',
+          evidence: { kind: 'run-unknown', observedAt, message: 'The original explicit restart was admitted.' },
+          recoveryInputs: { reminder: '', continuation: '' } }
+        const recorded = await this.updateExactAgentSession(input.agentSessionId, input.expectedRun, session => ({ ...session,
+          continuity: admitted, continuityOperations: { ...session.continuityOperations, [input.operationId]: admitted }, updatedAt: Math.max(session.updatedAt + 1, observedAt) }))
+        this.publishSession(recorded)
+      }
+      return await this.resumeAgentRun(reservation.restart!.request, input.expectedRun, undefined, undefined, digest, reservation)
+    } finally { this.executingRestarts.delete(operation); this.restartSettlements.delete(operation); settle() }
+  }
+
+  /** Read the original restart progress. Never starts, stops or submits input. */
+  async inspectAgentRestart(value: AgentMuxAgentRestartIdentity): Promise<AgentMuxAgentRestartInspection> {
+    const input = parseAgentRestartInput(value, true)
+    const result: AgentMuxAgentRestartInspection = { ...input, previousRun: { ...input.expectedRun }, phase: 'not-found', canRetry: true, observedAt: Date.now() }
+    const canonical = await this.store.readMetadata(input.agentSessionId)
+    const prior = canonical?.continuityOperations?.[input.operationId]
+    if (prior) {
+      if (prior.action !== 'restart' || !sameRun(prior.previousRun, input.expectedRun)) throw new AgentMuxError('The operation names another original request.', 'AGENT_RESTART_CONFLICT')
+      result.session = this.projectSession(canonical!)
+      if (prior.newRun && prior.kind === 'resumed') return { ...result, phase: 'restarted', canRetry: false, newRun: { ...prior.newRun } }
+      if (prior.newRun && prior.kind === 'unavailable' && prior.errorCode === AGENT_TERMINAL_HANDSHAKE_FAILED) return { ...result,
+        phase: 'failed', canRetry: false, newRun: { ...prior.newRun }, detail: prior.error ?? 'The original replacement Run exited during startup.',
+        failure: { code: prior.errorCode, message: prior.error ?? 'The original replacement Run exited during startup.', observedAt: prior.observedAt } }
+    }
+    const operation = agentLifecycleOperationIdentity('restart', input.agentSessionId, input.operationId)
+    const reservation = await this.store.loadResumeCorrelation(input.agentSessionId, operation)
+    if (!reservation?.restart) return prior ? { ...result, phase: 'unconfirmed', canRetry: false, detail: 'The original restart reservation is unavailable; retain its original operation.' } : result
+    if (!sameRun(reservation.expectedRun, input.expectedRun)) throw new AgentMuxError('The original restart Run changed.', 'AGENT_RESTART_CONFLICT')
+    if (canonical) result.session = this.projectSession(canonical)
+    if (reservation.restart.startNotApplied) return { ...result, phase: 'starting', canRetry: true, detail: 'The original Run stopped. Its replacement Start was confirmed not applied; explicitly retry this same operation and frozen plan.' }
+    if (reservation.preparedSession) {
+      const candidates = (await this.kernel.list()).filter(run => run.lifecycleOperationId === operation)
+      const frozen = reservation.preparedSession.continuity?.restartLaunch
+      if (candidates.length === 1 && candidates[0]!.workspacePath === reservation.preparedSession.workspacePath && frozen &&
+        frozen.program === candidates[0]!.program && frozen.argsDigest === createHash('sha256').update(JSON.stringify(candidates[0]!.args)).digest('base64url')) {
+        return { ...result, phase: 'starting', canRetry: true, newRun: runRef(candidates[0]!.runId), detail: 'Original Start found; repeat the same restart request to confirm its Session commit.' }
+      }
+      return { ...result, phase: 'unconfirmed', canRetry: false, detail: 'The original Start is unconfirmed. No Start or input was repeated.' }
+    }
+    try {
+      const run = await this.kernel.status(input.expectedRun.runId)
+      if (canonical) this.assertAgentRun(canonical, run)
+      return { ...result, phase: run.state.type === 'running' ? 'stopping' : 'starting' }
+    } catch (error) {
+      return { ...result, phase: error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found' ? 'starting' : 'unconfirmed',
+        detail: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
   async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     if (!input.prompt.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent resume prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
@@ -5121,7 +5243,8 @@ export class AgentMuxClient {
     expectedRun?: AgentMuxRunRef,
     knownCapability?: AgentCapabilitySnapshot,
     reopening?: AgentMuxAgentReopenInput,
-    directRequestDigest?: string
+    directRequestDigest?: string,
+    restartReservation?: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>
   ): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     const previous = reopening ? undefined : this.requireAgentSession(input.agentSessionId)
@@ -5140,12 +5263,12 @@ export class AgentMuxClient {
       ...(input.prompt?.trim() ? { userContent: input.prompt } : {})
     }
     const lifecycleOperationId = agentLifecycleOperationIdentity(
-      reopening ? 'reopen' : 'resume', input.agentSessionId,
+      restartReservation ? 'restart' : reopening ? 'reopen' : 'resume', input.agentSessionId,
       safeId(input.operationId, 'Agent resume operation id')
     )
-    let reservation = reopening
+    let reservation = restartReservation ?? (reopening
       ? await this.registry.reserveReopen(input.agentSessionId, reopening.expectedRetiredAt, lifecycleOperationId, input.operationId)
-      : await this.registry.reserveExisting('resume', previous!.agentSessionId, previous!.run, lifecycleOperationId)
+      : await this.registry.reserveExisting('resume', previous!.agentSessionId, previous!.run, lifecycleOperationId))
     let hookBinding: AgentHookBinding | null = null
     let persisted: AgentMuxStoredAgentSession | null = null
     let abandonedRun: AgentMuxRunRef | null = null
@@ -5183,12 +5306,13 @@ export class AgentMuxClient {
       } catch (error) {
         if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
       }
-      if (oldRun?.state.type === 'running') {
+      if (oldRun?.state.type === 'running' && !restartReservation) {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
       }
-      if (directRequestDigest) {
+      if (directRequestDigest && (!restartReservation || !continuity)) {
         const now = Date.now()
-        continuity = { operationId: input.operationId, agentSessionId: current.agentSessionId, trigger: 'input',
+        continuity = { operationId: input.operationId, agentSessionId: current.agentSessionId, trigger: restartReservation ? 'manual' : 'input',
+          ...(restartReservation ? { action: 'restart' as const } : {}),
           policy: normalizeAgentContinuityPolicy(), previousRun: { ...current.run }, nativeTarget: structuredClone(current.nativeHandle),
           admittedAt: now, observedAt: now, rechecks: 0, kind: 'starting', reason: 'explicit-request', requestDigest: directRequestDigest,
           evidence: oldRun ? { kind: 'run-ended', state: oldRun.state.type as 'exited' | 'interrupted', observedAt: now } : { kind: 'run-missing', observedAt: now },
@@ -5199,7 +5323,7 @@ export class AgentMuxClient {
         if (directInput) continuity.launchInput = directInput
       }
       // Continuity already froze this configuration together with its capability probe.
-      if (!knownCapability) input = await this.sessionExecutorOptions(current, input)
+      if (!knownCapability && !restartReservation) input = await this.sessionExecutorOptions(current, input)
       const provider = this.providers.get(current.providerId)
       if (reopening && provider.catalog.resumeStrategy.kind !== 'provider-native') {
         throw new AgentMuxError('This Provider does not support continuing its retired native conversation.', 'AGENT_RESUME_UNAVAILABLE')
@@ -5224,6 +5348,30 @@ export class AgentMuxClient {
       delete (withoutPreviousNativeActor as Partial<AgentMuxStoredAgentSession>).nativeActor
       const nativeSession = { ...withoutPreviousNativeActor, ...(managedLaunch?.nativeActor ? { nativeActor: managedLaunch.nativeActor } : {}) }
       await this.requireHookIngressOwner()
+      if (restartReservation) {
+        if (!matchesProviderNativeSessionTarget(restartReservation.restart?.nativeTarget, current.nativeHandle)) throw new AgentMuxError('The original restart native target changed.', 'AGENT_RESTART_CONFLICT')
+        if (oldRun?.state.type === 'running') {
+          this.stopRequestedRuns.add(current.run.runId)
+          try { await this.kernel.stop(restartReservation.restart!.stopOperation) }
+          catch (error) {
+            if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw new AgentMuxError(
+              `The original restart Stop is unconfirmed. Inspect or retry the same operation. ${error instanceof Error ? error.message : String(error)}`,
+              'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+          }
+        }
+        // A Stop acknowledgement is not a substitute for the exact old Run's terminal state.
+        try { oldRun = await this.kernel.status(current.run.runId); this.assertAgentRun(current, oldRun) }
+        catch (error) { if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') oldRun = null; else throw error }
+        if (oldRun?.state.type === 'running') throw new AgentMuxError('The original Run has not ended. No replacement was started.',
+          'AGENT_RESTART_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+        if (continuity) continuity.evidence = oldRun ? { kind: 'run-ended', state: oldRun.state.type as 'exited' | 'interrupted', observedAt: Date.now() } : { kind: 'run-missing', observedAt: Date.now() }
+        if (continuity) {
+          continuity.reason = 'restart-starting'
+          const pending = structuredClone(continuity)
+          this.publishSession(await this.updateExactAgentSession(current.agentSessionId, current.run, session => ({ ...session,
+            continuity: pending, continuityOperations: { ...session.continuityOperations, [input.operationId]: pending }, updatedAt: Math.max(session.updatedAt + 1, Date.now()) })))
+        }
+      }
       await this.hookBindings.get(current.run.runId)?.close()
       this.hookBindings.delete(current.run.runId)
       this.settleHookRestore(current)
@@ -5272,6 +5420,12 @@ export class AgentMuxClient {
       const launchEnvironment = this.agentEnvironment(plan.env, current.agentSessionId, current.providerId, current.executorId,
         hookBinding, lifecycleOperationId, invocationCapability)
       if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {
+        if (restartReservation) {
+          const identity = this.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })
+          if (restartReservation.restart?.startNotApplied && continuity.restartLaunch && !isDeepStrictEqual(continuity.restartLaunch, identity)) throw new AgentMuxError(
+            'The original not-applied restart launch changed. Its original plan and native identity are retained.', 'AGENT_RESTART_CONFLICT')
+          continuity.restartLaunch = identity
+        }
         if (continuity.launchInput) continuity.launchInput.launchPlan = this.kernel.launchIdentity({ program: plan.command, args: plan.args, env: launchEnvironment })
         reservation = await this.registry.prepareResume(reservation, { ...nativeSession, continuity,
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
@@ -5288,12 +5442,25 @@ export class AgentMuxClient {
         env: launchEnvironment,
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
-      }).catch(error => {
+      }).catch(async error => {
         if (!(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
           // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
           preserveUnconfirmedRun = true
           throw new AgentMuxError(`Continue start is unconfirmed. Read the original Session; no operation was resent. ${error instanceof Error ? error.message : String(error)}`,
             reopening ? 'AGENT_REOPEN_UNCONFIRMED' : 'AGENT_RESUME_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+        }
+        if (restartReservation && reservation.kind === 'resume') {
+          const failure = { code: error.code, message: error.message, observedAt: Date.now() }
+          reservation = await this.registry.recordRestartStartNotApplied(reservation, failure)
+          const pending = await this.updateExactAgentSession(current.agentSessionId, current.run, value => {
+            const original = value.continuityOperations?.[input.operationId] ?? continuity!
+            const retained = { ...original, reason: 'restart-start-not-applied', errorCode: error.code, error: error.message,
+              ...(continuity?.restartLaunch ? { restartLaunch: continuity.restartLaunch } : {}), observedAt: failure.observedAt }
+            return { ...value, continuity: retained, continuityOperations: { ...value.continuityOperations, [input.operationId]: retained } }
+          })
+          this.publishSession(pending)
+          throw new AgentMuxError('The original Run stopped; replacement Start was confirmed not applied. Check or explicitly retry the same original restart.',
+            'AGENT_RESTART_START_NOT_APPLIED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
         }
         throw error
       })
@@ -5315,6 +5482,7 @@ export class AgentMuxClient {
       }
       if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {
         next.continuity = { ...continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
+        if (restartReservation) { delete next.continuity.errorCode; delete next.continuity.error }
         bindContinuityLaunchInput(next.continuity, next.run)
         const recoveryDelivery = createContinuityInputDelivery(next.continuity, run.acceptedInputBytes ?? undefined)
         if (recoveryDelivery) next.continuity.recoveryDelivery = recoveryDelivery
@@ -5537,7 +5705,8 @@ export class AgentMuxClient {
         }
       }
       try {
-        if (!preserveUnconfirmedRun) {
+        if (restartReservation && !preserveUnconfirmedRun && !persisted) this.pendingLifecycleBindings.delete(lifecycleOperationId)
+        if (!preserveUnconfirmedRun && !restartReservation) {
           if (!persisted || hookBound) this.pendingLifecycleBindings.delete(lifecycleOperationId)
           await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
         }
@@ -5559,6 +5728,10 @@ export class AgentMuxClient {
     const candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)
     if (!prepared || candidates.length !== 1) return null
     const run = candidates[0]!
+    if (reservation.restart && (!prepared.continuity?.restartLaunch || prepared.continuity.restartLaunch.program !== run.program ||
+      prepared.continuity.restartLaunch.argsDigest !== createHash('sha256').update(JSON.stringify(run.args)).digest('base64url'))) {
+      throw new AgentMuxError('The original restart Run does not match its frozen no-input launch.', 'AGENT_RESTART_CONFLICT')
+    }
     if (run.runId === reservation.expectedRun.runId || run.workspacePath !== prepared.workspacePath) {
       throw new AgentMuxError('Original resume Run does not match the prepared target.', 'AGENT_SESSION_RUN_MISMATCH')
     }
@@ -7307,6 +7480,7 @@ export class AgentMuxClient {
           evidence: { source: 'agentmux', observedAt: Date.now() } }) }
         continue
       }
+      if (reservation.kind === 'resume' && reservation.restart && !reservation.preparedSession) continue
       if (reservation.kind === 'resume' && reservation.preparedSession) {
         try { await this.completePreparedResume(reservation, runs) }
         catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,

@@ -274,6 +274,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.continuity.control', '--input FILE|-', 'Continue or cancel one exact durable recovery intent.',
     { '--input': 'data' }, async f => parseAgentContinuityControlInput(await readControlJsonInput(value(f, '--input', true)!, 'Recovery control')),
     'JSON requires complete agentSessionId, intentOperationId, expectedRun, operationId and action. continue requires positive additionalAttempts; cancel forbids that field. Cancel prevents unclaimed attempts without stopping an admitted or healthy Run. Keep the exact full packet and operationId after an unknown receipt; repeat it to read the original result, including after retirement. Continue only reopens a paused intent and never replays prior input.'),
+  ...(['agent.restart', 'agent.restart.inspect'] as const).map(method => command(method,
+    '--session ID --run ID --operation-id ID', method === 'agent.restart' ? 'Explicitly stop this original Run and restore the same native conversation without sending input.' : 'Read one original restart without starting, stopping or sending input.',
+    { '--session': 'data', '--run': 'data', ...OP }, f => {
+      if (!f.values.has('--operation-id')) invalid('--operation-id is required for an exact original restart.')
+      return { agentSessionId: id(f, '--session', true), expectedRun: { runId: id(f, '--run', true) }, operationId: value(f, '--operation-id', true)! }
+    }, 'Requires an authenticated user or device and complete original Session/Run identities. Keep the same Run and operation ID after an unknown reply. Inspect the original operation; never retry with a new operation ID. Restart interrupts ongoing work, keeps the original native conversation and never replays a prompt. Ordinary Resume does not stop a healthy backend.')),
   command('agent.refresh', '--session ID', 'Re-read the canonical original Session using its complete Session ID.',
     { '--session': 'data' }, f => ({ agentSessionId: id(f, '--session', true) }),
     'No Run is started, resumed or stopped and no input is sent. Passive native identity observation may confirm and persist metadata asynchronously; this reply does not promise identity recovery or reopen a retired Session. Use agent inspect for diagnostic inspection.'),
