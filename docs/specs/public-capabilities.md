@@ -75,7 +75,7 @@ Note 使用同一 `file.read/write/create`，经 Main 的 [NoteFileWriter](../..
 
 缺失目标的正文创建沿同一文件 owner 提供 `file.create`，CLI 为 `file create --input FILE|-`；先由 `file.read` 确认目标映射，提交完整原资源、Zone 相对路径、正文与明确的 `expectedRevision:null`。Main 确认映射后委托 `WorkspaceFiles.write` 的排他创建，不覆盖已存在文件；普通文本和 Note 使用同一通用能力，不新增正文 owner。结果沿原 `written`／`conflict`／`error`／`unknown` 与完整资源／revision 表达，未知先读同一准确目标对账，不自动换名或重发。既有 `file.write` 的完整 revision 要求保持。
 
-Note 首次保留的内容共享沿 [Files 共享合同](../../packages/core/src/public-rpc-file-share.ts) 提供 `file.share`／`file.share.inspect`，CLI 为 `file share [inspect] --input FILE|-`。GUI 和 CLI 共用 [原共享 owner](../../apps/desktop/src/main/note-shared-block-owner.ts)、Note writer、lease、CAS 和可信历史，分别回执共享文件创建、原位置替换与目标保存，不冒跨文件原子提交。检查可读取保留的原请求或一个准确共享文件；恢复范围及 Markdown 身份、关系的唯一来源见 [Note 格式](note-markdown.md#共享-markdown-文件)。
+Note 首次保留的内容共享沿 [Files 共享合同](../../packages/core/src/public-rpc-file-share.ts) 提供 `file.share`／`file.share.undo`／`file.share.inspect`，CLI 为 `file share [undo|inspect] --input FILE|-`。GUI 和 CLI 共用 [原共享 owner](../../apps/desktop/src/main/note-shared-block-owner.ts)、[撤销 owner](../../apps/desktop/src/main/note-shared-undo-owner.ts)、Note writer、lease、CAS 和可信历史，分别回执共享文件创建、原位置替换、目标保存与条件回收，不冒跨文件原子提交。一次目标保存可同时移除旧使用并新增共享；检查可读取保留的原提取／撤销请求或一个准确共享文件。恢复范围、受管并发边界及 Markdown 身份、关系的唯一来源见 [Note 格式](note-markdown.md#共享-markdown-文件)。
 
 项目文件名发现沿同一 Files owner：`file ls` CLI → `file.list` → `WorkspaceFiles.listFiles`；结果只含名称、原资源与 complete／partial 原因，应用 Git 忽略规则且不递归目录链接，不读正文或改变焦点。名称相对请求的目录；使用 `file open --zone` 继续时，将原 `file ls --path` 的目录前缀与名称拼接为 Zone 相对路径（默认 `.` 可省略）。未知观察保留原精确打开能力。
 
