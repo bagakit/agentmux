@@ -2424,7 +2424,8 @@ export class AgentMuxClient {
   }
 
   /** Exact-record lookup reuses the original Provider binding, resource signer and read lifetime. */
-  private async readConversationNativeRecord(agentSessionId: string, source: AgentSessionHistorySource, recordId: string, signal?: AbortSignal): Promise<AgentSessionHistoryItem> {
+  private async readConversationNativeRecord(agentSessionId: string, source: AgentSessionHistorySource, recordId: string, signal?: AbortSignal,
+    invocation: Pick<AgentMuxSessionQuestionReplyInput, 'commandOverride' | 'args' | 'env'> & { turnId?: string } = {}): Promise<AgentSessionHistoryItem> {
     if (this.providerReadsDisposed) throw new AgentMuxError('Conversation reader was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) throw new AgentMuxError('Conversation reading is busy; retry this exact original record.', 'AGENT_SESSION_HISTORY_BUSY')
     const lifetime = this.providerReadLifetime('history'), { controller, read } = lifetime
@@ -2434,18 +2435,18 @@ export class AgentMuxClient {
       const descriptor = await read(this.historyDescriptor(agentSessionId))
       const previous = descriptor.history?.previousNativeHandle
       const sourceOptions = previous?.kind === 'provider' && previous.providerId === source.providerId && previous.sessionId === source.nativeSessionId ? { nativeSource: 'previous' as const } : {}
-      const binding = await read(this.nativeHistoryBinding(agentSessionId, sourceOptions, controller.signal, 'read'))
+      const binding = await read(this.nativeHistoryBinding(agentSessionId, { ...invocation, ...sourceOptions }, controller.signal, 'read'))
       const { session, provider, handle, executorOptions: options } = binding
       if (source.providerId !== session.providerId || source.nativeSessionId !== handle.sessionId) throw new AgentMuxError('The exact native record belongs to another original source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       if (!provider.readSessionHistoryRecord) throw new AgentMuxError('This Provider cannot locate the exact recorded version. The original source remains readable.', 'AGENT_SESSION_HISTORY_RECORD_UNSUPPORTED')
       const contentSigningSecret = (await read(this.store.readMetadata(agentSessionId)))?.hookToken
       const originalSource = { providerId: source.providerId, nativeSessionId: source.nativeSessionId }
-      const item = await read(provider.readSessionHistoryRecord({ agentSessionId, source: originalSource, recordId, signal: controller.signal,
+      const item = await read(provider.readSessionHistoryRecord({ agentSessionId, source: originalSource, recordId, ...(invocation.turnId === undefined ? {} : { turnId: invocation.turnId }), signal: controller.signal,
         command: resolveAgentExecutable(options.commandOverride, provider.executable), args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath,
         ...(contentSigningSecret === undefined ? {} : { contentSigningSecret }), ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }) }))
       await read(binding.assertCurrent())
       const record = normalizeSessionHistoryPage(source, { source, items: [item], nextCursor: null }, 1).items[0]!
-      if (record.id !== recordId) throw new AgentMuxError('The original lookup returned another native record.', 'CONTROL_PROTOCOL_ERROR')
+      if (record.id !== recordId || invocation.turnId !== undefined && record.turnId !== invocation.turnId) throw new AgentMuxError('The original lookup returned another native record.', 'CONTROL_PROTOCOL_ERROR')
       return await read(confirmNativeInputAdoption(record, { hostId: binding.sourceHostId, agentSessionId }, originalSource,
         key => this.inspectAgentPromptSubmission(key), controller.signal))
     } finally { signal?.removeEventListener('abort', cancel); lifetime.close() }
@@ -6715,21 +6716,31 @@ export class AgentMuxClient {
     if (session.nativeHandle?.kind === 'provider' && session.nativeHandle.sessionId !== input.source.nativeSessionId) {
       throw new AgentMuxError('The question belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     }
-    // A history reference identifies the question, not the live CLI editor.
-    // No current Provider exposes an exact automatic async reply protocol.
-    // Keep the original public entry and its recovery facts, without creating
-    // an input claim or drawing conclusions about an earlier operation.
-    const route = this.providers.get(session.providerId).catalog.capabilities.asyncQuestionReply
-    throw new AgentMuxError('Answer this question in the original terminal. Automatic question replies are not exposed by this Provider; your answer and existing operation remain available.',
-      'AGENT_QUESTION_REPLY_UNSUPPORTED', JSON.stringify({ reason: route === 'terminal'
-        ? 'original-terminal-required' : 'automatic-reply-not-declared',
-        recovery: { kind: 'terminal', agentSessionId: session.agentSessionId, expectedRun: session.run } }))
+    const provider = this.providers.get(session.providerId)
+    if (provider.catalog.capabilities.asyncQuestionReply !== 'native-input' || !provider.planQuestionReply) throw new AgentMuxError(
+      'This Provider does not expose direct asynchronous question replies. The original question, answer and terminal remain available.',
+      'AGENT_QUESTION_REPLY_UNSUPPORTED')
+    const record = await this.readConversationNativeRecord(session.agentSessionId, input.source, input.recordId, input.signal, input)
+    const prompt = provider.planQuestionReply(record, input.answers)
+    const assertSource = (current: AgentMuxAgentSession): void => {
+      const handle = current.nativeHandle
+      if (handle?.kind !== 'provider' || handle.providerId !== input.source.providerId || handle.sessionId !== input.source.nativeSessionId) throw new AgentMuxError(
+        'The question belongs to another original native source. No reply was sent; the original work remains available.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+    }
+    assertSource(session)
+    await this.submitPromptInternal({ ...condition, agentSessionId: session.agentSessionId, operationId: input.operationId,
+      prompt, execution: 'default', ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
+      ...(input.sourceDevice ? { sourceDevice: input.sourceDevice } : {}), sourceChannel: input.sourceChannel ?? 'question-reply',
+      ...(input.signal ? { signal: input.signal } : {}) }, undefined, assertSource, undefined, undefined, 'prompt', undefined, { source: input.source, turnId: input.turnId, recordId: input.recordId, questionIds: input.answers.map(answer => answer.questionId) })
+    return { agentSessionId: session.agentSessionId, source: { ...input.source }, recordId: input.recordId,
+      questionIds: input.answers.map(answer => answer.questionId), operationId: input.operationId, outcome: 'submitted' }
   }
 
   private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
     assertSession?: (session: AgentMuxAgentSession) => void, assertInput?: () => void,
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
-    inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
+    inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> },
+    questionReply?: AgentPromptMessageContent['questionReply']): Promise<void> {
     const startedAt = Date.now()
     const id = (value: unknown): string | null => typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\0\r\n]/u.test(value) ? value : null
     let sourceDevice: import('./types.js').AgentOperationDevice | undefined
@@ -6745,7 +6756,7 @@ export class AgentMuxClient {
     let stage = 'validation'
     try {
       assertInput?.()
-      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, value => { stage = value }, authority, producer, inputControl)
+      await this.performPromptSubmission(input, authorAgentSessionId, assertSession, value => { stage = value }, authority, producer, inputControl, questionReply)
     } catch (error) {
       // All observations below come from this invocation's failure boundary. Missing
       // projections stay missing; they do not authorize replay of the logical message.
@@ -6782,7 +6793,8 @@ export class AgentMuxClient {
   private async performPromptSubmission(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string,
     assertSession?: (session: AgentMuxAgentSession) => void, stage: (value: string) => void = () => {},
     authority?: import('./prompt-submission.js').AgentPromptInputAuthority, producer: 'prompt' | 'message' = 'prompt',
-    inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }): Promise<void> {
+    inputControl?: { authorizeDispatch(): Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> },
+    questionReply?: AgentPromptMessageContent['questionReply']): Promise<void> {
     stage('connection')
     this.requireConnected()
     stage('validation')
@@ -6823,6 +6835,7 @@ export class AgentMuxClient {
       ...(producer === 'message' ? { kind: 'message', messageId: input.operationId } : { kind: 'prompt', submissionId: input.operationId })
     }))?.admission?.intent : undefined
     const authored: AgentPromptMessageContent = {
+      ...(questionReply ? { questionReply: structuredClone(questionReply) } : {}),
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
       ...(authorAgentSessionId ? { authorAgentSessionId } : authority?.externalAuthor ? { authorExternal: structuredClone(authority.externalAuthor) } : input.authorHuman === true ? { authorHuman: true } : {}),
@@ -6909,7 +6922,8 @@ export class AgentMuxClient {
             return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, ordinaryPlan, condition,
               input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertCurrentSubmission, transportQualification,
               inputKey,
-              { ...(authority ? { authority } : {}), ...(inputControl ? { authorizeDispatch: inputControl.authorizeDispatch } : {}) })
+              { ...(authority ? { authority } : {}), ...(inputControl ? { authorizeDispatch: inputControl.authorizeDispatch } : {}),
+                ...(questionReply ? { requiredNativeSource: questionReply.source } : {}) })
           }, { kind: 'semantic', bytes: null }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation, release => { releasePreparationObservation = release }, transportQualification?.deadline)
           break
         } catch (error) {

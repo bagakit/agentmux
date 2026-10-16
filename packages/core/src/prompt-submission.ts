@@ -146,7 +146,7 @@ export async function observePromptInput<T>(signal: AbortSignal, read: () => Pro
 
 function promptMessageIdentity(message: AgentPromptMessageContent | undefined): string {
   return JSON.stringify(message === undefined ? null : [message.userContent, message.systemContext,
-    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel, message.authorExternal])
+    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel, message.authorExternal, message.questionReply])
 }
 
 /**
@@ -303,7 +303,7 @@ export class AgentPromptSubmissionCoordinator {
     assertSession?: (session: AgentMuxAgentSession) => void,
     transportQualification?: AgentPromptTransportQualification,
     inputKey?: AgentPromptInputKey,
-    control?: { authority?: AgentPromptInputAuthority; authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null>; onlyIfUnclaimed?: boolean }
+    control?: { authority?: AgentPromptInputAuthority; authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null>; onlyIfUnclaimed?: boolean; requiredNativeSource?: { providerId: string; nativeSessionId: string } }
   ): Promise<AgentPromptMessageContent | undefined> {
     const condition = 'kind' in binding ? undefined : binding
     const manual = condition === undefined
@@ -478,7 +478,7 @@ export class AgentPromptSubmissionCoordinator {
     assertSession?: (session: AgentMuxAgentSession) => void,
     transportQualification?: AgentPromptTransportQualification,
     admissionIntent?: AgentPromptAdmissionIntent,
-    control?: { authority?: AgentPromptInputAuthority; authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null> }
+    control?: { authority?: AgentPromptInputAuthority; authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null>; requiredNativeSource?: { providerId: string; nativeSessionId: string } }
   ): Promise<void> {
     const provider = this.deps.providers.get(session.providerId)
     const manual = admissionIntent?.kind === 'manual-actor'
@@ -655,19 +655,23 @@ export class AgentPromptSubmissionCoordinator {
     // A manual terminal intent and any previously frozen byte plan stay terminal.
     const defaultNativeSource = (current: AgentMuxStoredAgentSession) => {
       const handle = current.nativeHandle
-      if (inputKey.kind !== 'message' || execution !== 'default' || admissionIntent?.kind !== 'exact-condition' ||
+      if ((!control?.requiredNativeSource && inputKey.kind !== 'message') || execution !== 'default' || admissionIntent?.kind !== 'exact-condition' ||
           rejoiningFrozenPlan || current.hostId !== 'local' || run.pid === null || !provider.prepareNativeInput || !current.nativeActor ||
           this.deps.registry.isDurabilityUnconfirmed(current.agentSessionId) ||
           handle?.kind !== 'provider' || handle.providerId !== current.providerId ||
           current.observedNativeHandle && !sameNativeHandle(current.observedNativeHandle, handle) ||
           current.nativeBinding && !sameRun(current.nativeBinding.run, current.run) ||
           current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run)) return undefined
-      return { providerId: handle.providerId, nativeSessionId: handle.sessionId }
+      const source = { providerId: handle.providerId, nativeSessionId: handle.sessionId }
+      if (control?.requiredNativeSource && !isDeepStrictEqual(source, control.requiredNativeSource)) return undefined
+      return source
     }
     const nativeOriginal = admissionIntent?.kind === 'native-conversation' ||
-        inputKey.kind === 'message' && execution === 'default' && admissionIntent?.kind === 'exact-condition' && !rejoiningFrozenPlan
+        (control?.requiredNativeSource || inputKey.kind === 'message') && execution === 'default' && admissionIntent?.kind === 'exact-condition' && !rejoiningFrozenPlan
       ? await refreshSession(session.agentSessionId, session.run) : undefined
     const source = nativeOriginal && defaultNativeSource(nativeOriginal)
+    if (control?.requiredNativeSource && !source) throw new AgentMuxError(
+      'The original native question source or actor is unconfirmed. No reply was sent; the Agent and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
     const target: { source: { providerId: string; nativeSessionId: string }; expectedTurnId?: string } | undefined =
       admissionIntent?.kind === 'native-conversation' ? admissionIntent : source ? { source } : undefined
     if (target) {

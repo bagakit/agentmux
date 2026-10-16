@@ -1,5 +1,6 @@
 import { AgentMuxError } from '../errors.js'
 import type {
+  AgentSessionHistoryItem,
   AgentSessionHistoryQuestionRequest,
   AgentSessionHistoryQuestionAnswer
 } from '../types.js'
@@ -47,4 +48,21 @@ export function codexQuestionAnswers(content: unknown): AgentSessionHistoryQuest
   if (!replies.length || replies.some(reply => !reply || typeof reply !== 'object' || Array.isArray(reply) ||
     typeof reply.questionItemId !== 'string' || !reply.questionItemId || typeof reply.question !== 'string' || typeof reply.answer !== 'string')) return undefined
   return replies.map(reply => ({ questionId: reply.questionItemId, answer: reply.answer, prompt: reply.question }))
+}
+
+/** The native async reply envelope binds each answer to its original question. */
+export function planCodexQuestionReply(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string {
+  const request = record.questionRequest
+  if (request?.delivery !== 'async' || !answers.length) throw new AgentMuxError(
+    'The exact record does not expose asynchronous questions.', 'INVALID_AGENT_QUESTION_REPLY')
+  const questions = new Map(request.questions.map(question => [question.id, question]))
+  const seen = new Set<string>()
+  const replies = answers.map(answer => {
+    const question = questions.get(answer.questionId)
+    if (!question || seen.has(answer.questionId) || !answer.answer.trim()) throw new AgentMuxError(
+      'The answer must name an original question exactly once.', 'INVALID_AGENT_QUESTION_REPLY')
+    seen.add(answer.questionId)
+    return { questionItemId: question.id, question: question.prompt, answer: answer.answer }
+  })
+  return OPEN + '\n' + JSON.stringify(replies) + '\n' + CLOSE
 }

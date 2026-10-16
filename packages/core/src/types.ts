@@ -535,8 +535,8 @@ export type AgentCapabilities = {
   /** Native copies preserve their Provider context and receive a new conversation identity. */
   providerFork?: { current: true }
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
-  /** Structured async questions use the original CLI editor, not an automatic reply channel. */
-  asyncQuestionReply?: 'terminal'
+  /** Exact async answers use the original managed native actor when declared. */
+  asyncQuestionReply?: 'native-input'
   /** Manual current-terminal submit reports bytes; it does not promise Native steering. */
   promptExecution?: { immediate: 'terminal-submit' | 'interrupt-before-input' }
   /** Explicit selected-source input; only supported original managed Runs have its private transport. */
@@ -1276,6 +1276,8 @@ export type AgentMuxAgentCreationFact = {
 
 /** Original message segments and verified authors captured before Input dispatch. */
 export type AgentPromptMessageContent = {
+  /** Original question identity frozen with this input; independent of encoded native text. */
+  questionReply?: { source: AgentSessionHistorySource; turnId: string; recordId: string; questionIds: string[] }
   userContent?: string
   systemContext?: string
   authorAgentSessionId?: string

@@ -54,6 +54,7 @@ import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryRecordContext,
   AgentSessionHistoryItem,
+  AgentSessionHistoryQuestionAnswer,
   AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryObservationContext,
   AgentSessionHistoryObservationHandle,
@@ -166,6 +167,8 @@ export type AgentProvider = {
   buildForkLaunch?(context: AgentProviderForkContext): AgentLaunchPlan
   /** Original executable has already been probed; this final plan also enters original lifecycle preparation. */
   prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
+  /** Encode replies from an exact Provider-read record; no caller-supplied display text. */
+  planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
   prepareNativeInput?(context: AgentProviderNativeInputContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string }): Promise<AgentProviderPreparedNativeInput>
   observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
   reconnectTerminalFrontend?(context: AgentProviderNativeInputContext, request: { operationId: string; expectedFrontendId: string; nativeSessionId: string }): Promise<AgentTerminalFrontendObservation>
@@ -221,6 +224,7 @@ export type AgentProviderDefinition = {
     args: readonly string[]
   ) => string[]
   prepareManagedLaunch?: AgentProvider['prepareManagedLaunch']
+  planQuestionReply?: AgentProvider['planQuestionReply']
   prepareNativeInput?: AgentProvider['prepareNativeInput']
   observeTerminalFrontend?: AgentProvider['observeTerminalFrontend']
   reconnectTerminalFrontend?: AgentProvider['reconnectTerminalFrontend']
@@ -381,6 +385,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     catalog,
     hook: definition.hook,
     ...(definition.prepareManagedLaunch ? { prepareManagedLaunch: definition.prepareManagedLaunch } : {}),
+    ...(definition.planQuestionReply ? { planQuestionReply: definition.planQuestionReply } : {}),
     ...(definition.prepareNativeInput ? { prepareNativeInput: definition.prepareNativeInput } : {}),
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
