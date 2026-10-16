@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { spawn, execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -52,7 +53,7 @@ let probe: Awaited<ReturnType<typeof messageJournalIo>>
 beforeAll(async () => { probe = await messageJournalIo() })
 afterAll(async () => { await probe.close() })
 function input(id = 'one'): AgentMuxMessageAppendInput {
-  return { messageId: `message-${id}`, operationId: `operation-${id}`, createdAt: 100,
+  return { messageId: `message-${id}`, operationId: `operation-${id}`, createdAt: _tailFixtureEpoch(0, 0, 100),
     sender: { kind: 'human', principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
     threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null,
     senderSessionId: null, senderRunId: null, recipientSessionId: 'recipient', recipientRunId: 'run-recipient',
@@ -177,7 +178,7 @@ describe('journal persistence under isolated resource pressure', () => {
     console.log('__JOURNAL_ACKED_IO__',JSON.stringify(probe.stats()))
   })
 
-  it('returns promptly while a real second process owns the original writer mutex',async()=>{
+  it('waits asynchronously for a short original mutex lease and preserves one original effect',async()=>{
     const q=await queue(); await q.append(input())
     const script=`import {DatabaseSync} from 'node:sqlite';const d=new DatabaseSync(process.argv[1]);d.exec('BEGIN IMMEDIATE');process.send('held');setTimeout(()=>{d.exec('COMMIT');d.close();process.exit(0)},1400)`
     const child=spawn(process.execPath,['--input-type=module','-e',script,`${q.path}.mutex.sqlite`],{stdio:['ignore','ignore','pipe','ipc']})
@@ -185,10 +186,32 @@ describe('journal persistence under isolated resource pressure', () => {
     try {
       await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject)})
       let beats=0; timer=setInterval(()=>beats++,10); const start=performance.now()
-      const error=await q.append(input('two')).catch(error=>error)
-      expect(error.code).toBe('MESSAGE_QUEUE_BACKPRESSURE'); expect(performance.now()-start).toBeLessThan(700)
-      await new Promise(resolve=>setTimeout(resolve,50)); expect(beats).toBeGreaterThan(1)
+      const accepted=await q.append(input('two'))
+      expect(accepted.sequence).toBe(2); expect(performance.now()-start).toBeLessThan(5000)
+      expect(beats).toBeGreaterThan(1)
       expect(await exited).toBe(0); expect((await q.append(input('two'))).sequence).toBe(2)
+      console.log('__MESSAGE_MUTEX_RELEASE__',JSON.stringify({elapsedMs:performance.now()-start,beats,sequence:accepted.sequence}))
+    } finally {if(timer)clearInterval(timer);if(child.exitCode===null){child.kill('SIGKILL');await exited}}
+  })
+  it('bounds only acquisition, records no effect on timeout, and retries the original identity after release',async()=>{
+    const q=await queue(); await q.append(input())
+    const script=`import {DatabaseSync} from 'node:sqlite';const d=new DatabaseSync(process.argv[1]);d.exec('BEGIN IMMEDIATE');process.send('held');process.once('message',()=>{d.exec('ROLLBACK');d.close();process.exit(0)})`
+    const child=spawn(process.execPath,['--input-type=module','-e',script,`${q.path}.mutex.sqlite`],{stdio:['ignore','ignore','pipe','ipc']})
+    const exited=new Promise<number|null>(resolve=>child.once('exit',resolve)); const original=input('same-after-timeout')
+    let timer:ReturnType<typeof setInterval>|undefined
+    try {
+      await new Promise((resolve,reject)=>{child.once('message',resolve);child.once('error',reject)})
+      let beats=0; timer=setInterval(()=>beats++,10); const start=performance.now()
+      const error=await q.append(original).catch(error=>error), elapsedMs=performance.now()-start
+      expect(error.code).toBe('MESSAGE_QUEUE_BACKPRESSURE'); expect(['mutex-configure','mutex-acquire']).toContain(JSON.parse(error.detail).stage)
+      expect(elapsedMs).toBeGreaterThan(1000); expect(elapsedMs).toBeLessThan(5000); expect(beats).toBeGreaterThan(1)
+      const {DatabaseSync}=await import('node:sqlite'), read=new DatabaseSync(q.path,{readOnly:true})
+      try {expect(read.prepare('SELECT count(*) AS n FROM messages WHERE message_id=?').get(original.messageId!)!.n).toBe(0)} finally {read.close()}
+      child.send('release'); expect(await exited).toBe(0)
+      const receipt=await q.append(original); expect(receipt.envelope.operationId).toBe(original.operationId)
+      expect(await q.append(original)).toEqual(receipt)
+      expect((await q.readJournal()).filter(r=>r.kind==='message'&&r.envelope.messageId===original.messageId)).toHaveLength(1)
+      console.log('__MESSAGE_MUTEX_TIMEOUT__',JSON.stringify({elapsedMs,beats,messageId:receipt.messageId,operationId:receipt.envelope.operationId,sequence:receipt.sequence}))
     } finally {if(timer)clearInterval(timer);if(child.exitCode===null){child.kill('SIGKILL');await exited}}
   })
   it('converts every original communication fact once and reopens them in independent processes',async()=>{
@@ -228,7 +251,7 @@ describe('journal persistence under isolated resource pressure', () => {
     expect(first.batch).toEqual(expectedBatch);expect(first.acknowledged.messages).toEqual([]);expect(first.acknowledged.generation).toBe(2)
     expect(first.dispatch).toMatchObject({sourceMessageId:'message-source',originAwaits:false,events:[{kind:'worker_done',replyMessageId:'message-reply'}]})
     expect(first.unknown).toBe('AGENT_PROMPT_INPUT_UNCONFIRMED');expect(first.captures).toBe(0)
-    expect(first.messages[0]).toMatchObject({envelope:{messageId:'message-source',body:source.body,senderSessionId:'owner',recipientSessionId:'recipient'},promptCondition:condition,delivery:{state:'delivered',at:200}})
+    expect(first.messages[0]).toMatchObject({envelope:{messageId:'message-source',body:source.body,senderSessionId:'owner',recipientSessionId:'recipient'},promptCondition:condition,delivery:{state:'delivered',at:_tailFixtureEpoch(0, 0, 200)}})
     const hash=createHash('sha256').update(raw).digest('hex');expect(await readFile(`${path}.original-${hash}`)).toEqual(raw)
   })
 
@@ -287,7 +310,7 @@ describe('journal persistence under isolated resource pressure', () => {
     const q = await queue(); const root = dirname(q.path), storePath = join(root, 'sessions.json')
     const store = new AgentMuxFileAgentSessionStore(storePath)
     await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'recipient', providerId: 'synthetic', executorId: 'synthetic', hostId: 'local', workspacePath: root,
-      run: condition.expectedRun, retiredRuns: [], hookBindingId: 'hook', hookToken: 'token', createdAt: 1, updatedAt: 1 })
+      run: condition.expectedRun, retiredRuns: [], hookBindingId: 'hook', hookToken: 'token', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) })
     const core = await privateRpcCorePort(storePath, q.path)
     const submit = vi.spyOn(core.client as unknown as { submitPromptInternal(input: unknown): Promise<void> }, 'submitPromptInternal')
       .mockImplementation(async () => { fault('dir-sync', 'EIO') })
@@ -304,11 +327,11 @@ describe('journal persistence under isolated resource pressure', () => {
     } finally { await core.dispose() }
   })
 
-  it('consumes a real compiled CLI through public RPC and retries its original ID after a storage fault', async () => {
+  it('persists a real compiled CLI through public RPC and retries its original ID while the input consumer waits', async () => {
     const q = await queue(); const root = dirname(q.path), storePath = join(root, 'sessions.json')
     const store = new AgentMuxFileAgentSessionStore(storePath)
     await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'recipient', providerId: 'synthetic', executorId: 'synthetic', hostId: 'local', workspacePath: root,
-      run: condition.expectedRun, retiredRuns: [], hookBindingId: 'hook', hookToken: 'token', createdAt: 1, updatedAt: 1 })
+      run: condition.expectedRun, retiredRuns: [], hookBindingId: 'hook', hookToken: 'token', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) })
     const core = await privateRpcCorePort(storePath, q.path); const sends: unknown[] = []
     // Registry identity is real; no native Provider behavior is invoked by this persisted-facts port.
     const provider = core.client.providers.list()[0]!
@@ -319,7 +342,7 @@ describe('journal persistence under isolated resource pressure', () => {
         if (request.operation === 'list.active-agents') return { operation: 'list.active-agents', agents: [{
           agentSessionId: 'recipient', promptCondition: condition, projectId: null, projectName: null,
           workspacePath: root, providerId: 'synthetic', executorId: 'synthetic', processState: 'running',
-          status: 'active', updatedAt: 1 }] }
+          status: 'active', updatedAt: _tailFixtureEpoch(0, 0, 1) }] }
         if (request.operation === 'send') { sends.push(request); return { operation: 'send', agentSessionId: 'recipient' } }
         throw new Error(`Unexpected private operation ${request.operation}`)
       } })
@@ -335,9 +358,16 @@ describe('journal persistence under isolated resource pressure', () => {
       expect(rejected.stderr).toContain('MESSAGE_QUEUE_UNAVAILABLE'); expect(rejected.stderr).toContain('disk I/O error'); expect(sends).toHaveLength(0)
       io.fault = undefined; probe.reset()
       const accepted = JSON.parse((await exec(process.execPath, args, { env, timeout: 5000 })).stdout)
-      expect(accepted).toMatchObject({ ok: true, operationId: 'cli-operation', result: { messageId: 'cli-message', delivery: { state: 'delivered' } } })
-      expect(sends).toHaveLength(1)
-      await exec(process.execPath, args, { env, timeout: 5000 }); expect(sends).toHaveLength(1)
+      console.log('__JOURNAL_CLI_ACCEPTED__', JSON.stringify(accepted))
+      expect(accepted).toMatchObject({ ok: true, operationId: 'cli-operation', result: { messageId: 'cli-message', delivery: { state: 'queued' },
+        inputReceipt: { persistence: 'confirmed', status: 'waiting', observation: 'owned', admission: null, originalControlOperationId: 'cli-operation' } } })
+      // This persisted-facts fixture supplies no Native status/input consumer. An original
+      // journal admission must not be promoted to delivered or bypass that input owner.
+      expect(sends).toHaveLength(0)
+      const retry=JSON.parse((await exec(process.execPath, args, { env, timeout: 5000 })).stdout)
+      expect(retry.result).toMatchObject({receiptId:accepted.result.receiptId,sequence:accepted.result.sequence,envelope:accepted.result.envelope,
+        inputReceipt:{ref:accepted.result.inputReceipt.ref,originalControlOperationId:'cli-operation'}})
+      expect(sends).toHaveLength(0)
       expect((await q.readJournal()).filter(row => row.kind === 'message')).toHaveLength(1)
     } finally { await server.stop(); await core.dispose() }
   })
