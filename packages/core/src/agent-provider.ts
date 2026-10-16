@@ -1,3 +1,4 @@
+import type { AgentTerminalFrontendObservation } from './agent-terminal-frontend.js'
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './session-history-changes.js'
 import type { AgentPromptPreparationWaitReason } from './prompt-preparation.js'
 import { AgentMuxError } from './errors.js'
@@ -166,6 +167,8 @@ export type AgentProvider = {
   /** Original executable has already been probed; this final plan also enters original lifecycle preparation. */
   prepareManagedLaunch?(plan: AgentLaunchPlan, lifecycleOperationId: string, context: { kind: 'create' | 'resume' | 'fork'; prompt?: string }): Promise<AgentProviderManagedLaunch>
   prepareNativeInput?(context: AgentProviderNativeInputContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string }): Promise<AgentProviderPreparedNativeInput>
+  observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
+  reconnectTerminalFrontend?(context: AgentProviderNativeInputContext, request: { operationId: string; expectedFrontendId: string; nativeSessionId: string }): Promise<AgentTerminalFrontendObservation>
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
@@ -219,6 +222,8 @@ export type AgentProviderDefinition = {
   ) => string[]
   prepareManagedLaunch?: AgentProvider['prepareManagedLaunch']
   prepareNativeInput?: AgentProvider['prepareNativeInput']
+  observeTerminalFrontend?: AgentProvider['observeTerminalFrontend']
+  reconnectTerminalFrontend?: AgentProvider['reconnectTerminalFrontend']
   planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution }) => AgentPromptInputPlan
   inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot, strategy?: NonNullable<AgentCatalogEntry['capabilities']['promptExecution']>['immediate']) => AgentPromptExecutionContext
   inspectPromptPreparationWait?: AgentProvider['inspectPromptPreparationWait']
@@ -384,6 +389,8 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
+    ...(definition.observeTerminalFrontend ? { observeTerminalFrontend: definition.observeTerminalFrontend } : {}),
+    ...(definition.reconnectTerminalFrontend ? { reconnectTerminalFrontend: definition.reconnectTerminalFrontend } : {}),
     ...(definition.observeSessionStatus ? { observeSessionStatus: definition.observeSessionStatus } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.listNativeSessions ? { listNativeSessions: definition.listNativeSessions } : {}),

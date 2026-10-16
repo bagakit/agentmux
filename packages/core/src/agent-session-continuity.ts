@@ -212,6 +212,8 @@ export type AgentMuxContinuityOperation = {
   previousInput?: AgentMuxContinuityPreviousInput
   launchInput?: AgentMuxContinuityLaunchInput
   recoveryDelivery?: AgentMuxContinuityInputDelivery
+  /** Same-Run frontend action; exact original operation and output boundary survive lost replies. */
+  frontendReconnect?: { previousFrontendId: string; outputAfterByte: number; frontendId?: string }
 }
 
 export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxContinuityLaunchInput {
@@ -297,6 +299,9 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     [delivery.reminder, delivery.continuation].some(part => !part || typeof part.selected !== 'boolean' || typeof part.text !== 'string' ||
       typeof part.digest !== 'string' || !['not-selected', 'waiting', 'dispatching', 'unknown', 'accepted', 'not-applied', 'superseded'].includes(part.status) || part.receiptRef && JSON.stringify(part.receiptRef) !== JSON.stringify(delivery.key)) ||
     delivery.receipt && JSON.stringify(delivery.receipt.key) !== JSON.stringify(delivery.key))) throw new TypeError('Invalid continuity input delivery.')
+  if (op.frontendReconnect && (!op.frontendReconnect.previousFrontendId ||
+    !Number.isSafeInteger(op.frontendReconnect.outputAfterByte) || op.frontendReconnect.outputAfterByte < 0 ||
+    op.frontendReconnect.frontendId !== undefined && !op.frontendReconnect.frontendId)) throw new TypeError('Invalid original frontend reconnect.')
   return { ...structuredClone(op), policy: normalizeAgentContinuityPolicy(op.policy) }
 }
 

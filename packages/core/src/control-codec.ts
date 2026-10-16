@@ -613,7 +613,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       requestId,
       operation: source.operation,
       target,
-      ...(source.operation === 'resume' ? { text: text(source.text, 'Resume text') } : {}),
+      ...(source.operation === 'resume' ? { text: source.text === undefined ? '' : text(source.text, 'Resume text') } : {}),
       ...(owner ? { caller: owner } : {})
     } as AgentMuxControlRequest
   }

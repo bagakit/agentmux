@@ -1,3 +1,4 @@
+export * from './agent-terminal-frontend.js'
 export { mintObjectId, deriveObjectId, isObjectId } from './object-id.js'
 export * from './agent-provider.js'
 export * from './agent-plugin.js'

@@ -1179,6 +1179,8 @@ export type AgentMuxAgentSession = {
    * reverting to the Provider's more permissive default. Absent when the create narrowed nothing.
    */
   launchOptions?: LaunchOptionSelection
+  /** Live Provider observation; never persisted as durable health. */
+  terminalFrontend?: import('./agent-terminal-frontend.js').AgentTerminalFrontend
   terminalHandshake?: AgentTerminalHandshakeState
   terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
@@ -1294,6 +1296,9 @@ export type AgentFuturePromptIntent = {
 }
 
 export type AgentTerminalHandshakeState = {
+  /** New frontend on the same Run has its own reply and fresh output boundary. */
+  frontendId?: string
+  outputAfterByte?: number
   run: AgentMuxRunRef
   operationId: string
   inputByteRange: {
@@ -1418,7 +1423,7 @@ export type AgentHookIngressObservation = {
 
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
-export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity'> & {
+export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'terminalFrontend'> & {
   /** Retained original-Run recovery evidence; never a live activity or input-authorization projection. */
   recoveryActivity?: AgentRecoveryActivity
   /** Private native service credential, frozen with this original lifecycle launch. Never a public capability ACK. */
