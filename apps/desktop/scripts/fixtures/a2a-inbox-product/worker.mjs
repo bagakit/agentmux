@@ -430,7 +430,7 @@ try {
   assert.deepEqual(nextBatch.messages.map(item => item.envelope.messageId).sort(), nextIds); assert.ok(nextBatch.messages.length > 0)
   assert.ok(nextBatch.generation > batch.generation); assert.deepEqual(nextBatch.readerRun, batch.readerRun)
   const lateGeneration = await cli(['message', 'inbox', 'ack', '--generation', String(batch.generation), '--reader-run', batch.readerRun.runId], recipient, false)
-  assert.equal(lateGeneration.error.code, 'MESSAGE_ACK_GENERATION_STALE')
+  assert.equal(lateGeneration.error.code, 'AGENT_DELIVERY_GENERATION_STALE')
   const retainedNextBatch = (await cli(['message', 'inbox', 'check', '--limit', '100'], recipient)).result
   assert.deepEqual(retainedNextBatch, nextBatch, 'A genuine late ack cannot advance the next original batch')
   facts.restart.staleGenerationRefused = true; facts.restart.ackReceipts.lateGeneration = lateGeneration

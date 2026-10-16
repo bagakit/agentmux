@@ -237,7 +237,11 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
   assert.ok(!product.mailbox.recipientUserPage.text.includes('A2A original review')); assert.ok(!product.mailbox.recipientUserPage.keys.some(key => key.includes(normalMessage.journalMessageId)))
   if (scope === 'integration' || scope === 'restart') {
     assert.deepEqual(product.chain.scenarios.map(item => item.kind).sort(), ['failed', 'normal', 'unknown', 'unsubmitted'])
-    for (const item of product.chain.scenarios) { assert.equal(item.cliMessageId, item.journalMessageId); assert.equal(item.body, item.original.envelope.body); assert.ok(item.original.sequence > 0) }
+    for (const item of product.chain.scenarios) {
+      assert.equal(item.cliMessageId, item.journalMessageId)
+      assert.equal(item.cli.operationId, item.original.envelope.operationId)
+      assert.equal(item.body, item.original.envelope.body); assert.ok(item.original.sequence > 0)
+    }
     assert.equal(product.chain.normal.nativeInputCount, 1); assert.equal(product.chain.normal.conversationCount, 1)
     assert.equal(product.chain.normal.authorSessionId, product.chain.normal.senderSessionId)
     const normalId = product.chain.scenarios.find(item => item.kind === 'normal').journalMessageId
@@ -262,7 +266,7 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
     const { ackReceipts, agentConsumption, unknownReplay } = product.restart
     assert.equal(ackReceipts.wrongRun.error.code, 'MESSAGE_ACK_GENERATION_STALE')
     assert.ok(first.runBirths.some(run => run.runId === ackReceipts.wrongReaderRun.runId)); assert.notEqual(ackReceipts.wrongReaderRun.runId, agentConsumption.originalBatch.readerRun.runId)
-    assert.equal(ackReceipts.lateGeneration.error.code, 'MESSAGE_ACK_GENERATION_STALE')
+    assert.equal(ackReceipts.lateGeneration.error.code, 'AGENT_DELIVERY_GENERATION_STALE')
     assert.ok(agentConsumption.nextBatch.generation > agentConsumption.originalBatch.generation); assert.deepEqual(agentConsumption.nextBatch.readerRun, agentConsumption.originalBatch.readerRun)
     assert.deepEqual(agentConsumption.nextBatch.messages.map(item => item.envelope.messageId).sort(), product.chain.scenarios.filter(item => ['failed', 'unknown'].includes(item.kind)).map(item => item.journalMessageId).sort())
     assert.ok(agentConsumption.nextBatch.messages.length > 0); assert.deepEqual(agentConsumption.retainedNextBatch, agentConsumption.nextBatch)
