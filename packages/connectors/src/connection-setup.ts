@@ -11,6 +11,7 @@ type Row = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCal
 type PrivateEnvelope = { operationId: string; connectionId: string; attemptId: string; challenge: ConnectionSetupView['challenge']; privateState: string; source?: NonNullable<ConnectionSetupBegin['source']>; sourceAuthAttemptId?: string; localAccount?: ReturnType<typeof parseConnectionSetupAccount> }
 type Authentication = NonNullable<ConnectionSetupOperation['authentication']>
 type AuthStep = { operationId: string; input: ConnectionSetupAdvance; authentication: Authentication; privateRef: string | null }
+export type SetupAuthenticationSource = { stepId: string; attemptId: string; stage: string; privateState: string; captureAuthentication: (privateState: string, childStepId: string) => string }
 type AuthEnvelope = PrivateEnvelope & { stepId: string; stage: Authentication['stage']; account: ReturnType<typeof parseConnectionSetupAccount> | null }
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const sameActor = (a: ConnectionEnrollmentCallContext['actor'], b: ConnectionEnrollmentCallContext['actor']) => a.kind === b.kind && a.id === b.id
@@ -32,8 +33,8 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     connections.database.exec("CREATE INDEX IF NOT EXISTS connection_setup_by_application ON connection_setup_operation(json_extract(record_json,'$.application.domain'),json_extract(record_json,'$.application.appId'))")
     connections.database.exec('CREATE TABLE IF NOT EXISTS connection_setup_auth_step (ordinal INTEGER PRIMARY KEY AUTOINCREMENT, step_id TEXT UNIQUE NOT NULL, operation_id TEXT NOT NULL, action_id TEXT UNIQUE NOT NULL, input_json TEXT NOT NULL, record_json TEXT NOT NULL, private_ref TEXT)')
     connections.database.exec('CREATE INDEX IF NOT EXISTS connection_setup_auth_by_operation ON connection_setup_auth_step(operation_id,ordinal)')
-    this.inspection = new SetupApplicationInspection({ connections, secrets, read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), snapshot: row => this.authenticationSnapshot(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
-    this.configuration = new SetupApplicationConfiguration({ connections, secrets, inspection: this.inspection, creator: row => this.creator(row), read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
+    this.inspection = new SetupApplicationInspection({ connections, secrets, read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), snapshot: row => this.authenticationSource(row), acceptAuthentication: (row, field, childStepId, authStepId, ref) => this.acceptAuthentication(row, field, childStepId, authStepId, ref), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
+    this.configuration = new SetupApplicationConfiguration({ connections, secrets, inspection: this.inspection, creator: row => this.creator(row), acceptAuthentication: (row, field, childStepId, authStepId, ref) => this.acceptAuthentication(row, field, childStepId, authStepId, ref), read: id => this.read(id), authority: (context, row) => this.authority(context, row), current: row => this.current(row), touch: row => this.touch(row), view: (row, context) => this.view(row, context) })
   }
   close(): void { this.closed = true; this.nativeRequests.clear(); this.unsettled.clear(); this.unsettledAuthentication.clear(); this.inspection.close(); this.configuration.close() }
   private safe<T>(run: () => T): T {
@@ -82,12 +83,34 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
   private authEnvelope(value: string | null, row: Row, step: AuthStep): AuthEnvelope | null {
     try {
       if (value === null) return null
-      const p = JSON.parse(value) as AuthEnvelope
+      const saved = JSON.parse(value), continuation = typeof saved.authentication === 'string' ? JSON.parse(saved.authentication) : null
+      if (continuation && (continuation.binding !== this.authenticationBinding(row) || typeof continuation.childStepId !== 'string' || typeof continuation.sourceRef !== 'string')) return null
+      const p = (continuation ? continuation.snapshot : saved) as AuthEnvelope
       if (p.operationId !== row.operation.operationId || p.connectionId !== row.operation.connectionId || p.stepId !== step.authentication.stepId || p.attemptId !== step.authentication.attemptId || typeof p.privateState !== 'string' || p.stage !== step.authentication.stage) return null
       const account = p.account === null ? null : parseConnectionSetupAccount(p.account)
       if (['account', 'confirmed'].includes(p.stage) !== Boolean(account)) return null
       return { operationId: p.operationId, connectionId: p.connectionId, stepId: p.stepId, attemptId: p.attemptId, privateState: p.privateState, stage: p.stage, account, challenge: p.challenge === null ? null : parseConnectionSetupChallenge(p.challenge) }
     } catch { return null }
+  }
+  private authenticationBinding(row: Row): string {
+    return createHash('sha256').update(JSON.stringify({ intent: admitted(row.operation), actor: row.actor, adapterId: row.operation.adapterId, application: row.operation.application })).digest('hex')
+  }
+  private async authenticationSource(row: Row): Promise<SetupAuthenticationSource | null> {
+    const source = this.authStep(row.operation.operationId)
+    if (!this.secrets || !source?.privateRef || source.authentication.secureStorage !== 'stored') return null
+    const snapshot = this.authEnvelope(await this.secrets.resolve(source.privateRef), row, source)
+    if (!snapshot) return null
+    return { ...snapshot, captureAuthentication: (privateState, childStepId) => JSON.stringify({ binding: this.authenticationBinding(row), childStepId, sourceRef: source.privateRef, snapshot: { ...snapshot, privateState } }) }
+  }
+  /** Adopt only this owner's saved field; business children never interpret the authentication schema. */
+  private acceptAuthentication(row: Row, field: string | undefined, childStepId: string, authenticationStepId: string, credentialRef: string): void {
+    if (field === undefined) return
+    const value = JSON.parse(field), original = this.authStep(row.operation.operationId)
+    if (value.binding !== this.authenticationBinding(row) || value.childStepId !== childStepId || typeof value.sourceRef !== 'string' || value.snapshot?.stepId !== authenticationStepId) throw failure('The original authentication continuation is unconfirmed. Retain its saved result for local recovery.')
+    // A late result still belongs to its child, but cannot replace a newer account or Cookie snapshot.
+    if (!original || original.authentication.stepId !== authenticationStepId || !this.current(this.read(row.operation.operationId)!) || original.privateRef !== value.sourceRef) return
+    if (!this.authEnvelope(JSON.stringify(value.snapshot), row, original) || value.snapshot.stage !== 'confirmed') throw failure('The original confirmed authentication continuation is unconfirmed. Retain its saved result for local recovery.')
+    this.updateAuth(original, () => {}, credentialRef)
   }
   private async authenticationSnapshot(row: Row): Promise<AuthEnvelope | null> {
     if (!this.secrets) return null
