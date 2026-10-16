@@ -74,7 +74,7 @@ export function AgentAsyncQuestionCard({ request, recordedAnswers, attempt, draf
     <div className="agent-question__header"><span><SemanticIcon name="status.unknown" size={14} aria-hidden="true" />已记录的问题</span>
       <span className="agent-question__state" role="status" aria-live="polite">{answered ? <SemanticIcon name="action.confirm" size={12} aria-hidden="true" /> : null}{state}</span>
     </div>
-    {!answered && onDraftChange ? <p className="agent-question__draft">答案草稿（尚未提交）</p> : null}
+    {!answered && onDraftChange ? <p className="agent-question__draft">答案草稿</p> : null}
     {request.questions.map(question => {
       const original = recordedAnswers.get(question.id)
       const hasAnswer = recordedAnswers.has(question.id)
