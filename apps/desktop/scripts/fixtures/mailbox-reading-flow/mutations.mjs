@@ -1,4 +1,8 @@
 export const mailboxMutations = [
+  { label: 'canonical-agent-aliases-stay-out-of-user-history', file: 'apps/desktop/src/renderer/src/lib/use-composer-input-history.tsx',
+    before: 'messages: userMessages, loading: history.loading || native.loading', after: 'messages: history.messages, loading: history.loading || native.loading', tests: ['apps/desktop/test/input-history-agent-aliases.test.tsx'] },
+  { label: 'query-aliases-keep-the-original-version', file: 'apps/desktop/src/renderer/src/lib/user-input-history.ts',
+    before: 'JSON.stringify([conversationRecordId(record), revision])', after: 'JSON.stringify([conversationRecordId(record)])', tests: ['apps/desktop/test/input-history-agent-aliases.test.tsx'] },
   { label: 'user-messages-excludes-agent-inputs', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: '<InputMailboxRecords mailbox={userInputMailbox}', after: '<InputMailboxRecords mailbox={inputMailbox}', tests: ['apps/desktop/test/session-mailbox-author-boundary.test.tsx'] },
   { label: 'journal-is-the-message-source', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
