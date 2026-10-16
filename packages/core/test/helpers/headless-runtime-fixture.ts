@@ -116,6 +116,7 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
     })
   }
   return { root, env, client, restart, restartNativeDaemon, stopOwner, failProbe: () => writeFile(join(stateDirectory, 'probe-failure'), 'failed'), get owner() { return current.owner }, get socketPath() { return current.socketPath },
+    get nativeProcessId() { return daemon.pid },
     failInput: (failure: import('../../src/errors.js').AgentMuxControlFailure) => writeFile(join(stateDirectory, 'input-failure'), JSON.stringify(failure)),
     inputFailureCalls: async () => (await readFile(join(stateDirectory, 'input-failure-calls'), 'utf8')).trim().split('\n'),
     async cleanup() {
