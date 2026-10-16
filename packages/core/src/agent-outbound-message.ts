@@ -18,17 +18,14 @@ import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js
  * 出口。字节层的 bracketed paste 封装（buildPromptInputPayload）也是另一层：它解决 "多行文本怎么
  * 安全进终端"，与 "这段话是谁说的" 无关。
  *
- * 信封 `<amux from="amux">…</amux>` 只做**署名与可读性**：它把 "AgentMux 在对你说话" 与
- * "用户在对你说话" 分开，让 Agent 一眼能辨。它**不做认证**——`from` 是声明而非凭证，可被伪造
+ * 信封 `<amux>…</amux>` 只做**署名与可读性**：它把 "AgentMux 在对你说话" 与
+ * "用户在对你说话" 分开，让 Agent 一眼能辨。它**不做认证**——标签是声明而非凭证，可被伪造
  * （见设计文档《AgentMux 对 Agent 说的话》的威胁模型），不签名、不校验、不引入 capability
  * ledger。格式人类可读、可嵌进自然语言，不是需要解析器的线协议。
  *
  * **用户原文永不被信封改写**：它照旧原样送达，不塞进属性、不被转义成另一种形状。信封包裹的
  * 只有 AgentMux 自己的话。
  */
-
-/** 信封上的署名。声明这段话出自 AgentMux 自身，而非某个 Agent 或用户。 */
-const AMUX_FROM = 'amux'
 
 // 启动定向握手挂在这段引导里：让 Agent 第一步就去问自己的坐标与能力，而不是等到要开分屏那一刻才发现
 // 自己在 AgentMux 里。引导负责的是**发现**——让 Agent 知道这些能力存在（自定义 Executor 按名可开、
@@ -58,7 +55,6 @@ const AWAIT_USER_REQUEST = 'No request yet. Wait for the user.'
 function amuxEnvelope(text: string): string {
   const document = new DOMImplementation().createDocument(null, 'amux', null)
   const envelope = document.documentElement!
-  envelope.setAttribute('from', AMUX_FROM)
   // Platform text remains text even when a rule or note contains XML-looking syntax.
   envelope.appendChild(document.createTextNode(`\n${text}\n`))
   return new XMLSerializer().serializeToString(envelope).replace(/\r/g, '&#13;')
