@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { mintObjectId } from './object-id.js'
 import { chmod, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from './errors.js'
 import { assertDispatchEventKind, assertDispatchMessage, openDispatch, recordDispatchEvent, type Dispatch, type DispatchEvent, type DispatchEventKind,
@@ -19,7 +20,7 @@ import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOp
 import { normalizeMessageChannel } from './message-origin.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
 import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
@@ -100,6 +101,7 @@ export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' 
 export { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
 
 const processQueueTails = new Map<string, Promise<void>>()
+type JournalTransaction = { readonly snapshot?: boolean; readonly signal?: AbortSignal }
 const inputMailboxCursorKey = randomBytes(32)
 type InputMailboxCursor = { queueId: string; incarnation: string; agentSessionId: string; through: number; before: number; offset?: number; digest?: string }
 type InputMailboxJournalItem = { sequence: number; recordedAt: number } & (
@@ -195,10 +197,10 @@ export class DurableAgentMuxMessageQueue {
     this.queueId = queueIdFor(path)
   }
 
-  private withLock<T>(operation: () => Promise<T>, durableReceipt = false): Promise<T> {
+  private withLock<T>(operation: () => Promise<T>, durableReceipt = false, transaction: JournalTransaction = {}): Promise<T> {
     const key = `${this.path}.mutex.sqlite`
     const processTail = processQueueTails.get(key) ?? Promise.resolve()
-    const result = processTail.then(() => this.withFileLock(operation, durableReceipt))
+    const result = processTail.then(() => this.withFileLock(operation, durableReceipt, transaction))
     const tail = result.then(() => undefined, () => undefined)
     processQueueTails.set(key, tail)
     // Do not retain a settled queue path forever; concurrent callers already hold this tail.
@@ -206,8 +208,8 @@ export class DurableAgentMuxMessageQueue {
     return result
   }
 
-  private async withFileLock<T>(operation: () => Promise<T>, durableReceipt: boolean): Promise<T> {
-    // SQLite's BEGIN IMMEDIATE is the cross-process writer mutex. The kernel releases it when a
+  private async withFileLock<T>(operation: () => Promise<T>, durableReceipt: boolean, transaction: JournalTransaction): Promise<T> {
+    // SQLite's exclusive transaction is the original cross-process writer mutex. The kernel releases it when a
     // process dies, including a crash during append, so there is no pathname to reclaim with a
     // check-then-unlink race. A legacy orphan .lock file is deliberately ignored.
     const mutexPath = `${this.path}.mutex.sqlite`
@@ -218,30 +220,42 @@ export class DurableAgentMuxMessageQueue {
     let result!: T
     let stage = 'journal-directory'
     try {
+      transaction.signal?.throwIfAborted()
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
       // Loading the queue's validator or CLI help must not initialize SQLite or put an
       // experimental-module warning in the machine-readable error receipt stream.
       const { DatabaseSync } = await import('node:sqlite')
-      stage = 'mutex-open'
-      mutex = new DatabaseSync(mutexPath)
-      stage = 'mutex-configure'
-      await chmod(mutexPath, 0o600)
-      // A separate writer must not synchronously stall this Core's terminal/Hook event loop.
-      // The caller can retry its original operation after the positively busy owner releases it.
-      configureMessageJournal(mutex)
-      stage = 'mutex-acquire'
-      mutex.exec('BEGIN IMMEDIATE'); acquired = true
+      // Only lock acquisition waits. No operation/body has run, so this never resends an effect.
+      // Match the local Session Store's bounded 300 attempts at a 5–15ms async cadence.
+      for (let attempt = 0; ; attempt++) {
+        transaction.signal?.throwIfAborted()
+        try {
+          stage = 'mutex-open'; mutex = new DatabaseSync(mutexPath)
+          stage = 'mutex-configure'; await chmod(mutexPath, 0o600); configureMessageJournal(mutex)
+          // A failed IMMEDIATE attempt can retain a SHARED read lease and block the holder's
+          // commit. Exclusive acquisition + closing each failed handle keeps waiters harmless.
+          stage = 'mutex-acquire'; mutex.exec('BEGIN EXCLUSIVE'); acquired = true; break
+        } catch (error) {
+          const sqlite = error as { code?: string; errcode?: number }
+          if (sqlite.code !== 'ERR_SQLITE_ERROR' || sqlite.errcode !== 5 || attempt >= 299) throw error
+          mutex?.close(); mutex = undefined
+          await delay(5 + Math.random() * 10, undefined, { signal: transaction.signal })
+        }
+      }
       stage = 'journal-open'
-      this.database = await openMessageJournal(this.path, mutex, (db, record) => {
-        this.database = db
-        try { this.applyRecord(record) } finally { this.database = undefined }
-      })
-      stage = 'journal-acquire'
-      this.db.exec('BEGIN IMMEDIATE')
-      // Existing journals are validated by their original owner before this
-      // writer transaction adds its own bounded internal projections.
-      this.db.exec(inputControlJournalSchema)
-      this.db.exec(messageRouteJournalSchema)
+      if (transaction.snapshot) this.database = await openMessageJournalSnapshot(this.path)
+      else {
+        this.database = await openMessageJournal(this.path, mutex, (db, record) => {
+          this.database = db
+          try { this.applyRecord(record) } finally { this.database = undefined }
+        })
+        stage = 'journal-acquire'
+        this.db.exec('BEGIN IMMEDIATE')
+        // Existing journals are validated before their owner adds internal projections.
+        this.db.exec(inputControlJournalSchema)
+        this.db.exec(messageRouteJournalSchema)
+      }
+      transaction.signal?.throwIfAborted()
       stage = 'operation'
       result = await operation()
       stage = 'journal-commit'
@@ -829,6 +843,27 @@ export class DurableAgentMuxMessageQueue {
       await reauthorize?.(message)
       return message
     })
+  }
+
+  /** A private observation cut, independent of consumption. No body crosses this boundary. */
+  async messageChanges(after?: { incarnation: string; throughSequence: number }, signal?: AbortSignal) {
+    const read = (db: DatabaseSync) => {
+      const incarnation = String(db.prepare('SELECT incarnation FROM metadata').get()!.incarnation)
+      const maximum = Number(db.prepare('SELECT COALESCE(MAX(sequence), 0) AS value FROM records').get()!.value)
+      if (after && (after.incarnation !== incarnation || maximum < after.throughSequence)) throw new AgentMuxError(
+        'The original message journal changed or moved backwards. Keep the existing reading window; explicitly inspect the original Host.', 'AGENT_MESSAGE_SOURCE_CHANGED')
+      if (!after) return { cut: { incarnation, throughSequence: maximum }, changes: [], hasMore: false }
+      const rows = db.prepare(messageObservationQuery).all(after.throughSequence, maximum)
+      // Advance past unrelated journal facts without extracting their bodies.
+      return { cut: { incarnation, throughSequence: rows.length === 100 ? Number(rows.at(-1)!.sequence) : maximum }, hasMore: rows.length === 100,
+        changes: rows.filter(row => row.sender_kind === 'agent-session' && row.recipient_kind === 'agent-session')
+          .map(row => ({ type: 'agent-message-changed' as const, sequence: Number(row.sequence), messageId: String(row.message_id),
+          senderSessionId: String(row.sender_id), recipientSessionId: String(row.recipient_id) })) }
+    }
+    return this.withLock(async () => {
+      if (!after) this.db.exec(messageObservationJournalSchema)
+      return read(this.db)
+    }, false, { snapshot: !!after, ...(signal ? { signal } : {}) })
   }
 
   /** Browse the original journal without constructing bodies, delivery batches or consumer cursors. */

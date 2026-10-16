@@ -38,6 +38,7 @@ export class AgentMuxClientEventPublisher {
   private readonly statusListeners = new Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>()
   private readonly timelineListeners = new Map<string, Map<(event: AgentMuxClientEvent) => unknown, AgentMuxClientEventListenerOptions>>()
   private publishingDiagnostic = false
+  get hasEventListeners(): boolean { return this.listeners.size > 0 }
 
   /** Low-frequency owner facts; these listeners never join ordered-byte dispatch. */
   onStatusEvent<Result>(listener: AgentMuxClientEventListener<Result>, options: AgentMuxClientEventListenerOptions = {}): () => void {
