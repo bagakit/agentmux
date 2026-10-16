@@ -763,6 +763,7 @@ export function projectRuntimeEvent(
       interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
       semanticStatus: _semanticStatus,
       currentActivity: _currentActivity,
+      terminalFrontend: _terminalFrontend,
       continuity: _continuity,
       continuityOperations: _continuityOperations,
       terminalCapability: _terminalCapability,
@@ -813,6 +814,7 @@ export function projectRuntimeEvent(
       ...(core.session.currentActivity
         ? { currentActivity: structuredClone(core.session.currentActivity) }
         : {}),
+      ...(core.session.terminalFrontend ? { terminalFrontend: structuredClone(core.session.terminalFrontend) } : {}),
       ...(core.session.continuity ? { continuity: structuredClone(core.session.continuity) } : {}),
       ...(core.session.continuityOperations ? { continuityOperations: structuredClone(core.session.continuityOperations) } : {}),
       ...(core.session.terminalCapability

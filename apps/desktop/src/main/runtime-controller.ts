@@ -330,6 +330,7 @@ function projectSession(
       capabilities: capabilitiesFor(subject.providerId),
       ...(semanticFacts ? { semanticStatus: structuredClone(semanticFacts) } : {}),
       ...(subject.agentSession.currentActivity ? { currentActivity: structuredClone(subject.agentSession.currentActivity) } : {}),
+      ...(subject.agentSession.terminalFrontend ? { terminalFrontend: structuredClone(subject.agentSession.terminalFrontend) } : {}),
       ...(subject.agentSession.continuity ? { continuity: structuredClone(subject.agentSession.continuity) } : {}),
       ...(subject.agentSession.continuityOperations ? { continuityOperations: structuredClone(subject.agentSession.continuityOperations) } : {}),
       hostId: subject.hostId,
@@ -2288,6 +2289,32 @@ export class RuntimeController {
         config
       )
     }
+  }
+
+  async restartSession(
+    control: AgentSessionControl, config: AppConfig, operationId: string, observeOnly = false
+  ): Promise<import('../shared/contracts.js').SessionRestartResult> {
+    return await this.trackHostLifecycleOperation(control.hostId, async () => {
+      const client = await this.connectedClient(control.hostId, 'runtime')
+      const identity = { agentSessionId: control.agentSessionId, expectedRun: control.run, operationId }
+      if (!observeOnly) {
+        const original = await client.inspectAgentRestart(identity)
+        if (original.phase !== 'not-found') await client.restartAgent(identity)
+        else {
+          const stored = client.agentSession(control.agentSessionId)
+          await client.restartAgent({ ...identity, ...this.sessionExecutorOptions(control.hostId, client, config, stored) })
+        }
+      }
+      const inspection = await client.inspectAgentRestart(identity)
+      const { session: coreSession, ...receipt } = inspection
+      if (!coreSession || receipt.newRun && receipt.newRun.runId !== coreSession.run.runId) return receipt
+      // A later unrelated restart cannot replace this original operation's completion receipt.
+      const session = await this.sessionByTarget(client, { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
+      if (session.kind !== 'agent' || session.control.hostId !== control.hostId ||
+          session.control.agentSessionId !== control.agentSessionId ||
+          session.control.run.runId !== coreSession.run.runId) return receipt
+      return { ...receipt, session }
+    })
   }
 
   async stopSession(control: SessionControl): Promise<void> {

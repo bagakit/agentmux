@@ -1067,6 +1067,7 @@ export type SessionSnapshot = SessionSnapshotBase & (
       continuity?: AgentMuxAgentSession['continuity']
       continuityOperations?: AgentMuxAgentSession['continuityOperations']
       /** Core-owned terminal capability fact; absent means no active degradation marker. */
+      terminalFrontend?: AgentMuxAgentSession['terminalFrontend']
       terminalCapability?: AgentTerminalCapabilityState
       terminalPromptDelivery?: AgentTerminalPromptDeliveryState
       /** Desktop display-read failure on this exact Session/Run; never a Runtime availability fact. */
@@ -1238,6 +1239,10 @@ export type SessionAttachResult = {
 
 /** Ordered retained bytes for an already-owned attachment; creates no Desktop lease. */
 export type SessionReplayResult = Pick<SessionAttachResult, 'replay' | 'gap'>
+
+export type SessionRestartResult = Omit<import('@agentmux/core').AgentMuxAgentRestartInspection, 'session'> & {
+  session?: SessionSnapshot
+}
 
 export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
@@ -1934,6 +1939,7 @@ export type AgentMuxDesktopApi = {
     reopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
     reconcileReopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
     resume(session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string): Promise<SessionSnapshot>
+    restart(session: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<SessionRestartResult>
     interrupt(session: SessionControl): Promise<void>
     resize(
       attachmentId: string,

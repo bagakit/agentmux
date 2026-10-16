@@ -60,16 +60,25 @@ export function sessionStopTimeoutError(timeoutMs: number): Error & { code: stri
  * 它仍会在 daemon 上生效。我们放弃的只是**等待**，不是那个动作。晚到的结果由 Runtime 的
  * `run-removed` 事件收口，与这里无关。
  */
+/** Restart shares the same bounded stop-receipt wait; timing out only releases this observer. */
+export function sessionRestartTimeoutError(timeoutMs: number): Error & { code: string } {
+  return Object.assign(new Error(
+    'The Session restart has no confirmed response after ' + Math.round(timeoutMs / 1000) + 's. ' +
+    'The original operation may still be running. Check that same restart before trying again; the conversation and drafts are kept.'
+  ), { code: 'SESSION_RESTART_UNCONFIRMED' })
+}
+
 export async function withStopTimeout<T>(
   operation: Promise<T>,
-  timeoutMs: number = SESSION_STOP_TIMEOUT_MS
+  timeoutMs: number = SESSION_STOP_TIMEOUT_MS,
+  timeoutError: (timeoutMs: number) => Error = sessionStopTimeoutError
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     return await Promise.race([
       operation,
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(sessionStopTimeoutError(timeoutMs)), timeoutMs)
+        timer = setTimeout(() => reject(timeoutError(timeoutMs)), timeoutMs)
       })
     ])
   } finally {

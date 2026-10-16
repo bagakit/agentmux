@@ -32,7 +32,7 @@ import {
   WINDOW_RESIZE_EVENT_CHANNEL,
   WORKSPACE_FILE_INVALIDATED_CHANNEL
 } from '../shared/contracts.js'
-import { withStopTimeout } from '../shared/session-stop-timeout.js'
+import { withStopTimeout, sessionRestartTimeoutError } from '../shared/session-stop-timeout.js'
 import type {
   AgentAttentionNotifyInput,
   AgentLaunchInput,
@@ -586,6 +586,8 @@ const api: AgentMuxPreloadApi = {
       unwrapSessionReopenResult(await ipcRenderer.invoke('sessions:reopen', reference, expectedRetiredAt, operationId)),
     resume: (session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) =>
       ipcRenderer.invoke('sessions:resume', session, prompt, operationId, agentMuxNote),
+    restart: async (session: AgentSessionControl, operationId: string, observeOnly?: boolean) =>
+      unwrapSessionObservationResult<import('../shared/contracts.js').SessionRestartResult>(await withStopTimeout(ipcRenderer.invoke('sessions:restart', session, operationId, observeOnly), undefined, sessionRestartTimeoutError)),
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),

@@ -1,6 +1,28 @@
 import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
+/** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
+export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { title: string; detail: string } | null {
+  if (session?.kind !== 'agent' || session.processState !== 'running') return null
+  const frontend = session.terminalFrontend
+  if (!frontend || frontend.run.runId !== session.control.run.runId) return null
+  if (frontend.state === 'detached') return {
+    title: 'Terminal disconnected',
+    detail: frontend.backendState === 'running'
+      ? 'The backend is still running. Resume reconnects this terminal to the same conversation.'
+      : frontend.backendState === 'stopping'
+        ? 'The backend is finishing its shutdown. Resume checks the original Session and its recovery.'
+        : frontend.backendState === 'exited'
+          ? 'The backend process ended. Resume checks recovery of the original conversation.'
+          : 'The terminal exited. The backend state is not yet confirmed; Resume checks the original Session.'
+  }
+  if (frontend.state === 'unknown') return {
+    title: 'Terminal connection unconfirmed',
+    detail: 'The frontend observation could not be confirmed. Resume checks the original Session and connection.'
+  }
+  return null
+}
+
 /** A later restore refusal cannot replace the exact Run's confirmed exit facts. */
 export function sessionExitPresentation(session: Pick<SessionSnapshot, 'kind' | 'processState' | 'status'>): { title: string; detail: string } | null {
   if (session.processState !== 'exited') return null

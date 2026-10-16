@@ -1815,6 +1815,11 @@ export async function registerIpc(args: {
   handle('sessions:controlContinuity', async (hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput) => await sessionObservationResult(() => args.runtime.controlContinuity(hostId, input)))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
   handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) => await args.runtime.recoverSession(session, config, workspacePath, operationId, request))
+  handleWithEvent('sessions:restart', async (event, session: AgentSessionControl, operationId: string, observeOnly?: boolean) => {
+    requireTrustedSender('sessions:restart', event)
+    if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')
+    return await sessionObservationResult(() => args.runtime.restartSession(session, config, operationId, observeOnly))
+  })
   handle('sessions:stop', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you stopped the Agent.'); await args.runtime.stopSession(session) })
   handle('browser:forgetAppLinkScheme', async (scheme: string, expected: AppLinkSchemeChoice) => {
     if (!APP_LINK_SCHEME_CHOICES.includes(expected)) {

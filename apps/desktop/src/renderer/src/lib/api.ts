@@ -1188,6 +1188,7 @@ const mockApi: AgentMuxDesktopApi = {
       await mockApi.sessions.write(session.control, `${prompt.trim()}\r`, 'user')
       return structuredClone(session)
     },
+    restart: async () => { throw new Error('Restart requires the connected original Host. No Session or Run was changed.') },
     interrupt: async () => {},
     resize: async (_attachmentId, cols, rows) => ({ cols, rows }),
     controlContinuity: async () => { throw new Error('Recovery controls require the original native Host. This preview does not change a recovery intent.') },
