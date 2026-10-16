@@ -30,10 +30,11 @@ export async function confirmNativeInputAdoption(item: AgentSessionHistoryItem, 
     const target = intent.admissionIntent
     const addressed = target?.kind === 'native-conversation' && isDeepStrictEqual(target.expectedRun, key.expectedRun) &&
       isDeepStrictEqual(target.source, source) && plan.expectedTurnId === target.expectedTurnId
-    const defaultMessage = key.kind === 'message' && target?.kind === 'exact-condition' &&
-      isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) && (intent.execution ?? 'default') === 'default' &&
-      plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
-    if (!addressed && !defaultMessage) return unconfirmed()
+    const questionReply = key.kind === 'prompt' && intent.message?.questionReply
+    const defaultInput = (key.kind === 'message' || questionReply && isDeepStrictEqual(questionReply.source, source)) &&
+      target?.kind === 'exact-condition' && isDeepStrictEqual(target.condition.expectedRun, key.expectedRun) &&
+      (intent.execution ?? 'default') === 'default' && plan.operation === 'start-or-steer' && plan.expectedTurnId === undefined
+    if (!addressed && !defaultInput) return unconfirmed()
     return { ...original, conversation: { ...conversation, adoptedInput: { key } } }
   } catch {
     signal?.throwIfAborted()
