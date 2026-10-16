@@ -54,7 +54,7 @@ it('the original Desktop Activity card edits without sending and opens the origi
   const f = await fixture('unanswered'), page = await f.client.sessionHistoryPage(f.input.agentSessionId, f.invocation)
   const { container, root } = await mounted(), terminal = vi.fn(), edit = vi.fn()
   await act(async () => root.render(<ActivityView sessionId={f.input.agentSessionId} executionHostId="local" items={[]}
-    capability="complete-events" nativeHistoryPage={page} questionReplyRoute="terminal"
+    capability="complete-events" nativeHistoryPage={page}
     onOpenQuestionTerminal={terminal} onQuestionDraftChange={edit} />))
   const card = container.querySelector('[aria-label="Native asynchronous question"]')!
   await act(async () => { [...card.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === 'Keep original')!.click() })

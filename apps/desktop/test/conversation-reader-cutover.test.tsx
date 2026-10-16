@@ -380,7 +380,7 @@ it('the original Codex question and late recorded answer reach actual Activity t
   const { host, root } = mount(), control = { hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }
   const draft = vi.fn(), terminal = vi.fn(), changes = vi.spyOn(f.client, 'readConversationChanges')
   await act(async () => root.render(<ActivityView {...activityReadingProps({ control, workspaceRoot: f.root })}
-    questionReplyRoute="terminal" questionTerminalTarget={{ source: savedQuestionSource, run: f.session.run }} onQuestionDraftChange={draft} onOpenQuestionTerminal={terminal} />))
+    questionReplyTarget={{ source: savedQuestionSource, run: f.session.run }} onQuestionDraftChange={draft} onOpenQuestionTerminal={terminal} />))
   await flush(() => expect(host.querySelector('[aria-label="Native asynchronous question"] fieldset')?.getAttribute('data-question-id')).toBe(savedQuestionId))
   expect(host.querySelector('[aria-label="Native asynchronous question"] legend')?.textContent).toBe(savedQuestionPrompt)
   await flush(() => expect(changes).toHaveBeenCalled())

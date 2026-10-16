@@ -16,43 +16,55 @@ vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionRe
 import { reconcileConversationQuestionReplies } from '../src/renderer/src/lib/conversation-question'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { desktopQuestionReplyState } from '../src/renderer/src/lib/conversation-question'
 const original = useAppStore.getState(), control: AgentSessionControl = { kind: 'agent', hostId: 'original-host', agentSessionId: 'question-session', run: { runId: 'question-run' } }
 const target = { source: { providerId: 'codex', nativeSessionId: 'question-native' }, turnId: 'question-turn', recordId: 'native-question' }
-const page: AgentSessionHistoryPage = { agentSessionId: control.agentSessionId, source: target.source, nextCursor: null, items: [{ id: target.recordId, turnId: target.turnId, kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original question body' }], questionRequest: { delivery: 'async', questions: [ { id: 'first', prompt: 'Choose a direction', options: [{ id: 'keep', label: 'Keep original' }], acceptsText: true }, { id: 'second', prompt: 'Free text answer', options: [], acceptsText: true } ] } }] }
+const page: AgentSessionHistoryPage = { agentSessionId: control.agentSessionId, source: target.source, sourceHostId: control.hostId, nextCursor: null, items: [{ id: target.recordId, turnId: target.turnId, kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original question body' }], questionRequest: { delivery: 'async', questions: [ { id: 'first', prompt: 'Choose a direction', options: [{ id: 'keep', label: 'Keep original' }], acceptsText: true }, { id: 'second', prompt: 'Free text answer', options: [], acceptsText: true } ] } }] }
 const key = questionReplyKey(control.agentSessionId, target)
 const held = { hostId: control.hostId, phase: 'unknown' as const, diagnostic: { code: 'ORIGINAL_UNKNOWN', message: 'Original receipt remains unknown' }, input: { ...target, operationId: 'original-operation', expectedRun: control.run, afterSubmissionId: 'original-predecessor', answers: [{ questionId: 'first', answer: 'Original frozen answer' }] } }
 let root: Root, container: HTMLDivElement
+const closes: Array<() => Promise<void>> = []
 const pane = () => <SessionPane sessionId={control.agentSessionId} surfaceKind="agent" interactiveResize={false} visible readOnly={false} linkOrigin={{ workspaceId: 'ws', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }}/>
 async function flush() { await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }) }
 async function fill(field: HTMLTextAreaElement, value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }); await flush() }
+async function waitCard() {
+  for (let step = 0; step < 40; step++) {
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
+    if ([...container.querySelectorAll('[aria-label="Native asynchronous question"]')].some(node => !node.closest('[inert]'))) return
+  }
+  card()
+}
 function card() { const values = [...container.querySelectorAll<HTMLElement>('[aria-label="Native asynchronous question"]')].filter(node => !node.closest('[inert]')); expect(values).toHaveLength(1); return values[0]! }
 async function click(selector: string) { await act(async () => card().querySelector<HTMLButtonElement>(selector)!.click()); await flush() }
 async function setup(unknown = false) {
   const capabilities = new AgentProviderRegistry().catalog().find(provider => provider.id === 'codex')!.capabilities
-  expect(capabilities.asyncQuestionReply).toBe('terminal')
+  expect(capabilities.asyncQuestionReply).toBe('native-input')
   const config = { version: 9, hosts: [{ id: control.hostId, kind: 'local', label: 'Private host' }], executors: { codex: { label: 'Private reader', providerId: 'codex', command: 'unused', args: [], env: {}, injectAgentMuxGuide: true } }, workspaces: [{ id: 'ws', name: 'Project', hostId: control.hostId, path: _newTailFixturePath("private/project"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as AppConfig
   const session = { id: control.agentSessionId, kind: 'agent', hostId: control.hostId, workspacePath: _newTailFixturePath("private/project"), label: 'Original question agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: _newTailFixtureEpoch(0, 0, 1), promptSubmissionPredecessor: null, nativeSessionId: target.source.nativeSessionId, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: target.source.nativeSessionId }, createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1), processState: 'running', status: { state: 'done', source: 'native-hook', observedAt: _newTailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0, capabilities, control } as Extract<SessionSnapshot, { kind: 'agent' }>
   const focus = vi.fn(); useAppStore.setState({ config, sessions: [session], agentComposerDrafts: { [control.agentSessionId]: 'ORIGINAL UNSENT' }, viewModes: { [control.agentSessionId]: 'activity' }, timelines: {}, pendingAgentLaunches: {}, runtimeOwnershipWarnings: [], recoveryCandidates: [], agentSteerQueues: {}, questionReplies: unknown ? { [control.agentSessionId]: { [key]: structuredClone(held) } } : {}, questionReplyDrafts: {}, focusRegion: focus, workbenchSaveWarning: null })
   const reads = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page), send = vi.spyOn(api.sessions, 'replyQuestion'), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
   const write = vi.spyOn(api.sessions, 'write'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
-  await act(async () => root.render(pane())); await flush(); return { reads, send, copy, focus, write, resume, stop }
+  const reader = await conversationPagePortFixture(control, target.source, async () => page); closes.push(reader.close)
+  await act(async () => root.render(pane())); await flush()
+  await vi.waitFor(() => expect(container.querySelector('[aria-label="Native asynchronous question"]')).not.toBeNull())
+  return { reads, send, copy, focus, write, resume, stop }
 }
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container) })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(original, true); vi.restoreAllMocks() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); for (const close of closes.splice(0).reverse()) await close(); useAppStore.setState(original, true); vi.restoreAllMocks() })
 it('actual SessionPane edits two answers, copies plain text and opens the same SID and Region then returns with drafts and unknown intact', async () => {
   const f = await setup(true), frozen = structuredClone(useAppStore.getState().questionReplies[control.agentSessionId]![key])
   await click('[data-question-id="first"] button'); await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, '  第二题\n保留空白  ')
   await click('[aria-label="Copy answer: Free text answer"]'); expect(f.copy).toHaveBeenCalledExactlyOnceWith('  第二题\n保留空白  ')
   const drafts = structuredClone(useAppStore.getState().questionReplyDrafts), count = f.reads.mock.calls.length
-  await click('.agent-question__footer button')
+  await click('[data-question-action="terminal"]')
   expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal')
   expect(container.querySelector('[data-terminal-session]')?.getAttribute('data-terminal-session')).toBe(control.agentSessionId)
   expect(f.focus).toHaveBeenCalledWith('ws', 'tab', 'region', 'pointer', 'group')
-  await act(async () => useAppStore.getState().setViewMode(control.agentSessionId, 'activity')); await flush()
+  await act(async () => useAppStore.getState().setViewMode(control.agentSessionId, 'activity')); await flush(); await waitCard()
   expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.value).toBe('  第二题\n保留空白  ')
-  await act(async () => root.render(<div>Another surface</div>)); await act(async () => root.render(pane())); await flush()
+  await act(async () => root.render(<div>Another surface</div>)); await act(async () => root.render(pane())); await flush(); await waitCard()
   expect(useAppStore.getState().questionReplyDrafts).toEqual(drafts); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
   expect(card().querySelector('.agent-question__original')?.textContent).toContain('original-predecessor'); expect(card().textContent).toContain('Original receipt remains unknown')
   expect(useAppStore.getState().agentComposerDrafts[control.agentSessionId]).toBe('ORIGINAL UNSENT')
@@ -65,14 +77,14 @@ it('actual Pane keeps clipboard and save failures visible without blocking draft
   await act(async () => useAppStore.setState({ workbenchSaveWarning: 'Disk save unavailable' })); await flush(); expect(card().textContent).toContain('kept in this running app')
   let resolve!: () => void; f.copy.mockImplementationOnce(() => new Promise<void>(done => { resolve = done })); await click('[aria-label="Copy answer: Free text answer"]')
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, control: { ...session.control, hostId: 'new-host', run: { runId: 'new-run' } } } : session) }))); await flush()
-  await act(async () => resolve()); expect(card().textContent).not.toContain('Copied'); expect(f.send).not.toHaveBeenCalled()
-  await click('.agent-question__footer button'); expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal')
+  await act(async () => resolve()); expect(container.textContent).not.toContain('Copied'); expect(f.send).not.toHaveBeenCalled()
+  expect(useAppStore.getState().questionReplyDrafts[control.agentSessionId]![key]).toEqual([{ questionId: 'second', answer: 'Plain answer' }])
 })
 it('same-source native answers never settle old unknown or clear diagnostic; only exact whole-operation notApplied can reject and legacy confirmed stays intact', async () => {
   await setup(true); const frozen = structuredClone(useAppStore.getState().questionReplies[control.agentSessionId]![key])
   for (const answer of ['Original frozen answer', 'Different native answer']) {
     const answered = { ...page, items: [...page.items, { id: 'native-answer', kind: 'user-message' as const, contentParts: [], questionAnswers: [{ questionId: 'first', answer }, { questionId: 'second', answer: 'Native second answer' }] }] }
-    await act(async () => root.render(<ActivityView sessionId={control.agentSessionId} capability="complete-events" items={[]} nativeHistoryPage={answered} questionReplyState={target => desktopQuestionReplyState(useAppStore.getState().questionReplies[control.agentSessionId], control.agentSessionId, target)} />)); await flush(); expect(card().textContent).toContain('Answered'); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
+    await act(async () => root.render(<ConversationView sessionId={control.agentSessionId} executionHostId={control.hostId} page={answered} questionReplyState={target => desktopQuestionReplyState(useAppStore.getState().questionReplies[control.agentSessionId], control.agentSessionId, target)} />)); await flush(); expect(card().textContent).toContain('Answered'); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
   }
   for (const fact of [{ submissionId: 'foreign-operation', run: control.run }, { submissionId: held.input.operationId, run: { runId: 'foreign-run' } }]) { reconcileConversationQuestionReplies(control, fact); await flush(); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen) }
   reconcileConversationQuestionReplies({ ...control, hostId: 'foreign-host' }, { submissionId: held.input.operationId, run: control.run }); await flush(); expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toEqual(frozen)
@@ -82,14 +94,49 @@ it('same-source native answers never settle old unknown or clear diagnostic; onl
 
 it('actual Pane distinguishes retained or unknown native sources and a known old reply Run without blocking draft/copy/original terminal', async () => {
   const f = await setup(); await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Kept draft across source changes')
-  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端')
+  expect(card().querySelector('[data-question-action="send"]')?.textContent).toContain('发送答案')
   for (const change of [{ nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'changed-native-source' } }, { nativeHandle: undefined }]) {
-    await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, ...change } : session) }))); await flush()
-    expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端'); expect(card().textContent).toContain('retained question')
+    await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, ...change } : session) }))); await flush(); await waitCard()
+    expect(card().querySelector('[data-question-action="terminal"]')?.textContent).toContain('打开原终端'); expect(card().textContent).toContain('准确回复通道暂不可用')
     expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.disabled).toBe(false)
     await click('[aria-label="Copy answer: Free text answer"]'); expect(f.copy.mock.lastCall?.[0]).toBe('Kept draft across source changes')
   }
-  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, nativeHandle: { kind: 'provider', providerId: target.source.providerId, sessionId: target.source.nativeSessionId }, control: { ...control, run: { runId: 'new-run' } } } : session), questionReplies: { [control.agentSessionId]: { [key]: { ...held, phase: 'rejected' } } } }))); await flush()
-  expect(card().querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端')
-  await click('.agent-question__footer button'); expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal'); expect(f.send).not.toHaveBeenCalled(); expect(f.write).not.toHaveBeenCalled()
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.kind === 'agent' ? { ...session, nativeHandle: { kind: 'provider', providerId: target.source.providerId, sessionId: target.source.nativeSessionId }, control: { ...control, run: { runId: 'new-run' } } } : session), questionReplies: { [control.agentSessionId]: { [key]: { ...held, phase: 'rejected' } } } }))); await flush(); await waitCard()
+  expect(card().querySelector('[data-question-action="terminal"]')?.textContent).toContain('打开原终端')
+  await click('[data-question-action="terminal"]'); expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('terminal'); expect(f.send).not.toHaveBeenCalled(); expect(f.write).not.toHaveBeenCalled()
+})
+
+it('actual Pane sends selected and written answers through its original API with durable intent and no terminal handoff', async () => {
+  const dispose = await useAppStore.getState().initialize(); closes.push(async () => dispose())
+  const f = await setup()
+  f.send.mockImplementation(async (actual, input) => {
+    expect(actual).toEqual(control)
+    expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toMatchObject({ phase: 'sending', input })
+    return { agentSessionId: control.agentSessionId, source: input.source, recordId: input.recordId,
+      operationId: input.operationId, questionIds: input.answers.map(answer => answer.questionId), outcome: 'submitted' }
+  })
+  await click('[data-question-id="first"] button')
+  await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Exact written answer')
+  expect(f.send).not.toHaveBeenCalled()
+  await click('[data-question-action="send"]')
+  expect(f.send).toHaveBeenCalledOnce()
+  expect(f.send.mock.calls[0]![1]).toMatchObject({ ...target, expectedRun: control.run, afterSubmissionId: null,
+    answers: [{ questionId: 'first', answer: 'Keep original' }, { questionId: 'second', answer: 'Exact written answer' }] })
+  expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]?.phase).toBe('submitted')
+  expect(useAppStore.getState().viewModes[control.agentSessionId]).toBe('activity')
+  for (const action of [f.copy, f.focus, f.write, f.resume, f.stop]) expect(action).not.toHaveBeenCalled()
+})
+
+it('a failed Desktop storage receipt retains the answer and never dispatches the precise reply', async () => {
+  const dispose = await useAppStore.getState().initialize(); closes.push(async () => dispose())
+  const f = await setup()
+  vi.spyOn(api.ui, 'requestStorageFlush').mockRejectedValue(Error('Original storage commit unavailable'))
+  await click('[data-question-id="first"] button')
+  await fill(card().querySelector('[aria-label="Your answer: Free text answer"]')!, 'Retained written answer')
+  await click('[data-question-action="send"]')
+  expect(f.send).not.toHaveBeenCalled()
+  expect(useAppStore.getState().questionReplies[control.agentSessionId]![key]).toMatchObject({ phase: 'rejected',
+    input: { answers: [{ questionId: 'first', answer: 'Keep original' }, { questionId: 'second', answer: 'Retained written answer' }] } })
+  expect(card().textContent).toContain('Original storage commit unavailable')
+  expect(card().querySelector<HTMLTextAreaElement>('[aria-label="Your answer: Free text answer"]')!.disabled).toBe(false)
 })

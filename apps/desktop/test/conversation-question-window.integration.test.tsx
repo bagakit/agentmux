@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi, type MockInstance } from 'vitest';
@@ -45,7 +46,7 @@ beforeEach(async () => {
     await writeFile(records, JSON.stringify(originalEntries));
     await writeFile(script, `import {readFileSync} from 'node:fs';import {createInterface} from 'node:readline';createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line);if(q.id===undefined)return;let result;if(q.method==='initialize')result={userAgent:'controlled-read-only-protocol'};else if(q.method==='thread/read')result={thread:{id:${JSON.stringify(source.nativeSessionId)},historyMode:'paginated'}};else if(q.method==='thread/items/list'){const rows=JSON.parse(readFileSync(${JSON.stringify(records)},'utf8')).reverse(),offset=Number(q.params.cursor??0),limit=q.params.limit??30;result={data:rows.slice(offset,offset+limit),nextCursor:offset+limit<rows.length?String(offset+limit):null}}process.stdout.write(JSON.stringify({id:q.id,result})+'\\n')})`);
     store = new AgentMuxFileAgentSessionStore(join(directory, 'sessions.json'));
-    await store.compareAndSwap(null, { kind: 'agent', agentSessionId: sid, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: directory, run: control.run, retiredRuns: [], hookBindingId: 'fixture-hook', hookToken: 'fixture-token', createdAt: 1, updatedAt: 1, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: source.nativeSessionId } });
+    await store.compareAndSwap(null, { kind: 'agent', agentSessionId: sid, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: directory, run: control.run, retiredRuns: [], hookBindingId: 'fixture-hook', hookToken: 'fixture-token', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: source.nativeSessionId } });
     client = new AgentMuxClient({ store });
     stored = await readFile(store.path);
     const read = (options = {}) => client.sessionHistoryPage(sid, { commandOverride: process.execPath, args: [script], ...options });
@@ -94,7 +95,7 @@ it('a retained submitted operation stays independent of recorded answers and ope
   const attempt = { phase: 'submitted' as const, answers }
   const terminal = vi.fn(), edit = vi.fn()
   const node = (context: AgentSessionHistoryPage | null) => <ConversationView page={oldPage} sessionId={sid}
-    questionAnswerContext={context} questionReplyRoute="terminal" onOpenQuestionTerminal={terminal}
+    questionAnswerContext={context} onOpenQuestionTerminal={terminal}
     onQuestionDraftChange={edit} questionReplyState={() => attempt}/>
   await render(node(null))
   expect(card().dataset.questionState).toBe('submitted')
