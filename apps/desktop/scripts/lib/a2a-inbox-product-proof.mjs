@@ -11,8 +11,9 @@ import { listProbeProcesses, stopProbeProcesses, runProbeProcess } from '../prob
 const exec = promisify(execFile), require = createRequire(import.meta.url)
 export const a2aProofSha = bytes => createHash('sha256').update(bytes).digest('hex')
 const packages = ['core', 'demand', 'client-ui', 'layout', 'relay', 'identity', 'git', 'diagnostic-evidence', 'connectors']
-const assets = ['packages/core/vendor', 'apps/desktop/vendor', 'apps/desktop/resources', 'apps/desktop/native', 'apps/desktop/brand', 'apps/desktop/browser-extension']
+const assets = ['packages/core/vendor', 'apps/desktop/vendor', 'apps/desktop/native', 'apps/desktop/brand', 'apps/desktop/browser-extension']
 const owns = ['apps/desktop/src', 'apps/desktop/electron.vite.config.ts', 'apps/desktop/package.json',
+  'apps/desktop/resources', 'apps/desktop/scripts/build-workspace-move-helper.mjs',
   'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/scripts/excalidraw-local-fonts.ts', 'apps/desktop/scripts/pdfjs-viewer-assets.ts', 'apps/desktop/scripts/file-diagram-assets.ts',
   'apps/host/src', 'apps/host/package.json', 'test/fixture-values.mjs', 'test/fixture-epoch.cjs',
   'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json', 'tsconfig.shared.json', 'patches',
@@ -115,6 +116,9 @@ export async function runA2aInboxProductProof({ root, evidence }) {
     await command('core-build', process.execPath, [join(privateRoot, 'packages/core/scripts/build.mjs')], privateRoot)
     for (const [name, config] of [['client-ui', 'tsconfig.build.json'], ['connectors', 'tsconfig.json']])
       await command(name + '-build', process.execPath, [require.resolve('typescript/bin/tsc'), '-p', 'packages/' + name + '/' + config], privateRoot)
+    // Normal Desktop prebuild supplies its filesystem helper. Its output belongs
+    // to this private resources directory, never the linked immutable asset trees.
+    await command('workspace-helper-build', process.execPath, [join(privateRoot, 'apps/desktop/scripts/build-workspace-move-helper.mjs')], privateRoot)
     const original = await readFile(join(privateRoot, 'apps/desktop/src/main/index.ts'), 'utf8')
     const anchor = 'const window = new BrowserWindow({\n      ...windowConstructorGeometry(persistedGeometry),', placement = '    workbenchWindow = window'
     assert.equal(original.split(anchor).length, 2); assert.equal(original.split(placement).length, 2)
@@ -132,11 +136,12 @@ privateA2aClipboard.writeText = text => recordPrivateA2aClipboard(${JSON.stringi
     product.loaded = JSON.parse(await readFile(loadedPath, 'utf8')); product.compilerInputs = JSON.parse(await readFile(compilerInputsPath, 'utf8'))
     assert.equal(product.compilerInputs[product.windowOverlay.owner], product.windowOverlay.compilerInput)
     for (const path of requiredLoaded) assert.equal(product.loaded[path], product.sources[path], 'Actual product consumer compiled: ' + path)
-    for (const directory of ['apps/desktop/out', ...packages.map(name => 'packages/' + name + '/dist')]) {
+    for (const directory of ['apps/desktop/out', 'apps/desktop/resources/bin', ...packages.map(name => 'packages/' + name + '/dist')]) {
       try { for (const entry of await readdir(join(privateRoot, directory), { recursive: true, withFileTypes: true })) if (entry.isFile()) {
         const path = join(entry.parentPath, entry.name); product.compiled[relative(privateRoot, path)] = a2aProofSha(await readFile(path))
       } } catch (error) { if (error.code !== 'ENOENT') throw error }
     }
+    assert.ok(product.compiled['apps/desktop/resources/bin/agentmux-workspace-move'], 'Actual Desktop filesystem helper is included in the private build')
     for (const [path, digest] of Object.entries(product.sources)) assert.equal(a2aProofSha(await readFile(join(root, path))), digest, 'Source stayed unchanged while building: ' + path)
     assert.equal((await exec('git', ['diff', sourceCommit, '--name-only', '--', ...assets], { cwd: root })).stdout.trim(), '', 'Immutable asset trees stayed committed during the build')
     const workerEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_') && !['NODE_OPTIONS', 'ELECTRON_RUN_AS_NODE', 'CODEX_HOME'].includes(name)))
