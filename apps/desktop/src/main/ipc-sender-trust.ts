@@ -120,6 +120,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'continuousProgress:goalAction': 'Goal progress',
   'continuousProgress:action': 'continuous progress',
   'sessions:inputOccupation': 'Agent input occupation',
+  'sessions:restart': 'original Agent Session restart',
   'continuousProgress:pauseForInput': 'continuous progress',
   'ui:requestStorageFlush': 'storage flush',
   'ui:writeClipboardImage': 'clipboard image',

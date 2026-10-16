@@ -8,10 +8,12 @@ import { useAppStore } from '../store'
 import { RegionMenuEntryView } from './RegionContextMenu'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useFocusStopAgent } from './FocusStopAgent'
+import { useSessionRestart } from './SessionRestart'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
+const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 
 
 /** A Context card knows its semantic SID, not which of its Regions to address. */
@@ -23,6 +25,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   const actionOwnsFocus = useRef(false)
   const origin = useRef<HTMLElement | null>(null)
   const stop = useFocusStopAgent(active)
+  const restart = useSessionRestart(active)
   const actions = agentRosterMenuActions({ sessionId, writeClipboardText: async text => {
     await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
   } })
@@ -49,8 +52,9 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
         <ContextMenu.Separator className="tab-context-menu__separator" />
         {actions.filter(action => action.key === 'copy-session').map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
         <ContextMenu.Separator className="tab-context-menu__separator" />
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(sessionId, context.name, origin.current) }}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></ContextMenu.Item>
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
       </ContextMenu.Content>
     </DocumentOverlayPortal>
-  </ContextMenu.Root>{active ? stop.dialog : null}</>
+  </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}</> : null}</>
 }

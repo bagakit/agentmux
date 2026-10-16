@@ -31,6 +31,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'object.composer-details': { label: 'Composer details', glyph: 'input-tools' },
   'action.resume-session': { label: 'Resume original Session', glyph: 'session-resume' },
   'action.restart-terminal': { label: 'Restart terminal', glyph: 'terminal-restart' },
+  'action.restart-session': { label: 'Restart Session', glyph: 'terminal-restart' },
   'action.return-control': { label: 'Return control to Agent', glyph: 'handoff-agent' },
   'action.replay': { label: 'Replay operation', glyph: 'operation-replay' },
   'action.restore-defaults': { label: 'Restore defaults', glyph: 'defaults-restore' },

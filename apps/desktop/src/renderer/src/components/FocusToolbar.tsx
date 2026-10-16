@@ -22,9 +22,11 @@ import { currentDisplayNameRevision, useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useFocusStopAgent } from './FocusStopAgent'
+import { useSessionRestart } from './SessionRestart'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
+const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 const ThemeObjectInboxIcon = semanticIconComponent('object.inbox')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
@@ -48,6 +50,7 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
 }) {
   const renameTab = useAppStore(state => state.renameTab)
   const stop = useFocusStopAgent(active)
+  const restart = useSessionRestart(active)
   const sessions = useWorkbenchTabSessions(tab ?? undefined)
   const sessionNameMetadata = useWorkbenchTabNameMetadata(tab ?? undefined)
   const agentNames = useWorkbenchTabRecord('agentNames', tab ?? undefined)
@@ -162,7 +165,7 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
     ...(tab ? [{ key: 'rename', label: 'Rename Tab', icon: ThemeActionEditIcon, run: () => { ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('tab', tab.id) }; setDraft(name) } }] : []),
     ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: ThemeActionStopIcon, run: onToggleRegion }] : []),
     ...(selected?.actionable ? [{ key: 'review', label: 'Review request', icon: ThemeObjectInboxIcon, run: onReview }] : []),
-    ...(selectedId && activeSurface?.kind === 'agent' ? [{ key: 'stop', label: 'Stop Agent', icon: ThemeActionStopIcon, run: () => stop.requestStop(selectedId, selected?.name ?? name, menuOriginRef.current) }] : []),
+    ...(selectedId && activeSurface?.kind === 'agent' ? [{ key: 'restart', label: 'Restart Session…', icon: ThemeActionRestartIcon, run: () => restart.requestRestart(selectedId, selected?.name ?? name, menuOriginRef.current) }, { key: 'stop', label: 'Stop Agent', icon: ThemeActionStopIcon, run: () => stop.requestStop(selectedId, selected?.name ?? name, menuOriginRef.current) }] : []),
   ]
   return <div className="focus-toolbar__context">
     {draft !== null ? <TextInput ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={() => { if (active) void commitRename() }} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; ++editGeneration.current; setDraft(null) } }} /> : <ContextMenu.Root modal={false} open={active && contextOpen} onOpenChange={setContextOpen}>
@@ -204,6 +207,6 @@ function FocusToolbarContext({ active, selectedId, selected, tab, reference, onR
       <DocumentOverlayPortal component={DropdownMenu.Portal}><DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <DropdownMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></DropdownMenu.Item>)}</DropdownMenu.Content></DocumentOverlayPortal>
     </DropdownMenu.Root>
     <button type="button" className="icon-button" aria-label="Close Focus workspace" title="Collapse Focus workspace" onClick={onCloseWorkspace}><ThemeLayoutCloseRightIcon size={14} /></button>
-    {active ? stop.dialog : null}
+    {active ? <>{restart.dialog}{stop.dialog}</> : null}
   </div>
 }

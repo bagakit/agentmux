@@ -1384,6 +1384,7 @@ type AppState = {
   reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
   recoverSession(sessionId: string, operationId?: string, options?: { preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
+  restartSession(control: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<import('../../shared/contracts').SessionRestartResult>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
   resyncTimeline(sessionId: string, options?: { observationOnly?: boolean }): Promise<void>
@@ -11107,6 +11108,26 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         lifecycle: { step: 'resume', subject: current.control, lastProcessState: current.processState }
       } : undefined)
     }
+  },
+  async restartSession(control, operationId, observeOnly = false) {
+    const result = await api.sessions.restart(control, operationId, observeOnly)
+    if (result.agentSessionId !== control.agentSessionId || result.operationId !== operationId ||
+        result.previousRun.runId !== control.run.runId) throw new Error('Restart response belongs to another original Session, Run or operation.')
+    const session = result.session
+    if (session && (session.kind !== 'agent' || session.id !== control.agentSessionId ||
+        session.control.hostId !== control.hostId || session.control.agentSessionId !== control.agentSessionId ||
+        result.newRun && session.control.run.runId !== result.newRun.runId))
+      throw new Error('Restart projection belongs to another Session or Run. The original operation is retained.')
+    if (session?.kind === 'agent' && session.id === control.agentSessionId &&
+        session.control.hostId === control.hostId && session.control.agentSessionId === control.agentSessionId) {
+      set(state => {
+        const current = state.sessions.find(item => item.id === session.id)
+        if (current?.kind !== 'agent' || current.control.hostId !== control.hostId ||
+            current.control.run.runId !== control.run.runId && current.control.run.runId !== session.control.run.runId) return state
+        return projectRecoveredSession(state, session.id, session)
+      })
+    }
+    return result
   },
   async stopSession(sessionId) {
     const state = get()

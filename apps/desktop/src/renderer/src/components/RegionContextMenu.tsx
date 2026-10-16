@@ -1,6 +1,10 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { createContext, useContext, useId, type ReactNode } from 'react'
+import { createContext, useContext, useId, useRef, type ReactNode } from 'react'
+import { useSessionRestart } from './SessionRestart'
+import { useAppStore } from '../store'
+import { sessionPresentationById } from '../lib/session-presentation'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { formatRegionAddress, formatSessionAddress } from '../lib/agent-address'
 import type { RegionSwapMenuEntry, WorkbenchSplitMenuEntry } from '../lib/workbench-tab-actions'
 import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
@@ -9,6 +13,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 const ThemeActionCopyAddressIcon = semanticIconComponent('action.copy-address')
 const ThemeActionReplaceIcon = semanticIconComponent('action.replace')
+const ThemeActionRestartIcon = semanticIconComponent('action.restart-session')
 const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations')
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
@@ -25,6 +30,7 @@ export type RegionMenuEntry =
   | { kind: 'connector-group'; group: ConnectorMenuGroup }
   | { kind: 'layout'; entries: readonly WorkbenchSplitMenuEntry[] }
   | { kind: 'swaps'; entries: readonly RegionSwapMenuEntry[] }
+  | { kind: 'restart'; onSelect(): void }
   | { kind: 'promote'; onSelect(): void }
   | { kind: 'window'; onSelect(): void }
 
@@ -157,6 +163,7 @@ export function RegionMenuEntryView({ entry, index, Item, Separator, Group = Con
       </SubContent>
     </DocumentOverlayPortal>
   </Sub>
+  if (entry.kind === 'restart') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></Item>
   if (entry.kind === 'window') return <Item className="tab-context-menu__item" onSelect={entry.onSelect}><ThemeActionOpenExternalIcon size={14} /><span>Open original Region in window</span></Item>
   if (entry.kind === 'promote') {
     return (
@@ -204,6 +211,10 @@ export function RegionContextMenu({
     swapMenu: readonly RegionSwapMenuEntry[]
   promote?: (() => void) | undefined
 }) {
+  const active = useWorkbenchPresentationActive()
+  const restart = useSessionRestart(active)
+  const origin = useRef<HTMLElement | null>(null)
+  const name = useAppStore(state => agentSessionId ? sessionPresentationById(state.sessions).get(agentSessionId)?.label ?? agentSessionId : null)
   const base = createRegionCopyModel({
     regionId,
     agentSessionId,
@@ -212,14 +223,14 @@ export function RegionContextMenu({
     swapMenu,
     promote
   })
-  const model = { ...base, entries: [...base.entries, ...(onOpenWindow ? [{ kind: 'window' as const, onSelect: onOpenWindow }] : []), ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
+  const model = { ...base, entries: [...base.entries, ...(agentSessionId ? [{ kind: 'separator' as const }, { kind: 'restart' as const, onSelect: () => restart.requestRestart(agentSessionId, name ?? agentSessionId, origin.current) }] : []), ...(onOpenWindow ? [{ kind: 'window' as const, onSelect: onOpenWindow }] : []), ...(connector.group ? [{ kind: 'connector-group' as const, group: connector.group }] : [])] }
   // 让位不在这里接线：原生视图的让位由 App 的那一个 MutationObserver 按 Radix 的 DOM 协议
   // （portal 到 React 根之外 + data-state=open）统一观察，见 lib/native-overlay-regions.ts。
   // 这个菜单——#544 那个被浏览器盖住的——正是"逐个接线会漏"的证据本身。
   return (
     <RegionMenuContext.Provider value={{ entries: model.entries, onOpen: connector.onOpen, dialogOpen: connector.dialogOpen }}>
       <ContextMenu.Root onOpenChange={connector.onOpen}>
-        <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
+        <ContextMenu.Trigger asChild onContextMenu={event => { origin.current = event.currentTarget }}>{children}</ContextMenu.Trigger>
         <DocumentOverlayPortal component={ContextMenu.Portal}>
           <ContextMenu.Content className="tab-context-menu region-context-menu" collisionPadding={8} onCloseAutoFocus={event => { if (connector.dialogOpen) event.preventDefault() }}>
             {model.entries.map((entry, index) => <RegionMenuEntryView
@@ -229,6 +240,7 @@ export function RegionContextMenu({
           </ContextMenu.Content>
         </DocumentOverlayPortal>
       </ContextMenu.Root>
+      {active ? restart.dialog : null}
     </RegionMenuContext.Provider>
   )
 }
