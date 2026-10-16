@@ -81,8 +81,10 @@ async function cli(args, caller = null, expectSuccess = true) {
   return receipt
 }
 async function focusReadingTarget(place, session) {
-  const result = (await cli(['space', 'focus', '--region', place.to.regionId, '--input', 'target', '--expect-session', session.agentSessionId])).result
-  assert.equal(result.operation, 'focus'); assert.equal(result.partial, false)
+  const receipt = await cli(['space', 'focus', '--region', place.to.regionId, '--input', 'target', '--expect-session', session.agentSessionId])
+  assert.equal(receipt.operation, 'space.focus')
+  const { result } = receipt
+  assert.equal(result.partial, false)
   assert.ok(['applied', 'unchanged'].includes(result.navigation.state))
   assert.equal(result.navigation.expectedAgentSessionId, session.agentSessionId)
   assert.equal(result.navigation.selection.space.regionId, place.to.regionId)
