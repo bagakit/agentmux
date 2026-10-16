@@ -23,9 +23,9 @@ export const AGENTMUX_HOSTED_METHODS = [
   'answerAsk', 'cancelAsk', 'startDiscussion', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch', 'readMessage', 'listMessages', 'readDispatch', 'listDispatches'
 ] as const satisfies readonly (keyof AgentMuxClient)[]
 
-/** Physical Runtime operations do not require a Session catalog or general event observation. */
+/** Physical Runtime operations do not require general Session recovery observation. */
 export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
-  'connectRuntime', 'observeRunStorage', 'listRuns',
+  'connectRuntime', 'observeRunStorage', 'listRuns', 'runtimeProjection',
   'reattachAgent', 'writeAgent', 'pasteAgent', 'resizeAgent', 'signalAgent',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal'

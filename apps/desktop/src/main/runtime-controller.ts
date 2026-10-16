@@ -880,7 +880,7 @@ export class RuntimeController {
         if (!runtimeOwner(client)) this.connectEndpointInBackground(hostId, client)
         throw new AgentMuxError(warning.message, warning.code)
       }
-      await this.connectedClient(hostId)
+      await this.connectedClient(hostId, 'runtime')
       if (this.hosts.get(hostId)?.client !== client) throw new Error('Runtime endpoint changed during its observation.')
       let projection = await client.runtimeProjection()
       while (true) {

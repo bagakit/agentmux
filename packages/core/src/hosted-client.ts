@@ -176,6 +176,21 @@ export async function connectHostedAgentMux(options: {
     if (method === 'clientPerformanceDiagnostics') {
       if (!stream || !bootstrap) throw new AgentMuxError('Performance owner is not connected.', 'CONTROL_UNAVAILABLE')
     } else await observeRead(connectControl(method === 'connectRuntime'), sourceSignal)
+    if (method === 'runtimeProjection' && !bootstrap) {
+      // Main needs the original Provider declarations to present these Subjects.
+      // Their read-only bootstrap does not require the general event lease to open.
+      const expected = fence(), epoch = controlEpoch
+      const observed = parseHostedBootstrap(await rpc.call('runtime.bootstrap', { consumerId, fence: expected }, { signal: observationSignal(sourceSignal) }))
+      if (disposed || epoch !== controlEpoch || controlOwner?.runtimeId !== expected.runtimeId ||
+          controlOwner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError(
+        'The original Host changed during its Runtime metadata observation.', 'CONTROL_CANCELLED')
+      if (observed.owner.runtimeId !== expected.runtimeId || observed.owner.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError(
+        'Runtime bootstrap belongs to another owner.', 'RUNTIME_OWNER_CHANGED')
+      if (options.expectedStorePath !== undefined && observed.storePath !== options.expectedStorePath) throw new AgentMuxError(
+        'This Host owns a different durable Session Store. The original workbench is retained.', 'CONTROL_OWNER_BUSY')
+      // A concurrent event opening may already have newer Session facts. Never replace them.
+      bootstrap ??= { ...structuredClone(observed), owner: structuredClone(controlOwner) }
+    }
     let signal: AbortSignal | undefined, wireArgs = args
     if (method === 'sessionHistorySources' && args[0]) {
       const { signal: cancellation, ...scope } = args[0] as NonNullable<Parameters<AgentMuxHostedClient['sessionHistorySources']>[0]>
