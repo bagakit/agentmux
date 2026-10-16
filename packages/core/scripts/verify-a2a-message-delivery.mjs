@@ -25,6 +25,12 @@ await runA2aProof({
     { symbol: 'initialMessage', path: 'apps/desktop/src/renderer/src/lib/space-agent-control.ts' }
   ],
   mutations: [
+    { label: 'local-transport-promoted-to-human-exact', file: 'client.js', tests: delivery,
+      before: 'operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,',
+      after: "operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true, ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {})," },
+    { label: 'local-transport-promoted-to-human-controlled', file: 'client.js', tests: delivery,
+      before: 'prompt: renderAgentMuxMessageEnvelope(envelope), admissionIntent:',
+      after: "prompt: renderAgentMuxMessageEnvelope(envelope), ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}), admissionIntent:" },
     { label: 'sender-capability-disconnected', file: 'agent-capability.js', tests: delivery,
       before: 'if (!sameHash(hashAgentCapability(raw), binding.capabilityHash))', after: 'if (false)' },
     { label: 'actual-send-source-disconnected', file: 'client.js', tests: delivery,
