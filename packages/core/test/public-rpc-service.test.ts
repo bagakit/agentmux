@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { loadAgentSessions } from '../src/agent-session-store.js'
 import { pathToFileURL } from 'node:url'
@@ -11,7 +12,6 @@ import { parseRpcControlResult, rpcControlRequest } from '../src/rpc-business-co
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js'
-import { AGENTMUX_AGENT_MESSAGING_RULES } from '../src/agent-messaging-guidance.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 
 const cleanups: Array<() => Promise<void>> = []
@@ -35,20 +35,20 @@ describe('public service uses the original Core and Desktop business owners', ()
     sdkPublisher.publishRunEvent({ type: 'data', runId: 'run-reader-d', startByte: 0, endByte: 1, data: 'x', dataBytes: Uint8Array.of(120) })
     expect(metadata).not.toHaveBeenCalled(); expect(received).not.toHaveBeenCalled()
     sdkPublisher.publish({ type: 'agent-error', agentSessionId: 'reader-a', code: 'PRIVATE_READER_ERROR', message: 'Observed reader error',
-      evidence: { source: 'run-process', observedAt: 1, run: { runId: 'run-reader-a' } } })
+      evidence: { source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1), run: { runId: 'run-reader-a' } } })
     // Shared diagnostics cannot establish failure of these healthy, independently attached readers.
     expect(metadata).toHaveBeenCalledTimes(3); expect(received).not.toHaveBeenCalled()
     metadata.mockClear()
     sdkPublisher.publish({ type: 'agent-session', session: h.client.agentSession('reader-a') })
     expect(metadata).toHaveBeenCalledTimes(3); expect(received).not.toHaveBeenCalled()
-    sdkPublisher.publish({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 2 } })
+    sdkPublisher.publish({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: _tailFixtureEpoch(0, 0, 2) } })
     expect(received).toHaveBeenCalledTimes(3)
     expect(received.mock.calls.map(([event]) => event.code)).toEqual(Array(3).fill('CONTROL_UNAVAILABLE'))
     expect(received.mock.calls.map(([event]) => event.agentSessionId).sort()).toEqual(['reader-a', 'reader-b', 'reader-c'])
     await Promise.all(readers.map(reader => reader.close())); metadata.mockClear(); received.mockClear()
     sdkPublisher.publish({ type: 'agent-error', agentSessionId: 'reader-a', code: 'PRIVATE_READER_ERROR', message: 'After close',
-      evidence: { source: 'run-process', observedAt: 1, run: { runId: 'run-reader-a' } } })
-    sdkPublisher.publish({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: 3 } })
+      evidence: { source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1), run: { runId: 'run-reader-a' } } })
+    sdkPublisher.publish({ type: 'connection-state', state: 'lost', evidence: { source: 'agentmux', observedAt: _tailFixtureEpoch(0, 0, 3) } })
     expect(metadata).not.toHaveBeenCalled(); expect(received).not.toHaveBeenCalled()
     expect(h.inner.kernel.stop).not.toHaveBeenCalled(); expect(h.inner.kernel.attach).not.toHaveBeenCalled()
   })
@@ -86,11 +86,14 @@ describe('public service uses the original Core and Desktop business owners', ()
     const listed = await service.call('agent.ls', {})
     expect(listed.sessions).toHaveLength(1); expect(listed.errors).toEqual([{ agentSessionId: 'caller', hostId: 'local', code: 'CONTROL_UNAVAILABLE', message: 'Private Run snapshot unavailable' }])
     const inspected = await service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'recipient' } })
-    expect(inspected.session.agentSessionId).toBe('recipient'); expect(inspected.displayName).toEqual({ override: null, availability: 'unavailable' })
+    expect(inspected.session.agentSessionId).toBe('recipient'); expect(inspected.displayName).toEqual({ override: null, source: null, nameRevision: null, availability: 'unavailable' })
     expect(inspected.unavailable).toHaveLength(1)
     const self = await service.call('whoami', {}, { caller: h.credentials })
-    expect(self.messaging).toEqual(AGENTMUX_AGENT_MESSAGING_RULES)
-    expect(parseRpcNativeResult('whoami', self, {}, h.credentials)).toMatchObject({ messaging: AGENTMUX_AGENT_MESSAGING_RULES })
+    expect(Object.keys(self).sort()).toEqual(['session', 'status', 'unavailable', 'view'])
+    expect(self).toMatchObject({ session: h.client.agentSession('caller'), status: null,
+      view: { attached: false, reason: 'no-desktop-view' },
+      unavailable: [expect.objectContaining({ code: 'CONTROL_UNAVAILABLE', message: 'Private Run snapshot unavailable' })] })
+    expect(parseRpcNativeResult('whoami', self, {}, h.credentials)).toEqual(self)
     await service.dispose(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   })
   it('validates the current durable capability, rather than a long-lived registry cache', async () => {
@@ -98,7 +101,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     const service = new AgentMuxRpcService({ coreClients: h.coreClients, execute })
     await service.call('space.ls', { target: {} }, { caller: h.credentials })
     const before = (await h.store.load())[0]!
-    await h.store.compareAndSwap(before, { ...before, capabilityHash: hashAgentCapability(issueAgentCapability()), updatedAt: 2 })
+    await h.store.compareAndSwap(before, { ...before, capabilityHash: hashAgentCapability(issueAgentCapability()), updatedAt: _tailFixtureEpoch(0, 0, 2) })
     await expect(service.call('space.ls', { target: {} }, { caller: h.credentials })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     expect(execute).toHaveBeenCalledOnce(); expect(h.client.agentSession('caller').run).toEqual(before.run)
   })
@@ -112,7 +115,7 @@ describe('public service uses the original Core and Desktop business owners', ()
   it('keeps retired identities in prefix admission without resurrecting a retired Session', async () => {
     const h = await owner(['sameprefix-live']), service = new AgentMuxRpcService({ coreClients: h.coreClients })
     vi.spyOn(h.store, 'loadRetiredAgentSessions').mockResolvedValue([{ agentSessionId: 'sameprefix-retired', hostId: 'local',
-      run: { runId: 'retired-run' }, source: 'user', observedAt: 2 }])
+      run: { runId: 'retired-run' }, source: 'user', observedAt: _tailFixtureEpoch(0, 0, 2) }])
     await expect(service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'sameprefix' } }))
       .rejects.toMatchObject({ code: 'AMBIGUOUS_AGENT_SESSION' })
     await expect(service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'sameprefix-retired' } }))
@@ -175,8 +178,8 @@ describe('public service uses the original Core and Desktop business owners', ()
   })
   it('preserves original Goal activity in both canonical read and snapshot', async () => {
     const goal = { id: 'g', title: 'demandId is literal prose', description: '', status: 'todo', priority: 'normal',
-      projectId: null, projectName: null, assigneeExecutorId: null, sessionIds: [], tags: [], createdAt: 1, updatedAt: 2, source: 'default-topic' as const,
-      activities: [{ id: 'activity-original', kind: 'progress', message: 'Real retained activity', createdAt: 1, actorId: 'caller', operationId: 'activity-op' }] }
+      projectId: null, projectName: null, assigneeExecutorId: null, sessionIds: [], tags: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 2), source: 'default-topic' as const,
+      activities: [{ id: 'activity-original', kind: 'progress', message: 'Real retained activity', createdAt: _tailFixtureEpoch(0, 0, 1), actorId: 'caller', operationId: 'activity-op' }] }
     const service = new AgentMuxRpcService({ coreClients: () => [], execute: async request => request.operation === 'demand.activity.read'
       ? { operation: request.operation, demandId: goal.id, activities: goal.activities, diskDurability: 'confirmed' }
       : { operation: 'demand.list', demands: [goal] } })
@@ -201,7 +204,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     const subscription = await service.subscribe('agent.output', { agentSessionId: 'self', afterByte: 1, follow }, event => { events.push(event) }, { caller: h.credentials })
     if (follow) for (const push of h.observers) {
       push({ type: 'data', runId: 'run-caller', data: '中', dataBytes: Uint8Array.from([0xb8, 0xad]), startByte: 1, endByte: 3 })
-      push({ type: 'exit', runId: 'run-caller', state: { type: 'exited', code: 0, signal: null }, observedAt: 2 })
+      push({ type: 'exit', runId: 'run-caller', state: { type: 'exited', code: 0, signal: null }, observedAt: _tailFixtureEpoch(0, 0, 2) })
     }
     await subscription.start!()
     const output = events.filter(event => event.type === 'output')
@@ -222,7 +225,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     }, vi.fn(), failure)
     await ordered.finishReplayAsync([])
     const event = (start: number) => ({ type: 'terminal-output' as const, run: { runId: 'run' }, data: '', dataBytes: new Uint8Array(size),
-      evidence: { source: 'terminal-output' as const, observedAt: 1, outputByteRange: { startByte: start, endByte: start + size } } })
+      evidence: { source: 'terminal-output' as const, observedAt: _tailFixtureEpoch(0, 0, 1), outputByteRange: { startByte: start, endByte: start + size } } })
     ordered.accept(event(0)); await ready; ordered.accept(event(size)); resume()
     await vi.waitFor(() => expect(ranges).toHaveLength(6))
     expect(ranges).toEqual([0, 128 * 1024, 256 * 1024, size, size + 128 * 1024, size + 256 * 1024])

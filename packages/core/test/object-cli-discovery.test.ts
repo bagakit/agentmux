@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -13,13 +14,12 @@ import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli
 import { privateRpcCorePort } from './helpers/private-rpc-core.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
-import { SELF_CONTEXT_TOPIC_HINT } from '../src/agent-self-context.js'
 
 const goals: AgentMuxDemand[] = [
   { id: 'original-G1', title: 'First', description: 'saved', status: 'in_progress', priority: 'normal', projectId: 'P1', projectName: 'One',
-    assigneeExecutorId: 'E1', activities: [{ id: 'A1', kind: 'progress', message: 'original Goal activity', actorId: null, createdAt: 15 }], sessionIds: ['generic-session'], createdAt: 1, updatedAt: 20, source: 'session' },
+    assigneeExecutorId: 'E1', activities: [{ id: 'A1', kind: 'progress', message: 'original Goal activity', actorId: null, createdAt: _tailFixtureEpoch(0, 0, 15) }], sessionIds: ['generic-session'], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 20), source: 'session' },
   { id: 'original-G2', title: 'Second', description: 'saved too', status: 'done', priority: 'low', projectId: 'P2', projectName: 'Two',
-    assigneeExecutorId: 'E2', activities: [{ id: 'A2', kind: 'review', message: 'other Goal activity', actorId: null, createdAt: 25 }], sessionIds: ['other-session'], createdAt: 2, updatedAt: 30, source: 'session' }
+    assigneeExecutorId: 'E2', activities: [{ id: 'A2', kind: 'review', message: 'other Goal activity', actorId: null, createdAt: _tailFixtureEpoch(0, 0, 25) }], sessionIds: ['other-session'], createdAt: _tailFixtureEpoch(0, 0, 2), updatedAt: _tailFixtureEpoch(0, 0, 30), source: 'session' }
 ]
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []
@@ -96,13 +96,13 @@ describe('compiled object discovery through the actual public service and origin
     const store = new AgentMuxFileAgentSessionStore(storePath)
     await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'original-SID', providerId: 'codex', executorId: 'codex',
       hostId: 'local', workspacePath: root, run: { runId: 'original-Run' }, retiredRuns: [], hookBindingId: 'original-hook',
-      hookToken: 'synthetic-hook', capabilityHash: hashAgentCapability(capability), createdAt: 1, updatedAt: 1 })
+      hookToken: 'synthetic-hook', capabilityHash: hashAgentCapability(capability), createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) })
     const core = await privateRpcCorePort(storePath, join(root, 'messages.ndjson'))
     const address = { spaceId: 'S', zoneId: 'Z', workspaceId: 'W', displayWorkspaceId: 'D', groupId: 'G', tabId: 'T', regionId: 'R' }
     const catalog = { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [address] }
     const bounds = { x: 0.1, y: 0.2, width: 0.4, height: 0.4 }
     const neighbors = { left: { kind: 'none' }, right: { kind: 'tab', tabId: 'other-T' }, up: { kind: 'none' }, down: { kind: 'none' } } as const
-    const terminalView = { runId: 'original-Run', sampledAt: 123, visible: true, readOnly: false, liveReady: true, acceptsInput: true,
+    const terminalView = { runId: 'original-Run', sampledAt: _tailFixtureEpoch(0, 0, 123), visible: true, readOnly: false, liveReady: true, acceptsInput: true,
       viewGrid: { cols: 80, rows: 24 }, buffer: { type: 'normal', baseY: 100, viewportY: 40, length: 124 }, mouseTrackingMode: 'none' } as const
     const region = { kind: 'agent', workspaceId: 'W', tabId: 'T', regionId: 'R', agentSessionId: 'original-SID', providerId: 'codex', executorId: 'codex', bounds, neighbors, terminalView } as const
     const file = { kind: 'file', workspaceId: 'W', tabId: 'T', regionId: 'F', path: fixturePath("literal file"), bounds, neighbors } as const
@@ -145,7 +145,9 @@ describe('compiled object discovery through the actual public service and origin
         expect(whoami.code, whoami.stderr).toBe(0)
         const body = JSON.parse(whoami.stdout).result
         expect(body.session).toMatchObject({ agentSessionId: 'original-SID', run: { runId: 'original-Run' }, workspacePath: root })
-        expect(body.topic).toBe(SELF_CONTEXT_TOPIC_HINT)
+        expect(Object.keys(body).sort()).toEqual(['session', 'status', 'unavailable', 'view'])
+        expect(body.status).toBeNull()
+        expect(body.unavailable).toContainEqual(expect.objectContaining({ code: 'STATUS_UNAVAILABLE' }))
         expect(body.view).toMatchObject({ attached: false, reason: failure === 'CALLER_NOT_OPEN' ? 'no-desktop-view' : 'view-unavailable' })
         expect(body.unavailable).toContainEqual(expect.objectContaining({ code: failure }))
       }
