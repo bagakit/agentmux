@@ -6,6 +6,7 @@ import { BROWSER_OPERATION_FEEDBACK_WORLD_ID } from '../src/main/browser-operati
 import { AgentMuxControlServer, BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { projectBrowserControlResult } from '../src/main/browser-completion-control.js'
+import { rpcControlRequest, rpcControlResult, parseRpcControlResult } from '../../../packages/core/src/rpc-business-codec.js'
 import { mkdtempSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { LocalExecutionHost } from '@agentmux/core'
@@ -1317,6 +1318,25 @@ describe('Browser RSI：operation 凭 id 可查可停，与发起它的那条连
     })
     return { calls, entered, release }
   }
+
+  it.each(['x'.repeat(512), ' ' + 'x'.repeat(240) + '界'.repeat(20) + '😀'.repeat(50) + ' C '])('Browser operation exact identity survives real manager active read/stop and strict public result consumption: %s', async id => {
+    const { path, journal } = fileJournal(), { manager } = await managerWithBrowser(journal), held = holdFirstCall()
+    const request = rpcControlRequest('browser.run', { browserId: 'b1', operationId: id, code: 'return await snapshot()' })
+    expect(request).toMatchObject({ operationId: id })
+    const pending = manager.runScript('b1', 'return await snapshot()', undefined, undefined, id)
+    try {
+      await held.entered
+      const active = await manager.getOperation(id)
+      expect(active?.id).toBe(id)
+      const read = rpcControlResult('browser.inspect', projectBrowserControlResult({ operation: 'browser.operation', runOperation: active }))
+      expect(parseRpcControlResult('browser.inspect', read, { operationId: id })).toMatchObject({ runOperation: { id } })
+      const stopped = await manager.stopOperationById(id)
+      expect(stopped).toMatchObject({ id, phase: 'stopped' })
+      const stop = rpcControlResult('browser.stop', projectBrowserControlResult({ operation: 'browser.stop', runOperation: stopped }))
+      expect(parseRpcControlResult('browser.stop', stop, { operationId: id })).toMatchObject({ runOperation: { id, phase: 'stopped' } })
+    } finally { held.release(); await pending; manager.dispose(); await rm(dirname(path), { recursive: true, force: true }) }
+    expect(await pending).toMatchObject({ runOperation: { id }, outcome: { kind: 'stopped' } })
+  }, 30_000)
 
   it('调用方给的 id 就是记录里的 id，在飞期间凭它既查得到也停得下', async () => {
     const { journal } = fileJournal()
