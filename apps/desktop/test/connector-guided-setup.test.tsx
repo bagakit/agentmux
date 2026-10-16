@@ -542,3 +542,31 @@ it('a later original-bot response preserves the new bot setup the user explicitl
     expect(app.launch).not.toHaveBeenCalled(); expect(writes()).toEqual([])
   } finally { release() }
 }, 30_000)
+
+it('the primary check reads the frozen version after an unknown submit without changing or replaying that submission', async () => {
+  await open(); bot = true; mode = 4; callbackMode = 4; cards = true; permissions = true; reception = true
+  await click('[data-guided-primary]'); await idle()
+  await reviewCreation(); await click('[data-publication-confirm]')
+  await ready(() => expect(dom.container.querySelector('[data-publication-review-created]')).not.toBeNull())
+  await click('[data-publication-review-created]')
+  await ready(() => expect(dom.container.querySelector('[data-publication-confirm]')).not.toBeNull())
+  const request = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (...args) => {
+    const response = await request(...args)
+    return new URL(String(args[0])).pathname === '/developers/v1/publish/commit/' + APP + '/' + VERSION ? new Response('Original acknowledgement lost', { status: 502 }) : response
+  })
+  await click('[data-publication-confirm]'); await idle()
+  expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Check version status')
+  const original = structuredClone(current().applicationConfiguration!.selected!)
+  expect(original).toMatchObject({ effect: 'submit-application-version', versionId: VERSION, request: 'unknown' })
+  for (let check = 0; check < 2; check++) {
+    const before = native.length, count = writes().length
+    await click('[data-guided-primary]'); await idle()
+    expect(native.slice(before).map(call => call.path)).toEqual(['/developers/v1/app_version/detail/' + APP + '/' + VERSION])
+    expect(current().applicationConfiguration!.selected).toEqual(original)
+    expect(current().applicationInspection!.readResult).toEqual({ subject: 'publication-version', versionId: VERSION, status: 'reviewing' })
+    expect(document.querySelector('[data-guided-task]')?.textContent).toContain('Waiting for platform review')
+    expect(document.querySelector('[data-guided-task]')?.textContent).toContain('original submission result is not confirmed')
+    expect(writes()).toHaveLength(count)
+  }
+}, 30_000)
