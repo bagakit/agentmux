@@ -64,8 +64,7 @@ import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './cont
 import { AgentMuxError } from './errors.js'
 import { readAgentSessionHistory, validateSessionHistoryReadInput, isSessionHistoryQuery } from './session-history-reader.js'
 import { parseSessionHistoryResourceParams, parseSessionHistoryResourceResult } from './session-history-resource.js'
-import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
-import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
+import { classifySelfViewFailure } from './agent-self-context.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './agent-role-directory.js'
 import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
@@ -1515,8 +1514,7 @@ export class AgentMuxRpcService {
           target: { kind: 'self' }, caller: { agentSessionId: owner.agentSessionId, capability: owner.capability } }))
           view = observed.operation === 'inspect.region' ? { attached: true, region: observed.region } : null
         } catch (error) { view = classifySelfViewFailure(error); issues.push(unavailable(error)) }
-        result = { session: owner.session, status, view, topic: SELF_CONTEXT_TOPIC_HINT,
-          messaging: AGENTMUX_AGENT_MESSAGING_RULES, unavailable: issues }; break
+        result = { session: owner.session, status, view, unavailable: issues }; break
       }
       case 'agent.role.ls': case 'agent.role.resolve': case 'agent.role.register': {
         const scope = caller?.session.workspacePath ?? rpcString(p.workspacePath, 'Explicit role Workspace path')

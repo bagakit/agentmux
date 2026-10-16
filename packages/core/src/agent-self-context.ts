@@ -13,17 +13,6 @@ export const AGENTMUX_SELF_CONTEXT_VERB = 'whoami' as const
  * 当成好的"）。
  */
 
-/**
- * Topic 一项在 whoami 里的解释性缺席。
- *
- * Topic 是 Scratch 文件系统事实：`topic.md` 与 `.agents/` 才是唯一真相，topicId 由展示侧从工作区
- * 路径派生，Core 够不到。whoami 若要输出 Topic，只能在 Core 复刻那套目录约定——那就是给 Topic
- * 造第二份来源，两份必然漂移且漂移那天不会有测试变红。所以这里不产出 Topic，只带一句指向工作区
- * 文件的话，让缺席变成"这里不管 Topic、去文件里找"的可辨缺席，而不是甩给接收方去猜。
- */
-export const SELF_CONTEXT_TOPIC_HINT =
-  'Topic is not a Core fact. Read topic.md and the .agents/ files in your Workspace to find your Topic and collaborators.'
-
 export type SelfViewOutcome =
   | { attached: true; region: AgentMuxInspectedRegion }
   | { attached: false; reason: 'no-desktop-view' }
