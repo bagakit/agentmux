@@ -6099,8 +6099,8 @@ export class AgentMuxClient {
       const provider = this.providers.get(current.providerId)
       await this.ensureTerminalFrontendObservation(current)
       const frontend = this.terminalFrontendWatches.get(current.agentSessionId)?.frontend
-      if (current.nativeActor && provider.reconnectTerminalFrontend && !receipt.frontendReconnect && (!frontend || frontend.state === 'unknown')) return pending('provider-unverified', evidence)
-      if (current.nativeActor && provider.reconnectTerminalFrontend && (frontend?.state === 'detached' || receipt.frontendReconnect)) {
+      if (current.nativeActor?.frontendControl && provider.reconnectTerminalFrontend && !receipt.frontendReconnect && (!frontend || frontend.state === 'unknown')) return pending('provider-unverified', evidence)
+      if (current.nativeActor?.frontendControl && provider.reconnectTerminalFrontend && (frontend?.state === 'detached' || receipt.frontendReconnect)) {
         try {
           const target = current.nativeHandle
           if (target?.kind !== 'provider' || target.providerId !== current.providerId || !run?.pid) throw new AgentMuxError(
@@ -8599,7 +8599,7 @@ export class AgentMuxClient {
   private async ensureTerminalFrontendObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<boolean> {
     if (this.reopensDisposed) return false
     const current = this.registry.findByRun(session.run), provider = this.providers.get(session.providerId)
-    if (!current?.nativeActor || !provider.observeTerminalFrontend) return true
+    if (!current?.nativeActor?.frontendControl || !provider.observeTerminalFrontend) return true
     const key = JSON.stringify([session.run.runId, current.nativeActor.actorId])
     const existing = this.terminalFrontendWatches.get(session.agentSessionId)
     if (existing?.key === key && existing.frontend?.state !== 'unknown') return await existing.pending

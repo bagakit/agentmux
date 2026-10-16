@@ -1677,9 +1677,11 @@ function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentR
 function normalizePrivateNativeActor(value: unknown): import('./types.js').AgentPrivateNativeActor {
   const v = record(value, 'private native actor')
   const launch = record(v.launch, 'original Provider launch')
-  if (Object.keys(v).some(k => !['protocolId', 'actorId', 'lifecycleOperationId', 'token', 'launch'].includes(k)) || typeof v.token !== 'string' || !/^[a-f0-9]{64}$/u.test(v.token) ||
+  if (Object.keys(v).some(k => !['protocolId', 'actorId', 'lifecycleOperationId', 'token', 'launch', 'frontendControl'].includes(k)) || typeof v.token !== 'string' || !/^[a-f0-9]{64}$/u.test(v.token) ||
+      v.frontendControl !== undefined && v.frontendControl !== true ||
       Object.keys(launch).some(k => k !== 'command' && k !== 'args') || !Array.isArray(launch.args) || launch.args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new AgentMuxError('Invalid private native actor.', 'INVALID_AGENT_SESSION_STORE')
   return { protocolId: string(v.protocolId, 'native protocol'), actorId: string(v.actorId, 'native actor'), lifecycleOperationId: string(v.lifecycleOperationId, 'native lifecycle'), token: v.token,
+    ...(v.frontendControl === true ? { frontendControl: true as const } : {}),
     launch: { command: string(launch.command, 'original Provider command', MAX_PATH_BYTES), args: [...launch.args] as string[] } }
 }
 
