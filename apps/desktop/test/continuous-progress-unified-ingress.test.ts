@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import * as loadedCore from '@agentmux/core'
 import {
   AGENTMUX_AGENT_MESSAGING_ENTRY, AgentMuxClient, AgentMuxFileAgentSessionStore, ContinuousProgressScheduler, agentPromptCondition,
   decideContinuousProgress, type AgentMuxStoredAgentSession,
@@ -357,8 +358,10 @@ describe('continuous progress uses the public ingress and shared observation', (
     Object.assign(f, await f.make())
     await owner.store.save((await owner.store.load()).map(loop => ({ ...loop, prompt: 'changed current configuration' })))
     // Reload the actual producer with a later public rule revision, as after an upgrade.
+    const realCore = { ...loadedCore }
+    expect(realCore.AgentMuxClient).toBe(Client)
     vi.resetModules()
-    vi.doMock('@agentmux/core', async originalModule => ({ ...await originalModule<typeof import('@agentmux/core')>(),
+    vi.doMock('@agentmux/core', () => ({ ...realCore,
       AGENTMUX_AGENT_MESSAGING_ENTRY: 'Rules for a future claim; never replace the pending message.' }))
     const { ContinuousProgressLoopManager: CurrentManager } = await import('../src/main/continuous-progress-loop-manager.js')
     const cold = owner.make(CurrentManager); await cold.start(); owner.at(1000); await cold.check()
