@@ -215,11 +215,15 @@ it.each([
 it.each([
   ['missing navigation', () => { Object.assign(browser(), { navigationId: null, nativeOwner: 'unconfirmed' }) }],
   ['page error', () => { browser().error = 'PRIVATE_NAVIGATION_FAILED' }]
-] as const)('actual installation keeps Browser qualification for %s', async (_name, change) => {
+] as const)('actual installation retains local Browser observation for %s without gating the original workbench', async (_name, change) => {
   const f = await fixture(); change()
-  const error = await install(f).catch(error => error)
-  expect(error.message).toBe('An original Browser page has not reopened; its Region is preserved but UI activation is unconfirmed.')
-  expect(error.transaction.ui.status).toBe('unknown')
+  const original = structuredClone(io.before), expected = structuredClone(io.after)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error: error.message }))
+  expect(outcome.error, 'A local Browser observation must not revoke the restored original workbench').toBeNull()
+  expect(outcome.result?.ui.status).toBe('committed')
+  expect(outcome.result?.ui.observation).toEqual(expected)
+  expect(io.before).toEqual(original)
+  expect(io.cutovers).toBe(1)
 })
 it('rejection retains the last successful observation when a later RPC read is unavailable', async () => {
   const f = await fixture(); after().focus.executionSessionId = 'changed-focus'; io.failAfterRead = true
