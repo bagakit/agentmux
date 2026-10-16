@@ -69,7 +69,7 @@ it('keeps provisional cards readable until a real positive width exists', () => 
   const counts = [0, 1, 8, 2] as const, metrics = { width: 0, padding: 4, gap: 2, cardGap: 2 }
   expect(allocator.allocateFocusLaneColumns(counts, metrics).widths).toEqual([0, 180, 180, 180])
   expect(allocator.allocateFocusLaneColumns(counts, { ...metrics, width: 176 }).widths).toEqual([0, 172, 172, 172])
-  expect(allocator.allocateFocusLaneColumns(counts, { ...metrics, width: 500 }).widths).toEqual([0, 247, 247, 320])
+  expect(allocator.allocateFocusLaneColumns(counts, { ...metrics, width: 500 }).widths).toEqual([0, 320, 496, 496])
 })
 
 it('synchronously measures actual initial columns before paint, then consumes RO content sizes without another geometry read', async () => {

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import * as allocator from '../src/renderer/src/lib/focus-lane-layout'
-import type { FocusLaneCounts } from '../src/renderer/src/lib/focus-lane-layout'
+import type { FocusLaneCounts, FocusLaneLayout } from '../src/renderer/src/lib/focus-lane-layout'
 import { useAppStore } from '../src/renderer/src/store'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { App } from '../src/renderer/src/App'
@@ -18,6 +18,8 @@ vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFoc
 vi.mock('../src/renderer/src/components/NewTabSurface', () => ({ NewTabSurface: () => null }))
 vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDock: () => null }))
 vi.mock('../src/renderer/src/components/ProjectRail', () => ({ ProjectRail: () => null }))
+import { layoutCost, oracleCost } from './fixtures/focus-lane-oracle'
+
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement, stylesheet: HTMLStyleElement, base: Extract<SessionSnapshot, { kind: 'agent' }>
 let measuredWidth = 1336, observers: Array<{ callback: ResizeObserverCallback; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }>
@@ -25,18 +27,6 @@ const metrics = (counts: FocusLaneCounts, slots: number) => {
   const m = counts.filter(count => count > 0).length
   return { width: slots * 182 + 4 + Math.max(0, m - 1) * 2 - m * 2, padding: 4, gap: 2, cardGap: 2 }
 }
-function oracle(counts: FocusLaneCounts, slots: number) {
-  let best = Infinity
-  function enumerate(index: number, used: number, rows: number) {
-    if (index === 4) { best = Math.min(best, rows); return }
-    const count = counts[index]!
-    if (!count) { enumerate(index + 1, used, rows); return }
-    for (let columns = 1; columns <= Math.min(count, slots - used); columns++) enumerate(index + 1, used + columns, Math.max(rows, Math.ceil(count / columns)))
-  }
-  enumerate(0, 0, 0)
-  return best
-}
-const actualRows = (counts: FocusLaneCounts, columns: readonly number[]) => Math.max(0, ...counts.map((count, index) => count ? Math.ceil(count / columns[index]!) : 0))
 function agent(id: string, state: SessionSnapshot['status']['state']) {
   return { ...base, id, workspacePath: _hygiene_fixturePath("repo"), processState: state === 'disconnected' ? 'interrupted' as const : 'running' as const, status: { ...base.status, state }, control: { ...base.control, agentSessionId: id, run: { runId: 'original-' + id } } }
 }
@@ -74,6 +64,16 @@ const mount = () => act(async () => root.render(createElement(GlobalFocusSurface
 const groups = () => container.querySelector<HTMLElement>('.focus-project-board__live > .focus-project-lanes .focus-project-lanes__groups')!
 const section = (bucket: string) => groups().querySelector<HTMLElement>(`[data-bucket="${bucket}"]`)!
 const columns = () => ['attention', 'working', 'results', 'idle'].map(bucket => Number(section(bucket)?.style.getPropertyValue('--focus-card-columns') ?? 0))
+const mountedLayout = (): FocusLaneLayout => ({
+  columns: columns(), widths: ['attention', 'working', 'results', 'idle'].map(bucket => parseFloat(section(bucket)?.style.getPropertyValue('--focus-group-width') || '0')),
+  rowByBucket: ['attention', 'working', 'results', 'idle'].map(bucket => section(bucket) ? Number(section(bucket).style.gridRow) - 1 : -1),
+  columnStart: ['attention', 'working', 'results', 'idle'].map(bucket => parseFloat(section(bucket)?.style.getPropertyValue('--focus-group-offset') || '0')),
+  maxRows: Number(groups().dataset.focusMaxRows), slots: Number(groups().dataset.focusCardSlots)
+})
+function assertMountedBudget(width: number) {
+  const actual = mountedLayout()
+  for (let index = 0; index < 4; index++) if (actual.columns[index]) expect(actual.columnStart[index]! + actual.widths[index]!).toBeLessThanOrEqual(width - 4 + 1e-8)
+}
 const titleState = (bucket: string) => container.querySelector<HTMLElement>(`.focus-project-board__live .focus-project-lanes__status-rail [data-bucket="${bucket}"]`)!
 const card = (id: string) => container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`)!
 const listObservers = () => observers.filter(observer => observer.observe.mock.calls.some(([element]) => (element as HTMLElement).classList.contains('focus-project-lanes__rows')))
@@ -87,7 +87,7 @@ it('matches an independently enumerated optimum across nonempty integer budgets'
     const counts = [a, b, c, d] as const, m = counts.filter(Boolean).length
     for (let slots = Math.max(1, m); slots <= 10; slots++) {
       const layout = allocator.allocateFocusLaneColumns(counts, metrics(counts, slots))
-      expect(layout.slots).toBe(slots); expect(actualRows(counts, layout.columns)).toBe(oracle(counts, slots))
+      expect(layout.slots).toBe(m ? slots : 0); expect(layoutCost(counts, layout, metrics(counts, slots))).toBe(oracleCost(counts, metrics(counts, slots)))
       layout.columns.forEach((column, i) => expect(column).toBeLessThanOrEqual(counts[i]!)); checked++
     }
   }
@@ -101,12 +101,12 @@ it('actual Global projects 12/5/1 into optimal five, six and seven readable slot
     measuredWidth = metrics(counts, slots).width
     await act(async () => notify(listObservers()[0]!))
     expect(Number(groups().dataset.focusCardSlots)).toBe(slots)
-    expect(actualRows(counts, columns())).toBe(oracle(counts, slots))
+    expect(layoutCost(counts, mountedLayout(), metrics(counts, slots))).toBe(oracleCost(counts, metrics(counts, slots)))
     expect(groups().querySelectorAll('.focus-context')).toHaveLength(18)
     expect(section('attention')).toBeNull()
     expect(titleState('attention').getAttribute('aria-label')).toBe('Attention · 0')
     expect(section('disconnected')).toBeNull()
-    expect(titleState('disconnected').querySelectorAll('.focus-context')).toHaveLength(0)
+    expect(titleState('disconnected')).toBeNull()
   }
   expect(listObservers()).toHaveLength(1)
 })
@@ -118,11 +118,35 @@ it('bounds a single card group and preserves real adjacent gaps instead of stret
   expect(section('results').style.getPropertyValue('--focus-group-width')).toBe('642px')
   expect(columns()).toEqual([0, 0, 2, 0])
 })
+it('actual Global consumes explicit rows while keeping every original section and card parent through reflow', async () => {
+  measuredWidth = 659; await seed(3, 5, 12)
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, agent('needs-review', 'error')] })))
+  await mount()
+  const counts = [1, 3, 5, 12] as const
+  const sections = ['attention', 'working', 'results', 'idle'].map(section)
+  const original = card('idle-0'), parent = original.parentElement, state = useAppStore.getState()
+  await act(async () => original.focus())
+  const observer = listObservers()[0]!
+  for (const width of [659, 728, 729.5, 730, 730.5, 1000.5]) {
+    measuredWidth = width
+    await act(async () => notify(observer))
+    const actual = mountedLayout(), m = { width, padding: 4, gap: 2, cardGap: 2 }
+    expect(layoutCost(counts, actual, m)).toBe(oracleCost(counts, m))
+    assertMountedBudget(width)
+    expect(actual.columns[3]).toBeGreaterThan(1)
+    expect(['attention', 'working', 'results', 'idle'].map(section)).toEqual(sections)
+    expect(card('idle-0')).toBe(original); expect(original.parentElement).toBe(parent)
+    expect(document.activeElement).toBe(original)
+    expect(groups().querySelectorAll('.focus-context')).toHaveLength(21)
+    expect(useAppStore.getState().sessions).toBe(state.sessions)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+  }
+})
 it('keeps a still optimal previous allocation across a real count change and equivalent content updates', async () => {
-  measuredWidth = metrics([0, 17, 5, 1], 8).width; await seed(17); await mount()
+  measuredWidth = metrics([0, 13, 5, 1], 8).width; await seed(13); await mount()
   expect(columns()).toEqual([0, 5, 2, 1])
   const original = card('work-0'), draft = useAppStore.getState().agentComposerDrafts
-  await seed(16)
+  await seed(12)
   expect(columns()).toEqual([0, 5, 2, 1]); expect(card('work-0')).toBe(original)
   await act(async () => original.focus())
   const observerCount = observers.length
@@ -152,12 +176,10 @@ it('necessary wrapping retains one readable subcolumn and authoritative observat
   expect(columns()).toEqual([0, 1, 1, 1])
   expect(card('healthy-lost').closest('[data-bucket="idle"]')).not.toBeNull()
   expect(section('disconnected')).toBeNull()
-  expect(titleState('disconnected').querySelectorAll('.focus-context')).toHaveLength(0)
-  expect(titleState('disconnected').querySelector('button')?.textContent).toBe('1')
+  expect(titleState('disconnected')).toBeNull()
+  expect(card('offline').closest('[data-bucket="idle"]')).not.toBeNull()
 })
-// Counter transferred from the independent reviewer. Its private .tmp location
-// could not resolve React (0 tests); this package-local test runs the original
-// App Settings route, its original mounted Global and original Store instead.
+// The actual App retains Focus behind Settings; hidden geometry stays dormant.
 it('actual App Settings pauses the retained Focus lane width observer without replacing its work surface', async () => {
   await act(async () => useAppStore.setState({ loading: false, initialize: async () => () => {}, activeWorkspaceId: 'repo', layouts: {} }))
   await seed(2, 1, 1)
@@ -196,8 +218,8 @@ it('actual Global preserves the fractional group budget through its production m
   for (const width of [729, 729.5, 730, 730.5, 731, 999.5, 1000, 1000.5, 1000.75]) {
     measuredWidth = width
     await act(async () => notify(list[0]!))
-    expect(widths().reduce((sum, w) => sum + w, 2), 'actual group widths plus gap must fit the fractional content width').toBeLessThanOrEqual(width - 4)
-    expect(columns()).toEqual(width < 730 ? [0, 2, 1, 0] : [0, 3, 1, 0])
+    assertMountedBudget(width)
+    expect(layoutCost([0, 9, 1, 0], mountedLayout(), { width, padding: 4, gap: 2, cardGap: 2 })).toBe(oracleCost([0, 9, 1, 0], { width, padding: 4, gap: 2, cardGap: 2 }))
     expect(groups().querySelectorAll('.focus-context')).toHaveLength(10)
     expect(card('work-0')).toBe(original)
   }
@@ -206,7 +228,7 @@ it('actual Global preserves the fractional group budget through its production m
   measuredWidth = 1000.625
   await act(async () => notify(list[0]!))
   expect(compute).toHaveBeenCalledOnce()
-  expect(widths().reduce((sum, w) => sum + w, 2)).toBeLessThanOrEqual(measuredWidth - 4)
+  assertMountedBudget(measuredWidth)
   expect(document.activeElement).toBe(original)
   expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
   expect(useAppStore.getState().sessions).toBe(state.sessions)

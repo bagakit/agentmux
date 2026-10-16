@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client", "vitest/globals"] },
+  "include": ["../../../src/**/*.ts", "../../../src/**/*.tsx", "../../../*.ts", "../../../test/focus-lane-row-budget.test.ts", "../../../test/focus-lane-height-balance.test.tsx", "../../../test/focus-lane-wrapped-width.test.tsx", "../../../test/focus-lane-measurement.test.tsx"]
+}
