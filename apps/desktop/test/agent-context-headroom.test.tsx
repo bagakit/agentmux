@@ -150,6 +150,16 @@ beforeEach(async () => {
   transport.handlers.set('continuousProgress:list', () => [])
   transport.handlers.set('continuousProgress:pauseForInput', () => undefined)
   transport.handlers.set('sessions:inputOccupation', () => undefined)
+  transport.handlers.set('connections:call', method => {
+    expect(method).toBe('connection.binding.ls')
+    return { bindings: [] }
+  })
+  transport.handlers.set('sessions:messages', (session, options) => {
+    const original = session as { hostId: string; agentSessionId: string }
+    expect(original.hostId).toBe('local'); expect(IDS).toContain(original.agentSessionId)
+    expect(options).toEqual({ direction: 'incoming', limit: 25 })
+    return { hostId: original.hostId, participantSessionId: original.agentSessionId, direction: 'incoming', messages: [], nextBeforeSequence: null }
+  })
   useAppStore.persist.clearStorage(); window.localStorage.clear()
   useAppStore.setState({ ...initial, loading: true }, true)
   await useAppStore.persist.rehydrate()
@@ -166,7 +176,7 @@ beforeEach(async () => {
   renderedCalls = [...transport.calls]
   expect(renderedCalls.toSorted()).toEqual([
     'spatial:read', 'config:get', 'sessions:snapshot', 'providers:list', 'demands:list', 'ui:spatialLinksReady', 'notesStorage:inspect',
-    ...IDS.flatMap(() => ['schedule:list', 'continuousProgress:list'])
+    ...IDS.flatMap(() => ['schedule:list', 'continuousProgress:list', 'connections:call', 'sessions:messages'])
   ].toSorted())
 })
 afterEach(async () => {
@@ -184,18 +194,18 @@ it('real preload publications reach the multi-Agent tree, workspace list and eac
   }
   const expected = { low: null, warm: { pressure: 'caution', text: '70%' }, high: { pressure: 'danger', text: '90%' }, unknown: null }
   expect(pressureRows('.agent-tree [role="menuitem"]')).toEqual(expected)
-  expect(pressureRows('.workspace-agent-row')).toEqual(expected)
+  expect(pressureRows('.workspace-agent-list-item .focus-context')).toEqual({ low: null, warm: null, high: null, unknown: null })
   for (const [id, used, remaining] of [['low', 69, 31], ['warm', 70, 30], ['high', 90, 10]] as const) {
     const ui = composer(id)
     expect(ui.chip.textContent).toContain(`${used}%`)
     expect(ui.chip.getAttribute('aria-label')).toContain(`${remaining}% remaining`)
-    expect(ui.details.textContent).toContain('Native observation, unsent draft excluded')
+    expect(ui.details.textContent).toContain('Native readings; context excludes the unsent draft')
     expect(ui.details.textContent).toContain('Last observed')
     expect(ui.details.textContent).not.toContain('9000000')
   }
   const unknown = composer('unknown')
   expect(unknown.chip.textContent).toContain('—')
-  expect(unknown.details.textContent).toContain('Unavailable')
+  expect(unknown.details.textContent).toContain('Used tokens and capacity not reported')
   expect(unknown.details.textContent).not.toContain('0%')
   expect(document.querySelector('.agent-tree')!.textContent).toContain('70%')
   expect(document.querySelector('.agent-tree [data-pressure="danger"]')!.getAttribute('title')).toContain('start a fresh session')
@@ -217,7 +227,7 @@ it('a newer compacted reading reduces pressure while mid-turn publication keeps 
   expect(composer('high').details.textContent).toContain('80% remaining')
   expect(composer('high').details.textContent).toContain('200 of 1.0k tokens')
   expect(pressureRows('.agent-tree [role="menuitem"]')).toEqual({ low: null, warm: null, high: null, unknown: null })
-  expect(pressureRows('.workspace-agent-row')).toEqual({ low: null, warm: null, high: null, unknown: null })
+  expect(pressureRows('.workspace-agent-list-item .focus-context')).toEqual({ low: null, warm: null, high: null, unknown: null })
 })
 
 it('an accepted authoritative usage clear removes the old number on every real consumer', async () => {
@@ -229,10 +239,10 @@ it('an accepted authoritative usage clear removes the old number on every real c
   await emit(publication('warm', undefined, NOW + 1))
   expect(current('warm')).not.toHaveProperty('turnUsage')
   expect(composer('warm').chip.textContent).toContain('—')
-  expect(composer('warm').details.textContent).toContain('Unavailable')
+  expect(composer('warm').details.textContent).toContain('Used tokens and capacity not reported')
   expect(composer('warm').details.textContent).not.toContain('0%')
   expect(pressureRows('.agent-tree [role="menuitem"]')).toEqual({ low: null, warm: null, high: null, unknown: null })
-  expect(pressureRows('.workspace-agent-row')).toEqual({ low: null, warm: null, high: null, unknown: null })
+  expect(pressureRows('.workspace-agent-list-item .focus-context')).toEqual({ low: null, warm: null, high: null, unknown: null })
 })
 
 it('a native turn without capacity remains unknown and does not lock the healthy Composer or change attention', async () => {
@@ -264,7 +274,8 @@ it('a native turn without capacity remains unknown and does not lock the healthy
     expect(useAppStore.getState().agentComposerDrafts[id]).toBe(draft)
   }
   expect(composer('unknown').chip.textContent).toContain('—')
-  expect(composer('unknown').details.textContent).toContain('never an estimate from lifetime billing')
+  expect(composer('unknown').details.textContent).toContain('Used tokens and capacity not reported')
+  expect(composer('unknown').details.textContent).toContain('Native readings; context excludes the unsent draft')
   expect(composer('high').chip.textContent).toContain('90%')
   expect(useAppStore.getState().agentSteerQueues).toEqual({})
   // Explicit input retains progress pause and input-occupation publication; usage adds no reads.
