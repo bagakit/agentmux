@@ -331,9 +331,13 @@ ${AGENTMUX_GOAL_CREATE_GUIDE}`
   message: {
     summary: 'Authenticated messages, pending input, inbox and original dispatch reports',
     roles: 'Agents communicating across independent Sessions',
-    when: 'Inspect delivery, manage pending input or report through an original dispatch',
+    when: 'Browse original A2A messages, inspect delivery, manage pending input or report through an original dispatch',
     guide: `Core owns authenticated messages, ordered delivery, inbox generations and original
-dispatch threads. Begin with message inbox check and read the exact original message or
+dispatch threads. Use message ls --direction incoming|outgoing for bounded original metadata
+and body previews; message read --message-id ID retrieves one original body, without
+creating a delivery batch or advancing ack. Keep nextBeforeSequence with the same Host,
+participant and direction. message read --operation-id retains original intake lookup.
+Use message inbox check only for explicit batch consumption, and read the exact original message or
 dispatch before replying. Keep operationId, messageId, source message, thread and reply
 identities. Pending drafts, queued input, delivery and business reports are different states.
 

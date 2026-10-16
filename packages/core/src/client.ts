@@ -3939,14 +3939,29 @@ export class AgentMuxClient {
   }
 
   /** Read original intake before any input claim or dispatch exists; no Runtime readiness is required. */
-  async readMessage(input: { operationId: string; caller?: { agentSessionId: string; capability: string } }): Promise<DurableAgentMuxMessage | null> {
-    return this.messageQueue.readByOperationId(input.operationId, async message => {
+  async readMessage(input: import('./agent-message-query.js').AgentMuxMessageRead & { caller?: { agentSessionId: string; capability: string } }): Promise<DurableAgentMuxMessage | null> {
+    if ((input.operationId !== undefined) === (input.messageId !== undefined)) throw new AgentMuxError(
+      'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
+    const reauthorize = async (message: DurableAgentMuxMessage | null) => {
       if (!input.caller) return
       const caller = input.caller
       await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
       if (message && caller.agentSessionId !== message.envelope.senderSessionId &&
         caller.agentSessionId !== message.envelope.recipientSessionId) throw new AgentMuxError(
         'Only an original message participant can read it with Agent authority.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    }
+    return input.messageId === undefined
+      ? this.messageQueue.readByOperationId(input.operationId!, reauthorize)
+      : this.messageQueue.readByMessageId(input.messageId, reauthorize)
+  }
+
+  /** Original A2A metadata only; no connection, Run probe, input or acknowledgement. */
+  async listMessages(input: import('./agent-message-query.js').AgentMuxMessageQuery & { caller?: { agentSessionId: string; capability: string } }): Promise<import('./agent-message-query.js').AgentMuxMessagePage> {
+    const caller = input.caller
+    if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
+      'An Agent can only browse its own original messages.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    return this.messageQueue.listMessages(input, async () => {
+      if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
     })
   }
 

@@ -580,13 +580,42 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (p.message !== null) {
           const original = record(p.message, ['sequence', 'envelope', 'delivery', 'promptCondition', 'execution', 'admissionIntent', 'sourceChannel', 'sourceDevice'])
           const envelope = message(original)
-          if (envelope.operationId !== input.operationId || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
+          if ((input.messageId === undefined ? envelope.operationId !== input.operationId : envelope.messageId !== input.messageId) || credentials && envelope.senderSessionId !== credentials.agentSessionId &&
             envelope.recipientSessionId !== credentials.agentSessionId) fail()
           if (original.execution !== undefined) member(original.execution, ['default', 'immediate'])
           if (original.admissionIntent !== undefined) validateAgentPromptAdmissionIntent(original.admissionIntent)
           if (original.sourceChannel !== undefined) normalizeMessageChannel(original.sourceChannel)
           if (original.sourceDevice !== undefined) normalizeOperationDevice(original.sourceDevice)
         }
+        break
+      }
+      case 'message.ls': {
+        record(p, ['hostId', 'participantSessionId', 'direction', 'messages', 'nextBeforeSequence'])
+        string(p.hostId); string(p.participantSessionId); member(p.direction, ['incoming', 'outgoing'])
+        if (input.hostId !== undefined && p.hostId !== input.hostId || p.direction !== input.direction ||
+          p.participantSessionId !== (input.participantSessionId ?? credentials?.agentSessionId) ||
+          credentials && p.participantSessionId !== credentials.agentSessionId) fail()
+        const limit = input.limit ?? 50, before = input.beforeSequence ?? Number.MAX_SAFE_INTEGER
+        let previous = before as number
+        const seen = new Set<string>()
+        array(p.messages, item => {
+          const entry = record(item, ['sequence', 'envelope', 'delivery', 'bodyPreview', 'bodyBytes'])
+          count(entry.sequence); count(entry.bodyBytes); text(entry.bodyPreview); delivery(entry.delivery)
+          if (entry.sequence === 0 || (entry.sequence as number) >= previous || (entry.bodyPreview as string).length > 240) fail()
+          previous = entry.sequence as number
+          const metadata = record(entry.envelope, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient',
+            'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId'])
+          record(metadata.sender, ['kind', 'agentSessionId']); record(metadata.recipient, ['kind', 'agentSessionId'])
+          const envelope = validateAgentMuxMessageEnvelope({ ...metadata, body: '' })
+          if (envelope.sender.kind !== 'agent-session' || envelope.recipient.kind !== 'agent-session' ||
+            envelope.sender.agentSessionId !== envelope.senderSessionId || envelope.recipient.agentSessionId !== envelope.recipientSessionId ||
+            envelope[p.direction === 'incoming' ? 'recipientSessionId' : 'senderSessionId'] !== p.participantSessionId || seen.has(envelope.messageId)) fail()
+          seen.add(envelope.messageId)
+        })
+        if ((p.messages as unknown[]).length > (limit as number)) fail()
+        count(p.nextBeforeSequence, true)
+        if (p.nextBeforeSequence !== null && (p.nextBeforeSequence === 0 || p.nextBeforeSequence !== previous ||
+          (p.messages as unknown[]).length !== limit)) fail()
         break
       }
       case 'message.dispatch.read': dispatchObservation(p, input); break

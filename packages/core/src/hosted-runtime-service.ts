@@ -23,7 +23,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'readDeliveryAttempt', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId',
   'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
-  'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'readDispatch', 'listDispatches'
+  'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'listMessages', 'readDispatch', 'listDispatches'
 ])
 // These exact Run capabilities have no Session-observation prerequisite. Semantic methods keep connect().
 const RUNTIME_METHODS = new Set<AgentMuxHostedMethod>(AGENTMUX_HOSTED_RUNTIME_METHODS)

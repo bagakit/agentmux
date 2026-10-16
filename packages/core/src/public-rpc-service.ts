@@ -101,7 +101,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
-  'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
+  'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
@@ -240,7 +240,8 @@ const NATIVE_FIELDS = {
   'system.diagnostics.inspect': ['target', 'includeRaw', 'includeRelated', 'budget'],
   'message.delivery.inspect': ['logId', 'hostId'], 'message.delivery.report': ['hostId', 'record'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
-  'message.read': ['operationId', 'hostId'],
+  'message.read': ['operationId', 'messageId', 'hostId'],
+  'message.ls': ['hostId', 'participantSessionId', 'direction', 'beforeSequence', 'limit'],
   'message.dispatch.open': ['sourceMessageId'], 'message.dispatch.inspect': ['sourceMessageId'],
   'message.dispatch.read': ['sourceMessageId', 'hostId'],
   'message.dispatch.ls': ['hostId', 'participantSessionId', 'afterSourceMessageId', 'limit'],
@@ -1541,7 +1542,7 @@ export class AgentMuxRpcService {
           toAgentSessionId: (await this.owner(rpcString(p.toAgentSessionId, 'Recipient Session ID'))).agentSessionId,
           taskId: rpcString(p.taskId, 'Task ID') }); break
       }
-      case 'message.read': case 'message.dispatch.read': case 'message.dispatch.ls': {
+      case 'message.read': case 'message.ls': case 'message.dispatch.read': case 'message.dispatch.ls': {
         if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) throw new AgentMuxError(
           'Message reading requires an authenticated Agent participant or a transport-approved user/device. Original communication and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
         const hostId = p.hostId === undefined ? caller?.hostId : rpcString(p.hostId, 'Original message Host ID')
@@ -1563,8 +1564,19 @@ export class AgentMuxRpcService {
           result = { ...await owner.client.forwardRpc(method, { ...p, hostId: 'local' } as AgentMuxRpcParams<M>, context), hostId }; break
         }
         const auth = caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}
-        if (method === 'message.read') result = { message: await owner.client.readMessage({
-          operationId: rpcString(p.operationId, 'Original message operation ID'), ...auth }), hostId }
+        if (method === 'message.read') {
+          if ((p.operationId !== undefined) === (p.messageId !== undefined)) throw new AgentMuxError(
+            'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
+          const selector = p.messageId === undefined ? { operationId: rpcString(p.operationId, 'Original message operation ID') }
+            : { messageId: rpcString(p.messageId, 'Original message ID') }
+          result = { message: await owner.client.readMessage({ ...selector, ...auth }), hostId }
+        } else if (method === 'message.ls') {
+          if (p.direction !== 'incoming' && p.direction !== 'outgoing') throw new AgentMuxError('Message direction must be incoming or outgoing.', 'INVALID_CONTROL_REQUEST')
+          result = { ...await owner.client.listMessages({
+            participantSessionId: rpcString(p.participantSessionId ?? caller?.agentSessionId, 'Participant Session ID'),
+            direction: p.direction, ...(p.beforeSequence === undefined ? {} : { beforeSequence: rpcCount(p.beforeSequence, -1, Number.MAX_SAFE_INTEGER) }),
+            limit: rpcCount(p.limit, 50, 100), ...auth }), hostId }
+        }
         else if (method === 'message.dispatch.read') result = { ...await owner.client.readDispatch({
           sourceMessageId: rpcString(p.sourceMessageId, 'Source message ID'), ...auth }), hostId }
         else result = { ...await owner.client.listDispatches({
