@@ -2,11 +2,12 @@ import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
-export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { title: string; detail: string } | null {
+export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'unknown'; title: string; detail: string } | null {
   if (session?.kind !== 'agent' || session.processState !== 'running') return null
   const frontend = session.terminalFrontend
   if (!frontend || frontend.run.runId !== session.control.run.runId) return null
   if (frontend.state === 'detached') return {
+    kind: 'detached',
     title: 'Terminal disconnected',
     detail: frontend.backendState === 'running'
       ? 'The backend is still running. Resume reconnects this terminal to the same conversation.'
@@ -17,8 +18,9 @@ export function sessionFrontendPresentation(session: SessionSnapshot | undefined
           : 'The terminal exited. The backend state is not yet confirmed; Resume checks the original Session.'
   }
   if (frontend.state === 'unknown') return {
+    kind: 'unknown',
     title: 'Terminal connection unconfirmed',
-    detail: 'The frontend observation could not be confirmed. Resume checks the original Session and connection.'
+    detail: 'The frontend observation could not be confirmed. Refresh checks this original Session without restarting it or resending input.'
   }
   return null
 }
