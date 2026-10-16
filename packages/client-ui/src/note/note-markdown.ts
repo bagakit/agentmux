@@ -5,7 +5,7 @@ import remarkStringify, { type Options as StringifyOptions } from 'remark-string
 import remarkGfm from 'remark-gfm'
 import remarkDirective from 'remark-directive'
 import { decodeHTML, escapeAttribute } from 'entities'
-import { readNoteMarkdownHeader, NOTE_MARKDOWN_SCHEMA } from '@agentmux/core/note-format'
+import { readNoteMarkdownHeader, NOTE_MARKDOWN_SCHEMA, isNoteWorkspaceRelativePath } from '@agentmux/core/note-format'
 import { parseNoteLinkTarget, scanNoteWikiLinks } from '@agentmux/core/note-links'
 import { NOTE_SCHEMA } from './note-format.js'
 import { noteContentSchema } from './note-content-schema.js'
@@ -161,6 +161,11 @@ function blocks(nodes: readonly Md[], body: string, item = false): JSONContent[]
       if (Object.keys(attrs).some(key => !['id','ref','target'].includes(key)) || exact.blockId === undefined || !attrs.ref || node.children?.length) return fail('A structural Note reference identity or target is invalid.')
       result.push({ type: 'blockReference', attrs: { blockId: attrs.id ? decode(attrs.id) : null, referenceId: decode(attrs.ref), target: exact, mode: node.name === 'note-ref' ? 'reference' : 'embed' } }); continue
     }
+    if (node.type === 'leafDirective' && node.name === 'note-include') {
+      const attrs = node.attributes ?? {}, exact = target(attrs.target ?? '')
+      if (Object.keys(attrs).some(key => !['id','ref','target','path','workspace','forwarded'].includes(key)) || exact.blockId !== undefined || !attrs.ref || !isNoteWorkspaceRelativePath(attrs.path) || attrs.workspace !== undefined && (!attrs.workspace || /[\0\r\n]/u.test(attrs.workspace)) || node.children?.length) return fail('A shared Markdown include identity or locator is invalid.')
+      result.push({ type: 'noteInclude', attrs: { blockId: attrs.id ? decode(attrs.id) : null, referenceId: decode(attrs.ref), noteId: exact.noteId, path: attrs.path, ...(attrs.workspace === undefined ? {} : { workspaceId: attrs.workspace }), ...(attrs.forwarded === undefined ? {} : { forwardedBlockIds: attrs.forwarded.split(',').map(decode) }) } }); continue
+    }
     if (['paragraph','heading'].includes(node.type)) {
       const content = inline(node.children ?? [], body)
       let blockId: string | null = null
@@ -187,7 +192,7 @@ export function parseNoteMarkdown(raw: string): NoteDocument {
   const header = readNoteMarkdownHeader(raw)
   if (header.status !== 'valid') throw new Error(header.message)
   const tree = parser.parse(header.body) as unknown as Md
-  return { schema: NOTE_SCHEMA, noteId: header.noteId, ...(header.title === undefined ? {} : { title: header.title }), content: { type: 'doc', content: blocks(tree.children ?? [], header.body) } }
+  return { schema: NOTE_SCHEMA, noteId: header.noteId, ...(header.title === undefined ? {} : { title: header.title }), ...(header.kind ? { kind: header.kind } : {}), ...(header.origin ? { origin: header.origin } : {}), content: { type: 'doc', content: blocks(tree.children ?? [], header.body) } }
 }
 
 function inlineMarkdown(nodes: readonly JSONContent[]): Md[] {
@@ -249,6 +254,7 @@ function blockMarkdown(nodes: readonly JSONContent[]): Md[] {
       const children = (node.content ?? []).map(child => ({ type: 'listItem', children: [...typeof child.attrs?.blockId === 'string' ? [comment('item',encode(child.attrs.blockId))] : [], ...blockMarkdown(child.content ?? [])] }))
       return [...prelude, ...attrs.type != null ? [comment('list-type',encode(attrs.type))] : [], { type: 'list', ordered: node.type === 'orderedList', start: prelude.length ? 1 : attrs.start ?? 1, children }]
     } else if (node.type === 'blockReference') return [{ type: 'leafDirective', name: attrs.mode === 'embed' ? 'note-embed' : 'note-ref', attributes: { ...own ? { id: encode(own) } : {}, ref: encode(attrs.referenceId), target: href(attrs.target) }, children: [] }]
+    else if (node.type === 'noteInclude') return [{ type: 'leafDirective', name: 'note-include', attributes: { ...own ? { id: encode(own) } : {}, ref: encode(attrs.referenceId), target: href({ noteId: attrs.noteId }), path: attrs.path, ...(typeof attrs.workspaceId === 'string' ? { workspace: attrs.workspaceId } : {}), ...(Array.isArray(attrs.forwardedBlockIds) && attrs.forwardedBlockIds.length ? { forwarded: attrs.forwardedBlockIds.map(encode).join(',') } : {}) }, children: [] }]
     else return fail('Unsupported Note block: ' + node.type + '.')
     return [...prelude, block, ...own ? [{ type: 'noteAnchor', value: '^' + encode(own) }] : []]
   })
@@ -274,5 +280,6 @@ export function serializeNoteDocument(note: NoteDocument): string {
     },
   } } as StringifyOptions).use(remarkGfm).use(remarkDirective)
   const body = compiler.stringify(tree as never)
-  return `---\nschema: ${NOTE_MARKDOWN_SCHEMA}\nnote-id: ${JSON.stringify(note.noteId)}\n${note.title === undefined ? '' : `title: ${JSON.stringify(note.title)}\n`}---\n\n${body}`
+  const shared = (note.kind ? `kind: ${note.kind}\n` : '') + (note.origin ? 'origin:\n' + Object.entries(note.origin).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}\n`).join('') : '')
+  return `---\nschema: ${NOTE_MARKDOWN_SCHEMA}\nnote-id: ${JSON.stringify(note.noteId)}\n${note.title === undefined ? '' : `title: ${JSON.stringify(note.title)}\n`}${shared}---\n\n${body}`
 }

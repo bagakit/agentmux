@@ -1,7 +1,7 @@
 import type { NoteCorpusPage, NoteCorpusReference, NoteCorpusHit } from '@agentmux/core'
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
 import { matchingNoteLinkBlocks, normalizeNoteLinkName, parseNoteWikiQuery } from '@agentmux/core/note-links'
-import { noteKnowledge, parseNoteFile, type NoteFileDocument } from './note-knowledge.js'
+import { noteKnowledge, parseNoteFile, resolveNoteBlock, type NoteFileDocument } from './note-knowledge.js'
 import { noteContentSchema } from './note-content-schema.js'
 import { noteSemanticText } from './note-wikilinks.js'
 
@@ -17,6 +17,7 @@ export function deriveNoteCorpus(originals: readonly { resource: NoteResource; d
     const original = byPath.get(locationKey(source.location))!, parsed = parseNoteFile(original.document)
     return {
       resource: original.resource, noteId: source.note.noteId, title: source.note.title ?? null, revision: source.revision,
+      ...(source.note.kind ? { kind: source.note.kind } : {}), ...(source.blockForwardings.length ? { blockForwardings: [...source.blockForwardings] } : {}),
       unanchoredBlockCount: parsed.status === 'valid' ? parsed.unanchoredBlockCount : 0,
       blocks: [...source.blocks.values()].map(block => ({
         blockId: block.blockId, type: block.content.type!,
@@ -36,7 +37,6 @@ export function deriveNoteCorpus(originals: readonly { resource: NoteResource; d
     }
   }
   const duplicateNoteIds = [...byId].filter(([, pages]) => pages.length > 1).map(([id]) => id)
-  const blockIds = new Map(pages.map(page => [page, new Set(page.blocks.map(block => block.blockId))]))
   const duplicates = new Set(duplicateNoteIds), titlesKnown = pages.every(page => page.title !== null)
   const references: NoteCorpusReference[] = knowledge.references.map(reference => {
     let target = reference.target, resolution: NoteCorpusReference['resolution'] = 'unknown', queryText: string | undefined
@@ -62,10 +62,10 @@ export function deriveNoteCorpus(originals: readonly { resource: NoteResource; d
       if (targets.length > 1) resolution = 'ambiguous'
       else if (!targets.length) resolution = complete ? 'missing' : 'unknown'
       else if (!complete) resolution = 'unknown'
-      else if (target.kind === 'page') resolution = 'resolved'
+      else if (target.kind === 'page') resolution = reference.mode === 'embed' && targets[0]!.kind !== 'shared-block' ? 'unknown' : 'resolved'
       else {
         const blockId = target.blockId
-        resolution = blockIds.get(targets[0]!)!.has(blockId) ? 'resolved' : targets[0]!.unanchoredBlockCount ? 'unknown' : 'missing'
+        resolution = resolveNoteBlock(knowledge, { noteId: target.noteId, blockId }).status
       }
     }
     return {

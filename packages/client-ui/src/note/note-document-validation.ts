@@ -2,12 +2,14 @@ import { NOTE_SCHEMA } from './note-format.js'
 import { NOTE_BLOCK_TYPES, noteContentSchema } from './note-content-schema.js'
 import { readNoteBlockProvenance } from './note-provenance.js'
 import { parseNoteLinkTarget, parseNoteWikiQuery } from '@agentmux/core/note-links'
+import { isNoteWorkspaceRelativePath, parseNoteSharedMetadata } from '@agentmux/core/note-format'
 const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const identity = (value: unknown): value is string => typeof value === 'string' && value.length > 0
 
 export function validateNoteDocument(value: unknown, allowUnanchored = false): number {
     if (!record(value) || value.schema !== NOTE_SCHEMA || !identity(value.noteId) || !record(value.content) || value.content.type !== 'doc') throw new Error('The Note schema or identity is missing or unsupported.')
     if (value.title !== undefined && (typeof value.title !== 'string' || !value.title.trim() || /[\0\r\n]/u.test(value.title))) throw new Error('The Note title must be nonempty single-line text.')
+    parseNoteSharedMetadata(value)
     const blocks = new Set<string>(), references = new Set<string>(); let unanchored = 0
     const visit = (node: unknown): void => {
       if (!record(node) || !identity(node.type)) throw new Error('The Note contains an invalid content node.')
@@ -34,6 +36,12 @@ export function validateNoteDocument(value: unknown, allowUnanchored = false): n
       if (node.type === 'blockReference') {
         const attrs = node.attrs
         if (!record(attrs) || !identity(attrs.referenceId) || references.has(attrs.referenceId) || !record(attrs.target) || !identity(attrs.target.noteId) || !identity(attrs.target.blockId) || (attrs.mode !== 'reference' && attrs.mode !== 'embed')) throw new Error('A block reference identity or exact target is invalid.')
+        references.add(attrs.referenceId)
+      }
+      if (node.type === 'noteInclude') {
+        const attrs = node.attrs
+        if (!record(attrs) || !identity(attrs.referenceId) || /[\0\r\n]/u.test(attrs.referenceId) || references.has(attrs.referenceId) || !identity(attrs.noteId) || /[\0\r\n]/u.test(attrs.noteId) || !isNoteWorkspaceRelativePath(attrs.path) || attrs.workspaceId != null && (!identity(attrs.workspaceId) || /[\0\r\n]/u.test(attrs.workspaceId))) throw new Error('A shared file include identity or Workspace path is invalid.')
+        if (attrs.forwardedBlockIds != null && (!Array.isArray(attrs.forwardedBlockIds) || attrs.forwardedBlockIds.some(id => !identity(id) || /[\0\r\n]/u.test(id) || id === attrs.blockId))) throw new Error('The original shared include forwarding declarations are invalid.')
         references.add(attrs.referenceId)
       }
       if (node.type === 'noteLink') {

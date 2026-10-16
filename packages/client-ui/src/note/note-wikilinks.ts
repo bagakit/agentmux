@@ -104,6 +104,7 @@ export function indexNoteReferences(tree: ProseMirrorNode): readonly IndexedNote
     if (NOTE_BLOCK_TYPES.some(type => type === node.type.name) && typeof node.attrs.blockId !== 'string') owner = undefined
     if (typeof node.attrs.blockId === 'string') owner = { blockId: node.attrs.blockId, start: absolute + 1 }
     if (owner && node.type.name === 'blockReference') references.push({ blockId: owner.blockId, mode: node.attrs.mode, occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: { kind: 'block', ...node.attrs.target } })
+    if (owner && node.type.name === 'noteInclude') references.push({ blockId: owner.blockId, mode: 'embed', occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: { kind: 'page', noteId: node.attrs.noteId } })
     if (node.type.name === 'noteLink') {
       if (owner) references.push({ blockId: owner.blockId, mode: 'link', occurrence: { kind: 'stored', referenceId: node.attrs.referenceId }, target: node.attrs.target === null ? { kind: 'unbound', text: node.attrs.text } : { kind: node.attrs.target.blockId ? 'block' : 'page', ...node.attrs.target } })
       return

@@ -1,5 +1,6 @@
 import type { JSONContent } from '@tiptap/core'
 import { NOTE_SCHEMA } from './note-format.js'
+import type { NoteSharedMetadata } from '@agentmux/core/note-format'
 export type { NoteLinkTarget, NoteInlineLinkAttributes } from '@agentmux/core/note-links'
 export type { NoteBlockAuthorship, NoteBlockProvenance } from './note-provenance.js'
 export { NOTE_BLOCK_TYPES } from './note-content-schema.js'
@@ -7,7 +8,8 @@ export { NOTE_SCHEMA, NOTE_FILE_EXTENSION } from './note-format.js'
 
 export type NoteBlockTarget = { noteId: string; blockId: string }
 export type NoteBlockReference = { referenceId: string; target: NoteBlockTarget; mode: 'reference' | 'embed' }
-export type NoteDocument = { schema: typeof NOTE_SCHEMA; noteId: string; title?: string; content: JSONContent }
+export type NoteInclude = { referenceId: string; noteId: string; path: string; workspaceId?: string; forwardedBlockIds?: string[] }
+export type NoteDocument = { schema: typeof NOTE_SCHEMA; noteId: string; title?: string; content: JSONContent } & NoteSharedMetadata
 export type NoteDocumentRead = { status: 'valid'; note: NoteDocument; unanchoredBlockCount: number } | { status: 'invalid'; raw: string; message: string }
 export { serializeNoteDocument } from './note-markdown.js'
 import { parseNoteMarkdown } from './note-markdown.js'

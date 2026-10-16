@@ -1,4 +1,4 @@
-import { AgentMuxError, type NotebookObservationPort, type NoteContentObservation, type NotebookGraph, type NotebookGraphParams } from '@agentmux/core'
+import { AgentMuxError, type NotebookObservationPort, type NoteContentObservation, type NoteContentMetadata, type NotebookGraph, type NotebookGraphParams } from '@agentmux/core'
 import { notebookFingerprint, type NotebookPage, type NotebookState } from '@agentmux/core/notebook-catalog'
 import { noteKnowledge, parseNoteFile, resolveNoteBlock, type NoteFileDocument } from '@agentmux/client-ui/note/note-knowledge'
 import type { WorkspaceRecord } from '../shared/contracts.js'
@@ -7,17 +7,20 @@ import type { WorkspaceFiles } from './workspace-files.js'
 import { matchingNoteLinkBlocks, normalizeNoteLinkName, parseNotebookResolveParams, parseNotebookResolveResult, parseNoteWikiQuery, type NoteLinkTarget, type NotebookResolveParams, type NotebookResolveResult } from '@agentmux/core/note-links'
 import type { PendingNoteWikiLink } from '@agentmux/client-ui/note/note-wikilinks'
 import type { NoteCorpusParams, NoteCorpusResult } from '@agentmux/core'
-import { readNoteCorpus } from './note-corpus-reader.js'
+import { readNoteCorpus, readNoteCorpusSources } from './note-corpus-reader.js'
 import type { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
 
 /** Exact durable resources, including closed pages, through the original Files owner. */
 export class NotebookObservationOwner implements NotebookObservationPort {
+  /** Hints from the latest in-call file graph, revalidated by Files on every content read. */
+  private sharedResources = new Map<string, NoteContentMetadata[]>()
+  private incompleteSharedWorkspaces = new Set<string>()
   constructor(private readonly ports: { workspace(id: string): WorkspaceRecord | undefined; files: Pick<WorkspaceFiles, 'read'> & Partial<Pick<WorkspaceFiles, 'readDirectory'>>; metadata?: Pick<AgentMuxNotebookStore, 'readProvenance'> }) {}
   /** Explicit projection of original files; never a catalog recovery or registration. */
   scan(params: NoteCorpusParams, options?: { signal?: AbortSignal }): Promise<NoteCorpusResult> {
     return readNoteCorpus(this.ports, params, options)
   }
-  private async read(page: NotebookPage, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<{ observation: NoteContentObservation; document?: NoteFileDocument }> {
+  private async read(page: Pick<NotebookPage, 'noteId' | 'resource'>, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<{ observation: NoteContentObservation; document?: NoteFileDocument }> {
     const base = { noteId: page.noteId, resource: structuredClone(page.resource) }, original = page.resource
     const workspace = this.ports.workspace(original.workspaceId)
     const unknown = (message: string) => ({ observation: { ...base, status: 'unknown' as const, message } })
@@ -35,14 +38,22 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       if (parsed.status === 'invalid') return { observation: { ...base, status: 'invalid', revision: document.revision, message: parsed.message } }
       if (parsed.note.noteId !== page.noteId) return { observation: { ...base, status: 'identity-mismatch', revision: document.revision, actualNoteId: parsed.note.noteId, message: 'The original file contains another Note identity. Both identities and bytes are retained; inspect its source before editing.' } }
       const knowledge = noteKnowledge([{ location: { workspaceId: original.workspaceId, path: original.path }, document }])
-      return { document, observation: { ...base, status: 'read', revision: document.revision, content: document.content, actualNoteId: parsed.note.noteId, unanchoredBlockCount: parsed.unanchoredBlockCount, blockIds: [...knowledge.sources[0]!.blocks.keys()] } }
+      return { document, observation: { ...base, ...(parsed.note.kind ? { kind: parsed.note.kind } : {}), status: 'read', revision: document.revision, content: document.content, actualNoteId: parsed.note.noteId, unanchoredBlockCount: parsed.unanchoredBlockCount, blockIds: [...knowledge.sources[0]!.blocks.keys()], ...(knowledge.sources[0]!.blockForwardings.length ? { blockForwardings: [...knowledge.sources[0]!.blockForwardings] } : {}) } }
     } catch (error) { options?.signal?.throwIfAborted(); return unknown(error instanceof Error ? error.message : String(error)) }
   }
   async content(state: NotebookState, noteId: string, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<NoteContentObservation> {
-    const page = state.pages[noteId]
-    if (!page) throw new AgentMuxError('The exact Note is absent from this durable catalog. Refresh the directory without replacing its original file.', 'NOTEBOOK_INPUT_INVALID')
+    let page: Pick<NotebookPage, 'noteId' | 'resource'> | undefined = state.pages[noteId]
+    if (!page) {
+      if (!this.sharedResources.has(noteId)) await this.graph(state, {}, options)
+      const originals = this.sharedResources.get(noteId)
+      if (!originals?.length) throw new AgentMuxError('The original shared Markdown file is not confirmed in this scope. Scan its original Workspace; no alternative file was selected.', 'NOTEBOOK_INPUT_INVALID')
+      if (originals.length !== 1) return { noteId, resource: originals[0]!.resource, status: 'unknown', message: 'This shared identity exists in multiple original files. Resolve that ambiguity before reading one as the shared original.' }
+      if (this.incompleteSharedWorkspaces.has(originals[0]!.resource.workspaceId)) return { noteId, resource: originals[0]!.resource, status: 'unknown', message: 'The original file scan was incomplete. Refresh that scope to confirm this shared identity; ordinary Files reads remain available.' }
+      page = { noteId, resource: originals[0]!.resource }
+    }
     const observation = (await this.read(page, options)).observation
     if (observation.status !== 'read') return observation
+    if (!state.pages[noteId] && observation.kind !== 'shared-block') return { noteId, resource: observation.resource, status: 'unknown', revision: observation.revision, message: 'This original file no longer declares shared content. Its bytes are retained; inspect the header before using this include.' }
     const query = { noteId, resource: observation.resource, revision: observation.revision, blockIds: observation.blockIds }
     try {
       if (!this.ports.metadata) throw new Error('The original Note metadata owner is unavailable.')
@@ -67,7 +78,7 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       if (!promise) {
         if (source && notebookFingerprint(source.resource) === key) {
           const parsed = parseNoteFile(source.document), knowledge = noteKnowledge([{ location: { workspaceId: page.resource.workspaceId, path: page.resource.path }, document: source.document }])
-          promise = parsed.status === 'valid' && parsed.note.noteId === page.noteId ? Promise.resolve({ document: source.document, observation: { status: 'read' as const, noteId: page.noteId, resource: page.resource, revision: source.document.revision, content: source.document.content, actualNoteId: page.noteId, unanchoredBlockCount: parsed.unanchoredBlockCount, blockIds: [...knowledge.sources[0]!.blocks.keys()] } }) : this.read(page)
+          promise = parsed.status === 'valid' && parsed.note.noteId === page.noteId ? Promise.resolve({ document: source.document, observation: { status: 'read' as const, noteId: page.noteId, resource: page.resource, revision: source.document.revision, content: source.document.content, actualNoteId: page.noteId, unanchoredBlockCount: parsed.unanchoredBlockCount, blockIds: [...knowledge.sources[0]!.blocks.keys()], ...(knowledge.sources[0]!.blockForwardings.length ? { blockForwardings: [...knowledge.sources[0]!.blockForwardings] } : {}) } }) : this.read(page)
         } else promise = this.read(page)
         reads.set(key, promise)
       }
@@ -106,7 +117,7 @@ export class NotebookObservationOwner implements NotebookObservationPort {
     return { ...resultBase, result: { status: 'resolved', target: { noteId: selected.noteId, blockId: matches[0]!.blockId } } }
   }
   async graph(state: NotebookState, params: NotebookGraphParams, options?: { signal?: AbortSignal }): Promise<NotebookGraph> {
-    if (params.noteId && !state.pages[params.noteId] || params.notebookId && !state.notebooks[params.notebookId]) throw new AgentMuxError('The requested original Note or Notebook is absent from this durable catalog. Refresh its directory.', 'NOTEBOOK_INPUT_INVALID')
+    if (params.notebookId && !state.notebooks[params.notebookId]) throw new AgentMuxError('The requested original Note or Notebook is absent from this durable catalog. Refresh its directory.', 'NOTEBOOK_INPUT_INVALID')
     const selected = new Set(Object.values(state.pages).filter(p => params.noteId ? p.noteId === params.noteId : params.notebookId ? p.notebookId === params.notebookId : true).map(p => p.noteId))
     const observations: NotebookGraph['observations'] = [], documents: { location: { workspaceId: string; path: string }; document: NoteFileDocument }[] = []
     const observedReads = new Map<string, Awaited<ReturnType<NotebookObservationOwner['read']>>>()
@@ -121,6 +132,60 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       observations.push(metadata)
       if (document) { const location = { workspaceId: page.resource.workspaceId, path: page.resource.path }; documents.push({ location, document }); resources.set(JSON.stringify([location.workspaceId, location.path]), page.resource) }
     }
+    // A graph request discovers shared files only in Workspaces whose observed originals
+    // actually include a file. The same bounded scan supplies bytes and duplicate evidence.
+    const includeWorkspaces = new Set<string>()
+    for (const original of documents) {
+      const parsed = parseNoteFile(original.document)
+      const visit = (node: import('@tiptap/core').JSONContent) => { if (node.type === 'noteInclude') { includeWorkspaces.add(original.location.workspaceId); if (typeof node.attrs?.workspaceId === 'string') includeWorkspaces.add(node.attrs.workspaceId) }; node.content?.forEach(visit) }
+      if (parsed.status === 'valid') visit(parsed.note.content)
+    }
+    const incompleteSharedWorkspaces = new Set<string>()
+    for (const workspaceId of includeWorkspaces) {
+      options?.signal?.throwIfAborted()
+      const workspace = this.ports.workspace(workspaceId)
+      // A stale App-specific hint does not invalidate a file found by ID in the original physical scope.
+      if (!workspace) continue
+      const known = new Map(documents.filter(item => {
+        const resource = resources.get(JSON.stringify([item.location.workspaceId, item.location.path]))
+        return item.location.workspaceId === workspaceId && resource?.hostId === workspace.hostId && resource.workspacePath === workspace.path
+      }).map(item => [item.location.path, item.document]))
+      const scanned = await readNoteCorpusSources({ ...this.ports, files: { ...this.ports.files,
+        ...(this.ports.files.readDirectory ? { readDirectory: this.ports.files.readDirectory.bind(this.ports.files) } : {}),
+        read: async (owner, path, budget) => {
+          const maxFileBytes = Math.min(budget?.maxFileBytes ?? WORKSPACE_FILE_MAX_BYTES, params.maxBytes ?? WORKSPACE_FILE_MAX_BYTES)
+          const original = known.get(path)
+          if (original && new TextEncoder().encode(original.content).byteLength <= maxFileBytes) return { status: 'read' as const, document: original }
+          return this.ports.files.read(owner, path, { ...budget, maxFileBytes })
+        }
+      } }, { workspaceId, path: '.', maxFiles: 20000, maxDirectories: 20000, maxBytes: 64 * 1024 * 1024 }, options)
+      // Missing paragraph anchors/titles do not invalidate a whole file's stable identity.
+      if (scanned.result.coverage.limited || scanned.result.coverage.issues.length) incompleteSharedWorkspaces.add(workspaceId)
+      const sharedIds = new Set(scanned.result.pages.filter(page => page.kind === 'shared-block').map(page => page.noteId))
+      for (const original of scanned.documents) {
+        const parsed = parseNoteFile(original.document)
+        if (parsed.status !== 'valid' || parsed.note.kind !== 'shared-block' && !sharedIds.has(parsed.note.noteId)) continue
+        const resourceKey = notebookFingerprint(original.resource)
+        if (observations.some(item => notebookFingerprint(item.resource) === resourceKey)) continue
+        const indexed = noteKnowledge([{ location: { workspaceId, path: original.resource.path }, document: original.document }])
+        observations.push({ status: 'read', noteId: parsed.note.noteId, actualNoteId: parsed.note.noteId, resource: original.resource,
+          ...(parsed.note.kind ? { kind: parsed.note.kind } : {}), revision: original.document.revision, blockIds: [...indexed.sources[0]!.blocks.keys()], ...(indexed.sources[0]!.blockForwardings.length ? { blockForwardings: [...indexed.sources[0]!.blockForwardings] } : {}), unanchoredBlockCount: parsed.unanchoredBlockCount })
+        const location = { workspaceId, path: original.resource.path }
+        documents.push({ location, document: original.document }); resources.set(JSON.stringify([location.workspaceId, location.path]), original.resource)
+      }
+    }
+    if (params.noteId && !observations.some(item => item.noteId === params.noteId)) throw new AgentMuxError('The requested original Note or shared file is not confirmed in this scope. Its files are retained; scan the original Workspace to inspect it.', 'NOTEBOOK_INPUT_INVALID')
+    if (!params.noteId && !params.notebookId) observations.forEach(item => selected.add(item.noteId))
+    else if (params.noteId) selected.add(params.noteId)
+    else {
+      // Included shared files belong to the visible neighborhood, without a catalog registration.
+      const sourceKnowledge = noteKnowledge(documents)
+      let changed = true
+      while (changed) {
+        changed = false
+        for (const ref of sourceKnowledge.references) if (selected.has(ref.source.note.noteId) && ref.mode === 'embed' && ref.target.kind === 'page' && !selected.has(ref.target.noteId)) { selected.add(ref.target.noteId); changed = true }
+      }
+    }
     const readable = observations.filter(o => o.status === 'read').length
     const knowledge = noteKnowledge(documents, readable === observations.length ? 'complete' : readable === 0 ? 'unknown' : 'partial')
     const identities = new Map<string, Set<string>>()
@@ -129,9 +194,11 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       locations.add(JSON.stringify(observed.resource)); identities.set(observed.actualNoteId, locations)
     }
     const duplicateNoteIds = [...identities].filter(([, locations]) => locations.size > 1).map(([id]) => id)
-    const hasExternalTargets = knowledge.references.some(r => r.target.kind !== 'unbound' && !state.pages[r.target.noteId])
-    const graphKnowledge = hasExternalTargets ? { ...knowledge, scope: 'partial' as const } : knowledge
-    const observedByNoteId = new Map(observations.map(o => [o.noteId, o]))
+    for (const observed of observations) if (observed.status === 'read' && observed.kind === 'shared-block') observed.fileIdentity = duplicateNoteIds.includes(observed.noteId) ? 'ambiguous' : includeWorkspaces.has(observed.resource.workspaceId) && incompleteSharedWorkspaces.size === 0 ? 'confirmed' : 'unknown'
+    const observedIds = new Set(observations.map(item => item.noteId))
+    const hasExternalTargets = knowledge.references.some(r => r.target.kind !== 'unbound' && !observedIds.has(r.target.noteId))
+    const graphKnowledge = { ...knowledge, ...(hasExternalTargets ? { scope: 'partial' as const } : {}), ...(incompleteSharedWorkspaces.size ? { fileScope: 'partial' as const } : {}), confirmedIncludes: observations.flatMap(item => item.status === 'read' && item.kind === 'shared-block' && item.fileIdentity === 'confirmed' ? [{ noteId: item.noteId, workspaceId: item.resource.workspaceId, path: item.resource.path, revision: item.revision }] : []) }
+    const observedByNoteId = new Map(observations.filter(o => !duplicateNoteIds.includes(o.noteId)).map(o => [o.noteId, o]))
     // Query targets are an observation of these exact saved revisions, never a file binding.
     // Reuse the same resolver and already-read originals; no second scan, write or minted ID.
     const queryResults = new Map<string, NotebookResolveResult>()
@@ -151,10 +218,15 @@ export class NotebookObservationOwner implements NotebookObservationPort {
           else { const confirmed = result.result.target; target = confirmed.blockId ? { kind: 'block', noteId: confirmed.noteId, blockId: confirmed.blockId } : { kind: 'page', noteId: confirmed.noteId }; resolution = 'resolved' }
         } else resolution = result.mode === 'resolve' ? result.result.status : 'unknown'
       } else resolution = target.kind === 'unbound' ? 'unbound' : duplicateNoteIds.includes(target.noteId) ? 'ambiguous' : observedByNoteId.get(target.noteId)?.status === 'missing' ? 'missing' : target.kind === 'block' ? resolveNoteBlock(graphKnowledge, target).status : observedByNoteId.get(target.noteId)?.status === 'read' ? 'resolved' : 'unknown'
+      if (reference.mode === 'embed' && target.kind === 'page' && !duplicateNoteIds.includes(target.noteId) && (incompleteSharedWorkspaces.size > 0 || observedByNoteId.get(target.noteId)?.kind !== 'shared-block')) resolution = 'unknown'
       references.push({ source: { noteId: reference.source.note.noteId, blockId: reference.blockId }, sourceResource: resources.get(JSON.stringify([reference.source.location.workspaceId, reference.source.location.path]))!, target, occurrence: reference.occurrence, mode: reference.mode, resolution, ...(query === undefined ? {} : { query }) })
     }
     const hasUnbound = references.some(reference => reference.target.kind === 'unbound')
-    const completeness = observations.every(o => o.status === 'read' && (o.unanchoredBlockCount ?? 0) === 0) && duplicateNoteIds.length === 0 && !hasExternalTargets && !hasUnbound ? 'complete' : knowledge.sources.length === 0 && observations.length > 0 ? 'unknown' : 'partial'
+    const completeness = observations.every(o => o.status === 'read' && (o.unanchoredBlockCount ?? 0) === 0) && duplicateNoteIds.length === 0 && !hasExternalTargets && !hasUnbound && !references.some(item => item.resolution === 'ambiguous' || item.resolution === 'unknown') && incompleteSharedWorkspaces.size === 0 ? 'complete' : knowledge.sources.length === 0 && observations.length > 0 ? 'unknown' : 'partial'
+    const sharedResources = new Map<string, NoteContentMetadata[]>(), sharedIds = new Set(observations.filter(item => item.kind === 'shared-block').map(item => item.noteId))
+    for (const item of observations) if (sharedIds.has(item.noteId)) { const list = sharedResources.get(item.noteId) ?? []; list.push(item); sharedResources.set(item.noteId, list) }
+    this.sharedResources = sharedResources
+    this.incompleteSharedWorkspaces = incompleteSharedWorkspaces
     return {
       catalogRevision: state.revision, scope: params.noteId ? { kind: 'note', noteId: params.noteId } : params.notebookId ? { kind: 'notebook', notebookId: params.notebookId } : { kind: 'catalog' }, scannedScope: 'catalog', completeness, observations, duplicateNoteIds,
       hierarchy: Object.values(state.pages).filter(p => p.parentNoteId && (selected.has(p.noteId) || selected.has(p.parentNoteId))).map(p => ({ parentNoteId: p.parentNoteId!, noteId: p.noteId })),
