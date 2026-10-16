@@ -75,6 +75,8 @@ Note 使用同一 `file.read/write/create`，经 Main 的 [NoteFileWriter](../..
 
 缺失目标的正文创建沿同一文件 owner 提供 `file.create`，CLI 为 `file create --input FILE|-`；先由 `file.read` 确认目标映射，提交完整原资源、Zone 相对路径、正文与明确的 `expectedRevision:null`。Main 确认映射后委托 `WorkspaceFiles.write` 的排他创建，不覆盖已存在文件；普通文本和 Note 使用同一通用能力，不新增正文 owner。结果沿原 `written`／`conflict`／`error`／`unknown` 与完整资源／revision 表达，未知先读同一准确目标对账，不自动换名或重发。既有 `file.write` 的完整 revision 要求保持。
 
+Note 首次保留的内容共享沿 [Files 共享合同](../../packages/core/src/public-rpc-file-share.ts) 提供 `file.share`／`file.share.inspect`，CLI 为 `file share [inspect] --input FILE|-`。GUI 和 CLI 共用 [原共享 owner](../../apps/desktop/src/main/note-shared-block-owner.ts)、Note writer、lease、CAS 和可信历史，分别回执共享文件创建、原位置替换与目标保存，不冒跨文件原子提交。检查可读取保留的原请求或一个准确共享文件；恢复范围及 Markdown 身份、关系的唯一来源见 [Note 格式](note-markdown.md#共享-markdown-文件)。
+
 项目文件名发现沿同一 Files owner：`file ls` CLI → `file.list` → `WorkspaceFiles.listFiles`；结果只含名称、原资源与 complete／partial 原因，应用 Git 忽略规则且不递归目录链接，不读正文或改变焦点。名称相对请求的目录；使用 `file open --zone` 继续时，将原 `file ls --path` 的目录前缀与名称拼接为 Zone 相对路径（默认 `.` 可省略）。未知观察保留原精确打开能力。
 
 编辑器当前草稿的动作由 [`space-control` 类型](../../packages/core/src/space-control.ts)和[严格 parser](../../packages/core/src/space-control-parser.ts)定义。`file.view` 沿原 FileRegion 模式 owner；`file.format` 从 [Renderer control 消费](../../apps/desktop/src/renderer/src/store.ts)进入 [`format-file-region`](../../apps/desktop/src/renderer/src/lib/file-formats/format-file-region.ts)，与 File 动作共享同一可撤销草稿编辑。`file.build`／`file.build.inspect`／`file.build.cancel` 进入 [`build-file-region`](../../apps/desktop/src/renderer/src/lib/file-formats/build-file-region.ts) 与 Main [`FileBuilds`](../../apps/desktop/src/main/file-builds.ts)，准确绑定原 Region、build ID、Host 与草稿版本；公开回执含日志和产物元数据，PDF bytes 留在宿主。以上动作不隐式保存、切焦点或因打开 Preview 自动启动编译器。

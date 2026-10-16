@@ -33,7 +33,33 @@ title: "研究记录"
 已有 ID 必须保留；普通新增段落可省略锚点。读取、挂载或观察不分配持久身份，显式保存经原 writer 为缺失块分配 ID。
 未锚定块仍可读，`unanchoredBlockCount` 使图观察保持 partial；不能借父块身份伪造 source endpoint 或把未确认标题当成唯一目标。
 重复身份不自动改写或选首；同文件重复块／引用 ID 按原 schema 报解析问题，跨资源重复 Note ID 在图中保持歧义。
-引用块留在原文件，只有显式提取独立 Note 才拆文档。
+普通段落仍留在原文件；文内块地址与独立共享文件身份是不同层次。首次保留的共享复用由原 Files 提取 owner 创建独立 Markdown，并将原位置替为整文件嵌入；宿主不保存展开后的正文副本。
+
+## 共享 Markdown 文件
+
+共享内容复用同一 Note 文件格式，frontmatter 增加 `kind: shared-block`；`note-id` 标识整个共享文件，不借用内部首段落或标题身份。
+
+```md
+---
+schema: agentmux.note.md.v1
+note-id: "shared-content-id"
+kind: shared-block
+title: "共享结论"
+---
+
+这份内容可以自然改写。
+
+- 可以增加列表
+- 也可以新增段落
+```
+
+正文增删、分段与格式调整不改变文件级引用目标。内部段落可以有自己的文内锚点，但它们不是整个共享文件的地址；缺少新段落锚点不否定已确认的文件身份。原根块地址由原位置嵌入节点承接；提取列表或引用容器时，原位置以 `forwarded="child1,child2"` 明确记录已有后代地址到共享文件的转发（编辑树字段为 `forwardedBlockIds`），ID 逐项 URI 编码，不为新段落补造旧地址。其他位置复用不复制这些转发声明，重复或失效的声明不能选首解析。
+
+首次提取的 `origin` 随共享文件保存来源身份、资源路径、原 revision、原块和 operation，以及必要的请求指纹、`sourceOperationId` 与目标提交定位线索。它是可读 YAML 恢复元数据，不包含隐藏的 JSON 正文、可信作者声明或自报成功状态；每个实际文件写入的持久结果仍沿原 Files 和历史操作回执确认。未知时保原请求和文件，不从当前恰好有内容追认丢失的成功回执。
+
+复制和悬停不创建文件。待兑现的粘贴及未知请求保在原 FileDocument 的草稿／恢复事实中，未保存撤销不产生共享实体；它们不是另一份持久当前正文或关系 Store。实际保存沿 `file.share` 共用提取 owner，分别报告共享文件、原位置和目标文档的结果；检查入口及准确参数由 [Files 共享合同](../../packages/core/src/public-rpc-file-share.ts) 与生成的 CLI help 持有。
+
+`file.share.inspect` 的 `request` 模式观察保留的原完整请求；`shared` 模式只需准确 `file.read` 目标，核对 Markdown 声明与可信原创建事件，再分别观察该文件的创建、来源替换和目标提交。单个文件不能重建丢失的未保存全文或整批提取请求，因此不据此宣称整批完成或自动补写。
 
 ## 文件标题与目录投影
 
@@ -70,6 +96,9 @@ BOM 和换行，不因改名补块 ID、改写正文排版或将块作者改为�
 | `[[query]]<!--amux-ref:R-->` | 有稳定 occurrence 的未绑定查询 |
 | `::note-ref{#sourceBlock ref="R" target="note:noteID#blockID"}` | 结构化块引用 |
 | `::note-embed{#sourceBlock ref="R" target="note:noteID#blockID"}` | 在原位置嵌入目标块 |
+| `::note-include{#sourceBlock ref="R" target="note:sharedID" path="block-shared.note.md"}` | 原位置或其他 Note 整体嵌入同一共享 Markdown |
+
+`note-include` 的 `target` 指向文件级 `note-id`，`path` 是 Workspace 相对定位线索；跨 Workspace 可带 `workspace="WS_ID"`，无此字段时以宿主 Workspace 定位。路径和 Workspace 都不是身份，不能把第一次路径命中当唯一性证明。整套文件搬到新 Workspace 后，纯文件索引仍按文件内 Note ID 重建关系。同一观察 owner 从原文件重建位置与重复身份，读取头和准确资源后确认整个共享内容；文件改名、移动后仍以原 ID 定位。多个 Note 中的原位编辑共用原共享文件的草稿、revision 和保存 owner，各宿主只保存 include。共享正文的删除、一次嵌入的移除与提取撤销分别处理，不因移除一个位置递归删除共享内容。
 
 这些标记保存字段，不包含隐藏的 JSON／base64 内容树。粗体、斜体、删除线、代码、列表、引用和换行使用 Markdown；
 下划线、非标准链接属性、列表类型等原 schema 字段使用有限 HTML／comment 扩展。
