@@ -41,7 +41,7 @@ it('Hosted confirms only transport for exact input after store observation failu
   const input = vi.fn(async () => ({ run: { acceptedInputBytes: 1 }, appliedByteRange: { startByte: 0, endByte: 1 } }))
   const kernel = { connect: vi.fn(async () => { connected = true }), isConnected: () => connected,
     disconnect: async () => { connected = false }, resetConnection: () => { connected = false },
-    onEvent: () => () => {}, onError: () => () => {}, onConnectionLost: () => () => {}, input,
+    onEvent: () => () => {}, onError: () => () => {}, onConnectionLost: () => () => {}, onConnectionAvailable: () => () => {}, input,
     identity: () => ({ buildIdentity: 'private-proof', protocolVersion: 1, daemonInstanceId: 'original-daemon' }) }
   const inner = core as any; inner.kernel = kernel
   const load = vi.spyOn(inner.registry, 'load').mockRejectedValue(new Error('private store observation unavailable'))
@@ -97,7 +97,7 @@ it('late old Run snapshot cannot mutate the new transport observation', async ()
   Object.assign(state.hookServer, { port: 0 })
   const kernel = { connect: vi.fn(async () => { connected = true }), isConnected: () => connected,
     disconnect: () => { connected = false }, resetConnection: vi.fn(() => { connected = false }),
-    onEvent: () => () => {}, onError: () => () => {}, onConnectionLost: () => () => {},
+    onEvent: () => () => {}, onError: () => () => {}, onConnectionLost: () => () => {}, onConnectionAvailable: () => () => {},
     list: vi.fn().mockReturnValueOnce(pending).mockResolvedValue([]) }
   state.kernel = kernel; state.reconnectSleep = async () => {}
   const consume = vi.spyOn(state, 'backfillEndedRuns')
@@ -117,7 +117,7 @@ it('late old Run snapshot cannot mutate the new transport observation', async ()
   } finally { release([]); await old.catch(() => {}); await client.dispose(); vi.restoreAllMocks() }
 })
 
-it('the real Hosted SDK admits original transport input while its bootstrap projection awaits Session observation', async () => {
+it('the real Hosted SDK admits original transport input while independent Session observation remains pending', async () => {
   const h = await rpcOwnerFixture(['retained']), core = h.client, inner = core as any
   Object.assign(inner.hookServer, { port: 0 })
   let release!: () => void
@@ -138,6 +138,8 @@ it('the real Hosted SDK admits original transport input while its bootstrap proj
       return { dispose: async () => { await stream.dispose() } }
     }
   } as AgentMuxHostedRpcPort
+  // General recovery has its original owner. Physical bootstrap/projection no longer starts it.
+  const opening = core.connect(); void opening.catch(() => {})
   const sdk = await connectHostedAgentMux({ rpc: port, waitForReady: false })
   let admission: Promise<void> | undefined
   try {
@@ -152,7 +154,7 @@ it('the real Hosted SDK admits original transport input while its bootstrap proj
     expect(load).toHaveBeenCalledOnce()
     expect(inner.kernel.input).toHaveBeenCalledExactlyOnceWith('run-retained', { ownerInstanceId: 'original-daemon', operationId: 'original-sdk-input', expectedByte: 0, data: 'x' })
     expect(sdk.agentSession('retained').run.runId).toBe('run-retained')
-  } finally { release(); await admission?.catch(() => {}); await sdk.dispose(); await service.dispose(); await h.close(); vi.restoreAllMocks() }
+  } finally { release(); await opening.catch(() => {}); await admission?.catch(() => {}); await sdk.dispose(); await service.dispose(); await h.close(); vi.restoreAllMocks() }
 })
 
 it('a fully observed healthy connect does not emit recovery or repeat unrelated directory work', async () => {
