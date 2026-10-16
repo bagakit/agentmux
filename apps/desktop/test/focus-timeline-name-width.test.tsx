@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { fixtureIso as _hygiene_fixtureIso } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -32,9 +33,9 @@ afterEach(async () => {
   document.getElementById('agentmux-window-overlay-host')?.remove()
 })
 function agent(id: string, path: string): SessionSnapshot {
-  return { kind: 'agent', id, providerId: 'claude', executorId: 'private', hostId: 'local', workspacePath: path, label: id, createdAt: 1, updatedAt: 1,
-    processState: 'running', latestOutputBytes: 0, agentSessionUpdatedAt: 1,
-    capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: false, replyCorrelation: 'none' }, status: { state: 'working', source: 'native-hook', observedAt: 1 },
+  return { kind: 'agent', id, providerId: 'claude', executorId: 'private', hostId: 'local', workspacePath: path, label: id, createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
+    processState: 'running', latestOutputBytes: 0, agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1),
+    capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: false, replyCorrelation: 'none' }, status: { state: 'working', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 1) },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: id + '-run' } } }
 }
 const entries: AgentFocusHistoryEntry[] = ['one', 'two', 'three'].map((id, i) => ({ sessionId: id, focusedAt: NOW - (i + 1) * HOUR / 2,
@@ -104,7 +105,16 @@ it('keyboard bounds and the original durable partialize/restore chain preserve w
 it('narrow actual geometry only limits the rendered column and an unchanged gesture never overwrites the saved wider preference', async () => {
   let width = 320
   const observers = new Set<() => void>()
-  vi.stubGlobal('ResizeObserver', class { constructor(private update: () => void) { observers.add(update) } observe() {} disconnect() { observers.delete(this.update) } })
+  vi.stubGlobal('ResizeObserver', class {
+    private targets = new Set<Element>()
+    private update = () => this.callback([...this.targets].map(target => {
+      const rect = target.getBoundingClientRect()
+      return { target, borderBoxSize: [{ inlineSize: rect.width, blockSize: rect.height }], contentRect: rect } as unknown as ResizeObserverEntry
+    }), this as unknown as ResizeObserver)
+    constructor(private callback: ResizeObserverCallback) { observers.add(this.update) }
+    observe(target: Element) { this.targets.add(target); this.update() }
+    disconnect() { observers.delete(this.update) }
+  })
   const original = HTMLElement.prototype.getBoundingClientRect
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const rectangle = (size: number) => ({ x: 0, y: 0, left: 0, right: size, top: 0, bottom: 168, width: size, height: 168, toJSON() {} })
@@ -126,7 +136,7 @@ it('200 draft/keyboard width updates preserve actual native/captured records, bo
   const directory = await mkdtemp(join(tmpdir(), 'focus-name-width-')), path = join(directory, 'native.jsonl')
   await writeFile(path, Array.from({ length: 130 }, (_, i) => JSON.stringify({ sessionId: 'native-width', uuid: `record-${i}`, type: 'user', message: { role: 'user', content: `Original native width task ${i}` }, timestamp: new Date(NOW - HOUR).toISOString() })).join('\n') + '\n')
   const store = new AgentMuxFileAgentSessionStore(join(directory, 'sessions.json'))
-  const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'archived-width', providerId: 'claude', executorId: 'private', hostId: 'private', workspacePath: directory, run: { runId: 'never-started' }, retiredRuns: [], hookBindingId: 'private', hookToken: 'private', createdAt: 1, updatedAt: 1, nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-width', transcriptPath: path } }
+  const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'archived-width', providerId: 'claude', executorId: 'private', hostId: 'private', workspacePath: directory, run: { runId: 'never-started' }, retiredRuns: [], hookBindingId: 'private', hookToken: 'private', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-width', transcriptPath: path } }
   await store.compareAndSwap(null, session)
   await store.applyTimelineMutation({ type: 'append', agentSessionId: session.agentSessionId, item: { id: 'captured', agentSessionId: session.agentSessionId, kind: 'user_message', source: 'user', status: 'complete', createdAt: NOW - HOUR, updatedAt: NOW - HOUR, title: 'Input', content: 'Original captured width task' } })
   const client = new AgentMuxClient({ store }), pending = new Set<Promise<unknown>>()
@@ -161,7 +171,7 @@ it('200 draft/keyboard width updates preserve actual native/captured records, bo
   for (let i = 0; i < 100; i++) await h.move(i % 2 ? 144 : 128)
   await h.up()
   for (let i = 0; i < 100; i++) await h.key(i % 2 ? 'ArrowRight' : 'ArrowLeft')
-  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: 30, status: { ...session.status, observedAt: 2 } })) })))
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: 30, status: { ...session.status, observedAt: _tailFixtureEpoch(0, 0, 2) } })) })))
   expect([catalog.mock.calls.length, page.mock.calls.length, timeline.mock.calls.length, project.mock.calls.length, group.mock.calls.length]).toEqual(before)
   expect(document.querySelectorAll('.recent-focus__input-list [data-input-message-id]')).toHaveLength(91); expect(document.querySelector('[data-input-preview-id]')).toBe(body); expect(selection.toString()).toBe(selected)
   expect([viewport.scrollTop, viewport.scrollLeft]).toEqual([48, 12]); expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts); expect(useAppStore.getState().agentFocus).toBe(original.agentFocus); expect(connect.mock.calls).toEqual([])

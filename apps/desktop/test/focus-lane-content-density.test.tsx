@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { readFileSync, appendFileSync } from 'node:fs'
@@ -58,7 +59,7 @@ const message = (id: string, kind: 'user_message' | 'assistant_message', content
 })
 const timeline = (id: string, items: AgentTimelineItem[]): AgentTimelineSnapshot => ({ agentSessionId: id, revision: items.length + 1, items })
 const tool = (id: string): AgentTimelineItem => ({ id: `${id}-tool`, agentSessionId: id, kind: 'tool_call', source: 'native-hook',
-  status: 'complete', title: 'Bash', toolName: 'Bash', toolInput: JSON.stringify({ command: 'pnpm test --filter density' }), createdAt: 3, updatedAt: 3 })
+  status: 'complete', title: 'Bash', toolName: 'Bash', toolInput: JSON.stringify({ command: 'pnpm test --filter density' }), createdAt: _tailFixtureEpoch(0, 0, 3), updatedAt: _tailFixtureEpoch(0, 0, 3) })
 const page = (id: string, items: AgentSessionHistoryPage['items'] = []): AgentSessionHistoryPage => ({
   agentSessionId: id, source: { providerId: 'claude', nativeSessionId: `${id}-native` }, items, nextCursor: null
 })
@@ -70,6 +71,8 @@ const section = (bucket: string) => { const node = groups().querySelector<HTMLEl
 const card = (id = A) => { const node = container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`); expect(node).not.toBeNull(); return node! }
 const preview = () => document.querySelector<HTMLElement>('.focus-context-hover')
 const listObservers = () => observers.filter(observer => observer.target?.classList.contains('focus-project-lanes__rows'))
+const notify = (observer: typeof observers[number]) => observer.callback([{ target: observer.target!,
+  contentRect: new DOMRect(0, 0, width, 600) } as ResizeObserverEntry], {} as ResizeObserver)
 async function seed(sessions: Agent[], timelines: Record<string, AgentTimelineSnapshot> = {}) {
   await act(async () => useAppStore.setState({ sessions, timelines, agentNames: Object.fromEntries(sessions.map(session => [session.id, `任务 ${session.id}`])) }))
 }
@@ -88,7 +91,10 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class {
     entry: typeof observers[number]
     constructor(callback: ResizeObserverCallback) { this.entry = { callback, disconnect: vi.fn() }; observers.push(this.entry) }
-    observe = (target: Element) => { this.entry.target = target }
+    observe = (target: Element) => {
+      this.entry.target = target
+      queueMicrotask(() => { if (!this.entry.disconnect.mock.calls.length) notify(this.entry) })
+    }
     unobserve() {}
     disconnect = () => this.entry.disconnect()
   })
@@ -130,7 +136,7 @@ afterEach(async () => {
 it('uses five readable slots at 914 while interrupted tasks remain in the original Recovery group', async () => {
   const sessions = [...Array.from({ length: 7 }, (_, i) => agent(`work-${i}`)), agent('result', 'done'),
     ...Array.from({ length: 6 }, (_, i) => agent(`idle-${i}`, 'running', 'run-process')), agent('offline-a', 'disconnected'), agent('offline-b', 'disconnected')]
-  await seed(sessions, { result: timeline('result', [message('result', 'assistant_message', 'Recorded result', 2)]) }); await mount()
+  await seed(sessions, { result: timeline('result', [message('result', 'assistant_message', 'Recorded result', _tailFixtureEpoch(0, 0, 2))]) }); await mount()
   expect(groups().querySelectorAll('.focus-context')).toHaveLength(16)
   expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['working', 'results', 'idle'])
   expect(groups().dataset.focusCardSlots).toBe('5'); expect(groups().dataset.focusMaxRows).toBe('4')
@@ -154,7 +160,7 @@ it('uses five readable slots at 914 while interrupted tasks remain in the origin
   expect(useAppStore.getState().sessions.map(session => session.control)).toEqual(before.sessions.map(session => session.control))
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts); expect(listObservers()).toHaveLength(1)
   for (const budget of [912, 971, 972]) {
-    width = budget; await act(async () => listObservers()[0]!.callback([], {} as ResizeObserver))
+    width = budget; await act(async () => notify(listObservers()[0]!))
     expect(groups().dataset.focusCardSlots).toBe('5'); expect(groups().dataset.focusMaxRows).toBe('4')
     expect(['working', 'results', 'idle'].map(bucket => Number(section(bucket).style.getPropertyValue('--focus-card-columns')))).toEqual([2, 1, 2])
     expect(groups().querySelectorAll('.focus-context')).toHaveLength(16)
@@ -167,7 +173,7 @@ it('keeps both Working and Recovery cards bounded across width changes without r
   expect(section('working').style.getPropertyValue('--focus-group-width')).toBe('320px')
   const original=card(), recovered=container.querySelector('[data-session-id="offline"]'), before=useAppStore.getState()
   expect(recovered?.textContent).toContain('Run interrupted')
-  width=320; await act(async()=>listObservers()[0]!.callback([],{} as ResizeObserver))
+  width=320; await act(async()=>notify(listObservers()[0]!))
   for(const bucket of ['working','idle']) { expect(Number(section(bucket).style.getPropertyValue('--focus-card-columns'))).toBe(1);expect(parseFloat(section(bucket).style.getPropertyValue('--focus-group-width'))).toBeLessThanOrEqual(320) }
   expect(card()).toBe(original);expect(container.querySelector('[data-session-id="offline"]')).toBe(recovered)
   expect(useAppStore.getState().sessions).toBe(before.sessions);expect(useAppStore.getState().agentFocus).toBe(before.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
@@ -207,7 +213,7 @@ it('keeps the actual rename input and exact menu target across 1 to 2 to 1 and a
 })
 
 it('keeps a pinned hover record and zero unrelated cost through the single-card presentation transition', async () => {
-  await seed([agent(A)], { [A]: timeline(A,[message(A,'assistant_message','Original retained sparse reply',10)]) });await mount();await open()
+  await seed([agent(A)], { [A]: timeline(A,[message(A,'assistant_message','Original retained sparse reply',_tailFixtureEpoch(0, 0, 10))]) });await mount();await open()
   const original=card(), reply=preview()!.querySelector('.focus-context-hover__recap p')!,range=document.createRange();range.selectNodeContents(reply);window.getSelection()!.removeAllRanges();window.getSelection()!.addRange(range)
   const selection=window.getSelection()!.toString(), parent=original.parentElement
   await act(async()=>useAppStore.setState(state=>({sessions:[...state.sessions,agent(B)]})))
@@ -225,7 +231,7 @@ it('shows a complete wrapper body as the ordinary recap while raw aria/hover and
   const body = '已核 src/scroll-anchor.ts，保留原草稿与正文选区。'.repeat(20)
   const wrapped = ("[Message from Agent " + ('declared-'.repeat(25)) + ("]\n<bagakit-msg type=\"result\" name=\"Declared only\" time=\"" + _hygiene_fixtureIso(24112800000, "zone-second", 480) + "\">") + (body) + "</bagakit-msg>")
   expect(wrapped.length).toBeGreaterThan(800); expect(parseAgentMuxMessagePrefix(wrapped)?.body).toBe(body)
-  await seed([agent(A)], { [A]: timeline(A, [message(A, 'assistant_message', wrapped, 2), tool(A)]) }); await mount()
+  await seed([agent(A)], { [A]: timeline(A, [message(A, 'assistant_message', wrapped, _tailFixtureEpoch(0, 0, 2)), tool(A)]) }); await mount()
   const original = useAppStore.getState().timelines[A]!
   expect(card().querySelector('.focus-context__recap > span')?.textContent).toBe(body)
   expect(card().querySelector('.focus-context__activity')).toBeNull()
@@ -251,7 +257,7 @@ it('shows a complete wrapper body as the ordinary recap while raw aria/hover and
   ]
   for (const raw of unrecognized) {
     expect(parseAgentMuxMessagePrefix(raw)).toBeNull()
-    await act(async () => useAppStore.setState({ timelines: { [A]: timeline(A, [message(A, 'assistant_message', raw, 2)]) } }))
+    await act(async () => useAppStore.setState({ timelines: { [A]: timeline(A, [message(A, 'assistant_message', raw, _tailFixtureEpoch(0, 0, 2))]) } }))
     expect(card().querySelector('.focus-context__recap > span')?.textContent).toBe(excerpt(raw))
     expect(card().getAttribute('aria-label')).toContain(excerpt(raw)); expect(useAppStore.getState().timelines[A]!.items[0]!.content).toBe(raw)
   }
@@ -259,8 +265,8 @@ it('shows a complete wrapper body as the ordinary recap while raw aria/hover and
 
 it('distinguishes idle completion without a result, unknown activity and a recorded result without changing state or selection identity', async () => {
   const sessions = [agent('idle-done', 'done'), agent('unknown', 'running', 'run-process'), agent('result', 'done')]
-  await seed(sessions, { unknown: timeline('unknown', [message('unknown', 'assistant_message', 'Held reply, activity remains unknown', 2)]),
-    result: timeline('result', [message('result', 'assistant_message', 'Recorded result', 2)]) })
+  await seed(sessions, { unknown: timeline('unknown', [message('unknown', 'assistant_message', 'Held reply, activity remains unknown', _tailFixtureEpoch(0, 0, 2))]),
+    result: timeline('result', [message('result', 'assistant_message', 'Recorded result', _tailFixtureEpoch(0, 0, 2))]) })
   const tab = createWorkbenchTab('density-exact-tab', { regionId: 'density-exact-region', workspaceId: 'density',
     kind: 'agent', phase: 'attached', sessionId: 'unknown' })
   const reference = { displayWorkspaceId: 'density', groupId: 'density-exact-group', tabId: tab.id, regionId: 'density-exact-region' }
@@ -275,8 +281,8 @@ it('distinguishes idle completion without a result, unknown activity and a recor
     const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, catalog, select)
     const currentReference = focusTimelineCurrentReference(state.workbenchSpaceSelection,
       state.workbenchSpaceSelection ? state.layouts[state.workbenchSpaceSelection.workspaceId] : undefined, state.tabs, catalog)
-    return createElement(GlobalFocusSurface, { presentation, currentReference, workspaceOpen: Boolean(state.workbenchSpaceSelection),
-      onSelectContext: state.focusExecutionSession, onSelectLocation: select })
+    return <GlobalFocusSurface presentation={presentation} currentReference={currentReference} workspaceOpen={Boolean(state.workbenchSpaceSelection)}
+      onSelectContext={state.focusExecutionSession} onSelectLocation={select} />
   }
   await act(async () => root!.render(createElement(MainFocusFixture)))
   expect(card('idle-done').dataset).toMatchObject({ state: 'done', bucket: 'idle', activity: 'idle' })
@@ -301,13 +307,13 @@ it('distinguishes idle completion without a result, unknown activity and a recor
 it('keeps pending, failure, connection and unconfirmed Mote service facts directly readable over retained recaps', async () => {
   const permission: Agent = { ...agent('permission'), pendingInteraction: { kind: 'permission', id: 'permission-request', agentSessionId: 'permission',
     title: 'Allow editing src/density.ts?', options: [{ id: 'once', label: 'Allow once', kind: 'allow-once' }],
-    evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'permission-original-run' } } } }
+    evidence: { source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 2), run: { runId: 'permission-original-run' } } } }
   const question: Agent = { ...agent('question'), pendingInteraction: { kind: 'question', id: 'question-request', agentSessionId: 'question',
     questions: [{ id: 'choice', prompt: 'Ship stable or canary?', options: [{ id: 'stable', label: 'Stable' }] }],
-    evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'question-original-run' } } } }
-  const failure = { ...agent('failure', 'error'), status: { state: 'error' as const, source: 'native-hook' as const, observedAt: 2, detail: 'Attachment failed; original Run retained' } }
+    evidence: { source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 2), run: { runId: 'question-original-run' } } } }
+  const failure = { ...agent('failure', 'error'), status: { state: 'error' as const, source: 'native-hook' as const, observedAt: _tailFixtureEpoch(0, 0, 2), detail: 'Attachment failed; original Run retained' } }
   const connection = { ...agent('connection', 'disconnected'), processState: 'running' as const,
-    status: { state: 'disconnected' as const, source: 'native-hook' as const, observedAt: 2, detail: 'Connection lost; current execution unconfirmed' } }
+    status: { state: 'disconnected' as const, source: 'native-hook' as const, observedAt: _tailFixtureEpoch(0, 0, 2), detail: 'Connection lost; current execution unconfirmed' } }
   const mote = { ...agent('unconfirmed', 'running', 'run-process'), workspacePath: _hygiene_fixturePath("unconfirmed-mote/topic--launcher--unconfirmed") }
   // The original directory owner confirms this exact address, while its read
   // error leaves Topic/Mote classification unknown; cwd spelling is not proof.
@@ -316,7 +322,7 @@ it('keeps pending, failure, connection and unconfirmed Mote service facts direct
   vi.mocked(api.scratch.listTopics).mockResolvedValue([unknownTopic])
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, scratch] }, scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 0, topics: [unknownTopic], error: null, reading: false } } })))
   const sessions = [permission, question, failure, connection, mote]
-  await seed(sessions, Object.fromEntries(sessions.map(session => [session.id, timeline(session.id, [message(session.id, 'assistant_message', 'Old recap remains held', 2)])])))
+  await seed(sessions, Object.fromEntries(sessions.map(session => [session.id, timeline(session.id, [message(session.id, 'assistant_message', 'Old recap remains held', _tailFixtureEpoch(0, 0, 2))])])))
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces,
     { id: '__scratch__', name: 'Topics', hostId: 'local', kind: 'folder', path: _hygiene_fixturePath("unconfirmed-mote") }] } })))
   await mount(); expect(board().querySelectorAll('.focus-context')).toHaveLength(5)
@@ -336,8 +342,8 @@ it('keeps pending, failure, connection and unconfirmed Mote service facts direct
 
 it('keeps irrelevant churn dormant, preserves the latest three hover inputs and rejects a reflow click on another SID', async () => {
   const captured = Array.from({ length: 4 }, (_, i) => ({ ...message(A, 'user_message', `Request ${i}`, i + 1), source: 'user' as const, authorHuman: true }))
-  await seed([agent(A), agent(B)], { [A]: timeline(A, [...captured, message(A, 'assistant_message', 'Original response', 10)]) })
-  vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A, [{ id: 'native', kind: 'user-message', startedAt: 2.5, contentParts: [{ kind: 'text', text: 'Native input' }] }]))
+  await seed([agent(A), agent(B)], { [A]: timeline(A, [...captured, message(A, 'assistant_message', 'Original response', _tailFixtureEpoch(0, 0, 10))]) })
+  vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A, [{ id: 'native', kind: 'user-message', startedAt: _tailFixtureEpoch(0, 0, 2.5), contentParts: [{ kind: 'text', text: 'Native input' }] }]))
   await mount(); expect(api.workspaces.listBranches).toHaveBeenCalled(); expect(api.workspaces.appearance).toHaveBeenCalled()
   expect(renders.cards[A]).toBeGreaterThan(0); expect(renders.cards[B]).toBeGreaterThan(0)
   const allocate = vi.spyOn(allocation, 'allocateFocusLaneColumns'), partition = vi.spyOn(projection, 'groupFocusContexts')
@@ -363,7 +369,7 @@ it('keeps irrelevant churn dormant, preserves the latest three hover inputs and 
   expect(window.getSelection()!.toString()).toBe('Original response'); expect(document.activeElement).toBe(input)
   expect([input.selectionStart, input.selectionEnd]).toEqual([2, 8]); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   await escape(); await act(async () => original.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })))
-  width = 320; await act(async () => listObservers()[0]!.callback([], {} as ResizeObserver))
+  width = 320; await act(async () => notify(listObservers()[0]!))
   expect(allocate).toHaveBeenCalled(); expect(partition).toHaveBeenCalled()
   await act(async () => sibling.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })))
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
