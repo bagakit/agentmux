@@ -4,7 +4,7 @@
 
 ## 目标与优先级
 
-1. **通用本地 Agent 核心包优先。** `packages/core` 可独立发布、无 UI 依赖、与宿主框架无关。它以类型安全的公共 API 统一 Agent CLI 的发现、配置、Session、输入输出、状态、权限与语义恢复；新增 Agent 原则上只增加 Provider，不迫使 client 改写交互。持久 Session 与原身份可恢复是核心正确性底线，行为合同归[Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康)，不能用能启动新进程或当前画面正常代签。
+1. **通用本地 Agent 核心包优先。** `packages/core` 可独立发布、无 UI 依赖、与宿主框架无关。它以类型安全的公共 API 统一 Agent CLI 的发现、配置、Session、输入输出、状态、权限与语义恢复；新增 Agent 原则上只增加 Provider，不迫使 client 改写交互。持久 Session 与原身份可恢复是项目 P00 基础，行为合同归[Durable Runtime 健康](docs/design/behavior/session-recovery.md#durable-runtime-健康)，不能用能启动新进程或当前画面正常代签。
 2. **编辑器是第一方 client 和参考实现。** Desktop 用真实编辑、终端、工作区、worktree 与多 Agent 流程验证 Core，保持 Agent-first、terminal-first，并达到成熟产品的交互与视觉质量。全部 Agent 生命周期经过 Core 公共 API。
 
 ## 分层与身份
