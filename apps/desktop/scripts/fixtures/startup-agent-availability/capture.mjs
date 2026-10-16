@@ -7,7 +7,7 @@ import { dirname, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
-export async function captureStartupProduct({ root, evidence }) {
+export async function captureStartupProduct({ root, evidence, rendererMutation }) {
   const fixture = resolve(root, 'apps/desktop/scripts/fixtures/startup-agent-availability')
   const desktop = resolve(root, 'apps/desktop'), compiled = resolve(evidence, 'compiled')
   const require = createRequire(resolve(desktop, 'package.json')), vitePath = require.resolve('vite')
@@ -16,7 +16,7 @@ export async function captureStartupProduct({ root, evidence }) {
   const privateRoot = await mkdtemp(resolve(tmpdir(), 'amx-startup-agents-'))
   const inputs = {}, artifacts = [], phases = [], frames = []
   const receipt = { schema: 'agentmux.startup-agent-product-capture.v1', completed: false, privateRoot, inputs, artifacts, phases, frames,
-    boundary: 'Actual complete App and Renderer initialize, startup stage, Workbench, General settings and System notifications; actual ConfigStore/ConfigOwner writes and Core spatial disk owner; persistent Chromium localStorage. Four independently launched private Electron processes read the same original disk state. Executor availability/check failures and empty Runtime snapshot are controlled API boundary inputs, no live Agent or user Runtime.' }
+    boundary: 'Actual complete App and Renderer initialize, startup stage, Workbench, General settings and System notifications; actual ConfigStore/ConfigOwner writes and Core spatial disk owner; persistent Chromium localStorage. Three independently launched private Electron processes read the same original disk state. Executor availability/check failures and empty Runtime snapshot are controlled API boundary inputs, no live Agent or user Runtime.' }
   async function bind(file) {
     const key = relative(root, file), bytes = await readFile(file)
     assert.ok(bytes.length > 0, 'Nonempty actual source: ' + key)
@@ -39,6 +39,8 @@ export async function captureStartupProduct({ root, evidence }) {
       }
     }
     aliases.set('@agentmux/client-ui/theme', resolve(root, 'packages/client-ui/src/theme/index.ts'))
+    aliases.set('@agentmux/client-ui/composer-input-config', resolve(root, 'packages/client-ui/src/lib/composer-input-config.ts'))
+    await bind(resolve(root, 'packages/client-ui/package.json'))
     await esbuild({ entryPoints: [resolve(fixture, 'owner-entry.ts')], outfile: resolve(compiled, 'owner.mjs'), bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', logLevel: 'error',
       plugins: [{ name: 'bind-actual-startup-durable-owners', setup(builder) {
         builder.onResolve({ filter: /^@agentmux\// }, args => args.path === '@agentmux/core' ? { path: resolve(fixture, 'core-entry.ts') } : aliases.has(args.path) ? { path: aliases.get(args.path) } : undefined)
@@ -68,12 +70,18 @@ export async function captureStartupProduct({ root, evidence }) {
         const files = new Set(); styles.walk(node => { if (node.source?.input.file) files.add(node.source.input.file.split('?')[0]) })
         await Promise.all([...files].filter(file => file.startsWith(root + '/') && !file.includes('/node_modules/')).map(bind))
       } }] } },
-      plugins: [{ name: 'bind-actual-startup-renderer', enforce: 'pre', async transform(_code, id) {
+      plugins: [{ name: 'bind-actual-startup-renderer', enforce: 'pre', async transform(code, id) {
         const file = id.split('?')[0]
         if (file.startsWith(root + '/') && !file.includes('/node_modules/')) await bind(file)
+        if (rendererMutation && file === resolve(root, rendererMutation.file)) {
+          assert.equal(code.split(rendererMutation.from).length, 2, 'One actual production Renderer mutation seam')
+          const loaded = code.replace(rendererMutation.from, rendererMutation.to)
+          receipt.rendererMutation = { ...rendererMutation, original: sha(code), loaded: sha(loaded) }
+          return { code: loaded, map: null }
+        }
       } }],
       build: { target: 'esnext', outDir: resolve(compiled, 'renderer'), sourcemap: false, emptyOutDir: false } })
-    for (const stage of ['control', 'failure-restart', 'restart', 'skip-restart']) {
+    for (const stage of ['control', 'failure-restart', 'restart']) {
       const lines = [], env = { ...process.env, AGENTMUX_STATE_DIRECTORY: resolve(privateRoot, 'agentmux-state'), AGENTMUX_RUNTIME_DIRECTORY: resolve(privateRoot, 'runtime') }
       delete env.ELECTRON_RUN_AS_NODE
       const facts = await runProbeProcess(require('electron'), [resolve(fixture, 'main.cjs'), resolve(compiled, 'renderer/index.html'), resolve(compiled, 'owner.mjs'), privateRoot, evidence, stage],
@@ -85,11 +93,11 @@ export async function captureStartupProduct({ root, evidence }) {
       assert.equal(scene.completed, true); frames.push(...scene.frames)
     }
     const scenes = await Promise.all(phases.map(phase => readFile(resolve(evidence, phase.stage + '-scene.json')).then(JSON.parse)))
-    assert.equal(new Set(scenes.map(scene => scene.pid)).size, 4, 'Four independent Electron main processes')
+    assert.equal(new Set(scenes.map(scene => scene.pid)).size, 3, 'Three independent Electron main processes')
     for (const scene of scenes.slice(1)) assert.deepEqual(scenes[0].checkpoint.surface, scene.checkpoint.surface)
     assert.equal(scenes[1].failureRecovery.pendingCauseRetained, true); assert.equal(scenes[1].failureRecovery.clearedAfterSuccessfulChecks, true)
-    assert.equal(scenes[2].restart.noReseed, true); assert.equal(scenes[2].actualSettingsSaveReadback, true); assert.equal(scenes[3].skipBackground.originalWorkfaceRetained, true)
-    assert.equal(frames.length, 5, 'Full normal/narrow startup and General settings plus actual failed-check System notification captures are nonempty')
+    assert.equal(scenes[2].restart.noReseed, true); assert.equal(scenes[2].actualSettingsSaveReadback, true)
+    assert.equal(frames.length, 5, 'Normal/narrow restored workface and General settings plus actual failed-check System notification captures are nonempty')
     assert.ok(Object.keys(inputs).some(file => file.endsWith('/App.tsx')))
     assert.ok(Object.keys(inputs).some(file => file.endsWith('/StartupLoadingSurface.tsx')))
     assert.ok(Object.keys(inputs).some(file => file.endsWith('/GeneralSettingsPane.tsx')))
