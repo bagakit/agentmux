@@ -3,7 +3,7 @@ import type { PublicationImage, PublicationFile, ResourceUploadReceipt, Resolved
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync } from 'node:sqlite'
-import { AgentMuxError, renderAgentMuxMessageEnvelope, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
+import { AgentMuxError, type AgentSessionHistoryItem, type AgentSessionHistoryContentPart } from '@agentmux/core'
 import { parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectionDeliveryCoverage, type ConnectionDeliveryCoverage, type ConnectionDeliveryGap, type ConnectionDelivery, type ConnectionDeliveryState, type ConnectionDeliveryMapping, type ConnectionDeliveryReceiptReason, type ConnectionDeliveryReceipt, type RoomBinding } from '@agentmux/core/connections'
 import { parseConversationChangesPage, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
@@ -285,9 +285,10 @@ export class PublicationStore {
       if (!row) return
       const ingress = JSON.parse(String(row.record_json))
       if (ingress.externalConversationId !== boundary.externalConversationId || ingress.input?.hostId !== boundary.executionHostId || ingress.input?.agentSessionId !== boundary.agentSessionId || item.inputRef.agentSessionId !== ingress.input.agentSessionId || item.inputRef.messageId !== ingress.input.messageId || !same(item.inputRef.expectedRun, ingress.input.expectedRun) || !same(ingress.input.author, author) || ingress.state === 'refused') return
-      // The actual writer retains Core's complete public rendering. This is an
-      // integrity check after typed input/claim association, never a text join.
-      if (renderAgentMuxMessageEnvelope({ sender: author, senderSessionId: null, body: ingress.body }) !== item.content) return
+      // Core's original input writer records this exact Input key, author and
+      // public-content boundary together. Ordinary content edits remove the key
+      // and boundary; retained revisions keep their original facts. Today's
+      // formatter cannot qualify or invalidate the original accepted wire.
       return { connectionId: boundary.connectionId, externalConversationId: boundary.externalConversationId, externalMessageId: author.externalMessageId }
     } catch { return }
   }
