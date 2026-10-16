@@ -375,7 +375,13 @@
 .pane-body__region[data-active="false"],
 .workbench-layout-body[data-workbench-layout-state="parked"],
 .workbench-reference-body[data-workbench-layout-state="parked"],
-.retained-workbench-parking { clip-path: inset(50%); }
+.retained-workbench-parking {
+  clip-path: inset(50%);
+  /* Keep the original DOM, reading and measurable boxes. Chromium can skip
+     unused descendant layout/paint until a reader explicitly requests geometry
+     or this same workface leaves its parked owner. */
+  content-visibility: hidden;
+}
 
 /* Parking preserves measurable geometry and mounted readers, but has no visible
    motion consumer. Descendants resume on their original timeline when their
