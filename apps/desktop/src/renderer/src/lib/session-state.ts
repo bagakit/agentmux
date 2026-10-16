@@ -532,7 +532,7 @@ export function reduceAgentMembershipSnapshot(
     return sessions === state.sessions ? state : { ...state, sessions }
   }
   const canonicalById = new Map(canonicalAgents.map((session) => [session.id, session]))
-  const timelines = { ...state.timelines }
+  let timelines = state.timelines
   for (const session of canonicalAgents) {
     const incoming = snapshot.timelines[session.id]
     if (!incoming && session.timelineObservation && sameRun(session.timelineObservation.run, session.control.run)) continue
@@ -544,19 +544,36 @@ export function reduceAgentMembershipSnapshot(
       continue
     }
     const current = timelines[session.id]
-    if (!current || incoming.revision >= current.revision) timelines[session.id] = incoming
+    if (!current || incoming.revision >= current.revision) {
+      let next = incoming
+      if (current) {
+        // Membership reads decode fresh objects. Reuse only complete equal facts,
+        // including source/epoch/gaps; a revision alone does not establish equality.
+        const items = configValuesEqual(current.items, incoming.items) ? current.items : incoming.items
+        const stream = configValuesEqual(current.stream, incoming.stream) ? current.stream : incoming.stream
+        if (items !== incoming.items || stream !== incoming.stream) next = { ...incoming, items, ...(stream === undefined ? {} : { stream }) }
+        if (configValuesEqual(current, next)) next = current
+      }
+      if (next !== current) {
+        if (timelines === state.timelines) timelines = { ...state.timelines }
+        timelines[session.id] = next
+      }
+    }
   }
   const existingIds = new Set(state.sessions.map((session) => session.id))
   const sessions = state.sessions.map(session => {
     const incoming = canonicalById.get(session.id)
-    return incoming && session.kind === 'agent' && sameRun(session.control.run, incoming.control.run)
+    const next = incoming && session.kind === 'agent' && sameRun(session.control.run, incoming.control.run)
       ? { ...incoming, status: retainContinuityFailure(session.status, incoming.status, incoming.processState === 'running') }
       : incoming ?? session
+    return configValuesEqual(session, next) ? session : next
   })
   for (const [id, session] of canonicalById) {
     if (!existingIds.has(id)) sessions.push(session)
   }
-  return { ...state, sessions: projectRuntimeEndpointSessions(sessions, snapshot.runtimeEndpointWarnings), timelines }
+  const projected = projectRuntimeEndpointSessions(sessions, snapshot.runtimeEndpointWarnings)
+  const retained = projected.length === state.sessions.length && projected.every((session, index) => session === state.sessions[index]) ? state.sessions : projected
+  return retained === state.sessions && timelines === state.timelines ? state : { ...state, sessions: retained, timelines }
 }
 
 /**
