@@ -105,7 +105,7 @@ export function parseConnectionSetupInspectionReceipt(value: unknown): Connectio
     result.versionId = id(p.versionId)
     if (result.input.versionId !== result.versionId || !result.input.decision.actionId.startsWith('setup-version-read:')) fail()
   } else if (p.versionId !== undefined || result.input.versionId !== undefined || result.input.publicationDraft !== undefined) fail()
-  if (result.input.decision.value !== 'continue' || result.secureStorage === 'stored' && result.request !== 'confirmed') fail()
+  if (result.input.decision.value !== 'continue' || result.secureStorage === 'stored' && !['confirmed', 'unknown'].includes(result.request)) fail()
   return result
 }
 export function parseConnectionSetupPermissionReview(value: unknown): ConnectionSetupPermissionReview {
@@ -182,7 +182,7 @@ export function parseConnectionSetupConfigurationReceipt(value: unknown): Connec
   const common = ['effect', 'stepId', 'input', 'request', 'secureStorage']
   const p = object(value, [...common, ...(effect === 'add-application-permissions' ? ['purpose', 'sourceStepIds', 'scopeNames', 'requiresDataRangeConfiguration'] : effect === 'add-message-reception' ? ['sourceStepIds', 'transport'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sourceStepIds', 'versionId', 'submission'] : ['sourceStepId'])])
   const input = parseConnectionSetupParams('connection.setup.advance', p.input), request = requestState(p.request), secureStorage = choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown'] as const), stepId = id(p.stepId)
-  if (input.decision.value !== 'confirm' || secureStorage === 'stored' && request !== 'confirmed') fail()
+  if (input.decision.value !== 'confirm' || secureStorage === 'stored' && !['confirmed', 'unknown'].includes(request)) fail()
   if (effect === 'create-application-version' || effect === 'submit-application-version') {
     const sourceStepIds = parsePublicationSourceIds(p.sourceStepIds, effect), versionId = p.versionId === null ? null : id(p.versionId)
     const draft = input.publicationDraft
@@ -285,7 +285,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       return { actionId, expectedRevision, kind: choice(a.kind, ['inspect-application', 'recover-application-inspection', ...Object.values(CONNECTION_SETUP_READ_ACTIONS)] as const) }
     })
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
-    if (actions.some(a => a.kind === 'recover-application-inspection') && (!selected || selected.request !== 'confirmed' || selected.secureStorage === 'stored')) fail()
+    if (actions.some(a => a.kind === 'recover-application-inspection') && (!selected || !['confirmed', 'unknown'].includes(selected.request) || !['storing', 'unknown'].includes(selected.secureStorage))) fail()
     const permission = choice(s.applicationInfoReadPermission, ['confirmed', 'unknown'] as const)
     if (permission === 'confirmed' && (!selected || selected.subject !== undefined || selected.request !== 'confirmed' || selected.secureStorage !== 'stored' || result.reason === 'connection-revised' || operation!.authentication?.stage !== 'confirmed' || operation!.authentication.request !== 'confirmed' || operation!.authentication.secureStorage !== 'stored')) fail()
     result.applicationInspection = { observations, selected, next: s.next === null ? null : text(s.next), applicationInfoReadPermission: permission, actions }
@@ -317,7 +317,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     const actions = (c.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['enable-messaging', 'use-persistent-connection', 'use-persistent-callback', 'add-card-actions', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version', 'recover-configuration-effect'] as const) } })
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
     if (actions.some(a => a.kind !== 'recover-configuration-effect' && (a.kind !== effect || capability !== 'disabled' || a.expectedRevision !== operation!.revision || c.reason !== undefined))) fail()
-    if (actions.some(a => a.kind === 'recover-configuration-effect') && (!selected || selected.request !== 'confirmed' || selected.secureStorage === 'stored')) fail()
+    if (actions.some(a => a.kind === 'recover-configuration-effect') && (!selected || !['confirmed', 'unknown'].includes(selected.request) || !['storing', 'unknown'].includes(selected.secureStorage))) fail()
     if (method === 'connection.setup.advance' && (!result.receipt || !selected || selected.stepId !== result.receipt.stepId)) fail()
     const common = { effects, next: c.next === null ? null : text(c.next), selected, capability, actions, ...(c.reason === undefined ? {} : { reason: choice(c.reason, ['source-unconfirmed', 'adapter-unavailable', 'original-effect-unconfirmed'] as const) }) }
     if (effect === 'add-application-permissions') {
