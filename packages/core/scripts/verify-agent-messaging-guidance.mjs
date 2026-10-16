@@ -89,4 +89,3 @@ await runA2aProof({
       before: 'prefer a directional Region in that same Tab', after: 'choose any available Region', tests: discovery }
   ]
 })
-
