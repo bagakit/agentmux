@@ -126,67 +126,109 @@ function account(value: unknown): ConnectionSetupAccount {
   const tenantName = label([...display(record(p.tenantDisplayName) ?? {}, ['value']), ...display(p, ['tenantName', 'tenant_name'])])
   return { userId, tenantId, ...(userName ? { userName } : {}), ...(tenantName ? { tenantName } : {}) }
 }
-function nodes(value: unknown): Ast[] {
-  if (Array.isArray(value)) return value.flatMap(nodes)
+function nodes(value: unknown, includeLocalScopes = true): Ast[] {
+  if (Array.isArray(value)) return value.flatMap(item => nodes(item, includeLocalScopes))
   const p = record(value); if (!p || typeof p.type !== 'string') return []
-  return [p as unknown as Ast, ...Object.values(p).flatMap(nodes)]
+  if (!includeLocalScopes) {
+    if (['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(p.type)) return []
+    if (p.type === 'BlockStatement' && (p.body as Ast[]).some(statement => windowBinding(statement) && statement.kind !== 'var')) return []
+    if (p.type === 'CallExpression' && ['FunctionExpression', 'ArrowFunctionExpression'].includes(String(record(p.callee)?.type))) {
+      const callee = record(p.callee)!, body = record(callee.body), local = body?.type === 'BlockStatement' ? body.body as Ast[] : []
+      const shadowed = isWindow(callee.id) || (callee.params as unknown[]).some(bindsWindow) || local.some(windowBinding) || hoistedWindow(local)
+      return [p as Ast, ...nodes(p.arguments, false), ...(shadowed ? [] : nodes(callee.body, false))]
+    }
+    if (p.type === 'ClassDeclaration' || p.type === 'ClassExpression') {
+      const members = record(p.body)?.body as Ast[]
+      const active = isWindow(p.id) ? [] : members.flatMap(member => {
+        if (member.type === 'StaticBlock') return (member.body as Ast[]).some(windowBinding) || hoistedWindow(member.body) ? [] : nodes(member.body, false)
+        return member.static ? nodes(member.value, false) : []
+      })
+      return [p as Ast, ...nodes(p.superClass, false), ...active]
+    }
+  }
+  return [p as Ast, ...Object.values(p).flatMap(item => nodes(item, includeLocalScopes))]
 }
 function isWindow(value: unknown): boolean { const p = record(value); return p?.type === 'Identifier' && p.name === 'window' }
+function bindsWindow(value: unknown): boolean {
+  const pattern = record(value); if (!pattern) return false
+  if (pattern.type === 'Identifier') return isWindow(pattern)
+  if (pattern.type === 'ObjectPattern') return (pattern.properties as Ast[]).some(property => bindsWindow(property.type === 'RestElement' ? property.argument : property.value))
+  if (pattern.type === 'ArrayPattern') return (pattern.elements as unknown[]).some(bindsWindow)
+  return pattern.type === 'AssignmentPattern' ? bindsWindow(pattern.left) : pattern.type === 'RestElement' && bindsWindow(pattern.argument)
+}
+function windowBinding(statement: Ast): boolean {
+  return statement.type === 'VariableDeclaration' && (statement.declarations as Ast[]).some(d => bindsWindow(d.id)) || ['FunctionDeclaration', 'ClassDeclaration'].includes(statement.type) && isWindow(statement.id)
+}
+function hoistedWindow(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hoistedWindow)
+  const n = record(value)
+  if (!n || ['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ClassDeclaration', 'ClassExpression'].includes(String(n.type))) return false
+  if (n.type === 'VariableDeclaration' && n.kind === 'var' && windowBinding(n as Ast)) return true
+  return Object.values(n).some(hoistedWindow)
+}
 /** Program bindings persist across scripts; declarations inside functions do not. */
 function scriptBindings(program: Program): void {
-  function hoisted(value: unknown): boolean {
-    if (Array.isArray(value)) return value.some(hoisted)
-    const n = record(value)
-    if (!n || ['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression', 'ClassDeclaration', 'ClassExpression'].includes(String(n.type))) return false
-    if (n.type === 'VariableDeclaration' && n.kind === 'var' && (n.declarations as Ast[]).some(d => nodes(d.id).some(isWindow))) return true
-    return Object.values(n).some(hoisted)
-  }
   for (const statement of program.body as unknown as Ast[]) {
-    const expression = record(statement.expression)
-    if (statement.type === 'VariableDeclaration' && (statement.declarations as Ast[]).some(d => nodes(d.id).some(isWindow)) || ['FunctionDeclaration', 'ClassDeclaration'].includes(statement.type) && isWindow(statement.id)) throw new Error('Shadowed bootstrap binding')
-    if (expression?.type === 'AssignmentExpression' && isWindow(expression.left)) throw new Error('Replaced bootstrap binding')
+    if (windowBinding(statement)) throw new Error('Shadowed bootstrap binding')
+    if (nodes(statement, false).some(node => node.type === 'AssignmentExpression' && isWindow(node.left))) throw new Error('Replaced bootstrap binding')
   }
-  if (hoisted(program)) throw new Error('Shadowed bootstrap binding')
+  if (hoistedWindow(program)) throw new Error('Shadowed bootstrap binding')
+}
+function identityField(value: unknown): 'user' | 'csrfToken' | null {
+  const member = record(value); if (member?.type !== 'MemberExpression') return null
+  const property = record(member.property), key = member.computed ? property?.value : property?.name
+  if (isWindow(member.object)) return key === 'user' || key === 'csrfToken' ? key : null
+  const parent = record(member.object)
+  if (parent?.type === 'MemberExpression' && isWindow(parent.object)) {
+    const root = record(parent.property), field = parent.computed ? root?.value : root?.name
+    if (field === 'user') return typeof key !== 'string' || ['id', 'userId', 'user_id', 'tenantId', 'tenant_id'].includes(key) ? 'user' : null
+  }
+  const ancestor = identityField(member.object)
+  return ancestor === 'user' ? 'user' : null
 }
 function bootstrap(html: string): { account: ConnectionSetupAccount; csrf: string } {
   const candidates: { key: 'user' | 'csrfToken'; value: unknown }[] = []
   function script(source: string): void {
     let ast: Program
-    try { ast = parseScript(source, { ecmaVersion: 'latest', sourceType: 'script' }) } catch { throw new Error('Unknown console bootstrap syntax') }
+    try { ast = parseScript(source, { ecmaVersion: 'latest', sourceType: 'script' }) } catch { return }
     scriptBindings(ast)
-    let statements = ast.body.filter(s => s.type !== 'EmptyStatement' && s.type !== 'FunctionDeclaration') as unknown as Ast[]
-    const expression = statements.length === 1 ? record(statements[0]!.expression) : null
-    const callee = record(expression?.callee)
-    const initializer = expression?.type === 'CallExpression' && callee?.type === 'FunctionExpression'
-    if (initializer && record(callee.body)?.type === 'BlockStatement') statements = record(callee.body)!.body as Ast[]
-    const binding = (statement: Ast) => statement.type === 'VariableDeclaration' && (statement.declarations as Ast[]).some(d => nodes(d.id).some(isWindow))
-    if (initializer && !statements.some(binding) && statements.some(s => record(s.expression)?.type === 'AssignmentExpression' && isWindow(record(s.expression)?.left))) throw new Error('Replaced bootstrap binding')
-    const hasIdentity = statements.some(s => {
-      const e = record(s.expression), left = record(e?.left), property = record(left?.property)
-      return e?.type === 'AssignmentExpression' && left?.type === 'MemberExpression' && isWindow(left.object) && ['user', 'csrfToken'].includes(String(left.computed ? property?.value : property?.name))
-    })
-    if (!hasIdentity) return
-    if (initializer) {
-      // Only the sourced literal initializer supplies identity; no code is executed.
-      if (callee.id || callee.async || callee.generator || !Array.isArray(callee.params) || callee.params.length || !Array.isArray(expression.arguments) || expression.arguments.length || record(callee.body)?.type !== 'BlockStatement') throw new Error('Unqualified console initializer')
-    }
-    const assigned = new Set<string>()
-    for (const s of statements) {
-      if (s.type === 'EmptyStatement' || s.type === 'FunctionDeclaration') continue
-      const e = record(s.expression), left = record(e?.left), property = record(left?.property), key = String(property?.name)
-      if (s.type !== 'ExpressionStatement' || e?.type !== 'AssignmentExpression' || e.operator !== '=' || left?.type !== 'MemberExpression' || !isWindow(left.object) || left.computed || !key || ['user', 'csrfToken'].includes(key) && assigned.has(key)) throw new Error('Unqualified console bootstrap program')
-      const right = record(e.right); if (!right) throw new Error('Unknown console bootstrap literal')
-      for (const node of (key === 'user' ? nodes(right) : []).filter(n => n.type === 'ObjectExpression')) {
-        const keys = (node.properties as Ast[]).map(p => record(p.key)?.value)
-        if (new Set(keys).size !== keys.length) throw new Error('Duplicate console bootstrap field')
+    const meaningful = (statement: Ast) => statement.type !== 'EmptyStatement' && !(statement.type === 'ExpressionStatement' && typeof statement.directive === 'string')
+    const identityWrites = (statement: Ast) => nodes(statement, false).filter(node => node.type === 'AssignmentExpression' && identityField(node.left) || (node.type === 'UpdateExpression' || node.type === 'UnaryExpression' && node.operator === 'delete') && identityField(node.argument))
+    function fields(body: Ast[]): void {
+      const statements = body.filter(meaningful)
+      for (const s of statements) {
+        const e = record(s.expression), callee = record(e?.callee)
+        if (e?.type === 'CallExpression' && callee?.type === 'FunctionExpression' && record(callee.body)?.type === 'BlockStatement') {
+          const local = (record(callee.body)!.body as Ast[]).filter(meaningful)
+          if (isWindow(callee.id) || (callee.params as unknown[]).some(bindsWindow) || local.some(windowBinding) || hoistedWindow(local)) continue
+          scriptBindings({ ...ast, body: local } as unknown as Program)
+          if (!local.some(statement => identityWrites(statement).length > 0)) continue
+          // Only the finite native literal initializer is a source; no code is executed.
+          if (callee.id || callee.async || callee.generator || !Array.isArray(callee.params) || callee.params.length || !Array.isArray(e.arguments) || e.arguments.length) throw new Error('Unqualified console initializer')
+          fields(local)
+          continue
+        }
+        const loop = record(s.body)
+        // Stop at these known unreachable prefixes, without guessing whether other loops terminate.
+        if (s.type === 'ThrowStatement' || s.type === 'ForStatement' && s.test === null && (loop?.type === 'EmptyStatement' || loop?.type === 'BlockStatement' && (loop.body as unknown[]).length === 0)) break
+        const writes = identityWrites(s)
+        if (!writes.length) continue
+        const left = record(e?.left), key = identityField(left)
+        if (s.type !== 'ExpressionStatement' || e?.type !== 'AssignmentExpression' || e.operator !== '=' || !left || !isWindow(left.object) || left.computed || !key || writes.length !== 1) throw new Error('Unqualified console identity write')
+        const right = record(e.right)
+        if (!right || key === 'user' && right.type !== 'ObjectExpression' || key === 'csrfToken' && right.type !== 'Literal') throw new Error('Unknown console bootstrap literal')
+        for (const node of (key === 'user' ? nodes(right) : []).filter(n => n.type === 'ObjectExpression')) {
+          const keys = (node.properties as Ast[]).map(p => record(p.key)?.value)
+          if (new Set(keys).size !== keys.length) throw new Error('Duplicate console bootstrap field')
+        }
+        const value: unknown = key === 'csrfToken' ? right.value : JSON.parse(source.slice(Number(right.start), Number(right.end)))
+        if (key === 'csrfToken' && !opaque(value)) throw new Error('Unknown console bootstrap literal')
+        candidates.push({ key, value })
       }
-      const value: unknown = !initializer && key === 'csrfToken' && right.type === 'Literal' ? right.value : JSON.parse(source.slice(Number(right.start), Number(right.end)))
-      if (key === 'user' && right.type !== 'ObjectExpression' || key === 'csrfToken' && (right.type !== 'Literal' || !opaque(value))) throw new Error('Unknown console bootstrap literal')
-      assigned.add(key)
-      if (key === 'user' || key === 'csrfToken') candidates.push({ key, value })
     }
-    if (initializer && (!assigned.has('user') || !assigned.has('csrfToken'))) throw new Error('Incomplete console initializer')
+    fields(ast.body as unknown as Ast[])
   }
+
   function visit(node: DefaultTreeAdapterTypes.Node): void {
     if ('tagName' in node) {
       if (['template', 'noscript'].includes(node.tagName)) return
