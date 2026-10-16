@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { stat } from 'node:fs/promises'
@@ -42,7 +43,7 @@ describe('one public JSON-RPC service over bounded transports', () => {
   it('preserves finite fractional filesystem Wiki timestamps through the actual snapshot boundary', async () => {
     const topic = { id: 'topic', topicId: 'topic', workspaceId: 'scratch', hostId: 'local', path: fixturePath("scratch/topic"), spaceId: 'space',
       kind: 'topic' as const, directoryPath: 'topic', topicPath: 'topic/Topic.md', title: 'Topic', summary: '', collaborators: [],
-      wiki: { path: 'topic/Wiki.md', content: '# Wiki', version: 'original', source: 'user' as const, enabled: true, updatedAt: 123.75 } }
+      wiki: { path: 'topic/Wiki.md', content: '# Wiki', version: 'original', source: 'user' as const, enabled: true, updatedAt: _tailFixtureEpoch(0, 0, 123.75) } }
     const h = await endpoint({ snapshot: async () => ({ topics: [topic] }) })
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } })
     try {
@@ -173,25 +174,22 @@ describe('one public JSON-RPC service over bounded transports', () => {
   })
   it('default send resolves a prefix once, retains a distinct message id and reads the same receipt without repeating input', async () => {
     const sdk = await rpcOwnerFixture(['caller', 'recipient-canonical']); cleanups.push(sdk.close)
-    const sent: AgentMuxControlRequest[] = []
+    const sent = vi.spyOn(sdk.client, 'submitAgentMessage')
     const h = await endpoint({ coreClients: sdk.coreClients, execute: async request => {
       if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [{ agentSessionId: 'recipient-canonical',
         promptCondition: { expectedRun: { runId: 'run-recipient-canonical' }, afterSubmissionId: null }, projectId: null, projectName: null,
-        workspacePath: sdk.root, providerId: 'codex', executorId: 'codex', processState: 'running', status: 'idle', updatedAt: 1 }] }
-      if (request.operation === 'send') { sent.push(request); return { operation: request.operation, agentSessionId: 'recipient-canonical' } }
+        workspacePath: sdk.root, providerId: 'codex', executorId: 'codex', processState: 'running', status: 'idle', updatedAt: _tailFixtureEpoch(0, 0, 1) }] }
       throw new Error('Unexpected original owner operation')
     } })
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } })
     const params = { operationId: 'default-send-operation', target: { kind: 'agent-session' as const, agentSessionId: 'recipient' }, text: 'Original task body' }
     try {
       const first = await client.call('agent.send', params), repeated = await client.call('agent.send', params)
-      expect(() => parseAgentMuxControlRequest({ ...sent[0], message: undefined })).toThrow(expect.objectContaining({ code: 'MESSAGE_ENVELOPE_INVALID' }))
-      expect(() => parseAgentMuxControlRequest({ ...sent[0], caller: sdk.credentials })).toThrow(expect.objectContaining({ code: 'MESSAGE_SENDER_MISMATCH' }))
       expect(first.messageId).not.toBe(params.operationId); expect(first.envelope.recipientSessionId).toBe('recipient-canonical')
       expect(repeated).toEqual(expect.objectContaining({ messageId: first.messageId, envelope: first.envelope, delivery: first.delivery }))
       const explicit = await client.call('agent.send', { ...params, messageId: first.messageId, operationId: 'later-read-operation' })
       expect(explicit.envelope.operationId).toBe(params.operationId)
-      expect(sent).toHaveLength(1); expect(sent[0]).toMatchObject({ target: { kind: 'agent-session', agentSessionId: 'recipient-canonical' } })
+      expect(sent).toHaveBeenCalledOnce(); expect(sent.mock.calls[0]![0]).toMatchObject({ agentSessionId: 'recipient-canonical', envelope: first.envelope })
       expect(sdk.inner.kernel.stop).not.toHaveBeenCalled()
     } finally { await client.dispose() }
   })
