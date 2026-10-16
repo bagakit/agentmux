@@ -2,14 +2,14 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { useAgentBookmarkWindow } from '../lib/use-agent-bookmark-window'
 import { useAgentBookmarkReading } from '../lib/agent-bookmark-reading'
-import { agentBookmarks } from '../lib/agent-bookmarks'
+import { agentBookmarks, type AgentBookmarkBounds } from '../lib/agent-bookmarks'
 import { WorkbenchDocumentContext } from '../lib/workbench-document'
 import { observeWorkbenchDocumentReturn, workbenchDocumentIdentity, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { createPortal } from 'react-dom'
-import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { AgentInputRecap } from './AgentInputRecap'
 import { AgentReadingBody as ReadingBody } from './AgentReadingBody'
@@ -34,7 +34,6 @@ import { getModalOverlayContainer, ModalAttachmentDismissal, MODAL_OVERLAY_SLOT_
 const DetailsIcon = semanticIconComponent('action.more')
 const CloseIcon = semanticIconComponent('action.close')
 const DragIcon = semanticIconComponent('action.drag')
-const ResizeIcon = semanticIconComponent('layout.resize-window')
 const ResetIcon = semanticIconComponent('action.reset-view')
 const OpenIcon = semanticIconComponent('action.open-external')
 const PinIcon = semanticIconComponent('action.pin')
@@ -109,7 +108,8 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   const attachedToModal = visible && !detachedFromModal.current && opening.anchor.ownerDocument === document && getModalOverlayContainer(opening.anchor) !== null
   const context = request.context
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
-  const bookmarkWindow = useAgentBookmarkWindow(request.bookmark, panel, reading, document)
+  const canDrag = Boolean(request.bookmark || request.session?.kind === 'agent')
+  const bookmarkWindow = useAgentBookmarkWindow(request.bookmark, panel, reading, document, canDrag ? pinFromDrag : undefined)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const back = useRef<HTMLButtonElement>(null), returnToReading = useRef(false)
   const reflowAnchor = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
@@ -271,15 +271,23 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   }
   function leave() {
     cancelDeparture()
+    if (bookmarkWindow.isGesturing()) return
     departure.current = setTimeout(() => {
       if (panel.current?.contains(document.activeElement) || document.activeElement === request.anchor) return
       agentInformationPreview.dismiss(request.token)
     }, 160)
   }
-  function togglePin() {
+  function rememberPinReading() {
     cancelDeparture()
     const container = reading.current?.querySelector<HTMLElement>('[data-agent-input-reading]') ?? reading.current
     reflowAnchor.current = container ? { container, anchor: captureReadingAnchor(container) } : null
+  }
+  function pinFromDrag(bounds: AgentBookmarkBounds) {
+    rememberPinReading()
+    return agentInformationPreview.ensurePinned(request.token, bounds)
+  }
+  function togglePin() {
+    rememberPinReading()
     const bounds = panel.current?.getBoundingClientRect()
     agentInformationPreview.pin(request.token, bounds && bounds.width > 0 && bounds.height > 0 ? { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } : undefined)
   }
@@ -328,9 +336,15 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     let current = true
     const update = async () => {
       const { x, y } = await computePosition(request.anchor, surface, {
-        strategy: 'fixed', placement: 'bottom-start', middleware: [offset(8), flip({ padding: 10 }), shift({ padding: 10, crossAxis: true })]
+        strategy: 'fixed', placement: 'right-start', middleware: [offset(8),
+          flip({ padding: 10, fallbackPlacements: ['left-start', 'bottom-start', 'top-start'] }), shift({ padding: 10 }),
+          size({ padding: 10, apply({ availableHeight, elements }) {
+            // Preserve room for title/actions when every side is constrained; fit the body by scrolling.
+            const height = Math.min(620, window.innerHeight - 20, Math.max(Math.min(160, window.innerHeight - 20), availableHeight))
+            if (current && !bookmarkWindow.isGesturing()) elements.floating.style.maxHeight = `${height}px`
+          } }), shift({ padding: 10, crossAxis: true })]
       })
-      if (current) {
+      if (current && !bookmarkWindow.isGesturing()) {
         Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
         if (request.enterReading && document.activeElement === request.anchor && !request.anchor.closest('[inert]')) reading.current?.focus({ preventScroll: true })
       }
@@ -373,20 +387,23 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     }
   }, [request, tab, document])
   return createPortal(<WorkbenchDocumentContext.Provider value={{ document, window: workbenchDocumentIdentity(document) }}><DesktopClientUiProvider document={document}><div ref={panel} id={request.id} className="focus-context-hover agent-information-reader" role="region"
-    data-state="open" data-pinned={request.pinned || undefined} data-bookmark-key={request.bookmark?.key} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden', zIndex: 'var(--layer-popover)' }}
+    data-state="open" data-drag-to-pin={canDrag || undefined} data-pinned={request.pinned || undefined} data-bookmark-key={request.bookmark?.key} hidden={!visible} aria-label={`Full context for ${context.name}`} tabIndex={-1} style={{ visibility: 'hidden', zIndex: 'var(--layer-popover)' }}
     onPointerDownCapture={() => { if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }}
     onPointerEnter={cancelDeparture} onPointerLeave={leave} onFocus={() => { cancelDeparture(); if (request.bookmark) agentBookmarks.bringToFront(request.bookmark.key) }} onBlur={event => {
       if (event.relatedTarget && (event.relatedTarget as Node).nodeType && (panel.current?.contains(event.relatedTarget as Node) || event.relatedTarget === request.anchor)) return
       leave()
     }}>
     <header className="agent-information-reader__header" {...bookmarkWindow.header}>
-      {request.bookmark ? <button type="button" data-bookmark-move className="agent-bookmark__move" aria-label="Move Agent bookmark" title="Drag title to move · Arrow keys move · Shift+Arrow keys resize" onKeyDown={bookmarkWindow.moveKey}><DragIcon size={14} aria-hidden="true" /></button> : null}
+      {canDrag ? <button type="button" data-bookmark-move className="agent-bookmark__move" aria-label={request.pinned ? "Move Agent bookmark" : "Drag to pin Agent bookmark"} title={request.pinned ? "Drag title to move · Arrow keys move · Shift+Arrow keys resize" : "Drag title to pin and move"} onKeyDown={bookmarkWindow.moveKey}><DragIcon size={14} aria-hidden="true" /></button> : null}
       <span className="agent-information-reader__identity">{visible ? <ConversationMessageAvatar speaker={{ role: 'agent', id: context.id }} name={context.name}
         executorId={context.executorId} providerId={context.providerId ?? undefined} project={affiliation?.project} mote={affiliation?.mote} size={32} /> : null}</span>
       <div className="agent-information-reader__heading"><small title={context.originAddress ?? path}>{context.workspaceName}</small><strong title={context.name}>{context.name}</strong></div>
       <button type="button" className="agent-information-reader__status" title={currentContext.detail} aria-label={`${sameSource ? currentContext.stateLabel : 'Reading snapshot'} · Status and source`}
         onPointerDown={event => { if (event.button === 0) event.preventDefault() }} onClick={() => showMetadata('source')}>
         {sameSource && visible ? <FocusContextStateSummary context={currentContext} /> : <span className="focus-context-hover__state">Reading snapshot</span>}
+      </button>
+      <button type="button" className="agent-information-reader__pin" aria-label={request.pinned ? 'Remove Agent bookmark' : 'Pin Agent bookmark'} aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Remove bookmark · P' : 'Pin Agent bookmark · P'}>
+        <PinIcon size={13} aria-hidden="true" />
       </button>
     </header>
     {sourceNotice || service ? <div className="agent-information-reader__service" role={sourceNotice ? 'status' : undefined}>
@@ -403,16 +420,13 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         <AgentInformationDetails context={context} goalLinks={request.goalLinks} usage={usage} control={visible && sameSource ? request.control : undefined} tab={tab} onTab={setTab} source={source} />
       </div> : null}
     </div>
-    {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag corner or use Arrow keys to resize" {...bookmarkWindow.resize}><ResizeIcon size={14} aria-hidden="true" /></button> : null}
     <footer className="agent-information-reader__footer" onPointerDown={event => { if (event.button === 0) event.preventDefault() }}>
       <button type="button" className="agent-information-reader__facts" onClick={() => tab ? showReading() : showMetadata('usage')}
         title="Usage, Goals, messages and source" aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
         <AgentInformationSummary usage={usage} goalLinks={request.goalLinks} /><DetailsIcon size={13} aria-hidden="true" />
       </button>
       {request.bookmark ? <button type="button" className="agent-bookmark__reset" onClick={bookmarkWindow.reset} title="Reset bookmark position and size" aria-label="Reset bookmark position and size"><ResetIcon size={13} aria-hidden="true" /></button> : null}
-      <button type="button" className="agent-information-reader__pin" aria-label={request.pinned ? 'Remove Agent bookmark' : 'Pin Agent bookmark'} aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Remove bookmark · P' : 'Pin Agent bookmark · P'}>
-        <PinIcon size={13} aria-hidden="true" />
-      </button>
+
       <button type="button" className="agent-information-reader__open" aria-label="Open Agent" title="Open Agent" onClick={() => {
         const original = useAppStore.getState().sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId)
         if (original?.control.hostId === context.hostId && (context.kind !== 'agent' || original.kind === 'agent' && original.control.agentSessionId === request.control?.agentSessionId)) {
@@ -420,6 +434,9 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
         } else showMetadata('source')
       }}><OpenIcon size={13} aria-hidden="true" /></button>
       <button type="button" className="agent-information-reader__close" onClick={() => close(true)} aria-label="Close Agent reading" title="Close · Esc"><CloseIcon size={15} aria-hidden="true" /></button>
+      {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag corner or use Arrow keys to resize" {...bookmarkWindow.resize}>
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true"><path d="m3 9 6-6m-2 6 2-2" /></svg>
+      </button> : null}
     </footer>
   </div><ModalAttachmentDismissal active={attachedToModal} targetRef={panel} onEscapeKeyDown={escapeReading} /></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>, readingHost)
 }
