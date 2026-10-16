@@ -295,7 +295,7 @@ it('known pending gets a new explicit observation action while malformed machine
     () => Response.json({ code: '0', data: { next_step: null, step_info: { status: 2 } } }),
     () => Response.json({ code: 0, data: { next_step: null, step_info: { status: '2' } } }),
     () => Response.json({ code: 0, data: { next_step: null, step_info: { status: '5' } } }),
-    () => Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1 } } }),
+    () => Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 7 } } }),
     () => new Response('Phone confirmed. window.user is logged in.')
   ]
   for (const [index, response] of malformed.entries()) {
@@ -308,6 +308,29 @@ it('known pending gets a new explicit observation action while malformed machine
     expect(JSON.stringify(unknown)).not.toContain('fixture-private-http-error')
     expect((await f.sdk.call('connection.setup.advance', input)).receipt).toEqual(unknown.receipt)
     expect(requests).toHaveBeenCalledTimes(2)
+  }
+  const optional = [{ status: 1 }, { mode: 'dual_domain_sync', cross_login_uri: '', local_login_uri: 'https://unqualified.invalid/private-local' }, []]
+  for (const [index, info] of optional.entries()) {
+    const route = nativeRoute(), requests = vi.fn(async (url: string | URL | Request, init?: RequestInit) => new URL(String(url)).pathname === '/accounts/qrlogin/polling'
+      ? Response.json({ code: 0, data: { next_step: 'enter_app', step_info: info } }) : route(url, init))
+    vi.stubGlobal('fetch', requests)
+    const begun = await f.sdk.call('connection.setup.begin', { ...f.input, operationId: 'optional-cross-handoff-' + index })
+    const input = advanceInput(begun), handoff = await f.sdk.call('connection.setup.advance', input)
+    expect(handoff.continuation?.stage).toBe('handoff')
+    expect(handoff.continuation?.account).toBeNull(); expect(handoff.challenge).toBeNull()
+    expect(handoff.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
+    expect((await f.sdk.call('connection.setup.advance', input)).receipt).toEqual(handoff.receipt)
+    expect(requests).toHaveBeenCalledTimes(2)
+    const landed = await advance(f, handoff)
+    expect(landed.continuation?.stage).toBe('handoff'); expect(landed.continuation?.account).toBeNull()
+    expect(requests).toHaveBeenCalledTimes(3)
+    const account = await advance(f, landed)
+    expect(account.continuation?.stage).toBe('account')
+    expect(account.continuation?.account).toEqual({ userId: USER, tenantId: TENANT, userName: 'Fixture account', tenantName: 'Fixture enterprise' })
+    expect(account.continuation?.actions.map(action => action.kind)).toContain('confirm-account')
+    expect(requests.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual([
+      'https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'
+    ])
   }
 }, 30_000)
 
