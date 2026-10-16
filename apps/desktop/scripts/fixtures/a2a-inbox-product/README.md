@@ -6,6 +6,10 @@ This fixture is shared only by T-006 Mailbox, T-007 integration and T-009 restar
 
 The native executable is explicitly synthetic. It implements the existing qualified authenticated Codex 0.163 actor protocol, writes the canonical `UserMessage` and original opaque `client_id`, and returns actual admitted/rejected/lost native receipts to Core. Core owns claims, adoption, authors, journal, queues and recovery. No fixture writes message journal states or manufactures native adoption, model replies, user authority or a new delivery mode. This proves product protocol wiring; actual model cooperation belongs to T-008.
 
+Electron resolves its system home independently of `HOME`. Each genuine application launch pauses at the unique compiled `SCRATCH_BACKING_PATH` declaration, after imports and before home-backed configuration initializes. The fixture uses the public Electron `app.setPath('home', privateHome)` API on that original call frame and then resumes. The original pause, breakpoint, production snapshot `localHome` and actual spatial catalog must confirm isolation. Environment variables alone do not qualify it.
+
+The production configuration get/save CAS path switches App appearance for twelve actual Mailbox captures: dark and light, all three pages, and wide and narrow viewports. The original appearance object is restored afterwards, preserving authored defaults. Captures record the rendered theme; no DOM style or preview replaces the production theme owner.
+
 The first actual App constructs its workface with public operations and creates an unsent queue and draft with real editor input. The first detached Electron process is killed while the original healthy Runs remain outside its process group. The second actual App starts ordinarily with the same private home and storage and no seed/rehydration controls. Tab membership changes from unique B to B+C through `agent.open --split right`; a same-MID retry must retain its original B route. It does not claim an occupied Region was replaced.
 
 After capture an Agent independent of the product UI author must actually open every listed PNG and write `review.json` beside the raw artifact:

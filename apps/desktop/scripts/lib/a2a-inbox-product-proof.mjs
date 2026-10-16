@@ -25,7 +25,8 @@ const requiredLoaded = ['apps/desktop/src/main/index.ts', 'apps/desktop/src/main
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
   'apps/desktop/src/renderer/src/components/SessionMailbox.tsx', 'apps/desktop/src/renderer/src/components/MailboxA2A.tsx',
   'apps/desktop/src/renderer/src/components/MailboxReading.tsx', 'packages/client-ui/src/components/ConversationMessage.tsx',
-  'packages/client-ui/src/components/ConversationInputText.tsx', 'packages/client-ui/src/components/InputMailboxRecords.tsx']
+  'packages/client-ui/src/components/ConversationInputText.tsx', 'packages/client-ui/src/components/InputMailboxRecords.tsx',
+  'apps/desktop/src/main/config-store.ts', 'apps/desktop/src/renderer/src/App.tsx', 'packages/client-ui/src/theme/runtime.ts']
 
 /** One private complete product build, shared only by the three A2A acceptance consumers. */
 export async function runA2aInboxProductProof({ root, evidence }) {
@@ -198,6 +199,16 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
   for (const frame of review.frames) assert.equal(frame.verdict, 'pass')
   assert.ok(product.mailbox?.pages?.every(page => ['inbox', 'outbox', 'user'].includes(page)) && product.mailbox.pages.length === 3)
   assert.equal(product.mailbox.copyExact, true); assert.equal(product.mailbox.clipboardPort.text, product.chain.scenarios.find(item => item.kind === 'normal').body); assert.equal(product.mailbox.clipboardPort.port, 'electron.clipboard.writeText'); assert.equal(product.mailbox.humanReadDidNotAcknowledgeAgent, true)
+  assert.deepEqual(product.mailbox.themeMatrix.restoredAppearance, product.mailbox.themeMatrix.originalAppearance)
+  assert.deepEqual(product.mailbox.themeMatrix.transitions.map(item => item.requested).sort(), ['dark', 'light'])
+  for (const transition of product.mailbox.themeMatrix.transitions) {
+    assert.equal(transition.committed.appAppearance, transition.requested); assert.equal(transition.rendered.appearance, transition.requested)
+    assert.ok(transition.rendered.background.length > 0)
+    for (const folder of ['inbox', 'outbox', 'user']) for (const [size, width] of [['wide', 1440], ['narrow', 750]]) {
+      const frame = product.frames.find(item => item.name === `mailbox-${folder}-${transition.requested}-${size}`)
+      assert.ok(frame); assert.equal(frame.width, width); assert.equal(frame.observed.appearance, transition.requested)
+    }
+  }
   const normalMessage = product.chain.scenarios.find(item => item.kind === 'normal')
   assert.equal(product.mailbox.recipientUserPage.agentSessionId, normalMessage.original.envelope.recipientSessionId)
   assert.ok(!product.mailbox.recipientUserPage.text.includes('A2A original review')); assert.ok(!product.mailbox.recipientUserPage.keys.some(key => key.includes(normalMessage.journalMessageId)))

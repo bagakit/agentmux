@@ -156,7 +156,7 @@ async function screenshot(app, name, width = 1440, height = 980) {
   await sleep(160)
   const value = await app.cdp.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false })
   const bytes = Buffer.from(value.data, 'base64'), path = join(evidence, 'frames', name + '.png'); await writeFile(path, bytes)
-  const observed = await app.cdp.evaluate(`({title:document.title,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(el=>el.getClientRects().length).map(el=>el.dataset.workbenchRegionId),text:document.body.innerText.slice(0,8000)})`)
+  const observed = await app.cdp.evaluate(`({title:document.title,appearance:document.documentElement.dataset.appearance,theme:document.documentElement.dataset.theme,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(el=>el.getClientRects().length).map(el=>el.dataset.workbenchRegionId),text:document.body.innerText.slice(0,8000)})`)
   frames.push({ name, path, sha256: sha(bytes), width, height, observed })
 }
 async function snapshot(app, ids, messageIds) {
@@ -299,6 +299,28 @@ try {
   facts.chain.scenarios.push({ kind: 'unsubmitted', cliMessageId: unsubmittedId, journalMessageId: unsubmitted.envelope.messageId, body: unsubmittedBody, original: unsubmitted, cli: unsubmittedReceipt })
   const absentConversation = await conversationInput(other, unsubmittedId); assert.equal(absentConversation.units.length, 0)
   facts.chain.unsubmitted = { conversationCount: absentConversation.units.length, conversation: absentConversation.page, history: absentHistory }
+  // The production CAS configuration owner and theme runtime supply both appearances.
+  const originalAppearance = await first.cdp.evaluate('(async()=>(await window.agentmux.config.get()).appearance)()')
+  const originalRendered = await first.cdp.evaluate('({appearance:document.documentElement.dataset.appearance,theme:document.documentElement.dataset.theme})')
+  facts.mailbox.themeMatrix = { originalAppearance, originalRendered, transitions: [] }
+  try {
+    for (const appearance of ['dark', 'light']) {
+      const committed = await first.cdp.evaluate(`(async()=>{const expected=await window.agentmux.config.get();return(await window.agentmux.config.save({...expected,appearance:{...expected.appearance,appAppearance:${JSON.stringify(appearance)}}},expected)).appearance})()`)
+      assert.equal(committed.appAppearance, appearance)
+      const rendered = await waitFor('production theme committed to the original document', () => first.cdp.evaluate(`(()=>{const root=document.documentElement;return root.dataset.appearance===${JSON.stringify(appearance)}&&!('themeChanging'in root.dataset)?{appearance:root.dataset.appearance,theme:root.dataset.theme,background:getComputedStyle(root).getPropertyValue('--bg').trim()}:null})()`))
+      facts.mailbox.themeMatrix.transitions.push({ requested: appearance, committed, rendered })
+      for (const [folder, place] of [['inbox', recipientPlace], ['outbox', authorPlace], ['user', authorPlace]]) {
+        await cli(['space', 'focus', '--region', place.to.regionId]); await openMailbox(first.cdp, place.to.regionId, folder)
+        await screenshot(first, `mailbox-${folder}-${appearance}-wide`, 1440, 980)
+        await screenshot(first, `mailbox-${folder}-${appearance}-narrow`, 750, 900)
+      }
+    }
+  } finally {
+    const restored = await first.cdp.evaluate(`(async()=>{const expected=await window.agentmux.config.get();return(await window.agentmux.config.save({...expected,appearance:${JSON.stringify(originalAppearance)}},expected)).appearance})()`)
+    assert.deepEqual(restored, originalAppearance)
+    facts.mailbox.themeMatrix.restoredAppearance = restored
+    await waitFor('original production appearance restored', () => first.cdp.evaluate(`document.documentElement.dataset.appearance===${JSON.stringify(originalRendered.appearance)}`))
+  }
   const addition = (await cli(['agent', 'open', '--session', other.agentSessionId, '--region', recipientPlace.to.regionId, '--split', 'right', '--focus'])).result
   assert.equal(addition.to.tabId, recipientPlace.to.tabId)
   const pinnedRetry = await cli(sendArgs, author); assert.equal(pinnedRetry.result.envelope.recipientSessionId, recipient.agentSessionId)
