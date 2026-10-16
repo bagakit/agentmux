@@ -119,7 +119,7 @@ it('keeps Idle high pressure, unknown and ended members while status shapes use 
   expect(dom.container.querySelector('[data-session-id="ended"][data-state="exited"]')).not.toBeNull()
   await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-session-id="idle"]')!.focus())
   const reader = document.querySelector('.agent-information-reader')!
-  expect(reader).not.toBeNull(); expect(reader.textContent).toContain('5% context left')
+  expect(reader).not.toBeNull(); expect(reader.querySelector('[title="5% context remaining"]')?.textContent).toBe('5% ctx')
   await act(async () => reader.querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
   expect(reader.querySelector('.agent-usage-details__context')?.textContent).toContain('95% used')
   expect(reader.querySelector('.agent-usage-details__context')?.textContent).toContain('5% remaining')
@@ -153,7 +153,7 @@ it('isolates actual row renders during unrelated Store output and makes no Conte
 it('the Focus entry shares the existing Surface owner and retains execution, draft and Run without a duplicate footer action', async () => {
   await dom.render(<SurfaceToolDock workspace={workspace} />)
   const before = useAppStore.getState()
-  await dom.click('.workspace-tool-context .workspace-agents-tool__focus')
+  await dom.click('.workspace-agents-tool__header .workspace-agents-tool__focus')
   expect(useAppStore.getState().mainSurface).toBe('agents')
   expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
   expect(dom.container.querySelector('.workspace-agents-tool__focus--footer')).toBeNull()

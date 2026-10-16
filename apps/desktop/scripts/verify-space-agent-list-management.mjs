@@ -117,7 +117,7 @@ try {
   assert.notEqual(receipt.phases[0].actual.pid, receipt.phases[1].actual.pid, 'Two real private process identities')
   assert.equal(receipt.phases[0].actual.seedCount, 1); assert.equal(receipt.phases[1].actual.seedCount, 0)
   receipt.frames = await Promise.all(receipt.phases.flatMap(item => item.actual.frames).map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.image))) })))
-  assert.deepEqual(receipt.frames.map(frame => frame.image).sort(), ['default-384.png', 'shared-menu-384.png', 'filtered-multiselect-384.png', 'bulk-close-confirmation.png', 'partial-close-result-384.png', 'narrow-288.png', 'shared-focus-1200.png', 'shared-focus-360.png', 'restored-order-384.png'].sort())
+  assert.deepEqual(receipt.frames.map(frame => frame.image).sort(), ['default-384.png', 'shared-menu-384.png', 'filtered-multiselect-384.png', 'bulk-close-confirmation.png', 'partial-close-result-384.png', 'narrow-288.png', 'narrow-selection-288.png', 'shared-focus-1200.png', 'shared-focus-360.png', 'restored-order-384.png'].sort())
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => [relative(root, path), hash(await readFile(path))])))
   assert.deepEqual(receipt.sourceAfter, receipt.inputs, 'Source remained equal to actual compiled inputs during capture')
   receipt.capturedPass = true

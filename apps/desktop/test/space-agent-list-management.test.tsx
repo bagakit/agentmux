@@ -59,6 +59,50 @@ beforeEach(() => {
 })
 
 describe('Space Agent list management through the production Dock and shared Focus card', () => {
+  it('keeps title, count and named navigation actions in one header with passive order information', async () => {
+    await render()
+    const header = dom.container.querySelector('.workspace-agents-tool__header')!
+    expect(header.querySelector('strong')?.textContent).toBe(workspace.name)
+    expect(header.querySelector('[aria-label="3 Agents · Startup order"]')?.textContent).toBe('3')
+    const actions = header.querySelector('[role="group"][aria-label="Agent list actions"]')!
+    expect([...actions.querySelectorAll('button')].map(node => node.getAttribute('aria-label'))).toEqual(['去 Focus 中查看', 'Select Agents'])
+    expect(button('去 Focus 中查看', header).title).toBe('View in Focus')
+    expect(button('Select Agents', header).title).toBe('Select Agents')
+    expect(dom.container.querySelectorAll('.workspace-agents-tool__header')).toHaveLength(1)
+    expect(header.parentElement?.querySelector('[aria-label="Filter Agents by state"]')).not.toBeNull()
+    await act(async () => useAppStore.setState({ workspaceAgentOrder: { [workspace.id]: [agentKey('gamma')] } }))
+    expect(header.querySelector('[aria-label="3 Agents · Manual order"]')?.textContent).toBe('3')
+  })
+
+  it('reuses the same header for selection actions and keeps hidden scope beside usable filters', async () => {
+    await render()
+    const header = dom.container.querySelector('.workspace-agents-tool__header')!
+    const filters = dom.container.querySelector('[aria-label="Filter Agents by state"]')!
+    const toggle = button('Select Agents', header)
+    toggle.focus()
+    await click('Select Agents')
+    expect(button('Done selecting', header)).toBe(toggle)
+    expect(document.activeElement).toBe(toggle)
+    await select('alpha'); await filter('attention')
+    expect(dom.container.querySelector('.workspace-agents-tool__header')).toBe(header)
+    expect(dom.container.querySelector('[aria-label="Filter Agents by state"]')).toBe(filters)
+    expect(header.querySelector('[role="status"]')?.textContent).toBe('1 selected1 hidden by filter')
+    const actions = header.querySelector('[role="group"][aria-label="Selected Agent actions"]')!
+    expect([...actions.querySelectorAll('button')].map(node => node.getAttribute('aria-label'))).toEqual([
+      'Select visible Agents', 'Clear selection', 'Copy titles + Agent links', 'Close Agents', 'Done selecting'
+    ])
+    expect([...actions.querySelectorAll('button')].every(node => Boolean(node.title))).toBe(true)
+    expect(button('Close Agents', header).disabled).toBe(false)
+    toggle.focus()
+    await click('Done selecting')
+    expect(button('Select Agents', header)).toBe(toggle)
+    expect(document.activeElement).toBe(toggle)
+    expect(header.querySelector('[aria-label="Agent list actions"]')).not.toBeNull()
+    expect(header.querySelector('[aria-label="Selected Agent actions"]')).toBeNull()
+    expect(ids()).toEqual(['gamma'])
+    expect(useAppStore.getState().agentComposerDrafts.alpha).toBe('Keep the original unsent draft')
+  })
+
   it('uses creation order, appends new Agents and keeps nodes in place through activity and state changes', async () => {
     await render()
     expect(ids()).toEqual(['alpha', 'beta', 'gamma'])
@@ -94,7 +138,7 @@ describe('Space Agent list management through the production Dock and shared Foc
     const menu = document.querySelector('.focus-context-menu')
     expect(menu).not.toBeNull()
     expect(menu?.getAttribute('data-agent-session-id')).toBe('gamma')
-    expect([...menu!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['Rename Agent', 'Copy Agent Link', 'Stop Agent'])
+    expect([...menu!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent)).toEqual(['Rename Agent', 'Copy Agent Link', 'Restart Session…', 'Stop Agent'])
   })
 
   it('filters by authoritative state and selects visible cards while retaining hidden selection until clear', async () => {
