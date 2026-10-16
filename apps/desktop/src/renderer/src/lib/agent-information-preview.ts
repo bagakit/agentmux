@@ -34,6 +34,19 @@ function restoredContext(bookmark: AgentBookmark): FocusContext {
     recap: bookmark.excerpt ? { text: bookmark.excerpt, reading: { text: bookmark.excerpt, truncated: true }, source: 'Last assistant message', origin: 'timeline' } : null }
 }
 
+/** Idempotent promotion shared by explicit Pin and the first deliberate drag. */
+function pinReading(request: AgentInformationPreview, bounds?: AgentBookmarkBounds): AgentBookmark | undefined {
+  if (request.pinned) return request.bookmark
+  const session = request.session
+  if (session?.kind !== 'agent') { publish(current.map(item => item === request ? { ...item, pinned: true } : item)); return }
+  const key = agentBookmarks.pin({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, presentationId: session.id, label: request.context.name,
+    workspaceName: request.context.workspaceName, excerpt: request.context.recap?.reading?.text ?? request.context.recap?.text,
+    bounds: bounds ?? { x: 32, y: 72, width: 460, height: 600 } })
+  const bookmark = agentBookmarks.get().bookmarks.find(item => item.key === key)
+  publish(current.map(item => item === request ? { ...item, pinned: true, bookmark } : item))
+  return bookmark
+}
+
 export const agentInformationPreview = {
   get: () => current.at(-1) ?? null,
   getAll: () => current,
@@ -75,14 +88,20 @@ export const agentInformationPreview = {
       if (request.bookmark) agentBookmarks.remove(request.bookmark.key)
       return
     }
+    pinReading(request, bounds)
+  },
+  ensurePinned(token: object, bounds: AgentBookmarkBounds) {
+    const request = current.find(item => item.token === token)
+    if (!request || request.session?.kind !== 'agent') return
     const session = request.session
-    if (session?.kind !== 'agent') { publish(current.map(item => item === request ? { ...item, pinned: true } : item)); return }
-    const value = { hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, presentationId: session.id, label: request.context.name,
-      workspaceName: request.context.workspaceName, excerpt: request.context.recap?.reading?.text ?? request.context.recap?.text,
-      bounds: bounds ?? { x: 32, y: 72, width: 460, height: 600 } }
-    const key = agentBookmarks.pin(value)
-    const bookmark = agentBookmarks.get().bookmarks.find(item => item.key === key)
-    publish(current.map(item => item === request ? { ...item, pinned: true, bookmark } : item))
+    const existed = agentBookmarks.get().bookmarks.some(item => item.hostId === session.control.hostId && item.agentSessionId === session.control.agentSessionId)
+    const bookmark = pinReading(request, bounds)
+    if (!bookmark) return
+    return { key: bookmark.key, cancel: () => {
+      if (existed || !current.some(item => item.token === token && item.bookmark?.key === bookmark.key)) return
+      publish(current.map(item => item.token === token ? { ...item, pinned: false, bookmark: undefined } : item))
+      agentBookmarks.remove(bookmark.key)
+    } }
   },
   /** Reconcile presentation records only. Empty Runtime snapshots never delete a durable bookmark. */
   restore(bookmarks: readonly AgentBookmark[], document: Document) {
