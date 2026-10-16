@@ -17,7 +17,7 @@ import { executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useLauncherInputs } from '../lib/launcher-inputs'
 import { EMPTY_LAUNCH_OPTION_SELECTION } from '../lib/launcher-option-draft'
-import { appendFileReferences, appendSelectedFileReferences } from '@agentmux/client-ui/composer-file-reference'
+import { useComposerAttachments } from '../lib/use-composer-attachments'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
@@ -36,7 +36,7 @@ import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
 import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
-import { LauncherFileReferences } from './LauncherFileReferences'
+import { ComposerFileReferences } from './ComposerFileReferences'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
@@ -342,28 +342,10 @@ export function NewTabSurface({
     } catch (cause) { setError(presentError(cause)) }
   }
 
-  function appendReference(path: string): void {
-    void feedback.run(() => insertionRef.current?.insert(() => appendSelectedFileReferences('', [path]), { separate: true }))
-  }
-
-  async function captureComposerScreenshot(): Promise<void> {
-    await insertionRef.current?.insert(async () => {
-      const path = await api.ui.captureScreenshot()
-      if (!feedback.isCurrent()) return null
-      return path ? appendFileReferences('', [path]) : null
-    }, { separate: true })
-  }
-
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
-
-  async function chooseComposerFiles(): Promise<void> {
-    if (host?.kind !== 'local') { setFileReferencesOpen(true); return }
-    await insertionRef.current?.insert(async () => {
-      const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined, dialogDocument)
-      if (!feedback.isCurrent()) return null
-      return paths?.length ? appendSelectedFileReferences('', paths, workspace?.path) : null
-    }, { separate: true })
-  }
+  const attachments = useComposerAttachments({ scope: toolsScope, hostId: workspace?.hostId, workspacePath: workspace?.path,
+    disabled: false, insertion: insertionRef, feedback, document: dialogDocument,
+    onRemoteFiles: () => setFileReferencesOpen(true) })
 
   return (
     <section ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
@@ -406,9 +388,7 @@ export function NewTabSurface({
         <div className="launcher-composer composer"><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
           completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
-          onPasteImage={(file, insert) => { void feedback.run(async () => {
-            if (host?.kind !== 'local') throw new Error('This image has not been sent to the selected machine. Your draft is kept; use Files to reference an image in that project, or paste it after choosing the local machine.')
-            await insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return feedback.isCurrent() ? appendFileReferences('', [path]) : null }, { separate: true }) }) }}
+          onPasteImage={attachments.pasteImage} onDropFiles={attachments.dropFiles}
           autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
           placeholder="What would you like to work on?" /></div>
@@ -417,8 +397,8 @@ export function NewTabSurface({
             commands={completion.commands} loadSkills={completion.loadSkills}
             onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
             onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
-            referenceTools={<ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />}
-            {...(host?.kind === 'local' ? { onCapture: captureComposerScreenshot } : {})} runAction={feedback.run} />
+            referenceTools={<ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void attachments.chooseFiles() }} label="Reference files for the Agent" />}
+            {...(host?.kind === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />
         </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded} active={motionActive}
           onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
           onReset={() => { if (selectedProviderId) for (const optionId of Object.keys(launchOptionSelection)) selectOption(selectedProviderId, optionId, null) }}
@@ -435,8 +415,8 @@ export function NewTabSurface({
         step: 'Host Executor discovery failed', mode: `${host?.label ?? workspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
         restore: 'Refresh agents on this host. Configure custom commands in Settings → Agents on this Host.'
       } }} /> : selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
-      {fileReferencesOpen && workspace && motionActive ? <LauncherFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
-        onSelect={appendReference} onClose={() => setFileReferencesOpen(false)} /> : null}
+      {fileReferencesOpen && workspace && motionActive ? <ComposerFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
+        onSelect={path => { void attachments.referencePaths([path]) }} onClose={() => setFileReferencesOpen(false)} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}

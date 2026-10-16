@@ -14,8 +14,8 @@
 //
 // 为什么这道全局拦截**不会**打断应用内既有的拖拽：应用内所有拖拽都走 @dnd-kit 的 PointerSensor，那是基于
 // pointer 事件（pointerdown/pointermove）的合成拖拽，**不产生原生 HTML5 DragEvent**，也不读 dataTransfer。
-// 渲染层此前没有任何 native dragover/drop/dataTransfer 监听（已核实）。所以在 window 上无条件 preventDefault
-// 原生 dragover/drop，掐掉的只有「从 OS 拖文件进来」这一种，碰不到 @dnd-kit 的文件树/工作台拖拽。
+// Composer 的原生文件拖入由原编辑器消费，接入真实 File 与资源引用；本 guard 不停止传播，只取消导航默认动作。
+// 因此 window 上的 preventDefault 仍保护未被编辑器接纳的拖入，也不影响 @dnd-kit 的文件树/工作台拖拽。
 
 // 只用到 window 的这两个方法，不依赖整个 Window 类型，方便测试传入最小替身。
 export type FileDropGuardHost = Pick<Window, 'addEventListener' | 'removeEventListener'>

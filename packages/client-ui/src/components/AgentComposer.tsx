@@ -1,4 +1,4 @@
-import type { ComposerInsertionHandle, ComposerPasteImage } from '../lib/composer-insertion.js'
+import type { ComposerInsertionHandle, ComposerPasteImage, ComposerDropFiles } from '../lib/composer-insertion.js'
 import { type ReactNode, type Ref } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { matchComposerShortcut } from '../lib/composer-keyboard.js'
@@ -38,6 +38,7 @@ export type AgentComposerProps = ComposerCompletionProps & {
   onReferenceActiveFile?: () => void
   onAttach?: () => void
   onPasteImage?: ComposerPasteImage
+  onDropFiles?: ComposerDropFiles
   insertionRef?: Ref<ComposerInsertionHandle>
 }
 
@@ -71,6 +72,7 @@ export function AgentComposer({
   onReferenceActiveFile,
   onAttach,
   onPasteImage,
+  onDropFiles,
   insertionRef,
   onHistoryRecall,
   historyNavigation,
@@ -144,6 +146,7 @@ export function AgentComposer({
         }}
         {...(readPastedImage ? { readPastedImage } : {})}
         {...(onPasteImage ? { onPasteImage } : {})}
+        {...(onDropFiles ? { onDropFiles } : {})}
         {...(onActivateSemanticReference ? { onActivateReference: onActivateSemanticReference } : {})}
         placeholder={placeholder}
       />

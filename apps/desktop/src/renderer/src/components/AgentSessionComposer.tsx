@@ -5,14 +5,15 @@ import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagno
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
-import { useEffect, useMemo, useRef, type ReactNode } from 'react'
-import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
 import type { ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
-import { appendFileReferences, appendSelectedFileReferences } from '@agentmux/client-ui/composer-file-reference'
+import { useComposerAttachments } from '../lib/use-composer-attachments'
+import { ComposerFileReferences } from './ComposerFileReferences'
 import { expandSemanticReferences, type ComposerSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { useComposerCandidates, skillComposerSuggestion } from '../lib/use-composer-candidates'
 import { composerSubmitMode } from '../lib/composer-submit-mode'
@@ -206,34 +207,12 @@ export function AgentSessionComposer({
 
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
 
-  function addFileReference(): void {
-    if (!activeFile || !submitMode.canType) return
-    void feedback.run(() => insertionRef.current?.insert(() => appendSelectedFileReferences('', [activeFile]), { separate: true }))
-  }
-
-  async function attachFiles(): Promise<void> {
-    if (!submitMode.canType) return
-    const workspacePath = session?.kind === 'agent' ? session.workspacePath : undefined
-    await insertionRef.current?.insert(async () => {
-      const chosen = await api.ui.chooseFiles(workspacePath ? { defaultPath: workspacePath } : undefined, dialogDocument)
-      return chosen?.length ? appendSelectedFileReferences('', chosen, workspacePath) : null
-    }, { separate: true })
-  }
-
-  async function pasteImage(file: File, insert: ComposerInsert): Promise<void> {
-    if (!submitMode.canType) return
-    await insert(async () => {
-      const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' })
-      return appendFileReferences('', [path])
-    }, { separate: true })
-  }
-
-  async function capture(): Promise<void> {
-    await insertionRef.current?.insert(async () => {
-      const path = await api.ui.captureScreenshot()
-      return path ? appendFileReferences('', [path]) : null
-    }, { separate: true })
-  }
+  const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
+  const attachmentScope = JSON.stringify([sessionId, session?.hostId, session?.workspacePath])
+  useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
+  const attachments = useComposerAttachments({ scope: attachmentScope, hostId: session?.hostId,
+    workspacePath: session?.workspacePath, disabled: !submitMode.canType, insertion: insertionRef, feedback,
+    document: dialogDocument, ...(workspace ? { onRemoteFiles: () => setFileReferencesOpen(true) } : {}) })
 
   const notices: ServiceNoticeItem[] = sessionServiceNotices(session, queuedEntries, sendingId,
     nativeService).map(notice => notice.id === 'timeline-observation'
@@ -305,6 +284,8 @@ export function AgentSessionComposer({
     {(mailbox, pending) => (
     <div style={{ display: 'contents' }} onFocusCapture={() => inputHistory.setFocused(true)}
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
+    {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
+      onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
     <AgentComposer key={sessionId} active={visible} aboveInput={<>{pending}{session?.kind === 'agent' ? <ConnectorSharing session={session} regionId={mailboxOrigin?.regionId} visible={visible} /> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
@@ -332,7 +313,7 @@ export function AgentSessionComposer({
         viewMode={viewMode} onViewModeChange={(mode) => setViewMode(sessionId, mode)}
         loadSkills={completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
         onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
-        {...(session?.hostId === 'local' ? { onCapture: capture } : {})} runAction={feedback.run} />}
+        {...(session?.hostId === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />}
       value={text}
       disabled={!submitMode.canType}
       placeholder={submitMode.placeholder}
@@ -354,16 +335,13 @@ export function AgentSessionComposer({
       // AGENT_INTERACTION_PENDING. So this took away an ability the runtime still has: RED-LINES.md
       // 判定流程 "绕过我这段代码，这条路还能不能通？→ 能" ⇒ red line.
       {...(submitMode.primaryAction === 'stop' ? { onInterrupt: () => void interrupt(sessionId) } : {})}
-      // Draft-building helpers follow `canType`, which is what their own bodies already check
-      // (attachFiles/pasteImage/addFileReference each return early on `!canType`). Gating them on
-      // canSubmit contradicted those guards: while a card is pending the placeholder invites "Draft a
-      // steer…" yet attach/paste/@-file were withheld from the draft the user is allowed to type.
-      // These three only edit the local draft — nothing leaves the renderer — so a pending card is
-      // irrelevant to them.
+      // Resource helpers edit the existing draft, including while a request is pending.
+      // Submission eligibility stays with Core; it does not disable local drafting.
       {...(submitMode.canType ? {
-        onAttach: () => { void feedback.run(attachFiles) },
-        onPasteImage: (file: File, insert: ComposerInsert) => { void feedback.run(() => pasteImage(file, insert)) },
-        ...(activeFile ? { onReferenceActiveFile: addFileReference } : {})
+        onAttach: () => { void attachments.chooseFiles() },
+        onPasteImage: attachments.pasteImage,
+        onDropFiles: attachments.dropFiles,
+        ...(activeFile ? { onReferenceActiveFile: () => { void attachments.referencePaths([activeFile]) } } : {})
       } : {})}
       {...(submitMode.canSubmit ? { onSubmit: () => void submit() } : {})}
       // Typed Send may restore a Session. Posture is a raw keystroke for the current live Run;

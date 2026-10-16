@@ -890,6 +890,7 @@ const mockApi: AgentMuxDesktopApi = {
       try { link.click() } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 0) }
       return { status: 'download-requested' }
     },
+    pathForFile: () => '',
     savePastedImage: async () => { throw new Error('Pasting images requires the desktop app.') },
     // No main process to confine a read to the pasted directory, so null is the honest answer: the
     // conversation renderer treats it exactly as "not a readable pasted image" and keeps the plain-text

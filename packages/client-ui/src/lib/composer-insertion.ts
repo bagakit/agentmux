@@ -42,7 +42,9 @@ export async function insertComposerContent(
   parse: (value: string) => JSONContent,
   options: { separate?: boolean } = {}
 ): Promise<void> {
+  if (!editor.isEditable || editor.view.composing) throw new Error('The message editor is not accepting this attachment. Your draft was not changed.')
   let bookmark = editor.state.selection.getBookmark()
+  const document = editor.view.dom.ownerDocument
   const focusOwner = document.activeElement
   const map = ({ transaction }: { transaction: { mapping: Parameters<typeof bookmark.map>[0] } }) => {
     bookmark = bookmark.map(transaction.mapping)
@@ -52,15 +54,21 @@ export async function insertComposerContent(
     const value = await resolve()
     if (value === null || value === '') return
     if (editor.isDestroyed) throw new Error('The message editor closed before the attachment finished. The saved draft was not changed.')
+    if (!editor.isEditable || editor.view.composing) throw new Error('The message editor is not accepting this attachment. Your draft was not changed.')
     const range = bookmark.resolve(editor.state.doc)
     const { from } = range
     const before = editor.state.doc.textBetween(Math.max(0, from - 1), from, '\n', '\ufffc')
     const after = editor.state.doc.textBetween(range.to, Math.min(editor.state.doc.content.size, range.to + 1), '\n', '\ufffc')
     const prefix = options.separate && before && !/\s/u.test(before) ? ' ' : ''
     const suffix = options.separate && after && !/\s/u.test(after) && !/\s$/u.test(value) ? ' ' : ''
+    // Every external insertion is one edit, isolated from neighboring manual typing.
+    editor.view.dispatch(closeHistory(editor.state.tr))
     replaceComposerRange(editor, parse(`${prefix}${value}${suffix}`), range)
+    editor.view.dispatch(closeHistory(editor.state.tr))
     if (document.activeElement === focusOwner || editor.isFocused) editor.commands.focus()
   } finally {
     editor.off('transaction', map)
   }
 }
+
+export type ComposerDropFiles = (files: readonly File[], insert: ComposerInsert) => void
