@@ -1228,7 +1228,7 @@ function terminalCapability(
   if (
     source.state !== 'unknown' ||
     source.mode !== 'degraded' ||
-    source.reason !== 'handshake-timeout' ||
+    !['handshake-timeout', 'handshake-unconfirmed'].includes(source.reason as string) ||
     run.runId !== currentRun.runId
   ) {
     throw new AgentMuxError(
@@ -1236,10 +1236,15 @@ function terminalCapability(
       'INVALID_AGENT_SESSION_STORE'
     )
   }
+  const diagnostic = source.diagnostic === undefined ? undefined : record(source.diagnostic, 'terminalCapability.diagnostic')
   return {
     state: 'unknown',
     mode: 'degraded',
-    reason: 'handshake-timeout',
+    reason: source.reason as AgentTerminalCapabilityState['reason'],
+    ...(diagnostic ? { diagnostic: {
+      code: string(diagnostic.code, 'terminalCapability.diagnostic.code'),
+      message: text(diagnostic.message, 'terminalCapability.diagnostic.message')
+    } } : {}),
     run,
     observedAt: timestamp(source.observedAt, 'terminalCapability.observedAt')
   }

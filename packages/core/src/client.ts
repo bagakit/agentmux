@@ -83,6 +83,7 @@ import {
   AGENT_TERMINAL_CAPABILITY_PERSIST_FAILED,
   AGENT_TERMINAL_HANDSHAKE_FAILED,
   AGENT_TERMINAL_HANDSHAKE_TIMEOUT,
+  AGENT_TERMINAL_HANDSHAKE_UNCONFIRMED,
   classifyTerminalHandshakeFailure,
   degradedInputCursor,
   terminalHandshakeExitError
@@ -508,6 +509,8 @@ function runRef(runId: string): AgentMuxRunRef {
  * lifecycle callers can still fail closed on the resulting `AGENT_TERMINAL_HANDSHAKE_FAILED`.
  */
 function mapVanishedTerminalHandshakeRun(error: unknown): unknown {
+  if (error instanceof AgentMuxError && error.code === 'STALE_AGENT_SESSION_BINDING' &&
+      error.cause instanceof AgentMuxError && error.cause.code === 'CTXMUX_run_not_found') error = error.cause
   if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') return error
   const mapped = new AgentMuxError(
     'Agent Run disappeared before its terminal capability query was observed.',
@@ -7482,7 +7485,9 @@ export class AgentMuxClient {
       run = await this.kernel.status(session.run.runId)
     } catch (error) {
       if (error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found') {
-        throw new AgentMuxError('Agent Session points to a Run that is no longer available.', 'STALE_AGENT_SESSION_BINDING')
+        const missing = new AgentMuxError('Agent Session points to a Run that is no longer available.', 'STALE_AGENT_SESSION_BINDING', error.detail)
+        missing.cause = error
+        throw missing
       }
       throw error
     }
@@ -7538,11 +7543,11 @@ export class AgentMuxClient {
   }
 
   /**
-   * 握手的降级包装：超时不再中止任何东西，其余照旧抛。
+   * A capability timeout or changed retained input boundary does not revoke a healthy Run.
    *
    * 四个调用点里有三个（connect 循环、launch、resume）过去把任何握手错误都当成致命：connect
    * 会 `kernel.disconnect()` 拆掉整条连接，launch/resume 会回滚——**用一次慢探测杀掉一个刚
-   * 启动好的、健康的 Agent**。这里只吃掉超时那一类：Agent 还在跑，我们没等到 `[?u` 而已。
+   * 启动好的、健康的 Agent**。超时与旧握手输入边界变化只保留能力未知；其余错误拒绝这次观察。
    *
    * 降级时做两件事，一件都不能少：
    * 1. 从 daemon 播种输入游标（与无握手 provider 同一条兜底），否则首条 prompt 的栅栏起点是错的。
@@ -7584,7 +7589,11 @@ export class AgentMuxClient {
       const degraded: AgentTerminalCapabilityState = {
         state: 'unknown',
         mode: 'degraded',
-        reason: 'handshake-timeout',
+        reason: outcome.reason === 'capability-query-timeout' ? 'handshake-timeout' : 'handshake-unconfirmed',
+        ...(outcome.reason === 'handshake-unconfirmed' ? { diagnostic: {
+          code: error instanceof AgentMuxError ? error.code : AGENT_TERMINAL_HANDSHAKE_UNCONFIRMED,
+          message: error instanceof Error ? error.message : String(error)
+        } } : {}),
         run: { ...requestedSession.run },
         observedAt
       }
@@ -7818,6 +7827,15 @@ export class AgentMuxClient {
         observeReadiness(readySession)
         return readySession
       }
+      // A retained unacknowledged reply is not a new write. Later input cannot
+      // acknowledge it, and changing its boundary would replay it after that input.
+      const currentRun = await this.requireRunningTerminalHandshakeRun(session)
+      if (currentRun.acceptedInputBytes !== session.terminalHandshake.inputByteRange.startByte) {
+        throw new AgentMuxError(
+          `The original terminal capability reply remains unconfirmed at input byte ${session.terminalHandshake.inputByteRange.startByte}; the exact Run is now at ${currentRun.acceptedInputBytes ?? 'unknown'}. Its original operation and receipt are retained without replay.`,
+          AGENT_TERMINAL_HANDSHAKE_UNCONFIRMED
+        )
+      }
     }
 
     let startupOutput = ''
@@ -7869,180 +7887,183 @@ export class AgentMuxClient {
       }
       if (!queryObserved) await query
 
-      const boundaryRun = await this.kernel.status(session.run.runId)
-      this.assertAgentRun(session, boundaryRun)
-      const startByte = boundaryRun.acceptedInputBytes
-      if (startByte === null) {
-        throw new AgentMuxError(
-          'CtxMux omitted its accepted Input byte cursor.',
-          'CTXMUX_INPUT_CURSOR_MISSING'
-        )
-      }
-
-      const claimHandshake = (current: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession => {
-        if (current.terminalHandshake) {
-          assertState(current.terminalHandshake)
-          return current
-        }
-        const initialReadiness = current.terminalPromptReadiness?.source === 'initial-composer'
-          ? current.terminalPromptReadiness
-          : undefined
-        if (
-          initialReadiness &&
-          (
-            initialReadiness.id !== initialReadinessId ||
-            initialReadiness.readyThroughByte !== undefined ||
-            initialReadiness.consumedBySubmissionId !== undefined
+      // Query observation must stay outside the input lane: native protocol
+      // replies are themselves input. Only claim/write/receipt serialize here.
+      return await this.serializeAgentInput(session, async (_current, boundaryRun) => {
+        const startByte = boundaryRun.acceptedInputBytes
+        if (startByte === null) {
+          throw new AgentMuxError(
+            'CtxMux omitted its accepted Input byte cursor.',
+            'CTXMUX_INPUT_CURSOR_MISSING'
           )
+        }
+
+        const claimHandshake = (current: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession => {
+          if (current.terminalHandshake) {
+            assertState(current.terminalHandshake)
+            return current
+          }
+          const initialReadiness = current.terminalPromptReadiness?.source === 'initial-composer'
+            ? current.terminalPromptReadiness
+            : undefined
+          if (
+            initialReadiness &&
+            (
+              initialReadiness.id !== initialReadinessId ||
+              initialReadiness.readyThroughByte !== undefined ||
+              initialReadiness.consumedBySubmissionId !== undefined
+            )
+          ) {
+            throw new AgentMuxError(
+              'Initial terminal prompt readiness is invalid before handshake acknowledgement.',
+              'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+            )
+          }
+          const next: AgentMuxStoredAgentSession = {
+            ...current,
+            terminalHandshake: {
+              run: { ...current.run },
+              operationId,
+              inputByteRange: {
+                startByte,
+                endByte: startByte + responseBytes
+              },
+              acknowledged: false
+            },
+            ...(initialReadiness
+              ? {
+                  terminalPromptReadiness: {
+                    ...initialReadiness,
+                    outputCursorBytes: boundaryRun.latestOutputBytes
+                  }
+                }
+              : {}),
+            updatedAt: Date.now()
+          }
+          delete next.terminalCapability
+          return next
+        }
+        let claimed: AgentMuxStoredAgentSession
+        try {
+          claimed = await this.registry.update(
+            session.agentSessionId,
+            session.run,
+            claimHandshake
+          )
+        } catch (error) {
+          if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+          await this.registry.load(session.hostId)
+          const canonical = this.requireAgentSession(session.agentSessionId)
+          if (!sameRun(canonical.run, session.run)) {
+            throw new AgentMuxError(
+              'Agent Session changed while adopting its terminal handshake.',
+              'STALE_AGENT_SESSION'
+            )
+          }
+          claimed = canonical.terminalHandshake
+            ? canonical
+            : await this.registry.update(
+                session.agentSessionId,
+                session.run,
+                claimHandshake
+              )
+        }
+        const state = claimed.terminalHandshake
+        if (!state) {
+          throw new AgentMuxError(
+            'Terminal handshake claim was not persisted.',
+            'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+          )
+        }
+        assertState(state)
+        if (state.acknowledged) {
+          const currentRun = await this.kernel.status(session.run.runId)
+          this.assertAgentRun(session, currentRun)
+          const acceptedInputBytes = currentRun.acceptedInputBytes
+          if (acceptedInputBytes === null || acceptedInputBytes < state.inputByteRange.endByte) {
+            throw new AgentMuxError(
+              'CtxMux Input cursor precedes the persisted terminal handshake receipt.',
+              'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+            )
+          }
+          this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
+          observeReadiness(claimed)
+          return claimed
+        }
+
+        const accepted = await this.kernel.input(session.run.runId, {
+          ownerInstanceId: this.kernel.identity().daemonInstanceId,
+          operationId: state.operationId,
+          expectedByte: state.inputByteRange.startByte,
+          data: handshake.response
+        })
+        if (
+          accepted.appliedByteRange.startByte !== state.inputByteRange.startByte ||
+          accepted.appliedByteRange.endByte !== state.inputByteRange.endByte ||
+          accepted.run.acceptedInputBytes === null ||
+          accepted.run.acceptedInputBytes < state.inputByteRange.endByte
         ) {
           throw new AgentMuxError(
-            'Initial terminal prompt readiness is invalid before handshake acknowledgement.',
-            'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+            'CtxMux terminal handshake receipt does not match the persisted Input claim.',
+            'AGENT_TERMINAL_HANDSHAKE_RECEIPT_MISMATCH'
           )
         }
-        const next: AgentMuxStoredAgentSession = {
-          ...current,
-          terminalHandshake: {
-            run: { ...current.run },
-            operationId,
-            inputByteRange: {
-              startByte,
-              endByte: startByte + responseBytes
+        const acknowledgeHandshake = (
+          current: AgentMuxStoredAgentSession
+        ): AgentMuxStoredAgentSession => {
+          if (!current.terminalHandshake) {
+            throw new AgentMuxError(
+              'Terminal handshake claim disappeared before acknowledgement.',
+              'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
+            )
+          }
+          assertState(current.terminalHandshake)
+          if (current.terminalHandshake.acknowledged) return current
+          const next: AgentMuxStoredAgentSession = {
+            ...current,
+            terminalHandshake: {
+              ...current.terminalHandshake,
+              acknowledged: true
             },
-            acknowledged: false
-          },
-          ...(initialReadiness
-            ? {
-                terminalPromptReadiness: {
-                  ...initialReadiness,
-                  outputCursorBytes: boundaryRun.latestOutputBytes
-                }
-              }
-            : {}),
-          updatedAt: Date.now()
+            updatedAt: Date.now()
+          }
+          delete next.terminalCapability
+          return next
         }
-        delete next.terminalCapability
-        return next
-      }
-      let claimed: AgentMuxStoredAgentSession
-      try {
-        claimed = await this.registry.update(
-          session.agentSessionId,
-          session.run,
-          claimHandshake
-        )
-      } catch (error) {
-        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
-        await this.registry.load(session.hostId)
-        const canonical = this.requireAgentSession(session.agentSessionId)
-        if (!sameRun(canonical.run, session.run)) {
-          throw new AgentMuxError(
-            'Agent Session changed while adopting its terminal handshake.',
-            'STALE_AGENT_SESSION'
+        let ready: AgentMuxStoredAgentSession
+        try {
+          ready = await this.registry.update(
+            session.agentSessionId,
+            session.run,
+            acknowledgeHandshake
           )
-        }
-        claimed = canonical.terminalHandshake
-          ? canonical
-          : await this.registry.update(
-              session.agentSessionId,
-              session.run,
-              claimHandshake
+        } catch (error) {
+          if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
+          await this.registry.load(session.hostId)
+          const canonical = this.requireAgentSession(session.agentSessionId)
+          if (!sameRun(canonical.run, session.run)) {
+            throw new AgentMuxError(
+              'Agent Session changed while adopting its terminal handshake acknowledgement.',
+              'STALE_AGENT_SESSION'
             )
-      }
-      const state = claimed.terminalHandshake
-      if (!state) {
-        throw new AgentMuxError(
-          'Terminal handshake claim was not persisted.',
-          'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
-        )
-      }
-      assertState(state)
-      if (state.acknowledged) {
-        const currentRun = await this.kernel.status(session.run.runId)
-        this.assertAgentRun(session, currentRun)
-        const acceptedInputBytes = currentRun.acceptedInputBytes
-        if (acceptedInputBytes === null || acceptedInputBytes < state.inputByteRange.endByte) {
-          throw new AgentMuxError(
-            'CtxMux Input cursor precedes the persisted terminal handshake receipt.',
-            'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
-          )
+          }
+          ready = canonical.terminalHandshake?.acknowledged
+            ? canonical
+            : await this.registry.update(
+                session.agentSessionId,
+                session.run,
+                acknowledgeHandshake
+              )
         }
-        this.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
-        observeReadiness(claimed)
-        return claimed
-      }
-
-      const accepted = await this.kernel.input(session.run.runId, {
-        ownerInstanceId: this.kernel.identity().daemonInstanceId,
-        operationId: state.operationId,
-        expectedByte: state.inputByteRange.startByte,
-        data: handshake.response
-      })
-      if (
-        accepted.appliedByteRange.startByte !== state.inputByteRange.startByte ||
-        accepted.appliedByteRange.endByte !== state.inputByteRange.endByte ||
-        accepted.run.acceptedInputBytes === null ||
-        accepted.run.acceptedInputBytes < state.inputByteRange.endByte
-      ) {
-        throw new AgentMuxError(
-          'CtxMux terminal handshake receipt does not match the persisted Input claim.',
-          'AGENT_TERMINAL_HANDSHAKE_RECEIPT_MISMATCH'
-        )
-      }
-      const acknowledgeHandshake = (
-        current: AgentMuxStoredAgentSession
-      ): AgentMuxStoredAgentSession => {
-        if (!current.terminalHandshake) {
-          throw new AgentMuxError(
-            'Terminal handshake claim disappeared before acknowledgement.',
-            'AGENT_TERMINAL_HANDSHAKE_STATE_INVALID'
-          )
-        }
-        assertState(current.terminalHandshake)
-        if (current.terminalHandshake.acknowledged) return current
-        const next: AgentMuxStoredAgentSession = {
-          ...current,
-          terminalHandshake: {
-            ...current.terminalHandshake,
-            acknowledged: true
-          },
-          updatedAt: Date.now()
-        }
-        delete next.terminalCapability
-        return next
-      }
-      let ready: AgentMuxStoredAgentSession
-      try {
-        ready = await this.registry.update(
-          session.agentSessionId,
-          session.run,
-          acknowledgeHandshake
-        )
-      } catch (error) {
-        if (!(error instanceof AgentMuxError) || error.code !== 'STALE_AGENT_SESSION') throw error
-        await this.registry.load(session.hostId)
-        const canonical = this.requireAgentSession(session.agentSessionId)
-        if (!sameRun(canonical.run, session.run)) {
-          throw new AgentMuxError(
-            'Agent Session changed while adopting its terminal handshake acknowledgement.',
-            'STALE_AGENT_SESSION'
-          )
-        }
-        ready = canonical.terminalHandshake?.acknowledged
-          ? canonical
-          : await this.registry.update(
-              session.agentSessionId,
-              session.run,
-              acknowledgeHandshake
-            )
-      }
-      this.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
-      observeReadiness(ready)
-      return ready
+        this.agentInputCursors.set(session.agentSessionId, accepted.run.acceptedInputBytes)
+        observeReadiness(ready)
+        return ready
+      }, { kind: 'protocol', bytes: responseBytes })
     } catch (error) {
       if (error instanceof AgentMuxError && (
         error.code === AGENT_TERMINAL_HANDSHAKE_FAILED ||
-        error.code === AGENT_TERMINAL_HANDSHAKE_TIMEOUT
+        error.code === AGENT_TERMINAL_HANDSHAKE_TIMEOUT ||
+        error.code === 'STALE_AGENT_SESSION'
       )) {
         // Reuse this handshake's Attachment; never attach another live consumer for diagnostics.
         // A failed state read cannot replace the original failure with a guessed exit fact.

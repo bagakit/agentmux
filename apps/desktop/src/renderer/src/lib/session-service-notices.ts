@@ -130,7 +130,7 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
       restore: failure.recovery
     } }
   })
-  const connectionTime = session.terminalCapability?.reason === 'handshake-timeout' ? session.terminalCapability.observedAt
+  const connectionTime = session.terminalCapability?.run.runId === session.control.run.runId ? session.terminalCapability.observedAt
     : session.terminalOutputChannel?.reason === 'reattach-failed' ? session.terminalOutputChannel.observedAt
     : session.status.state === 'disconnected' ? session.status.observedAt : undefined
   for (const [id, outcome, observedAt] of [
