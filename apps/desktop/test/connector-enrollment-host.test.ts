@@ -26,6 +26,7 @@ import {
 
 const privateToken = 'private-enrollment-account-token'
 const applicationSecret = 'private-enrolled-application-secret'
+const originalConsoleScript = 'window.user={"id":"original-user","tenantId":"original-tenant"};window.csrfToken="original-private-csrf";'
 const pngDataUrl =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='
 const input: ConnectionEnrollmentBeginInput = {
@@ -49,6 +50,7 @@ let clock: number
 let secureAvailable: boolean
 let rejectedCookieStage: 'initialize' | 'console' | 'creation' | null
 let sentCookies: Array<{ path: string; cookie: string }>
+let consoleDocument: string
 
 function cookies(stage: 'initialize' | 'console' | 'creation', initial?: HeadersInit): Headers {
   const headers = new Headers(initial)
@@ -70,6 +72,7 @@ beforeEach(async () => {
   secureAvailable = true
   rejectedCookieStage = null
   sentCookies = []
+  consoleDocument = `<script>${originalConsoleScript}</script>`
   clock = Date.now()
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
   const key = randomBytes(32)
@@ -134,7 +137,7 @@ beforeEach(async () => {
       if (target.href === 'https://ask.feishu.cn/') return new Response('Landing is not an account identity')
       if (target.href === 'https://open.feishu.cn/app')
         return new Response(
-          '<script>window.user={"id":"original-user","tenantId":"original-tenant"};window.csrfToken="original-private-csrf";</script>',
+          consoleDocument,
           { headers: cookies('console', { 'content-type': 'text/html' }) }
         )
       if (target.pathname === '/developers/v1/app/upload/image')
@@ -558,4 +561,67 @@ it('continues native zero waiting through Host, SDK and compiled CLI to the orig
   expect((await client.call('connection.enrollment.inspect', { operationId: input.operationId })).operation).toEqual(signedIn.operation)
   expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(signedIn.operation)
   expect(calls).toHaveLength(5)
+})
+
+it.each([
+  ['declaration', `<script>var pageVersion=1;${originalConsoleScript}</script>`],
+  ['nonliteral-metadata', `<script>"use strict";(function(){"use strict";${originalConsoleScript}window.runtimeMetadata=readRuntimeMetadata();})();</script>`]
+] as const)('reads authoritative bootstrap fields with unrelated %s through Host, SDK and compiled CLI', async (_name, html) => {
+  consoleDocument = html
+  pollReply = () => Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: '' } } })
+  let view = await client.call('connection.enrollment.begin', input)
+  const originalAttempt = view.operation!.authentication!.attemptId
+  let lastInput: ConnectionEnrollmentAdvanceInput | undefined
+  for (const path of ['/accounts/qrlogin/polling', '/', '/app']) {
+    clock = Math.max(clock, view.challenge?.nextPollAt ?? clock) + 1
+    lastInput = decision(view, 'continue-authentication')
+    const before = calls.length
+    view = await cli(['advance', '--input', '-'], lastInput)
+    expect(calls).toHaveLength(before + 1)
+    expect(calls.at(-1)!.path).toBe(path)
+    expect(view.operation!.authentication).toEqual({ attemptId: originalAttempt, stage: path === '/app' ? 'account' : 'handoff' })
+    if (path !== '/app') expect(view.account).toBeNull()
+    expect(view.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  }
+  expect(view.operation).toMatchObject({ operationId: input.operationId, connectionId: input.connectionId, label: input.label, preset: { name: input.preset!.name, description: input.preset!.description }, application: null, authorization: 'not-started' })
+  expect(view.account).toEqual({ userId: 'original-user', tenantId: 'original-tenant' })
+  expect(view.actions.map(action => action.kind)).toContain('confirm-account')
+  expect(view.actions.map(action => action.kind)).not.toContain('create')
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/', '/app'])
+  expect(calls.every(call => call.preclaimed)).toBe(true)
+  expect((await client.call('connection.enrollment.advance', lastInput!)).receipt).toEqual(view.receipt)
+  expect((await client.call('connection.enrollment.inspect', { operationId: input.operationId })).operation).toEqual(view.operation)
+  expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(view.operation)
+  expect(calls).toHaveLength(4)
+})
+
+it('retains unknown when a later active script dynamically writes the authoritative user', async () => {
+  consoleDocument = `<script>${originalConsoleScript}</script><script>window.user=readDynamicUser();</script>`
+  let view = await client.call('connection.enrollment.begin', input)
+  const originalAttempt = view.operation!.authentication!.attemptId
+  let lastInput: ConnectionEnrollmentAdvanceInput | undefined
+  for (const path of ['/accounts/qrlogin/polling', '/cross', '/', '/', '/app']) {
+    clock = Math.max(clock, view.challenge?.nextPollAt ?? clock) + 1
+    lastInput = decision(view, 'continue-authentication')
+    const before = calls.length
+    view = await cli(['advance', '--input', '-'], lastInput)
+    expect(calls).toHaveLength(before + 1)
+    expect(calls.at(-1)!.path).toBe(path)
+    if (path !== '/app') {
+      expect(view.operation!.authentication!.stage).toBe('handoff')
+      expect(view.account).toBeNull()
+    }
+  }
+  expect(view.operation!.authentication).toEqual({ attemptId: originalAttempt, stage: 'unknown' })
+  expect(view.account).toBeNull()
+  expect(view.operation!.diagnostic).toMatchObject({ stage: 'authentication', step: 'console', failure: 'bootstrap-unconfirmed', httpStatus: 200, boundary: 'bootstrap' })
+  expect(view.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  expect(view.actions.map(action => action.kind)).not.toContain('continue-authentication')
+  expect(view.actions.map(action => action.kind)).not.toContain('confirm-account')
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/', '/app'])
+  expect((await client.call('connection.enrollment.advance', lastInput!)).receipt).toEqual(view.receipt)
+  expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(view.operation)
+  expect(JSON.stringify(view)).not.toContain('readDynamicUser')
+  expect(JSON.stringify(view)).not.toContain('original-private-csrf')
+  expect(calls).toHaveLength(6)
 })
