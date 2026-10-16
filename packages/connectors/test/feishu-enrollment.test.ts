@@ -203,6 +203,29 @@ it.each([
   expect(f.view.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
   if (_name.endsWith('labels')) expect(f.view.account).toEqual({ userId: 'original-user', tenantId: 'original-tenant' })
 })
+const accountFields = 'window.user={"id":"original-user","tenantId":"original-tenant"};window.csrfToken="private-csrf";'
+it.each([
+  ['flat-declarations', '<script>var pageVersion=1;const pageReady=true;let marker=0;' + accountFields + '</script>'],
+  ['flat-directive', '<script>"use strict";' + accountFields + '</script>'],
+  ['unrelated-pattern-key', '<script>const {window:metadata}=sourceMetadata;' + accountFields + '</script>'],
+  ['nonliteral-metadata', '<script>' + accountFields + 'window.metadata=readMetadata();window.features=()=>true;window["extra"]=undefined;</script>'],
+  ['unrelated-call', '<script>recordMetadata();' + accountFields + 'recordMetadata();</script>'],
+  ['iife-directives', '<script>"use strict";(function(){"use strict";var pageVersion=1;' + accountFields + 'window.metadata=readMetadata();recordMetadata();})();</script>'],
+  ['iife-with-adjacent-statements', '<script>var before=1;(function(){' + accountFields + '})();const after=2;recordMetadata();</script>'],
+  ['separate-syntax-error', '<script>const invalid=;</script><script>' + accountFields + '</script><script>function broken(</script>'],
+  ['reachable-loop', '<script>for(;;){break;}' + accountFields + '</script>'],
+  ['same-literal-repeated-flat', '<script>' + accountFields + accountFields + '</script>'],
+  ['same-literal-repeated-iife', '<script>(function(){' + accountFields + accountFields + '})();</script>'],
+  ['qualified-sources-pair', '<script>(function(){window.user={"id":"original-user","tenantId":"original-tenant"};})();</script><script>window.csrfToken="private-csrf";</script>'],
+  ['optional-property-writes', '<script>' + accountFields + 'window.user.name=readDisplayName();window.user["lastSeen"]=Date.now();window.user.displayName.value=readDisplayName();</script>'],
+  ['local-block-binding', '<script>{const window={};window.user=readLocalUser();}' + accountFields + '</script>'],
+  ['local-iife-binding', '<script>(function(){const window={};window.user={"id":"local","tenantId":"local"};window.csrfToken="local";})();</script><script>' + accountFields + '</script>']
+])('only account fields govern native bootstrap qualification: %s', async (_name, document) => {
+  const f = await signedIn('https://open.feishu.cn', document)
+  expect(f.view.account).toEqual({ userId: 'original-user', tenantId: 'original-tenant' })
+  expect(f.network.calls).toHaveLength(6)
+})
+
 async function withIcon() {
   const f = await signedIn()
   f.network.queue.push(Response.json({ code: 0, data: { url: icon } }))
