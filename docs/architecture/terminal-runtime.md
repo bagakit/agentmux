@@ -75,7 +75,7 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 | 分类／分派 | 源码 owner | 当前机制 |
 | --- | --- | --- |
-| 需要原 Native 的物理事实或操作 | `AGENTMUX_HOSTED_RUNTIME_METHODS` → `RUNTIME_METHODS` | 调用 `connectRuntime()`；包括原终端附着及 `runtimeProjection`、`runtimeSubject` 等物理事实投影 |
+| 需要原 Native 的准确操作 | `AGENTMUX_HOSTED_RUNTIME_METHODS` → `RUNTIME_METHODS` | 调用 `connectRuntime()`；包括原终端附着、物理事实投影与准确 Agent 创建。每个方法仍守自己的业务前提 |
 | 不以 Native 或全局恢复完成为通用前置 | `OFFLINE_METHODS` | 例如 `sessionTimeline` 从原持久来源读取；每个方法仍守自身目标、权限和存储合同，offline 不表示缓存成功或事实已知 |
 | 其余方法的默认分派 | Host service 的调用分支与各操作 owner | 当前默认调用 `connect()`，受控输入保留既有例外；默认分派不证明每项都确需全局恢复，必要前提仍沿准确操作的真实依赖判定。权限、意图和回执继续由原 owner 核对 |
 
@@ -89,6 +89,10 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 4. Main 返回原 `attachmentId`、Session、terminal continuation 与 Replay；Renderer 应用初始切面，再接续原 reader 的有序输出。显示、解析完成和输入资格各沿原事实确认。
 
 冷 Host 的准确 Agent 附着先沿 Core `resolveRawAgentSession`／原 metadata owner 解析该 Session，再取得原 Run。独立调用 `runtimeSubject` 时，若活动 registry 尚无该 Agent 的绑定，仍可能得到 `UNKNOWN_AGENT_SESSION`；Runtime 准入不自动加载所有元数据，也不猜造 Session。owner fence、Session／Run 匹配与 reader lease 继续由各原 owner 核对；释放 reader 不停止原 Run。
+
+Main 新建 Agent 经 `launchAdmittedAgent` → Hosted `createAgentWithDelivery`，远端目标使用 `createHostAgentWithDelivery`；SDK 的 `createAgent` 复用同一 Core 创建 owner。三者沿 shared Runtime 准入，Core 保留原 SID／operation、意图摘要、prepared seed、Provider／Executor、授权、原生启动与首次投递回执合同。新的 fork 在核对准确 source 时仅通过 `resolveRawAgentSession` 采用其原绑定，后续 Store、Run、native witness 和最终来源检查仍成立；已有回执与 prepared 操作先于新的来源采用处理。
+
+`inspectAgentCreation` 和 `attestAgentCreation` 使用现有 offline 分派，分别消费原创建记录和来源授权事实。inspect 读到原 durable 回执可直接返回；原已确认／待确认结果如实保留，没有原结果与 prepared 关联时明确未知。只有需要 reconcile 原 prepared 创建时才 `connectRuntime()` 并核对原 Native 列表，不执行新启动或输入。attest 沿原 Store、来源能力和签名 owner，不由 Runtime 连通性授予权限。offline 是连接前提分类，不是业务授权或成功结果。
 
 ## 2. 所有权矩阵
 
@@ -334,6 +338,7 @@ PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间
 | 首帧 render 监听未注销导致 TUI 自发 resize | `TerminalView.tsx` 的 one-shot `terminal.onRender` | 首个 render 先 dispose；后续输出不再触发 viewport 同步 |
 | Attach 逐条写入数千个 replay event，历史 TUI 帧看起来像持续 resize | `apps/desktop/test/terminal-replay.test.ts` | replay 合并为一次 parser write；恢复完成前隐藏画布 |
 | 原 Attachment 已取得，回执投影却等待无关 Session 恢复 | [真实 cold Host/Main 附着测试](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts) | 恢复 pending／确认失败两阶段，原 Agent 与 raw Terminal 均返回准确 Run／PID、已知初始内容和连续 live byte range；无输入重放或新 Run，reader 清理及错误 owner／换 Run 拒绝仍成立 |
+| 原终端可附着，新 Agent 创建仍等待无关恢复 | [同一真实 Main 的独立创建测试](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts)、[Hosted 创建与来源授权](../../packages/core/test/remote-initial-creation.test.ts)、[原创建检查](../../packages/core/test/remote-creation-exact-read.test.ts)、[冷 fork 来源](../../packages/core/test/current-fork-lifecycle.test.ts) | 创建、读取和来源授权各消费自身准入；准确 Run／输出、重复原操作、未知首次投递、prepared reconcile、变更来源拒绝和原权限边界分别验证，不以 attach 通过代签创建 |
 
 [测试策略](../testing/strategy.md) 记录整体 oracle 与证据范围；本表列回归意图，测试存在不代表本轮候选已通过。
 
