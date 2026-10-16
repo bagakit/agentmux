@@ -1,5 +1,6 @@
-import { pendingNoteShares, clearPendingNoteShares, applyNoteDraftShareEcho, bindNoteDraftBlockIdentity, noteBlockFingerprint, noteNodeAtPath } from './lib/note-share-staging'
-import { fileShareSourceOperation, parseFileShareResult, type FileShareParams, type FileShareResult, type FileWriteParams } from '@agentmux/core/files'
+import { pendingNoteShares, clearPendingNoteShares, applyNoteDraftShareEcho, applyNoteDraftRestoreEcho, bindNoteDraftBlockIdentity, noteBlockFingerprint, noteNodeAtPath } from './lib/note-share-staging'
+import { noteShareUndoRecoveryMessage, removedSavedNoteIncludes } from './lib/note-share-removal'
+import { fileShareSourceOperation, parseFileHistoryResult, parseFileShareResult, parseFileShareUndoResult, type FileShareUndoParams, type FileShareUndoResult, type FileShareParams, type FileShareResult, type FileWriteParams } from '@agentmux/core/files'
 import { retainFileDocument, hasFileDocumentConsumer, type NoteFileTarget } from './lib/file-document-consumers'
 import { executorEnvironmentRevision } from '../../shared/executor-probe-context'
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult, sameAgentContinuityControlInput } from '@agentmux/core/agent-session-continuity-control'
@@ -12,8 +13,8 @@ import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import type { NoteFileAttempt, NoteFileInput, NoteWrittenReceipt, NoteHistorySelection } from '../../shared/note-file-editing'
-import { afterNoteComposition, mergeLiveNote, setNoteComposition } from './lib/note-live-merge'
-import { confirmNoteHistoryTarget, noteHistoryReadParams, noteResourceReadParams, type NoteHistoryRead, type NoteHistoryTarget } from './lib/note-history-target'
+import { afterNoteComposition, hasNoteComposition, mergeLiveNote, setNoteComposition } from './lib/note-live-merge'
+import { confirmNoteHistoryTarget, confirmDeletedNoteHistoryTarget, noteHistoryReadParams, noteResourceReadParams, type NoteHistoryRead, type NoteHistoryInspection, type NoteHistoryTarget } from './lib/note-history-target'
 import { restoredConnectorRoomIntents, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './lib/connector-service-intent'
 import type { ConnectorServiceObservation } from './lib/connector-service-observation'
@@ -1295,6 +1296,8 @@ type AppState = {
   saveNoteFile(target: NoteFileTarget): Promise<void>
   inspectNoteShare(workspaceId: string, path: string): Promise<void>
   continueNoteShare(workspaceId: string, path: string): Promise<void>
+  inspectNoteShareUndo(workspaceId: string, path: string): Promise<void>
+  continueNoteShareUndo(workspaceId: string, path: string): Promise<void>
   adoptNoteCurrentDocument(tabId: string, regionId: string): Promise<void>
   retryNoteInput(tabId: string, regionId: string): Promise<void>
   retainNoteEditorDraft(tabId: string, regionId: string, displayed: string, incoming: string, resource: { hostId: string; path: string }, action: 'retain' | 'keep-displayed'): void
@@ -1303,7 +1306,7 @@ type AppState = {
   useRetainedDocumentDraft(tabId: string, regionId?: string, selected?: FileDocument): void
   reloadDocument(tabId: string, regionId?: string): Promise<void>
   refreshDocument(workspaceId: string, path: string): Promise<void>
-  inspectNoteHistory(tabId: string, regionId: string, noteId: string): Promise<NoteHistoryRead>
+  inspectNoteHistory(tabId: string, regionId: string, noteId: string): Promise<NoteHistoryInspection>
   applyNoteHistory(tabId: string, regionId: string, selection: NoteHistorySelection): Promise<void>
   launchBoardAgent(
     workspaceId: string,
@@ -1931,7 +1934,9 @@ function updateNoteFileInput(surface: { workspaceId: string; path: string }, con
   void drainNoteInput(surface.workspaceId, surface.path)
 }
 
-async function readNoteHistoryTarget(tabId: string, regionId: string, noteId: string): Promise<NoteHistoryRead> {
+function readNoteHistoryTarget(tabId: string, regionId: string, noteId: string, allowDeleted: true): Promise<NoteHistoryInspection>
+function readNoteHistoryTarget(tabId: string, regionId: string, noteId: string, allowDeleted?: false): Promise<NoteHistoryRead>
+async function readNoteHistoryTarget(tabId: string, regionId: string, noteId: string, allowDeleted = false): Promise<NoteHistoryInspection> {
   const state = useAppStore.getState(), tab = state.tabs[tabId], surface = tab?.regions[regionId]
   if (surface?.kind !== 'file') throw Error('The original Note file occurrence is unavailable.')
   const key = documentKey(surface.workspaceId, surface.path), lifetime = documentLifetime(key)
@@ -1949,6 +1954,10 @@ async function readNoteHistoryTarget(tabId: string, regionId: string, noteId: st
   try {
     const observed = await api.files.readPublic(params)
     if (changed || documentLifetime(key) !== lifetime || !current()) throw Error('The original Note resource changed during its history read. The selection and draft are retained.')
+    if (allowDeleted) {
+      const deleted = confirmDeletedNoteHistoryTarget(params, noteId, observed, surface.path, state.documents[key])
+      if (deleted) return deleted
+    }
     return confirmNoteHistoryTarget(params, noteId, observed, surface.path)
   } finally { release() }
 }
@@ -2010,7 +2019,7 @@ async function settleNoteWritten(workspaceId: string, path: string, lifetime: nu
       const { noteProvenance: _oldProvenance, noteWriteAttribution: _oldAttribution, ...kept } = current
       return { documents: { ...state.documents, [key]: { ...kept, content, revision: result.revision,
         ...(result.noteProvenance ? { noteProvenance: result.noteProvenance } : {}), ...(result.noteAttribution ? { noteWriteAttribution: result.noteAttribution } : {}),
-        noteEditing: { baseline: { content: canonical, revision: result.revision }, receipt, ...(current.noteEditing?.shares ? { shares: current.noteEditing.shares } : {}), ...(current.noteEditing?.share ? { share: current.noteEditing.share } : {}) } } },
+        noteEditing: { baseline: { content: canonical, revision: result.revision }, receipt, ...(current.noteEditing?.shares ? { shares: current.noteEditing.shares } : {}), ...(current.noteEditing?.share ? { share: current.noteEditing.share } : {}), ...(current.noteEditing?.shareUndo ? { shareUndo: current.noteEditing.shareUndo } : {}), ...(current.noteEditing?.shareUndoReceipt ? { shareUndoReceipt: current.noteEditing.shareUndoReceipt } : {}) } } },
         dirtyDocuments: { ...state.dirtyDocuments, [key]: content !== canonical },
         documentGenerations: { ...state.documentGenerations, [key]: generation + 1 }, documentIssues: issues,
         savingDocuments: { ...state.savingDocuments, [key]: false } }
@@ -2047,7 +2056,7 @@ async function reconcileNoteRead(workspaceId: string, path: string, lifetime: nu
         if (!owns() || useAppStore.getState().documents[key]?.noteEditing?.attempt?.operationId !== pending.operationId) return true
         if (response.result.status === 'read') {
           const event = response.result.entries.find(entry => entry.eventId === eventId)
-          if (event?.status === 'committed' && event.operation === (pending.action?.kind ?? 'edit') && event.content !== undefined && (!pending.written || pending.written.revision === event.revision)) {
+          if (event?.status === 'committed' && event.operation !== 'delete' && event.operation === (pending.action?.kind ?? 'edit') && typeof event.content === 'string' && typeof event.revision === 'string' && (!pending.written || pending.written.revision === event.revision)) {
             await settleNoteWritten(workspaceId, path, lifetime, pending, { status: 'written', revision: event.revision, content: event.content,
               noteHistory: { status: 'committed', eventId: event.eventId, batchId: event.batchId, replayed: true },
               ...(event.provenance ? { noteProvenance: { ...event.provenance, status: 'recorded' } } : {}) }, resourceCurrent)
@@ -2275,6 +2284,122 @@ async function loadPersistedFileDocument(workspaceId: string, path: string, reso
 
 
 type NoteShareAttempt = { params: FileShareParams; writes: Map<string, { workspaceId: string; path: string; lifetime: number; attempt: NoteFileAttempt }>; references: string[] }
+/** Known local drafts veto collection; this never claims that the managed file scope is complete. */
+function preserveNoteDrafts(state: AppState, destinationKey: string): string[] {
+  const ids = new Set<string>()
+  for (const key of new Set([...Object.keys(state.documents), ...Object.keys(state.retainedDocumentDrafts)])) {
+    const document = state.documents[key]
+    const retained = state.retainedDocumentDrafts[key] ?? []
+    if (key === destinationKey || !retained.length && !state.dirtyDocuments[key] && !hasNoteComposition(key) && !Object.keys(document?.noteEditing?.shares ?? {}).length && !document?.noteEditing?.input && !document?.noteEditing?.attempt && !document?.noteEditing?.share && !document?.noteEditing?.shareUndo) continue
+    const bodies = (draft: FileDocument) => { const editing = draft.noteEditing; return [draft.content, editing?.attempt?.content, editing?.input?.proposedContent, ...(editing?.input?.queued?.map(value => value.proposedContent) ?? []), editing?.share?.params.destination.content, editing?.shareUndo?.params.destination.content] }
+    for (const draft of [...(document ? [document] : []), ...retained]) for (const ticket of Object.values(draft.noteEditing?.shares ?? {})) ids.add(ticket.include.noteId)
+    const raw = [...(document ? bodies(document) : []), ...retained.flatMap(bodies)]
+    for (const content of raw) {
+      if (content === undefined) continue
+      const header = readNoteMarkdownHeader(content)
+      if (header.status === 'valid') ids.add(header.noteId)
+      const note = readNoteDocument(content)
+      if (note.status !== 'valid') continue
+      const visit = (node: import('@tiptap/core').JSONContent) => {
+        const target = node.type === 'noteInclude' ? node.attrs?.noteId : node.type === 'blockReference' || node.type === 'noteLink' ? node.attrs?.target?.noteId : undefined
+        if (typeof target === 'string') ids.add(target)
+        node.content?.forEach(visit)
+      }
+      visit(note.note.content)
+    }
+  }
+  return [...ids]
+}
+function unconfirmedNoteShareUndo(params: FileShareUndoParams, error: unknown): FileShareUndoResult {
+  return { operationId: params.destination.operationId!, status: 'unknown', destination: null, collections: [], message: presentError(error) }
+}
+async function applyNoteShareCollections(key: string, result: FileShareUndoResult): Promise<void> {
+  for (const collection of result.collections) {
+    const source = collection.source
+    if (source?.resource && source.result.status === 'written') {
+      const resource = source.resource, state = useAppStore.getState(), workspace = state.config?.workspaces.find(value => value.id === resource.workspaceId)
+      if (workspace?.hostId === resource.hostId && workspace.path === resource.workspacePath && state.documents[documentKey(resource.workspaceId, resource.path)]) {
+        const header = source.result.content === undefined ? null : readNoteMarkdownHeader(source.result.content), eventId = source.result.noteHistory?.eventId
+        if (header?.status === 'valid' && eventId && source.result.noteHistory?.status === 'committed') {
+          try {
+            const prefix = resource.logicalDirectory ?? (resource.zonePath === resource.workspacePath ? '' : resource.zonePath.slice(resource.workspacePath.length + 1))
+            const params = { zoneId: resource.zoneId, path: prefix ? resource.path.slice(prefix.length + 1) : resource.path, expectedResource: resource, noteId: header.noteId, eventId, includeContent: true }
+            const history = parseFileHistoryResult(await api.files.historyPublic(params), params).result
+            const original = history.status === 'read' ? history.entries.find(value => value.eventId === eventId) : undefined
+            if (original?.operation === 'undo' && original.status === 'committed' && typeof original.beforeContent === 'string' && original.content === source.result.content && original.revision === source.result.revision) applyNoteDraftRestoreEcho(documentKey(resource.workspaceId, resource.path), original.beforeContent, source.result.content!, collection.noteId)
+          } catch { /* The exact saved file remains readable; generic snapshot recovery retains unmatched local input. */ }
+        }
+        await refreshFileDocument(resource.workspaceId, resource.path)
+      }
+    }
+    if (collection.resource && collection.deletion?.result.status === 'deleted') {
+      const resource = collection.resource, state = useAppStore.getState(), workspace = state.config?.workspaces.find(value => value.id === resource.workspaceId)
+      if (workspace?.hostId === resource.hostId && workspace.path === resource.workspacePath && state.documents[documentKey(resource.workspaceId, resource.path)]) await refreshFileDocument(resource.workspaceId, resource.path)
+    }
+  }
+  useAppStore.setState(state => {
+    const document = state.documents[key]
+    if (!document || document.noteEditing?.shareUndo?.params.destination.operationId !== result.operationId && document.noteEditing?.share?.params.destination.operationId !== result.operationId) return state
+    const retained = result.collections.flatMap(value => value.retainedReason ? [{ noteId: value.noteId, ...value.retainedReason }] : [])
+    const workspaces = new Set([
+      ...(result.destination?.result.status === 'written' && result.destination.resource ? [result.destination.resource.workspaceId] : []),
+      ...result.collections.flatMap(value => [
+        ...(value.source?.result.status === 'written' && value.source.resource ? [value.source.resource.workspaceId] : []),
+        ...(value.deletion?.result.status === 'deleted' && value.resource ? [value.resource.workspaceId] : [])
+      ])
+    ])
+    let revisions = state.workspaceFileRevisions
+    for (const workspaceId of workspaces) revisions = bumpWorkspaceFileRevision(revisions, workspaceId)
+    return { workspaceFileRevisions: revisions, documents: { ...state.documents, [key]: { ...document, noteEditing: { ...document.noteEditing, shareUndoReceipt: { operationId: result.operationId, status: result.status, retained } } } } }
+  })
+}
+async function applyNoteShareUndoResult(key: string, params: FileShareUndoParams, result: FileShareUndoResult): Promise<void> {
+  const resource = params.destination.expectedResource, attempt = useAppStore.getState().documents[key]?.noteEditing?.attempt
+  const notApplied = (result.status === 'conflict' || result.status === 'error') && result.destination?.result.noteHistory?.status === 'not-applied' && result.destination.result.noteHistory.eventId === params.destination.operationId && result.collections.every(value => value.source === null && value.deletion === null)
+  if (attempt && attempt.operationId === params.destination.operationId && result.destination?.result.status === 'written') {
+    if (result.destination.result.content !== undefined && result.destination.result.noteHistory?.status === 'committed') for (const collection of result.collections) {
+      const restored = collection.source
+      if (restored?.result.status === 'written' && restored.result.noteHistory?.eventId === params.destination.operationId && restored.resource?.hostId === resource.hostId && restored.resource.workspaceId === resource.workspaceId && restored.resource.workspacePath === resource.workspacePath && restored.resource.path === resource.path) applyNoteDraftRestoreEcho(key, attempt.content, result.destination.result.content, collection.noteId)
+    }
+    await settleNoteWritten(resource.workspaceId, resource.path, documentLifetime(key), attempt, result.destination.result, () => noteAttemptResourceCurrent(resource.workspaceId, resource.path, attempt))
+    if (result.destination.result.content === undefined) await refreshFileDocument(resource.workspaceId, resource.path)
+  }
+  await applyNoteShareCollections(key, result)
+  useAppStore.setState(state => {
+    const document = state.documents[key]
+    if (!document?.noteEditing || document.noteEditing.shareUndo?.params.destination.operationId !== params.destination.operationId) return state
+    const issues = { ...state.documentIssues }, pending = document.noteEditing.attempt
+    if (notApplied) {
+      issues[key] = { kind: 'write-error', code: 'NOTE_OPERATION_NOT_APPLIED', message: 'This original reference removal was confirmed not applied. Your complete draft is kept; inspect the current file before saving again.' }
+      return { documents: { ...state.documents, [key]: { ...document, noteEditing: { ...document.noteEditing, shareUndo: undefined, ...(pending?.operationId === params.destination.operationId ? { attempt: undefined } : {}) } } }, documentIssues: issues, savingDocuments: { ...state.savingDocuments, [key]: false } }
+    }
+    if (result.status === 'committed' || result.status === 'partial') {
+      if (issues[key]?.kind === 'write-unknown' && issues[key].code === 'NOTE_SHARE_UNDO_UNCONFIRMED') delete issues[key]
+      return { documents: { ...state.documents, [key]: { ...document, noteEditing: { ...document.noteEditing, shareUndo: undefined } } }, documentIssues: issues, savingDocuments: { ...state.savingDocuments, [key]: false } }
+    }
+    issues[key] = { kind: 'write-unknown', code: 'NOTE_SHARE_UNDO_UNCONFIRMED', message: result.message ?? noteShareUndoRecoveryMessage(document.noteEditing), attempted: { content: params.destination.content, expectedRevision: params.destination.expectedRevision, generation: state.documentGenerations[key] ?? 0, resource: { hostId: resource.hostId, path: resource.workspacePath } } }
+    return { documents: { ...state.documents, [key]: { ...document, noteEditing: { ...document.noteEditing, ...(pending && pending.operationId === params.destination.operationId && pending.phase === 'sending' ? { attempt: { ...pending, phase: 'unknown' as const } } : {}) } } }, documentIssues: issues, savingDocuments: { ...state.savingDocuments, [key]: false } }
+  })
+  if (notApplied) {
+    const workspace = useAppStore.getState().config?.workspaces.find(value => value.id === resource.workspaceId)
+    if (workspace?.hostId === resource.hostId && workspace.path === resource.workspacePath) await refreshFileDocument(resource.workspaceId, resource.path)
+  }
+}
+/** Called inside the existing exact-file save tail, with its already captured draft and public mapping. */
+async function submitNoteShareUndo(key: string, attempt: NoteFileAttempt): Promise<boolean> {
+  if (!attempt.enhanced || attempt.expectedRevision === null || !attempt.baseContent) return false
+  const referenceIds = removedSavedNoteIncludes(attempt.baseContent, attempt.content), target = attempt.target
+  if (!referenceIds.length || !target) return false
+  const params: FileShareUndoParams = { destination: { zoneId: target.zoneId, ...(target.spaceId ? { spaceId: target.spaceId } : {}), path: target.path, expectedResource: target.expectedResource,
+    content: attempt.content, baseContent: attempt.baseContent, expectedRevision: attempt.expectedRevision, operationId: attempt.operationId }, referenceIds, preserveNoteIds: preserveNoteDrafts(useAppStore.getState(), key) }
+  useAppStore.setState(state => ({ documents: { ...state.documents, [key]: { ...state.documents[key]!, noteEditing: { ...state.documents[key]!.noteEditing, shareUndo: { params } } } } }))
+  let result: FileShareUndoResult
+  try { result = parseFileShareUndoResult(await api.files.shareUndoPublic(params), params) }
+  catch (error) { result = unconfirmedNoteShareUndo(params, error) }
+  await applyNoteShareUndoResult(key, params, result)
+  return true
+}
+
 // One original unsaved operation, not a second body/relationship store. Its durable receipts live with the Files owner.
 const noteShareAttempts = new Map<string, NoteShareAttempt>()
 function unconfirmedNoteShare(params: FileShareParams, error: unknown): FileShareResult {
@@ -2305,7 +2430,8 @@ async function applyNoteShareResult(key: string, original: NoteShareAttempt, res
       if (receipt.result.content === undefined) await refreshFileDocument(held.workspaceId, held.path, held.lifetime)
     }
   }
-  if (result.status === 'committed') {
+  if (result.undo) await applyNoteShareCollections(key, result.undo)
+  if (result.status === 'committed' || result.status === 'partial') {
     noteShareAttempts.delete(key); clearPendingNoteShares(key, original.references)
     useAppStore.setState(state => {
       const issues = { ...state.documentIssues }
@@ -2326,12 +2452,12 @@ async function applyNoteShareResult(key: string, original: NoteShareAttempt, res
       if (attempt?.operationId === held.attempt.operationId && attempt.phase === 'sending') documents[id] = { ...document!, noteEditing: { ...document!.noteEditing, attempt: { ...attempt, phase: 'unknown' } } }
     }
     return { documents, savingDocuments: { ...state.savingDocuments, ...Object.fromEntries([...original.writes.keys()].map(id => [id, false])) }, documentIssues: { ...state.documentIssues,
-    [key]: { kind: 'write-unknown', code: 'NOTE_SHARE_UNCONFIRMED', message: result.message ?? 'Sharing is not fully confirmed. The original content and operation are kept. Check this same sharing operation before continuing.',
+    [key]: { kind: 'write-unknown', code: 'NOTE_SHARE_UNCONFIRMED', message: result.message ?? (result.undo?.status === 'partial' ? noteShareUndoRecoveryMessage(documents[key]?.noteEditing ?? {}) : 'Sharing is not fully confirmed. The original content and operation are kept. Check this same sharing operation before continuing.'),
       attempted: { content: original.params.destination.content, expectedRevision: original.params.destination.expectedRevision,
         generation: state.documentGenerations[key] ?? 0, resource: { hostId: original.params.destination.expectedResource.hostId, path: original.params.destination.expectedResource.workspacePath } } } } }
   })
 }
-async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?: NoteFileTarget): Promise<boolean> {
+async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?: NoteFileTarget, overwrite = false): Promise<boolean> {
   const initial = useAppStore.getState(), surface = explicit ?? fileSurface(initial.tabs[tabId], regionId)
   if (!surface) return false
   const key = documentKey(surface.workspaceId, surface.path), retained = originalNoteShareAttempt(key)
@@ -2370,12 +2496,18 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
       proposals.set(documentKey(workspaceId, path), { content: original.content, generation: state.documentGenerations[documentKey(workspaceId, path)] ?? 0 })
       const header = readNoteMarkdownHeader(original.content)
       if (header.status !== 'valid' || header.noteId !== noteId) throw Error('The original sharing file identity changed. Its draft is kept.')
-      const baseline = document?.noteEditing?.baseline?.revision === original.revision ? document.noteEditing.baseline : observed.result.document.revision === original.revision ? observed.result.document : undefined
-      if (!baseline || noteHistoryRevision(baseline.content) !== original.revision) throw Error('The original sharing baseline is unconfirmed. Its draft and current file are kept.')
-      return { ...read, expectedResource: observed.resource, content: original.content, expectedRevision: original.revision, baseContent: baseline.content, operationId: crypto.randomUUID() }
+      const conflict = overwrite && documentKey(workspaceId, path) === key ? state.documentIssues[key] : undefined
+      if (overwrite && documentKey(workspaceId, path) === key && conflict?.kind !== 'changed') throw Error('The current file conflict is not confirmed. Your pending uses and draft are kept; inspect this original file before overwriting it.')
+      const overwritten = conflict?.kind === 'changed' ? conflict.observed : undefined
+      if (overwritten && observed.result.document.revision !== overwritten.revision) throw Error('The observed file changed again before overwrite. Its pending uses and complete draft are kept; inspect the new current version.')
+      const baseline = overwritten ?? (document?.noteEditing?.baseline?.revision === original.revision ? document.noteEditing.baseline : observed.result.document.revision === original.revision ? observed.result.document : undefined)
+      if (!baseline || noteHistoryRevision(baseline.content) !== (overwritten?.revision ?? original.revision)) throw Error('The original sharing baseline is unconfirmed. Its draft and current file are kept.')
+      return { ...read, expectedResource: observed.resource, content: original.content, expectedRevision: overwritten?.revision ?? original.revision, baseContent: baseline.content, operationId: crypto.randomUUID() }
     }
     const destination = await prepare(destinationRead, surface.workspaceId, surface.path, currentRead.note.noteId)
     const params: FileShareParams = { operationId: crypto.randomUUID(), destination, promotions: [] }
+    const removed = removedSavedNoteIncludes(destination.baseContent!, destination.content)
+    if (removed.length) { params.undoReferenceIds = removed; params.preserveNoteIds = preserveNoteDrafts(state, key) }
     const sourceWrites = new Map<string, FileWriteParams>()
     for (const ticket of active) {
       if (params.promotions.some(value => value.operationId === ticket.operationId)) continue
@@ -2447,8 +2579,9 @@ async function enqueueFileSave(
   const initialSurface = target ?? fileSurface(initialTab, regionId)
   if (!initialSurface) return
   const key = documentKey(initialSurface.workspaceId, initialSurface.path)
-  if (!overwrite && (pendingNoteShares(key).size || originalNoteShareAttempt(key))) {
-    if (await enqueueNoteShareSave(tabId, regionId, target)) return
+  if (useAppStore.getState().documents[key]?.noteEditing?.shareUndo) { await useAppStore.getState().inspectNoteShareUndo(initialSurface.workspaceId, initialSurface.path); return }
+  if (pendingNoteShares(key).size || originalNoteShareAttempt(key)) {
+    if (await enqueueNoteShareSave(tabId, regionId, target, overwrite)) return
   }
   const queuedLifetime = documentLifetime(key)
   const previous = fileSaveTails.get(key) ?? Promise.resolve()
@@ -2508,7 +2641,13 @@ async function enqueueFileSave(
         resource: { hostId: savedResource.hostId, workspaceId: savedResource.id, workspacePath: savedResource.path, path: surface.path }, phase: 'sending',
         ...(baseContent === undefined ? {} : { baseContent }), ...(enhanced ? { enhanced: true } : {}) }
       const originalRegion = target ? undefined : fileSurface(tab, regionId)?.regionId
-      try { if (noteAttempt.noteId !== null && originalRegion) noteAttempt.target = (await readNoteHistoryTarget(tabId, originalRegion, noteAttempt.noteId)).target }
+      try {
+        if (noteAttempt.noteId !== null && originalRegion) noteAttempt.target = (await readNoteHistoryTarget(tabId, originalRegion, noteAttempt.noteId)).target
+        else if (noteAttempt.noteId !== null && target) {
+          const read = noteResourceReadParams(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? [], target)
+          noteAttempt.target = confirmNoteHistoryTarget(read, noteAttempt.noteId, await api.files.readPublic(read), surface.path).target
+        }
+      }
       catch { /* History discovery is independent; an unavailable observation cannot remove ordinary Files saving. */ }
       if (documentLifetime(currentKey) !== savedLifetime || !resourceWatch?.current() || !noteAttemptResourceCurrent(surface.workspaceId, surface.path, noteAttempt)) return
       const captured = noteAttempt
@@ -2516,6 +2655,8 @@ async function enqueueFileSave(
         noteEditing: { ...current.documents[currentKey]!.noteEditing, attempt: captured } } } }))
     }
     useAppStore.setState((current) => reduceDocumentSaving(current, surface.workspaceId, surface.path, true))
+    if (!overwrite && noteAttempt && await submitNoteShareUndo(currentKey, noteAttempt)) return
+    const undoMappingUnavailable = !overwrite && noteAttempt?.enhanced && Boolean(noteAttempt.baseContent) && !noteAttempt.target && removedSavedNoteIncludes(noteAttempt.baseContent!, noteAttempt.content).length > 0
     let result
     try {
       result = await api.files.write(surface.workspaceId, {
@@ -2539,6 +2680,8 @@ async function enqueueFileSave(
         const canonical = result.content !== undefined ? result.content
           : !result.contentUnavailable && noteHistoryRevision(document.content) === result.revision ? document.content : undefined
         await settleNoteWritten(surface.workspaceId, surface.path, savedLifetime, noteAttempt, { ...result, ...(canonical === undefined ? {} : { content: canonical }) }, resourceWatch?.current)
+        if (undoMappingUnavailable) useAppStore.setState(current => current.documents[currentKey] ? { documents: { ...current.documents, [currentKey]: { ...current.documents[currentKey]!, noteEditing: { ...current.documents[currentKey]!.noteEditing,
+          shareUndoReceipt: { operationId: noteAttempt.operationId, retained: [{ code: 'mapping-unconfirmed', message: 'The saved reference was removed. Shared-file cleanup was not checked: the original file mapping is unconfirmed.' }] } } } } } : current)
         void useAppStore.getState().invalidateScratchTopicPaths(surface.workspaceId, [surface.path])
         await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
         return
@@ -2613,7 +2756,7 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
     await drainNoteInput(initial.workspaceId, initial.path)
     const state = useAppStore.getState(), surface = fileSurface(state.tabs[tabId], regionId)
     if (!surface || documentKey(surface.workspaceId, surface.path) !== key || documentLifetime(key) !== lifetime) throw Error('The original history target changed. No action was sent.')
-    if (state.documents[key]?.noteEditing?.attempt || state.documents[key]?.noteEditing?.share) throw Error('The original Note request still needs reconciliation. Its operation and draft are retained; check that same request first.')
+    if (state.documents[key]?.noteEditing?.attempt || state.documents[key]?.noteEditing?.share || state.documents[key]?.noteEditing?.shareUndo) throw Error('The original Note request still needs reconciliation. Its operation and draft are retained; check that same request first.')
     const observed = await readNoteHistoryTarget(tabId, regionId, selected.target.noteId)
     if (JSON.stringify(observed.target) !== JSON.stringify(selected.target) || documentLifetime(key) !== lifetime) throw Error('The original history resource changed. Read that same Note before choosing another action.')
     const current = useAppStore.getState(), document = current.documents[key]
@@ -3671,7 +3814,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,
     recallZoneSelection: persistedSurveyZoneSelection(presentation.recallZoneSelection),
     surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
-    documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input || document.noteEditing?.share)),
+    documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input || document.noteEditing?.share || document.noteEditing?.shareUndo)),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings!,
       restoredWorkbench: projectPersistedWorkbench({ tabs: tabs!, layouts: layouts! }) } : {})
@@ -9026,7 +9169,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // A retained dirty draft remains in the original document projection, but a
       // hidden draft does not need a live filesystem observer or its child process.
       void api.files.unobserve(target.workspaceId, target.path)
-      if (state.dirtyDocuments[key] || state.documents[key]?.noteEditing?.share) return
+      if (state.dirtyDocuments[key] || state.documents[key]?.noteEditing?.share || state.documents[key]?.noteEditing?.shareUndo) return
       advanceDocumentLifetime(key)
       set(current => reconcileWorkbenchFileProjection(current, { tabs: current.tabs, layouts: current.layouts }))
     }
@@ -9055,7 +9198,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async saveNoteFile(target) {
     await enqueueFileSave('', false, undefined, target)
     const key = documentKey(target.workspaceId, target.path), state = get()
-    if (!hasFileDocumentConsumer(key) && !state.dirtyDocuments[key] && !state.documents[key]?.noteEditing?.share && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface => surface.kind === 'file' && documentKey(surface.workspaceId, surface.path) === key))) {
+    if (!hasFileDocumentConsumer(key) && !state.dirtyDocuments[key] && !state.documents[key]?.noteEditing?.share && !state.documents[key]?.noteEditing?.shareUndo && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface => surface.kind === 'file' && documentKey(surface.workspaceId, surface.path) === key))) {
       advanceDocumentLifetime(key)
       set(current => reconcileWorkbenchFileProjection(current, { tabs: current.tabs, layouts: current.layouts }))
     }
@@ -9077,11 +9220,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (inspected.mode !== 'request') return
       const result = parseFileShareResult(inspected.result, attempt.params)
       await applyNoteShareResult(key, attempt, result)
-      if (result.status === 'committed') return
+      if (result.status === 'committed' || result.status === 'partial') return
       // This explicit user action keeps the original operation and payload. The original owner
       // checks each durable phase before it can continue; an unknown write is never replayed here.
       await applyNoteShareResult(key, attempt, parseFileShareResult(await api.files.sharePublic(attempt.params), attempt.params))
     } catch (error) { await applyNoteShareResult(key, attempt, unconfirmedNoteShare(attempt.params, error)) }
+  },
+  async inspectNoteShareUndo(workspaceId, path) {
+    const key = documentKey(workspaceId, path), original = get().documents[key]?.noteEditing?.shareUndo
+    if (!original) return
+    try {
+      const inspected = await api.files.inspectSharePublic({ mode: 'undo', request: original.params })
+      if (inspected.mode === 'undo') await applyNoteShareUndoResult(key, original.params, parseFileShareUndoResult(inspected.result, original.params))
+    } catch (error) { await applyNoteShareUndoResult(key, original.params, unconfirmedNoteShareUndo(original.params, error)) }
+  },
+  async continueNoteShareUndo(workspaceId, path) {
+    const key = documentKey(workspaceId, path), original = get().documents[key]?.noteEditing?.shareUndo
+    if (!original) return
+    try {
+      const inspected = await api.files.inspectSharePublic({ mode: 'undo', request: original.params })
+      if (inspected.mode !== 'undo') return
+      const result = parseFileShareUndoResult(inspected.result, original.params)
+      await applyNoteShareUndoResult(key, original.params, result)
+      if (result.status === 'committed' || result.status === 'partial') return
+      await applyNoteShareUndoResult(key, original.params, parseFileShareUndoResult(await api.files.shareUndoPublic(original.params), original.params))
+    } catch (error) { await applyNoteShareUndoResult(key, original.params, unconfirmedNoteShareUndo(original.params, error)) }
   },
   updateDocument(tabId, content, regionId) {
     set(state => {
@@ -9111,7 +9274,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (index < 0) return state
       const selected = drafts[index]!
       // The chosen body becomes current, while its original request remains a retained fact.
-      const hasOriginalRequest = selected.noteEditing?.attempt || selected.noteEditing?.input || selected.noteEditing?.share
+      const hasOriginalRequest = selected.noteEditing?.attempt || selected.noteEditing?.input || selected.noteEditing?.share || selected.noteEditing?.shareUndo
       const remaining = hasOriginalRequest ? drafts : drafts.filter((_draft, position) => position !== index)
       return { documents: { ...state.documents, [key]: { ...document, content: selected!.content,
         ...(document.noteEditing ? { noteEditing: { ...document.noteEditing, input: undefined } } : {}),
@@ -9183,7 +9346,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async refreshDocument(workspaceId, path) {
     await refreshFileDocument(workspaceId, path)
   },
-  inspectNoteHistory: readNoteHistoryTarget,
+  inspectNoteHistory: (tabId, regionId, noteId) => readNoteHistoryTarget(tabId, regionId, noteId, true),
   applyNoteHistory: enqueueNoteHistoryAction,
   async launchBoardAgent(workspaceId, executorId, prompt, topicId) {
     await get().selectWorkspace(workspaceId)

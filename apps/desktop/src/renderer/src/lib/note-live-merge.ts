@@ -3,6 +3,7 @@ export { mergeLiveNote, type NoteLiveMerge } from '@agentmux/client-ui/note/note
 /** Live composition capabilities only; document bytes remain in the original File session. */
 const composing = new Map<string, Set<string>>()
 const completions = new Map<string, Set<() => void>>()
+export function hasNoteComposition(key: string): boolean { return Boolean(composing.get(key)?.size) }
 export function setNoteComposition(key: string, view: string, active: boolean): void {
   const views = composing.get(key) ?? new Set<string>()
   if (active) { views.add(view); composing.set(key, views); return }

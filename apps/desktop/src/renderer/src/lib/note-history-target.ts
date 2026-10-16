@@ -1,11 +1,23 @@
 import { parseFileReadResult, type FileReadParams, type FileReadResult, type FileHistoryParams } from '@agentmux/core/files'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
-import type { ScratchTopicSnapshot } from '../../../shared/contracts'
+import type { FileDocument, ScratchTopicSnapshot } from '../../../shared/contracts'
 import { zoneFileResource } from '../../../shared/zone-file-resource'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 
 export type NoteHistoryTarget = Omit<FileHistoryParams, 'limit' | 'before' | 'eventId' | 'includeContent'>
 export type NoteHistoryRead = { target: NoteHistoryTarget; document: Extract<FileReadResult['result'], { status: 'read' }>['document'] }
+export type NoteHistoryInspection = NoteHistoryRead | { target: NoteHistoryTarget; deleted: true }
+
+/** A confirmed missing path permits read-only history of the exact previously attributed Note. */
+export function confirmDeletedNoteHistoryTarget(params: FileReadParams, noteId: string, value: FileReadResult, expectedPath: string, original: FileDocument | undefined): NoteHistoryInspection | null {
+  const receipt = parseFileReadResult(value, params), provenance = original?.noteProvenance
+  if (receipt.result.status !== 'deleted' || !receipt.resource || receipt.resource.path !== expectedPath || !original || provenance?.status !== 'recorded' || provenance.noteId !== noteId || provenance.revision !== original.revision) return null
+  const actual = receipt.resource, prior = provenance.resource
+  if (prior.hostId !== actual.hostId || prior.workspaceId !== actual.workspaceId || prior.workspacePath !== actual.workspacePath || prior.path !== actual.path) return null
+  const header = readNoteMarkdownHeader(original.content)
+  if (header.status !== 'valid' || header.noteId !== noteId) return null
+  return { target: { zoneId: params.zoneId, ...(params.spaceId === undefined ? {} : { spaceId: params.spaceId }), path: params.path, expectedResource: actual, noteId }, deleted: true }
+}
 
 /** A candidate from this original File occurrence; only an actual read confirms it. */
 export function noteHistoryReadParams(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], tabId: string, regionId: string): FileReadParams {

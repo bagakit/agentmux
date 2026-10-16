@@ -1,5 +1,6 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { NoteSharedFileEditing } from './NoteSharedFileEditing'
+import { noteShareUndoRecoveryMessage } from '../lib/note-share-removal'
 import { noteHistoryReadParams } from '../lib/note-history-target'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
@@ -42,6 +43,8 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
   useEffect(() => () => setNoteComposition(key, occurrence, false), [key, occurrence])
   const document = useAppStore(state => presentation.active || displayed.current.key !== key ? state.documents[key] : displayed.current.document)
   const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
+  const saving = useAppStore(state => Boolean(state.savingDocuments[key]))
+  const sharedUndoIssue = useAppStore(state => state.documents[key]?.noteEditing?.shareUndo ? state.documentIssues[key] : undefined)
   const notes = useAppStore(useShallow(state => presentation.active || displayed.current.key !== key ? noteFilesFromDocuments(state.documents) : displayed.current.notes))
   if (presentation.active || displayed.current.key !== key) displayed.current = { key, document, notes }
   const knowledge = useMemo(() => noteKnowledge(loadedNoteFiles(notes), 'partial'), [notes])
@@ -174,6 +177,10 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
   }, [sharedNote, knowledge])
   if (!document) return null
   return <div className="note-surface" style={noteReadingStyle(config?.notes)}>
+
+    {document.noteEditing?.shareUndo ? <div className="note-knowledge-notice" role="status">{saving ? 'Saving this shared-reference removal…' : sharedUndoIssue && 'message' in sharedUndoIssue ? sharedUndoIssue.message : noteShareUndoRecoveryMessage(document.noteEditing)}
+      {!saving && <><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().inspectNoteShareUndo(surface.workspaceId, surface.path)}>Check this removal</button><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().continueNoteShareUndo(surface.workspaceId, surface.path)}>Continue this removal</button></>}
+    </div> : document.noteEditing?.shareUndoReceipt?.retained.length ? <div className="note-knowledge-notice" role="status">{document.noteEditing.shareUndoReceipt.status === 'partial' ? noteShareUndoRecoveryMessage(document.noteEditing) : [...new Set(document.noteEditing.shareUndoReceipt.retained.map(value => value.message))].join(' ')}</div> : null}
 
     {directoryFacts?.issues.length ? <div className="note-knowledge-notice" role="status">{directoryFacts.issues.map((issue, index) => <div key={index}>{issue}</div>)}</div> : null}
     {!blockPresentation ? <div className="note-knowledge-notice" role="status">Block selection recovery is unconfirmed for this display. Editing continues; restore its exact display position to resume selection recovery.</div> : null}

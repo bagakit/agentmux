@@ -3,7 +3,7 @@ import { parseFileReadParams, type FileReadParams } from '@agentmux/core/files'
 import { validateNoteDocument } from '@agentmux/client-ui/note/note-document-validation'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { isNoteWorkspaceRelativePath } from '@agentmux/core/note-format'
-import { NOTE_SCHEMA, readNoteDocument, serializeNoteDocument, type NoteInclude } from '../../../shared/note-document'
+import { NOTE_SCHEMA, readNoteDocument, serializeNoteDocument, type NoteDocument, type NoteInclude } from '../../../shared/note-document'
 import type { NoteFileTarget } from './file-document-consumers'
 const MIME = 'application/x-agentmux-note-share'
 export type { NoteShareCopy, PendingNoteShare } from '../../../shared/note-file-editing'
@@ -119,18 +119,34 @@ export function applyNoteDraftShareEcho(key: string, before: string, canonical: 
   if (previous.status !== 'valid' || next.status !== 'valid' || previous.note.noteId !== next.note.noteId) return
   const includes = new Set<string>(), visit = (node: JSONContent) => { if (node.type === 'noteInclude' && typeof node.attrs?.blockId === 'string') includes.add(node.attrs.blockId); node.content?.forEach(visit) }; visit(next.note.content)
   if (!sourceBlockIds.length || !sourceBlockIds.every(id => includes.has(id))) return
-  const normalized = serializeNoteDocument(previous.note)
-  const comparable = (node: JSONContent): string => JSON.stringify(node, (name, value) => name === 'provenance' ? undefined : value)
+  applyExactNoteDraftEcho(key, previous.note, next.note)
+}
+/** Only an original inverse-file receipt authorizes include-to-original structure, never a text resemblance. */
+export function applyNoteDraftRestoreEcho(key: string, before: string, canonical: string, sharedNoteId: string): void {
+  const previous = readNoteDocument(before), next = readNoteDocument(canonical)
+  if (previous.status !== 'valid' || next.status !== 'valid' || previous.note.noteId !== next.note.noteId) return
+  const roots = new Set<string>(), restored = new Set<string>()
+  const visit = (node: JSONContent) => { if (node.type === 'noteInclude' && node.attrs?.noteId === sharedNoteId && typeof node.attrs.blockId === 'string') roots.add(node.attrs.blockId); node.content?.forEach(visit) }; visit(previous.note.content)
+  const found = (node: JSONContent) => { if (node.type !== 'noteInclude' && typeof node.attrs?.blockId === 'string' && roots.has(node.attrs.blockId)) restored.add(node.attrs.blockId); node.content?.forEach(found) }; found(next.note.content)
+  if (!restored.size) return
+  applyExactNoteDraftEcho(key, previous.note, next.note)
+}
+function applyExactNoteDraftEcho(key: string, previous: NoteDocument, next: NoteDocument): void {
+  const normalized = serializeNoteDocument(previous)
+  const equivalent = (left: JSONContent, right: JSONContent): boolean => {
+    const attrs = (node: JSONContent) => Object.fromEntries(Object.entries(node.attrs ?? {}).filter(([name]) => name !== 'provenance' && (name !== 'blockId' || left.attrs?.blockId && right.attrs?.blockId)))
+    return left.type === right.type && left.text === right.text && JSON.stringify(left.marks) === JSON.stringify(right.marks) && JSON.stringify(attrs(left)) === JSON.stringify(attrs(right)) && (left.content?.length ?? 0) === (right.content?.length ?? 0) && (left.content ?? []).every((node, index) => equivalent(node, right.content![index]!))
+  }
   for (const editor of editors.get(key) ?? []) {
-    if (editor.isDestroyed || editor.view.composing || serializeNoteDocument({ ...previous.note, content: editor.getJSON() }) !== normalized) continue
-    const target = editor.schema.nodeFromJSON(next.note.content), current = editor.state.doc
+    if (editor.isDestroyed || editor.view.composing || serializeNoteDocument({ ...previous, content: editor.getJSON() }) !== normalized) continue
+    const target = editor.schema.nodeFromJSON(next.content), current = editor.state.doc
     let prefix = 0, suffix = 0, from = 0, end = current.content.size
-    while (prefix < current.childCount && prefix < target.childCount && comparable(current.child(prefix).toJSON()) === comparable(target.child(prefix).toJSON())) { from += current.child(prefix++).nodeSize }
-    while (suffix < current.childCount - prefix && suffix < target.childCount - prefix && comparable(current.child(current.childCount - suffix - 1).toJSON()) === comparable(target.child(target.childCount - suffix - 1).toJSON())) { end -= current.child(current.childCount - ++suffix).nodeSize }
+    while (prefix < current.childCount && prefix < target.childCount && equivalent(current.child(prefix).toJSON(), target.child(prefix).toJSON())) { from += current.child(prefix++).nodeSize }
+    while (suffix < current.childCount - prefix && suffix < target.childCount - prefix && equivalent(current.child(current.childCount - suffix - 1).toJSON(), target.child(target.childCount - suffix - 1).toJSON())) { end -= current.child(current.childCount - ++suffix).nodeSize }
     let targetFrom = 0, targetEnd = target.content.size
     for (let index = 0; index < prefix; index++) targetFrom += target.child(index).nodeSize
     for (let index = 0; index < suffix; index++) targetEnd -= target.child(target.childCount - index - 1).nodeSize
-    editor.view.dispatch(editor.state.tr.replaceWith(from, end, target.content.cut(targetFrom, targetEnd)).setMeta('noteRemoteSnapshot', true).setMeta('preventUpdate', true).setMeta('addToHistory', false))
+    editor.view.dispatch(editor.state.tr.replaceWith(from, end, target.content.cut(targetFrom, targetEnd)).setMeta('noteRemoteSnapshot', true).setMeta('noteSharedReceiptEcho', true).setMeta('preventUpdate', true).setMeta('addToHistory', false))
   }
 }
 

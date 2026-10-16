@@ -12,6 +12,9 @@ export type NoteFileEditing = {
   shares?: Record<string, PendingNoteShare>
   /** The whole original first-use intent survives settlement of any individual file. */
   share?: { params: import('@agentmux/core/files').FileShareParams; references: string[] } | undefined
+  /** Removal and optional collection are one original intent, independently of one file receipt. */
+  shareUndo?: { params: import('@agentmux/core/files').FileShareUndoParams } | undefined
+  shareUndoReceipt?: { operationId: string; status?: import('@agentmux/core/files').FileShareUndoResult['status']; retained: { noteId?: string; code: string; message: string }[] } | undefined
 }
 export type NoteShareCopy = { version: 1; source: NoteResource & { noteId: string }; read?: import('@agentmux/core/files').FileReadParams; block: { path: number[]; fingerprint: string; blockId?: string }; proposalId?: string; include?: import('./note-document').NoteInclude }
 export type PendingNoteShare = { copy: NoteShareCopy; operationId: string; include: import('./note-document').NoteInclude }
