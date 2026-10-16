@@ -21,4 +21,5 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-submission
     if (process.env.AGENTMUX_SUBMISSION_LOADED) appendFileSync(process.env.AGENTMUX_SUBMISSION_LOADED, JSON.stringify({ path, mutation: mutation ?? null, originalSHA256: sha(source), sha256: sha(code) }) + '\n')
     return code === source ? undefined : { code, map: null }
   }
-}], test: { ...base.test, include: ['apps/desktop/test/conversation-submission-presentation.test.tsx', 'apps/desktop/test/conversation-source-labels.test.tsx', 'apps/desktop/test/conversation-submission-reader.test.tsx'], passWithNoTests: false } })
+}], test: { ...base.test, css: { include: [/conversation-message(?:-disclosure)?\.css/u] },
+  include: ['apps/desktop/test/conversation-submission-presentation.test.tsx', 'apps/desktop/test/conversation-source-labels.test.tsx', 'apps/desktop/test/conversation-submission-reader.test.tsx'], passWithNoTests: false } })

@@ -18,6 +18,7 @@ import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { getSelection()?.removeAllRanges(); for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const wait = (check: () => void) => vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) }); check() }, { timeout: 8000 })
+const openOriginal = async (row: Element) => act(async () => { const detail = row.querySelector<HTMLDetailsElement>('details')!; detail.open = true; detail.dispatchEvent(new Event('toggle')) })
 const prose = '同一份原始输入 **selected words**。\n\n完整第二段与长内容保持可读。'
 const native = (id: string) => ({ type: 'user', uuid: id, sessionId: 'native-main', message: { role: 'user', content: prose } })
 async function fixture(surface: 'desktop' | 'shared' = 'desktop', initiallyEmpty = false, anotherTarget = false) {
@@ -55,7 +56,8 @@ it('the actual source read drives only its exact unread submission, then preserv
   expect(s.row().querySelector('[data-icon-animation]')).toBeNull()
   expect(s.row('unknown-submission').querySelector('[data-icon-animation]')).toBeNull()
   const disclosure = s.row().querySelector<HTMLDetailsElement>('details')!
-  expect(disclosure.open).toBe(true)
+  expect(disclosure.open).toBe(false); expect(s.row().querySelector('.log-turn__body')).toBeNull()
+  expect(disclosure.querySelector('.message-disclosure__preview')?.textContent).toContain('完整第二段')
   const oldRef = s.row().dataset.conversationItemRef
   const initial = await vi.mocked(api.conversation.readAgentConversation).mock.results[0]!.value
   let settled: unknown
@@ -80,11 +82,15 @@ it('the actual source read drives only its exact unread submission, then preserv
   expect(s.row()).toBeNull()
   const card = s.host.querySelector('[data-native-record-id="exact-native"]')!
   expect(card.querySelectorAll('[data-submission-record]')).toHaveLength(1)
+  const summary = card.querySelector('[data-submission-record] summary')!
+  expect(summary.textContent).toContain('消息发送'); expect(summary.textContent).toContain('已进入对话')
+  expect(summary.querySelector('time')).not.toBeNull()
   expect(card.querySelector('[data-icon-animation]')).toBeNull()
   expect(s.row('failed-submission').textContent).toContain('提交失败')
   expect(card.querySelector('.log-turn__body')!.textContent).toContain('完整第二段')
-  const original = card.querySelector<HTMLDetailsElement>('[data-original-contribution]')!
-  await act(async () => { original.open = true; original.dispatchEvent(new Event('toggle')) })
+  const original = card.querySelector<HTMLElement>('[data-submission-record]')!
+  expect(original.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
+  await openOriginal(original)
   expect(original.querySelector('[data-conversation-item-ref]')?.getAttribute('data-conversation-item-ref')).toBe(oldRef)
   expect(s.row('unknown-submission')).not.toBeNull()
   expect(s.row('unknown-submission').querySelector('[data-icon-animation]')).toBeNull()
@@ -95,6 +101,7 @@ it('the actual source read drives only its exact unread submission, then preserv
 
 it('a real failed original read stops submission activity and preserves the original body and Retry', async () => {
   const s = await fixture()
+  await openOriginal(s.row())
   let reject!: (error: Error) => void, entered!: () => void
   const entry = new Promise<void>(resolve => { entered = resolve })
   vi.mocked(api.conversation.readConversationChanges).mockImplementationOnce(async () => { entered(); return new Promise((_resolve, decline) => { reject = decline }) })
@@ -171,6 +178,7 @@ it('a selected original keeps its displayed row through a later accepted exact n
   await appendFile(s.f.path, jsonl([native('exact-native'), native('second-native')]))
   await s.publish(); await entry
   await wait(() => expect(s.row().querySelector('[data-icon-animation="spin"]')).not.toBeNull())
+  await openOriginal(s.row()); await openOriginal(s.row('second-submission'))
   const otherDetail = s.row('second-submission').querySelector<HTMLDetailsElement>('details')!, otherBody = s.row('second-submission').querySelector('.log-turn__body')!
   const row = s.row(), detail = row.querySelector<HTMLDetailsElement>('details')!, body = row.querySelector('.log-turn__body')!
   const text = body.querySelector('strong')!.firstChild!, range = document.createRange()
@@ -188,9 +196,12 @@ it('a selected original keeps its displayed row through a later accepted exact n
 })
 
 
-it('an unrelated first native card cannot fold an automatically expanded unknown submission around its Range', async () => {
+it('an unrelated first native card preserves an explicitly opened unknown submission and its Range', async () => {
   const s = await fixture('shared', true)
-  const row = s.row('unknown-submission'), detail = row.querySelector<HTMLDetailsElement>('details')!, body = row.querySelector('.log-turn__body')!
+  const row = s.row('unknown-submission'), detail = row.querySelector<HTMLDetailsElement>('details')!
+  expect(detail.open).toBe(false); expect(row.querySelector('.log-turn__body')).toBeNull()
+  await openOriginal(row)
+  const body = row.querySelector('.log-turn__body')!
   expect(detail.open).toBe(true)
   const text = body.querySelector('strong')!.firstChild!, range = document.createRange(); range.selectNodeContents(text); getSelection()!.addRange(range)
   await appendFile(s.f.path, jsonl([native('first-unrelated-native')]))
@@ -200,5 +211,5 @@ it('an unrelated first native card cannot fold an automatically expanded unknown
   expect(detail.open).toBe(true); expect(getSelection()!.getRangeAt(0)).toBe(range)
   expect(row.querySelector('[data-icon-animation]')).toBeNull()
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
-  await wait(() => expect(detail.open).toBe(false))
+  await wait(() => expect(detail.open).toBe(true))
 })

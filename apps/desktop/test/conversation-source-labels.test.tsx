@@ -47,7 +47,7 @@ it('equal text and bare IDs stay independent with explicit unconfirmed source re
  const p=page([{...native('native',[{kind:'text',text:item.content!}]),kind:'user-message' as never}])
  await render(<ConversationView sessionId={sid} executionHostId="remote-route" page={p} timeline={timeline([item])}/>)
  expect(host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(2)
- expect(labels(host)).toContain('native');expect(host.textContent).not.toContain('跨来源关联未确认');expect(host.textContent).toContain('发送记录')
+ expect(labels(host)).toContain('native');expect(host.textContent).not.toContain('跨来源关联未确认');expect(host.textContent).toContain('消息发送')
  const submission = host.querySelector<HTMLDetailsElement>('[data-submission-id] .message-disclosure')!
  expect(submission.open).toBe(false)
  expect([...host.querySelectorAll('.log-turn__body')].map(n=>n.textContent)).toEqual(['Equal original input'])

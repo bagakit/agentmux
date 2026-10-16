@@ -155,6 +155,31 @@ it('reports unopened original-contribution disclosures without attributing their
   expect(sample.message).toBe(true); expect(sample.messageExposed).toBe(false); expect(sample.open).toBe(false)
 })
 
+it('observes the compact native send contribution at its original captured identity', async () => {
+  const x = await fixture(), sid = x.f.session.agentSessionId
+  const source = { providerId: 'claude', nativeSessionId: 'native-main' }
+  const nativeRef = { hostId: 'local', agentSessionId: sid, source: { kind: 'native' as const, ...source, recordId: 'native-input' } }
+  const capturedRef = { hostId: 'local', agentSessionId: sid, source: { kind: 'captured' as const, recordId: 'captured-input' } }
+  const item: AgentTimelineItem = { id: capturedRef.source.recordId, agentSessionId: sid, kind: 'user_message', source: 'user', status: 'complete',
+    title: 'Original submission', content: 'Original captured body', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), conversation: { sameEvent: nativeRef } }
+  const page = { agentSessionId: sid, sourceHostId: 'local', source, nextCursor: null, items: [
+    { id: nativeRef.source.recordId, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: 'Native readable body' }] }
+  ] }
+  const projection = projectConversationReading({ agentSessionId: sid, executionHostId: 'local', historyPage: page, timeline: { agentSessionId: sid, sourceHostId: 'local', revision: 1, items: [item] } })
+  await act(async () => x.root.render(<ConversationView sessionId={sid} executionHostId="local" page={page} records={projection.records} originalRecords={projection.originalRecords} coverage={projection.timeline.coverage} />))
+  expect(x.host.querySelectorAll('[data-conversation-event-id]')).toHaveLength(1)
+  const detail = x.host.querySelector<HTMLDetailsElement>('.conversation-submission details')!
+  expect(detail).not.toBeNull()
+  const sample = () => conversationRenderedObservation(x.host, sid, [nativeRef, capturedRef], 'local')
+  expect(sample().map(value => [value.message, value.disclosure, value.open])).toEqual([[true, false, null], [false, true, false]])
+  await act(async () => { detail.open = true; detail.dispatchEvent(new Event('toggle')) })
+  expect(sample()[1]).toMatchObject({ message: true, messageExposed: true, disclosure: true, open: true })
+  await act(async () => { detail.open = false; detail.dispatchEvent(new Event('toggle')) })
+  expect(sample()[1]).toMatchObject({ message: true, messageExposed: false, disclosure: true, open: false })
+  expect(conversationRenderedObservation(x.host, sid, [{ ...capturedRef, hostId: 'another-host' }], 'local')[0]).toMatchObject({ message: false, disclosure: false, open: null })
+  expect(x.f.controls.map(value => value.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+})
+
 it('applies the displayed reference fence to committed inspection after a Session switch', async () => {
   const x = await fixture()
   let view!: ReturnType<typeof useConversationView>, sampled!: ReturnType<ReturnType<typeof useConversationView>['inspect']>
