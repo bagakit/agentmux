@@ -516,7 +516,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             : <MailboxEmpty title="The original Agent and Host are not yet known" /> : null}
         </div>
       })}
-      <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} hidden={folder !== 'user'}>
+      <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading)} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
           <InputMailboxRecords mailbox={userInputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
             renderLocal={item => {

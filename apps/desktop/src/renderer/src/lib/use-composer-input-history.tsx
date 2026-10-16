@@ -9,6 +9,7 @@ import { api } from './api'
 import { copyTextToClipboard } from './clipboard-copy'
 import { useAppStore } from '../store'
 import { useSessionUserMessages } from './session-user-messages'
+import { userInputHistoryMessages } from './user-input-history'
 
 const EMPTY: readonly string[] = Object.freeze([])
 const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
@@ -46,10 +47,15 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
   const nativeMessages = native.sourceMessages.length ? native.sourceMessages : EMPTY_MESSAGES
   const initialMessages = useMemo(() => [...nativeMessages.filter(message => message.source.kind === 'native'), ...captured], [nativeMessages, captured])
   const history = useAgentInputHistory({ scope, enabled, read, initialMessages })
+  // Apply the current accepted entity membership after every original query/page,
+  // including search. Raw source seeds never acquire an author of their own.
+  const userMessages = useMemo(() => userInputHistoryMessages(history.messages, native.messages,
+    { hostId: control?.hostId ?? '', agentSessionId: sid }), [history.messages, native.messages, control?.hostId, sid])
+  const userHistory = { ...history, messages: userMessages, loading: history.loading || native.loading }
   useEffect(() => () => action.current?.abort(), [scope, visible, mailboxOpen, history.query])
   const local = useAppStore(state => state.agentComposerHistory[sessionId] ?? EMPTY)
-  const entries = useMemo(() => [...history.messages.filter(message => message.author.kind !== 'agent' &&
-    message.contentParts.every(part => part.kind === 'text')).map(message => message.content).reverse(), ...local], [local, history.messages])
+  const entries = useMemo(() => [...userMessages.filter(message =>
+    message.contentParts.every(part => part.kind === 'text')).map(message => message.content).reverse(), ...local], [local, userMessages])
   const resourceReader = useCallback(async (request: AgentSessionHistoryResourceRequest) => {
     if (!control) throw new Error('原 Agent 资源来源未提供。')
     return api.sessions.historyResource(control, request)
@@ -97,7 +103,7 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
     assertCurrent(controller)
     return copyRecordedText(result.text)
   }
-  return { history, localEntries: local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse(),
+  return { history: userHistory, localEntries: local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse(),
     fill, fillText, fillLocal, copy, canFill: visible && !readOnly, resourceReader,
-    entries, messages: history.messages, setMailboxOpen, setFocused }
+    entries, messages: userMessages, setMailboxOpen, setFocused }
 }
