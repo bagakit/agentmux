@@ -13,7 +13,7 @@ import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgent
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 const dom = composerDOM({ agentInformation: true }), agent = composerSession('pinned-agent'), neighbor = composerSession('neighbor-agent')
 const workspace = composerConfig.workspaces[0]!, onOpen = vi.fn(), dispose = vi.fn()
 let conversation: Awaited<ReturnType<typeof agentCardConversationFixture>>
@@ -167,10 +167,15 @@ it('expires a visible pinned work signal at the Core boundary without changing t
     const original = panel(), prose = original.querySelector('.focus-context-hover__recap p'), reads = vi.mocked(api.sessions.historyPage).mock.calls.length
     expect(original.querySelector('.focus-context-hover__state-label')?.textContent).toContain('Working')
     await act(async () => vi.advanceTimersByTime(msUntilSemanticStatusStale(status, Date.now()) + 1000))
-    expect(panel()).toBe(original); expect(panel().textContent).toContain('Work signal expired')
+    expect(panel()).toBe(original); expect(panel().querySelector('.agent-information-reader__status')!.textContent).toContain('Activity signal expired')
     expect(panel().querySelector('.focus-context-hover__state-label')?.textContent).not.toContain('Working')
     expect(panel().querySelector('.focus-context-hover__recap p')).toBe(prose)
     expect(api.sessions.historyPage).toHaveBeenCalledTimes(reads)
+    await act(async () => original.querySelector<HTMLButtonElement>('.agent-information-reader__status')!.click())
+    expect(original.textContent).toContain('Last confirmed')
+    expect(original.textContent).toContain('Prompt readiness')
+    await act(async () => original.querySelector<HTMLButtonElement>('[aria-label="Back to original content"]')!.click())
+    expect(original.querySelector('.focus-context-hover__recap p')).toBe(prose)
   } finally { vi.useRealTimers() }
 })
 

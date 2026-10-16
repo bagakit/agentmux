@@ -13,7 +13,7 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 import * as Modal from '@agentmux/client-ui/components/Modal'
 import { DocumentOverlayPortal } from '../src/renderer/src/components/WindowOverlayHost'
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 const dom = composerDOM({ agentInformation: true }), agent = composerSession('pinned-interaction')
 const timeline = { agentSessionId: agent.id, revision: 1, items: [{ id: 'reply', agentSessionId: agent.id, kind: 'assistant_message' as const, source: 'native-hook' as const, status: 'complete' as const, title: 'Reply', content: 'Original reply.', createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }] }
 const panel = () => document.querySelector<HTMLElement>('.agent-information-reader')!

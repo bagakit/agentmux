@@ -12,7 +12,7 @@ import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 const dom = composerDOM({ agentInformation: true }), base = composerSession('image-display')
 const agent = { ...base, control: { ...base.control, agentSessionId: 'canonical-image-reader' } }
 const neighbor = { ...composerSession('neighbor-image-display'), hostId: 'neighbor-host', control: { ...agent.control, hostId: 'neighbor-host' } }

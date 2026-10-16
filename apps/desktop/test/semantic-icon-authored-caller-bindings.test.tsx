@@ -93,7 +93,7 @@ it('idle Focus uses the original observation instead of claiming the Agent was p
   expect(dom.container.querySelector('[data-icon-animation]')).toBeNull()
   expect(session.processState).toBe('running')
   await dom.render(<FocusContextStateMark context={{ ...contexts[0]!, activitySemantic: 'unknown' }} />)
-  drawing(dom.container, 'status.unknown')
+  drawing(dom.container, 'status.presence-unknown')
 })
 
 it('unknown executor remains unknown while the original launch prompt and actions remain available', async () => {

@@ -10,7 +10,7 @@ import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
@@ -60,7 +60,7 @@ beforeEach(async () => {
 it.each(['focus', 'workspace'] as const)('%s consumes shared usage, exact Goal and original message relationships only on disclosure', async surface => {
   await mount(); expect(api.sessions.historyPage).not.toHaveBeenCalled(); expect(api.sessions.dispatches).not.toHaveBeenCalled()
   expect(card(surface).querySelector('button')).toBeNull()
-  await open(surface); expect(panel().textContent).toContain('75% context left'); expect(panel().textContent).toContain('540k tokens')
+  await open(surface); expect(panel().querySelector('[title="75% context remaining"]')).not.toBeNull(); expect(panel().textContent).toContain('540k tokens')
   expect(api.sessions.dispatches).not.toHaveBeenCalled()
   await disclose('Usage'); expect(panel().querySelector('[data-agent-usage-scope="native-session"]')!.textContent).toContain('540k')
   expect(panel().querySelector('[data-agent-usage-scope="response"]')!.textContent).toContain('1.5k')
@@ -81,7 +81,7 @@ it('retains the original reply DOM and selection while usage updates in the shar
   window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range); const selected = window.getSelection()!.toString()
   const count = vi.mocked(api.sessions.historyPage).mock.calls.length
   await act(async () => useAppStore.setState({ sessions: [{ ...agent, turnUsage: { ...usage, context: { usedTokens: 16000, capacityTokens: 32000 } } }] }))
-  expect(panel().textContent).toContain('50% context left'); expect(panel().querySelector('.focus-context-hover__recap p')).toBe(reply)
+  expect(panel().querySelector('[title="50% context remaining"]')).not.toBeNull(); expect(panel().querySelector('.focus-context-hover__recap p')).toBe(reply)
   expect(window.getSelection()!.toString()).toBe(selected); expect(api.sessions.historyPage).toHaveBeenCalledTimes(count); expect(api.sessions.dispatches).not.toHaveBeenCalled()
 })
 it('does not infer communication from a native body prefix or claim exhaustive absence', async () => {
