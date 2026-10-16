@@ -19,7 +19,7 @@ const tests = [targetTest, spatialTest, 'apps/desktop/test/new-tab-resource-cont
   'apps/desktop/test/workbench-tabs.test.ts', 'apps/desktop/test/workbench-region-store.test.ts',
   'apps/desktop/test/session-connecting-surface.test.tsx']
 const product = ['components/NewTabSurface.tsx', 'components/LauncherEnvironment.tsx',
-  'components/LauncherExecutionPicker.tsx', 'components/LauncherFileReferences.tsx',
+  'components/LauncherExecutionPicker.tsx', 'components/ComposerFileReferences.tsx',
   'lib/launcher-workspace.ts', 'lib/note-creation.ts', 'lib/session-state.ts',
   'lib/desktop-spatial-state.ts', 'lib/control.ts', 'lib/workbench-tabs.ts',
   'lib/workbench-resource-display.ts', 'store.ts', 'styles/launcher.css'].map(source)
@@ -129,7 +129,7 @@ if (mode === '--source') {
     console.log(`${mutation.id}: Assertion RED / exact restore GREEN`)
   }
   const definitions = [['resolveLauncherWorkspaceId', 'lib/launcher-workspace.ts'], ['setLauncherExecutionWorkspace', 'store.ts'],
-    ['LauncherExecutionPicker', 'components/LauncherExecutionPicker.tsx'], ['LauncherFileReferences', 'components/LauncherFileReferences.tsx'],
+    ['LauncherExecutionPicker', 'components/LauncherExecutionPicker.tsx'], ['ComposerFileReferences', 'components/ComposerFileReferences.tsx'],
     ['desktopSpatialGraph', 'lib/desktop-spatial-state.ts'], ['desktopWorkbenchFromSpatial', 'lib/desktop-spatial-state.ts'],
     ['workbenchTabDisplayWorkspaceId', 'lib/workbench-resource-display.ts'], ['reduceSessionLaunchFailed', 'lib/session-state.ts'],
     ['planControlOpen', 'lib/control.ts']]

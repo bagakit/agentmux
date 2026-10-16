@@ -7,7 +7,7 @@ import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '../../..'), prefix = 'apps/desktop/src/renderer/src/'
 const owner = 'apps/desktop/src/main/workspace-files.ts', factory = 'apps/desktop/src/main/host-factory.ts'
-const launcher = prefix + 'components/LauncherFileReferences.tsx', hook = prefix + 'components/file-tree/useWorkspaceFileTree.ts'
+const launcher = prefix + 'components/ComposerFileReferences.tsx', hook = prefix + 'components/file-tree/useWorkspaceFileTree.ts'
 const explorer = prefix + 'components/FileExplorer.tsx'
 const tests = ['apps/desktop/test/remote-workspace-read-resilience.test.ts', 'apps/desktop/test/remote-workspace-read-resilience.test.tsx']
 const helper = 'apps/desktop/test/helpers/remote-directory-fixture.ts', fixture = 'apps/desktop/test/fixtures/delayed-workspace-ssh.mjs'
@@ -45,7 +45,7 @@ async function productionCallers() {
     { definition: owner, file: callers[0], call: 'files.readDirectory' },
     { definition: factory, file: callers[1], call: 'createExecutionHost' },
     { definition: callers[0], file: callers[2], call: 'ipcRenderer.invoke', firstArgument: 'files:readDirectory' },
-    { definition: launcher, file: callers[3], jsx: 'LauncherFileReferences' },
+    { definition: launcher, file: callers[3], jsx: 'ComposerFileReferences' },
     { definition: hook, file: explorer, call: 'useWorkspaceFileTree' },
     { definition: hook, file: callers[4], call: 'useWorkspaceFileTree' }
   ]

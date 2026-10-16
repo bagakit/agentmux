@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
-import { LauncherFileReferences } from '../src/renderer/src/components/LauncherFileReferences'
+import { ComposerFileReferences } from '../src/renderer/src/components/ComposerFileReferences'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { AgentMuxError } from '../../../packages/core/src/errors'
@@ -46,7 +46,7 @@ const retry = async () => {
 }
 
 it('Launcher retains same-resource files throughout a pending refresh, timeout and successful Retry', async () => {
-  await dom.render(<LauncherFileReferences workspace={f.workspace} onSelect={() => {}} onClose={() => {}} />)
+  await dom.render(<ComposerFileReferences workspace={f.workspace} onSelect={() => {}} onClose={() => {}} />)
   await waitForRead(() => expect(refRow()).not.toBeNull())
   let fail!: (error: Error) => void
   vi.spyOn(f.host, 'run').mockImplementationOnce(async () => await new Promise((_resolve, reject) => { fail = reject }))
@@ -64,14 +64,14 @@ it('Launcher retains same-resource files throughout a pending refresh, timeout a
 }, 15000)
 
 it('Launcher excludes old files and late results when the same Workspace changes original Host or root', async () => {
-  await dom.render(<LauncherFileReferences workspace={f.workspace} onSelect={() => {}} onClose={() => {}} />)
+  await dom.render(<ComposerFileReferences workspace={f.workspace} onSelect={() => {}} onClose={() => {}} />)
   await waitForRead(() => expect(refRow()).not.toBeNull())
   let complete!: (value: Awaited<ReturnType<typeof api.files.readDirectory>>) => void
   vi.mocked(api.files.readDirectory).mockImplementationOnce(async () => await new Promise(resolve => { complete = resolve }))
   await click('[aria-label="Refresh project files"]')
   const replacement = { ...f.workspace, hostId: 'replacement-host', path: _hygiene_fixturePath("replacement/project") }
   vi.mocked(api.files.readDirectory).mockResolvedValueOnce([{ name: 'replacement.md', path: 'replacement.md', isDirectory: false, isSymlink: false }])
-  await dom.render(<LauncherFileReferences workspace={replacement} onSelect={() => {}} onClose={() => {}} />)
+  await dom.render(<ComposerFileReferences workspace={replacement} onSelect={() => {}} onClose={() => {}} />)
   expect(refRow(), 'Changed resources must never display the old resource files').toBeNull()
   await act(async () => complete([{ name: 'old-late.md', path: 'old-late.md', isDirectory: false, isSymlink: false }]))
   expect(document.querySelector('[data-reference-path="old-late.md"]')).toBeNull()
