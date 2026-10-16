@@ -1,3 +1,4 @@
+export { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './agent-session-restart.js'
 export * from './agent-terminal-frontend.js'
 export { mintObjectId, deriveObjectId, isObjectId } from './object-id.js'
 export * from './agent-provider.js'

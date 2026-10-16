@@ -451,6 +451,28 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (result.state === 'active') parseRpcAgentSession(result.session)
         return result as unknown as Record<string, unknown>
       }
+      case 'agent.restart': {
+        record(p, ['session'])
+        const session = parseRpcAgentSession(p.session), expected = record(input.expectedRun)
+        const operation = session.continuityOperations?.[String(input.operationId)]
+        if (session.agentSessionId !== input.agentSessionId || !operation || operation.action !== 'restart' ||
+          operation.previousRun.runId !== expected.runId || operation.kind !== 'resumed' || operation.newRun?.runId !== session.run.runId || session.run.runId === expected.runId) fail()
+        break
+      }
+      case 'agent.restart.inspect': {
+        record(p, ['agentSessionId', 'operationId', 'expectedRun', 'previousRun', 'phase', 'canRetry', 'session', 'newRun', 'observedAt', 'detail', 'failure'])
+        if (p.agentSessionId !== input.agentSessionId || p.operationId !== input.operationId ||
+          record(p.expectedRun).runId !== record(input.expectedRun).runId || record(p.previousRun).runId !== record(input.expectedRun).runId ||
+          !['not-found', 'stopping', 'starting', 'restarted', 'failed', 'unconfirmed'].includes(String(p.phase)) || typeof p.canRetry !== 'boolean') fail()
+        count(p.observedAt)
+        if (p.detail !== undefined) text(p.detail)
+        if (p.session !== undefined && parseRpcAgentSession(p.session).agentSessionId !== input.agentSessionId) fail()
+        if (p.newRun !== undefined) { if (typeof record(p.newRun).runId !== 'string' || record(p.newRun).runId === record(input.expectedRun).runId) fail() }
+        if (p.phase === 'restarted' && (!p.newRun || p.canRetry !== false)) fail()
+        if (p.failure !== undefined) { const failure = record(p.failure, ['code', 'message', 'observedAt']); string(failure.code); text(failure.message); count(failure.observedAt); if (p.phase !== 'failed') fail() }
+        if (p.phase === 'failed' && (!p.newRun || !p.failure || p.canRetry !== false)) fail()
+        break
+      }
       case 'agent.refresh': {
         record(p, ['session'])
         const session = parseRpcAgentSession(p.session)
