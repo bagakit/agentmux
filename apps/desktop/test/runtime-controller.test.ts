@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixtureEpoch: _newTailFixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath as _tail_fixturePath } from '../../../test/fixture-values.mjs'
@@ -317,6 +318,7 @@ type RuntimeController = SourceRuntimeController
 import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler.js'
 
 const store: AgentMuxAgentSessionStore = {
+  readRetiredAgentSession: async () => null,
   async load() { return [] },
   async loadMetadata() { return [] },
   async loadRetiredRuns() { return [] },
@@ -1427,6 +1429,23 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.stopAgent).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])('delivers the exact Core recovery result without an event projection (changed Run: %s)', async changed => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!, original = agentStatusFixture()
+    const run = { ...original.run, state: 'running' as const, pid: 42 }
+    client.agentSession.mockImplementation(() => { throw new AgentMuxError('Original event observation is unconfirmed.', 'RUNTIME_UNAVAILABLE') })
+    client.ensureAgentContinuity.mockResolvedValue({ kind: 'reattachable', session: original.session,
+      previousRun: original.session.run, run, evidence: { kind: 'run-running', observedAt: run.observedAt } })
+    const canonicalRun = changed ? { ...run, runId: 'new-canonical-run' } : run
+    client.runtimeSubject.mockResolvedValue({ subjectId: 'agent:local:agent-1', kind: 'agent', hostId: 'local',
+      providerId: original.session.providerId, executorId: original.session.executorId,
+      workspacePath: original.session.workspacePath, agentSession: { ...original.session, run: { runId: canonicalRun.runId } }, run: canonicalRun })
+    const result = controller.recoverSession({ kind: 'agent', hostId: 'local', agentSessionId: 'agent-1', run: original.session.run },
+      localConfig, undefined, 'original-exact-recovery', { trigger: 'manual' })
+    if (changed) await expect(result, 'a changed canonical Run cannot impersonate the original Core recovery result').rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    else await expect(result, 'an unconfirmed event projection cannot refuse the exact Core recovery result').resolves.toMatchObject({ kind: 'reattachable', session: { id: 'agent-1', control: { run: original.session.run } } })
+    await controller.dispose()
+  })
+
   it.each(['resumeSession', 'recoverSession'] as const)(
     'fails %s closed when an existing Executor was rebound to another Provider',
     async (operation) => {
@@ -2279,12 +2298,12 @@ describe('RuntimeController configuration transaction', () => {
     const client = runtimeFixture.FakeClient.instances[0]!
     const status = agentStatusFixture()
     // 一个远早于「现在」的时刻：真实场景里它是 hook 最后一次说话的时间。
-    const lastHeardFrom = 1_000
+    const lastHeardFrom = _tailFixtureEpoch(0, 0, 1_000)
     // 进程台账自己的观测时刻必须**与上面那个不同**：投影里 `const observedAt = run.observedAt`
     // （runtime-controller.ts:159），所以「把语义状态的时刻盖成进程时刻」这个变异，只有在两者
     // 取值不同时才是可观测的改动。实测两者都填 1000 时，那次变异是恒等替换，42 条照旧全绿——
     // fixture 自己让被测的缺陷变成了 no-op。
-    const processObservedAt = 900_000
+    const processObservedAt = _tailFixtureEpoch(0, 0, 900_000)
     client.runtimeProjection.mockResolvedValue({
       hostId: 'local',
       subjects: [{

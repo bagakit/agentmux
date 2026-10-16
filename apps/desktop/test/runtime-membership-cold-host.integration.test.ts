@@ -219,6 +219,13 @@ it('cold actual Host/Main delivers original Agent and Terminal attachments befor
       .rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
   } finally { await rpc.dispose() }
   const healthyControl = opening.snapshot!.sessions.find(session => session.id === healthy.agentSessionId)!.control
+  const recoveringOriginal = controller.recoverSession(healthyControl, config, undefined, 'private-cold-main-recover', { trigger: 'manual' })
+    .then(value => ({ value }), error => ({ error }))
+  const recoveredOriginal = await Promise.race([recoveringOriginal, sessionObservation.promise.then(() => ({ unrelatedRecovery: true }))])
+  if (!('value' in recoveredOriginal)) { release.resolve(); await recoveringOriginal }
+  expect(recoveredOriginal, `Main recovery must not wait for unrelated full Session observation: ${'error' in recoveredOriginal ? String(recoveredOriginal.error) : ''}`).toHaveProperty('value')
+  if ('value' in recoveredOriginal) expect(recoveredOriginal.value).toMatchObject({ kind: 'reattachable',
+    session: { id: healthy.agentSessionId, control: { run: healthy.run } } })
   await expect(controller.attachSession(contents.id, { ...healthyControl, run: { runId: raw.runId } }, 0, config))
     .rejects.toThrow('Session control changed before its exact Run Attachment was established')
   await until(() => kernel.hasAttachment(healthy.run.runId), value => !value, 'wrong Run Attachment rollback')
@@ -251,6 +258,57 @@ it('cold actual Host/Main delivers original Agent and Terminal attachments befor
   expect(degraded.terminalCapability?.reason).toBe('handshake-unconfirmed')
   console.info('PRIVATE_ORIGINAL_ATTACHMENTS=' + JSON.stringify({ nativeProcessId, nativeInstanceId: nativeBefore.instanceId,
     attachmentProofs, inputCalls: input.mock.calls.length, startCalls: start.mock.calls.length }))
+}, 60_000)
+
+it('cold actual Main explicitly resumes the original native target without waiting for unrelated full observation', async () => {
+  const scope = await headlessFixture(); cleanup.push(scope.cleanup); await scope.stopOwner()
+  for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
+  for (const [key, value] of Object.entries(scope.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, value!)
+  const core = await import('@agentmux/core'), store = new core.AgentMuxFileAgentSessionStore(scope.env.AGENTMUX_AGENT_SESSION_STORE!)
+  const seed = new core.AgentMuxClient({ store }); cleanup.push(() => seed.dispose())
+  Object.defineProperty((seed as any).hookServer, 'port', { value: 0 }); await seed.connect()
+  const command = resolve('packages/core/test/fixtures/fake-codex-cli.mjs'), env = { AGENTMUX_FAKE_READY_MODE: 'before',
+    AGENTMUX_FAKE_NATIVE_RECORD: '1', AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: join(scope.root, 'native') }
+  const original = await seed.createAgent({ providerId: 'codex', executorId: 'codex', agentSessionId: 'private-main-explicit-resume',
+    createOperationId: 'private-main-explicit-create', workspacePath: scope.root, commandOverride: command, args: [], env, injectAgentMuxGuide: false })
+  const retained = await until(() => seed.agentSession(original.agentSessionId), value => Boolean(value.nativeHandle), 'original Main native target')
+  const active = await seed.statusAgent(original.agentSessionId), native = seed.runtimeIdentity(), nativePid = scope.nativeProcessId
+  process.kill(active.run.pid!, 'SIGTERM')
+  await until(() => seed.statusAgent(original.agentSessionId), value => value.run.state === 'exited', 'original Main Run exit')
+  await seed.dispose()
+  const entered = deferred(), release = deferred(); cleanup.push(async () => release.resolve())
+  const claim = store.claimStaleLifecycles.bind(store)
+  vi.spyOn(store, 'claimStaleLifecycles').mockImplementationOnce(async (...args) => { entered.resolve(); await release.promise; return await claim(...args) })
+  const host = await startAgentMuxHost({ store, socketPath: defaultAgentMuxControlSocketPath() }); cleanup.push(host.dispose)
+  Object.defineProperty((host.client as any).hookServer, 'port', { value: 0 })
+  await entered.promise
+  const observation = deferred(), connect = host.client.connect.bind(host.client)
+  const observing = vi.spyOn(host.client, 'connect').mockImplementation(() => { observation.resolve(); return connect() })
+  const subscribe = host.hosted.subscribe.bind(host.hosted)
+  vi.spyOn(host.hosted, 'subscribe').mockImplementation(async (method, ...args) => {
+    if (method === 'runtime.events') throw new AgentMuxError('Private general observation remains pending.', 'CONTROL_UNAVAILABLE')
+    return await subscribe(method, ...args)
+  })
+  const starts = vi.spyOn((host.client as any).kernel, 'start')
+  const controller = new RuntimeController(store, connectDesktopAgentMuxHost); cleanup.push(() => controller.dispose())
+  const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: { ...structuredClone(DEFAULT_CONFIG.executors),
+    codex: { ...structuredClone(DEFAULT_CONFIG.executors.codex!), command, args: [], env, injectAgentMuxGuide: false } },
+  hosts: [{ id: 'local', kind: 'local', label: 'Private exact recovery Host' }],
+  workspaces: [{ id: 'private-main-resume-workspace', hostId: 'local', kind: 'folder', name: 'Private', path: scope.root }] }
+  controller.commit(await controller.prepare(config)); await controller.snapshot(config)
+  const control = { kind: 'agent' as const, hostId: 'local', agentSessionId: original.agentSessionId, run: original.run }
+  const resuming = controller.resumeSession(control, 'Continue the same original private conversation.', 'private-main-original-resume', config)
+    .then(value => ({ value }), error => ({ error }))
+  const result = await Promise.race([resuming, observation.promise.then(() => ({ unrelatedObservation: true }))])
+  if (!('value' in result)) { release.resolve(); await resuming }
+  expect(result, 'Main explicit resume must not wait for unrelated full Session observation').toHaveProperty('value')
+  if (!('value' in result)) throw new Error('Private Main resume did not produce its original Session')
+  expect(result.value).toMatchObject({ kind: 'agent', id: original.agentSessionId, processState: 'running' })
+  expect(result.value.control.run).not.toEqual(original.run)
+  expect((await store.readMetadata(original.agentSessionId))!.nativeHandle).toEqual(retained.nativeHandle)
+  expect(starts).toHaveBeenCalledOnce(); expect(observing).not.toHaveBeenCalled()
+  expect(host.client.runtimeIdentity()).toEqual(native); expect(scope.nativeProcessId).toBe(nativePid)
+  release.resolve()
 }, 60_000)
 
 it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pending recovery and unconfirmed capability without replaying an unknown creation', async () => {
