@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
@@ -14,8 +15,8 @@ const oid = 'a'.repeat(40), parent = 'b'.repeat(40)
 const target = { workspaceId: 'original-workspace', expectedResource: { hostId: 'local', workspacePath: fixturePath("original/subfolder") } }
 const snapshot = { hostId: 'local', repoPath: fixturePath("original"), commitOid: oid, parentOid: parent }
 const details: Extract<GitCommitDetailsResult, { kind: 'ready' }> = { kind: 'ready', snapshot,
-  commit: { oid, parents: [parent], subject: 'Full title', message: 'Full title\n\n完整正文\nline two\n', author: 'Author', authoredAt: 1,
-    committer: 'Committer', committedAt: 2, refs: [] },
+  commit: { oid, parents: [parent], subject: 'Full title', message: 'Full title\n\n完整正文\nline two\n', author: 'Author', authoredAt: _tailFixtureEpoch(0, 0, 1),
+    committer: 'Committer', committedAt: _tailFixtureEpoch(0, 0, 2), refs: [] },
   entries: [{ path: 'new\nname 中文.txt', origPath: 'old name.txt', change: 'renamed' }], warnings: [] }
 const input = { kind: 'commit' as const, snapshot, file: { path: details.entries[0]!.path, origPath: details.entries[0]!.origPath } }
 
@@ -79,7 +80,7 @@ describe('public Git target and result contracts', () => {
     expect(() => parseRpcNativeResult('git.commit', { ...details, snapshot: { ...snapshot, commitOid: parent } }, params)).toThrow()
   })
   it('binds continuation to the original roots and exact next offset', () => {
-    const scope = { hostId: 'local', repoPath: fixturePath("original"), selectedRef: null, roots: [oid], refs: [], checkedAt: 1 }
+    const scope = { hostId: 'local', repoPath: fixturePath("original"), selectedRef: null, roots: [oid], refs: [], checkedAt: _tailFixtureEpoch(0, 0, 1) }
     const { message: _message, committer: _committer, committedAt: _time, ...historyCommit } = details.commit
     const page = { kind: 'ready', snapshot: scope, commits: [historyCommit], nextCursor: { snapshot: scope, offset: 1 } }
     expect(parseGitResult('git.history', page, target)).toBe(page)
@@ -132,10 +133,12 @@ describe('public Git target and result contracts', () => {
     for (const method of ['git.history', 'git.commit', 'git.diff', 'git.open']) {
       expect(AGENTMUX_CLI_COMMANDS.filter(command => command.method === method)).toHaveLength(1)
       expect(agentMuxCommandHelp(method)).toContain('--workspace ID --host ID --workspace-path PATH')
-      expect(AGENTMUX_CLI_HELP).toContain('amux ' + method.replace('.', ' '))
+      expect(AGENTMUX_CLI_HELP).toContain('amux git')
+      expect(agentMuxCommandHelp('git')).toContain('amux ' + method.replace('.', ' '))
     }
-    expect(agentMuxModuleSkill('git')).toContain('Reading never checks out, stages or writes Git')
-    expect(agentMuxCommandHelp('git.open')).toContain('read and presentation are separate facts')
+    expect(agentMuxModuleSkill('git')).toContain('amux git --help')
+    expect(agentMuxCommandHelp('git')).toContain('Reading never checks out, stages or writes Git')
+    expect(agentMuxCommandHelp('git')).toContain('read and presentation are separate facts')
     await expect(parseAgentMuxCliInvocation(['git', 'commit', '--oid', oid])).rejects.toThrow()
   })
 })

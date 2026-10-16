@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -40,7 +41,7 @@ describe('compiled object-first CLI help and discovery', () => {
     const tail = ['--session', '--help', '--retired-at', '12', '--operation-id', '--help']
     const invocation = await parseAgentMuxCliInvocation(['--endpoint', endpoint, 'agent', 'reopen', 'check', ...tail])
     expect(invocation).toMatchObject({ command: { method: 'agent.reopen.check' }, endpoint,
-      params: { agentSessionId: '--help', expectedRetiredAt: 12, operationId: '--help' } })
+      params: { agentSessionId: '--help', expectedRetiredAt: _tailFixtureEpoch(0, 0, 12), operationId: '--help' } })
     const invalid = [
       ['--endpoint', endpoint, '--endpoint', endpoint, 'agent', 'reopen', 'check', ...tail],
       ['agent', 'reopen', 'check', ...tail, '--session', 'duplicate'],
@@ -71,24 +72,28 @@ describe('compiled object-first CLI help and discovery', () => {
       expect(JSON.parse(reply.stderr)).toMatchObject({ ok: false, operation: 'agent.reopen.check', operationId: 'nested-read-only',
         error: { code: 'CONTROL_UNAVAILABLE', message: 'Private history observation is unavailable.', detail } })
       expect(calls).toHaveBeenCalledExactlyOnceWith('agent.reopen.check',
-        { agentSessionId: '--help', expectedRetiredAt: 12, operationId: 'nested-read-only' },
+        { agentSessionId: '--help', expectedRetiredAt: _tailFixtureEpoch(0, 0, 12), operationId: 'nested-read-only' },
         expect.objectContaining({ transport: 'unix', principal: expect.objectContaining({ kind: 'user' }) }))
       expect(ownerReads).toBe(1)
     } finally { calls.mockRestore(); await owner.stop() }
   })
 
-  it('renders every actual registered command, its exact leaf help and its parent objects without a service', async () => {
+  it('discovers registered roots and every exact leaf without unfolding unrelated branches', async () => {
     const result = await run(['--help'])
     expect(result.code, result.stderr).toBe(0)
     expect(AGENTMUX_CLI_COMMANDS.length).toBeGreaterThan(0)
     for (const command of AGENTMUX_CLI_COMMANDS) {
       const spelling = command.method.replaceAll('.', ' ')
-      expect(result.stdout).toContain('amux ' + spelling)
+      expect(result.stdout).toContain('amux ' + command.method.split('.')[0])
       const leaf = await run(['--help', ...command.method.split('.')])
       expect(leaf.code, command.method + ': ' + leaf.stderr).toBe(0)
       expect(leaf.stdout).toContain('Usage: amux ' + spelling)
       expect(leaf.stdout).toContain(command.summary)
     }
+    expect(result.stdout).not.toContain('amux agent native history resource')
+    expect(agentMuxCommandHelp('agent')).toContain('amux agent native')
+    expect(agentMuxCommandHelp('agent')).not.toContain('amux agent native history resource')
+    expect(agentMuxCommandHelp('agent.native')).toContain('amux agent native history')
     const groups = [...new Set(AGENTMUX_CLI_COMMANDS.filter(command => command.method.includes('.')).map(command => command.method.split('.')[0]!))]
     expect(groups.length).toBeGreaterThan(0)
     for (const group of groups) {
@@ -114,27 +119,29 @@ describe('compiled object-first CLI help and discovery', () => {
     expect(result.stdout).not.toContain('--request-id')
     const agent = await run(['agent', '--skill'])
     expect(agent.code, agent.stderr).toBe(0)
-    expect(agent.stdout).toContain('--project PROJECT')
-    expect(agent.stdout).toContain('--source-workspace WORKSPACE')
-    expect(result.stdout).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
-    expect(agentMuxCommandHelp('agent.send')).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    expect(agent.stdout).toContain('agent open --help')
+    expect(agentMuxCommandHelp('agent.open')).toContain('--project PROJECT')
+    expect(agentMuxCommandHelp('agent.open')).toContain('--source-workspace WORKSPACE')
+    expect(result.stdout).not.toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    expect(agentMuxCommandHelp('agent.send')).not.toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    expect(agentMuxModuleSkill('message')).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
   })
 
   it('keeps wire and business identities, partial writes, caret and manual boundaries explicit', async () => {
-    const result = await run(['--skill'])
-    expect(result.stdout).toContain('RPC wire IDs only correlate transport messages')
-    expect(result.stdout).toContain('Without a complete success reply, the commit result is unconfirmed')
-    expect(result.stdout).toContain('do not automatically retry the write')
-    expect(result.stdout).toContain('A current read cannot certify an earlier lost receipt')
+    const result = await run(['--help', 'agent', 'send'])
+    expect(result.stdout).toContain('RPC ids correlate transport')
+    expect(result.stdout).toContain('original business action')
+    expect(result.stdout).toContain('unknown results')
+    expect(result.stdout).toContain('never automatically replay a write')
     expect(result.stdout).toContain('Reader cancellation only detaches that reader')
-    expect(result.stdout).toContain('Selection,')
-    expect(result.stdout).toContain('changes no SOUL/Wiki/user profile')
+    expect(result.stdout).toContain('Observation failure does not end a healthy Agent')
+    expect(agentMuxCommandHelp('file.open')).toContain('Selection, presentation and input focus')
     expect(agentMuxCommandHelp('agent.open')).toContain('No existing Tab anchor')
     expect(agentMuxCommandHelp('agent.open')).toContain('Project is an execution resource')
     expect(agentMuxCommandHelp('space.mv')).toContain('Session, Run, Host and cwd')
   })
 
-  it('retains Browser page capabilities in its module and result/transfer recovery from their actual owner', async () => {
+  it('discloses Browser program APIs and result/transfer recovery only at the program entry', async () => {
     const browser = agentMuxCommandHelp('browser.run')!
     const module = await run(['browser', '--skill'])
     expect(module.code, module.stderr).toBe(0)
@@ -143,7 +150,7 @@ describe('compiled object-first CLI help and discovery', () => {
     for (const effect of ['observe', 'act', 'wait', 'navigate'] as const) {
       const names = browserPageCapabilityNames(effect)
       expect(names.length).toBeGreaterThan(0)
-      for (const name of names) expect(module.stdout).toContain('`' + name + '`')
+      for (const name of names) expect(browser).toContain('`' + name + '`')
     }
     expect(browser).toContain('withinRef')
     expect(browser).toContain('missingFrames')
@@ -152,6 +159,9 @@ describe('compiled object-first CLI help and discovery', () => {
     expect(browser).toContain('readDownload')
     expect(browser).toContain('uploadFiles')
     expect(browser).toContain('browser inspect --operation-id')
+    expect(module.stdout).toContain('browser run --help')
+    expect(module.stdout).not.toContain('withinRef')
+    expect(agentMuxCommandHelp('browser.inspect')).not.toContain('withinRef')
   })
 
   it('guides web pages into an exact reusable Browser or a readable Region in the Agent Tab', async () => {
