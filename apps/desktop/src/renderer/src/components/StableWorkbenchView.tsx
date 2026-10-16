@@ -214,14 +214,17 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       const destination = windowPlacement?.destination ?? siblingHome ?? host.ownerDocument.getElementById(destinationId) ?? parentDocument.getElementById(destinationId) ?? document.getElementById(destinationId)
       if (!destination) return false
       if (host.parentElement !== destination) {
-        // Reparenting an existing DOM host collapses Chromium's live Range.
-        // Snapshot node endpoints, not cloned live Ranges, for this one move.
-        const oldDocument = host.ownerDocument, hadDocumentFocus = oldDocument.hasFocus()
-        const ranges = captureReadingRanges(host), activeElement = oldDocument.activeElement
-        const scrolls = captureReadingScrolls(host, ranges, activeElement)
+        // The pre-mutation owner protects same-document reading. This late
+        // snapshot is consumed only when adoption crosses native documents;
+        // reading selection or scroll here otherwise flushes unused layout.
+        const oldDocument = host.ownerDocument
+        const crossDocument = oldDocument !== destination.ownerDocument
+        const hadDocumentFocus = crossDocument && oldDocument.hasFocus()
+        const ranges = crossDocument ? captureReadingRanges(host) : []
+        const activeElement = crossDocument ? oldDocument.activeElement : null
+        const scrolls = crossDocument ? captureReadingScrolls(host, ranges, activeElement) : []
         // Connected moves preserve the existing editor focus and browser state.
         // A detached slot still needs insertion before its parent can attach.
-        const crossDocument = host.ownerDocument !== destination.ownerDocument
         if (crossDocument) { destination.ownerDocument.adoptNode(host); destination.append(host) }
         else if (host.isConnected && destination.isConnected) destination.moveBefore(host, null)
         else destination.append(host)
