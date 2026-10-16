@@ -30,7 +30,7 @@ async function pause(milliseconds = 1700) {
 }
 
 it('automatically follows the original Mote sign-in through pending and scanned states, then requires both account and creation confirmation', async () => {
-  const views = observeViews(), pending = [1, 1, 2], native = f.registration.getMockImplementation()!
+  const views = observeViews(), pending = [1, 0, 2], native = f.registration.getMockImplementation()!
   f.registration.mockImplementation(async (url, input) => {
     if (new URL(String(url)).pathname === '/accounts/qrlogin/polling') {
       const previous = views.at(-1)!
@@ -51,6 +51,7 @@ it('automatically follows the original Mote sign-in through pending and scanned 
       challenge: { qrPayload: original.challenge!.qrPayload }
     })
     expect(document.querySelector('.mote-bot-confirmation svg')).toBe(qr)
+    expect(views[index + 1]!.account).toBeNull()
   }
   await visible('[data-mote-enrollment-action="confirm-account"]', 7000)
   expect(views.map(view => view.operation!.authentication!.stage)).toEqual(['waiting', 'waiting', 'waiting', 'scanned', 'handoff', 'handoff', 'handoff', 'handoff', 'account'])
