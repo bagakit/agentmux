@@ -3,7 +3,7 @@ import { useMarkdownCopyText } from '../platform.js'
 import { SemanticIcon } from '../theme/icons.js'
 
 /** Copy original content through the host; feedback belongs to this source and attempt. */
-export function ContentCopyButton({ text, identity, label, actionLabel = 'Copy', className = '' }: { text: string; identity: unknown; label: string; actionLabel?: string; className?: string }) {
+export function ContentCopyButton({ text, identity, label, actionLabel = 'Copy', className = '', onCopyError }: { text: string; identity: unknown; label: string; actionLabel?: string; className?: string; onCopyError?: ((error: unknown) => void) | undefined }) {
   const copyText = useMarkdownCopyText()
   const owner = useMemo(() => ({}), [text, identity, copyText])
   const latestOwner = useRef(owner); latestOwner.current = owner
@@ -19,12 +19,13 @@ export function ContentCopyButton({ text, identity, label, actionLabel = 'Copy',
     let failed = false, accepted = false
     setCopy({ owner, state: 'copying' })
     try {
-      accepted = await copyText(text, () => {
+      accepted = await copyText(text, error => {
+        onCopyError?.(error)
         failed = true
         action.pending = false
         if (current()) setCopy({ owner, state: 'failed' })
       }) === true
-    } catch { failed = true }
+    } catch (error) { failed = true; onCopyError?.(error) }
     action.pending = false
     if (current()) setCopy({ owner, state: accepted && !failed ? 'copied' : 'failed' })
   }

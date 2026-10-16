@@ -17,7 +17,7 @@
 .agent-information-reader[data-bookmark-key] { font-size: var(--fs-meta); line-height: 1.5; }
 .agent-information-reader[data-drag-to-pin] .agent-information-reader__header { gap: 7px; padding: 7px 10px 6px; }
 .agent-information-reader[data-bookmark-key] .agent-information-reader__heading { gap: 1px; }
-.agent-information-reader[data-bookmark-key] .agent-information-reader__heading > strong { font-size: var(--fs-body); line-height: 1.3; }
+.agent-information-reader[data-bookmark-key] .agent-information-reader__name > strong { font-size: var(--fs-body); line-height: 1.3; }
 .agent-information-reader[data-bookmark-key] .agent-information-reader__reading,
 .agent-information-reader[data-bookmark-key] .agent-information-reader__metadata { padding: 0 10px 9px; }
 .agent-information-reader[data-bookmark-key] .agent-information-reader__service { gap: 5px; padding: 0 10px 6px; font-size: var(--fs-micro); }

@@ -1,3 +1,4 @@
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { useId, type ReactNode } from 'react'
 import type { AgentTurnUsage } from '@agentmux/core'
 import type { AgentSessionControl } from '../../../shared/contracts'
@@ -11,12 +12,17 @@ import { AgentCommunicationRelations } from './AgentCommunicationRelations'
 export type AgentInformationTab = 'usage' | 'goals' | 'messages' | 'source'
 const tabs = [['usage', 'Usage'], ['goals', 'Goals'], ['messages', 'Messages'], ['source', 'Source']] as const
 
-/** A quiet, held-fact entry; unknown metrics do not become a first-screen form. */
-export function AgentInformationSummary({ usage, goalLinks }: { usage?: AgentTurnUsage | undefined; goalLinks?: FocusGoalLinks | undefined }) {
+/** Compact held metrics; no observation or message read is started for this chrome. */
+export function AgentInformationSummary({ usage, goalLinks, descriptionId }: { descriptionId: string; usage?: AgentTurnUsage | undefined; goalLinks?: FocusGoalLinks | undefined }) {
   const used = contextUsedPercent(usage?.context)
-  return <><span title={used === null ? 'Agent usage' : `${100 - used}% context remaining`}>{used === null ? 'Details' : `${100 - used}% ctx`}</span>
-    {usage?.cumulative ? <small>{formatTokenCount(usage.cumulative.totalTokens)} tokens</small> : null}
-    {goalLinks?.confirmedCount ? <small>{goalLinks.confirmedCount} {goalLinks.confirmedCount === 1 ? 'Goal' : 'Goals'}</small> : null}</>
+  const context = used === null ? 'Context remaining not reported' : `${100 - used}% context remaining`
+  const tokens = usage?.cumulative ? `${formatTokenCount(usage.cumulative.totalTokens)} native Session tokens` : 'Cumulative tokens not reported'
+  return <>
+    <span id={descriptionId} className="agent-information-summary-description">{context} · {tokens}{goalLinks?.confirmedCount ? ` · ${goalLinks.confirmedCount} confirmed Goals` : ''}</span>
+    <span className="agent-information-metric" title={context} aria-label={context}><SemanticIcon name="object.context" size={13} /><span>{used === null ? '—' : `${100 - used}%`}</span></span>
+    <span className="agent-information-metric" title={tokens} aria-label={tokens}><SemanticIcon name="object.performance" size={13} /><span>{usage?.cumulative ? formatTokenCount(usage.cumulative.totalTokens) : '—'}</span></span>
+    {goalLinks?.confirmedCount ? <span className="agent-information-metric" title={`${goalLinks.confirmedCount} confirmed Goals`} aria-label={`${goalLinks.confirmedCount} confirmed Goals`}><SemanticIcon name="object.goal" size={13} /><span>{goalLinks.confirmedCount}</span></span> : null}
+  </>
 }
 
 /** The caller owns exact identity and visibility. Only the selected message page reads. */
