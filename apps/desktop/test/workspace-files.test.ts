@@ -155,6 +155,133 @@ describe('WorkspaceFiles original worker input failures', () => {
   })
 })
 
+describe.runIf(process.platform === 'darwin')('WorkspaceFiles exact original file collection', () => {
+  async function created(label: string) {
+    const fixture = await localFixture(`exact-${label}`), files = new WorkspaceFiles(() => fixture.host)
+    // Larger than the old metadata publication helper's 4096-byte bound.
+    const content = 'A real shared Markdown paragraph.\n'.repeat(2400)
+    const input = { path: 'shared.note.md', content, expectedRevision: null }
+    const receipt = await files.write(fixture.workspace, input)
+    expect(receipt.status).toBe('written')
+    if (receipt.status !== 'written' || !receipt.fileWitness) throw Error('A real native creation witness is required')
+    return { ...fixture, files, content, path: join(fixture.root, input.path),
+      request: { path: input.path, expectedRevision: receipt.revision, witness: receipt.fileWitness, operationId: `collect-${label}` } }
+  }
+
+  it('records the actual published creation generation and collects only that complete original', async () => {
+    const f = await created('original'), actual = await stat(f.path, { bigint: true })
+    expect(f.request.witness).toEqual({ device: String(actual.dev), inode: String(actual.ino), size: String(actual.size),
+      ctimeNs: String(actual.ctimeNs), mtimeNs: String(actual.mtimeNs) })
+    expect(await f.files.deleteExact(f.workspace, f.request)).toEqual({ status: 'deleted' })
+    await expect(access(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readdir(f.root)).toEqual([])
+    // A missing file cannot certify a repeat of the original business deletion.
+    expect(await f.files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'conflict' })
+  })
+
+  it('keeps a later same-byte rewrite and an ABA edit despite an unchanged digest', async () => {
+    const f = await created('aba')
+    await writeFile(f.path, 'Later editing')
+    await writeFile(f.path, f.content)
+    expect(await f.files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'conflict' })
+    expect(await readFile(f.path, 'utf8')).toBe(f.content)
+  })
+
+  it('does not collect a new same-name inode after the native directory has been pinned', async () => {
+    const f = await created('input-replacement'), held = f.path + '.held'
+    localWorkerRace.beforeInput = async () => { await rename(f.path, held); await writeFile(f.path, f.content) }
+    expect(await f.files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'conflict' })
+    expect(localWorkerRace.beforeInput).toBeNull()
+    expect(await readFile(f.path, 'utf8')).toBe(f.content)
+    expect(await readFile(held, 'utf8')).toBe(f.content)
+  })
+
+  it('restores a competing entry claimed after original verification without deleting either file', async () => {
+    const f = await created('claim-replacement'), held = f.path + '.held'
+    const files = new WorkspaceFiles(() => f.host, { beforeLocalDeleteClaim: async () => {
+      await rename(f.path, held); await writeFile(f.path, 'A competing public file')
+    } })
+    expect(await files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'conflict' })
+    expect(await readFile(f.path, 'utf8')).toBe('A competing public file')
+    expect(await readFile(held, 'utf8')).toBe(f.content)
+    expect((await readdir(f.root)).filter(name => name.startsWith('.agentmux-reclaim-'))).toEqual([])
+  })
+
+  it('collects the pinned original while retaining a new public-name entry', async () => {
+    const f = await created('new-public-entry')
+    const files = new WorkspaceFiles(() => f.host, { afterLocalDeleteClaim: async () => { await writeFile(f.path, 'New public object') } })
+    expect(await files.deleteExact(f.workspace, f.request)).toEqual({ status: 'deleted' })
+    expect(await readFile(f.path, 'utf8')).toBe('New public object')
+    expect(await readdir(f.root)).toEqual(['shared.note.md'])
+  })
+
+  it('retains and reports the changed original claim when safe restoration is occupied', async () => {
+    const f = await created('retained-claim')
+    let claimed = ''
+    const files = new WorkspaceFiles(() => f.host, { afterLocalDeleteClaim: async () => {
+      claimed = (await readdir(f.root)).find(name => name.startsWith('.agentmux-reclaim-'))!
+      expect(claimed).toBeTruthy(); await writeFile(join(f.root, claimed), 'Later shared content')
+      await writeFile(f.path, 'New public object')
+    } })
+    expect(await files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'unknown', retainedPath: claimed || expect.any(String) })
+    expect(await readFile(join(f.root, claimed), 'utf8')).toBe('Later shared content')
+    expect(await readFile(f.path, 'utf8')).toBe('New public object')
+  })
+
+  it('never moves or deletes a replacement at the private claim name', async () => {
+    const f = await created('claim-swapped'), held = f.path + '.held'
+    let claimed = ''
+    const files = new WorkspaceFiles(() => f.host, { afterLocalDeleteClaim: async () => {
+      claimed = (await readdir(f.root)).find(name => name.startsWith('.agentmux-reclaim-'))!
+      expect(claimed).toBeTruthy(); await rename(join(f.root, claimed), held)
+      await writeFile(join(f.root, claimed), 'Competing claim object')
+    } })
+    expect(await files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'unknown', retainedPath: expect.any(String) })
+    expect(await readFile(join(f.root, claimed), 'utf8')).toBe('Competing claim object')
+    expect(await readFile(held, 'utf8')).toBe(f.content)
+    await expect(access(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it.each(['before', 'after'] as const)('retains the original when its parent is moved at the %s-claim boundary', async stage => {
+    const f = await created(`parent-${stage}`), originalParent = join(f.root, 'blocks'), movedParent = join(f.root, 'moved')
+    await mkdir(originalParent)
+    // Create in the original parent so its witness belongs to that exact file.
+    const result = await f.files.write(f.workspace, { path: 'blocks/shared.note.md', content: f.content, expectedRevision: null })
+    if (result.status !== 'written' || !result.fileWitness) throw Error('The original nested file needs its native witness')
+    const swap = async () => {
+      await rename(originalParent, movedParent); await mkdir(originalParent)
+      await writeFile(join(originalParent, 'shared.note.md'), 'New original-path resource')
+    }
+    const files = new WorkspaceFiles(() => f.host, stage === 'before' ? { beforeLocalDeleteClaim: swap } : { afterLocalDeleteClaim: swap })
+    const receipt = await files.deleteExact(f.workspace, { ...f.request, path: 'blocks/shared.note.md', expectedRevision: result.revision, witness: result.fileWitness })
+    expect(receipt.status).toBe(stage === 'before' ? 'conflict' : 'unknown')
+    expect(await readFile(join(originalParent, 'shared.note.md'), 'utf8')).toBe('New original-path resource')
+    if (stage === 'before') expect(await readFile(join(movedParent, 'shared.note.md'), 'utf8')).toBe(f.content)
+    else {
+      if (receipt.status !== 'unknown' || !receipt.retainedPath) throw Error('The moved claim must have an accurate inspection location')
+      expect(receipt.retainedPath).toMatch(/^moved\/\.agentmux-reclaim-/)
+      expect(await readFile(join(f.root, receipt.retainedPath), 'utf8')).toBe(f.content)
+    }
+  })
+
+  it.each(['directory', 'symlink'] as const)('refuses a %s replacement without following or recursing', async kind => {
+    const f = await created(kind), outside = join(dirname(f.root), 'outside.txt')
+    await writeFile(outside, 'Outside content'); await rm(f.path)
+    if (kind === 'directory') { await mkdir(f.path); await writeFile(join(f.path, 'child.txt'), 'Retain this child') }
+    else await symlink(outside, f.path)
+    expect(await f.files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'conflict' })
+    expect(await readFile(outside, 'utf8')).toBe('Outside content')
+    if (kind === 'directory') expect(await readFile(join(f.path, 'child.txt'), 'utf8')).toBe('Retain this child')
+  })
+
+  it.each(['sync', 'receipt'] as const)('keeps a %s failure after unlink unknown, without inventing a success receipt', async fault => {
+    const f = await created(fault), files = new WorkspaceFiles(() => f.host, { localDeleteFault: fault })
+    expect(await files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'unknown' })
+    await expect(access(f.path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await files.deleteExact(f.workspace, f.request)).toMatchObject({ status: 'conflict' })
+  })
+})
+
 describe('WorkspaceFiles root confinement', () => {
   // Every local operation must pin the directory it already checked before the worker acts on it, so a
   // directory swapped for an escaping symlink inside that window cannot redirect the operation outside

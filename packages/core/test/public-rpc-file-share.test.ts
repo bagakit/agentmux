@@ -3,7 +3,7 @@ import { fixturePath } from './helpers/fixture-values.js'
 import { fileUploadRevision, type FileReadResource, type FileWriteParams, type FileWriteResult } from '../src/public-rpc-files'
 import { fileShareCreateOperation, fileShareSourceOperation, parseFileShareParams, parseFileShareResult, type FileShareParams, type FileShareResult } from '../src/public-rpc-file-share'
 import { boundedFileShareResult } from '../src/public-rpc-service'
-import { rpcEncode } from '../src/public-rpc-frame'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode } from '../src/public-rpc-frame'
 const digest = (body: string) => fileUploadRevision(new TextEncoder().encode(body))
 const body = (noteId: string, text = 'Ordinary Markdown') => `---\nschema: agentmux.note.md.v1\nnote-id: ${noteId}\n---\n\n${text}\n`
 function fixture() {
@@ -43,3 +43,24 @@ it('keeps all committed per-file outcomes when combined canonical bodies and obs
   if (compact.destination!.result.status !== 'written' || result.destination!.result.status !== 'written') throw Error('Expected committed write')
   expect(compact.destination!.result.revision).toBe(result.destination!.result.revision)
 }, 20_000)
+
+it('compacts nested undo bodies against the entire combined inspection frame even when standalone undo fits',()=>{
+ const {params,result,written}=fixture();params.undoReferenceIds=['old-use'];const source=written(params.destination.expectedResource,body('destination'),params.destination.operationId!)
+ result.undo={operationId:params.destination.operationId!,status:'committed',destination:source,collections:[{noteId:'old-shared',referenceIds:['old-use'],resource:null,source:null,deletion:null,retainedReason:{code:'other-references',message:'Another use remains.'}}]}
+ if(source.result.status!=='written')throw Error('fixture');source.result.content=''
+ const overhead=new TextEncoder().encode(JSON.stringify({jsonrpc:'2.0',id:1,result:result.undo})).length
+ source.result.content='x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES-overhead-64)
+ expect(()=>rpcEncode({jsonrpc:'2.0',id:1,result:result.undo})).not.toThrow()
+ expect(()=>rpcEncode({jsonrpc:'2.0',id:1,result:{mode:'request',result}})).toThrow('frame budget')
+ const compact=boundedFileShareResult(result,1,true)
+ expect(compact.undo!.destination!.result).toMatchObject({status:'written',contentUnavailable:expect.any(String),noteHistory:{status:'committed'}})
+ expect(()=>rpcEncode({jsonrpc:'2.0',id:1,result:{mode:'request',result:compact}})).not.toThrow()
+ expect(parseFileShareResult(compact,params).status).toBe('committed')
+},20_000)
+it('requires the complete undo receipt for a committed combined save and accurate partial receipts for known partial',()=>{
+ const {params,result,written}=fixture();params.undoReferenceIds=['old-use'];expect(()=>parseFileShareResult(result,params)).toThrow('complete original undo')
+ result.undo={operationId:params.destination.operationId!,status:'unknown',destination:result.destination,collections:[]};expect(()=>parseFileShareResult(result,params)).toThrow()
+ result.status='partial';expect(()=>parseFileShareResult(result,params)).toThrow()
+ result.undo={operationId:params.destination.operationId!,status:'partial',destination:result.destination,collections:[{noteId:'old-shared',referenceIds:['old-use'],resource:null,source:written(params.destination.expectedResource,body('destination'),params.destination.operationId!),deletion:null,retainedReason:{code:'scope-changed',message:'Original source restored but shared retained.'}}]}
+ expect(parseFileShareResult(result,params).status).toBe('partial')
+})
