@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as monaco from 'monaco-editor/editor/editor.api.js'
@@ -281,11 +282,23 @@ it('keeps unavailable history explicit and never presents it as an empty saved t
 })
 
 it('keeps original events and actions usable when a valid protocol timestamp exceeds the display Date range', async () => {
-  vi.mocked(api.files.historyPublic).mockImplementation(async params => history(params, records().map(row => ({ ...row, at: 8.7e15 }))))
+  vi.mocked(api.files.historyPublic).mockImplementation(async params => history(params, records().map(row => ({ ...row, at: _tailFixtureEpoch(0, 0, 8.7e15) }))))
   await opened()
   expect(dom.container.textContent).toContain('Time unavailable')
   expect(dom.container.textContent).toContain('Agent · Research agent')
   expect(dom.container.querySelector('[aria-label="Preview version original-event-2"]')).not.toBeNull()
   await click('Undo this activity…'); await click('Undo selected activity')
   expect(useAppStore.getState().applyNoteHistory).toHaveBeenCalledWith(tabId, regionId, { target: target(), batchId: 'original-batch', batchLastEventId: 'original-event-2' })
+})
+
+it('shows a shared-file deletion as an absent after document without inventing an empty saved version or restore action', async () => {
+  const row = records()[0]!
+  const deleted: NoteHistoryRecord = { ...row, operation: 'delete', source: { eventId: 'original-create-event' }, beforeContent: content('Shared content before collection'), baseRevision: noteHistoryRevision(content('Shared content before collection')), content: null, revision: null }
+  vi.mocked(api.files.historyPublic).mockImplementation(async params => history(params, [deleted]))
+  await opened(); await dom.click('[aria-label="Preview version original-event-2"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Version preview"]')?.textContent).toContain('It has no saved document after the change.'))
+  expect(dom.container.textContent).toContain('Shared file collected')
+  expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Restore this entire version…')).toBe(false)
+  expect(pairs).toHaveLength(0)
+  expect(useAppStore.getState().applyNoteHistory).not.toHaveBeenCalled()
 })
