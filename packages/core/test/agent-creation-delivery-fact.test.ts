@@ -86,7 +86,7 @@ function healthyOneCreation() {
 describe('public Agent creation retains the original first-prompt delivery fact', () => {
   it.each([undefined, '   '])('persists not-requested for absent or blank original prompt %j', async prompt => {
     const result = await create(prompt)
-    const creation = { createOperationId: requestId, initialPrompt: 'not-requested', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'confirmed' }
+    const creation = { createOperationId: requestId, initialPrompt: 'not-requested', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result.creation).toEqual(creation)
     expect(result.session.creation).toEqual(creation)
     expect(client.agentSession(sessionId).creation).toEqual(creation)
@@ -98,7 +98,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
 
   it('confirms an at-launch first prompt from the same creation, without another Input', async () => {
     const result = await create(task)
-    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'confirmed' }
+    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result).toMatchObject({ promptConfirmed: true, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -120,7 +120,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     expect((await store.loadTimeline(sessionId)).items).toEqual([])
     release()
     const result = await creating
-    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'confirmed' }
+    const creation = { createOperationId: requestId, initialPrompt: 'confirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result).toMatchObject({ promptConfirmed: true, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)
@@ -138,7 +138,7 @@ describe('public Agent creation retains the original first-prompt delivery fact'
     providerId = 'kimi'
     submit.mockRejectedValue(new Error('Private fixture loses the original Input receipt'))
     const result = await create(task)
-    const creation = { createOperationId: requestId, initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), agentMuxContext: 'unconfirmed' }
+    const creation = { createOperationId: requestId, initialPrompt: 'unconfirmed', intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u) }
     expect(result).toMatchObject({ promptConfirmed: false, creation, session: { creation } })
     expect(client.agentSession(sessionId).creation).toEqual(creation)
     expect((await stored()).creation).toEqual(creation)

@@ -2,23 +2,35 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { join } from 'node:path'
-import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
-import { AgentMuxError } from '../src/errors.js'
-import { composeAgentPrompt } from '../src/agent-outbound-message.js'
+import { createHash } from 'node:crypto'
+import { AgentMuxClient as SourceClient } from '../src/client.js'
+import { AgentMuxFileAgentSessionStore as SourceStore } from '../src/agent-session-store.js'
+import { AgentMuxError as SourceError } from '../src/errors.js'
+import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import type { AgentMuxContinuityInputRequest } from '../src/agent-session-continuity.js'
 
 
+const owner = process.env.AGENTMUX_TEST_GUIDANCE_CORE ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_GUIDANCE_CORE)
+  : { AgentMuxClient: SourceClient, AgentMuxFileAgentSessionStore: SourceStore, AgentMuxError: SourceError }
+const { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxError } = owner as {
+  AgentMuxClient: typeof SourceClient; AgentMuxFileAgentSessionStore: typeof SourceStore; AgentMuxError: typeof SourceError }
+type AgentMuxClient = SourceClient
+
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const fresh: AgentMuxContinuityInputRequest = { submissionId: 'original-user-input', prompt: 'New user intent exactly.', agentMuxNote: 'Original platform context.', authorHuman: true, sourceChannel: 'api' }
 async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; lostStart?: boolean; noRun?: boolean; failedStart?: boolean; postLaunch?: boolean } = {}) {
   const providerId = options.providerId ?? 'codex'
-  const h = await rpcOwnerFixture(['recipient'], undefined, () => ({ providerId, executorId: providerId,
+  const h = await rpcOwnerFixture(['recipient'], { AgentMuxClient, AgentMuxFileAgentSessionStore }, () => ({ providerId, executorId: providerId,
     nativeHandle: { kind: 'provider', providerId, sessionId: 'native-original' } }))
-  const core = h.client as any, provider = h.client.providers.get(providerId)
-  if (options.postLaunch) (provider as any).catalog = { ...provider.catalog, promptDelivery: 'post-launch-only' }
+  const core = h.client as any, originalProvider = h.client.providers.get(providerId)
+  // This port's Start returns the plan verbatim, without the real adapter's
+  // same-PID env wrapper. Its physical launch identity must describe that port.
+  core.kernel.launchIdentity = ({ program, args }: { program: string; args: readonly string[] }) => ({ program,
+    argsDigest: createHash('sha256').update(JSON.stringify(args)).digest('base64url') })
+  const provider = { ...originalProvider, catalog: { ...originalProvider.catalog, ...(options.postLaunch ? { promptDelivery: 'post-launch-only' as const } : {}) }, prepareManagedLaunch: async (plan: any) => ({ plan }) }
+  h.client.providers.replace(provider)
   const previousRun = { runId: 'run-recipient' }, newRun = { runId: 'new-run' }
   const started: any[] = []
   const currentRun = () => ({ ...h.run(newRun.runId), program: started[0]?.program ?? provider.executable,
@@ -51,7 +63,7 @@ it.each(['codex', 'claude', 'gemini'] as const)('carries the original fresh inpu
   try {
     const result = await h.client.ensureAgentContinuity(h.request)
     expect(result.kind).toBe('resumed')
-    const packet = h.op()!.launchInput!, composed = composeAgentPrompt(fresh.prompt, fresh.agentMuxNote)
+    const packet = h.op()!.launchInput!, composed = composeAgentResumePrompt(fresh.prompt, fresh.agentMuxNote)
     expect(packet).toMatchObject({ input: fresh, prompt: composed.text, state: 'launch-carried', delivery: 'launch',
       key: { kind: 'prompt', agentSessionId: 'recipient', expectedRun: h.newRun, submissionId: fresh.submissionId },
       receipt: { kind: 'runtime-launch', operationId: h.started[0].operationKey, run: h.newRun } })
@@ -77,7 +89,7 @@ it('reads the original launch key through the real public RPC input.inspect wire
     expect(inspected.input).toBeUndefined(); expect(inspected.record?.admission).toBeUndefined()
     const history = await h.store.loadTimeline('recipient')
     expect(history.items.find(item => item.id === 'prompt:' + fresh.submissionId)).toMatchObject({ content: fresh.prompt, authorHuman: true, sourceChannel: fresh.sourceChannel })
-    expect(history.items.find(item => item.id === 'system-context:' + fresh.submissionId)).toMatchObject({ content: fresh.agentMuxNote })
+    expect(history.items.find(item => item.id === 'system-context:' + fresh.submissionId)).toMatchObject({ content: composeAgentResumePrompt(fresh.prompt, fresh.agentMuxNote).systemContext })
     expect(h.core.kernel.input).not.toHaveBeenCalled()
   } finally { await rpc?.dispose(); await server.stop(); await h.close() }
 })
@@ -85,7 +97,8 @@ it('reads the original launch key through the real public RPC input.inspect wire
 it('restores recent automatic work without carrying synthesized input in native resume argv', async () => {
   const h = await fixture()
   try {
-    await h.client.ensureAgentContinuity({ ...h.request, input: undefined, trigger: 'startup' })
+    const { input: _fresh, ...startup } = h.request
+    await h.client.ensureAgentContinuity({ ...startup, trigger: 'startup' })
     const op = h.op()!
     expect(op.newRun).toEqual(h.newRun)
     expect(op.interruption).toMatchObject({ support: 'provider', state: 'unknown' })
@@ -109,8 +122,9 @@ it('reconciles an applied Start with lost ACK from the original reservation and 
     const core = next as any; await core.registry.load('local'); core.connected = true
     core.kernel.isConnected = () => true; core.kernel.list = h.core.kernel.list; core.kernel.status = h.core.kernel.status
     core.kernel.start = vi.fn(() => { throw new Error('An unknown Start must not repeat') }); core.kernel.input = vi.fn(() => { throw new Error('A launch must not repeat via PTY') })
-    core.restoreReopenObservation = async () => {}
-    expect((await next.ensureAgentContinuity(h.request)).kind).toBe('resumed')
+    core.restoreReopenObservation = async () => {}; core.ensureTerminalHandshakeOrDegrade = h.core.ensureTerminalHandshakeOrDegrade
+    const restored = await next.ensureAgentContinuity(h.request)
+    expect(restored.kind, JSON.stringify(restored)).toBe('resumed')
     const packet = next.agentSession('recipient').continuityOperations!['original-resume']!.launchInput!
     expect(packet).toMatchObject({ input: fresh, digest: pending.digest, state: 'launch-carried', key: { expectedRun: h.newRun } })
     expect(await next.inspectAgentPromptSubmission(packet.key!)).toMatchObject({ launch: packet })
@@ -157,7 +171,7 @@ it('allows a distinct explicit intent after a confirmed not-applied Start withou
     expect(h.op()!.launchInput?.state).toBe('not-applied')
     const next = { ...h.request, operationId: 'explicit-new-op', input: { ...fresh, submissionId: 'explicit-new-input', prompt: 'Explicit new body' } }
     expect((await h.client.ensureAgentContinuity(next)).kind).toBe('resumed')
-    expect(h.started).toHaveLength(1); expect(h.started[0].args).toContain(composeAgentPrompt(next.input.prompt, next.input.agentMuxNote).text)
+    expect(h.started).toHaveLength(1); expect(h.started[0].args).toContain(composeAgentResumePrompt(next.input.prompt, next.input.agentMuxNote).text)
     expect(h.core.kernel.input).not.toHaveBeenCalled()
   } finally { await h.close() }
 })
@@ -212,14 +226,15 @@ it('keeps the second concurrent fresh intent distinct from the one original laun
     const [winner, loser] = await Promise.all([h.client.ensureAgentContinuity(h.request), h.client.ensureAgentContinuity({ ...h.request, operationId: 'second-op', input: { ...fresh, submissionId: 'second-input', prompt: 'Second authored intent' } })])
     expect(winner.kind).toBe('resumed'); expect(loser.kind).toBe('conflict')
     expect(loser.continuity?.launchInput?.state).toBe('not-applied'); expect(loser.continuity?.launchInput?.key).toBeUndefined(); expect(h.started).toHaveLength(1)
-    expect(h.started[0].args).toContain(composeAgentPrompt(fresh.prompt, fresh.agentMuxNote).text)
+    expect(h.started[0].args).toContain(composeAgentResumePrompt(fresh.prompt, fresh.agentMuxNote).text)
   } finally { await h.close() }
 })
 
 it('does not add a fresh input to a healthy Run already won by ordinary startup', async () => {
   const h = await fixture()
   try {
-    await h.client.ensureAgentContinuity({ ...h.request, input: undefined, trigger: 'startup', policy: { reminderMode: 'off', continuationEnabled: false } })
+    const { input: _fresh, ...startup } = h.request
+    await h.client.ensureAgentContinuity({ ...startup, trigger: 'startup', policy: { reminderMode: 'off', continuationEnabled: false } })
     const freshResult = await h.client.ensureAgentContinuity({ ...h.request, operationId: 'fresh-loser' })
     expect(freshResult.kind).toBe('conflict'); expect(freshResult.continuity?.launchInput?.state).toBe('not-applied'); expect(freshResult.continuity?.launchInput?.key).toBeUndefined()
     expect(h.started).toHaveLength(1); expect(h.core.kernel.input).not.toHaveBeenCalled(); expect(h.core.kernel.stop).not.toHaveBeenCalled()
@@ -238,7 +253,8 @@ it.each(['fresh', 'plain-startup'] as const)('preserves both original decisions 
     const start = h.core.kernel.start, entered = Promise.withResolvers<void>(), blocked = new Promise<void>(resolve => { release = resolve })
     h.core.kernel.start = vi.fn(async (spec: any) => { const result = await start(spec); entered.resolve(); await blocked; return result })
     core.kernel.start = vi.fn(() => { throw new Error('Another Client cannot start over the original lease') })
-    winning = h.client.ensureAgentContinuity(winnerKind === 'fresh' ? h.request : { ...h.request, input: undefined, trigger: 'startup', policy: { reminderMode: 'off', continuationEnabled: false } })
+    const { input: _fresh, ...startup } = h.request
+    winning = h.client.ensureAgentContinuity(winnerKind === 'fresh' ? h.request : { ...startup, trigger: 'startup', policy: { reminderMode: 'off', continuationEnabled: false } })
     await entered.promise
     const losing = await other.ensureAgentContinuity({ ...h.request, operationId: 'other-client-op', input: { ...fresh, submissionId: 'other-client-input', prompt: 'Other original body' } })
     expect(losing.kind).toBe('conflict'); expect(losing.continuity?.launchInput?.key).toBeUndefined(); expect(losing.continuity?.launchInput?.receipt).toBeUndefined()
@@ -360,7 +376,7 @@ it('uses the original submission ID and real terminal owner for post-launch-only
   const h = await fixture({ postLaunch: true })
   try {
     await h.client.ensureAgentContinuity(h.request)
-    expect(h.started[0].args).not.toContain(composeAgentPrompt(fresh.prompt, fresh.agentMuxNote).text)
+    expect(h.started[0].args).not.toContain(composeAgentResumePrompt(fresh.prompt, fresh.agentMuxNote).text)
     expect(h.op()!.launchInput).toMatchObject({ state: 'terminal-confirmed', delivery: 'post-launch', key: { submissionId: fresh.submissionId, expectedRun: h.newRun } })
     const record = await h.client.inspectAgentPromptSubmission(h.op()!.launchInput!.key!)
     expect(record?.admission).toMatchObject({ submissionId: fresh.submissionId, acknowledged: true, intent: { prompt: h.op()!.launchInput!.prompt, message: h.op()!.launchInput!.message } })

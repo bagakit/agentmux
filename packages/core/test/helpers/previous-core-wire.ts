@@ -6,11 +6,11 @@ import { pathToFileURL } from 'node:url'
 import type { AgentMuxClient } from '../../src/client.js'
 import type { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
 
-/** Two real Core owners with different wire producers, without a stale package dist.
- * Only the old generation's readable formatter changes. Its journal, author
- * checks, claim recipe and transport are compiled from this candidate's source.
+/** Two real Core owners with different wire/guidance producers, without a stale dist.
+ * Only the earlier formatter and optional resume context producer change. Its
+ * journal, author checks, claim recipe and transport use this candidate's source.
  */
-export async function previousWireCore(): Promise<{
+export async function previousWireCore(options: { resumeWithoutGuidance?: boolean } = {}): Promise<{
   owner: { AgentMuxClient: typeof AgentMuxClient; AgentMuxFileAgentSessionStore: typeof AgentMuxFileAgentSessionStore }
   close(): Promise<void>
 }> {
@@ -40,7 +40,13 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
 ` + source.slice(end) }
         })
         builder.onLoad({ filter: /[/\\]agent-outbound-message\.ts$/ }, async ({ path }) => {
-          const source = await readFile(path, 'utf8'), anchor = 'const envelope = document.documentElement!'
+          let source = await readFile(path, 'utf8')
+          if (options.resumeWithoutGuidance) {
+            const start = source.indexOf('export function composeAgentResumePrompt('), end = source.indexOf('\n}\n', start)
+            if (start < 0 || end < start) throw Error('Previous guidance fixture lost its original resume producer')
+            source = source.slice(0, start) + 'export function composeAgentResumePrompt(prompt: string | undefined, agentMuxNote?: string) { return composeAgentPrompt(prompt, agentMuxNote) }' + source.slice(end + 2)
+          }
+          const anchor = 'const envelope = document.documentElement!'
           if (source.split(anchor).length !== 2) throw Error('Previous wire fixture lost its platform envelope boundary')
           return { loader: 'ts', contents: source.replace(anchor, anchor + "; envelope.setAttribute('from', 'amux')") }
         })
