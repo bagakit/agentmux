@@ -1,6 +1,7 @@
 import { validateAgentMuxMessageEnvelope, messageEnvelopeString as nonEmpty, messageEnvelopeTimestamp as finiteTimestamp, type AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 export { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import type { AgentMuxMessageQuery, AgentMuxMessagePage, AgentMuxMessageMetadata } from './agent-message-query.js'
 import { isDeepStrictEqual } from 'node:util'
 import { mintObjectId } from './object-id.js'
 import { chmod, mkdir } from 'node:fs/promises'
@@ -819,8 +820,55 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Exact immutable message identity lookup; never discovers unrelated messages. */
-  async readByMessageId(messageId: string): Promise<DurableAgentMuxMessage | null> {
-    return this.withLock(async () => this.message(nonEmpty(messageId, 'Message id')) ?? null)
+  async readByMessageId(messageId: string,
+    reauthorize?: (message: DurableAgentMuxMessage | null) => Promise<void>): Promise<DurableAgentMuxMessage | null> {
+    return this.withLock(async () => {
+      const message = this.message(nonEmpty(messageId, 'Message id')) ?? null
+      await reauthorize?.(message)
+      return message
+    })
+  }
+
+  /** Browse the original journal without constructing bodies, delivery batches or consumer cursors. */
+  async listMessages(input: AgentMuxMessageQuery, reauthorize: () => Promise<void>): Promise<AgentMuxMessagePage> {
+    const participantSessionId = nonEmpty(input.participantSessionId, 'Message participant Session id')
+    if (input.direction !== 'incoming' && input.direction !== 'outgoing') throw new AgentMuxError(
+      'Message direction must be incoming or outgoing.', 'INVALID_CONTROL_REQUEST')
+    const limit = input.limit ?? 50, before = input.beforeSequence ?? Number.MAX_SAFE_INTEGER
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(before) || before < 1) throw new AgentMuxError(
+      'Message page requires limit 1–100 and a positive original sequence cursor.', 'MESSAGE_BATCH_LIMIT_INVALID')
+    return this.withLock(async () => {
+      await reauthorize()
+      // Reuse the journal's participant expression indexes. Index initialization is local to
+      // discovery: it is never an input/readiness gate and creates no second message store.
+      this.db.exec(dispatchDiscoveryJournalSchema)
+      const side = input.direction === 'incoming' ? 'recipient' : 'sender'
+      const rows = this.db.prepare(`SELECT original.sequence,
+        json_remove(original.json, '$.envelope.body') AS metadata,
+        substr(json_extract(original.json, '$.envelope.body'), 1, 240) AS preview,
+        length(CAST(json_extract(original.json, '$.envelope.body') AS BLOB)) AS body_bytes,
+        latest.json AS delivery
+        FROM records original INDEXED BY message_${side}
+        JOIN messages m ON m.message_sequence=original.sequence
+        LEFT JOIN records latest ON latest.sequence=m.delivery_sequence
+        WHERE json_extract(original.json, '$.kind') = 'message'
+          AND json_extract(original.json, '$.envelope.${side}SessionId') = ?
+          AND json_extract(original.json, '$.envelope.sender.kind') = 'agent-session'
+          AND json_extract(original.json, '$.envelope.recipient.kind') = 'agent-session'
+          AND original.sequence < ? ORDER BY original.sequence DESC LIMIT ?`).all(participantSessionId, before, limit + 1)
+      const messages = rows.slice(0, limit).map(row => {
+        const original = JSON.parse(String(row.metadata)) as { envelope: Omit<AgentMuxMessageEnvelope, 'body'> }
+        const { body: _body, ...envelope } = validateAgentMuxMessageEnvelope({ ...original.envelope, body: '' })
+        const last = row.delivery === null ? null : JSON.parse(String(row.delivery)) as Extract<JournalRecord, { kind: 'delivery' | 'delivery-issue' }>
+        const delivery: AgentMuxMessageDeliveryState = last?.kind === 'delivery'
+          ? { state: last.state, at: last.at, ...(last.reason === undefined ? {} : { reason: last.reason }) }
+          : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
+        return { sequence: Number(row.sequence), envelope, delivery,
+          bodyPreview: String(row.preview).slice(0, 240), bodyBytes: Number(row.body_bytes) } satisfies AgentMuxMessageMetadata
+      })
+      return { participantSessionId, direction: input.direction, messages,
+        nextBeforeSequence: rows.length > limit ? messages.at(-1)!.sequence : null }
+    })
   }
 
   async listAfter(sequence = 0): Promise<readonly DurableAgentMuxMessage[]> {

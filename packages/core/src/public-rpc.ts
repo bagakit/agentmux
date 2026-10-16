@@ -251,7 +251,8 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
   'message.delivery.report': { hostId: string; record: import('./delivery-attempt.js').DeliveryAttempt }
   'message.inbox.check': { limit: number }
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
-  'message.read': { operationId: string; hostId?: string }
+  'message.read': import('./agent-message-query.js').AgentMuxMessageRead & { hostId?: string }
+  'message.ls': Omit<import('./agent-message-query.js').AgentMuxMessageQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.dispatch.open': { sourceMessageId: string }
   'message.dispatch.inspect': { sourceMessageId: string }
   'message.dispatch.read': { sourceMessageId: string; hostId?: string }
@@ -322,6 +323,7 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'message.inbox.check': Awaited<ReturnType<AgentMuxClient['checkDeliveries']>>
   'message.inbox.ack': Awaited<ReturnType<AgentMuxClient['ackDeliveryBatch']>>
   'message.read': { hostId: string; message: Awaited<ReturnType<AgentMuxClient['readMessage']>> }
+  'message.ls': import('./agent-message-query.js').AgentMuxMessagePage & { hostId: string }
   'message.dispatch.open': Awaited<ReturnType<AgentMuxClient['openDispatch']>>
   'message.dispatch.inspect': Awaited<ReturnType<AgentMuxClient['showDispatch']>>
   'message.dispatch.read': Awaited<ReturnType<AgentMuxClient['readDispatch']>> & { hostId: string }
@@ -377,7 +379,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
-  'message.read': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
+  'message.read': 'short', 'message.ls': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
