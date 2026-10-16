@@ -1,4 +1,4 @@
-import { insertComposerContent, replaceComposerDraft, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage } from '../lib/composer-insertion.js'
+import { insertComposerContent, replaceComposerDraft, replaceComposerRange, type ComposerInsertionHandle, type ComposerPasteImage, type ComposerDropFiles } from '../lib/composer-insertion.js'
 import { createContext, useContext, useEffect, useLayoutEffect, useImperativeHandle, useMemo, useRef, useId, useState, type KeyboardEvent as ReactKeyboardEvent, type Ref } from 'react'
 import { Decoration, Extension, Node, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react'
@@ -158,7 +158,7 @@ export function composerExtensions(
           if (oldNode !== newNode) updateProps()
           return true
         },
-        stopEvent: ({ event }) => Boolean(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('button'))
+        stopEvent: ({ event }) => event.type !== 'drop' && !event.type.startsWith('drag') && Boolean(event.target && (event.target as Element).nodeType === 1 && (event.target as Element).closest('button'))
       })
       return props => {
         const { node, editor, getPos } = props
@@ -207,6 +207,7 @@ export type InlineComposerProps = {
   'aria-label': string
   onKeyDown(event: KeyboardEvent, caret: number, selectionEmpty: boolean): void
   onPasteImage?: ComposerPasteImage
+  onDropFiles?: ComposerDropFiles
   insertionRef?: Ref<ComposerInsertionHandle>
   onActivateReference?: (reference: ComposerSemanticReference) => void
   // 要在正文里加下划线的识别词。每次渲染都可能是新数组，而扩展只装一次——所以下面读的是
@@ -278,7 +279,19 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     },
     handleDOMEvents: {
       compositionstart: () => { const editor = editorRef.current; if (editor) { const { from, to } = editor.state.selection; latest.current.onSelectionChange?.({ from, to, before: '', composing: true }) }; return false },
-      compositionend: () => { queueMicrotask(() => { const editor = editorRef.current; if (editor) reportSelection(editor) }); return false }
+      compositionend: () => { queueMicrotask(() => { const editor = editorRef.current; if (editor) reportSelection(editor) }); return false },
+      dragover: (view: any, event: DragEvent) => {
+        if (!latest.current.disabled && latest.current.onDropFiles && [...(event.dataTransfer?.types ?? [])].includes('Files')) {
+          event.preventDefault(); view.dom.dataset.fileDropTarget = 'true'
+        }
+        return false
+      },
+      dragleave: (view: any, event: DragEvent) => {
+        if (!view.dom.contains(event.relatedTarget as globalThis.Node | null)) delete view.dom.dataset.fileDropTarget
+        return false
+      },
+      drop: (view: any) => { delete view.dom.dataset.fileDropTarget; return false },
+      dragend: (view: any) => { delete view.dom.dataset.fileDropTarget; return false }
     },
     handlePaste: (_view: any, event: ClipboardEvent) => {
       const editor = editorRef.current
@@ -298,6 +311,19 @@ function PresentedInlineComposer(props: InlineComposerProps) {
         return true
       }
       return false
+    },
+    handleDrop: (view: any, event: DragEvent, _slice: unknown, moved: boolean) => {
+      // Internal text dragging stays with ProseMirror's original move transaction.
+      if (moved) return false
+      const files = [...(event.dataTransfer?.files ?? [])]
+      if (!files.length || !latest.current.onDropFiles) return false
+      event.preventDefault()
+      const editor = editorRef.current
+      if (!editor || latest.current.disabled || !editor.isEditable) return true
+      const point = view.posAtCoords({ left: event.clientX, top: event.clientY })
+      if (point && !view.composing) editor.commands.setTextSelection(point.pos)
+      latest.current.onDropFiles(files, (resolve, options) => insertComposerContent(editor, resolve, draftDocument, options))
+      return true
     },
     clipboardTextSerializer: (slice: any) => documentDraft({ type: 'doc', content: slice.content.toJSON() })
   }), [props.placeholder, props['aria-label']])
@@ -321,8 +347,8 @@ function PresentedInlineComposer(props: InlineComposerProps) {
     return () => { editor.off('mount', updateRoot) }
   }, [editor, platform.ownerDocument])
   useEffect(() => {
-    if (editor && !editor.isDestroyed) editor.setEditable(!props.disabled, false)
-  }, [editor, props.disabled])
+    if (editor && !editor.isDestroyed) { editor.setEditable(!props.disabled, false); if (props.disabled || props.active === false) delete editor.view.dom.dataset.fileDropTarget }
+  }, [editor, props.disabled, props.active])
   useEffect(() => {
     if (!editor || editor.isDestroyed || props.disabled) return
     return platform.bindComposerFocus(editor.view.dom, () => {

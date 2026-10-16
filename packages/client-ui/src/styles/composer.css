@@ -498,3 +498,6 @@
 
 .composer-mailbox__subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-meta); }
 .composer-mailbox__reading-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+
+/* A drop previews the existing editor boundary without changing its geometry. */
+.composer__editor .tiptap[data-file-drop-target="true"] { box-shadow: inset 0 0 0 1px var(--green-line); }

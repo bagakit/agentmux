@@ -7,7 +7,7 @@ import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInpu
 import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
-import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 import { THEME_BOOTSTRAP_CHANNEL, type ThemeBootstrap } from '../shared/theme-bootstrap'
 import { projectInitialTheme } from './theme-bootstrap'
 import { installNativeOverlayBlurGuard } from './native-overlay-focus'
@@ -418,6 +418,7 @@ const api: AgentMuxPreloadApi = {
     openExternal: (url: string) => ipcRenderer.invoke('ui:openExternal', url),
     exportTheme: (document, window) => ipcRenderer.invoke('ui:exportTheme', document, window),
     chooseFiles: (input, document) => ipcRenderer.invoke('ui:chooseFiles', input, document),
+    pathForFile: (file: File) => webUtils.getPathForFile(file),
     savePastedImage: (input: { bytes: Uint8Array; extension: string }) =>
       ipcRenderer.invoke('ui:savePastedImage', input),
     readPastedImage: (path: string) => ipcRenderer.invoke('ui:readPastedImage', path),

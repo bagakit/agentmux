@@ -1822,6 +1822,8 @@ export type AgentMuxDesktopApi = {
     exportTheme(document: ThemeDocument, window?: WorkbenchWindowDocument): Promise<ThemeFileExportResult>
     /** Native file picker. Returns absolute paths, or null when dismissed. */
     chooseFiles(input?: { defaultPath?: string }, document?: WorkbenchWindowDocument): Promise<string[] | null>
+    /** Original local File path from Electron webUtils; empty for a pathless browser File. */
+    pathForFile(file: File): string
     /** Persists pasted image bytes and returns the path an Agent can read them from. */
     savePastedImage(input: { bytes: Uint8Array; extension: string }): Promise<string>
     /**

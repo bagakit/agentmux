@@ -15,7 +15,7 @@ const ThemeObjectFileIcon = semanticIconComponent('object.file')
 
 
 /** Reads this selected Workspace's existing file owner; no local picker or attachment transfer. */
-export function LauncherFileReferences({ workspace, hostLabel, onSelect, onClose }: {
+export function ComposerFileReferences({ workspace, hostLabel, onSelect, onClose }: {
   workspace: WorkspaceRecord
   hostLabel?: string | undefined
   onSelect(path: string): void
