@@ -10,7 +10,8 @@ import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { AgentMuxSpatialStateStore, displayLabel, type AgentMuxNameContext } from '../../../packages/core/src/spatial-state'
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
-import { tabRenameTargets, useWorkbenchTabRename, useWorkbenchTabNameTooltip, WorkbenchTabRenameFeedback, type TabNameTarget } from '../src/renderer/src/components/WorkbenchTabNaming'
+import { tabRenameTargets, useWorkbenchTabRename, WorkbenchTabRenameFeedback, type TabNameTarget } from '../src/renderer/src/components/WorkbenchTabNaming'
+import { useWorkbenchNameTooltip } from '../src/renderer/src/components/WorkbenchNameTooltip'
 import { WorkbenchTabContextMenu } from '../src/renderer/src/components/WorkbenchTabContextMenu'
 import { ServiceWindowNotice } from '../src/renderer/src/components/ServiceWindowNotice'
 import type { SessionSnapshot } from '../src/shared/contracts'
@@ -47,7 +48,7 @@ async function mount(targets: TabNameTarget[], save: (target: TabNameTarget, val
     const renameInput = useRef<HTMLInputElement>(null)
     const [visible, setVisible] = useState(true); setSurfaceVisible = setVisible
     latest = useWorkbenchTabRename({ targets, displayName: 'Original name', revision: () => 0, save })
-    const tooltip = useWorkbenchTabNameTooltip('完整中文 Tab 名 · Long untruncated original work description', 'Agent and Browser', !visible || latest.rename !== null)
+    const tooltip = useWorkbenchNameTooltip('完整中文 Tab 名 · Long untruncated original work description', 'Agent and Browser', !visible || latest.rename !== null)
     return <><WorkbenchTabContextMenu tabId={tabId} copyableAgentSessionId={sid} regionCount={1}
       canCloseOthers={false} canCloseLeft={false} canCloseRight={false} canMoveToNewGroup={false}
       writeClipboardText={async () => {}} onRenameTab={latest.begin} renameLabel={latest.label}
@@ -192,7 +193,8 @@ it('the actual sortable Tab button merges both descriptions after the sortable a
   let tab: ts.JsxOpeningElement | undefined
   const visit = (node: ts.Node) => {
     if (ts.isJsxOpeningElement(node) && node.tagName.getText(tree) === 'button' &&
-      node.attributes.properties.some(property => ts.isJsxAttribute(property) && property.name.getText(tree) === 'data-workbench-tab-id')) tab = node
+      node.attributes.properties.some(property => ts.isJsxAttribute(property) && property.name.getText(tree) === 'data-workbench-tab-id') &&
+      node.attributes.properties.some(property => ts.isJsxSpreadAttribute(property) && property.expression.getText(tree) === 'attributes')) tab = node
     ts.forEachChild(node, visit)
   }
   visit(tree); expect(tab, 'nonempty actual production Tab button').toBeTruthy()
