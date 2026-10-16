@@ -33,8 +33,9 @@ function authentication(receipt: EnrollmentAuthenticationReceipt) {
 }
 it.each([
   ['unknown-step', 'another-step', 1, null],
-  ['unknown-status', 'qr_login_polling', 3, null],
-  ['init-status-on-poll', 'qr_login_polling', 0, null],
+  ['cancel-is-not-handoff', 'qr_login_polling', 3, null],
+  ['error-is-not-handoff', 'qr_login_polling', 4, null],
+  ['success-marker-is-not-handoff', 'qr_login_polling', 0, null],
   ['string-status', 'qr_login_polling', '1', null],
   ['missing-status', 'qr_login_polling', undefined, null],
   ['native-polling-expired', 'qr_login_polling', 5, 'expired'],
@@ -64,14 +65,37 @@ it.each([{}, { status: null }, { status: 0 }, { status: 2 }])('uses enter_app ha
   expect(JSON.parse(result.privateState).authentication.phase).toBe('cross-login')
   expect(network.calls).toHaveLength(2)
 })
-it.each([undefined, 'http://accounts.feishu.cn/cross', 'https://foreign.example/cross', 'https://user@accounts.feishu.cn/cross', 'https://accounts.feishu.cn/cross#fragment'])('keeps an unqualified handoff unknown without following its URL: %s', async crossLoginUri => {
+it.each(['', 7, 'http://accounts.feishu.cn/cross', 'https://foreign.example/cross', 'https://user@accounts.feishu.cn/cross', 'https://accounts.feishu.cn:8443/cross', 'https://accounts.feishu.cn/cross#fragment'])('keeps an unqualified handoff unknown without following its URL: %s', async crossLoginUri => {
   const network = remote(
     Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
     Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: crossLoginUri } } })
   )
   const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
-  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toMatchObject({ kind: 'unknown', diagnostic: { stage: 'authentication', step: 'poll', httpStatus: 200 } })
+  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: crossLoginUri === '' || typeof crossLoginUri !== 'string' ? 'invalid-response' : 'redirect-unconfirmed', httpStatus: 200, boundary: 'handoff' } })
   expect(network.calls).toHaveLength(2)
+})
+it.each([{ stepInfo: [] }, { stepInfo: 7 }, { stepInfo: 'not-an-object' }])('does not treat malformed handoff info as an absent optional cross: %j', async ({ stepInfo }) => {
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: stepInfo } })
+  )
+  const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
+  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: 'invalid-response', httpStatus: 200, boundary: 'envelope' } })
+  expect(network.calls).toHaveLength(2)
+})
+it.each(['https://foreign.example/private-target', 'http://ask.feishu.cn/private-target'])('does not follow an unqualified redirect from an accepted cross target: %s', async location => {
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: 'https://ask.feishu.cn/cross' } } }),
+    new Response(null, { status: 302, headers: { location } })
+  )
+  const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
+  const handoff = authentication(await adapter.advance({ ...original, privateState: initial.privateState }))
+  expect(network.calls).toHaveLength(2)
+  const unknown = await adapter.advance({ ...original, privateState: handoff.privateState })
+  expect(unknown).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'cross-login', failure: 'redirect-unconfirmed', httpStatus: 302, boundary: 'handoff' } })
+  expect(network.calls.map(call => new URL(call.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross'])
+  expect(JSON.stringify(unknown)).not.toContain('private-target')
 })
 function uploaded(receipt: EnrollmentUploadReceipt) {
   expect(receipt.kind).toBe('uploaded')
@@ -101,7 +125,8 @@ async function signedIn(origin = 'https://open.feishu.cn', document = html()) {
   const responses: Remote[] = [
     Response.json({ code: 0, data: { step_info: { token: 'private-qr-token' } } }, { headers: initialHeaders }),
     Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross' } } }),
-    new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } }),
+    new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/cross-finish' } }),
+    new Response('Cross-login complete, not the fixed landing'),
     new Response('landing', { headers: { 'content-type': 'text/html' } }),
     ...(origin === 'https://open.feishu.cn' ? [] : [new Response(null, { status: 302, headers: { location: origin + '/app' } })]),
     new Response(document, { headers: consoleHeaders })
@@ -117,7 +142,7 @@ async function signedIn(origin = 'https://open.feishu.cn', document = html()) {
   expect(view).toMatchObject({ stage: 'account', challenge: null, account: { userId: 'original-user', tenantId: 'original-tenant' } })
   expect(network.calls.map(call => { const u = new URL(call.url); return u.origin + u.pathname })).toEqual([
     'https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling',
-    'https://accounts.feishu.cn/cross', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app',
+    'https://accounts.feishu.cn/cross', 'https://ask.feishu.cn/cross-finish', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app',
     ...(origin === 'https://open.feishu.cn' ? [] : [origin + '/app'])
   ])
   return { original, adapter, network, privateState: view.privateState, view }
@@ -155,12 +180,13 @@ it('uses the original target-free account leaf and keeps authentication separate
   expect(Object.keys(state)).toEqual(['version', 'authentication'])
   expect(state.authentication).toMatchObject({ phase: 'account', csrf: 'private-csrf', consoleOrigin: 'https://open.feishu.cn' })
   for (const field of ['operationId', 'connectionId', 'attemptId', 'application']) expect(state.authentication).not.toHaveProperty(field)
-  expect(f.original.assertCurrent).toHaveBeenCalledTimes(5)
+  expect(f.original.assertCurrent).toHaveBeenCalledTimes(6)
   expect(f.network.queue).toEqual([])
   for (const call of f.network.calls) expect(new Headers(call.options.headers).get('user-agent')).toContain('Chrome/145.0.0.0')
   for (const call of f.network.calls.slice(0, 2)) expect(new URL(call.url).search).toMatch(/^\?_r\d+=\d+$/u)
   expect(new Headers(f.network.calls[3]!.options.headers).get('referer')).toBe('https://accounts.feishu.cn/cross')
-  expect(new Headers(f.network.calls[4]!.options.headers).get('referer')).toBe('https://ask.feishu.cn/')
+  expect(new Headers(f.network.calls[4]!.options.headers).get('referer')).toBe('https://ask.feishu.cn/cross-finish')
+  expect(new Headers(f.network.calls[5]!.options.headers).get('referer')).toBe('https://ask.feishu.cn/')
 })
 
 it.each(['ClientID', 'clientID', 'clientId', 'appId'] as const)('creates through the frozen developer-console template and accepts its exact %s receipt', async key => {
@@ -198,7 +224,7 @@ it.each([
 it.each([
   [() => new Response(null, { status: 503 }), { step: 'initialize', failure: 'http-status', httpStatus: 503 }],
   [() => Response.json({ code: 901, message: 'private-native-error' }), { step: 'initialize', failure: 'platform-error', httpStatus: 200, nativeCode: 901 }],
-  [() => Response.json({ code: 0, data: {} }), { step: 'initialize', failure: 'invalid-response', httpStatus: 200 }],
+  [() => Response.json({ code: 0, data: {} }), { step: 'initialize', failure: 'invalid-response', httpStatus: 200, boundary: 'envelope' }],
   [() => { throw new TypeError('private-native-network') }, { step: 'initialize', failure: 'transport-unconfirmed' }]
 ] as const)('reports safe native initialization facts without private material, case %#', async (response, diagnostic) => {
   remote(async () => response())
