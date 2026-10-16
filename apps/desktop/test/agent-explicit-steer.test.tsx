@@ -1,3 +1,4 @@
+import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -13,8 +14,8 @@ import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, agentPromptCondition, issueAgentCapability, hashAgentCapability,
-  type AgentMuxControlRequest, type AgentMuxMessageEnvelope, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, agentPromptCondition, issueAgentCapability, hashAgentCapability,
+  type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
@@ -96,7 +97,7 @@ beforeEach(async () => {
   immediateCapability = false
   privateQueueDirectory = await mkdtemp(join(tmpdir(), 'amx-explicit-steer-'))
   bridge.storageDirectory = privateQueueDirectory
-  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(privateQueueDirectory, 'messages.ndjson'))
+  isolateCoreFixtureEnvironment(privateQueueDirectory)
   await mkdir(join(privateQueueDirectory, 'Local Storage', 'leveldb'), { recursive: true })
   capability = issueAgentCapability()
   const store = new AgentMuxMemoryAgentSessionStore()
@@ -482,68 +483,6 @@ it('retains a fresh exact authorization arriving during a default Core attempt u
     [entry.operationId, undefined], [entry.operationId, { allowUncertainTurn: true }]
   ])
 })
-
-it('Control send steers its exact message through registered Main and public Core without a turn completion', async () => {
-  await draft('first accepted prompt'); await enter('metaKey'); await settled()
-  expect(writes).toEqual(['first accepted prompt', '\r'])
-  expect(client.agentSession(ID).semanticStatus?.state).toBe('working')
-  const message: AgentMuxMessageEnvelope = {
-    schema: 'agentmux.a2a.v1', messageId: 'control-exact-message', operationId: 'control-first-request',
-    createdAt: _reshape_fixtureEpoch(0, 0, 1), sender: { kind: 'agent-session', agentSessionId: ID },
-    recipient: { kind: 'agent-session', agentSessionId: ID }, threadId: 'control-thread',
-    correlationId: 'control-correlation', replyTo: null, workspaceId: 'private',
-    senderSessionId: ID, senderRunId: RUN, recipientSessionId: ID, recipientRunId: RUN,
-    body: 'continue this exact work\nkeep the second line'
-  }
-  const request: AgentMuxControlRequest = {
-    schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-first-request', operation: 'send',
-    target: { kind: 'agent-session', agentSessionId: ID }, text: message.body,
-    caller: { agentSessionId: ID, capability }, message, promptCondition: agentPromptCondition(client.agentSession(ID))
-  }
-  // Core authenticates the real issued capability against the durable Session/Run. No submit method is mocked:
-  // Store -> product preload -> registered IPC -> RuntimeController -> public Core all execute.
-  const prompt = `[Message from Agent ${ID}]\n${message.body}`
-  await act(async () => {
-    await expect(useAppStore.getState().executeControl(request)).resolves.toEqual({ operation: 'send', agentSessionId: ID })
-  })
-  const accepted = ['first accepted prompt', '\r', `\x1b[200~${prompt}\x1b[201~`, '\r']
-  expect(writes).toEqual(accepted)
-  const session = useAppStore.getState().sessions.find(session => session.id === ID)
-  if (session?.kind !== 'agent') throw new Error('The fixture Agent is missing')
-  const control = session.control
-  const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitMessage' && call[2].envelope.messageId === message.messageId)
-  expect(calls).toEqual([['sessions:submitMessage', control, { envelope: message, condition: request.promptCondition,
-    caller: { agentSessionId: ID, capability } }]])
-  expect(client.agentSession(ID).terminalPromptDelivery).toMatchObject({
-    reason: 'turn-end-unconfirmed', submissionId: message.messageId
-  })
-  expect((await client.sessionTimeline(ID)).items.find(item => item.id === `prompt:${message.messageId}`)).toMatchObject({
-    content: prompt, authorAgentSessionId: ID, status: 'complete'
-  })
-
-  await act(async () => {
-    await expect(useAppStore.getState().executeControl({ ...request, requestId: 'control-replayed-request' })).resolves.toEqual({
-      operation: 'send', agentSessionId: ID
-    })
-  })
-  expect(writes).toEqual(accepted)
-  await act(async () => {
-    await expect(useAppStore.getState().executeControl({ ...request, requestId: 'control-conflicting-request',
-      text: 'changed body', message: { ...message, body: 'changed body' }
-    })).rejects.toMatchObject({ code: 'MESSAGE_ID_CONFLICT' })
-  })
-  expect(writes).toEqual(accepted)
-  await expect(runtime.submitPrompt(control, 'default is still gated', 'control-default', agentPromptCondition(client.agentSession(ID))))
-    .rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
-  const inputByte = (await client.statusAgent(ID)).run.acceptedInputBytes
-  if (inputByte === undefined) throw new Error('The actual fixture input fence is missing')
-  await expect(runtime.submitPrompt(control, 'automatic is still gated', 'control-auto', agentPromptCondition(client.agentSession(ID)),
-    { completionId: 'not-an-observed-completion', inputByte, isCurrent: () => true, signal: new AbortController().signal },
-    { allowUncertainTurn: true }))
-    .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
-  expect(writes).toEqual(accepted)
-})
-
 
 it.each([false, true])('real Core receipt preserves a later Composer draft (lost ACK: %s)', async lostAck => {
   const gate = deferred()

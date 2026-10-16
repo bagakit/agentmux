@@ -105,7 +105,6 @@ ipcMain.handle('host-ui:request', async (_event, operation, ...args) => {
     case 'paste': requireOwned(args[0]); return runtime.paste(args[0], args[1], args[2])
     case 'stop': requireOwned(args[0]); return runtime.stopSession(args[0])
     case 'submit-prompt': requireOwned(args[0]); return runtime.submitPrompt(args[0], args[1], args[2], args[3], undefined, args[4], args[5])
-    case 'submit-message': requireOwned(args[0]); return runtime.submitMessage(args[0], args[1])
     case 'file-readDirectory': return files.readDirectory(workspace(args[0]), args[1])
     case 'file-read': return files.read(workspace(args[0]), args[1])
     case 'file-write': return files.write(workspace(args[0]), args[1])

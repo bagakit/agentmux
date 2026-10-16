@@ -51,7 +51,7 @@ api.files.observe = async () => {}
 api.files.unobserve = async () => {}
 // No live Session belongs to this proof. An unexpected lifecycle call is recorded and rejected;
 // neither the preview's fake Runs nor the user's Runtime can enter the spatial organization proof.
-for (const method of ['launchAgent', 'launchTerminal', 'write', 'paste', 'stop', 'submitPrompt', 'submitMessage'] as const) {
+for (const method of ['launchAgent', 'launchTerminal', 'write', 'paste', 'stop', 'submitPrompt'] as const) {
   (api.sessions as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => request(`forbidden-runtime-${method}`, ...args)
 }
 api.files.write = (...args: Parameters<AgentMuxDesktopApi['files']['write']>) => request('forbidden-file-write', ...args)

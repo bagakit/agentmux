@@ -78,7 +78,7 @@ const deny = (method: string) => async (...params: unknown[]) => {
 }
 // No preview Start, send, interrupt or acceptance can be mistaken for a real owner receipt.
 for (const [owner, methods] of [
-  [api.sessions, ['launchAgent', 'launchTerminal', 'write', 'paste', 'submitPrompt', 'submitMessage', 'replyQuestion', 'respondInteraction', 'setPosture', 'reopen', 'resume', 'interrupt', 'stop']],
+  [api.sessions, ['launchAgent', 'launchTerminal', 'write', 'paste', 'submitPrompt', 'replyQuestion', 'respondInteraction', 'setPosture', 'reopen', 'resume', 'interrupt', 'stop']],
   [api.demands, ['create', 'update', 'delete', 'linkSession', 'unlinkSession', 'confirmAlignment', 'acceptGrounding', 'activity', 'decision']]
 ] as const) for (const method of methods) {
   const transport = owner as unknown as Record<string, unknown>

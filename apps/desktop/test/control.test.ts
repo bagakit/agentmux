@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -11,7 +12,6 @@ import {
   type AgentMuxControlRequest,
   type AgentMuxExecutorProbeResult
 } from '@agentmux/core'
-import type { AgentMuxMessageEnvelope } from '@agentmux/core'
 import { BUILT_IN_AGENT_LABELS, BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ExecutorDetection, ExecutorDetectionInput, SessionSnapshot } from '../src/shared/contracts.js'
 import { directoryIdentity } from '../src/shared/space-addresses.js'
@@ -53,11 +53,11 @@ function agent(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
     label: id,
-    createdAt: 1,
-    updatedAt: 1,
-    agentSessionUpdatedAt: 1,
+    createdAt: _tailFixtureEpoch(0, 0, 1),
+    updatedAt: _tailFixtureEpoch(0, 0, 1),
+    agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1),
     processState: 'running',
-    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) },
     latestOutputBytes: 0,
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: `run-${id}` } }
   }
@@ -71,10 +71,10 @@ function terminal(id: string): Extract<SessionSnapshot, { kind: 'terminal' }> {
     hostId: 'local',
     workspacePath: _hygiene_fixturePath("repo"),
     label: id,
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: _tailFixtureEpoch(0, 0, 1),
+    updatedAt: _tailFixtureEpoch(0, 0, 1),
     processState: 'running',
-    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) },
     latestOutputBytes: 0,
     control: { kind: 'terminal', hostId: 'local', runId: id, run: { runId: id } }
   }
@@ -132,13 +132,6 @@ function request<T extends AgentMuxControlRequest>(value: DistributiveOmit<T, 's
     requestId: `request-${value.operation}`,
     ...value
   } as T
-}
-
-function envelope(body: string): AgentMuxMessageEnvelope {
-  return { schema: 'agentmux.a2a.v1', messageId: 'resolved-message', operationId: 'resolved-request', createdAt: 1,
-    sender: { kind: 'agent-session', agentSessionId: 'caller' }, recipient: { kind: 'agent-session', agentSessionId: 'caller' },
-    threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: 'workspace',
-    senderSessionId: 'caller', senderRunId: 'run-caller', recipientSessionId: 'caller', recipientRunId: 'run-caller', body }
 }
 
 function launch(session: Extract<SessionSnapshot, { kind: 'agent' }>, input: AgentLaunchInput): AgentLaunchResult {
@@ -261,82 +254,6 @@ describe('Desktop Control owner', () => {
     const byId = new Map(result.tab.regions.map((region) => [region.regionId, region.neighbors]))
     expect(byId.get('region-caller')?.down).toEqual({ kind: 'region', regionId: 'region-file' })
     expect(byId.get('region-file')?.up).toEqual({ kind: 'region', regionId: 'region-caller' })
-  })
-
-  it('deduplicates Tab Agent Sessions and returns typed ambiguity candidates', async () => {
-    let tab = fixture([agent('reviewer')])
-    tab = addWorkbenchRegion(tab, 'region-caller', 'right', {
-      regionId: 'region-caller-2', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'caller'
-    })
-    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
-    const submit = vi.spyOn(api.sessions, 'submitMessage').mockResolvedValue()
-    await useAppStore.getState().executeControl(request({
-      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', message: envelope('continue'), caller: { agentSessionId: 'caller', capability: 'test-capability' },
-      promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
-    }))
-    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, { envelope: envelope('continue'),
-      condition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, caller: { agentSessionId: 'caller', capability: 'test-capability' } })
-
-    tab = addWorkbenchRegion(tab, 'region-caller-2', 'down', {
-      regionId: 'region-reviewer', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'reviewer'
-    })
-    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
-    await expect(useAppStore.getState().executeControl(request({
-      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', message: envelope('continue'),
-      promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
-    }))).rejects.toMatchObject({
-      code: 'MESSAGE_TARGET_NOT_UNIQUE',
-      candidates: [
-        { agentSessionId: 'caller', regionIds: ['region-caller', 'region-caller-2'] },
-        { agentSessionId: 'reviewer', regionIds: ['region-reviewer'] }
-      ]
-    })
-  })
-
-  it('refuses a replacement Tab recipient without losing the original semantic Session or submitting twice', async () => {
-    const tab = fixture([agent('reviewer')])
-    const original = agent('caller')
-    const message: AgentMuxMessageEnvelope = {
-      schema: 'agentmux.a2a.v1', messageId: 'captured-tab-message', operationId: 'captured-tab-request', createdAt: 1,
-      sender: { kind: 'human', principal: 'local-cli' },
-      recipient: { kind: 'agent-session', agentSessionId: original.id },
-      threadId: 'captured-tab-message', correlationId: 'captured-tab-message', replyTo: null, workspaceId: null,
-      senderSessionId: null, senderRunId: null, recipientSessionId: original.id, recipientRunId: null,
-      body: 'original recipient only'
-    }
-    const replacement = createWorkbenchTab(tab.id, { regionId: 'region-caller', kind: 'agent', phase: 'attached',
-      workspaceId: 'workspace', sessionId: 'reviewer' })
-    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: replacement } }))
-    const submit = vi.spyOn(api.sessions, 'submitMessage').mockResolvedValue()
-    await expect(useAppStore.getState().executeControl(request({ operation: 'send',
-      target: { kind: 'tab', tabId: tab.id }, text: message.body, message,
-      promptCondition: { expectedRun: { runId: original.control.run.runId }, afterSubmissionId: null }
-    }))).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
-    expect(submit).not.toHaveBeenCalled()
-    expect(useAppStore.getState().sessions.map(item => item.id)).toEqual(['caller', 'reviewer'])
-    expect(useAppStore.getState().tabs[tab.id]).toBe(replacement)
-  })
-
-  it('delivers the verified A2A envelope to the resolved recipient instead of dropping to bare text', async () => {
-    const tab = fixture()
-    useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
-    const submit = vi.spyOn(api.sessions, 'submitMessage').mockResolvedValue()
-    const message: AgentMuxMessageEnvelope = {
-      schema: 'agentmux.a2a.v1', messageId: 'message-envelope-1', operationId: 'control-request-1', createdAt: 1,
-      sender: { kind: 'agent-session', agentSessionId: 'caller' },
-      recipient: { kind: 'agent-session', agentSessionId: 'caller' },
-      threadId: 'thread-1', correlationId: 'correlation-1', replyTo: null, workspaceId: 'workspace',
-      senderSessionId: 'caller', senderRunId: 'run-caller', recipientSessionId: 'caller', recipientRunId: 'run-caller',
-      body: 'keep this exact body'
-    }
-    await useAppStore.getState().executeControl({
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-request-1', operation: 'send',
-      target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller', capability: 'test-capability' }, message,
-      promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
-    })
-    expect(submit).toHaveBeenCalledWith(agent('caller').control, { envelope: message,
-      condition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, caller: { agentSessionId: 'caller', capability: 'test-capability' } })
-    expect(submit.mock.calls[0]?.[1].envelope.body).toBe('keep this exact body')
   })
 
   // T-002 身份关联 + 环境安全：新开的 Agent Region 与它的 Session（agentSessionId）、Run（runId）、
@@ -833,7 +750,7 @@ describe('Desktop Control owner', () => {
     // 「移动不调用 Runtime lifecycle」是断言出来的，不是读源码读出来的：搬一格不许起/停/重启底层 Run。
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
     const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal')
-    const submitPrompt = vi.spyOn(api.sessions, 'submitMessage')
+    const submitPrompt = vi.spyOn(api.sessions, 'submitPrompt')
     const resume = vi.spyOn(api.sessions, 'resume')
     const interrupt = vi.spyOn(api.sessions, 'interrupt')
     const stop = vi.spyOn(api.sessions, 'stop')

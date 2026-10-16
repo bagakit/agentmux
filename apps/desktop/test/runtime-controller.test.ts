@@ -415,18 +415,6 @@ function agentStatusFixture() {
 }
 
 describe('RuntimeController configuration transaction', () => {
-  it('routes the complete A2A envelope and credential through the Core delivery owner', async () => {
-    const controller = await configuredController()
-    const client = runtimeFixture.FakeClient?.instances?.at(-1)
-    const message = { envelope: { schema: 'agentmux.a2a.v1' as const, messageId: 'message', operationId: 'operation', createdAt: _reshape_fixtureEpoch(0, 0, 1),
-      sender: { kind: 'agent-session' as const, agentSessionId: 'caller-cli' }, recipient: { kind: 'agent-session' as const, agentSessionId: 'recipient' },
-      senderSessionId: 'caller-cli', senderRunId: 'run-caller-cli', recipientSessionId: 'recipient', recipientRunId: 'run-recipient',
-      threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null, body: 'original' },
-      condition: { expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null }, caller: { agentSessionId: 'caller-cli', capability: 'capability' } }
-    await controller.submitMessage({ kind: 'agent', hostId: 'local', agentSessionId: 'recipient', run: message.condition.expectedRun }, message)
-    expect(client?.submitAgentMessage).toHaveBeenCalledWith({ ...message, agentSessionId: 'recipient' })
-    await controller.dispose()
-  })
   beforeEach(() => {
     runtimeFixture.FakeClient.instances.length = 0
     runtimeFixture.FakeClient.failNextConnect = false

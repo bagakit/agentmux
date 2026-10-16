@@ -348,7 +348,7 @@ describe('mounted original Goal delegation consumer', () => {
       }
       return result(record)
     })
-    const send = vi.spyOn(api.sessions, 'submitMessage')
+    const send = vi.spyOn(api.sessions, 'submitPrompt')
     await mount(record)
     expect(container.textContent).toContain('Report ready to collect')
     await click('Collect report')

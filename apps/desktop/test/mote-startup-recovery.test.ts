@@ -37,7 +37,7 @@ async function fixture(timing: MoteRecoveryTiming, main: boolean) {
     expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]).toEqual(originalLayout)
     return { kind: 'resumed', session: { ...selected, control: { ...selected.control, run: { runId: 'original-resumed-run' } } } }
   })
-  const launch = vi.spyOn(api.sessions, 'launchAgent'), send = vi.spyOn(api.sessions, 'submitPrompt'), message = vi.spyOn(api.sessions, 'submitMessage'), write = vi.spyOn(api.sessions, 'write')
+  const launch = vi.spyOn(api.sessions, 'launchAgent'), send = vi.spyOn(api.sessions, 'submitPrompt'), write = vi.spyOn(api.sessions, 'write')
   const spatial = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
   const state = useAppStore.getState()
   await spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph({ ...state, config: moteConfig, tabs: moteTabs, layouts: { [SCRATCH_WORKSPACE_ID]: originalLayout }, sessions }, []) })
@@ -52,7 +52,7 @@ async function fixture(timing: MoteRecoveryTiming, main: boolean) {
       main || timing === 'startup' ? { control: { ...selected.control, run: { runId: 'original-resumed-run' } } }
         : { processState: 'exited', control: ended.control })
   })
-  return { selected, tab, recover, sessions, snapshot, preserved, launch, send, message, write }
+  return { selected, tab, recover, sessions, snapshot, preserved, launch, send, write }
 }
 const stateCopy = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 function expectOriginalWorkface(f: Awaited<ReturnType<typeof fixture>>, resumed: boolean) {
@@ -65,7 +65,7 @@ function expectOriginalWorkface(f: Awaited<ReturnType<typeof fixture>>, resumed:
   expect(state.layouts[SCRATCH_WORKSPACE_ID]).toEqual(originalLayout)
   expect({ drafts: state.agentComposerDrafts, focus: state.agentFocus, activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface }).toEqual(f.preserved)
   expect(state.workbenchSaveWarning).toBeNull()
-  expect(f.launch).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.message).not.toHaveBeenCalled(); expect(f.write).not.toHaveBeenCalled()
+  expect(f.launch).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.write).not.toHaveBeenCalled()
 }
 beforeEach(async () => {
   useAppStore.setState(baseline, true); seedMoteWorkface({ directory: false })

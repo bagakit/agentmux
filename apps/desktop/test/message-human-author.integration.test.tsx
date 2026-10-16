@@ -1,3 +1,4 @@
+import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -213,6 +214,7 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
     writes = []
 
     tempDir = await mkdtemp(join(tmpdir(), 'desktop-author-test-'))
+    isolateCoreFixtureEnvironment(tempDir)
     storeFile = join(tempDir, 'sessions.json')
     fakeTrustedSender.session.getStoragePath.mockReturnValue(tempDir)
     await mkdir(join(tempDir, 'Local Storage', 'leveldb'), { recursive: true })
@@ -752,19 +754,6 @@ describe('T041 Desktop Human Message Author vertical slice', () => {
     const timeline = await new AgentMuxFileAgentSessionStore(storeFile).loadTimeline(SESSION_ID)
     expect(projectSessionUserMessages({ agentSessionId: SESSION_ID, timeline }).map(message => [message.content, message.author]))
       .toEqual([[goal.description, { kind: 'unknown' }]])
-  })
-
-  it('actual control send without caller stays unknown and a known Agent caller remains Agent', async () => {
-    for (const [operationId, caller] of [['control-unknown', undefined], ['control-agent', 'peer-control-agent']] as const) {
-      await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: operationId, operation: 'send', target: { kind: 'agent-session', agentSessionId: SESSION_ID },
-        text: operationId, promptCondition: agentPromptCondition(client.agentSession(SESSION_ID)),
-        ...(caller ? { caller: { agentSessionId: caller } } : {}) })
-    }
-    expect(writes).toEqual(['control-unknown', '\r', 'control-agent', '\r'])
-    const timeline = await new AgentMuxFileAgentSessionStore(storeFile).loadTimeline(SESSION_ID)
-    expect(projectSessionUserMessages({ agentSessionId: SESSION_ID, timeline }).map(message => message.author))
-      .toEqual([{ kind: 'unknown' }, { kind: 'agent', agentSessionId: 'peer-control-agent' }])
   })
 
   it('actual continuous-progress delivery produces an accepted unknown receipt', async () => {

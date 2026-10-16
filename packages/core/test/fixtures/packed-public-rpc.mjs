@@ -119,11 +119,6 @@ const controlServer = new AgentMuxControlServer({
             providerId: session.providerId, executorId: session.executorId,
             processState: (await controlClient.statusAgent(session.agentSessionId)).run.state === 'running' ? 'running' : 'exited', status: 'unknown', updatedAt: session.updatedAt }))) }
       }
-      if (request.operation === 'send') {
-        await controlClient.submitAgentPrompt({
-    ...request.promptCondition, agentSessionId: targetId, operationId: request.requestId, prompt: request.text })
-        return { operation: request.operation, agentSessionId: targetId }
-      }
       if (request.operation === 'interrupt') {
         const session = controlClient.agentSession(targetId)
         await controlClient.signalAgent(targetId, session.run, 'SIGINT')

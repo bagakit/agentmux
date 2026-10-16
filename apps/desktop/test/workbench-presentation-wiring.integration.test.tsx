@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { existsSync } from 'node:fs'
@@ -98,12 +99,12 @@ beforeEach(() => {
     layouts: { [resourceId]: createWorkspaceLayout('resource-home', [decoy.id, tab.id]),
       ...Object.fromEntries(references.map(reference => [reference.displayWorkspaceId, createWorkspaceLayout(reference.groupId, [tabId])])) },
     sessions: [{ ...composerSession(), workspacePath: _hygiene_fixturePath("execution/original-cwd") }, composerSession('recorded-sender')], viewModes: { 'agent-1': 'activity' },
-    timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 1, items: [{ id: 'recorded-submission', agentSessionId: 'agent-1', kind: 'user_message', status: 'complete', source: 'user', content: body, authorAgentSessionId: 'recorded-sender', createdAt: 1, updatedAt: 1 }] } },
+    timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 1, items: [{ id: 'recorded-submission', agentSessionId: 'agent-1', kind: 'user_message', status: 'complete', source: 'user', content: body, authorAgentSessionId: 'recorded-sender', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) }] } },
     noticeReadReceipts: {}, agentSteerQueues: {}, agentSteerInFlight: {} })
 })
 it('real WorkspaceWorkbench produces the borrowed primary reference and independent secondary readers without duplicating the primary', async () => {
   const { element, targets } = fixture(), before = useAppStore.getState()
-  const controls = [vi.spyOn(api.sessions, 'stop'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'write'), vi.spyOn(api.sessions, 'submitMessage')]
+  const controls = [vi.spyOn(api.sessions, 'stop'), vi.spyOn(api.sessions, 'resume'), vi.spyOn(api.sessions, 'write'), vi.spyOn(api.sessions, 'submitPrompt')]
   await dom.render(element); await flush()
   const hosts = targets[tabId]!.map(target => document.getElementById(target.hostId)!)
   expect(hosts.every(Boolean)).toBe(true)
