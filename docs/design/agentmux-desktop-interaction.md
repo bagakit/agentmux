@@ -25,6 +25,7 @@
 | Composer、Message Tools、草稿、队列、邮箱与持续推进 | [输入与邮箱](behavior/conversation-input.md) |
 | 交互模式与外部群聊的共同语义、状态与投递边界 | [共同对话协议与外部交流入口](behavior/conversation-mode.md#共同对话协议与外部交流入口) |
 | Provider 能力、语义身份、AgentMux 注入上下文、A2A 与持久消息 | [Provider、身份与 Agent 消息](behavior/agent-capabilities-and-messaging.md) |
+| amux 可读信封、业务标记、内容分享与对象链接的格式 | [amux 格式协议](../specs/amux-protocol.md) |
 | ordered bytes、连续历史阅读、几何和相关成本 | [Terminal、历史与成本](behavior/terminal-reading.md) |
 | 协议、导航、自动化、控制交接与批准 | [Browser 工作面](behavior/browser-workface.md) |
 | 真实文件、格式、保存、worktree 与 Git 操作 | [文件、编辑与 Git](behavior/files-and-git.md) |

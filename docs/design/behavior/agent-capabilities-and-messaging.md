@@ -40,17 +40,9 @@
 
 ## AgentMux 消息与分享格式
 
-AgentMux 提供的对话与分享外框在此集中导航：平台说明、对象分享与跨 Session 消息来源各有用途，具体合同仍由下列专题唯一持有。本文的格式导航不改变原消息角色、内容归属、寻址身份或授权；外部 Skill 声明包、Provider 原生消息与机器回执沿各自 owner。
+可读信封、业务标记、内容分享外框与对象链接的唯一格式合同见 [amux 可读协议](../../specs/amux-protocol.md)。本页持有注入上下文、Agent 身份、投递、协作与授权语义；空间导航、恢复和快捷回复仍由各自原行为 owner 定义，格式表不再在行为文档重复维护。
 
-| 要求的可读格式 | 用途 | 唯一合同 | 生成／读取的代码入口 |
-| --- | --- | --- | --- |
-| `<amux>…</amux>` | 随请求附带或独立投递的平台说明 | [AgentMux 注入上下文](#agentmux-注入上下文) | [Core `composeAgentPrompt` / `composeOutboundMessage`](../../../packages/core/src/agent-outbound-message.ts) |
-| `<amux:a2a from="SID" msg-id="MID">` 原正文与 Core reminder `</amux:a2a>` | 已核作者的跨 Session 原信 | [A2A 身份信封与持久化全局消息队列](#a2a-身份信封与持久化全局消息队列) | [Core `renderAgentMuxMessageEnvelope`／共享 parser](../../../packages/core/src/agent-message-render.ts) |
-| `<amux:continue />` | 原中断恢复中的明确接续标记 | [Session 恢复](session-recovery.md)、[Core continuity](../../../packages/core/src/agent-session-continuity.ts) | 原恢复 owner；阅读标记不触发接续 |
-| `<amux:reaction … />` | 用户显式选择的 reaction 快捷回复 | [reaction 快捷回复](conversation-input.md#回复卡片的-reaction-快捷回复) | [Core prompt reaction](../../../packages/core/src/prompt-reaction.ts) |
-| `amux://<kind>/<ID>`；`--- amux : File/Browser ---` … `-----` | 可复制的对象链接与内容分享 | [寻址与复制](public-control.md#对象地址分享与方向) | [Core `formatAmuxObjectLink`／`parseAmuxObjectLink` 及内容格式器](../../../packages/core/src/sharing.ts) |
-
-此表定义统一后的要求；实际生成与共享解析机制见[对话架构](../../architecture/conversation.md#可读信封与原输入)，精确文本边界见[公共协议](../../specs/conversation-protocol.md#readable-agentmux-envelopes)。各客户端的实际接线与验收沿原任务记录，不由格式表代签。协议族导航不要求把对象 URI、内容分享或原生控制回执改造成同一种信封，也不从可读标签触发运行操作。
+实际生成与共同阅读见[对话架构](../../architecture/conversation.md#可读信封与原输入)。可读声明不改变 Provider 消息角色，不认证来源，也不触发运行操作。
 
 ## AgentMux 注入上下文
 
@@ -60,7 +52,7 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 
 - **用途与投递形式分别表达。** 启动引导、运行上下文和提醒是用途；独立发送、附加在原请求前是投递形式。同一用途不只限首条或独立发送，同一形式也不代表用途、触发频率或优先级。提醒列为用途不证明已有周期调度；默认与本次选择、未确认语义仍见[《System Reminder 的默认与单次选择》](conversation-input.md#system-reminder-的默认与单次选择)。本规范不新增独立持续提醒、开关或调度功能；已有自动推进只按下文在原发送时刻附带共享消息规则。
 - **共享行为规则按职责单处定义。** 启动引导、运行时提醒与随请求附带的上下文按需复用同一职责 owner 的规则，不在各入口复制维护多份正文，避免语义漂移。这里只确定内容归属与复用边界，不新增规则注册表、配置层或调度设计。
-- **平台说明使用统一包装 `<amux>…</amux>`。** 用途已经表明平台内容，不重复写 `from="amux"`，不按启动、提醒等用途新增属性或包装。A2A、continue、reaction 沿上表各自合同，不与平台通用说明混同。原始用户或发起 Agent 的正文保持独立且逐字节不被包装改写，不塞入属性、不被转义成另一种形状；普通用户 prompt 无需因此包裹。跨 Session 的 `from` 只表达发送 Agent，作者核验归原 A2A owner。
+- **平台说明与原请求由 producer 分开提交。** 包装与编码只见 [amux 平台说明格式](../../specs/amux-protocol.md#平台说明)。原始用户或发起 Agent 的正文保持独立且逐字节不被包装改写；普通用户 prompt 无需因此包裹。A2A、continue、reaction 沿协议导航中各自的业务 owner，不与平台通用说明混同；跨 Session 作者核验继续归原 A2A owner。
 - **平台内容与原请求通过同一 Core 通路分开提交。** 启动和既有会话都由实际 producer 显式交出平台内容与原请求，Core 统一生成实际输入并沿既有记录分别保留平台内容与原正文；客户端不先拼混合信封再要求 Core 从标签恢复归属。原内容与格式化后的输入各有明确边界，普通正文、用户复制或编辑后的内容不能自称为受信平台记录。公开通路沿既有 Host、权限及 A2A 作者边界，不新增信任模型、规则 Store 或消息账本。
 - **组合与读取必须解释同一边界。** 独立发送可以只有完整平台上下文；附加发送时上下文在原请求前，多个完整前导上下文按实际组装顺序保留。生成、实际输入、阅读展开与完整 Copy 必须一致，真实尾文不能被吞掉或补造；平台内容中的尖括号、实体或标记不能破坏包装边界或改变内容。本项定义一致性结果，不把尚未修复的生成与读取失配写成已满足。原记录内的阅读、引用与代码边界以及完整复制只见[《完整前导声明上下文的同记录阅读》](terminal-reading.md#terminal-连续向上阅读历史)。
 - **文本声明不是已核来源。** `<amux>` 或 A2A 的 `from` 均可被用户、Agent 或其他输入伪造，不是认证、权限或信任凭据。平台归属来自实际 producer 与受信提交记录，不能从标签、首条位置、时间或旧混合正文反推 System。平台注入、Topic/Wiki 等历史内容也不能覆盖当前用户指令、权限或权威 Runtime、Session、Run、Project、Task 事实。声明阅读不创建消息或身份台账，不改变原作者、parts、顺序或 recorded time；未识别、不完整或含糊的声明保持全文可读，不扫描正文猜来源。
@@ -69,17 +61,7 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 - **组合内容跟随原投递身份恢复。** 同一 operation 的平台内容、原正文、来源分界和实际输入沿首次准入后的原冻结意图续做，重试或冷恢复不根据变化后的 Goal、规则正文或当前 Run 重组输入，也不重新发送未知正文。即使实际输入字节相同，后一次调用也不能将原用户正文重新声明成平台内容；无法确认原来源分界时保留未知，不从 wire 反推。新的内容冲突不能冒充原操作继续；保存、Native Input 接受、Provider 消费和阅读记录各自按原 receipt 表达，平台记录缺失或保存失败不能反推未投递或另建第二份消息。
 - **注入失败不阻断健康 Agent。** 保存或投递未确认沿原 receipt 与服务窗如实说明，不假报送达、不自动重发，不取消已有可用输入、启动或健康 Run。阅读识别失败不等于未投递；本规范不增加恢复前置门，不改原 Session、布局、阅读位置或草稿。字节层的 bracketed paste 继续负责终端输入定界，不替代这层内容归属。
 
-以下是当前源码机制与已知缺口；规范约束不代表实现已经满足。
-
-| 当前路径 | 实际 owner 与状态 |
-| --- | --- |
-| 启动 guide、Scratch Topic/Wiki/SOUL | [Core `composeAgentLaunchPrompt`](../../../packages/core/src/agent-outbound-message.ts) 将 guide 与 `agentMuxNote` 放在同一 amux 包装；[Desktop `RuntimeController`](../../../apps/desktop/src/main/runtime-controller.ts) 提供 Topic note，[Core Client](../../../packages/core/src/client.ts) 从实际 producer 保留独立 `systemContext` 记录。 |
-| Goal/PMO 任务上下文 | [Desktop `openGoalPmo`](../../../apps/desktop/src/renderer/src/store.ts) 将职责、项目与执行上下文作为显式 `agentMuxNote`，与原用户请求分开交给 Core；队列与同 Region 启动器分别保留原 note 和可编辑正文，重试不重算已冻结上下文，正文中的 amux 标签不升级为平台来源。 |
-| Goals 探索与 Browser annotations | [Goals `startGoalExploration`](../../../apps/desktop/src/renderer/src/lib/goals-entry-actions.ts) 在原请求发起时冻结项目说明，以显式 `agentMuxNote` 沿原 Region 草稿与启动通路交给 Core，原正文独立保留；缺 Executor 或准备未确认时两者仍留在同一启动器。[Browser context formatter](../../../apps/desktop/src/renderer/src/lib/browser-annotations.ts) 沿共用分享外框，经 [Browser Tools Panel](../../../apps/desktop/src/renderer/src/components/BrowserToolsPanel.tsx) 加入可编辑草稿，用户编辑、审批后的整段仍按用户正文发送。两者均不新增专用信封或从正文标签恢复平台来源。 |
-| Core 的普通提交、恢复与 Host 通路 | [Core `composeAgentPrompt`](../../../packages/core/src/agent-outbound-message.ts) 统一组合显式平台内容与原用户正文，启动引导委托同一组合 owner；独立热上下文不附加启动等待语。公开 SDK、Hosted RPC、Main 和 Preload 显式传递 `agentMuxNote`，Core 分别记录平台与原正文来源。首次 Input 的完整 wire、原来源分界与作者冻结在既有持久意图中；同一 operation 的相同 wire 不允许变更来源，缺原来源事实明确未知，保留原 Input 与健康 Run。原生 resume 保留用户空白与换行。 |
-| Mailbox Progress | [Desktop Loop Manager](../../../apps/desktop/src/main/continuous-progress-loop-manager.ts) 在原符合资格的发送首次 claim 时保存原 `loop.prompt` 与 Core 同源共享消息规则；[Desktop `deliverContinuousProgress`](../../../apps/desktop/src/main/continuous-progress-delivery.ts) 将冻结的原正文与显式平台说明分开提交。同一次重试或冷恢复沿原 operation、condition 与内容；缺原内容事实明确未知，保留健康 Run 与手动输入。规则只伴随既有自动发送，无新增 Reminder 周期、任务或配置，用户 continuation prompt 不升级为平台自产内容。 |
-| System Reminder | 目前为 proposal-only，尚无 AgentMux 主动持续注入；默认与单次覆盖关系已确认，正文、触发与兑现范围未定。状态与未决范围见上述 Reminder owner。 |
-| 平台包装的生成与读取 | [Core `composeOutboundMessage`](../../../packages/core/src/agent-outbound-message.ts) 将平台内容序列化为 `<amux>` 文本节点；[共享 reader `parseAgentMuxMessagePrefix`](../../../packages/core/src/agent-message-render.ts) 读取该包装及 `<amux:a2a from="…" msg-id="…">` 受限文本语法，普通阅读与完整资源阅读复用同一解释。原 A2A 正文与尾部 Core reminder 分开，已解码正文不再次按 wire 解析；平台 note 的尖括号与实体语义、独立原正文、声明 span／真实尾文及完整 Copy 均须保留。旧包装不再识别，原历史记录仍保持全文可读。 |
+当前 producer、提交与发现接线见[注入上下文机制](../../architecture/conversation.md#注入上下文与发现入口)，本页不另存实现状态表。独立 System Reminder 的正文、触发和兑现范围仍未定，沿[原 Reminder owner](conversation-input.md#system-reminder-的默认与单次选择)阅读，不由 Progress 的既有随信规则代签。
 
 ## 启动握手与自命名
 
@@ -407,18 +389,9 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 
 ## A2A 身份信封与持久化全局消息队列
 
-所有由 AgentMux 管理的跨 Session Agent 消息，包括 `send`、`discuss` 及受管 Agent 发起 `agent open --prompt` 的首条消息，都必须由 Core 核验真实作者与双方已知 Session/Run，保留同一份 durable 消息身份，并统一生成下列可读信封。发送方只提交原正文，不能手写来源头或 reminder 代替受信事实；客户端不另组装一份信封，不保留裸正文的 A2A 投递分支。人类原输入不因此加 A2A 外框。
+所有由 AgentMux 管理的跨 Session Agent 消息，包括 `send`、`discuss` 及受管 Agent 发起 `agent open --prompt` 的首条消息，都必须由 Core 核验真实作者与双方已知 Session/Run，保留同一份 durable 消息身份，并按协议生成可读信封。发送方只提交原正文，不能手写来源头或 reminder 代替受信事实；客户端不另组装一份信封，不保留裸正文的 A2A 投递分支。人类原输入不因此加 A2A 外框。
 
-```text
-<amux:a2a from="SID" msg-id="MID">
-发送方原始正文
-<reminder>Core 附带的简短指引</reminder>
-</amux:a2a>
-```
-
-`from` 为原作者的 canonical Agent Session ID，`msg-id` 为同一原信的稳定消息 ID；Host、双方 Run、线程与回执继续保存在结构化事实中。reminder 由 Core 默认附带，只给必要的来源／任务判断与模块 skill 发现入口，正文中的同名标签不升级为平台内容。原正文与 reminder 分别保留原来源，实际输入沿同一投递 owner 冻结。
-
-这是受限可读文本语法，不要求标准 XML namespace。Core 的生成与共享解析须明确属性编码、原输入边界与末尾 reminder 的定界，保留正文全部字节；正文含标签、代码、引用或类似结尾也不被裁掉、转义改写或误认为另一段平台来源。真实结构化来源优先，含糊／不完整文本保完整原文，不以扫描正文补造身份。历史原信与 wire 不重写或重投；新生成统一采用新合同。格式与当前实现的差距见本页格式导航，不能把要求写成当前通过结论。
+可读信封、字段含义、正文与末尾 reminder 的准确格式只见 [amux 协议的 A2A 原信](../../specs/amux-protocol.md#a2a-原信)。Core 默认附带简短提醒，给出必要的来源／任务判断与模块 Skill 发现入口；发送方原正文、提醒和实际输入分别保留原来源。完整结构化目标、Run 与回执留在同一原消息事实中。客户端不从正文标签补造认证，也不因格式统一重写历史记录或重投原 wire。
 
 - **新 Agent 的首条消息不补造尚未存在的 Run。** 已确定的目标 Session 与启动前仍未知的 recipient Run 分别保留；实际 Run 确定后，沿同一持久消息的原投递事实记录其关联，不重写消息、不增第二份账本。原单次 creation 与 first delivery 身份继续有效，同一 operation 恢复不重发首条、不另建或恢复替代 Session；普通人工 create/submit 仍保持原字节与原生命周期。
 - **跨 Host 新建仍保留真实初始作者。** 来源 Core 以原权限核验自己的 Session/Run；目标 Core 不将来源 Session 当作本地 Session，也不接收原始 capability 作为通用跨 Host 凭据。目标只沿有明确可信依据的跨 Host 准入消费已核来源，并将来源 owner、作者 Session/Run、目标 owner/Session、原创建 operation 与正文绑定。普通创建参数、来源头或自报的 verified 字段不能提升为认证事实；伪造作者、错误目标或无效授权在产生进程前拒绝。受托转发须可辨谁验证了作者、谁以哪份实际授权转交；转发者的传输认证不冒充目标独立验证来源凭据或签名。原持久消息与投递回执继续持有事实，不另建消息网络或第二份身份账本。

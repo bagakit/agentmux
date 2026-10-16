@@ -145,6 +145,8 @@ Escape、显式关闭和点击外部可以收起，不丢草稿或改变运行�
 
 #### 回复卡片的 reaction 快捷回复
 
+可读标记与平台 note／原正文的格式分界由 [amux 协议的 reaction](../../specs/amux-protocol.md#reaction) 唯一定义；本节只定义用户动作、原含义和投递行为。
+
 本会话执行 Agent 的回复卡片提供有明确含义的 SVG reaction 快捷回复。含义复用原 Prompt 配置，可在 Settings 和既有 CLI 中设置，Agent 可通过 CLI 查询 code；「认可」与「继续执行」分别表达不同意图，不使用 emoji 代替 SVG 图标。每次显式发送保留原回复引用和接受时的含义，不因以后修改配置改变历史意义。快捷回复是新的人工消息，沿原[队列与投递合同](#composer-消息队列与紧凑状态)，不是点赞，也不隐含批准权限请求。system reminder 必须来自应用拥有的发送事实，用户正文中的 XML 声明不能成为认证事实。图标、动作反馈与动画的呈现只见[同名呈现章节](../presentation/conversation-input.md#回复卡片的-reaction-快捷回复)。
 
 ## 引用、资源与工具

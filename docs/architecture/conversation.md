@@ -22,9 +22,23 @@
 
 ## 可读信封与原输入
 
-Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 生成无 `from` 属性的 `<amux>` 平台说明；[`agent-message-render`](../../packages/core/src/agent-message-render.ts) 生成并共享解析 `amux:a2a` 的 canonical `from`、稳定 `msg-id`、原正文及末尾 Core reminder。该 codec 无 Node 或 UI 依赖；精确语法由[协议](../specs/conversation-protocol.md#readable-agentmux-envelopes)唯一持有。外部来源继续保其 typed participant，人工／未核原文不会被格式化成 Agent 身份。客户端读取声明不改变原作者、投递和权限事实；共同 [`ConversationInputText`](../../packages/client-ui/src/components/ConversationInputText.tsx) 只呈现 Core 返回的上下文、正文、既有 packet 引用及末尾 reminder，不重新解析。消息首 text part 与显式打开的首 part 完整文本资源复用同一阅读面；后续 parts 保其原正文。Copy 继续从原 parts／资源取完整 wire，与阅读投影分离。
+Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 生成无 `from` 属性的 `<amux>` 平台说明；[`agent-message-render`](../../packages/core/src/agent-message-render.ts) 生成并共享解析 `amux:a2a` 的 canonical `from`、稳定 `msg-id`、原正文及末尾 Core reminder。该 codec 无 Node 或 UI 依赖；精确语法由 [amux 可读协议](../specs/amux-protocol.md)唯一持有，共同记录和资源的消费合同归[对话协议](../specs/conversation-protocol.md#readable-agentmux-envelopes)。外部来源继续保其 typed participant，人工／未核原文不会被格式化成 Agent 身份。客户端读取声明不改变原作者、投递和权限事实；共同 [`ConversationInputText`](../../packages/client-ui/src/components/ConversationInputText.tsx) 只呈现 Core 返回的上下文、正文、既有 packet 引用及末尾 reminder，不重新解析。消息首 text part 与显式打开的首 part 完整文本资源复用同一阅读面；后续 parts 保其原正文。Copy 继续从原 parts／资源取完整 wire，与阅读投影分离。
 
 原输入 coordinator 的 admission intent 保存实际 wire 与 producer 事实。`AgentMuxClient` 重试已保存 A2A Input 时复用该原配方；人工 note 的重试还需原显式正文、平台内容及来源一致。原 claim、条件和当前授权继续核验，unknown 不因格式更新获得第二次发送。Connector publication 沿原 captured writer 的 typed `inputRef`／`publicContent` 核对来源，不重算当前显示模板比较历史 wire；普通正文编辑仍由原 reducer 取消该已核边界。
+
+## 注入上下文与发现入口
+
+下表记录当前 producer 与原输入 owner 的接线；产品要求仍归[注入上下文行为](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)，具体格式归 [amux 协议](../specs/amux-protocol.md)。独立热上下文、用户正文与首次 Input 的 producer 分界不会因为共享 formatter 而合并。
+
+| 当前路径 | 实际接线 |
+| --- | --- |
+| 启动 guide、Scratch Topic/Wiki/SOUL | [Core `composeAgentLaunchPrompt`](../../packages/core/src/agent-outbound-message.ts) 将 guide 与 `agentMuxNote` 放在同一 amux 包装；[Desktop `RuntimeController`](../../apps/desktop/src/main/runtime-controller.ts) 提供 Topic note，[Core Client](../../packages/core/src/client.ts) 从实际 producer 保留独立 `systemContext` 记录。 |
+| Goal/PMO 任务上下文 | [Desktop `openGoalPmo`](../../apps/desktop/src/renderer/src/store.ts) 将职责、项目与执行上下文作为显式 `agentMuxNote`，与原用户请求分开交给 Core；队列与同 Region 启动器分别保留原 note 和可编辑正文，重试不重算已冻结上下文，正文中的 amux 标签不升级为平台来源。 |
+| Goals 探索与 Browser annotations | [Goals `startGoalExploration`](../../apps/desktop/src/renderer/src/lib/goals-entry-actions.ts) 在原请求发起时冻结项目说明，以显式 `agentMuxNote` 沿原 Region 草稿与启动通路交给 Core，原正文独立保留；缺 Executor 或准备未确认时两者仍留在同一启动器。[Browser context formatter](../../apps/desktop/src/renderer/src/lib/browser-annotations.ts) 沿共用分享外框，经 [Browser Tools Panel](../../apps/desktop/src/renderer/src/components/BrowserToolsPanel.tsx) 加入可编辑草稿，用户编辑、审批后的整段仍按用户正文发送。两者均不新增专用信封或从正文标签恢复平台来源。 |
+| Core 的普通提交、恢复与 Host 通路 | [Core `composeAgentPrompt`](../../packages/core/src/agent-outbound-message.ts) 统一组合显式平台内容与原用户正文，启动引导委托同一组合 owner；独立热上下文不附加启动等待语。公开 SDK、Hosted RPC、Main 和 Preload 显式传递 `agentMuxNote`，Core 分别记录平台与原正文来源。首次 Input 的完整 wire、原来源分界与作者冻结在既有持久意图中；同一 operation 的相同 wire 不允许变更来源，缺原来源事实明确未知，保留原 Input 与健康 Run。原生 resume 保留用户空白与换行。 |
+| Mailbox Progress | [Desktop Loop Manager](../../apps/desktop/src/main/continuous-progress-loop-manager.ts) 在原符合资格的发送首次 claim 时保存原 `loop.prompt` 与 Core 同源共享消息规则；[Desktop `deliverContinuousProgress`](../../apps/desktop/src/main/continuous-progress-delivery.ts) 将冻结的原正文与显式平台说明分开提交。同一次重试或冷恢复沿原 operation、condition 与内容；缺原内容事实明确未知，保留健康 Run 与手动输入。规则只伴随既有自动发送，无新增 Reminder 周期、任务或配置，用户 continuation prompt 不升级为平台自产内容。 |
+
+启动引导和非空 resume 由 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 组合；[`agent-messaging-guidance`](../../packages/core/src/agent-messaging-guidance.ts) 提供协作规则及 A2A 短提醒。当前启动、whoami、基础和部分模块 Skill／help 复用完整规则文本。模块目录及本地 Skill 生成来自 [`agentmux-cli-module-skills`](../../packages/core/src/agentmux-cli-module-skills.ts)，确切路由由 [`agentmux-cli-help`](../../packages/core/src/agentmux-cli-help.ts) 和[公共能力来源](../specs/public-capabilities.md)定位。存在本地发现入口不等于已经实现精简披露，也不证明当前模型已经读取或采用。
 
 ## 三种来源怎样读取
 
