@@ -8,6 +8,7 @@ import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { useAppStore } from '../src/renderer/src/store'
 import { createFocusProjectionSelector, createWorkspaceAgentContextsSelector } from '../src/renderer/src/lib/focus-context'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import type { RendererAgentTimelineSnapshot } from '../src/renderer/src/lib/session-state'
 
 vi.mock('@agentmux/core/conversation', async original => {
   const actual = await original<typeof import('@agentmux/core/conversation')>()
@@ -96,6 +97,49 @@ it('keeps current classification and full recap while only presentation facts ch
   expect(project.mock.results[0]!.value.at(-1)?.content).toBe('Continue with this request')
   expect(changed.detailIsRecap).toBe(false)
   expect(changed.recap?.reading?.text).toBe(body.trim())
+})
+
+it('reuses Core conversation facts when an admitted status clears only live tool provenance', async () => {
+  const accepted: RendererAgentTimelineSnapshot = { ...timeline(), liveTool: { itemId: 'active-tool', hostId: session.hostId,
+    runId: session.control.run.runId, epoch: 1, observedAt: session.status.observedAt, startedAt: session.status.observedAt } }
+  const failed = { ...session, status: { ...session.status, state: 'error' as const, detail: 'Prior observation failed' } }
+  useAppStore.setState({ sessions: [failed], timelines: { [session.id]: accepted } })
+  await act(async () => root.render(<GlobalFocusSurface />))
+  const row = container.querySelector<HTMLElement>(`[data-session-id="${session.id}"].focus-context`)!
+  expect(row.getAttribute('aria-label')).toContain('Original observed response')
+  expect(project).toHaveBeenCalledTimes(1); project.mockClear()
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: session.hostId, event: {
+    type: 'agent-status', agentSessionId: session.id, state: 'error', detail: 'Current observation failed',
+    evidence: { source: 'native-hook', run: session.control.run, observedAt: session.status.observedAt + 1 }
+  } }))
+  const cleared = useAppStore.getState().timelines[session.id]!
+  expect(cleared).not.toBe(accepted); expect(cleared).not.toHaveProperty('liveTool')
+  expect(cleared.items).toBe(accepted.items); expect(cleared.stream).toBe(accepted.stream)
+  expect(cleared.revision).toBe(accepted.revision); expect(cleared.sourceHostId).toBe(accepted.sourceHostId)
+  expect(container.querySelector(`[data-session-id="${session.id}"].focus-context`)).toBe(row)
+  expect(row.dataset.bucket).toBe('attention'); expect(row.textContent).toContain('Current observation failed')
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the original draft')
+  expect(useAppStore.getState().sessions[0]!.control.run).toEqual(session.control.run)
+  expect(project).not.toHaveBeenCalled()
+  await act(async () => useAppStore.setState({ timelines: { [session.id]: { ...cleared,
+    items: [{ ...cleared.items[0]!, content: 'Different accepted history at the same revision' }] } } }))
+  expect(row.getAttribute('aria-label')).toContain('Different accepted history at the same revision')
+  expect(project).toHaveBeenCalledTimes(1)
+})
+
+it('captures Core items and stream identities independently of the Timeline wrapper', () => {
+  const accepted = timeline(), original = input(accepted), select = createFocusProjectionSelector()
+  select(original); project.mockClear()
+  accepted.items = [{ ...accepted.items[0]!, content: 'Replaced original items' }]
+  expect(select({ ...original, timelines: { [session.id]: { ...accepted } } }).contexts[0]!.recap?.reading?.text).toBe('Replaced original items')
+  expect(project).toHaveBeenCalledTimes(1); project.mockClear()
+  accepted.stream = { epoch: 'same-source-epoch', sequence: 1, revision: accepted.revision, origin: 'beginning', gaps: [],
+    positions: [{ id: accepted.items[0]!.id, firstSequence: 1, sequence: 1, revision: conversationRevision(accepted.items[0]) }] }
+  select({ ...original, timelines: { [session.id]: { ...accepted } } })
+  expect(project).toHaveBeenCalledTimes(1); project.mockClear()
+  accepted.stream = { ...accepted.stream, sequence: 2, positions: [{ ...accepted.stream.positions[0]!, sequence: 2 }] }
+  select({ ...original, timelines: { [session.id]: { ...accepted } } })
+  expect(project).toHaveBeenCalledTimes(1)
 })
 
 it('invalidates independently captured revision and source facts even if the input object is reused', () => {
