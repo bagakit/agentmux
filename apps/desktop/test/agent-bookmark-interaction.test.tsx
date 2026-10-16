@@ -60,7 +60,7 @@ async function pin(height = 172) {
 async function hover(entry: HTMLElement) { await act(async () => entry.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }))) }
 async function settle() { await act(async () => new Promise(resolve => setTimeout(resolve, 200))) }
 async function pointer(target: Element, type: string, id: number, x: number, y: number) {
-  await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: id, clientX: x, clientY: y })))
+  await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, isPrimary: true, pointerId: id, clientX: x, clientY: y })))
 }
 beforeEach(async () => {
   sourceModalOpenChange.mockClear()

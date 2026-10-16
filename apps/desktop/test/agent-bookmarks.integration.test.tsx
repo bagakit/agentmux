@@ -100,7 +100,7 @@ it('persists completed pointer gestures, cancels unfinished geometry and keeps h
     return { x, y, width, height, top: y, left: x, right: x + width, bottom: y + height, toJSON() {} }
   })
   const header = original.querySelector<HTMLElement>('header')!
-  const pointer = async (target: HTMLElement, type: string, x: number, y: number) => act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: 7, clientX: x, clientY: y })))
+  const pointer = async (target: HTMLElement, type: string, x: number, y: number) => act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, isPrimary: true, pointerId: 7, clientX: x, clientY: y })))
   await pointer(header, 'pointerdown', 100, 100); await pointer(header, 'pointermove', -1000, -1000)
   expect(original.style.left).toBe('8px'); expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(saved)
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
@@ -133,8 +133,8 @@ it('keeps preferred geometry when a fitted heading is clicked without dragging',
   vi.spyOn(original, 'getBoundingClientRect').mockImplementation(() => ({ x: 8, y: 8, width: window.innerWidth - 16, height: window.innerHeight - 16, top: 8, left: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8, toJSON() {} }))
   const header = original.querySelector<HTMLElement>('header')!
   await act(async () => {
-    header.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 4, clientX: 50, clientY: 50 }))
-    header.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 4, clientX: 50, clientY: 50 }))
+    header.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, isPrimary: true, pointerId: 4, clientX: 50, clientY: 50 }))
+    header.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, isPrimary: true, pointerId: 4, clientX: 50, clientY: 50 }))
   })
   expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(preferred)
 })
