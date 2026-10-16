@@ -437,7 +437,7 @@
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-  pointer-events: none;
+  pointer-events: auto;
 }
 .workbench-tab-name-tooltip > strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .workbench-tab-rename-feedback {

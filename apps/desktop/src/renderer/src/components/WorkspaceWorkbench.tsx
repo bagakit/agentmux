@@ -1,3 +1,4 @@
+import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { useWorkbenchWindowRevision, workbenchWindowPlacement, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { openWorkbenchWindow } from '../lib/workbench-windows'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -60,7 +61,7 @@ import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
-import { tabRenameTargets, useWorkbenchTabRename, useWorkbenchTabNameTooltip, WorkbenchTabRenameFeedback } from './WorkbenchTabNaming'
+import { tabRenameTargets, useWorkbenchTabRename, WorkbenchTabRenameFeedback } from './WorkbenchTabNaming'
 import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { WorkbenchEmptyState } from './WorkbenchEmptyState'
@@ -311,7 +312,7 @@ function SortableWorkbenchTab({
   const { rename } = naming
   const renameInput = useRef<HTMLInputElement>(null)
   const fullTabTooltip = session ? sessionTabTooltip(session, displayName, regionSummary) : surfaceTabTooltip(displayName, regionSummary)
-  const nameTooltip = useWorkbenchTabNameTooltip(displayName, fullTabTooltip.split('\n').slice(1).join('\n'), !visible || bindingMenuOpen || rename !== null || isDragging)
+  const nameTooltip = useWorkbenchNameTooltip(displayName, fullTabTooltip.split('\n').slice(1).join('\n'), !visible || bindingMenuOpen || rename !== null || isDragging)
   // Let the closing menu release its focus trap before focusing this editor.
   useEffect(() => {
     if (bindingMenuOpen) return

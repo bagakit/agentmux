@@ -1,5 +1,5 @@
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
-import { useEffect, useId, useRef, useState, type MouseEvent, type FocusEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { workbenchAgentFactsFor, workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
@@ -101,37 +101,4 @@ export function WorkbenchTabRenameFeedback({ anchor, notice, children }: {
     return () => { disposed = true; stop() }
   }, [anchor, notice])
   return notice ? <WindowOverlayPortal layer="service"><div ref={panel} data-state="open" className="workbench-tab-rename-feedback">{children}</div></WindowOverlayPortal> : null
-}
-
-/** A Tab's complete identity stays outside the strip's overflow, without activating the Tab. */
-export function useWorkbenchTabNameTooltip(name: string, detail: string, suppressed: boolean) {
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-  const surface = useRef<HTMLDivElement>(null), id = useId()
-  const visible = anchor !== null && !suppressed
-  useEffect(() => {
-    if (suppressed) setAnchor(null)
-  }, [suppressed])
-  useEffect(() => {
-    if (!visible || !anchor || !surface.current) return
-    let disposed = false
-    const panel = surface.current
-    const update = async () => {
-      const position = await computePosition(anchor, panel, { strategy: 'fixed', placement: 'bottom-start',
-        middleware: [offset(8), flip(), shift({ padding: 8 })] })
-      if (!disposed) Object.assign(panel.style, { left: `${position.x}px`, top: `${position.y}px`, visibility: 'visible' })
-    }
-    const stop = autoUpdate(anchor, panel, () => { void update() })
-    const hide = () => setAnchor(null)
-    const key = (event: KeyboardEvent) => { if (event.key === 'Escape') hide() }
-    window.addEventListener('blur', hide); document.addEventListener('visibilitychange', hide)
-    window.addEventListener('keydown', key)
-    return () => { disposed = true; stop(); window.removeEventListener('blur', hide)
-      document.removeEventListener('visibilitychange', hide); window.removeEventListener('keydown', key) }
-  }, [visible, anchor, name, detail])
-  const show = (event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => { if (!suppressed) setAnchor(event.currentTarget) }
-  return { props: { onMouseEnter: show, onMouseLeave: () => setAnchor(null), onFocus: show,
-    onBlur: () => setAnchor(null), 'aria-describedby': visible ? id : undefined },
-    content: visible ? <WindowOverlayPortal layer="tooltip"><div ref={surface} id={id} role="tooltip" className="workbench-tab-name-tooltip">
-      <strong>{name}</strong>{detail ? <span>{detail}</span> : null}
-    </div></WindowOverlayPortal> : null }
 }
