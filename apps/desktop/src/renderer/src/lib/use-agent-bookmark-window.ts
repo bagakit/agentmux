@@ -14,10 +14,12 @@ type Gesture = {
   pointerId: number; mode: 'move' | 'resize'; x: number; y: number
   start: AgentBookmarkBounds; current: AgentBookmarkBounds; target: HTMLElement
   active: boolean; key: string | undefined; cancelPin?: (() => void) | undefined
+  frame: number | null
   reading: HTMLElement | null; anchor: ReturnType<typeof captureReadingAnchor>
 }
 export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, panel: RefObject<HTMLDivElement | null>, reading: RefObject<HTMLDivElement | null>, document: Document, pin?: (bounds: AgentBookmarkBounds) => { key: string; cancel(): void } | undefined) {
   const gesture = useRef<Gesture | null>(null), view = document.defaultView!
+  const positionEpoch = useRef(0)
   const viewportAnchor = useRef<{ surface: HTMLElement; anchor: NonNullable<ReturnType<typeof captureReadingAnchor>>; text: string; width: number; height: number } | null>(null)
   function apply(bounds: AgentBookmarkBounds) {
     if (panel.current) Object.assign(panel.current.style, { left: `${bounds.x}px`, top: `${bounds.y}px`, width: `${bounds.width}px`, height: `${bounds.height}px`, maxHeight: '', visibility: 'visible' })
@@ -31,6 +33,7 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
     return { ...bounds, width: Math.max(320, bounds.width + dx), height: Math.max(180, bounds.height + dy) }
   }
   function rememberReading(event?: Event) {
+    if (gesture.current) return
     const surface = reader(), saved = viewportAnchor.current
     if (!surface || event && (event.target !== surface || saved && (saved.width !== view.innerWidth || saved.height !== view.innerHeight))) return
     const anchor = captureReadingAnchor(surface)
@@ -39,13 +42,19 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
   function end(commit: boolean) {
     const current = gesture.current
     if (!current) return
+    if (current.frame !== null) view.cancelAnimationFrame(current.frame)
     gesture.current = null
     if (current.target.hasPointerCapture?.(current.pointerId)) current.target.releasePointerCapture(current.pointerId)
     if (!current.active) return
-    if (panel.current) delete panel.current.dataset.bookmarkGesture
+    if (panel.current) {
+      delete panel.current.dataset.bookmarkGesture
+      panel.current.style.transform = ''; panel.current.style.willChange = ''
+    }
     apply(commit ? current.current : current.start)
-    if (current.reading) restoreReadingAnchor(current.reading, current.anchor)
-    rememberReading()
+    if (current.mode === 'resize') {
+      if (current.reading) restoreReadingAnchor(current.reading, current.anchor)
+      rememberReading()
+    }
     const changed = (['x', 'y', 'width', 'height'] as const).some(key => current.current[key] !== current.start[key])
     if (commit && changed && current.key) agentBookmarks.setBounds(current.key, current.current)
     if (!commit) current.cancelPin?.()
@@ -67,7 +76,7 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
     const root = panel.current
     root?.addEventListener('scroll', rememberReading, true)
     return () => { root?.removeEventListener('scroll', rememberReading, true); view.removeEventListener('resize', contain) }
-  }, [bookmark?.key, bookmark?.bounds, document])
+  }, [bookmark?.key, bookmark?.bounds.x, bookmark?.bounds.y, bookmark?.bounds.width, bookmark?.bounds.height, document])
   // Promotion changes bookmark identity; only the Document lifecycle owns capture cleanup.
   useLayoutEffect(() => {
     const cancel = (event: KeyboardEvent) => {
@@ -85,8 +94,9 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
     if (!bounds) return
     event.preventDefault()
     const surface = reader()
+    positionEpoch.current++
     gesture.current = { pointerId: event.pointerId, mode, x: event.clientX, y: event.clientY, start: bounds, current: bounds,
-      active: false, key: bookmark?.key, target: event.currentTarget, reading: surface, anchor: surface ? captureReadingAnchor(surface) : null }
+      active: false, frame: null, key: bookmark?.key, target: event.currentTarget, reading: surface, anchor: mode === 'resize' && surface ? captureReadingAnchor(surface) : null }
     event.currentTarget.setPointerCapture?.(event.pointerId)
   }
   const pointer = {
@@ -102,12 +112,25 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
           g.key = promoted.key; g.cancelPin = promoted.cancel
         }
         g.active = true
-        if (panel.current) panel.current.dataset.bookmarkGesture = g.mode
+        apply(g.start)
+        if (panel.current) {
+          panel.current.dataset.bookmarkGesture = g.mode
+          if (g.mode === 'move') panel.current.style.willChange = 'transform'
+        }
       }
       g.current = fitAgentBookmark(g.mode === 'move' ? { ...g.start, x: g.start.x + dx, y: g.start.y + dy }
         : resized(g.start, dx, dy), view.innerWidth, view.innerHeight)
-      apply(g.current)
-      if (g.reading) restoreReadingAnchor(g.reading, g.anchor)
+      // Coalesce high-rate input. Moving a fixed-size reading must not reflow or
+      // measure its text; resizing restores its character anchor once per frame.
+      if (g.frame === null) g.frame = view.requestAnimationFrame(() => {
+        g.frame = null
+        if (gesture.current !== g || !panel.current) return
+        if (g.mode === 'move') panel.current.style.transform = `translate3d(${g.current.x - g.start.x}px, ${g.current.y - g.start.y}px, 0)`
+        else {
+          apply(g.current)
+          if (g.reading) restoreReadingAnchor(g.reading, g.anchor)
+        }
+      })
     },
     onPointerUp(event: ReactPointerEvent<HTMLElement>) { if (event.pointerId === gesture.current?.pointerId) end(true) },
     onPointerCancel(event: ReactPointerEvent<HTMLElement>) { if (event.pointerId === gesture.current?.pointerId) end(false) },
@@ -130,6 +153,7 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
   }
   return {
     isGesturing: () => gesture.current !== null,
+    positionEpoch: () => positionEpoch.current,
     header: { onPointerDown: (event: ReactPointerEvent<HTMLElement>) => start(event, 'move'), ...pointer },
     resize: { onPointerDown: (event: ReactPointerEvent<HTMLElement>) => start(event, 'resize'), ...pointer, onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => keyboard(event, true) },
     moveKey: (event: ReactKeyboardEvent<HTMLElement>) => keyboard(event),
