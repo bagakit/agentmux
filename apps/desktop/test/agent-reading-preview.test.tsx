@@ -5,6 +5,7 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { agentCardConversationFixture } from './helpers/agent-card-conversation-fixture'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -18,20 +19,21 @@ const timeline = { agentSessionId: agent.id, revision: 1, items: [{ id: 'origina
 const context = () => agentContextForSession(agent, timeline, 'Original work', workspace, null)
 function panel() { return document.querySelector<HTMLElement>('.agent-information-reader')! }
 function reading() { return panel().querySelector<HTMLElement>('.agent-information-reader__reading')! }
-function card() { return dom.container.querySelector<HTMLButtonElement>('.workspace-agent-row')! }
+function card() { return dom.container.querySelector<HTMLButtonElement>('.focus-context')! }
 async function mount(active = true) {
-  await dom.render(<WorkbenchPresentationContext.Provider value={{ active, retainedRegionId: null }}><WorkspaceAgentRow context={context()} percent={null} onOpen={onOpen} /></WorkbenchPresentationContext.Provider>)
+  await dom.render(<WorkbenchPresentationContext.Provider value={{ active, retainedRegionId: null }}><WorkspaceAgentRow context={context()} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={onOpen} /></WorkbenchPresentationContext.Provider>)
 }
 async function open() { await mount(); await act(async () => card().focus()); expect(panel()).not.toBeNull() }
 async function info() { await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click()) }
 async function escape() { await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))) }
 
-beforeEach(() => {
+beforeEach(async () => {
   useAppStore.setState({ sessions: [agent, other], timelines: { [agent.id]: timeline }, agentNames: {}, demands: {}, mainSurface: 'agents' })
   onOpen.mockClear()
   vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'original-source' }, dispose() {} }))
   vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'original-source' }, nextCursor: null, items: [] }))
   vi.spyOn(api.sessions, 'dispatches').mockResolvedValue({ hostId: 'local', participantSessionId: agent.id, nextSourceMessageId: null, dispatches: [] })
+  await agentCardConversationFixture(() => ({ providerId: 'codex', nativeSessionId: 'original-source' }))
 })
 
 it('puts the complete original reply before intentional metadata without closed-card demand', async () => {

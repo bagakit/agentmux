@@ -6,6 +6,7 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -23,9 +24,9 @@ const panel = () => document.querySelector<HTMLElement>('.agent-information-read
 const entries = () => [...panel().querySelectorAll<HTMLElement>('.agent-input-recall__entry')]
 const detail = () => panel()?.querySelector<HTMLElement>('.agent-input-recall__original') ?? null
 async function open(surface: 'focus' | 'workspace' = 'workspace') {
-  await dom.render(surface === 'focus' ? <FocusContextRow context={context()} selected={false} onSelect={() => {}} /> : <WorkspaceAgentRow context={context()} percent={null} onOpen={() => {}} />)
-  await act(async () => dom.container.querySelector<HTMLElement>('.focus-context, .workspace-agent-row')!.focus())
-  await act(async () => vi.waitFor(() => expect(entries()).toHaveLength(6)))
+  await dom.render(surface === 'focus' ? <FocusContextRow context={context()} selected={false} onSelect={() => {}} /> : <WorkspaceAgentRow context={context()} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => {}} />)
+  await act(async () => dom.container.querySelector<HTMLElement>('.focus-context')!.focus())
+  await waitForAgentCardReading(() => expect(entries()).toHaveLength(6))
 }
 async function inspect() { const entry = entries().at(-1)!; await act(async () => { entry.focus(); entry.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) }); return entry }
 async function key(target: Element, value: string) { await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true }))) }
@@ -33,15 +34,17 @@ async function pointer(target: Element, type: 'pointerover' | 'pointerout', rela
   await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'mouse', relatedTarget })))
 }
 const settle = () => act(async () => new Promise(resolve => setTimeout(resolve, 200)))
-beforeEach(() => {
+beforeEach(async () => {
   useAppStore.setState({ sessions: [agent, neighbor], timelines: { [agent.id]: timeline }, demands: {}, agentNames: {} })
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
   vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: page.source, dispose() {} }))
+  await agentCardConversationFixture(() => page.source)
 })
 it.each(['focus', 'workspace'] as const)('recalls six loaded original inputs and reads the complete selected input with layered Escape in %s', async surface => {
   await open(surface)
-  expect(entries().map(node => node.closest('li')!.dataset.hoverInputId)).toEqual([2, 3, 4, 5, 6, 7].map(index => 'native:codex:recall-source:input-' + index))
-  expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(agent.control, { limit: 30 })
+  expect(entries().map(node => node.querySelector('p')!.textContent)).toEqual([2, 3, 4, 5, 6, 7].map(index => index === 7 ? originalText.trim() : 'Original task request ' + index))
+  expect(new Set(entries().map(node => node.closest('li')!.dataset.hoverInputId)).size).toBe(6)
+  expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(agent.control, expect.objectContaining({ limit: 100 }))
   const originalPanel = panel(), entry = await inspect(), body = detail()!.querySelector<HTMLElement>('.agent-input-recall__original-body')!
   expect(body.textContent).toContain('COMPLETE ORIGINAL INPUT TAIL'); expect(document.activeElement).toBe(body)
   const range = document.createRange(); range.selectNodeContents(body.querySelector('p')!); document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
@@ -83,5 +86,5 @@ it('keeps inspected original DOM and selection across pin and metadata, then hol
   await act(async () => useAppStore.setState({ sessions: [{ ...agent, control: { ...agent.control, run: { runId: 'replacement-recall-run' } } }, neighbor] }))
   expect(detail()).toBe(original); expect(original.querySelector('p')).toBe(prose); expect(panel().textContent).toContain('Reading an earlier Run or source')
   await act(async () => useAppStore.setState({ sessions: [agent, neighbor] }))
-  expect(detail()).toBe(original); expect(api.sessions.historyPage).toHaveBeenLastCalledWith(agent.control, { limit: 30 })
+  expect(detail()).toBe(original); expect(api.sessions.historyPage).toHaveBeenLastCalledWith(agent.control, expect.objectContaining({ limit: 100 }))
 })
