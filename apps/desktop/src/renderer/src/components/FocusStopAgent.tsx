@@ -58,8 +58,8 @@ export function useFocusStopAgent(active = true) {
 
   return {
     requestStop,
-    dialog: <ConfirmationDialog open={request !== null} title="Stop Agent?" {...(request ? { subject: request.name } : {})}
+    dialog: request !== null ? <ConfirmationDialog open={request !== null} title="Stop Agent?" {...(request ? { subject: request.name } : {})}
       description="Stop this Agent’s current Run. Its conversation history is kept for viewing and recovery."
-      confirmLabel="Stop Agent" busy={busy} onCancel={() => setRequest(null)} onConfirm={() => { void confirmStop() }} />
+      confirmLabel="Stop Agent" busy={busy} onCancel={() => setRequest(null)} onConfirm={() => { void confirmStop() }} /> : null
   }
 }

@@ -74,7 +74,7 @@ export function useSessionRestart(active = true) {
 
   return {
     requestRestart,
-    dialog: <ConfirmationDialog open={request !== null} title={request?.submitted ? 'Session restart' : 'Restart Session?'}
+    dialog: request !== null ? <ConfirmationDialog open={request !== null} title={request?.submitted ? 'Session restart' : 'Restart Session?'}
       {...(request ? { subject: request.name } : {})}
       description={request?.submitted
         ? 'This checks the original operation. Your conversation, drafts and work surface stay here.'
@@ -82,6 +82,6 @@ export function useSessionRestart(active = true) {
       confirmLabel={request?.failed ? 'Review new restart' : request?.submitted ? request.canRetry ? 'Retry original restart' : 'Check restart' : 'Restart Session'}
       intent={request?.submitted ? 'neutral' : 'danger'} busy={busy}
       feedback={feedback ? <p role="status" className="confirmation-dialog__description">{feedback}</p> : undefined}
-      onCancel={() => setRequest(null)} onConfirm={() => { void confirmRestart() }} />
+      onCancel={() => setRequest(null)} onConfirm={() => { void confirmRestart() }} /> : null
   }
 }
