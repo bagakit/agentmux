@@ -76,7 +76,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     if (binding.state !== 'active') return result('paused')
     const connection = this.options.connections.readConfiguration(binding.connectionId)
     if (!connection?.config.enabled || !equal(connection.config.application, binding.application)) return result('connection-disabled')
-    if (!['future-native-user-facing', 'future-shared-conversation'].includes(binding.scope.publication) || !['user', 'device'].includes(binding.authorizedBy.kind)) return result('publication-not-granted')
+    if (!['future-native-user-facing', 'future-shared-conversation'].includes(binding.scope.publication) || !['user', 'device', 'agent'].includes(binding.authorizedBy.kind) || binding.authorizedBy.kind === 'agent' && binding.authorizedBy.id !== binding.agentSessionId) return result('publication-not-granted')
     return { binding, authorized: true }
   }
   readGrant(grantId: string, revision?: number): ConnectionGrant | null {

@@ -164,13 +164,14 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       assertCurrent: () => this.authority(context)
     }
   }
-  async inspect(value: { operationId: string }) {
+  async inspect(value: { operationId: string }, context?: ConnectionEnrollmentCallContext) {
     const input = parseMoteConnectionParams('space.mote.connection.inspect', value)
     await this.db()
     const row = this.read(input.operationId)
+    if (context?.actor.kind === 'agent' && row) await this.authority(context, row)
     return { operation: row ? this.project(row) : null }
   }
-  async list(value: MoteConnectionListInput) {
+  async list(value: MoteConnectionListInput, context?: ConnectionEnrollmentCallContext) {
     const input = parseMoteConnectionParams('space.mote.connection.ls', value)
     await this.db()
     const before = input.cursor === undefined ? Number.MAX_SAFE_INTEGER : Number(input.cursor)
@@ -183,8 +184,8 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     return this.safe(() => {
       const limit = input.limit ?? 25,
         rows = this.database!.prepare(
-          'SELECT ordinal,record_json FROM mote_connection_operation WHERE target_json=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?'
-        ).all(JSON.stringify(input.target), before, limit + 1)
+          context?.actor.kind === 'agent' ? "SELECT ordinal,record_json FROM mote_connection_operation WHERE target_json=? AND ordinal<? AND json_extract(record_json,'$.actor.kind')=? AND json_extract(record_json,'$.actor.id')=? ORDER BY ordinal DESC LIMIT ?" : 'SELECT ordinal,record_json FROM mote_connection_operation WHERE target_json=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?'
+        ).all(...(context?.actor.kind === 'agent' ? [JSON.stringify(input.target), before, context.actor.kind, context.actor.id, limit + 1] : [JSON.stringify(input.target), before, limit + 1]))
       return {
         operations: rows.slice(0, limit).map((r) => this.project(JSON.parse(String(r.record_json)) as Row)),
         next: rows.length > limit ? String(rows[limit - 1]!.ordinal) : null
@@ -468,7 +469,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     try {
       const port = this.ports.connections.connections.profile!,
         input = row.profileInput!
-      const original = await port.inspect({ operationId: input.operationId })
+      const original = await port.inspect({ operationId: input.operationId }, childContext)
       const value = !original.operation
         ? await port.sync(input, childContext)
         : advance

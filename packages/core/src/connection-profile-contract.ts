@@ -37,8 +37,8 @@ export interface ConnectionProfilePort {
   get(input: ConnectionProfileGet, context?: ConnectionEnrollmentCallContext): Promise<ConnectionProfileObservation>
   sync(input: ConnectionProfileSync, context: ConnectionEnrollmentCallContext): Promise<ConnectionProfileOperation>
   advance(input: ConnectionProfileOperationInput, context: ConnectionEnrollmentCallContext): Promise<ConnectionProfileOperation>
-  inspect(input: ConnectionProfileOperationInput): Promise<{ operation: ConnectionProfileOperation | null }>
-  list(input: ConnectionProfileListInput): Promise<ConnectionProfileListResult>
+  inspect(input: ConnectionProfileOperationInput, context?: ConnectionEnrollmentCallContext): Promise<{ operation: ConnectionProfileOperation | null }>
+  list(input: ConnectionProfileListInput, context?: ConnectionEnrollmentCallContext): Promise<ConnectionProfileListResult>
 }
 export type ConnectionProfileParamsMap = {
   'connection.profile.get': ConnectionProfileGet; 'connection.profile.sync': ConnectionProfileSync

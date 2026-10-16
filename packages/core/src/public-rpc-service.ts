@@ -1,3 +1,4 @@
+import { assertAgentConnectionAccess } from './connection-agent-access.js'
 import { parseRendererAllocationsResult } from './renderer-allocations.js'
 import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult, type ApplicationAccessPort, type ApplicationAccessMethod } from './application-access.js'
@@ -449,24 +450,43 @@ export class AgentMuxRpcService {
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     if (isMoteConnectionMethod(method)) {
-      if (context.caller !== undefined || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Mote bot operations require a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      const caller = await this.authenticated(context)
+      if (!caller && (!context.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Mote bot operations require an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseMoteConnectionParams(method, params), owner = this.ports.moteConnections
       if (!owner) throw new AgentMuxError('Mote bot operations are unavailable on this Host. Original files and Agents remain available.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      const administration = { actor: { kind: context.principal.kind as 'user'|'device', id: context.principal.id }, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+      const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user'|'device', id: context.principal!.id }
+      const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
+      if (caller) {
+        const original = method === 'space.mote.connection.advance' || method === 'space.mote.connection.inspect' ? (await owner.inspect({ operationId: (input as { operationId: string }).operationId }, administration)).operation : undefined
+        const target = 'source' in input ? input.source.target : 'target' in input ? input.target : original?.source.target
+        if (target) {
+          const graph = target.expectedResource.workspacePath === caller.session.workspacePath ? null : (await this.spatial.read())?.graph
+          const zone = graph?.zones.find(zone => zone.zoneId === target.zoneId)
+          const exactExecutionDirectory = zone?.hostId === caller.hostId && zone.directoryPath === caller.session.workspacePath &&
+            zone.workspaceId === target.expectedResource.workspaceId && graph?.bindings.some(binding => binding.spaceId === target.spaceId && binding.zoneId === zone.zoneId)
+          if (target.expectedResource.hostId !== caller.hostId || target.expectedResource.workspacePath !== caller.session.workspacePath && !exactExecutionDirectory) throw new AgentMuxError('Mote bot operations stay within the authenticated Agent Workspace or its exact durable Mote execution directory on the original Host.', 'CONTROL_PERMISSION_DENIED')
+        }
+        if (method === 'space.mote.connection.sync') {
+          const sync = input as import('./mote-connection-contract.js').MoteConnectionSync
+          if (!await this.ports.connections?.ownsEnrollmentConnection?.(sync.connection.connectionId, caller.agentSessionId)) throw new AgentMuxError('This bot was not enrolled by the original Agent.', 'CONTROL_PERMISSION_DENIED')
+        }
+      }
       const result = method === 'space.mote.connection.create' ? await owner.create(parseMoteConnectionParams(method, params), administration)
         : method === 'space.mote.connection.sync' ? await owner.sync(parseMoteConnectionParams(method, params), administration)
         : method === 'space.mote.connection.advance' ? await owner.advance(parseMoteConnectionParams(method, params), administration)
-        : method === 'space.mote.connection.ls' ? await owner.list(parseMoteConnectionParams(method, params)) : await owner.inspect(parseMoteConnectionParams(method, params))
+        : method === 'space.mote.connection.ls' ? await owner.list(parseMoteConnectionParams(method, params), administration) : await owner.inspect(parseMoteConnectionParams(method, params), administration)
       return parseMoteConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
     }
     if (isConnectionMethod(method)) {
-      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Connection administration requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      const caller = await this.authenticated(context)
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Connection administration requires an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseConnectionParams(method, params)
       if (!this.ports.connections) throw new AgentMuxError('The connection owner is not enabled on this Host. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
-      const administration = { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.() } }
+      const administration = { actor: caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
+      if (caller) await assertAgentConnectionAccess(owner, method, input, caller.agentSessionId)
       if (isConnectionServiceMethod(method)) {
         const service = owner.service
         if (!service) throw new AgentMuxError('Connector service policy is unavailable on this Host. Existing connection management and Agents remain available.', 'CONTROL_UNAVAILABLE')
@@ -481,7 +501,7 @@ export class AgentMuxRpcService {
         const callContext = { ...administration, ...(context.signal ? { signal: context.signal } : {}) }
         const result = method === 'connection.setup.begin' ? await setup.begin(parseConnectionSetupParams(method, params), callContext)
           : method === 'connection.setup.advance' ? await setup.advance(parseConnectionSetupParams(method, params), callContext)
-          : method === 'connection.setup.ls' ? await setup.list(parseConnectionSetupParams(method, params))
+          : method === 'connection.setup.ls' ? await setup.list(parseConnectionSetupParams(method, params), administration)
           : await setup.inspect(parseConnectionSetupParams(method, params), callContext)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
@@ -492,8 +512,8 @@ export class AgentMuxRpcService {
         const result = method === 'connection.profile.get' ? await profile.get(parseConnectionProfileParams(method, params), callContext)
           : method === 'connection.profile.sync' ? await profile.sync(parseConnectionProfileParams(method, params), callContext)
           : method === 'connection.profile.advance' ? await profile.advance(parseConnectionProfileParams(method, params), callContext)
-          : method === 'connection.profile.ls' ? await profile.list(parseConnectionProfileParams(method, params))
-          : await profile.inspect(parseConnectionProfileParams(method, params))
+          : method === 'connection.profile.ls' ? await profile.list(parseConnectionProfileParams(method, params), callContext)
+          : await profile.inspect(parseConnectionProfileParams(method, params), callContext)
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       if (isConnectionEnrollmentMethod(method)) {
@@ -501,7 +521,7 @@ export class AgentMuxRpcService {
         if (!enrollment) throw new AgentMuxError('Application enrollment is unavailable on this Host. Existing Agents and connections remain available.', 'CONTROL_UNAVAILABLE')
         const result = method === 'connection.enrollment.begin' ? await enrollment.begin(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
           : method === 'connection.enrollment.advance' ? await enrollment.advance(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
-          : method === 'connection.enrollment.ls' ? await enrollment.list(parseConnectionEnrollmentParams(method, params))
+          : method === 'connection.enrollment.ls' ? await enrollment.list(parseConnectionEnrollmentParams(method, params), administration)
           : await enrollment.inspect(parseConnectionEnrollmentParams(method, params), { ...administration, ...(context.signal ? { signal: context.signal } : {}) })
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
@@ -549,12 +569,23 @@ export class AgentMuxRpcService {
           : method === 'connection.binding.pause' ? await bindings.pause(parseRoomBindingParams(method, params), administration)
           : method === 'connection.binding.relink' ? await bindings.relink(parseRoomBindingParams(method, params), administration)
           : await bindings.grant(parseRoomBindingParams(method, params), administration)
+        if (caller && method === 'connection.binding.ls') {
+          const page = result as import('./room-binding-contract.js').RoomBindingResultMap['connection.binding.ls']
+          const owned = await Promise.all(page.bindings.map(async binding => binding.authorizedBy.kind === 'agent' && binding.authorizedBy.id === caller.agentSessionId &&
+            await owner.ownsEnrollmentConnection?.(binding.connectionId, caller.agentSessionId) ? binding : null))
+          page.bindings = owned.filter((binding): binding is NonNullable<typeof binding> => binding !== null)
+        }
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       const result = method === 'connection.ls' ? await owner.list()
         : method === 'connection.inspect' ? await owner.inspect(parseConnectionParams('connection.inspect', params))
         : method === 'connection.configure' ? await owner.configure(parseConnectionParams('connection.configure', params))
         : await owner.test(parseConnectionParams('connection.test', params))
+      if (caller && method === 'connection.ls') {
+        const page = result as import('./connections-contract.js').ConnectionResultMap['connection.ls']
+        const owned = await Promise.all(page.connections.map(async connection => await owner.ownsEnrollmentConnection?.(connection.config.connectionId, caller.agentSessionId) ? connection : null))
+        page.connections = owned.filter((connection): connection is NonNullable<typeof connection> => connection !== null)
+      }
       return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
     }
     if (isAgentMuxRpcDeviceMethod(method)) {

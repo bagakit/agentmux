@@ -53,7 +53,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     })
   }
   private async authority(context: ConnectionEnrollmentCallContext, row?: Row | null): Promise<void> {
-    if (!context?.actor || !['user', 'device'].includes(context.actor.kind) || !context.actor.id || row && !sameActor(row.actor, context.actor)) throw failure('This management request belongs to its original transport-approved actor.', 'CONNECTION_SETUP_AUTHORITY_REQUIRED')
+    if (!context?.actor || !['user', 'device', 'agent'].includes(context.actor.kind) || !context.actor.id || row && !sameActor(row.actor, context.actor)) throw failure('This management request belongs to its original transport-approved actor.', 'CONNECTION_SETUP_AUTHORITY_REQUIRED')
     context.signal?.throwIfAborted(); await context.assertCurrent?.()
     if (this.closed) throw failure('The original management owner is closed. Continue the same request on its executing Host.')
   }
@@ -437,7 +437,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     if (!row.operation.source || !row.privateRef) return null
     try { return this.envelope(await this.secrets?.resolve(row.privateRef) ?? null, row)?.localAccount ?? null } catch { return null }
   }
-  async list(value: { connectionId: string; cursor?: string; limit?: number }): Promise<ConnectionSetupListing> {
+  async list(value: { connectionId: string; cursor?: string; limit?: number }, context?: ConnectionEnrollmentCallContext): Promise<ConnectionSetupListing> {
     const input = parseConnectionSetupParams('connection.setup.ls', value), limit = input.limit ?? 25
     let before = Number.MAX_SAFE_INTEGER
     if (input.cursor !== undefined) {
@@ -451,7 +451,8 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
         connectionRevision: current.revision,
         capabilities: [...(setup?.domains.includes(current.config.application.domain) ? ['management-authentication' as const] : []), ...(setup?.applicationInspection?.domains.includes(current.config.application.domain) ? ['application-inspection' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messagingCapability === 'function' && typeof setup.applicationConfiguration.enableMessaging === 'function' ? ['messaging-capability' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.eventTransportCapability === 'function' && typeof setup.applicationConfiguration.usePersistentConnection === 'function' ? ['persistent-event-transport' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.permissionPlan === 'function' && typeof setup.applicationConfiguration.addApplicationPermissions === 'function' ? ['application-permissions' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.messageReceptionPlan === 'function' && typeof setup.applicationConfiguration.addMessageReception === 'function' ? ['message-reception' as const] : []), ...(setup?.applicationConfiguration?.domains.includes(current.config.application.domain) && typeof setup.applicationConfiguration.publicationPlan === 'function' && typeof setup.applicationConfiguration.createVersion === 'function' && typeof setup.applicationConfiguration.submitVersion === 'function' ? ['application-publication' as const] : []), ...(setup?.enrollmentContinuation?.domains.includes(current.config.application.domain) && typeof setup.enrollmentContinuation.resume === 'function' ? ['enrollment-continuation' as const] : [])]
       } : null
-      const rows = this.connections.database.prepare('SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(input.connectionId, before, limit + 1)
+      const actor = context?.actor.kind === 'agent' ? context.actor : undefined
+      const rows = this.connections.database.prepare(actor ? "SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? AND json_extract(actor_json,'$.kind')=? AND json_extract(actor_json,'$.id')=? ORDER BY ordinal DESC LIMIT ?" : 'SELECT operation_id,ordinal FROM connection_setup_operation WHERE connection_id=? AND ordinal<? ORDER BY ordinal DESC LIMIT ?').all(...(actor ? [input.connectionId, before, actor.kind, actor.id, limit + 1] : [input.connectionId, before, limit + 1]))
       return { operations: rows.slice(0, limit).map(r => this.summary(this.read(String(r.operation_id))!)), next: rows.length > limit ? String(rows[limit - 1]!.ordinal) : null, support }
     })
   }

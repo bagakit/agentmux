@@ -106,7 +106,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
     this.current()
     if (
       !context.actor ||
-      !['user', 'device'].includes(context.actor.kind) ||
+      !['user', 'device', 'agent'].includes(context.actor.kind) ||
       !context.actor.id ||
       (row && !sameEnrollmentActor(row.actor, context.actor))
     )
@@ -126,7 +126,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
     const a = this.options.connections.registeredAdapter(row.operation.adapterId)?.enrollment
     return a?.domains.some((d) => d.domain === row.operation.domain) ? a : undefined
   }
-  async list(value: ConnectionEnrollmentListInput) {
+  async list(value: ConnectionEnrollmentListInput, context?: ConnectionEnrollmentCallContext) {
     this.current()
     const input = parseConnectionEnrollmentParams('connection.enrollment.ls', value)
     const available = !!this.options.secrets
@@ -140,7 +140,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
           ...(available ? {} : { reason: 'secure-storage-unavailable' as const })
         }))
       )
-    return { ...this.store.page(input.cursor, input.limit ?? 25), capabilities }
+    return { ...this.store.page(input.cursor, input.limit ?? 25, context?.actor.kind === 'agent' ? context.actor : undefined), capabilities }
   }
   async inspect(
     value: ConnectionEnrollmentOperationInput,

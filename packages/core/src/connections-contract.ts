@@ -38,6 +38,8 @@ export type ConnectionResultMap = import('./connection-setup-contract.js').Conne
 }
 /** Borrow the Host's original connection owner. Core never constructs adapters or stores credentials. */
 export interface ConnectionPort {
+  /** Original enrollment journal ownership, never a display label or credential-derived grant. */
+  ownsEnrollmentConnection?(connectionId: string, agentSessionId: string): Promise<boolean>
   setup?: import('./connection-setup-contract.js').ConnectionSetupPort
   service?: import('./connection-service-contract.js').ConnectionServicePort
   profile?: import('./connection-profile-contract.js').ConnectionProfilePort

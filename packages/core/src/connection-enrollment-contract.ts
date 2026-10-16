@@ -164,7 +164,7 @@ export type ConnectionEnrollmentListResult = {
 /** Supplied only by the executing transport owner, never by JSON. */
 export type ConnectionEnrollmentCallContext = {
   actor: {
-    kind: 'user' | 'device'
+    kind: 'user' | 'device' | 'agent'
     id: string
   }
   assertCurrent?(): void | Promise<void>
@@ -183,7 +183,7 @@ export interface ConnectionEnrollmentPort {
     input: ConnectionEnrollmentOperationInput,
     context: ConnectionEnrollmentCallContext
   ): Promise<ConnectionEnrollmentView>
-  list(input: ConnectionEnrollmentListInput): Promise<ConnectionEnrollmentListResult>
+  list(input: ConnectionEnrollmentListInput, context?: ConnectionEnrollmentCallContext): Promise<ConnectionEnrollmentListResult>
 }
 export type ConnectionEnrollmentParamsMap = {
   'connection.enrollment.begin': ConnectionEnrollmentBeginInput
