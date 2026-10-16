@@ -4,9 +4,10 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
+import { build } from 'vite'
 import { expect, it } from 'vitest'
 
-it('the production Desktop copying block supplies Main hashing imports inside a standalone app', async () => {
+it('the production Desktop copying block supplies Main hashing and static-avatar imports inside a standalone app', async () => {
   const repositoryRoot = resolve(import.meta.dirname, '../../..')
   const scriptPath = process.env.AGENTMUX_PACKAGE_HASHING_SOURCE ?? join(repositoryRoot, 'apps/desktop/scripts/package-macos.mjs')
   const source = ts.createSourceFile(scriptPath, await readFile(scriptPath, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
@@ -54,5 +55,43 @@ it('the production Desktop copying block supplies Main hashing imports inside a 
     const canonicalAppResources = await realpath(appResources)
     expect(actual.resolutions).toEqual(['sha2.js', 'utils.js'].map(file =>
       pathToFileURL(join(canonicalAppResources, 'node_modules/@noble/hashes', file)).href))
+
+    // Main's real avatar reader uses this shared serializer and the original face
+    // drawing. Keep React external exactly as in Main, then execute Node SSR in
+    // the standalone App so workspace modules cannot supply a missing runtime.
+    const avatarEntry = join(temporary, 'avatar-consumer.ts')
+    await writeFile(avatarEntry, `
+      import { moteAvatarSvg } from ${JSON.stringify(join(repositoryRoot, 'packages/client-ui/src/lib/mote-avatar-svg.ts'))}
+      import { DEFAULT_MOTE_FACE } from ${JSON.stringify(join(repositoryRoot, 'packages/client-ui/src/lib/mote-face.ts'))}
+      console.log(JSON.stringify({
+        face: moteAvatarSvg({ ...DEFAULT_MOTE_FACE, shape: 'diamond', palette: 'cocoa', eyes: 'wink' }),
+        icon: moteAvatarSvg('flask'),
+        browserGlobals: [typeof globalThis.window, typeof globalThis.document],
+        resolutions: ['react', 'react/jsx-runtime', 'react-dom/server'].map(name => import.meta.resolve(name))
+      }))
+    `)
+    await build({
+      configFile: false,
+      logLevel: 'silent',
+      esbuild: { jsx: 'automatic' },
+      build: {
+        target: 'node22', outDir: mainDirectory, emptyOutDir: false, minify: false,
+        lib: { entry: avatarEntry, formats: ['es'], fileName: () => 'avatar-consumer.js' },
+        rollupOptions: { external: id => /^(?:react|react-dom)(?:\/|$)/.test(id) }
+      }
+    })
+    const avatar = JSON.parse(execFileSync(process.execPath, [join(mainDirectory, 'avatar-consumer.js')], {
+      cwd: temporary, encoding: 'utf8', env: { PATH: process.env.PATH, NODE_PATH: '' }
+    })) as { face: string; icon: string; browserGlobals: string[]; resolutions: string[] }
+    expect(avatar.browserGlobals).toEqual(['undefined', 'undefined'])
+    for (const markup of [avatar.face, avatar.icon]) {
+      expect(markup).toMatch(/^<svg\b/)
+      expect(markup).toContain('viewBox=')
+      expect(markup).toMatch(/<(?:path|rect|ellipse|circle)\b/)
+      expect(markup).not.toMatch(/<(?:foreignObject|script|div)\b/)
+    }
+    expect(avatar.face).not.toBe(avatar.icon)
+    expect(avatar.resolutions).toEqual(['react/index.js', 'react/jsx-runtime.js', 'react-dom/server.node.js'].map(file =>
+      pathToFileURL(join(canonicalAppResources, 'node_modules', file)).href))
   } finally { await rm(temporary, { recursive: true, force: true }) }
 }, 30_000)
