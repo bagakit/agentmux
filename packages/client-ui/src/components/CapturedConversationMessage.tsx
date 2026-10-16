@@ -8,7 +8,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { formatClock } from '../lib/conversation-time.js'
 import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
-import { ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
+import { ConversationSubmissionFacts, ConversationSubmissionSummary, conversationSubmissionPreview } from './ConversationSubmissionMetadata.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
 export type SubmissionDisclosure = { compact: boolean; reading?: boolean; open?: boolean; onOpenChange(open: boolean): void }
 /** Exact captured record metadata. A failed native reader cannot hide a confirmed Hook reply. */
@@ -24,7 +24,7 @@ export function CapturedConversationMessage({ item, record, replyObservation, su
   const itemRef = record ? conversationItemRef(record) : conversationItemRef({ agentSessionId: item.agentSessionId, ...(props.executionHostId ? { executionHostId: props.executionHostId } : {}), source: { kind: 'captured', recordId: item.id } })
   const submission = Boolean(submissionDisclosure && record?.original.kind === 'captured' && record.role === 'message' && item.kind === 'user_message' && item.source === 'user')
   const originalSubmission = submission ? record?.records?.find(source => source.original.item === item) : undefined
-  const message = <ConversationMessage {...props} sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event && !submission ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
+  const message = <ConversationMessage {...props} expandedContent sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event && !submission ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
     messageDetails={<>{originalSubmission ? <ConversationSubmissionFacts record={originalSubmission} /> : <dl className="conversation-input-details__facts">
       <dt>记录方式</dt><dd>{source.label}</dd>
       <dt>来源说明</dt><dd>{source.description}</dd>
@@ -35,18 +35,15 @@ export function CapturedConversationMessage({ item, record, replyObservation, su
       {item.eventName ? <><dt>原事件</dt><dd>{item.eventName}</dd></> : null}
     </dl>}{props.messageDetails}</>} />
   if (submission && record && submissionDisclosure) {
-    const sender = record.speaker && props.describeSpeaker?.(record.speaker)
-    const senderName = sender?.name ?? props.name ?? record.speaker?.id ?? '作者未记录'
     return <div className="conversation-submission-record" data-submission-id={item.id}
       data-conversation-event-id={record.event?.id} data-conversation-event-revision={record.event?.revision}
       data-conversation-role={record.role} data-conversation-author={JSON.stringify(record.author)}
       data-conversation-item-ref={itemRef ? JSON.stringify(itemRef) : undefined}
       data-message-source-key={conversationMessageSourceKey(item.agentSessionId, { kind: 'captured', recordId: item.id })} tabIndex={-1}>
-      <ConversationMessageDisclosure preview={(record.content ?? '').slice(0, 160).replace(/\s+/gu, ' ').trim()} reveal={props.located === true}
-        expanded={!submissionDisclosure.compact || item.status !== 'complete'} {...(submissionDisclosure.open === undefined ? {} : { open: submissionDisclosure.open })}
+      <ConversationMessageDisclosure preview={conversationSubmissionPreview(record.content ?? '')} reveal={props.located === true}
+        expanded={!submissionDisclosure.compact} {...(submissionDisclosure.open === undefined ? {} : { open: submissionDisclosure.open })}
         onOpenChange={submissionDisclosure.onOpenChange}
-        summary={<><span className="conversation-submission-record__author">发送记录 · {senderName}{record.speaker?.role === 'agent' && senderName !== record.speaker.id ? <code>{record.speaker.id}</code> : null}</span>
-          {originalSubmission ? <ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} /> : null}
+        summary={<>{originalSubmission ? <ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} /> : null}
           {submissionDisclosure.reading ? <span className="conversation-submission-record__reading" role="status" aria-label="正在读取对应来源"><SemanticIcon name="status.loading" animation="spin" size={12} aria-hidden="true" /></span> : null}</>}>
         {message}
       </ConversationMessageDisclosure>

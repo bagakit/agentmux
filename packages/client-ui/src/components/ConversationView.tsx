@@ -1,6 +1,6 @@
 import { ConversationCoverage } from './ConversationCoverage.js'
 import { CapturedProcessRecord } from './CapturedProcessRecord.js'
-import { ConversationOriginalRecords } from './ConversationOriginalRecords.js'
+import { ConversationOriginalRecords, ConversationOriginalRecordContent } from './ConversationOriginalRecords.js'
 import { useConversationRecordLayout } from '../lib/use-conversation-record-layout.js'
 import type { AgentCapabilities, AgentMuxRunRef, AgentSessionHistorySource, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { ConversationRecord } from '../lib/conversation-records.js'
@@ -18,7 +18,7 @@ import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionRep
 import { projectConversationQuestions } from '@agentmux/core/conversation'
 import type { ConversationSourceRead } from '../lib/use-conversation-view.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
-import { conversationItemRef, conversationRecordId, type ConversationItemRef } from '@agentmux/core/conversation'
+import { conversationItemRef, type ConversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
@@ -88,11 +88,13 @@ export const ConversationView = memo(function ConversationView({
     })
   }, [choiceScope, projection.originalRecords])
   const expandedSubmissions = useMemo(() => new Set([...choices].filter(([, open]) => open).map(([id]) => id)), [choices])
-  // A protected original keeps the source facts of its displayed frame.
-  const sourceCoverage = describedRecords[0]?.coverage ?? projection.coverage
-  const unavailable = sourceCoverage.some(row => row.source.kind === 'native' && (row.current === 'unavailable' || row.current === 'unsupported'))
-  const unreadRecords = new Set(sourceCoverage.flatMap(row => row.gaps.flatMap(gap => gap.record &&
-    (gap.code === 'CONVERSATION_ANCHOR_UNREAD' || gap.code === 'CONVERSATION_OBSERVED_TARGET_UNREAD') ? [conversationRecordId(gap.record)] : [])))
+  function setSubmissionChoice(id: string, open: boolean): void {
+    setSubmissionChoices(previous => {
+      const values = previous.scope === choiceScope ? previous.values : new Map<string, boolean>()
+      if (values.get(id) === open && previous.scope === choiceScope) return previous
+      return { scope: choiceScope, values: new Map(values).set(id, open) }
+    })
+  }
   if (page && page.agentSessionId !== sessionId) return null
   if (describedRecords.length === 0 && !insertions?.length && projection.coverage.length === 0) return null
   const descriptions = new Map(describedRecords.filter(record => record.original.kind === 'native').map(record => [record.rawId, record]))
@@ -115,8 +117,6 @@ export const ConversationView = memo(function ConversationView({
   const orderedInsertions = [...(insertions ?? []), ...capturedInsertions]
 
   function renderCaptured(record: ConversationRecord, disclosure?: ConversationProcessProps['disclosure'], feed = false): ReactNode {
-    const keys = new Set([record.event?.anchorId, ...(record.records?.map(source => source.id) ?? [])])
-    const unread = [...keys].some(key => key !== undefined && unreadRecords.has(key))
     const choiceKey = record.records?.find(source => source.original.item === record.original.item)?.id ?? record.id
     const target = record.sources?.unreadSubmissionTarget
     const request = readActivity?.sourceRead
@@ -132,13 +132,9 @@ export const ConversationView = memo(function ConversationView({
       && request.nativeSource.providerId === target.source.providerId && request.nativeSource.nativeSessionId === target.source.nativeSessionId)
     const submissionDisclosure: SubmissionDisclosure | undefined = feed ? {
       reading: readingSubmission,
-      compact: Boolean(page?.items.length) && !expandSubmissions && !unavailable && !unread,
+      compact: !expandSubmissions,
       ...(choices.has(choiceKey) ? { open: choices.get(choiceKey)! } : {}),
-      onOpenChange: open => setSubmissionChoices(previous => {
-        const values = previous.scope === choiceScope ? previous.values : new Map<string, boolean>()
-        if (values.get(choiceKey) === open && previous.scope === choiceScope) return previous
-        return { scope: choiceScope, values: new Map(values).set(choiceKey, open) }
-      })
+      onOpenChange: open => setSubmissionChoice(choiceKey, open)
     } : undefined
     return renderCapturedRecord ? renderCapturedRecord(record, disclosure, submissionDisclosure) : record.role === 'process' || record.role === 'interaction'
       ? <CapturedProcessRecord record={record} {...(disclosure ? { disclosure } : {})} located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)} /> : <CapturedConversationMessage
@@ -153,8 +149,15 @@ export const ConversationView = memo(function ConversationView({
         messageDetails={<>{record.original.kind === 'captured' ? [record.original.item.toolInput, record.original.item.toolOutput].map((text, index) => text === undefined ? null : <details key={index}><summary>{index ? 'Original tool output' : 'Original tool input'}</summary><ConversationToolPayload text={text} identity={record.original.item} sourceIdentity={record.original.item} copyLabel={index ? 'Copy tool output' : 'Copy tool input'} /></details>) : null}</>} />
   }
   function renderOriginals(record: ConversationRecord): ReactNode {
-    const contributors = record.records?.filter(source => source.original.item !== record.original.item).flatMap(source => originals.has(source.id) ? [originals.get(source.id)!] : []) ?? []
-    return contributors.length ? <ConversationOriginalRecords records={contributors} expandedRecords={expandedSubmissions} renderRecord={renderOriginal} sessionId={sessionId} {...(locatedMessageKey === undefined ? {} : { locatedMessageKey })} /> : null
+    const contributors = record.records?.filter(source => source.original.item !== record.original.item).flatMap(source => {
+      const original = originals.get(source.id)
+      if (!original) return []
+      const submission = record.sources?.submissions?.some(item => item.id === source.id)
+      // The native card already exposes this original through its send receipt.
+      // Existing choices and exact source locators retain their own opened surface.
+      return !submission || choices.has(source.id) || locatedMessageKey === conversationMessageSourceKey(sessionId, original.source) ? [original] : []
+    }) ?? []
+    return contributors.length ? <ConversationOriginalRecords records={contributors} expandedRecords={expandedSubmissions} onOpenChange={setSubmissionChoice} renderRecord={renderOriginal} sessionId={sessionId} {...(locatedMessageKey === undefined ? {} : { locatedMessageKey })} /> : null
   }
   function renderOriginal(record: ConversationRecord): ReactNode {
     return record.original.kind === 'native' ? renderNativeRecord(record.original.item, undefined, record) : renderCaptured(record)
@@ -174,6 +177,7 @@ export const ConversationView = memo(function ConversationView({
       const speaker = record.role === 'process' ? undefined : record.speaker
       const described = speaker && item.kind !== 'system-message' ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage sources={record.sources} {...(record.event ? { conversationEvent: record.event } : {})} messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
+          renderSubmissionOriginal={source => { const original = originals.get(source.id); return original ? <ConversationOriginalRecordContent record={original} renderRecord={renderOriginal} /> : null }}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           {...(itemRef ? { itemRef } : {})}
           located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)}

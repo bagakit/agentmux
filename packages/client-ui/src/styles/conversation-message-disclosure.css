@@ -9,6 +9,6 @@
 .message-disclosure[open] .message-disclosure__action > svg { transform: rotate(90deg); }
 .message-disclosure > .log-turn__body { margin-top: var(--sp-2); }
 .message-disclosure[data-submission] > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-micro); }
-.message-disclosure[data-submission] .message-disclosure__preview { order: 1; flex-basis: 100%; color: var(--text-2); font-size: var(--fs-micro); white-space: normal; }
+.message-disclosure[data-submission] .message-disclosure__preview { order: 1; flex-basis: 100%; color: var(--text-2); font-size: var(--fs-micro); white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .message-disclosure[data-submission] .message-disclosure__action { margin-inline-start: auto; }
 .message-disclosure[data-submission] > div { margin-top: var(--sp-2); }

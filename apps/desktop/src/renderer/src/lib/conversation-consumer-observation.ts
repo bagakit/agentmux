@@ -39,7 +39,7 @@ export function conversationRenderedObservation(viewport: HTMLElement | null, se
     if (node.classList.contains('log-turn')) {
       const originals = messages.get(key) ?? []; originals.push(node); messages.set(key, originals)
     }
-    if (node.classList.contains('conversation-original-record') || node.classList.contains('conversation-submission-record') || node.classList.contains('conversation-reply-observation')) disclosures.set(key, node)
+    if (node.classList.contains('conversation-original-record') || node.classList.contains('conversation-submission-record') || node.classList.contains('conversation-submission') || node.classList.contains('conversation-reply-observation')) disclosures.set(key, node)
   }
   for (const node of viewport?.querySelectorAll<HTMLElement>('[data-native-record-ids]') ?? []) {
     const source = node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource

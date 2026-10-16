@@ -1,6 +1,6 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessage, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
-import type { ConversationItemRef } from '@agentmux/core/conversation'
+import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/core/conversation'
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { SemanticIcon } from '../theme/icons.js'
@@ -41,12 +41,16 @@ export type ConversationMessageProps = {
   recordTitle?: string
   /** A compact record face, without changing ordinary conversation defaults. */
   compact?: boolean
+  /** An already-open original disclosure owns the full body, including long human input. */
+  expandedContent?: boolean
   /** Keep secondary identity/context facts in the existing Info disclosure. */
   detailsOnlyMetadata?: boolean
   /** A Provider-recorded public message phase; never inferred from the text. */
   messagePhase?: AgentSessionHistoryMessagePhase
   recordedIdentity?: boolean
   messageDetails?: ReactNode
+  /** The owning conversation supplies the same original reader for an exact submission contribution. */
+  renderSubmissionOriginal?(record: ConversationSourceRecord): ReactNode
   /** Independent host actions; the shared reader remains the only message body. */
   messageActions?: ReactNode
   located?: boolean
@@ -146,7 +150,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  active = true, compact = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
+  active = true, compact = false, expandedContent = false, detailsOnlyMetadata = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
@@ -163,7 +167,7 @@ export function ConversationMessage({
   const readingIdentity = useMemo(() => ({}), [messageId, recordSourceKey])
   // Eligibility is an original author fact; display's unknown -> You mapping is insufficient.
   const humanText = recordedSpeaker?.role === 'human' ? parts.filter(part => part.kind === 'text').map(part => part.text).join('\n\n') : ''
-  const discloseHuman = humanText.length > 1200 || humanText.split('\n').length > 12
+  const discloseHuman = !expandedContent && (humanText.length > 1200 || humanText.split('\n').length > 12)
   const discloseBody = (body: ReactNode) => discloseHuman
     ? <ConversationMessageDisclosure key={JSON.stringify([messageId, recordSourceKey, humanText])} preview={humanText.slice(0, 160).trimEnd()} reveal={located}>{body}</ConversationMessageDisclosure>
     : body
@@ -340,7 +344,7 @@ export function ConversationMessage({
               {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
             </span> : null
   const metadata = hasMetadata || sources && !detailsOnlyMetadata ? <div className="log-turn__meta">
-        {sources?.submissions ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} /> : null}
+        {sources?.submissions ? <ConversationSubmissionMetadata records={sources.submissions} renderClock={renderClock} nativeReadable={hasContent} {...(renderSubmissionOriginal ? { renderOriginal: renderSubmissionOriginal } : {})} /> : null}
         {!detailsOnlyMetadata ? <ConversationSourceLabels sources={sources?.main} observation={sources?.collectedReply} /> : null}
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
