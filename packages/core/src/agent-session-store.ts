@@ -187,6 +187,8 @@ export type AgentMuxAgentSessionStore = {
     signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
   loadRetiredAgentSessions(signal?: AbortSignal): Promise<readonly AgentMuxRetiredAgentSession[]>
+  /** Exact original retirement authority; history descriptors cannot authorize recovery. */
+  readRetiredAgentSession(agentSessionId: string): Promise<AgentMuxRetiredAgentSession | null>
   /** Read only the original pending reopen correlation, including unavailable correlations. */
   loadReopenCorrelations(signal?: AbortSignal): Promise<readonly { expectedRetirement: AgentMuxRetiredAgentSession; operationId?: string }[]>
   /** Recover an existing creation identity by its caller operation, including no-Run reservations. */
@@ -2259,6 +2261,13 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return structuredClone(this.retiredAgentSessions)
   }
 
+  async readRetiredAgentSession(agentSessionId: string): Promise<AgentMuxRetiredAgentSession | null> {
+    string(agentSessionId, 'agentSessionId')
+    const value = this.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId)
+    if (value && this.sessions.has(agentSessionId)) throw new AgentMuxError('Session is both active and retired.', 'INVALID_AGENT_SESSION_STORE')
+    return value ? retiredAgentSession(value) : null
+  }
+
   async loadReopenCorrelations(signal?: AbortSignal) {
     signal?.throwIfAborted()
     return reopenCorrelations([...this.reservations.values()])
@@ -2789,6 +2798,24 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await observeRead(this.tail, signal)
     return await this.withReadDatabase(db => db.prepare('SELECT json FROM retired_sessions ORDER BY rowid').all()
       .map(row => retiredAgentSession(JSON.parse(String(row.json)))), document => structuredClone(document.retiredAgentSessions), signal)
+  }
+
+  async readRetiredAgentSession(agentSessionId: string): Promise<AgentMuxRetiredAgentSession | null> {
+    string(agentSessionId, 'agentSessionId')
+    await this.tail
+    return await this.withReadDatabase(db => {
+      const row = db.prepare('SELECT json FROM retired_sessions WHERE id=?').get(agentSessionId)
+      if (!row) return null
+      const value = retiredAgentSession(JSON.parse(String(row.json)))
+      if (value.agentSessionId !== agentSessionId || this.sessionMetadata(db, agentSessionId)) throw new AgentMuxError(
+        'Original retirement does not match its stored location or conflicts with an active Session.', 'INVALID_AGENT_SESSION_STORE')
+      return value
+    }, document => {
+      const value = document.retiredAgentSessions.find(session => session.agentSessionId === agentSessionId)
+      if (value && document.sessions.some(session => session.agentSessionId === agentSessionId)) throw new AgentMuxError(
+        'Session is both active and retired.', 'INVALID_AGENT_SESSION_STORE')
+      return value ? retiredAgentSession(value) : null
+    })
   }
 
   async loadReopenCorrelations(signal?: AbortSignal) {
