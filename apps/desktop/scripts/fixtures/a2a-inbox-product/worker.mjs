@@ -30,6 +30,7 @@ const originalConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label
 await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify(originalConfig))
 const children = new Set(), sessions = [], frames = [], cliCalls = []
 const facts = { frames, chain: { scenarios: [], cliCalls }, mailbox: {}, restart: {}, cleanup: { userRunTouched: false, processesReaped: false },
+  homeIsolation: { privateHome: process.env.HOME, launches: [] },
   syntheticNativeBoundary: 'Authenticated Codex 0.163 actor-shaped fixture, exact native UserMessage/client_id persisted by that actor. No model or vendor acceptance claim.' }
 let client, daemon, rpc, failure
 assert.equal(process.platform, 'darwin', 'This private native actor proof qualifies the current macOS product')
@@ -73,14 +74,15 @@ async function cli(args, caller = null, expectSuccess = true) {
   return receipt
 }
 async function cdpConnect(url) {
-  const ws = new WebSocket(url), pending = new Map(); let serial = 0
+  const ws = new WebSocket(url), pending = new Map(), pauses = []; let serial = 0
   await new Promise((done, fail) => { ws.addEventListener('open', done, { once: true }); ws.addEventListener('error', fail, { once: true }) })
-  ws.addEventListener('message', ({ data }) => { const value = JSON.parse(data), request = pending.get(value.id); if (!request) return
+  ws.addEventListener('message', ({ data }) => { const value = JSON.parse(data); if (value.method === 'Debugger.paused') pauses.push(value.params)
+    const request = pending.get(value.id); if (!request) return
     pending.delete(value.id); clearTimeout(request.timer); value.error ? request.reject(new Error(value.error.message)) : request.resolve(value.result) })
   ws.addEventListener('close', () => { for (const request of pending.values()) { clearTimeout(request.timer); request.reject(new Error('Original private CDP closed')) } pending.clear() })
   const call = (method, params = {}) => new Promise((resolve, reject) => { const id = ++serial, timer = setTimeout(() => { pending.delete(id); reject(new Error('Private CDP timeout: ' + method)) }, 15_000)
     pending.set(id, { resolve, reject, timer }); ws.send(JSON.stringify({ id, method, params })) })
-  return { call, close: () => ws.close(), evaluate: async expression => {
+  return { call, pauses, close: () => ws.close(), evaluate: async expression => {
     const value = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
     if (value.exceptionDetails) throw new Error(value.exceptionDetails.exception?.description ?? value.exceptionDetails.text)
     return value.result.value
@@ -90,17 +92,51 @@ async function launch(label) {
   const ready = join(root, 'ready-' + label + '.json')
   const env = { ...process.env, AGENTMUX_DESKTOP_READY_FILE: ready }; delete env.ELECTRON_RUN_AS_NODE
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(env[name], undefined)
-  const child = spawn(process.env.AGENTMUX_A2A_PROOF_ELECTRON, [join(root, 'apps/desktop'), '--remote-debugging-port=0'], {
+  const child = spawn(process.env.AGENTMUX_A2A_PROOF_ELECTRON, ['--inspect-brk=0', join(root, 'apps/desktop'), '--remote-debugging-port=0'], {
     cwd: join(root, 'apps/desktop'), env, detached: true, stdio: ['ignore', 'ignore', 'pipe'] })
-  children.add(child); let output = '', debuggerUrl
-  child.stderr.on('data', bytes => { output = (output + bytes).slice(-16_384); debuggerUrl ??= /DevTools listening on (ws:\/\/\S+)/.exec(output)?.[1] })
+  children.add(child); let output = '', mainUrl, debuggerUrl
+  child.stderr.on('data', bytes => { output = (output + bytes).slice(-16_384)
+    mainUrl ??= /Debugger listening on (ws:\/\/\S+)/.exec(output)?.[1]
+    debuggerUrl ??= /DevTools listening on (ws:\/\/\S+)/.exec(output)?.[1] })
+  const alive = () => { if (ended(child)) throw new Error('Private Desktop exited: ' + output) }
+  const main = await cdpConnect(await waitFor('private Main inspector', () => { alive(); return mainUrl }))
+  await main.call('Runtime.enable'); await main.call('Debugger.enable')
+  // Electron resolves its home independently of ENV HOME. Use the existing
+  // pre-constant inspector seam, after imports but before any home-backed workface.
+  const mainPath = join(root, 'apps/desktop/out/main/index.js'), lines = (await readFile(mainPath, 'utf8')).split('\n')
+  const anchors = lines.flatMap((line, index) => line.includes('const SCRATCH_BACKING_PATH = ') && line.includes('app.getPath("home")') ? [index] : [])
+  assert.equal(anchors.length, 1, 'Exactly one original compiled home boundary is required')
+  const breakpoint = await main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: anchors[0] })
+  await main.call('Runtime.runIfWaitingForDebugger')
+  let paused = await waitFor('private initial Main pause', () => main.pauses.shift())
+  const homePauses = [paused]
+  if (!paused.hitBreakpoints?.includes(breakpoint.breakpointId)) {
+    await main.call('Debugger.resume'); paused = await waitFor('private original home boundary', () => main.pauses.shift())
+    homePauses.push(paused)
+  }
+  assert.ok(paused.hitBreakpoints?.includes(breakpoint.breakpointId), 'Only the original pre-home boundary permits isolation')
+  const isolated = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
+    expression: `(()=>{const originalHome=app.getPath('home');app.setPath('home',${JSON.stringify(process.env.HOME)});return{originalHome,home:app.getPath('home')}})()`, returnByValue: true })
+  assert.equal(isolated.exceptionDetails, undefined)
+  const { originalHome, home } = isolated.result.value
+  assert.equal(home, process.env.HOME, 'Public Electron home must be private before the first home-dependent constant')
+  await main.call('Debugger.removeBreakpoint', { breakpointId: breakpoint.breakpointId }); await main.call('Debugger.resume')
   await waitFor('ordinary private Desktop ready', async () => { if (ended(child)) throw new Error('Private Desktop exited: ' + output)
     try { return JSON.parse(await readFile(ready, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }, 40_000)
   const address = new URL(await waitFor('private Desktop debugger', () => debuggerUrl))
   const page = await waitFor('actual product Renderer', async () => (await (await fetch('http://' + address.host + '/json/list')).json()).find(value => value.type === 'page' && value.url.startsWith('file:')))
   const cdp = await cdpConnect(page.webSocketDebuggerUrl); await cdp.call('Runtime.enable'); await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   await waitFor('actual App hydration', () => cdp.evaluate("Boolean(document.querySelector('.app-shell'))"))
-  return { child, cdp, origin: await cdp.evaluate('({url:location.href,origin:location.origin})'), seedControlsAbsent: true }
+  const nativeHome = await cdp.evaluate('(async()=>(await window.agentmux.sessions.snapshot()).localHome)()')
+  assert.equal(nativeHome, process.env.HOME, 'The production snapshot must confirm the actual private Electron home')
+  const catalog = (await cli(['space', 'ls'])).result.catalog
+  assert.ok(originalHome !== home && !JSON.stringify(catalog).includes(originalHome), 'The actual spatial catalog must not reference the original system home')
+  const isolation = { label, pid: child.pid, originalHome, home, nativeHome, catalog,
+    breakpoint: { id: breakpoint.breakpointId, url: pathToFileURL(mainPath).href, lineNumber: anchors[0] },
+    pauses: homePauses.map(event => ({ reason: event.reason, hitBreakpoints: event.hitBreakpoints,
+      location: event.callFrames[0].location, url: event.callFrames[0].url })) }
+  facts.homeIsolation.launches.push(isolation)
+  return { child, main, cdp, isolation, origin: await cdp.evaluate('({url:location.href,origin:location.origin})'), seedControlsAbsent: true }
 }
 async function activate(cdp, expression) {
   const point = await cdp.evaluate(`(()=>{const element=${expression};if(!element)throw new Error('Missing original product action');const r=element.getBoundingClientRect();if(!r.width||!r.height)throw new Error('Original product action is not visible');return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
@@ -159,7 +195,7 @@ try {
   const [author, recipient, other] = sessions
   const first = await launch('first')
   rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: endpoint } })
-  const catalog = (await cli(['space', 'ls'])).result.catalog
+  const catalog = first.isolation.catalog
   const zone = catalog.zones.find(zone => zone.workspaceId === 'proof-workspace'); assert.ok(zone, 'The private configured workspace has its actual Zone')
   const open = async session => (await cli(['agent', 'open', '--session', session.agentSessionId, '--zone', zone.zoneId, '--new-tab', '--focus'])).result
   const authorPlace = await open(author), recipientPlace = await open(recipient)
@@ -288,7 +324,7 @@ try {
   const before = await snapshot(first, ids, messageIds); facts.restart.first = before
   for (const run of before.runBirths) { const group = run.birth.split(/\s+/)[1]; assert.notEqual(Number(group), first.child.pid, 'Healthy Run stays outside the killed Electron group') }
   const inputBefore = Object.fromEntries(await Promise.all(sessions.map(async session => [session.agentSessionId, inputRequests(await nativeRequests(session)).length])))
-  first.cdp.close(); await stop(first.child, 'SIGKILL'); facts.restart.first.signal = first.child.signalCode
+  first.main.close(); first.cdp.close(); await stop(first.child, 'SIGKILL'); facts.restart.first.signal = first.child.signalCode
   const second = await launch('second')
   await waitFor('original Region and draft restored without a seed', () => second.cdp.evaluate(`${region(recipientPlace.to.regionId)}?.querySelector('.composer [role="textbox"]')?.textContent.includes('Original unsent draft')`))
   const after = await snapshot(second, ids, messageIds); facts.restart.second = after
@@ -321,7 +357,7 @@ try {
   } finally { await rename(originalNativePath + '.proof-unavailable', originalNativePath) }
   await waitFor('same healthy Run accepts manual input', async () => (await nativeRequests(recipient)).some(row => row.manualInput?.includes(marker)))
   facts.restart.healthyManualInput = true
-  second.cdp.close(); await stop(second.child, 'SIGKILL')
+  second.main.close(); second.cdp.close(); await stop(second.child, 'SIGKILL')
 } catch (error) { failure = error; facts.error = { message: error.message, stack: error.stack } }
 finally {
   try { await rpc?.dispose() } catch {}
