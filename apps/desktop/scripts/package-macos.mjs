@@ -827,7 +827,7 @@ function workbenchIdentity(workbench) {
         return descriptor
       }
       if (region.kind === 'browser') {
-        const { loading, error, navigationId, title, ...descriptor } = region
+        const { loading, error, navigationId, nativeOwner, title, ...descriptor } = region
         return descriptor
       }
       return region
@@ -856,7 +856,9 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
             restored.control.run.runId === region.control.run.runId && restored.control.hostId === region.control.hostId,
           'An original healthy Run is not yet available in its restored Region.')
         }
-        if (region.kind === 'browser' && !region.error) assert(restored?.kind === 'browser' && restored.navigationId && !restored.error,
+        // Dormant projections have no confirmed page to reopen. Their exact
+        // Browser descriptor and placement are still protected by equality above.
+        if (region.kind === 'browser' && region.navigationId && !region.error) assert(restored?.kind === 'browser' && restored.navigationId && !restored.error,
           'An original Browser page has not reopened; its Region is preserved but UI activation is unconfirmed.')
       }
     }
