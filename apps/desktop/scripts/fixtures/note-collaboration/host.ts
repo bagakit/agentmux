@@ -1,12 +1,15 @@
 import { mkdir, readFile, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxControlServer, connectAgentMuxRpc, parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult } from '@agentmux/core'
+import { parseFileShareUndoParams, parseFileShareUndoResult } from '@agentmux/core/files'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceFiles } from '../../../src/main/workspace-files'
 import { NoteFileWriter } from '../../../src/main/note-file-writer'
 import { NoteSharedBlockOwner } from '../../../src/main/note-shared-block-owner'
+import { NoteSharedUndoOwner } from '../../../src/main/note-shared-undo-owner'
+import { NoteSharedFileDeleteOwner } from '../../../src/main/note-shared-file-delete-owner'
 import { NoteTitleFileWriter } from '../../../src/main/note-title-file-writer'
 import { NotesStorageOwner } from '../../../src/main/notes-storage-owner'
 import { ConfigOwner } from '../../../src/main/config-owner'
@@ -66,13 +69,19 @@ export async function start(root: string, notify: (event: unknown) => void, opti
     await metadata.apply({ expectedRevision: state.revision, operationId: 'register-fixture-note', change: { kind: 'register', noteId, title: 'Shared knowledge', resource: { hostId: 'local', workspaceId: workspace.id, workspacePath: workspace.path, path } } }, actor)
   } else if (initial && initial.status !== 'read') throw Error('The existing fixture Note is unreadable; it was not reseeded: ' + JSON.stringify(initial))
   let sharedBlocks: NoteSharedBlockOwner
-  const owner = new FileReadOwner({ share: { share: (input, context) => sharedBlocks.share(input, context), inspectShare: (input, context) => sharedBlocks.inspectShare(input, context) }, workspace: id => config.workspaces.find(value => value.id === id), catalog: async () => spatialCatalog((await spatial.read())!.graph),
+  const owner = new FileReadOwner({ share: { share: (input, context) => sharedBlocks.share(input, context), undoShare: (input, context) => sharedBlocks.undoShare(input, context), inspectShare: (input, context) => sharedBlocks.inspectShare(input, context) }, workspace: id => config.workspaces.find(value => value.id === id), catalog: async () => spatialCatalog((await spatial.read())!.graph),
     files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer),
+      writeSharedUndo: (target, input, context, action, transferred) => notes.write(target, input, actual => writer.writeSharedUndo(actual, input, context, action, transferred)),
       createShared: (target, input, context, source) => notes.write(target, input, actual => writer.createShared(actual, input, context, source)),
       write: (target, input, context) => notes.write(target, input, actual => writer.write(actual, input, context)),
       restore: (target, input, context) => notes.write(target, input, actual => writer.restore(actual, input, context)),
       undo: (target, input, context) => notes.write(target, input, actual => writer.undo(actual, input, context)) } })
-  sharedBlocks = new NoteSharedBlockOwner({ files: owner, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata) })
+  const deletion = new NoteSharedFileDeleteOwner(files, metadata)
+  const sharedUndo = new NoteSharedUndoOwner({ files, workspaces: () => config.workspaces, target: owner.targetForNote.bind(owner),
+    read: owner.read.bind(owner), write: owner.write.bind(owner), writeInverse: owner.writeSharedInverse.bind(owner),
+    history: metadata.readHistory.bind(metadata), operation: metadata.readHistoryOperation.bind(metadata), lease: metadata.runWithWriteLease.bind(metadata),
+    delete: async (resource, input, context) => { const target = titleWorkspace(resource); return target ? notes.write(target, input, actual => deletion.delete(actual, input, context)) : { status: 'unknown', code: 'NOTE_RESOURCE_CHANGED', message: 'The exact original private shared deletion resource changed.' } } })
+  sharedBlocks = new NoteSharedBlockOwner({ undo: sharedUndo, files: { read: owner.read.bind(owner), write: owner.write.bind(owner), writeInverse: owner.writeSharedInverse.bind(owner), createShared: owner.createShared.bind(owner) }, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata) })
   const observation = new NotebookObservationOwner({ workspace: id => config.workspaces.find(value => value.id === id), files, metadata })
   const socketPath = join(root, 'control.sock'), server = new AgentMuxControlServer({ socketPath, files: owner, notebookStore: metadata, notebookObservation: observation, coreClients: () => [] })
   await server.start()
@@ -114,6 +123,16 @@ export async function start(root: string, notify: (event: unknown) => void, opti
         return result
       }
       case 'inspectSharePublic': { const input = parseFileShareInspectParams(args[0]); return parseFileShareInspectResult(await owner.inspectShare(input, { actor }), input) }
+      case 'shareUndoPublic': {
+        const input = parseFileShareUndoParams(args[0]), result = parseFileShareUndoResult(await owner.undoShare(input, { actor }), input)
+        if (lost && result.status === 'committed') {
+          lost = false
+          return parseFileShareUndoResult({ ...result, status: 'unknown', destination: null,
+            collections: result.collections.map(item => ({ ...item, source: null, deletion: null })),
+            code: 'PRIVATE_LOST_REPLY', message: 'The private transport dropped the original shared-undo reply after the real owner returned. Inspect the same request.' }, input)
+        }
+        return result
+      }
       case 'read': return observationPaused ? { status: 'error', code: 'PRIVATE_OBSERVATION_PAUSED', message: 'The private fixture retained the original operation while its read transport is unavailable.' } : writer.read(options.notebook ? originalWorkspace(args[0]) : workspace, args[1])
       case 'readDirectory': return files.readDirectory(originalWorkspace(args[0]), args[1])
       case 'list': return files.listFiles(options.notebook ? originalWorkspace(args[0]) : workspace, args[1], args[2])

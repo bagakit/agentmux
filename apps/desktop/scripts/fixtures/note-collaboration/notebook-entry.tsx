@@ -53,6 +53,7 @@ api.notebooks.resolve = input => invoke('notebooks.resolve', input)
 for (const method of ['read', 'write', 'readDirectory', 'list', 'observe', 'unobserve'] as const) (api.files[method] as any) = (...args: unknown[]) => invoke(method, ...args)
 for (const [method, rpc] of [['readPublic', 'file.read'], ['createPublic', 'file.create'], ['historyPublic', 'file.history'], ['restorePublic', 'file.restore'], ['undoPublic', 'file.undo']] as const) api.files[method] = input => invoke('rpc', rpc, input)
 api.files.sharePublic = input => invoke('sharePublic', input)
+api.files.shareUndoPublic = input => invoke('shareUndoPublic', input)
 api.files.inspectSharePublic = input => invoke('inspectSharePublic', input)
 api.files.onInvalidated = listener => { invalidations.add(listener); return () => { invalidations.delete(listener) } }
 api.ui.requestStorageFlush = () => invoke('storage.flush', localStorage.getItem('agentmux-workbench-v1'))
@@ -87,6 +88,21 @@ Object.assign(window, { noteNotebook: {
     return state.inspectNoteHistory(active.tabId, active.regionId, page.noteId)
   },
   async flush() { await prepareRendererUpdate() },
+  async openOriginalFile(path: string) {
+    const state = useAppStore.getState(), held = state.recallZoneSelection, active = held?.active
+    const location = active && spatialCatalog(state, []).locations.find(item => item.zoneId === held!.zoneId && item.tabId === active.tabId && item.regionId === active.regionId)
+    const binding = held && state.spaceZoneBindings[held.zoneId]
+    const workspace = location && state.config?.workspaces.find(item => item.id === location.workspaceId)
+    if (!held || !location || !binding || !workspace) throw Error('Select the original Notebook resource before opening its file')
+    const observed: { result?: import('../../../src/renderer/src/lib/file-workbench-state').FileOpenResult } = {}
+    const opened = await state.openFile(path, location.groupId, undefined, workspace.id, undefined, {
+      displayWorkspaceId: location.displayWorkspaceId, space: { spaceId: binding.spaceId, zoneId: held.zoneId },
+      resource: { hostId: workspace.hostId, path: workspace.path }, onResult: value => { observed.result = value }
+    })
+    const result = observed.result
+    if (result?.placement.tabId && result.placement.regionId) useAppStore.getState().setRecallZoneSelection(surveySelectReference(held, { tabId: result.placement.tabId, regionId: result.placement.regionId }))
+    return { opened, result }
+  },
   dispose() { stopLibrary(); ready(); events.close(); stopTheme() }
 } })
 
