@@ -37,7 +37,9 @@ it.each([
   ['init-status-on-poll', 'qr_login_polling', 0, null],
   ['string-status', 'qr_login_polling', '1', null],
   ['missing-status', 'qr_login_polling', undefined, null],
-  ['unconfirmed-expiry-marker', 'qr_login_polling', 5, null],
+  ['native-polling-expired', 'qr_login_polling', 5, 'expired'],
+  ['foreign-step-expiry', 'another-step', 5, null],
+  ['string-expiry-status', 'qr_login_polling', '5', null],
   ['original-waiting', null, 1, 'waiting'],
   ['original-scanned', null, 2, 'scanned'],
   ['original-expired', null, 5, 'expired']
@@ -86,11 +88,11 @@ function credential(receipt: EnrollmentCredentialReceipt) {
   if (receipt.kind !== 'credential') throw new Error('Original application credential was not confirmed')
   return receipt
 }
-function html() {
-  // Entirely synthetic literals in the finite, preserved twelve-field initializer shape.
-  return '<script>(function(){window.nonce="synthetic";window.user={"id":"original-user","tenantId":"original-tenant","name":"Original user","tenantName":"Original enterprise"};window.features=[];window.csrfToken="private-csrf";window.unit="cn";window.unitType=0;window.isOversea=false;window.env="test";window.outDomain={};window.resource={};window.domainBrand="feishu";window.seoType=0;})();</script>'
+function html(user: object = { id: 'original-user', tenantId: 'original-tenant', name: 'Original user', tenantName: 'Original enterprise' }) {
+  // Synthetic native literals; unrelated metadata is not account authority.
+  return '<script>(function(){window.nonce="synthetic";window.user=' + JSON.stringify(user) + ';window.features=[];window.csrfToken="private-csrf";window.unit="cn";window.unitType=0;window.isOversea=false;window.env="test";window.outDomain={};window.resource={};window.domainBrand="feishu";window.seoType=0;})();</script>'
 }
-async function signedIn(origin = 'https://open.feishu.cn') {
+async function signedIn(origin = 'https://open.feishu.cn', document = html()) {
   const initialHeaders = new Headers({ 'x-flow-key': 'private-flow' })
   initialHeaders.append('set-cookie', 'shared=private-shared; Domain=.feishu.cn; Path=/; Secure')
   initialHeaders.append('set-cookie', 'accounts-only=private-accounts; Path=/accounts; Secure')
@@ -102,7 +104,7 @@ async function signedIn(origin = 'https://open.feishu.cn') {
     new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } }),
     new Response('landing', { headers: { 'content-type': 'text/html' } }),
     ...(origin === 'https://open.feishu.cn' ? [] : [new Response(null, { status: 302, headers: { location: origin + '/app' } })]),
-    new Response(html(), { headers: consoleHeaders })
+    new Response(document, { headers: consoleHeaders })
   ]
   const network = remote(...responses), original = input(), adapter = createFeishuEnrollment()
   let view = authentication(await adapter.begin(original))
@@ -120,6 +122,16 @@ async function signedIn(origin = 'https://open.feishu.cn') {
   ])
   return { original, adapter, network, privateState: view.privateState, view }
 }
+it.each([
+  ['extra-metadata', html().replace('window.features=[];', 'window.features=[];window.newMetadata={"flag":true};')],
+  ['local-window', html() + '<script>function unrelated(){let window={};window={"user":null};return window;}</script>'],
+  ['empty-labels', html({ id: 'original-user', tenantId: 'original-tenant', name: '', tenantName: null })],
+  ['conflicting-labels', html({ id: 'original-user', tenantId: 'original-tenant', name: 'First label', userName: 'Other label', tenantName: 'First tenant', tenant_name: 'Other tenant' })]
+])('retains native identity independently of optional page fields: %s', async (_name, document) => {
+  const f = await signedIn('https://open.feishu.cn', document)
+  expect(f.view.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
+  if (_name.endsWith('labels')) expect(f.view.account).toEqual({ userId: 'original-user', tenantId: 'original-tenant' })
+})
 async function withIcon() {
   const f = await signedIn()
   f.network.queue.push(Response.json({ code: 0, data: { url: icon } }))

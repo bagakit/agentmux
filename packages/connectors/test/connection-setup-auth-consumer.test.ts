@@ -383,6 +383,10 @@ it('only an active top-level console bootstrap supplies stable identity; display
     `<script>window['user']=${identity};${csrf}</script>`,
     `<script>const window={};window.user=${identity};${csrf}</script>`,
     bootstrap() + bootstrap({ id: 'conflicting-account', tenantId: TENANT }),
+    '<script>var window={};</script>' + bootstrap(),
+    '<script>if(false){var window;}</script>' + bootstrap(),
+    '<script>window={};</script>' + bootstrap(),
+    '<script>(function(){window={};})();</script>' + bootstrap(),
     bootstrap({ id: USER, userId: 'conflicting-alias', tenantId: TENANT }),
     bootstrap({ id: USER }),
     `<script>window.user=${identity};</script>`,
@@ -624,6 +628,65 @@ it('native literal IIFE encoding reaches exact account confirmation through comp
   expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
+it('native identity survives harmless metadata and unrelated local window bindings through the original Host', async () => {
+  const f = await fixture(), before = await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })
+  const body = syntheticInitializer({ id: USER, tenantId: TENANT })
+  const examples = [
+    `<script>(function(){${body}window.newMetadata={"flag":true};})();</script>`,
+    `<script>(function(){${body}window.nonce="different metadata";window.env={"unit":"first","unit":"second"};})();</script>`,
+    '<script>{const window={};}</script>' + bootstrap({ id: USER, tenantId: TENANT }),
+    '<script>(function(){const window={};return window;})();</script>' + bootstrap({ id: USER, tenantId: TENANT }),
+    bootstrap({ id: USER, tenantId: TENANT }) + '<script>function unrelated(){let window={};window={"user":null,"csrfToken":null};return window;}</script>',
+    `<script>function unrelated(){const window={"user":null};return window;}window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};window.csrfToken=${JSON.stringify(CSRF)};</script>`
+  ]
+  for (const [index, html] of examples.entries()) {
+    const fetch = vi.fn(nativeRoute({ html })); vi.stubGlobal('fetch', fetch)
+    const input = { ...f.input, operationId: 'metadata-account-' + index }
+    const account = await toAccount(f, result(await f.cli(['begin', '--input', '-'], input)))
+    expect(account.continuation?.account).toEqual({ userId: USER, tenantId: TENANT })
+    const confirmed = result(await f.cli(['advance', '--input', '-'], advanceInput(account, 'confirm-account')))
+    expect(confirmed.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+  }
+  expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
+}, 45_000)
+
+it('optional display labels do not gate stable identity or original explicit account confirmation', async () => {
+  const f = await fixture()
+  const examples = [
+    bootstrap({ id: USER, tenantId: TENANT, name: '', tenantName: null }),
+    bootstrap({ id: USER, tenantId: TENANT, name: 'First label', userName: 'Other label', tenantName: 'First tenant', tenant_name: 'Other tenant' }),
+    bootstrap({ id: USER, tenantId: TENANT, name: 'First label' }) + bootstrap({ id: USER, tenantId: TENANT, name: 'Other label' })
+  ]
+  for (const [index, html] of examples.entries()) {
+    const fetch = vi.fn(nativeRoute({ html })); vi.stubGlobal('fetch', fetch)
+    const input = { ...f.input, operationId: 'optional-label-account-' + index }
+    const account = await toAccount(f, result(await f.cli(['begin', '--input', '-'], input)))
+    expect(account.continuation?.account).toEqual({ userId: USER, tenantId: TENANT })
+    const confirmed = result(await f.cli(['advance', '--input', '-'], advanceInput(account, 'confirm-account')))
+    expect(confirmed.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
+    expect(confirmed.operation?.operationId).toBe(input.operationId)
+    expect(fetch).toHaveBeenCalledTimes(5)
+  }
+}, 45_000)
+
+it('exact native QR polling expiry preserves the original operation and offers explicit renewal', async () => {
+  const f = await fixture(), fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init')
+    ? qrResponse()
+    : Response.json({ code: 0, data: { next_step: 'qr_login_polling', step_info: { status: 5 } } }))
+  vi.stubGlobal('fetch', fetch)
+  const pending = result(await f.cli(['begin', '--input', '-'], f.input)), input = advanceInput(pending)
+  const expired = result(await f.cli(['advance', '--input', '-'], input))
+  expect(expired.continuation).toMatchObject({ stage: 'expired', account: null })
+  expect(expired.continuation).not.toHaveProperty('challenge')
+  expect(expired.operation?.operationId).toBe(pending.operation!.operationId)
+  expect(expired.operation?.request.attemptId).toBe(pending.operation!.request.attemptId)
+  expect(expired.continuation?.actions.map(action => action.kind)).toEqual(['renew'])
+  expect((await inspect(f)).continuation).toEqual(expired.continuation)
+  expect(result(await f.cli(['advance', '--input', '-'], input)).receipt).toEqual(expired.receipt)
+  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
+}, 30_000)
+
 it('anonymous native shape and unqualified IIFE programs remain unknown without executing code or granting a confirmation', async () => {
   const f = await fixture(), identity = JSON.stringify({ id: USER, tenantId: TENANT })
   const body = `window.user=${identity};window.csrfToken=${JSON.stringify(CSRF)};`
@@ -648,16 +711,13 @@ it('anonymous native shape and unqualified IIFE programs remain unknown without 
     wrap(`throw new Error("fixture-initializer-throw");${body}`),
     wrap(`for(;;){}${body}`),
     wrap(`return;${body}`),
-    wrap(`${full}window.unobservedMetadata=true;`),
     wrap(`window["user"]=${identity};window.csrfToken=${JSON.stringify(CSRF)};`),
     wrap(`const alias=window;alias.user=${identity};window.csrfToken=${JSON.stringify(CSRF)};`),
     `<script>(function(window){${body}})();</script>`,
     wrap(`const window={};${body}`),
     wrap(`${body}window.user=${identity};`),
     wrap(`${body}window.csrfToken=${JSON.stringify(CSRF)};`),
-    wrap(`${full}window.nonce="fixture-native-nonce";`),
     wrap(`window.user={"id":"fixture-first-id","id":${JSON.stringify(USER)},"tenantId":${JSON.stringify(TENANT)}};window.csrfToken=${JSON.stringify(CSRF)};`),
-    wrap(`${body}window.env={"unit":"fixture-first-unit","unit":"fixture-second-unit"};`),
     wrap(`${body}window.features=undefined;`),
     wrap(`${body}window.unit=NaN;`),
     wrap(`${body}window.features=[...[]];`),
