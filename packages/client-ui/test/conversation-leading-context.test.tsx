@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureIso } from '../../../test/fixture-values.mjs'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -20,12 +21,13 @@ vi.mock('../src/components/AgentMarkdown.js', async importOriginal => {
 })
 
 const context = composeOutboundMessage({ amux: 'Original <application> context & escaped [Message from Agent example].' })
-const header = '[Message from Agent declared-agent]'
+const header = '<amux:a2a from="declared-agent" msg-id="original-message">'
+const ending = '\n<reminder>Original declared guidance.</reminder>\n</amux:a2a>'
 const body = '\n\n# Original **body**\n\n    indented code  \n'
-const raw = context + '\n\n' + header + '\n' + body
+const raw = context + '\n\n' + header + '\n' + body + ending
 let element: HTMLDivElement, root: Root
 const copy = vi.fn<ClientUiPlatform['copyText']>(async () => true)
-const readDetails = vi.fn(() => ({ sessionId: 'declared-agent', label: 'Current declared Agent', providerId: 'codex', createdAt: 1, goals: [] }))
+const readDetails = vi.fn(() => ({ sessionId: 'declared-agent', label: 'Current declared Agent', providerId: 'codex', createdAt: _tailFixtureEpoch(0, 0, 1), goals: [] }))
 const describe = vi.fn((speaker: ConversationSpeaker) => ({ name: speaker.id === 'declared-agent' ? 'Current declared Agent' : 'Recorded Agent', readDetails }))
 const platform: ClientUiPlatform = {
   copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
@@ -79,7 +81,7 @@ it('retains authored leading body newlines in the actual Markdown input and pres
   await render(card())
   // Observe the real Markdown consumer's input, then delegate to its actual rendering.
   const plainBody = '\n\nOriginal plain body  \n'
-  const plainRaw = context + '\n\n' + header + '\n' + plainBody
+  const plainRaw = context + '\n\n' + header + '\n' + plainBody + ending
   await render(card({ content: plainRaw }))
   const paragraph = find('.log-turn__body .md-input p')
   expect(markdownInputs).toContain(plainBody)
@@ -102,7 +104,7 @@ it('retains authored leading body newlines in the actual Markdown input and pres
 it('keeps the captured Agent authoritative over a different declaration and copies every original byte', async () => {
   const message = projectSessionUserMessages({ agentSessionId: 'recipient', timeline: { agentSessionId: 'recipient', revision: 1,
     items: [{ id: 'captured', agentSessionId: 'recipient', kind: 'user_message', status: 'complete', source: 'user', title: 'Original submission', content: raw,
-      authorAgentSessionId: 'recorded-agent', createdAt: 1, updatedAt: 1 }] } })[0]!
+      authorAgentSessionId: 'recorded-agent', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) }] } })[0]!
   await render(card({ speaker: speakerOfUserMessage(message), inputSource: message.source, content: message.contentParts }))
   expect(find('.log-turn__who').textContent).toContain('Recorded Agent')
   expect(find('[data-avatar-role]').dataset.avatarId).toBe('recorded-agent')
@@ -118,7 +120,7 @@ it('keeps the captured Agent authoritative over a different declaration and copi
 
 it('uses the existing declared packet reading, explicit source marker, original contexts and raw Copy', async () => {
   const packet = ("<bagakit-msg type=\"note\" name=\"Packet writer\" time=\"" + fixtureIso() + "\">Original <cite from=\"document\" ref=\"entry:1\">quoted &amp; exact</cite> tail</bagakit-msg>")
-  const input = context + '\n\n' + header + '\n' + packet
+  const input = context + '\n\n' + header + '\n' + packet + ending
   await render(card({ content: input }))
   expect(find('.log-turn__meta').textContent).toContain('Declared source')
   expect(find('.log-turn__citation').textContent).toContain('quoted & exact')
@@ -163,10 +165,10 @@ it.each(['    ', '> ', '```text\n'])('does not promote a %j quoted or code sende
 })
 
 it('keeps incomplete declarations literal and ordinary native input on its existing You display default', async () => {
-  const incomplete = '<amux from="amux">Unclosed\n\n' + header + '\nOriginal body'
+  const incomplete = '<amux>Unclosed\n\n' + header + '\nOriginal body'
   await render(card({ content: incomplete }))
   expect(element.querySelector('.log-turn__declared-context')).toBeNull()
-  expect(find('.log-turn__body').textContent).toContain('<amux from="amux">')
+  expect(find('.log-turn__body').textContent).toContain('<amux>')
   expect(find('.log-turn__body').textContent).toContain(header)
   await render(card({ content: 'Ordinary original native input' }))
   expect(find('.log-turn__who').textContent).toBe('You')
