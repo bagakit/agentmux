@@ -1,7 +1,9 @@
 import { EventEmitter } from 'node:events'
+import { writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxError, AgentMuxFileAgentSessionStore, AgentProviderRegistry, defaultAgentMuxControlSocketPath,
+import { AgentMuxError, AgentMuxFileAgentSessionStore, AgentProviderRegistry, connectAgentMuxRpc, defaultAgentMuxControlSocketPath,
   type AgentMuxAgentSession, type AgentMuxClientEvent } from '@agentmux/core'
 import { headlessFixture, until } from '../../../packages/core/test/helpers/headless-runtime-fixture.js'
 import { startAgentMuxHost } from '../../host/src/host.js'
@@ -21,7 +23,7 @@ afterEach(async () => {
 })
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 
-it('cold actual Host/Main projects original Agent bindings before lifecycle loading and after a sibling handshake cursor failure', async () => {
+it('cold actual Host/Main delivers original Agent and Terminal attachments before recovery and after a sibling handshake failure', async () => {
   const scope = await headlessFixture(); cleanup.push(scope.cleanup)
   await scope.stopOwner()
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
@@ -31,6 +33,22 @@ it('cold actual Host/Main projects original Agent bindings before lifecycle load
   const seed = await startAgentMuxHost({ store, providers: [codex], socketPath: defaultAgentMuxControlSocketPath() }); cleanup.push(seed.dispose)
   const previous = seed.client, originals: AgentMuxAgentSession[] = []
   await previous.connect()
+  // Only these private children watch their own fixture file. Changing stdout
+  // exercises real ordered output without sending any additional PTY input.
+  const outputCli = join(scope.root, 'private-output-cli.mjs')
+  await writeFile(outputCli, `#!/usr/bin/env node
+    import { readFileSync } from 'node:fs'
+    let emitted = ''
+    setInterval(() => {
+      try {
+        const value = readFileSync(process.env.PRIVATE_COLD_OUTPUT_FILE, 'utf8')
+        if (value && value !== emitted) { emitted = value; process.stdout.write('\\r\\n' + value + '\\r\\n') }
+      } catch (error) { if (error.code !== 'ENOENT') throw error }
+    }, 10)
+    if (process.argv[2] === 'private-raw') process.stdin.resume()
+    else await import(${JSON.stringify(pathToFileURL(resolve('packages/core/test/fixtures/fake-codex-cli.mjs')).href)})
+  `, { mode: 0o700 })
+  const healthyOutput = join(scope.root, 'healthy-output'), rawOutput = join(scope.root, 'raw-output')
   const initialKernel = (previous as unknown as { kernel: { input: (...args: unknown[]) => Promise<unknown> } }).kernel
   // The real creation owner persists its original handshake claim. A precise
   // pre-dispatch fault leaves those bytes unapplied, without forging any receipt.
@@ -39,8 +57,9 @@ it('cold actual Host/Main projects original Agent bindings before lifecycle load
   for (const suffix of ['uncertain', 'healthy']) {
     const session = await previous.createAgent({ providerId: 'codex', executorId: 'codex',
       agentSessionId: `private-cold-membership-${suffix}`, createOperationId: `private-cold-create-${suffix}`,
-      workspacePath: scope.root, commandOverride: resolve('packages/core/test/fixtures/fake-codex-cli.mjs'), args: [],
-      env: { AGENTMUX_FAKE_READY_MODE: 'before' }, injectAgentMuxGuide: false })
+      workspacePath: scope.root, commandOverride: outputCli, args: [],
+      env: { AGENTMUX_FAKE_READY_MODE: 'before', PRIVATE_COLD_OUTPUT_FILE: suffix === 'healthy' ? healthyOutput : join(scope.root, 'uncertain-output') },
+      injectAgentMuxGuide: false })
     originals.push(session)
   }
   const [uncertain, healthy] = originals as [AgentMuxAgentSession, AgentMuxAgentSession]
@@ -48,14 +67,26 @@ it('cold actual Host/Main projects original Agent bindings before lifecycle load
   const pending = (await store.readMetadata(uncertain.agentSessionId))!
   expect(pending.terminalHandshake?.acknowledged).toBe(false)
   const nativeBefore = previous.runtimeIdentity()
+  const nativeProcessId = scope.nativeProcessId
+  expect(nativeProcessId).toBeGreaterThan(1)
   await previous.writeTerminal(uncertain.run, { ownerInstanceId: nativeBefore.instanceId,
     operationId: 'private-cold-authorized-input', expectedByte: 0, data: 'Original authorized input\r' })
   const raw = await previous.createTerminal({ workspacePath: scope.root, command: process.execPath,
-    args: ['-e', 'process.stdin.resume()'], cols: 80, rows: 24 })
+    args: [outputCli, 'private-raw'], env: { PRIVATE_COLD_OUTPUT_FILE: rawOutput }, cols: 80, rows: 24 })
   const retired = await previous.createTerminal({ workspacePath: scope.root, command: process.execPath,
     args: ['-e', 'process.stdin.resume()'], cols: 80, rows: 24 })
   const before = await previous.statusAgent(uncertain.agentSessionId)
   const healthyBefore = await previous.statusAgent(healthy.agentSessionId)
+  const targets = [
+    { id: healthy.agentSessionId, run: healthy.run, pid: healthyBefore.run.pid, file: healthyOutput, initial: 'private-original-agent-output' },
+    { id: raw.runId, run: { runId: raw.runId }, pid: raw.pid, file: rawOutput, initial: 'private-original-terminal-output' }
+  ]
+  for (const target of targets) {
+    expect(target.pid).toBeGreaterThan(1)
+    await writeFile(target.file, target.initial)
+    await until(() => previous.readRunReplay(target.run), value => value.replay.map(chunk => chunk.data).join('').includes(target.initial),
+      'private original stdout before owner restart')
+  }
   expect(before.run.acceptedInputBytes).toBeGreaterThan(pending.terminalHandshake!.inputByteRange.startByte)
   await seed.dispose() // Only the isolated semantic owner; its original Native/PTYs survive.
   await store.retireRuns([{ runId: retired.runId }])
@@ -73,8 +104,10 @@ it('cold actual Host/Main projects original Agent bindings before lifecycle load
   cleanup.push(host.dispose)
   await entering.promise
   expect(host.client.agentSessions()).toEqual([]) // Strong cold-load oracle: registry.load has not run.
-  const kernel = (host.client as unknown as { kernel: { input: (...args: unknown[]) => Promise<unknown> } }).kernel
-  const input = vi.spyOn(kernel, 'input')
+  const kernel = (host.client as unknown as { kernel: {
+    input: (...args: unknown[]) => Promise<unknown>; start: (...args: unknown[]) => Promise<unknown>; hasAttachment(runId: string): boolean
+  } }).kernel
+  const input = vi.spyOn(kernel, 'input'), start = vi.spyOn(kernel, 'start')
   const events: AgentMuxClientEvent[] = []
   host.client.onEvent(event => events.push(event))
   const sessionObservation = deferred(), connect = host.client.connect.bind(host.client)
@@ -118,6 +151,79 @@ it('cold actual Host/Main projects original Agent bindings before lifecycle load
   expect(host.client.agentSessions()).toEqual([])
   expect(input).not.toHaveBeenCalled()
   expect(observeSession).not.toHaveBeenCalled()
+  // A cold standalone get still has no loaded registry. The actual attachment
+  // must resolve its own exact metadata before Main asks for its Runtime Subject.
+  await expect(host.client.runtimeSubject({ kind: 'agent-session', agentSessionId: healthy.agentSessionId }, healthyBefore.run))
+    .rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
+  const attachmentProofs: Array<{ phase: string; runId: string; pid: number | null; initialBytes: number; liveBytes: number }> = []
+  const attachOriginals = async (phase: 'pending' | 'failed') => {
+    const inputCount = input.mock.calls.length
+    for (const target of targets) {
+      const projected = opening.snapshot!.sessions.find(session => session.id === target.id)!
+      const pendingAttachment = controller.attachSession(contents.id, projected.control, 0, config)
+        .then(value => ({ value }), error => ({ error }))
+      const attached = phase === 'pending' ? await Promise.race([
+        pendingAttachment, sessionObservation.promise.then(() => ({ unrelatedRecovery: true as const }))
+      ]) : await pendingAttachment
+      // An actual classification regression must fail this semantic assertion,
+      // then release only this fixture's gate so cleanup cannot hang behind it.
+      if (!('value' in attached)) { release.resolve(); await pendingAttachment }
+      expect(attached, 'original Main attachment must not wait for unrelated Session recovery').toHaveProperty('value')
+      if (!('value' in attached)) throw new Error('Private original Attachment did not complete')
+      const value = attached.value
+      try {
+        expect(value.attachmentId).toBeTruthy()
+        expect(value.session).toMatchObject({ id: target.id, processState: 'running', control: { run: target.run } })
+        expect(value.currentSize).toMatchObject({ cols: expect.any(Number), rows: expect.any(Number) })
+        expect(value.gap).toBeNull()
+        const original = value.terminal.type === 'basic-vt' ? new TextDecoder().decode(value.terminal.restoreBytes) : ''
+        expect(original + value.replay.map(chunk => chunk.data).join('')).toContain(target.initial)
+        const native = (await host.client.listRuns()).find(run => run.runId === target.run.runId)!
+        expect(native).toMatchObject({ runId: target.run.runId, pid: target.pid, state: 'running' })
+        const from = delivered.length, marker = `private-${phase}-${target.id}-live-output`
+        const live = () => delivered.slice(from).flatMap(event => event.type === 'core' && event.event.type === 'terminal-output' &&
+          event.event.run.runId === target.run.runId ? [event.event] : [])
+        await writeFile(target.file, marker)
+        const output = await until(live, values => values.map(event => event.data).join('').includes(marker), 'original Main live output')
+        let cursor = value.session.latestOutputBytes
+        for (const event of output) {
+          const range = event.evidence.outputByteRange
+          expect(range.startByte).toBe(cursor)
+          expect(range.endByte - range.startByte).toBe(event.dataBytes.length)
+          cursor = range.endByte
+        }
+        expect(cursor).toBeGreaterThan(value.session.latestOutputBytes)
+        attachmentProofs.push({ phase, runId: target.run.runId, pid: native.pid,
+          initialBytes: Buffer.byteLength(original) + value.replay.reduce((sum, chunk) => sum + chunk.dataBytes.length, 0),
+          liveBytes: cursor - value.session.latestOutputBytes })
+      } finally { await controller.detachSession(contents.id, value.attachmentId) }
+      await until(() => kernel.hasAttachment(target.run.runId), value => !value, 'original reader lease release')
+      // Leave the same known original marker for the next independently opened cut.
+      await writeFile(target.file, target.initial)
+      await until(() => host.client.readRunReplay(target.run), value => value.replay.map(chunk => chunk.data).join('').includes(target.initial),
+        'private output retained after reader release')
+    }
+    expect(input).toHaveBeenCalledTimes(inputCount)
+    expect(start).not.toHaveBeenCalled()
+    expect(host.client.runtimeIdentity()).toEqual(nativeBefore)
+    expect(scope.nativeProcessId).toBe(nativeProcessId)
+  }
+  await attachOriginals('pending')
+  expect(observeSession).not.toHaveBeenCalled()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: defaultAgentMuxControlSocketPath() } })
+  try {
+    const { owner } = await rpc.call('runtime.owner.identity', {})
+    await expect(rpc.call('runtime.invoke', { consumerId: 'private-wrong-owner',
+      fence: { runtimeId: owner.runtimeId, ownerInstanceId: 'another-private-owner' },
+      invocation: { method: 'runtimeSubject', args: [{ kind: 'terminal-run', runId: raw.runId }, raw] } }))
+      .rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  } finally { await rpc.dispose() }
+  const healthyControl = opening.snapshot!.sessions.find(session => session.id === healthy.agentSessionId)!.control
+  await expect(controller.attachSession(contents.id, { ...healthyControl, run: { runId: raw.runId } }, 0, config))
+    .rejects.toThrow('Session control changed before its exact Run Attachment was established')
+  await until(() => kernel.hasAttachment(healthy.run.runId), value => !value, 'wrong Run Attachment rollback')
+  expect(input).not.toHaveBeenCalled()
+  expect(start).not.toHaveBeenCalled()
   observeSession.mockRestore()
   expect((await store.readMetadata(uncertain.agentSessionId))!.terminalHandshake).toEqual(pending.terminalHandshake)
   eventObservationAvailable = true
@@ -131,6 +237,7 @@ it('cold actual Host/Main projects original Agent bindings before lifecycle load
   assertMembers(await controller.snapshot(config))
   assertMembers(await controller.snapshot(config))
   expect(input).toHaveBeenCalledTimes(attempted) // Reading membership never retries terminal input.
+  await attachOriginals('failed')
   expect(host.client.runtimeIdentity()).toEqual(nativeBefore)
   expect((await host.client.statusAgent(uncertain.agentSessionId)).run).toMatchObject({
     runId: uncertain.run.runId, pid: before.run.pid, state: 'running', acceptedInputBytes: before.run.acceptedInputBytes })
@@ -139,6 +246,8 @@ it('cold actual Host/Main projects original Agent bindings before lifecycle load
     event.event.diagnostic?.code === 'CTXMUX_CONNECTION_OBSERVATION_FAILED'), 'ongoing original service window')
   expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({
     scope: 'observation', availability: 'connected', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED' }))
+  console.info('PRIVATE_ORIGINAL_ATTACHMENTS=' + JSON.stringify({ nativeProcessId, nativeInstanceId: nativeBefore.instanceId,
+    attachmentProofs, inputCalls: input.mock.calls.length, startCalls: start.mock.calls.length }))
 }, 60_000)
 
 it('Main consumes an original owner resume completed during its delayed metadata/Native read without publishing the new Run as a Terminal', async () => {
