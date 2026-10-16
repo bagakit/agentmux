@@ -2211,6 +2211,7 @@ export async function registerIpc(args: {
     applicationAccess: args.applicationAccess,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
     coreClients: () => args.runtime.rpcClients(),
+    callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     nativeAgentSessions: params => args.runtime.nativeAgentSessions({ hostId: params.hostId, executorId: params.executorId,
       ...(params.workspacePath === undefined ? {} : { workspacePath: params.workspacePath }) }, config),

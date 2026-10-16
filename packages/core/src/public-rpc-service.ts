@@ -141,6 +141,9 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
+  /** Borrow the configured Host's original public transport, preserving its caller and Runtime fence. */
+  callOriginalCore?<M extends AgentMuxRpcMethod>(hostId: string, method: M, params: AgentMuxRpcParams<M>,
+    context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
   /** Client-owned real filesystem/config observations, not a second registry. */
   snapshot?(params: AgentMuxRpcSnapshotParams): Promise<Partial<AgentMuxRpcSnapshot>>
   /** Native catalog uses the selected Host's original Executor configuration. */
@@ -1920,19 +1923,23 @@ export class AgentMuxRpcService {
       recipientId = candidates[0]!.agentSessionId
     } else throw new AgentMuxError('Message target is invalid.', 'INVALID_CONTROL_REQUEST')
     const recipientOwner = await this.owner(recipientId)
-    if (recipientOwner.client.forwardRpc) {
+    if (recipientOwner.client.forwardRpc || recipientOwner.hostId === 'local' && this.ports.callOriginalCore) {
       if (caller && caller.client !== recipientOwner.client) throw new AgentMuxError('Managed credentials cannot cross semantic Runtime owners.', 'AGENT_CAPABILITY_INVALID')
       // A local Hosted owner shares this journal. Its original first append is
       // already before input effects; a second ingress binding would loop when
       // that same Core receives it. Reuse that envelope on a lost-ACK retry.
       if (recipientOwner.hostId === 'local') {
         if (!original && expectedRun && expectedRun.runId !== recipientOwner.session.run.runId) throw new AgentMuxError('Expected Run does not match the original recipient.', 'MESSAGE_RECIPIENT_MISMATCH')
-        return await recipientOwner.client.forwardRpc('agent.send', {
+        const input: AgentMuxRpcParams<'agent.send'> = {
           ...p, text, operationId: original?.envelope.operationId ?? operationId, messageId: original?.envelope.messageId ?? messageId,
           ...(original ? original.envelope.recipientRunId ? { expectedRun: { runId: original.envelope.recipientRunId } } : {}
             : { expectedRun: { ...recipientOwner.session.run } }),
           target: { kind: 'agent-session', agentSessionId: recipientId }
-        }, await this.inputForwardContext(context))
+        }
+        const originalContext = await this.inputForwardContext(context)
+        return this.ports.callOriginalCore
+          ? await this.ports.callOriginalCore(recipientOwner.hostId, 'agent.send', input, originalContext)
+          : await recipientOwner.client.forwardRpc!('agent.send', input, originalContext)
       }
       if (expectedRun && expectedRun.runId !== recipientOwner.session.run.runId) throw new AgentMuxError('Expected Run does not match the original recipient.', 'MESSAGE_RECIPIENT_MISMATCH')
       const route = await routes.claimMessageRoute({ operationId, messageId, hostId: recipientOwner.hostId,
@@ -2003,19 +2010,10 @@ export class AgentMuxRpcService {
       }, queuePath) : undefined
       if (originalIntent && originalIntent.kind === 'exact-condition') throw new AgentMuxError('The original direct message intent is unconfirmed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
       const admission = originalIntent ? { admissionIntent: originalIntent } : { condition: promptCondition! }
-      let inputReceipt: AgentInputSubmissionReceipt | void
-      if (!this.ports.execute) inputReceipt = await recipientOwner.client.submitAgentMessage({
+      const inputReceipt = await recipientOwner.client.submitAgentMessage({
         agentSessionId: recipientId, envelope: queued.envelope, ...admission,
         execution, ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}),
         ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) } as Parameters<AgentMuxClient['submitAgentMessage']>[0], this.inputCallContext(context))
-      else {
-        const sent = await this.execute(this.request('send', { requestId: operationId,
-        target: { kind: 'agent-session', agentSessionId: queued.envelope.recipientSessionId! }, text,
-        ...(originalIntent ? { admissionIntent: originalIntent } : { promptCondition }),
-        execution, ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}),
-        message: queued.envelope, ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }))
-        inputReceipt = sent.operation === 'send' ? sent.inputReceipt : undefined
-      }
       if (inputReceipt && inputReceipt.status !== 'admitted' && inputReceipt.status !== 'terminal-confirmed') return { ...publicQueued, agentSessionId: recipientId, inputReceipt }
       const { input: _control, ...delivered } = await recordGlobalMessageDelivery(queued.messageId, 'delivered', Date.now(), undefined, queuePath)
       return { ...delivered, agentSessionId: recipientId, ...(inputReceipt ? { inputReceipt } : {}) }
