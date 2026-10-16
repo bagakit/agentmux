@@ -45,7 +45,7 @@ afterEach(() => vi.useRealTimers())
 it('the actual Space caller chooses its explicit current Group even when Focus holds another occurrence', async () => {
   await dom.render(<SurfaceToolDock workspace={workspace} />)
   const before = useAppStore.getState()
-  await dom.click('.workspace-agent-row')
+  await dom.click('.workspace-agent-row .focus-context[data-session-id]')
   const after = useAppStore.getState()
   expect(after.error).toBeNull()
   expect(after.agentFocus.execution.reference).toEqual(reference)
@@ -68,7 +68,7 @@ it('two Regions in the explicit Group remain indeterminate and never choose the 
   useAppStore.setState({ tabs: { ...before.tabs, [exact.id]: { ...exact, regions: { ...exact.regions, [secondRegion]: { regionId: secondRegion, workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id } }, layout: splitWorkbenchRegion(exact.layout, 'exact-region', 'right', secondRegion) } } })
   await dom.render(<SurfaceToolDock workspace={workspace} />)
   const stable = useAppStore.getState()
-  await dom.click('.workspace-agent-row')
+  await dom.click('.workspace-agent-row .focus-context[data-session-id]')
   const after = useAppStore.getState()
   expect(after.error).toContain('no unique confirmed display occurrence')
   expect(after.agentFocus).toBe(stable.agentFocus)
@@ -76,18 +76,21 @@ it('two Regions in the explicit Group remain indeterminate and never choose the 
   expect(after.sessions).toBe(stable.sessions); expect(after.agentComposerDrafts).toBe(stable.agentComposerDrafts)
 })
 
-it('shows held task Context and absolute activity time while a byte/update heartbeat cannot refresh it', async () => {
+it('shows the shared held task Context without list-only metadata and a byte/update heartbeat cannot replace it', async () => {
   const second = { ...composerSession('same-name'), label: session.label }
   useAppStore.setState({ sessions: [session, second], timelines: { [session.id]: timeline(session.id, '修复滚动回退并验证真实目标'), [second.id]: timeline(second.id, 'Review navigation without changing the original Run') } })
   const reads = [vi.spyOn(api.sessions, 'historySources'), vi.spyOn(api.sessions, 'observeHistory'), vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'timeline')]
   await dom.render(<SurfaceToolDock workspace={workspace} />)
   const row = dom.container.querySelector(`[data-session-id="${session.id}"]`)!
   expect(row.querySelector('.focus-context__detail')?.textContent).toContain('修复滚动回退并验证真实目标')
-  const time = row.querySelector('time')!
-  expect(time.dateTime).toBe(new Date(now - 300_000).toISOString())
-  expect(time.title).toContain('Last active')
+  const detail = row.querySelector('.focus-context__detail')!
+  expect(row.querySelector('time')).toBeNull()
+  expect(row.querySelector('.workspace-agent-row__metadata')).toBeNull()
   await act(async () => useAppStore.setState({ sessions: [{ ...session, updatedAt: now, latestOutputBytes: 80_000 }, second] }))
-  expect(dom.container.querySelector(`[data-session-id="${session.id}"] time`)?.getAttribute('datetime')).toBe(time.dateTime)
+  expect(dom.container.querySelector(`[data-session-id="${session.id}"]`)).toBe(row)
+  expect(row.querySelector('.focus-context__detail')).toBe(detail)
+  expect(detail.textContent).toContain('修复滚动回退并验证真实目标')
+  expect(row.querySelector('time')).toBeNull()
   expect(dom.container.textContent).not.toContain('Agent Sessions')
   expect(dom.container.textContent).not.toContain('Agents kept during Tab close')
   expect(row.querySelector('[data-focus-state-icon="unknown"]')).not.toBeNull()
@@ -107,11 +110,19 @@ it('keeps Idle high pressure, unknown and ended members while status shapes use 
   for (const id of ['idle', 'results', 'working', 'unknown']) expect(dom.container.querySelector(`[data-session-id="${id}"] [data-focus-state-icon]`)?.getAttribute('data-focus-state-icon')).toBe(id)
   expect(dom.container.querySelector('[data-session-id="working"] .focus-context__avatar--compact-content .agent-avatar__status')).not.toBeNull()
   expect(stripCssComments(readStyleSheet('./index.css'))).toMatch(/\.focus-context__avatar--compact-content \.agent-avatar \.agent-avatar__status\s*\{\s*display:\s*none/ )
-  const pressure = dom.container.querySelector('[data-session-id="idle"] [data-pressure="danger"]')!
-  expect(pressure.textContent).toBe('95%'); expect(pressure.getAttribute('title')).toContain('start a fresh session')
+  expect(dom.container.querySelector('[data-session-id="idle"] [data-pressure]')).toBeNull()
   const unknownRow = dom.container.querySelector('[data-session-id="unknown"]')!
   expect(unknownRow.querySelector('time')).toBeNull(); expect(unknownRow.textContent).not.toContain('0%')
-  expect(unknownRow.querySelector('.workspace-agent-row__metadata [title="Activity time unknown"]')).not.toBeNull()
+  expect(unknownRow.querySelector('.workspace-agent-row__metadata')).toBeNull()
+  expect(unknownRow.querySelector('[data-focus-state-icon="unknown"]')).not.toBeNull()
+  expect(unknownRow.textContent).toContain('Activity not confirmed')
+  expect(dom.container.querySelector('[data-session-id="ended"][data-state="exited"]')).not.toBeNull()
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-session-id="idle"]')!.focus())
+  const reader = document.querySelector('.agent-information-reader')!
+  expect(reader).not.toBeNull(); expect(reader.textContent).toContain('5% context left')
+  await act(async () => reader.querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
+  expect(reader.querySelector('.agent-usage-details__context')?.textContent).toContain('95% used')
+  expect(reader.querySelector('.agent-usage-details__context')?.textContent).toContain('5% remaining')
 })
 
 it('retains an accurately scoped Mote which Focus excludes from execution cards', async () => {
@@ -139,16 +150,13 @@ it('isolates actual row renders during unrelated Store output and makes no Conte
   for (const read of reads) expect(read).not.toHaveBeenCalled()
 })
 
-it('both Focus entry actions share the existing Surface owner and retain execution, draft and Run', async () => {
+it('the Focus entry shares the existing Surface owner and retains execution, draft and Run without a duplicate footer action', async () => {
   await dom.render(<SurfaceToolDock workspace={workspace} />)
   const before = useAppStore.getState()
   await dom.click('.workspace-tool-context .workspace-agents-tool__focus')
   expect(useAppStore.getState().mainSurface).toBe('agents')
   expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
-  await act(async () => useAppStore.getState().setMainSurface('workbench'))
-  await dom.click('.workspace-agents-tool__focus--footer')
-  expect(useAppStore.getState().mainSurface).toBe('agents')
-  expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+  expect(dom.container.querySelector('.workspace-agents-tool__focus--footer')).toBeNull()
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })

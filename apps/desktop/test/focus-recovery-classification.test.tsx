@@ -153,7 +153,8 @@ it('uses the same retained recovery facts in the board, current-focus preview, S
   expect(container.querySelector('.focus-navigation-preview__counts')?.textContent).toContain('Recovery')
   const space=container.querySelector('.workspace-agents-tool')!
   expect(space.querySelector('[data-session-id="lost"]')?.textContent).toContain('Run interrupted')
-  expect(space.querySelector('.workspace-agent-group header')?.textContent).toContain('Recovery')
+  expect(space.querySelector('[role="group"][aria-label="Filter Agents by state"]')).not.toBeNull()
+  expect(space.querySelector('[data-session-id="lost"]')?.getAttribute('data-bucket')).toBe('idle')
   const publicRows=readAgentPresentation(useAppStore.getState())
   expect(publicRows.map(r=>[r.agentSessionId,r.group,r.state])).toEqual([['missing','idle','disconnected'],['lost','idle','disconnected']])
   expect(publicRows.find(r=>r.agentSessionId==='lost')!.detail).toContain('Run interrupted')
