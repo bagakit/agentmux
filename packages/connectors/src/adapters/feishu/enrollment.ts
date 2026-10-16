@@ -76,7 +76,7 @@ async function request(input: EnrollmentAdapterInput, saved: Session, path: stri
   if (!payload || !Number.isSafeInteger(payload.code)) return invalidResponse(response.status)
   if (payload.code !== 0) return unknown({ stage: 'response', code: 'platform-error', httpStatus: response.status })
   try {
-    for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href)
+    for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href, { ignoreError: true })
     const cookieJar = cookies.serializeSync(); if (!cookieJar) return invalidResponse(response.status)
     saved.value.authentication = { ...native, cookieJar }
   } catch { return invalidResponse(response.status) }

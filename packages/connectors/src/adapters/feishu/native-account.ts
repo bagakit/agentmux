@@ -57,7 +57,7 @@ export function readNativeAccountState(snapshot: unknown): { state: NativeAccoun
   if (p.version === 1) {
     if (!Array.isArray(p.setCookies) || !p.setCookies.every(text)) throw new Error('Unknown original cookie snapshot')
     const cookies = jar()
-    for (const cookie of p.setCookies) cookies.setCookieSync(cookie, INIT)
+    for (const cookie of p.setCookies) cookies.setCookieSync(cookie, INIT, { ignoreError: true })
     return { state: { version: 2, flowKey: p.flowKey, token: p.token, cookieJar: serialize(cookies), phase: 'poll', hops: 0 }, cookies }
   }
   if (p.version !== 2 || !['poll', 'cross-login', 'landing', 'console', 'account', 'expired'].includes(String(p.phase)) || !Number.isSafeInteger(p.hops) || Number(p.hops) < 0 || Number(p.hops) > 8) throw new Error('Unknown authentication snapshot')
@@ -208,7 +208,7 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
     const response = await fetch(target.href, { method: state.phase === 'poll' ? 'POST' : 'GET', redirect: 'manual', headers, ...(state.phase === 'poll' ? { body: JSON.stringify({ biz_type: null }) } : {}), signal: signal ? AbortSignal.any([signal, bounded]) : bounded })
     httpStatus = response.status; failure = 'invalid-response'
     if (response.url && new URL(response.url).href !== target.href) return unconfirmed(step, failure, httpStatus)
-    for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href)
+    for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href, { ignoreError: true })
     let stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired' = 'handoff'
     if (response.status >= 300 && response.status < 400) {
       failure = 'redirect-unconfirmed'
