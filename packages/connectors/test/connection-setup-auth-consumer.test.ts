@@ -334,6 +334,35 @@ it('known pending gets a new explicit observation action while malformed machine
   }
 }, 30_000)
 
+it.each([null, 'qr_login_polling'] as const)('zero on %s remains an original waiting observation until a later handoff through the Setup SDK', async nextStep => {
+  const f = await fixture(), route = nativeRoute(); let polls = 0
+  const requests = vi.fn(async (url: string | URL | Request, init?: RequestInit) => new URL(String(url)).pathname === '/accounts/qrlogin/polling'
+    ? Response.json({ code: 0, data: ++polls === 1 ? { next_step: nextStep, step_info: { status: 0 } } : { next_step: 'enter_app', step_info: {} } }) : route(url, init))
+  vi.stubGlobal('fetch', requests)
+  const initial = await f.sdk.call('connection.setup.begin', f.input), first = advanceInput(initial), started = Date.now()
+  const waiting = await f.sdk.call('connection.setup.advance', first)
+  expect(waiting.continuation?.stage).toBe('waiting'); expect(waiting.continuation?.account).toBeNull()
+  expect(waiting.challenge!.qrPayload).toBe(initial.challenge!.qrPayload)
+  expect(waiting.challenge!.nextPollAt).toBeGreaterThanOrEqual(started + 1500)
+  expect(waiting.operation!.authentication!.attemptId).toBe(initial.operation!.request.attemptId)
+  expect(waiting.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
+  expect((await f.sdk.call('connection.setup.advance', first)).receipt).toEqual(waiting.receipt)
+  expect(requests).toHaveBeenCalledTimes(2)
+  const next = advanceInput(waiting)
+  expect(next.decision.actionId).not.toBe(first.decision.actionId)
+  const handoff = await f.sdk.call('connection.setup.advance', next)
+  expect(handoff.continuation?.stage).toBe('handoff'); expect(handoff.continuation?.account).toBeNull()
+  const landed = await advance(f, handoff)
+  expect(landed.continuation?.stage).toBe('handoff'); expect(landed.continuation?.account).toBeNull()
+  const account = await advance(f, landed)
+  expect(account.continuation?.stage).toBe('account')
+  expect(account.continuation?.account).toEqual({ userId: USER, tenantId: TENANT, userName: 'Fixture account', tenantName: 'Fixture enterprise' })
+  expect(account.continuation?.actions.map(action => action.kind)).toContain('confirm-account')
+  expect(requests.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual([
+    'https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'
+  ])
+})
+
 it('concurrent original actions share the durable native claim and a changed decision cannot borrow its authority', async () => {
   const f = await fixture(), entered = deferred<void>(), response = deferred<Response>()
   clean.push(() => response.resolve(polling(2)))
