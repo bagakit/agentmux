@@ -93,8 +93,10 @@ it.each(['region', 'tab'] as const)('actual CLI + remote RPC retain original %s 
   const newControl = await f.rpc().call('agent.send', { ...f.params, operationId: 'another-control-operation' })
   for (const receipt of [repeated, newControl]) expect(receipt).toMatchObject({ messageId: original.envelope.messageId,
     sequence: original.sequence, envelope: original.envelope })
-  const inspected = await f.rpc().call('message.read', { operationId: f.params.operationId, hostId: 'local' })
-  expect(inspected).toMatchObject({ hostId: 'local', message: { envelope: original.envelope } })
+  for (const selector of [{ operationId: f.params.operationId }, { messageId: f.params.messageId! }]) {
+    const inspected = await f.rpc().call('message.read', { ...selector, hostId: 'local' })
+    expect(inspected).toMatchObject({ hostId: 'local', message: { envelope: original.envelope } })
+  }
   expect(f.inspections).toHaveBeenCalledOnce()
   expect(await f.queues.a.listAfter()).toHaveLength(1); expect(await f.queues.b.listAfter()).toHaveLength(0)
   expect(await f.queue.listAfter()).toHaveLength(0)

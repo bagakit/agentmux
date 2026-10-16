@@ -37,7 +37,7 @@ await runA2aProof({
     { label: 'semantic-owner-replaced-under-original-host-alias', file: 'public-rpc-service.js',
       before: 'route.runtimeId !== null && scopes[0].client.runtimeOwnerIdentity?.()?.runtimeId !== route.runtimeId', after: 'false' },
     { label: 'original-operation-query-forgets-retained-route', file: 'public-rpc-service.js',
-      before: "const route = await (await this.messageRouteJournal()).readMessageRoute(rpcString(p.operationId, 'Original message operation ID'));", after: 'const route = null;' },
+      before: 'const route = await (await this.messageRouteJournal()).readMessageRoute(messageSelector.operationId, messageSelector.messageId);', after: 'const route = null;' },
     { label: 'concurrent-binding-overrides-explicit-run-fence', file: 'public-rpc-service.js',
       before: "if (expectedRun && expectedRun.runId !== route.expectedRun.runId)\n                throw new AgentMuxError('Expected Run conflicts with the first concurrent message route.', 'MESSAGE_RECIPIENT_MISMATCH');",
       after: 'void expectedRun;' },
