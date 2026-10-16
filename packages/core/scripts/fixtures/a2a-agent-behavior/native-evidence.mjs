@@ -16,20 +16,23 @@ export async function readPrivateNativeRecords(authHome) {
   }))
 }
 
+// The first session_meta owns a native file; later metadata may be inherited ancestry.
+const metadata = file => file.records[0]?.type === 'session_meta' ? file.records[0].payload : undefined
+
 export function nativeSession(records, events, model, actualPrompt) {
   const threadId = events.find(event => event.type === 'thread.started')?.thread_id
   assert.ok(threadId, 'Actual native main thread identity is missing')
-  const matches = records.filter(file => file.records.some(record => record.type === 'session_meta' && record.payload.id === threadId))
+  const matches = records.filter(file => metadata(file)?.id === threadId)
   assert.equal(matches.length, 1, 'Original native main source is not unique')
-  const main = matches[0], metadata = main.records.find(record => record.type === 'session_meta').payload
-  assert.equal(metadata.source, 'exec')
+  const main = matches[0], mainMetadata = metadata(main)
+  assert.equal(mainMetadata.source, 'exec')
   const settings = main.records.find(record => record.type === 'event_msg' && record.payload.type === 'thread_settings_applied')?.payload.thread_settings
   assert.equal(settings?.model, model, 'Actual native model differs from this scenario')
   assert.equal(settings?.approval_policy, 'never')
   const inputs = main.records.filter(record => record.type === 'response_item' && record.payload.type === 'message' && record.payload.role === 'user')
   assert.ok(inputs.some(record => record.payload.content.some(part => part.type === 'input_text' && part.text === actualPrompt)), 'Original native input differs from the exact Core/fixture packet')
   const calls = main.records.filter(record => record.type === 'response_item' && record.payload.type === 'function_call' && record.payload.namespace === 'collaboration').map(record => record.payload)
-  return { main, threadId, metadata, calls }
+  return { main, threadId, metadata: mainMetadata, calls }
 }
 
 export function assertNativeCollaboration(records, events, model, actualPrompt) {
@@ -40,14 +43,14 @@ export function assertNativeCollaboration(records, events, model, actualPrompt) 
   assert.ok(output, 'Original native child creation receipt is missing')
   const childPath = JSON.parse(output.output).task_name
   assert.ok(childPath)
-  const children = records.filter(file => file.records.some(record => record.type === 'session_meta' &&
-    record.payload.source?.subagent?.thread_spawn?.parent_thread_id === threadId && record.payload.source.subagent.thread_spawn.agent_path === childPath))
+  const children = records.filter(file => metadata(file)?.source?.subagent?.thread_spawn?.parent_thread_id === threadId &&
+    metadata(file).source.subagent.thread_spawn.agent_path === childPath)
   assert.equal(children.length, 1, 'Native child source does not match its original parent/creation receipt')
   const completion = children[0].records.find(record => record.type === 'event_msg' && record.payload.type === 'task_complete')?.payload
-  assert.equal(completion?.last_agent_message, '21', 'Actual native child did not complete the multiplication')
+  assert.match(completion?.last_agent_message ?? '', /\b21\b/u, 'Actual native child did not complete the multiplication')
   assert.ok(main.records.some(record => record.type === 'response_item' && record.payload.type === 'agent_message' &&
     record.payload.author === childPath && record.payload.recipient === '/root' && record.payload.content.some(part => part.type === 'input_text' && /\b21\b/u.test(part.text))), 'Original structured native child result was not returned to its parent')
-  return { mainThreadId: threadId, childThreadId: children[0].records.find(record => record.type === 'session_meta').payload.id,
+  return { mainThreadId: threadId, childThreadId: metadata(children[0]).id,
     childPath, originalSpawnCallId: spawn[0].call_id, result: completion.last_agent_message }
 }
 
@@ -56,10 +59,12 @@ export function assertNativeCollaboration(records, events, model, actualPrompt) 
 export function nativeEvidenceGuards(records, events, model, actualPrompt) {
   const original = assertNativeCollaboration(records, events, model, actualPrompt)
   const mutants = [
+    ['remove-main-owner-retain-inherited-ancestry', files => { const index = files.findIndex(file => metadata(file)?.id === original.mainThreadId); assert.ok(index >= 0); files.splice(index, 1) }],
+    ['duplicate-main-owner', files => { const duplicate = structuredClone(files.find(file => metadata(file)?.id === original.mainThreadId)); duplicate.path += '.duplicate'; files.push(duplicate) }],
     ['remove-native-invocation', files => { for (const file of files) file.records = file.records.filter(record => !(record.type === 'response_item' && record.payload.name === 'spawn_agent')) }],
     ['lose-native-creation-receipt', files => { for (const file of files) file.records = file.records.filter(record => !(record.type === 'response_item' && record.payload.type === 'function_call_output' && record.payload.call_id === original.originalSpawnCallId)) }],
     ['change-child-parent', files => { for (const file of files) for (const record of file.records) if (record.type === 'session_meta' && record.payload.source?.subagent?.thread_spawn) record.payload.source.subagent.thread_spawn.parent_thread_id = 'unrelated-parent' }],
-    ['change-child-result', files => { for (const file of files) if (file.records.some(record => record.type === 'session_meta' && record.payload.id === original.childThreadId)) for (const record of file.records) if (record.type === 'event_msg' && record.payload.type === 'task_complete') record.payload.last_agent_message = 'wrong-result' }],
+    ['change-child-result', files => { for (const file of files) if (metadata(file)?.id === original.childThreadId) for (const record of file.records) if (record.type === 'event_msg' && record.payload.type === 'task_complete') record.payload.last_agent_message = 'wrong-result' }],
     ['lose-parent-result-delivery', files => { for (const file of files) file.records = file.records.filter(record => !(record.type === 'response_item' && record.payload.type === 'agent_message' && record.payload.author === original.childPath)) }]
   ]
   const results = mutants.map(([name, mutate]) => {
