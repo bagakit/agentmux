@@ -100,6 +100,7 @@ export type ConnectionSetupCapability = 'enabled' | 'disabled' | 'unknown'
 export type ConnectionSetupConfigurationReceipt = {
   stepId: string; input: ConnectionSetupAdvance
   request: 'dispatching' | 'confirmed' | 'unknown'
+  /** Saves this child's private evidence; a stored continuation does not confirm its platform request. */
   secureStorage: 'not-started' | 'storing' | 'stored' | 'unknown'
 } & (
   | { effect: ConnectionSetupScalarEffect; sourceStepId: string }
@@ -120,6 +121,7 @@ export type ConnectionSetupInspectionReceipt = {
   stepId: string
   input: ConnectionSetupAdvance
   request: 'dispatching' | 'confirmed' | 'unknown'
+  /** Saves this child's private evidence; a stored continuation does not confirm its platform request. */
   secureStorage: 'not-started' | 'storing' | 'stored' | 'unknown'
 }
 export type ConnectionSetupStepReceipt = { actionId: string; stepId: string; state: 'dispatching' | 'confirmed' | 'unknown' }
