@@ -79,8 +79,10 @@ export const ConversationView = memo(function ConversationView({
     })
   }, [choiceScope, projection.originalRecords])
   const expandedSubmissions = useMemo(() => new Set([...choices].filter(([, open]) => open).map(([id]) => id)), [choices])
-  const unavailable = projection.coverage.some(row => row.source.kind === 'native' && (row.current === 'unavailable' || row.current === 'unsupported'))
-  const unreadRecords = new Set(projection.coverage.flatMap(row => row.gaps.flatMap(gap => gap.record &&
+  // A protected original keeps the source facts of its displayed frame.
+  const sourceCoverage = describedRecords[0]?.coverage ?? projection.coverage
+  const unavailable = sourceCoverage.some(row => row.source.kind === 'native' && (row.current === 'unavailable' || row.current === 'unsupported'))
+  const unreadRecords = new Set(sourceCoverage.flatMap(row => row.gaps.flatMap(gap => gap.record &&
     (gap.code === 'CONVERSATION_ANCHOR_UNREAD' || gap.code === 'CONVERSATION_OBSERVED_TARGET_UNREAD') ? [conversationRecordId(gap.record)] : [])))
   if (page && page.agentSessionId !== sessionId) return null
   if (describedRecords.length === 0 && !insertions?.length && projection.coverage.length === 0) return null
