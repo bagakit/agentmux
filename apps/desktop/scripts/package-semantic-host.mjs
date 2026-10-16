@@ -129,7 +129,7 @@ export async function stopSemanticHostForInstall(plan, ops = operations) {
   const { processes, row } = await inspectSemanticHostForInstall(plan, ops)
   const namespace = semanticHostProcessIds(plan.currentApp, row, processes)
   const original = processes.processes.filter(process => namespace.has(process.pid))
-  fail(processes.serving.filter(pid => !namespace.has(pid)).length === 0 && processes.externalNode.includes(row.pid),
+  fail(processes.serving.filter(pid => !namespace.has(pid)).length === 0,
     'The original GUI has not exited normally; its Semantic Host and Runs are retained.')
   ops.signal(row.pid, 'SIGTERM')
   const deadline = ops.now() + 10000
