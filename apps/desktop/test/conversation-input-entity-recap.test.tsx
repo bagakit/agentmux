@@ -11,10 +11,10 @@ import { createClientUiRoot } from './helpers/client-ui-render'
 import { createAgentInformationRoot } from './helpers/agent-information-root'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { AgentInputRecap } from '../src/renderer/src/components/AgentInputRecap'
-import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { agentInformationPreview, type AgentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
 
@@ -73,8 +73,8 @@ const rows = (host: ParentNode) => [...host.querySelectorAll<HTMLElement>('[data
 async function opened(scene: Awaited<ReturnType<typeof seed>>) {
  const { host, root } = mount(true), context = agentContextForSession(scene.session, undefined, 'Original Agent', composerConfig.workspaces[0]!, null)
  const onOpen = vi.fn()
- await act(async () => root.render(<WorkspaceAgentRow context={context} percent={null} onOpen={onOpen} />))
- const trigger = host.querySelector<HTMLButtonElement>('.workspace-agent-row')!
+ await act(async () => root.render(<WorkspaceAgentRow context={context} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={onOpen} />))
+ const trigger = host.querySelector<HTMLButtonElement>('.focus-context')!
  await act(async () => trigger.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
  await wait(() => expect(document.querySelector('.agent-information-reader')).not.toBeNull())
  const panel = document.querySelector<HTMLElement>('.agent-information-reader')!
