@@ -1,4 +1,4 @@
-import { parseConversationReadPage, parseConversationChangesPage, parseConversationViewReleaseResult, parseConversationWatchOpening, parseConversationObservation } from '@agentmux/core/conversation'
+import { parseConversationReadPageForWindow, parseConversationChangesPageForWindow, parseConversationViewReleaseResult, parseConversationWatchOpening, parseConversationObservation } from '@agentmux/core/conversation'
 import type { ConversationObservation, ConversationWatchOpening } from '@agentmux/core/conversation'
 import type { ConversationReadApi, ConversationReadPreloadApi } from '../../../shared/conversation-read'
 import { unwrapSessionInputOperationResult } from '../../../shared/session-input-result'
@@ -14,13 +14,13 @@ export function createConversationReadApi(bridge: ConversationReadPreloadApi): C
       options.signal?.throwIfAborted()
       const result = await bridge.readAgentConversation(input, cancellation(options.signal))
       options.signal?.throwIfAborted()
-      return parseConversationReadPage(unwrapSessionInputOperationResult(result), input)
+      return parseConversationReadPageForWindow(unwrapSessionInputOperationResult(result), input)
     },
     readConversationChanges: async (input, options = {}) => {
       options.signal?.throwIfAborted()
       const result = await bridge.readConversationChanges(input, cancellation(options.signal))
       options.signal?.throwIfAborted()
-      return parseConversationChangesPage(unwrapSessionInputOperationResult(result), input)
+      return parseConversationChangesPageForWindow(unwrapSessionInputOperationResult(result), input)
     },
     releaseConversationView: async input => parseConversationViewReleaseResult(unwrapSessionInputOperationResult(await bridge.releaseConversationView(input)), input),
     observeConversation: async (input, listener, options = {}) => {
