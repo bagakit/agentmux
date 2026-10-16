@@ -44,7 +44,7 @@ async function receipt(child: ChildProcess): Promise<{ owner: AgentMuxRuntimeOwn
     child.once('exit', code => { clearTimeout(timer); reject(new Error(`Private Headless exited ${code}: ${errors}`)) })
   })
 }
-export async function headlessFixture(options: { cli?: boolean; memoryStore?: boolean } = {}) {
+export async function headlessFixture(options: { cli?: boolean; memoryStore?: boolean; ownerNodeArgs?: string[] } = {}) {
   const root = await mkdtemp(fixturePath("tmp/amrr-"))
   const runtimeDirectory = join(root, 'r'), stateDirectory = join(root, 's')
   await Promise.all([mkdir(runtimeDirectory, { mode: 0o700 }), mkdir(join(stateDirectory, 'ctxmux'), { recursive: true, mode: 0o700 }), mkdir(join(root, 'home'), { mode: 0o700 })])
@@ -69,7 +69,7 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
   const ownerEntry = options.cli ? resolve(import.meta.dirname, '../../dist/headless-runtime-cli.js')
     : process.env.AGENTMUX_TEST_OWNER_ENTRY ?? resolve(import.meta.dirname, '../fixtures/headless-runtime-worker.mjs')
   const ownerArgs = options.cli ? ['serve'] : []
-  let server = spawn(process.execPath, [ownerEntry, ...ownerArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  let server = spawn(process.execPath, [...(options.ownerNodeArgs ?? []), ownerEntry, ...ownerArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let current: Awaited<ReturnType<typeof receipt>>
   try { current = await receipt(server) }
   catch (error) {
@@ -99,7 +99,7 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
   }
   const restart = async () => {
     await stopOwner()
-    server = spawn(process.execPath, [ownerEntry, ...ownerArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+    server = spawn(process.execPath, [...(options.ownerNodeArgs ?? []), ownerEntry, ...ownerArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
     current = await receipt(server); return current
   }
   const restartNativeDaemon = async () => {
@@ -116,7 +116,7 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
     })
   }
   return { root, env, client, restart, restartNativeDaemon, stopOwner, failProbe: () => writeFile(join(stateDirectory, 'probe-failure'), 'failed'), get owner() { return current.owner }, get socketPath() { return current.socketPath },
-    get nativeProcessId() { return daemon.pid },
+    get nativeProcessId() { return daemon.pid }, get ownerProcess() { return server },
     failInput: (failure: import('../../src/errors.js').AgentMuxControlFailure) => writeFile(join(stateDirectory, 'input-failure'), JSON.stringify(failure)),
     inputFailureCalls: async () => (await readFile(join(stateDirectory, 'input-failure-calls'), 'utf8')).trim().split('\n'),
     async cleanup() {
