@@ -41,6 +41,3 @@ export function mailboxMessages(sessionId: string | undefined, timeline: AgentTi
   for (const message of source) collect(message, message)
   return result
 }
-export function mailboxMessageIsIncoming({ message }: MailboxDisplayItem): boolean {
-  return message.author.kind === 'agent'
-}

@@ -29,11 +29,13 @@ export function MailboxTime({ value, complete = false }: { value: number | undef
     : <span>Time not recorded</span>
 }
 
-export function MailboxRecordRow({ recordKey, label, text, metadata, avatar, source, onOpen }: {
+export function MailboxRecordRow({ recordKey, label, text, bodyPreview, metadata, avatar, source, onOpen }: {
   recordKey: string; label: string; text: string | undefined; metadata: ReactNode; avatar?: ReactNode; source?: ReactNode
+  /** Already bounded by the original message owner; never reinterpret authored body as an outer envelope. */
+  bodyPreview?: string
   onOpen: (key: string, event: MouseEvent<HTMLButtonElement>) => void
 }) {
-  const preview = mailboxPreview(text)
+  const preview = bodyPreview === undefined ? mailboxPreview(text) : bodyPreview || 'No text recorded.'
   return <button type="button" className="composer-mailbox__row" data-record-key={recordKey}
     aria-label={`Read ${label}: ${preview}`} onClick={event => onOpen(recordKey, event)}>
     <span className="composer-mailbox__row-head">{avatar}<strong title={label}>{label}</strong><span className="composer-mailbox__metadata">{metadata}</span></span>
