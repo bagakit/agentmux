@@ -16,7 +16,7 @@ const frontend: AgentTerminalFrontend = { run: session.control.run, frontendId: 
 
 it('keeps the running backend fact separate from disconnected frontend presentation', () => {
   const view = { ...session, terminalFrontend: frontend }
-  expect(sessionFrontendPresentation(view)).toEqual({ title: 'Terminal disconnected',
+  expect(sessionFrontendPresentation(view)).toEqual({ kind: 'detached', title: 'Terminal disconnected',
     detail: 'The backend is still running. Resume reconnects this terminal to the same conversation.' })
   expect(view.processState).toBe('running')
   expect(sessionFrontendPresentation({ ...view, terminalFrontend: { ...frontend, state: 'attached' } })).toBeNull()
