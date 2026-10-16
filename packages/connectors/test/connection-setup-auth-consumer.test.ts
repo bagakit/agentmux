@@ -858,3 +858,71 @@ it.each(['account', 'unknown'] as const)('a real owner process restart preserves
   const effects = (await readFile(join(root, 'native-effects.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   expect(effects.map(value => value.path)).toEqual(mode === 'account' ? ['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'] : ['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
 }, 60_000)
+
+
+it('authoritative bootstrap fields survive unrelated statements through the default Setup SDK and compiled CLI', async () => {
+  const f = await fixture(), before = await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })
+  const fields = `window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};window.csrfToken=${JSON.stringify(CSRF)};`
+  const examples = [
+    `<script>var pageVersion=1;const pageReady=true;let marker=0;${fields}recordMetadata();</script>`,
+    `<script>"use strict";var before=1;(function(){"use strict";const pageReady=true;${fields}window.runtimeMetadata=readRuntimeMetadata();recordMetadata();})();let after=2;</script>`,
+    '<script>const invalid=;</script>' + bootstrap({ id: USER, tenantId: TENANT }) + '<script>function broken(</script>',
+    `<script>for(;;){break;}${fields}</script>`,
+    `<script>${fields}${fields}</script>`,
+    `<script>(function(){window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};})();</script><script>window.csrfToken=${JSON.stringify(CSRF)};</script>`,
+    `<script>${fields}window.user.name=readDisplayName();window.user["lastSeen"]=Date.now();window.user.displayName.value=readDisplayName();</script>`,
+    `<script>{const window={};window.user=readLocalUser();}const {window:metadata}=readMetadata();${fields}</script>`
+  ]
+  for (const [index, html] of examples.entries()) {
+    const fetch = vi.fn(nativeRoute({ html })); vi.stubGlobal('fetch', fetch)
+    const input = { ...f.input, operationId: 'field-source-account-' + index }
+    const account = await toAccount(f, result(await f.cli(['begin', '--input', '-'], input)))
+    expect(account.continuation?.account, 'field source ' + index).toEqual({ userId: USER, tenantId: TENANT })
+    const nativeCount = fetch.mock.calls.length
+    expect(nativeCount).toBe(6)
+    const confirmed = await f.sdk.call('connection.setup.advance', advanceInput(account, 'confirm-account'))
+    expect(confirmed.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
+    expect(fetch).toHaveBeenCalledTimes(nativeCount)
+    expect(JSON.stringify(confirmed.operation)).not.toContain(USER)
+    expect(JSON.stringify(confirmed.operation)).not.toContain(CSRF)
+  }
+  expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
+}, 45_000)
+
+it('explicit related bootstrap mutations remain unknown through the original public Setup owner', async () => {
+  const f = await fixture(), base = bootstrap({ id: USER, tenantId: TENANT })
+  const fields = `window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};window.csrfToken=${JSON.stringify(CSRF)};`
+  const invalid = [
+    base + '<script>window.user=readDynamicUser();</script>',
+    base + '<script>window.csrfToken=readDynamicToken();</script>',
+    base + '<script>window.user++;</script>',
+    base + '<script>window.csrfToken+="changed";</script>',
+    base + '<script>delete window.csrfToken;</script>',
+    base + '<script>window.user.id=readDynamicUser();</script>',
+    base + '<script>window.user[userProperty]=readDynamicUser();</script>',
+    base + '<script>(()=>{window.user=readDynamicUser();})();</script>',
+    base + '<script>class Metadata{static{window.user=readDynamicUser();}}</script>',
+    base + '<script>class Metadata{[window.user=readDynamicUser()](){}}</script>',
+    base + '<script>class Metadata{static changed=(window.csrfToken=readDynamicToken());}</script>',
+    `<script>(function(){const window={};${fields}})();</script>`,
+    `<script>(function(){const {window}=metadata;${fields}})();</script>`,
+    `<script>(function(){if(false){var window;}${fields}})();</script>`,
+    `<script>${fields}window.csrfToken="different-token";</script>`,
+    `<script>(function(){${fields}window.user=${JSON.stringify({ id: 'different-user', tenantId: TENANT })};})();</script>`,
+    `<script>window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};const invalid=;</script>`
+  ]
+  for (const [index, html] of invalid.entries()) {
+    const fetch = vi.fn(nativeRoute({ html })); vi.stubGlobal('fetch', fetch)
+    let view = await f.sdk.call('connection.setup.begin', { ...f.input, operationId: 'related-field-unknown-' + index })
+    let original: ConnectionSetupAdvance | undefined
+    for (let step = 0; step < 8 && !['account', 'unknown'].includes(view.continuation!.stage); step++) {
+      original = advanceInput(view); view = await f.sdk.call('connection.setup.advance', original)
+    }
+    expect(view.continuation, 'related mutation ' + index).toMatchObject({ stage: 'unknown', account: null })
+    expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
+    const count = fetch.mock.calls.length
+    expect(count).toBe(6)
+    expect((await f.sdk.call('connection.setup.advance', original!)).receipt).toEqual(view.receipt)
+    expect(fetch).toHaveBeenCalledTimes(count)
+  }
+}, 45_000)
