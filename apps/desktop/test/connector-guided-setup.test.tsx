@@ -253,8 +253,15 @@ it.each(['close', 'another-bot'] as const)('a late settings result after %s cann
   } finally { release() }
 }, 30_000)
 
-it('an accepted settings write with a lost local ACK presents one saving task and recovers the exact result without native replay', async () => {
+it.each(['accepted', 'unknown'] as const)('an %s settings reply with a lost local ACK presents one saving task without implying platform success or replay', async outcome => {
   await open(); await click('[data-guided-primary]'); await idle()
+  accept = outcome === 'accepted'
+  const request = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (...args) => {
+    const response = await request(...args)
+    if (new URL(String(args[0])).pathname === '/developers/v1/robot/switch/' + APP) response.headers.append('set-cookie', 'continued=fixture-guided-continuation; Path=/; Secure')
+    return response
+  })
   const store = DesktopConnectorSecrets.prototype.store; let lost = false
   vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (this: DesktopConnectorSecrets, input) {
     const result = await store.call(this, input)
@@ -262,9 +269,11 @@ it('an accepted settings write with a lost local ACK presents one saving task an
     return result
   })
   await click('[data-guided-primary]'); await idle()
-  expect(current().applicationConfiguration!.selected?.request).toBe('confirmed')
+  expect(current().applicationConfiguration!.selected?.request).toBe(outcome === 'accepted' ? 'confirmed' : 'unknown')
   expect(current().applicationConfiguration!.selected?.secureStorage).toBe('unknown')
   expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Finish saving original result')
+  expect(document.querySelector('[data-guided-task]')?.textContent).toContain('Finish saving the original result')
+  expect(document.querySelector('[data-guided-task]')?.textContent).not.toContain('accepted result')
   expect(firstLayerPrimaries()).toHaveLength(1)
   const original = current().applicationConfiguration!.selected!, before = [...native]
   await click('[data-guided-primary]'); await idle()
