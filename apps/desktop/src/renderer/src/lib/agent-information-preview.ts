@@ -97,7 +97,7 @@ export const agentInformationPreview = {
     const existed = agentBookmarks.get().bookmarks.some(item => item.hostId === session.control.hostId && item.agentSessionId === session.control.agentSessionId)
     const bookmark = pinReading(request, bounds)
     if (!bookmark) return
-    return { key: bookmark.key, cancel: () => {
+    return { key: bookmark.key, created: !existed, cancel: () => {
       if (existed || !current.some(item => item.token === token && item.bookmark?.key === bookmark.key)) return
       publish(current.map(item => item.token === token ? { ...item, pinned: false, bookmark: undefined } : item))
       agentBookmarks.remove(bookmark.key)
