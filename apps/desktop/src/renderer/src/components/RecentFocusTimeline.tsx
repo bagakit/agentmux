@@ -533,6 +533,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const { clock, dateClock } = time
   useEffect(() => { setDateDraft(null); setDateError(null); setDateChoice(null) }, [time.zone])
   const [now, setNow] = useState(Date.now)
+  const clockObserved = useRef(false)
   const [documentActive, setDocumentActive] = useState(document.visibilityState !== 'hidden')
   const documentVisible = visible && documentActive
   const [readingContextId, setReadingContextId] = useState<string | null>(null)
@@ -556,9 +557,11 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | undefined
     const observe = () => {
+      const refresh = clockObserved.current
+      clockObserved.current = true
       if (timer) clearInterval(timer)
       const active = document.visibilityState !== 'hidden'; setDocumentActive(active)
-      if (visible && active && mode !== 'collapsed') { setNow(Date.now()); timer = setInterval(() => setNow(Date.now()), 30_000) }
+      if (visible && active && mode !== 'collapsed') { if (refresh) setNow(Date.now()); timer = setInterval(() => setNow(Date.now()), 30_000) }
     }
     observe(); document.addEventListener('visibilitychange', observe)
     return () => { if (timer) clearInterval(timer); document.removeEventListener('visibilitychange', observe) }
