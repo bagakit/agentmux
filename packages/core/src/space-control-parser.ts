@@ -66,6 +66,12 @@ function derivedNameSource(value: unknown, code: Code): { nameSource?: 'derived'
 function nullableId(value: unknown, name: string, code: Code, spatial = false): string | null {
   return value === null ? null : spaceControlId(value, name, code, spatial)
 }
+function agentOrder(value: unknown, code: Code) {
+  return unique(list(value, entry => {
+    const item = fields(entry, ['hostId', 'agentSessionId'], code)
+    return { hostId: spaceControlId(item.hostId, 'Host', code), agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code) }
+  }, 'Agent order', code), item => JSON.stringify([item.hostId, item.agentSessionId]), 'Agent order', code)
+}
 
 export function parseSpaceControlSelector(value: unknown, code: Code): AgentMuxSpaceSelector {
   const source = fields(value, ['spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
@@ -111,6 +117,7 @@ function destination(value: unknown, code: Code): AgentMuxSpaceDestination {
 }
 
 export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceControlRequest['operation'] {
+  if (value === 'space.agent-order') return true
   if (value === 'space.mote.preferences.read' || value === 'space.mote.preferences.save') return true
   return value === 'agent.open' || value === 'space.ls' || value === 'space.inspect' || value === 'space.mv' ||
     value === 'agent.rename' || value === 'agent.inspect' || value === 'space.rename' ||
@@ -119,12 +126,18 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
   let request: AgentMuxSpaceControlRequest
-  if (operation === 'space.mote.preferences.read' || operation === 'space.mote.preferences.save') {
+  if (operation === 'space.agent-order') {
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'displayWorkspaceId', 'order', 'expectedOrder'], code)
+    if (Object.hasOwn(source, 'expectedOrder') && !Object.hasOwn(source, 'order')) fail('Expected order requires an explicit order change.', code)
+    request = { ...base, operation, displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code),
+      ...(Object.hasOwn(source, 'order') ? { order: agentOrder(source.order, code) } : {}),
+      ...(Object.hasOwn(source, 'expectedOrder') ? { expectedOrder: agentOrder(source.expectedOrder, code) } : {}) }
+  } else if (operation === 'space.mote.preferences.read' || operation === 'space.mote.preferences.save') {
     const { schemaVersion: _schema, requestId: _id, operation: _operation, ...input } = source
     request = operation === 'space.mote.preferences.read'
       ? { ...base, operation, ...parseMotePreferencesReadInput(input, code) }
@@ -502,7 +515,12 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const requestId = spaceControlId(source.requestId, 'Receipt Request', code)
   let result: AgentMuxSpaceControlResult
-  if (operation === 'space.mote.preferences.read') {
+  if (operation === 'space.agent-order') {
+    const body = fields(source.result, [...WORKFACE_FIELDS, 'scope', 'displayWorkspaceId', 'storedOrder', 'effectiveOrder'], code)
+    result = { operation, scope: member(body.scope, ['workspace-agent-list'], 'Agent list scope', code),
+      displayWorkspaceId: spaceControlId(body.displayWorkspaceId, 'Display Workspace', code), storedOrder: agentOrder(body.storedOrder, code),
+      effectiveOrder: agentOrder(body.effectiveOrder, code), outcome: member(body.outcome, VIEW_OUTCOMES, 'Agent order outcome', code), ...workfaceCommon(body, code) }
+  } else if (operation === 'space.mote.preferences.read') {
     result = { operation, ...parseMotePreferencesReadResult(source.result) }
   } else if (operation === 'space.mote.preferences.save') {
     const body = fields(source.result, ['kind', 'target', 'requestId', 'status', 'source', 'message'], code)

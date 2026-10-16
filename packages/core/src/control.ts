@@ -1025,6 +1025,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'open.git': 'long',
   'agent.view': 'long',
   'space.view': 'long',
+  'space.agent-order': 'long',
   'file.format': 'long',
   'file.build': 'long',
   'file.build.inspect': 'short',

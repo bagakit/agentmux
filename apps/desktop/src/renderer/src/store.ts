@@ -79,6 +79,7 @@ import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
 import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
 import { executeWorkfaceAgentView } from './lib/workface-agent-view'
+import { executeWorkspaceAgentOrder, restoreWorkspaceAgentOrder, workspaceAgentOrderMembers } from './lib/workspace-agent-order'
 import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen } from './lib/workface-file-open'
 import { executeWorkfaceFileView } from './lib/workface-file-view'
@@ -794,6 +795,8 @@ type AppState = {
   activeWorkspaceId: string | null
   /** 用户拖出来的 Topic 顺序。是一份偏好，不是真相来源——磁盘上没有的不会因它出现。 */
   scratchTopicOrder: string[]
+  workspaceAgentOrder: Record<string, string[]>
+  setWorkspaceAgentOrder(workspaceId: string, order: readonly string[]): Promise<import('@agentmux/core/control').AgentMuxWorkspaceAgentOrderReport>
   recentMoteAgents: Record<string, MoteRecentAgent>
   rememberMoteAgent(reference: WorkbenchProjectionSelection): void
   setScratchTopicOrder(order: readonly string[]): void
@@ -3145,6 +3148,7 @@ type PersistedAppState = {
   restoredWorkbench?: PersistedWorkbench
   unclaimedTerminalSessionIds: string[]
   scratchTopicOrder?: string[]
+  workspaceAgentOrder?: Record<string, string[]>
   recentMoteAgents?: Record<string, MoteRecentAgent>
   noticeReadReceipts?: Record<string, Record<string, string>>
   displacedAgentSessionIds?: string[]
@@ -3196,6 +3200,7 @@ type PersistedAppState = {
 
 export type RestoredUiState = Pick<
   AppState,
+  | 'workspaceAgentOrder'
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
@@ -3290,6 +3295,7 @@ export function restorePersistedUiState(
   config: AppConfig,
   persisted: Pick<
     PersistedAppState,
+    | 'workspaceAgentOrder'
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
@@ -3329,6 +3335,7 @@ export function restorePersistedUiState(
   >
 ): RestoredUiState {
   return {
+    workspaceAgentOrder: restoreWorkspaceAgentOrder(persisted.workspaceAgentOrder),
     workbenchSpaceSelection: restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection),
     focusTimelineNameWidth: clampFocusTimelineNameWidth(persisted.focusTimelineNameWidth),
     focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
@@ -3409,6 +3416,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     unclaimedTerminalSessionIds: state.unclaimedTerminalSessionIds,
     // 拖出来的顺序是用户意图，重开应该还在。它只是偏好：恢复时对不上磁盘的条目会被 orderTopics 丢掉。
     scratchTopicOrder: state.scratchTopicOrder,
+    workspaceAgentOrder: state.workspaceAgentOrder,
     recentMoteAgents: state.recentMoteAgents,
     // Agent 手改名是用户意图，重开要还在。key 是 session id；已消失的 session 留一条死名字无害——
     // 它不投影到任何界面（没有对应 session），下次同 id 复现的概率是 uuid 级零。
@@ -4261,6 +4269,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   pendingAgentLaunches: {},
   activeWorkspaceId: null,
   scratchTopicOrder: [],
+  workspaceAgentOrder: {},
+  async setWorkspaceAgentOrder(workspaceId, order) {
+    return await executeWorkspaceAgentOrder({ get,
+      set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
+      save: () => saveWorkbenchSelection(false)
+    }, { schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'space.agent-order', displayWorkspaceId: workspaceId, order: workspaceAgentOrderMembers(order) })
+  },
   recentMoteAgents: {},
   rememberMoteAgent(reference) {
     const current = get(), recentMoteAgents = recentMoteAgentsAfterVisit(current, reference)
@@ -5138,6 +5153,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         request.operation === 'settings.resource.remove') {
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
+    if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get,
+      set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
+      save: () => saveWorkbenchSelection(false)
+    }, request) }
     if (request.operation === 'agent.view') return await executeWorkfaceAgentView({
       get, setViewMode: (...args) => get().setViewMode(...args), save: saveWorkbenchSelection
     }, request)
@@ -11452,7 +11471,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
-    return { ...state, moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
