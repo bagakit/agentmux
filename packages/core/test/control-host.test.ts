@@ -25,6 +25,7 @@ import {
   AGENTMUX_CONTROL_SCHEMA_VERSION,
   agentMuxControlTimeoutMs,
   isLongAgentMuxControlOperation,
+  isAgentMuxControlOperation,
   resolveAgentMuxRegion,
   type AgentMuxAgentRegion,
   type AgentMuxControlBrowserEvent,
@@ -97,6 +98,9 @@ const soleRegionNeighbors = {
 } as const
 
 describe('Control protocol', () => {
+  it('keeps Agent input at the public Core owner instead of a Renderer Control operation', () => {
+    expect(isAgentMuxControlOperation('send')).toBe(false)
+  })
   it('uses only closed Tab, Region, AgentSession, Run, and owner surface identities', () => {
     expect(resolveAgentMuxRegion(regions, { kind: 'region', regionId: 'browser-right' })).toEqual(regions[1])
     expect(resolveAgentMuxRegion(regions, { kind: 'agent-session', agentSessionId: 'semantic-1' })).toEqual(agentRegion)
@@ -204,27 +208,6 @@ describe('Control protocol', () => {
       operation: 'context',
       caller: { agentSessionId: 'semantic-1' }
     })).toThrow('operation')
-  })
-
-  it('rejects a managed send without an envelope before delivery', () => {
-    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'bare-send', operation: 'send',
-      target: { kind: 'agent-session', agentSessionId: 'semantic-1' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' },
-      promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null } })).toThrow('envelope')
-  })
-
-  it('binds an A2A sender to the managed caller and its explicit Control target', () => {
-    const message = {
-      schema: 'agentmux.a2a.v1', messageId: 'message-1', operationId: 'request-1', createdAt: reshapeFixtureEpoch(0, 0, 1),
-      sender: { kind: 'agent-session', agentSessionId: 'caller' },
-      recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
-      threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null,
-      senderSessionId: 'caller', senderRunId: null, recipientSessionId: 'recipient', recipientRunId: null,
-      body: 'body'
-    } as const
-    expect(parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-1', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toMatchObject({ message })
-    expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-spoof', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'caller' }, message })).toThrow('sender')
-    expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-2', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'recipient' }, text: 'body', caller: { agentSessionId: 'other' }, message })).toThrow('sender')
-    expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'request-3', operation: 'send', target: { kind: 'agent-session', agentSessionId: 'other' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' }, message })).toThrow('recipient')
   })
 
   it('keeps open content and destinations as closed discriminated unions', () => {
@@ -664,7 +647,7 @@ describe('Control protocol', () => {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'send-tab',
       ok: false,
-      operation: 'send',
+      operation: 'resume',
       error: {
         code: 'MESSAGE_TARGET_NOT_UNIQUE',
         message: 'Tab contains multiple Agent Sessions.',
@@ -681,14 +664,14 @@ describe('Control protocol', () => {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'missing-candidates',
       ok: false,
-      operation: 'send',
+      operation: 'resume',
       error: { code: 'MESSAGE_TARGET_NOT_UNIQUE', message: 'Candidates are required.' }
     })).toThrow('candidates are required')
     expect(() => parseAgentMuxControlReceipt({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'unexpected-candidates',
       ok: false,
-      operation: 'send',
+      operation: 'resume',
       error: {
         code: 'REGION_NOT_OPEN',
         message: 'Region is closed.',
@@ -722,7 +705,7 @@ describe('Control protocol', () => {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'hybrid',
       ok: true,
-      operation: 'send',
+      operation: 'resume',
       result: { agentSessionId: 'agent-1' }
     }
     expect(() => parseAgentMuxControlReceipt({
@@ -864,6 +847,11 @@ describe('external Control control', () => {
 
   it('carries canonical public RPC through one real SDK and Unix owner endpoint', async () => {
     const core = await coreOwner()
+    const originalSubmit = core.client.submitAgentMessage.bind(core.client)
+    vi.spyOn(core.client, 'submitAgentMessage').mockImplementation(async input => {
+      if (input.envelope.body === 'invalid candidates') throw Object.assign(new Error('Invalid candidates'), { code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates: [{ agentSessionId: '', regionIds: [] }] })
+      return await originalSubmit(input)
+    })
     const path = join(core.root, 'control.sock')
     const seen: string[] = []
     const server = new AgentMuxControlServer({ socketPath: path, coreClients: core.coreClients,
@@ -879,13 +867,6 @@ describe('external Control control', () => {
           agent: { agentSessionId: 'semantic-1', runId: 'run', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: fixturePath("repo"), createOperationId: 'creation', initialPrompt: 'not-requested' },
           resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
         if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [activeAgent(core)] }
-        if (request.operation === 'send') {
-          expect(request.message).toMatchObject({ body: request.text, recipientSessionId: 'semantic-1', recipientRunId: 'run-semantic-1' })
-          if (request.text === 'invalid candidates') throw Object.assign(new Error('Invalid candidates'), {
-            code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates: [{ agentSessionId: '', regionIds: [] }]
-          })
-          return { operation: request.operation, agentSessionId: 'semantic-1' }
-        }
         throw new Error('Unexpected operation')
       }
     })
@@ -901,20 +882,18 @@ describe('external Control control', () => {
       .resolves.toMatchObject({ agentSessionId: 'semantic-1', delivery: { state: 'delivered' } })
     await expect(client.call('agent.send', { operationId: 'invalid-candidates', target: { kind: 'tab', tabId: 'tab-main' }, text: 'invalid candidates' }))
       .rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
-    expect(seen).toEqual(['inspect.tab', 'space.inspect', 'agent.open', 'inspect.tab', 'list.active-agents', 'send',
-      'inspect.tab', 'list.active-agents', 'send'])
+    expect(seen).toEqual(['inspect.tab', 'space.inspect', 'agent.open', 'inspect.tab', 'list.active-agents',
+      'inspect.tab', 'list.active-agents'])
     expect(core.inner.kernel.stop).not.toHaveBeenCalled()
   })
 
   it('decodes UTF-8 only after arbitrary socket chunks are joined', async () => {
     const core = await coreOwner(), path = join(core.root, 'control.sock')
-    let seen = ''
+    const submitted = vi.spyOn(core.client, 'submitAgentMessage')
     const server = new AgentMuxControlServer({ socketPath: path, coreClients: core.coreClients,
       async execute(request): Promise<AgentMuxControlResult> {
         if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [activeAgent(core)] }
-        if (request.operation !== 'send') throw new Error('Unexpected operation')
-        seen = request.text
-        return { operation: request.operation, agentSessionId: 'semantic-1' }
+        throw new Error('Unexpected operation')
       }
     })
     await server.start(); cleanups.push(() => server.stop())
@@ -930,7 +909,8 @@ describe('external Control control', () => {
       socket.once('error', reject)
     })
     expect(response).toMatchObject({ jsonrpc: '2.0', id: 'utf8-send', result: { delivery: { state: 'delivered' } } })
-    expect(seen).toBe('继续检查')
+    expect(submitted).toHaveBeenCalledOnce()
+    expect(submitted.mock.calls[0]![0].envelope.body).toBe('继续检查')
     expect(core.inner.kernel.stop).not.toHaveBeenCalled()
   })
 
@@ -1011,7 +991,6 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
       'open.browser': 'long',
       // Refresh checks the saved executable on the selected host; it waits for that probe.
       'settings.executors.refresh': 'long',
-      send: 'long',
       resume: 'long',
       stop: 'long',
       // 只读、本地布局与信号通常用短档；持久化写入另需长档。
@@ -1085,7 +1064,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
   })
 
   it('每个操作都被显式定过档——分档表必须是穷尽 Record，不许退回按形状推断', () => {
-    // 此前的分档是个谓词（`startsWith('open.') || === 'send' || …`）。谓词只能表达「符合这形状的算慢」，
+    // 此前的分档是个谓词（`startsWith('open.') || === 'resume' || …`）。谓词只能表达「符合这形状的算慢」，
     // 而**新操作不符合任何形状时会静默落进快档**：`interrupt` 加进联合类型时就没有任何东西提醒过
     // 要给它定档，它只是不匹配。
     //
@@ -1145,7 +1124,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // dispatcher owns each method's handshake; a subscription has no idle timeout.
     const delays = [...serverSource.matchAll(/socket\.setTimeout\(([^,)]+)/g)].map(match => match[1]!.trim())
     expect(delays).toEqual(['AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS', '0'])
-    expect(clientSource).toContain("timeout(method) + (this.endpoint.transport === 'ssh' ? AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS : 0)")
+    expect(clientSource).toContain("timeout(method) + (route.endpoint.transport === 'ssh' ? AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS : 0)")
     expect(wireSource).toContain('}, duration)')
     expect(importShape.test("import { agentMuxControlTimeoutMs } from './control.js'")).toBe(true)
   })

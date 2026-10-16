@@ -71,7 +71,7 @@ it('reads typed original A2A pages instead of inferring them from Conversation, 
 })
 
 it('reads and copies the one original MID without submitting, replaying or consuming an Agent message', async () => {
-  const copy = vi.fn(async () => true), submit = vi.spyOn(api.sessions, 'submitMessage'), write = vi.spyOn(api.sessions, 'write'), rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting')
+  const copy = vi.fn(async () => true), submit = vi.spyOn(api.sessions, 'submitPrompt'), write = vi.spyOn(api.sessions, 'write'), rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting')
   await dom.render(<SessionMailbox system={system()} queued={[]} control={session.control} onCopyQueued={copy} />)
   await toggle(); await dom.click('[data-record-key="a2a:received"]')
   expect(api.sessions.readMessage).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: session.id }, 'received')

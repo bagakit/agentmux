@@ -332,7 +332,7 @@ describe('journal persistence under isolated resource pressure', () => {
     const store = new AgentMuxFileAgentSessionStore(storePath)
     await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'recipient', providerId: 'synthetic', executorId: 'synthetic', hostId: 'local', workspacePath: root,
       run: condition.expectedRun, retiredRuns: [], hookBindingId: 'hook', hookToken: 'token', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) })
-    const core = await privateRpcCorePort(storePath, q.path); const sends: unknown[] = []
+    const core = await privateRpcCorePort(storePath, q.path); const sends = vi.spyOn(core.client, 'submitAgentMessage')
     // Registry identity is real; no native Provider behavior is invoked by this persisted-facts port.
     const provider = core.client.providers.list()[0]!
     core.client.providers.register({ ...provider, id: 'synthetic', label: 'Private journal target',
@@ -343,7 +343,6 @@ describe('journal persistence under isolated resource pressure', () => {
           agentSessionId: 'recipient', promptCondition: condition, projectId: null, projectName: null,
           workspacePath: root, providerId: 'synthetic', executorId: 'synthetic', processState: 'running',
           status: 'active', updatedAt: _tailFixtureEpoch(0, 0, 1) }] }
-        if (request.operation === 'send') { sends.push(request); return { operation: 'send', agentSessionId: 'recipient' } }
         throw new Error(`Unexpected private operation ${request.operation}`)
       } })
     await server.start()
@@ -355,7 +354,7 @@ describe('journal persistence under isolated resource pressure', () => {
       probe.fault('write')
       const rejected = await exec(process.execPath, args, { env, timeout: 5000 }).catch(error => error)
       console.log('__JOURNAL_CLI_REJECTED__', rejected.stderr)
-      expect(rejected.stderr).toContain('MESSAGE_QUEUE_UNAVAILABLE'); expect(rejected.stderr).toContain('disk I/O error'); expect(sends).toHaveLength(0)
+      expect(rejected.stderr).toContain('MESSAGE_QUEUE_UNAVAILABLE'); expect(rejected.stderr).toContain('disk I/O error'); expect(sends).not.toHaveBeenCalled()
       io.fault = undefined; probe.reset()
       const accepted = JSON.parse((await exec(process.execPath, args, { env, timeout: 5000 })).stdout)
       console.log('__JOURNAL_CLI_ACCEPTED__', JSON.stringify(accepted))
@@ -363,11 +362,11 @@ describe('journal persistence under isolated resource pressure', () => {
         inputReceipt: { persistence: 'confirmed', status: 'waiting', observation: 'owned', admission: null, originalControlOperationId: 'cli-operation' } } })
       // This persisted-facts fixture supplies no Native status/input consumer. An original
       // journal admission must not be promoted to delivered or bypass that input owner.
-      expect(sends).toHaveLength(0)
+      expect(sends).toHaveBeenCalledTimes(1)
       const retry=JSON.parse((await exec(process.execPath, args, { env, timeout: 5000 })).stdout)
       expect(retry.result).toMatchObject({receiptId:accepted.result.receiptId,sequence:accepted.result.sequence,envelope:accepted.result.envelope,
         inputReceipt:{ref:accepted.result.inputReceipt.ref,originalControlOperationId:'cli-operation'}})
-      expect(sends).toHaveLength(0)
+      expect(sends).toHaveBeenCalledTimes(1)
       expect((await q.readJournal()).filter(row => row.kind === 'message')).toHaveLength(1)
     } finally { await server.stop(); await core.dispose() }
   })

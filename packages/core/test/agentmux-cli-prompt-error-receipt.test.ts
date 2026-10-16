@@ -16,7 +16,7 @@ import { renderAgentMuxMessageEnvelope } from '../src/agent-message-render.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import { AgentMuxControlServer } from '../src/control-host.js'
-import type { AgentMuxControlHost, AgentMuxControlSendRequest } from '../src/control.js'
+import type { AgentMuxControlHost } from '../src/control.js'
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession, AgentMuxRunInputData } from '../src/types.js'
 
@@ -101,7 +101,7 @@ async function fixture() {
       return { run: run(), appliedByteRange: { startByte: operation.expectedByte, endByte: cursor } }
     }
     inner.kernel.stop = async runId => { stops.push(runId) }
-    const requests: AgentMuxControlSendRequest[] = []
+    const requests: Parameters<AgentMuxClient['submitAgentMessage']>[0][] = []
     const failures: Array<{ code: string; message: string; detail?: string; logId?: string }> = []
     const host: AgentMuxControlHost = {
       async execute(request) {
@@ -115,23 +115,17 @@ async function fixture() {
             status: 'unknown', updatedAt: current.updatedAt
           }] }
         }
-        if (request.operation !== 'send') throw new Error(`Unexpected fixture operation: ${request.operation}`)
-        requests.push(request)
-        try {
-          if (!request.caller?.capability) throw new Error('This fixture requires the issued managed caller capability.')
-          await owner.submitAgentMessage({
-            agentSessionId: stored.agentSessionId, condition: request.promptCondition,
-            envelope: request.message, sourceChannel: request.sourceChannel,
-            caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability }
-          })
-        } catch (error) {
-          const source = error as { code: string; message: string; detail?: string; logId?: string }
-          failures.push({ code: source.code, message: source.message, detail: source.detail, logId: source.logId })
-          throw error
-        }
-        return { operation: request.operation, agentSessionId: stored.agentSessionId }
+        throw new Error(`Unexpected fixture operation: ${request.operation}`)
       }
     }
+    const originalSubmit = owner.submitAgentMessage.bind(owner)
+    vi.spyOn(owner, 'submitAgentMessage').mockImplementation(async input => {
+      requests.push(input)
+      try { return await originalSubmit(input) } catch (error) {
+        const source = error as { code: string; message: string; detail?: string; logId?: string }
+        failures.push({ code: source.code, message: source.message, detail: source.detail, logId: source.logId }); throw error
+      }
+    })
     server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: owner }], execute: request => host.execute(request) })
     await server.start()
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
@@ -272,10 +266,9 @@ describe('public Prompt errors through Control and built CLI', () => {
             ...(h.failures[0]!.detail === undefined ? {} : { detail: h.failures[0]!.detail }) } })
         expect(reply.error.logId).toEqual(expect.any(String))
         expect(h.failures[0]!.message.length).toBeGreaterThan(0)
-        expect(h.requests[0]!.text).toBe('  original message\n第二行  ')
-        expect(h.requests[0]!.message?.body).toBe(h.requests[0]!.text)
+        expect(h.requests[0]!.envelope.body).toBe('  original message\n第二行  ')
         expect(h.requests[0]!.caller).toMatchObject({ agentSessionId: 'receipt-agent', capability: expect.any(String) })
-        expect(h.requests[0]!.message.sender).toEqual({ kind: 'agent-session', agentSessionId: 'receipt-agent' })
+        expect(h.requests[0]!.envelope.sender).toEqual({ kind: 'agent-session', agentSessionId: 'receipt-agent' })
         expect(h.owner.agentSession('receipt-agent')).toEqual(beforeSession)
         expect((await readFile(h.store.path)).equals(beforeFile)).toBe(true)
         expect(h.writes).toEqual([])
@@ -284,13 +277,13 @@ describe('public Prompt errors through Control and built CLI', () => {
         const original = await new DurableAgentMuxMessageQueue(join(h.root, 'messages.ndjson')).readByOperationId('original-operation')
         expect(JSON.parse((await h.send()).stdout)).toMatchObject({ ok: true, result: { messageId: 'original-message', delivery: { state: 'delivered' } } })
         expect(h.requests).toHaveLength(2)
-        expect(h.requests[1]!.message).toEqual(h.requests[0]!.message)
-        expect(h.requests[1]!.promptCondition).toEqual(h.requests[0]!.promptCondition)
+        expect(h.requests[1]!.envelope).toEqual(h.requests[0]!.envelope)
+        expect(h.requests[1]!.condition).toEqual(h.requests[0]!.condition)
         const delivered = await new DurableAgentMuxMessageQueue(join(h.root, 'messages.ndjson')).readByOperationId('original-operation')
         expect(delivered).toMatchObject({ envelope: original!.envelope, promptCondition: original!.promptCondition, execution: original!.execution, delivery: { state: 'delivered' } })
         const admitted = h.owner.agentSession('receipt-agent').promptCompletionAdmission
         expect(admitted).toMatchObject({ submissionId: 'original-message', acknowledged: true })
-        expect(h.writes).toEqual([{ operationId: admitted!.operationId, data: renderAgentMuxMessageEnvelope(h.requests[0]!.message) + '\r' }])
+        expect(h.writes).toEqual([{ operationId: admitted!.operationId, data: renderAgentMuxMessageEnvelope(h.requests[0]!.envelope) + '\r' }])
         expect(h.owner.agentSession('receipt-agent').run).toEqual(beforeSession.run)
         expect(h.stops).toEqual([])
         const inputCalls = h.inputCalls.length
