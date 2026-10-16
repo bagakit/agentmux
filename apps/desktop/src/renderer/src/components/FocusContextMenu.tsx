@@ -21,6 +21,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   open: boolean; context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void
 }) {
   const active = useWorkbenchPresentationActive()
+  const activeRef = useRef(active); activeRef.current = active
   const sessionId = context.id
   const actionOwnsFocus = useRef(false)
   const origin = useRef<HTMLElement | null>(null)
@@ -36,10 +37,10 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
       const rect = event.currentTarget.getBoundingClientRect()
       event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom }))
     }}>{children}</ContextMenu.Trigger>
-    <DocumentOverlayPortal component={ContextMenu.Portal}>
+    {open ? <DocumentOverlayPortal component={ContextMenu.Portal}>
       <ContextMenu.Content className="tab-context-menu focus-context-menu" data-agent-session-id={sessionId} collisionPadding={8}
         onCloseAutoFocus={event => {
-          if (!active) { event.preventDefault(); return }
+          if (!activeRef.current) { event.preventDefault(); return }
           const activeElement = document.activeElement
           const closing = event.target
           const laterFocus = activeElement instanceof HTMLElement && activeElement !== document.body &&
@@ -55,6 +56,6 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); restart.requestRestart(sessionId, context.name, origin.current) }}><ThemeActionRestartIcon size={14} /><span>Restart Session…</span></ContextMenu.Item>
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><ThemeActionStopIcon size={14} /><span>Stop Agent</span></ContextMenu.Item>
       </ContextMenu.Content>
-    </DocumentOverlayPortal>
+    </DocumentOverlayPortal> : null}
   </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}</> : null}</>
 }
