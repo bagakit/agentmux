@@ -43,6 +43,7 @@ import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { ReadPastedImage } from '@agentmux/client-ui/components/ConversationImage'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { Ruler } from './ConversationRuler'
 export { Ruler } from './ConversationRuler'
 import { ConversationRulerControls } from './ConversationRulerControls'
@@ -948,22 +949,15 @@ export function ActivityView({
   const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError || !readingWindow.historical && userMessageRead?.error)
   const emptyReadStatus = !hasUserMessages && !hasNativeRecords && !hasItems && ruler.items.length === 0 &&
     !earlierReadPending && (readPending || emptyReadFailed) ? (
-    <div className="activity-feed__empty-reading" data-read-state={emptyReadFailed ? 'interrupted' : 'pending'}
-      role="status" aria-live="polite" aria-busy={!emptyReadFailed || undefined}>
-      {!emptyReadFailed ? <div className="activity-feed__reading-landscape" aria-hidden="true">
-        <div className="activity-feed__reading-field">
-          <svg viewBox="0 0 1000 600" preserveAspectRatio="none" fill="none" stroke="currentColor">
-            {Array.from({ length: 9 }, (_, line) => <path key={line}
-              d={`M -240 ${line * 76 - 130} C 80 ${line * 76 - 270}, 330 ${line * 76 + 130}, 620 ${line * 76 - 25} S 1060 ${line * 76 - 100}, 1300 ${line * 76 + 40}`} />)}
-          </svg>
-        </div>
-        <div className="activity-feed__reading-sweep" />
-      </div> : null}
+    <FullPageLoadingSurface className="activity-feed__empty-reading" scope="region"
+      phase={emptyReadFailed ? 'failed' : 'loading'} eyebrow="Conversation reading"
+      title={emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'} detail="">
+      {!emptyReadFailed ? <div className="full-page-loading__light activity-feed__reading-light" aria-hidden="true" /> : null}
       <div className="activity-feed__reading-caption">
         <strong>{emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'}</strong>
         {emptyReadFailed ? <span>Retry the source above to continue reading.</span> : null}
       </div>
-    </div>
+    </FullPageLoadingSurface>
   ) : null
   // Reading navigation belongs to the message flow; the ruler keeps temporal facts only.
   const readingEntry = conversationReading && (readingWindow.hasMore || readingWindow.capturedHasMore || readingWindow.automaticReadError || readingWindow.hasNewer ||
