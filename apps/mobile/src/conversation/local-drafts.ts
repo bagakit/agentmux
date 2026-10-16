@@ -67,7 +67,8 @@ class SessionIntents<T> extends Map<string, T> {
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
   const drafts = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new SessionIntents<ResponseAttempt>(), questions = new SessionIntents<MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
-  const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false }
+  const state = { drafts, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, recordChanged: false,
+    get saveIssue() { return owner.snapshot().issue } }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
   let durableBaseline = baseline
   let originalRecord: DeviceWorkface = owner.snapshot().record

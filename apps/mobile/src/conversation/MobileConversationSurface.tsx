@@ -3,7 +3,7 @@ import { projectInputReceipt } from '@agentmux/client-ui/input-receipt-projectio
 import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
-import { mobileQuestionReplyState, reconcileMobileQuestionReplies } from './question-replies'
+import { mobileQuestionReplyState, reconcileMobileQuestionReplies, submitMobileQuestionReply } from './question-replies'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
@@ -703,8 +703,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               local.questionDrafts.set(questionReplyKey(agentSessionId, target), structuredClone(answers))
               void local.save().then(() => { if (mounted.current) redraw(value => value + 1) })
             }}
+            onQuestionReply={input => submitMobileQuestionReply(local, agentSessionId, pageClient ?? null, input,
+              () => { if (mounted.current) redraw(value => value + 1) })}
+            questionDraftNotice={local.notice ?? undefined}
             questionReplyRoute={session?.providerId ? client?.catalog?.().find(provider => provider.id === session.providerId)?.capabilities.asyncQuestionReply : undefined}
-            questionTerminalTarget={pageClient === client && !session?.nativeSourceObservation && session?.nativeHandle?.kind === 'provider' ? {
+            questionReplyTarget={pageClient === client && !session?.nativeSourceObservation && session?.nativeHandle?.kind === 'provider' ? {
               source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.run
             } : undefined}
             questionReplyContext={JSON.stringify([session?.hostId, agentSessionId, session?.run.runId, client?.runtimeOwnerIdentity?.()?.runtimeId])}
