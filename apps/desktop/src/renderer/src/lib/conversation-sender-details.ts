@@ -7,6 +7,7 @@ import { sessionPresentationById } from './session-presentation'
 import { scratchTopicKind, scratchTopicsForConfig, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
 import type { MoteConversationIdentity } from './mote-conversation-identity'
+import type { SpaceZoneBindings } from '../../../shared/space-addresses'
 
 /** Desktop appearance stays outside the shared UI's speaker identity contract. */
 export type FocusDescribeSpeaker = (speaker: ConversationSpeaker) => ReturnType<DescribeSpeaker> & { mote?: MoteConversationIdentity }
@@ -19,6 +20,7 @@ type SpeakerSnapshot = {
   config?: AppConfig | null
   scratchTopicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>
   spaceObjectIcons?: Readonly<SpaceIconOverrides>
+  spaceZoneBindings?: SpaceZoneBindings
 }
 
 /** The reading surface's identity dependencies, scoped to its actual speakers. */
@@ -74,7 +76,7 @@ export function createConversationSpeakerMetadataReader(snapshot: SpeakerSnapsho
       const topics = snapshot.scratchTopicSnapshots ? scratchTopicsForWorkspace(snapshot.scratchTopicSnapshots, sourceWorkspace) : null
       const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
       const target = sourceWorkspace && topicId && topic && !topic.readError && scratchTopicKind(topicId, topics) === 'mote'
-        ? topicSpaceIconTarget(sourceWorkspace, topic) : undefined
+        ? topicSpaceIconTarget(sourceWorkspace, topic, snapshot.spaceZoneBindings) : undefined
       const mote = target && sourceWorkspace && topic ? { workspaceId: sourceWorkspace.id, topicId: topic.id,
         objectKey: target.key, name: topic.title, icon: snapshot.spaceObjectIcons?.[target.key] ?? null } : undefined
       context = { mote, project: project ? { workspaceId: project.preferredWorkspaceId, name: project.name, path: project.repoPath,

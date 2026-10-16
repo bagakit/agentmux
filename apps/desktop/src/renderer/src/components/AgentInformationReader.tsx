@@ -7,6 +7,7 @@ import { WorkbenchDocumentContext } from '../lib/workbench-document'
 import { observeWorkbenchDocumentReturn, workbenchDocumentIdentity, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -21,15 +22,16 @@ import { useAppStore } from '../store'
 import { agentStateEnteredAt } from '../lib/agent-state-time'
 import { elapsedShort } from '../lib/project-activity-row'
 import { observeAgentSession } from '../lib/agent-observation'
+import { currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentInformationDetails, AgentInformationSummary, type AgentInformationTab } from './AgentInformationDetails'
 import { FocusContextStateMark } from './FocusContextState'
-import { AgentAvatar } from './AgentAvatar'
-import { WorkbenchTabGlyph, WorkbenchTopology } from './WorkbenchTopology'
+import { ConversationMessageAvatar } from './ConversationMessageAvatar'
+import { WorkbenchTabGlyph } from './WorkbenchTopology'
 import { getWindowOverlayHost, markWindowOverlayDismissal, wasWindowOverlayDismissed } from './WindowOverlayHost'
 import { getModalOverlayContainer, ModalAttachmentDismissal, MODAL_OVERLAY_SLOT_REMOVED } from '@agentmux/client-ui/components/Modal'
 
-const InfoIcon = semanticIconComponent('status.info')
+const DetailsIcon = semanticIconComponent('action.more')
 const CloseIcon = semanticIconComponent('action.close')
 const DragIcon = semanticIconComponent('action.drag')
 const ResizeIcon = semanticIconComponent('layout.resize-window')
@@ -52,7 +54,7 @@ function moveReadingHost(host: HTMLElement, destination: HTMLElement, before: El
   }
 }
 
-function FocusContextStateSummary({ context, explanationVisible }: { context: FocusContext; explanationVisible: boolean }) {
+function FocusContextStateSummary({ context }: { context: FocusContext }) {
   const session = useAppStore(state => state.sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId))
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
@@ -67,7 +69,7 @@ function FocusContextStateSummary({ context, explanationVisible }: { context: Fo
     : lastActive !== undefined ? `Last active ${elapsedShort(now - lastActive)} ago` : 'Activity time unknown'
   const duration = enteredAt !== undefined && context.bucket === 'attention' ? `${context.state === 'error' ? 'For' : 'Waiting'} ${time}` : time
   return <span className="focus-context-hover__state" aria-label={`${context.stateLabel} · ${duration}`} data-state-time={enteredAt !== undefined ? 'duration' : lastActive !== undefined ? 'last-active' : 'unknown'}>
-    <span className="focus-context-hover__state-label" title={context.stateLabel}><FocusContextStateMark context={context} />{!explanationVisible ? context.stateLabel : null}</span>
+    <span className="focus-context-hover__state-label"><FocusContextStateMark context={context} />{context.stateLabel}</span>
     <span className="focus-context-hover__state-time">{duration}</span>
   </span>
 }
@@ -80,12 +82,11 @@ const HeldReading = memo(function HeldReading({ request, enabled, available, fol
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin}`}>
         {context.recap.source === 'Last reply observation' ? COLLECTED_REPLY_TITLE : context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}
-        <span>{request.contentChanged ? 'Card content changed · Reading kept' : (context.recap.reading?.truncated ?? true) ? 'Excerpt at opening' : 'Observed at opening'}</span>
+        {request.contentChanged ? <span>Card content changed · Reading kept</span> : (context.recap.reading?.truncated ?? true) ? <span>Excerpt</span> : null}
       </small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} active={enabled} />
     </section> : !context.detailIsRecap && context.detailKind !== 'service' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
     {context.kind === 'agent' ? <AgentInputRecap request={request} enabled={enabled} available={available} follow={follow} /> : null}
-    <p className="agent-information-reader__end">End of this reading window <span>Earlier records remain in History.</span></p>
   </>
 })
 
@@ -225,14 +226,25 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     ? { ...agentContextForSession(session, undefined, context.name, context.workspace, context.topicId), lastActivityAt: context.lastActivityAt } : context,
   [visible, session, context, observationNow])
   const observation = session?.kind === 'agent' ? observeAgentSession(session, Date.now()) : undefined
+  const identityFacts = useAppStore(useShallow(state => ({ config: visible ? state.config : null,
+    topics: visible ? state.scratchTopicSnapshots : undefined, icons: visible ? state.spaceObjectIcons : undefined,
+    bindings: visible ? state.spaceZoneBindings : undefined })))
+  // Resolve only the exact held execution; a scalar SID or the current display
+  // Workspace cannot supply another Host's affiliation to this reader.
+  const affiliation = useMemo(() => session?.kind === 'agent' && identityFacts.config
+    ? currentConversationSpeakerMetadata(session.id, { sessions: [session], workspaces: identityFacts.config.workspaces,
+      config: identityFacts.config, agentNames: {}, scratchTopicSnapshots: identityFacts.topics ?? {}, spaceObjectIcons: identityFacts.icons ?? {}, spaceZoneBindings: identityFacts.bindings ?? {} }) : undefined,
+  [session?.id, session?.kind, session?.hostId, session?.workspacePath, identityFacts])
   const usage = session?.kind === 'agent' ? session.turnUsage : request.session?.kind === 'agent' ? request.session.turnUsage : undefined
   const sourceNotice = !sameSource ? 'Original Run or source is no longer confirmed. This reading is kept; new source data is not attached.'
     : request.bookmark && !readingSameSource ? 'Reading an earlier Run or source. Show latest to follow the current Agent.' : null
-  const service = observation?.reason && currentContext.bucket === 'idle' && currentContext.state !== 'disconnected' ? `${observation.reason === 'activity-stale' ? 'Work signal expired' : 'Current activity unconfirmed'} · Run ${observation.process}`
-    : !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
+  const routineObservation = observation?.reason && currentContext.bucket === 'idle' && currentContext.processState === 'running' &&
+    !currentContext.runUnobserved && currentContext.state !== 'disconnected'
+  const service = !routineObservation && !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
   const displayPath = usePathDisplay(), path = displayPath(context.workspacePath, context.hostId)
   const source = <>
     <h3>Status and source</h3><p>{currentContext.detail}</p>
+    {affiliation?.mote ? <p>Mote · {affiliation.mote.name}</p> : affiliation?.project ? <p>Project · {affiliation.project.name}</p> : <p>Project or Mote affiliation is not confirmed. The Executor identity is retained.</p>}
     {currentContext.detail !== context.detail ? <p>At opening: {context.detail}</p> : null}
     <dl className="agent-information-reader__source">
       <div><dt>Host</dt><dd>{request.bookmark?.hostId ?? context.hostId}</dd></div><div><dt>Session</dt><dd>{request.control?.agentSessionId ?? request.bookmark?.agentSessionId ?? context.id}</dd></div>
@@ -241,6 +253,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     </dl>
     {request.contentChanged ? <p>Original card content changed. Close and reopen its preview to read the latest observed text.</p> : null}
     <p>Text, positions and Goal links were captured for this preview. Status and usage follow the same confirmed Run and source.</p>
+    <p>This preview contains the latest observed reply and recent inputs. Earlier records remain in the Agent’s History.</p>
     {request.identity ? <section className="focus-context-hover__workbench" aria-label={`${request.identity.occurrenceCount} confirmed ${request.identity.occurrenceCount === 1 ? 'position' : 'positions'}`}>
       {request.identity.tabs.map(position => <section key={position.occurrenceKey ?? position.tabId} data-focus-occurrence-key={position.occurrenceKey}>
         <span className="focus-context-hover__position-glyph"><WorkbenchTabGlyph tab={position} /></span>
@@ -368,14 +381,16 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     }}>
     <header className="agent-information-reader__header" {...bookmarkWindow.header}>
       {request.bookmark ? <button type="button" data-bookmark-move className="agent-bookmark__move" aria-label="Move Agent bookmark" title="Drag title to move · Arrow keys move · Shift+Arrow keys resize" onKeyDown={bookmarkWindow.moveKey}><DragIcon size={14} aria-hidden="true" /></button> : null}
-      <span className="agent-information-reader__identity">{request.identity?.tabs.length
-        ? <WorkbenchTopology tabs={request.identity.tabs} interactive={false} enabled={false} />
-        : <AgentAvatar executorId={context.executorId} label={context.name} state={currentContext.state} providerId={context.providerId ?? undefined} size={24} visible={false} />}</span>
+      <span className="agent-information-reader__identity">{visible ? <ConversationMessageAvatar speaker={{ role: 'agent', id: context.id }} name={context.name}
+        executorId={context.executorId} providerId={context.providerId ?? undefined} project={affiliation?.project} mote={affiliation?.mote} size={32} /> : null}</span>
       <div className="agent-information-reader__heading"><small title={context.originAddress ?? path}>{context.workspaceName}</small><strong title={context.name}>{context.name}</strong></div>
-      {sameSource && visible ? <FocusContextStateSummary context={currentContext} explanationVisible={Boolean(service)} /> : <span className="focus-context-hover__state">Reading snapshot</span>}
+      <button type="button" className="agent-information-reader__status" title={currentContext.detail} aria-label={`${sameSource ? currentContext.stateLabel : 'Reading snapshot'} · Status and source`}
+        onPointerDown={event => { if (event.button === 0) event.preventDefault() }} onClick={() => showMetadata('source')}>
+        {sameSource && visible ? <FocusContextStateSummary context={currentContext} /> : <span className="focus-context-hover__state">Reading snapshot</span>}
+      </button>
     </header>
     {sourceNotice || service ? <div className="agent-information-reader__service" role={sourceNotice ? 'status' : undefined}>
-      <InfoIcon size={13} aria-hidden="true" /><p>{sourceNotice ?? service}</p><button type="button" onPointerDown={event => { if (event.button === 0) event.preventDefault() }} onClick={() => showMetadata('source')}>Source</button>
+      <p>{sourceNotice ?? service}</p><button type="button" onPointerDown={event => { if (event.button === 0) event.preventDefault() }} onClick={() => showMetadata('source')}>Source</button>
     </div> : null}
     {changedReading ? <div className="agent-information-reader__update" role="status">New Agent content <button type="button" onClick={() => { setReadingRequest(request); setReadingProtected(false) }}>Show latest</button></div> : null}
     <div className="agent-information-reader__body">
@@ -391,19 +406,19 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     {request.bookmark ? <button type="button" className="agent-bookmark__resize" aria-label="Resize Agent bookmark" title="Drag corner or use Arrow keys to resize" {...bookmarkWindow.resize}><ResizeIcon size={14} aria-hidden="true" /></button> : null}
     <footer className="agent-information-reader__footer" onPointerDown={event => { if (event.button === 0) event.preventDefault() }}>
       <button type="button" className="agent-information-reader__facts" onClick={() => tab ? showReading() : showMetadata('usage')}
-        aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
-        <InfoIcon size={14} aria-hidden="true" /><AgentInformationSummary usage={usage} goalLinks={request.goalLinks} />
+        title="Usage, Goals, messages and source" aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
+        <AgentInformationSummary usage={usage} goalLinks={request.goalLinks} /><DetailsIcon size={13} aria-hidden="true" />
       </button>
       {request.bookmark ? <button type="button" className="agent-bookmark__reset" onClick={bookmarkWindow.reset} title="Reset bookmark position and size" aria-label="Reset bookmark position and size"><ResetIcon size={13} aria-hidden="true" /></button> : null}
-      <button type="button" className="agent-information-reader__pin" aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Remove bookmark · P' : 'Pin Agent bookmark · P'}>
-        <PinIcon size={13} aria-hidden="true" />{request.pinned ? 'Pinned' : 'Pin'}
+      <button type="button" className="agent-information-reader__pin" aria-label={request.pinned ? 'Remove Agent bookmark' : 'Pin Agent bookmark'} aria-pressed={request.pinned} aria-keyshortcuts="P" onClick={togglePin} title={request.pinned ? 'Remove bookmark · P' : 'Pin Agent bookmark · P'}>
+        <PinIcon size={13} aria-hidden="true" />
       </button>
-      <button type="button" className="agent-information-reader__open" onClick={() => {
+      <button type="button" className="agent-information-reader__open" aria-label="Open Agent" title="Open Agent" onClick={() => {
         const original = useAppStore.getState().sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId)
         if (original?.control.hostId === context.hostId && (context.kind !== 'agent' || original.kind === 'agent' && original.control.agentSessionId === request.control?.agentSessionId)) {
           request.openWorkface(); agentInformationPreview.dismiss(request.token)
         } else showMetadata('source')
-      }}>Open Agent <OpenIcon size={13} aria-hidden="true" /></button>
+      }}><OpenIcon size={13} aria-hidden="true" /></button>
       <button type="button" className="agent-information-reader__close" onClick={() => close(true)} aria-label="Close Agent reading" title="Close · Esc"><CloseIcon size={15} aria-hidden="true" /></button>
     </footer>
   </div><ModalAttachmentDismissal active={attachedToModal} targetRef={panel} onEscapeKeyDown={escapeReading} /></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>, readingHost)
