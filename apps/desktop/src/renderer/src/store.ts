@@ -4862,58 +4862,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       for (const sessionId of Object.keys(get().agentSteerQueues)) void get().flushAgentSteerQueue(sessionId)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
-      // Cold-start browser rehydration. `restoreTab` is a pure presentation projection that emits a
-      // neutral browser shell (url/title from disk, transient fields defaulted); the WebContentsView
-      // that makes it live must be created here, where side effects legitimately live — the same seam
-      // the Agent recovery loop above uses. `api.browser.restore` cannot help on a cold start (it
-      // throws "Unknown released browser" — Main has no released entry after a process exit), so this
-      // goes through `create`, then `applyBrowserEvent` overwrites the defaulted transient fields with
-      // the real snapshot (navigationId etc.). This reverses the old "browser 面整面剥离" decision: the
-      // old comment's worry — that persisting a browser structure without a rebuild lifecycle ships a
-      // dead panel — was correct; what changed is that the lifecycle now exists (this loop).
-      //
-      // ponytail: serial `for...of` + `await`, one create at a time. Ceiling: N saved browsers ⇒ N
-      // sequential loadURLs, not N concurrent. Upgrade path if a user routinely keeps 10+ browser tabs
-      // and startup visibly drags: give BrowserPane a "create on first became-visible" seam so hidden
-      // tabs defer their create. Not built now — no measured need (YAGNI).
-      const browserRebuildFailures: string[] = []
-      const browserSurfaces = Object.values(get().tabs).flatMap(workbenchSurfaces)
-        .filter((surface) => surface.kind === 'browser')
-      let browserIndex = 0
-      for (const tab of Object.values(get().tabs)) {
-        for (const surface of workbenchSurfaces(tab)) {
-          if (surface.kind !== 'browser') continue
-          browserIndex += 1
-          set({ startupProgress: { step: 'browsers', current: browserIndex, total: browserSurfaces.length } })
-          try {
-            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId, surface.profileId || undefined, surface.mode, surface.viewport)
-            get().applyBrowserEvent({ type: 'updated', browser })
-          } catch (error) {
-            // Failure to acquire a native owner is not a user close. Keep the current durable Region
-            // and give its existing Retry a visible failure; never resurrect one closed while awaiting.
-            set((state) => {
-              const currentTab = state.tabs[tab.id]
-              if (!currentTab) return state
-              const currentSurface = currentTab.regions[surface.regionId]
-              if (currentSurface?.kind !== 'browser' || currentSurface.browserId !== surface.browserId) return state
-              return { tabs: { ...state.tabs, [tab.id]: { ...currentTab, regions: {
-                ...currentTab.regions,
-                [surface.regionId]: {
-                  ...currentSurface,
-                  loading: false,
-                  error: `Browser recovery failed: ${presentError(error)}. Retry to reopen this page.`
-                }
-              } } } }
-            })
-            browserRebuildFailures.push(`${surface.title || surface.url} (${presentError(error)})`)
-          }
-        }
-      }
-      if (browserRebuildFailures.length > 0) {
-        get().reportError(new Error(
-          `Some saved browser panes could not be reopened. Their Regions were retained; use Retry on the page: ${browserRebuildFailures.join('; ')}.`
-        ))
-      }
+      // Browser Regions are restored descriptions. Main acquires their original pages only
+      // for a visible presentation or an admitted public page operation.
       // A rejected initial snapshot used the saved Workbench as a temporary projection. Retry one
       // canonical membership read after the shell is visible so stale Terminal Regions get a real
       // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
@@ -5446,7 +5396,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   processState: matched?.processState ?? null }
               }
               case 'browser': return { ...base, kind: surface.kind, browserId: surface.browserId,
-                url: surface.url, title: surface.title, profileId: surface.profileId, mode: surface.mode, navigationId: surface.navigationId,
+                url: surface.url, title: surface.title, profileId: surface.profileId, mode: surface.mode,
+                ...(!surface.nativeOwnerDeferred && !surface.nativeOwnerUnavailable && surface.navigationId
+                  ? { navigationId: surface.navigationId } : { navigationId: null, nativeOwner: 'unconfirmed' as const }),
                 error: surface.error, loading: surface.loading }
               case 'file': return { ...base, kind: surface.kind, path: surface.path }
               case 'git': return { ...base, kind: surface.kind, scope: surface.scope, selection: surface.selection }

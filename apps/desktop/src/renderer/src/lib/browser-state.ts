@@ -35,11 +35,11 @@ export function reduceBrowserEvent(
       let regions = tab.regions
       for (const surface of Object.values(tab.regions)) {
         if (surface.kind !== 'browser' || surface.browserId !== event.browser.id) continue
-        if (!surface.nativeOwnerUnavailable && Object.entries(event.browser).every(([key, value]) => key === 'viewport'
+        if (!surface.nativeOwnerUnavailable && !surface.nativeOwnerDeferred && Object.entries(event.browser).every(([key, value]) => key === 'viewport'
           ? browserViewportsEqual(surface.viewport, event.browser.viewport)
           : Object.is(surface[key as keyof BrowserWorkbenchSurface], value))) continue
         if (regions === tab.regions) regions = { ...regions }
-        const { nativeOwnerUnavailable: _unavailable, privateSessionEnded, ...availableSurface } = surface
+        const { nativeOwnerUnavailable: _unavailable, nativeOwnerDeferred: _deferred, restoredViewportUnknown: _unknownViewport, privateSessionEnded, ...availableSurface } = surface
         regions[surface.regionId] = { ...availableSurface, ...event.browser, regionId: surface.regionId,
           ...(privateSessionEnded && event.browser.mode === 'private' && event.browser.url === 'about:blank' ? { privateSessionEnded } : {}) }
       }

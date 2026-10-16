@@ -118,15 +118,16 @@ export function BrowserPane(props: BrowserPaneProps) {
 }
 
 // Main connection state must survive a failed child tree and its local view retry.
-function useBrowserOwnerConnection({ tab, released = false, onControlConfirmation }: BrowserPaneProps) {
+function useBrowserOwnerConnection({ tab, visible, presentations = [], released = false, onControlConfirmation }: BrowserPaneProps) {
   const applyBrowserEvent = useAppStore(state => state.applyBrowserEvent)
   const reportError = useAppStore(state => state.reportError)
   const [restoring, setRestoring] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
   const [restoreAttempt, setRestoreAttempt] = useState(0)
   const nativeLifecycleRef = useRef<'present' | 'releasing' | 'released' | 'restoring'>(
-    released ? 'released' : 'present'
+    released || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable ? 'released' : 'present'
   )
+  const consumed = visible || presentations.some(presentation => presentation.visible)
   const lifecycleTokenRef = useRef(0)
   const recoveryInputs = useRef({ tab, released, onControlConfirmation })
   recoveryInputs.current = { tab, released, onControlConfirmation }
@@ -135,12 +136,14 @@ function useBrowserOwnerConnection({ tab, released = false, onControlConfirmatio
   // ordinary Browser updated event.  A token prevents a quick tab switch from committing a stale
   // restore after the policy has changed its mind.
   useEffect(() => {
-    const token = ++lifecycleTokenRef.current
     const { tab, onControlConfirmation } = recoveryInputs.current
+    // Only Main's exact unavailable fact retires a previously confirmed connection.
+    if (tab.nativeOwnerUnavailable && nativeLifecycleRef.current === 'present') nativeLifecycleRef.current = 'released'
     if (released) {
+      const token = ++lifecycleTokenRef.current
       setRestoring(false)
       onControlConfirmation?.(tab.regionId, true)
-      if (nativeLifecycleRef.current === 'released' || nativeLifecycleRef.current === 'releasing') return
+      if (tab.nativeOwnerDeferred || nativeLifecycleRef.current === 'released' || nativeLifecycleRef.current === 'releasing') return
       nativeLifecycleRef.current = 'releasing'
       void api.browser.release(tab.browserId)
         .then(() => {
@@ -155,7 +158,10 @@ function useBrowserOwnerConnection({ tab, released = false, onControlConfirmatio
         })
       return
     }
+    if (!consumed) return
+    if (restoreError !== null) return
     if (nativeLifecycleRef.current === 'present' || nativeLifecycleRef.current === 'restoring') return
+    const token = ++lifecycleTokenRef.current
     nativeLifecycleRef.current = 'restoring'
     onControlConfirmation?.(tab.regionId, true)
     setRestoreError(null)
@@ -183,18 +189,16 @@ function useBrowserOwnerConnection({ tab, released = false, onControlConfirmatio
       setRestoring(false)
       setRestoreError(presentError(error))
     })
-    return () => {
-      // Invalidate only this UI observation. Main still owns the request and original page.
-      lifecycleTokenRef.current += 1
-    }
-  }, [applyBrowserEvent, released, reportError, restoreAttempt, tab.browserId])
+    // Hiding this consumer does not cancel Main's request or abandon its result.
+    // The unmount cleanup below ends only this observation.
+  }, [applyBrowserEvent, consumed, released, reportError, restoreAttempt, tab.browserId, tab.nativeOwnerUnavailable])
 
   useEffect(() => () => {
     lifecycleTokenRef.current += 1
     recoveryInputs.current.onControlConfirmation?.(recoveryInputs.current.tab.regionId, false)
   }, [])
 
-  return { restoring, restoreError, nativeLifecycleRef, retryConnection: () => setRestoreAttempt(attempt => attempt + 1) }
+  return { restoring, restoreError, nativeLifecycleRef, retryConnection: () => { setRestoreError(null); setRestoreAttempt(attempt => attempt + 1) } }
 }
 
 function BrowserPaneOwner(props: BrowserPaneProps) {
@@ -455,7 +459,7 @@ function BrowserPaneContent({
   const annotationOwnerPresent = useCallback(() => nativeLifecycleRef.current === 'present', [])
   const annotationSync = useBrowserAnnotationMarkers({
     browserId: tab.browserId, navigationId: tab.navigationId, annotations,
-    active: !released && !restoring && restoreError === null, nativeOwnerPresent: annotationOwnerPresent
+    active: !released && !restoring && !tab.nativeOwnerDeferred && !tab.nativeOwnerUnavailable && restoreError === null, nativeOwnerPresent: annotationOwnerPresent
   })
 
   useLayoutEffect(() => {
@@ -973,7 +977,7 @@ function BrowserPaneContent({
       entries={WORKBENCH_TAB_SPLIT_ACTIONS.map(action => ({ ...action, kind: 'split' as const,
         onSelect: () => onRegionSplit(action.direction) }))}
       Item={DropdownMenu.Item} Group={DropdownMenu.Group} Label={DropdownMenu.Label} /> : null
-    const connectionUnavailable = released || restoring || restoreError !== null
+    const connectionUnavailable = released || restoring || tab.nativeOwnerDeferred || tab.nativeOwnerUnavailable || restoreError !== null
     const blocked = connectionUnavailable || screenshot !== null || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
       Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>

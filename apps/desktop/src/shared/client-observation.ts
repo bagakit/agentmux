@@ -42,7 +42,9 @@ const region = z.discriminatedUnion('kind', [
     selection: z.object({ commitOid: id, parentOid: nullableId }).strict().nullable() }).strict(),
   z.object({ ...regionBase, kind: z.literal('git-diff'), comparison }).strict(),
   z.object({ ...regionBase, kind: z.literal('browser'), browserId: id, url: z.string(), title: z.string(),
-    profileId: z.string().nullable(), mode: z.enum(['normal', 'private']).optional(), navigationId: z.string(), error: z.string().nullable(), loading: z.boolean() }).strict()
+    profileId: z.string().nullable(), mode: z.enum(['normal', 'private']).optional(), navigationId: id.nullable(),
+    nativeOwner: z.literal('unconfirmed').optional(), error: z.string().nullable(), loading: z.boolean() }).strict()
+    .refine(region => (region.nativeOwner === 'unconfirmed') === (region.navigationId === null), 'An unconfirmed Browser owner has no confirmed navigation identity.')
 ])
 export const desktopWorkbenchObservationSchema = z.object({
   loading: z.boolean(),
