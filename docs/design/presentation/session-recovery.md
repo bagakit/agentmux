@@ -138,6 +138,8 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共享 Region �
 
 ## 确认与任务弹层的统一品质
 
+“Restart Session…”作为 Agent 原操作菜单中的明确动作，与 Resume 区分。复用现有确认面，说明会中断当前工作、恢复同一会话且不重发旧输入；取消不产生生命周期动作。未收口的原重启显示真实反馈，提供检查原操作，只有 Core 明确允许时才重试同一请求，不因对话框关闭、页面重开或回执丢失创建另一次重启。准确目标、操作身份与恢复义务仅见[显式重启会话](../behavior/session-recovery.md#显式重启会话)。
+
 用户认为 Stop Agent Session 弹窗「太土」，希望类似界面都更加现代、精致、简洁、紧凑。操作与状态真源仅见交互 SSOT[《Stop Agent Session 与同类弹窗的统一品质》](../behavior/session-recovery.md#stop-agent-session-与同类弹窗的统一品质)。
 
 - 弹层沿 Graphite / Mint 与共享[《弹层作用域与层级》](shared-rules.md#弹层作用域与层级)的实色内容材质、细微中性高光与柔和阴影，遮罩保留原工作面的空间关系。明暗两主题均以文字和操作清晰度为先，不使用夸张彩色光圈、厚边框、警告图标独立卡或卡片套卡片来制造层次。
