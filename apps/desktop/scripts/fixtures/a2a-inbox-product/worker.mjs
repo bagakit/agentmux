@@ -26,7 +26,7 @@ const originalConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label
   executors: { proof: { providerId: 'codex', label: 'Synthetic native protocol', command: executable, args: [],
     env: { HOME: process.env.HOME, CODEX_HOME: nativeHome, AGENTMUX_A2A_PROOF_DIRECTORY: controls }, injectAgentMuxGuide: true } },
   workspaces: [{ id: 'proof-workspace', name: 'A2A private workspace', hostId: 'local', path: workspace, kind: 'folder' }],
-  appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
+  appearance: { appAppearance: 'dark', terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify(originalConfig))
 const children = new Set(), sessions = [], frames = [], cliCalls = []
 const facts = { frames, chain: { scenarios: [], cliCalls, readEffects: [] }, mailbox: {}, restart: {}, cleanup: { userRunTouched: false, processesReaped: false },
