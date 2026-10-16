@@ -224,6 +224,7 @@ it('preserves the actual short preview dimensions through pin, drag and content 
 it('changes size only through the explicit corner and ignores another pointer cancellation', async () => {
   await open(); const original = await pin(), handle = original.querySelector('.agent-bookmark__resize')!
   await pointer(handle, 'pointerdown', 7, 100, 100); await pointer(handle, 'pointermove', 7, 160, 180)
+  await act(async () => new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())))
   await pointer(handle, 'pointercancel', 8, 160, 180); await pointer(handle, 'lostpointercapture', 8, 160, 180)
   await pointer(handle, 'pointerup', 7, 160, 180)
   expect(agentBookmarks.get().bookmarks[0]!.bounds).toMatchObject({ width: 520, height: 252 })
