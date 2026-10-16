@@ -70,6 +70,19 @@ comma-separated URI-encoded IDs) for its existing extracted descendants. Its roo
 on the source include. Preserve these old addresses there; do not copy the forwarding declaration
 to new occurrences. No paragraph IDs are invented to stand in for the shared file itself.
 Each create/source/destination outcome is separate; this is not an atomic cross-file commit.
+To undo saved include occurrences, use amux file share undo --input JSON with
+{destination: the complete proposed file.write save, referenceIds:[removedSavedReferenceID],
+preserveNoteIds?: known dirty/unresolved documents and their bound target IDs}. Preserve all other
+ordinary proposed edits. The original owner checks insertion history, managed Note references and
+the native creation generation; it restores the source and collects only an unused unchanged file.
+Known dirty IDs only veto collection; they never certify complete scope. Existing uses or unknown
+evidence retain the shared Markdown with a reason. Source restoration and deletion have separate
+receipts; partial results preserve every applied stage and never replay an unconfirmed delete.
+Inspect that same undo with {mode:"undo",request:ORIGINAL_UNDO_PARAMS}. A known terminal
+partial undo preserves the saved draft and permits further ordinary editing; unknown phases
+keep the original request. Combine new promotions and removed uses in one file.share request
+with undoReferenceIds and optional preserveNoteIds; do not split the complete draft into two saves.
+
 Inspect with amux file share inspect --input JSON: {mode:"request",request:ORIGINAL_SHARE_PARAMS}
 retains the original batch, or {mode:"shared",shared:FILE_READ_PARAMS} checks one discovered
 Markdown file's trusted creation and source/destination history without needing the original

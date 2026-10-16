@@ -5,18 +5,33 @@ import type { NoteResource, NotebookActor } from './notebook-catalog.js'
 
 export type NoteHistoryStatus = 'prepared' | 'committed' | 'unconfirmed' | 'not-applied'
 /** Immutable selection behind a restoration or selective undo, held in the original event. */
-export type NoteHistorySource = { eventId: string } | { batchId: string; lastEventId: string }
+export type NoteHistorySource = { eventId: string } | { batchId: string; lastEventId: string } | { kind: 'shared'; eventIds: string[]; referenceIds: string[] }
+/** Kernel facts from the same successful publication, never caller supplied. */
+export type NoteFileWitness = { device: string; inode: string; size: string; ctimeNs: string; mtimeNs: string }
+export function parseNoteFileWitness(value: unknown): NoteFileWitness {
+  const v = value as NoteFileWitness
+  if (!v || typeof v !== 'object' || Array.isArray(v) || Object.keys(v).length !== 5 || !['device', 'inode', 'size', 'ctimeNs', 'mtimeNs'].every(key => typeof v[key as keyof NoteFileWitness] === 'string' && /^-?[0-9]+$/u.test(v[key as keyof NoteFileWitness]))) throw new AgentMuxError('The original native file generation is invalid.', 'NOTE_HISTORY_INVALID')
+  return structuredClone(v)
+}
 /** An edit event is not a body digest: restoring identical bytes is another event. */
-export type NoteHistoryRecord = {
+type NoteHistoryCommon = {
   eventId: string; sequence: number; batchId: string; noteId: string; resource: NoteResource; originalResource: NoteResource
   status: NoteHistoryStatus; at: number; actor: NotebookActor | null; parentEventId: string | null
-  operation: 'edit' | 'restore' | 'undo'; requestFingerprint: string
-  source?: NoteHistorySource
-  baseRevision: string | null; revision: string; beforeContent: string | null; content: string
+  requestFingerprint: string; fileWitness?: NoteFileWitness
   provenance?: NoteProvenanceWrite
 }
+export type NoteHistoryWriteRecord = NoteHistoryCommon & {
+  operation: 'edit' | 'restore' | 'undo'; source?: NoteHistorySource
+  baseRevision: string | null; revision: string; beforeContent: string | null; content: string
+}
+/** A deletion has no after body or revision. The former body remains independently readable history. */
+export type NoteHistoryDeleteRecord = NoteHistoryCommon & {
+  operation: 'delete'; source: { eventId: string }
+  baseRevision: string; revision: null; beforeContent: string; content: null; retainedPath?: string
+}
+export type NoteHistoryRecord = NoteHistoryWriteRecord | NoteHistoryDeleteRecord
 export type NoteHistoryEntry = Omit<NoteHistoryRecord, 'requestFingerprint' | 'beforeContent' | 'content' | 'provenance'> & {
-  beforeContent?: string | null; content?: string; provenance?: NoteProvenanceWrite
+  beforeContent?: string | null; content?: string | null; provenance?: NoteProvenanceWrite
 }
 export type NoteHistoryQuery = {
   noteId: string; resource: NoteResource; limit?: number; before?: number; eventId?: string; includeContent?: boolean
@@ -40,7 +55,8 @@ export function parseNoteHistorySource(operation: NoteHistoryRecord['operation']
   }
   if (!source || typeof source !== 'object' || Array.isArray(source)) invalid('The original history action source is required.')
   const value = source as Record<string, unknown>, fields = Object.keys(value)
-  if (operation === 'restore' && fields.length === 1 && fields[0] === 'eventId' && id(value.eventId)) return { eventId: value.eventId }
+  if ((operation === 'restore' || operation === 'delete') && fields.length === 1 && fields[0] === 'eventId' && id(value.eventId)) return { eventId: value.eventId }
+  if (operation === 'undo' && value.kind === 'shared' && fields.length === 3 && fields.every(key => ['kind', 'eventIds', 'referenceIds'].includes(key)) && Array.isArray(value.eventIds) && Array.isArray(value.referenceIds) && value.eventIds.length > 0 && value.referenceIds.length > 0 && value.eventIds.every(id) && value.referenceIds.every(id) && new Set(value.eventIds).size === value.eventIds.length && new Set(value.referenceIds).size === value.referenceIds.length) return { kind: 'shared', eventIds: [...value.eventIds], referenceIds: [...value.referenceIds] }
   if (operation === 'undo' && fields.length === 2 && fields.every(key => key === 'batchId' || key === 'lastEventId') && id(value.batchId) && id(value.lastEventId)) return { batchId: value.batchId, lastEventId: value.lastEventId }
   return invalid('The original history source does not match its operation.')
 }
@@ -58,11 +74,13 @@ export function parseNoteHistoryRecord(value: NoteHistoryRecord): NoteHistoryRec
   noteProvenanceResourceKey(value.originalResource)
   if (![value.eventId, value.batchId, value.requestFingerprint].every(id) || value.parentEventId !== null && (!id(value.parentEventId) || value.parentEventId === value.eventId) || !Number.isSafeInteger(value.sequence) || value.sequence < 0 ||
       !Number.isSafeInteger(value.at) || value.at < 0 || !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(value.status) ||
-      !['edit', 'restore', 'undo'].includes(value.operation) || typeof value.content !== 'string' || noteHistoryRevision(value.content) !== value.revision ||
+      !['edit', 'restore', 'undo', 'delete'].includes(value.operation) || (value.operation === 'delete' ? value.content !== null || value.revision !== null || value.beforeContent === null : typeof value.content !== 'string' || noteHistoryRevision(value.content) !== value.revision) ||
       (value.beforeContent === null ? value.baseRevision !== null : typeof value.beforeContent !== 'string' || noteHistoryRevision(value.beforeContent) !== value.baseRevision)) invalid('The original history event, body or baseline cannot be confirmed.')
   const source = parseNoteHistorySource(value.operation, value.source)
-  if (source && ('eventId' in source ? source.eventId : source.lastEventId) === value.eventId) invalid('A history action cannot select its own new event.')
+  if (source && ('eventId' in source ? source.eventId === value.eventId : 'lastEventId' in source ? source.lastEventId === value.eventId : source.eventIds.includes(value.eventId))) invalid('A history action cannot select its own new event.')
   if (value.actor !== null && (!['user', 'agent', 'device'].includes(value.actor.kind) || !id(value.actor.id))) invalid('The original history actor is invalid.')
+  if (value.fileWitness !== undefined) parseNoteFileWitness(value.fileWitness)
+  if (value.operation === 'delete' && (value.retainedPath !== undefined && !id(value.retainedPath))) invalid('The retained deletion claim path is invalid.')
   if (value.provenance !== undefined) {
     const provenance = parseNoteProvenanceWrite(value.provenance)
     if (provenance.noteId !== value.noteId || provenance.revision !== value.revision || noteProvenanceResourceKey(provenance.resource) !== noteProvenanceResourceKey(value.resource)) invalid('History attribution belongs to another original body.')

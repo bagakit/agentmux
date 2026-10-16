@@ -222,7 +222,8 @@ display Tab/Region. file read/ls access resources; file open/view access present
 does not save or overwrite a file. Inspect the original view and preserve unsaved user drafts.
 
 Pin file write/create to the original resource and observed revision; retain the original result. A save
-request is not a confirmed disk write; partial or unknown results remain unconfirmed. Upload
+request is not a confirmed disk write. Partial results certify only their explicitly confirmed
+stages; unknown stages remain unconfirmed. Upload
 and build operations have their own retained identities and inspect/cancel paths. Inspect the
 same upload/build after a lost reply instead of issuing a new logical operation. Formatting
 and build output do not certify a user's acceptance. Wrong targets reject only that request;
@@ -235,6 +236,12 @@ file.share for exclusive shared creation, original source replacement and destin
 Keep each original operation and bytes after unknown; file share inspect reads the original
 per-file history and current observations separately. A current matching file cannot certify
 an earlier lost receipt. Never manufacture a second body/relationship store.
+For removing saved shared include occurrences while preserving ordinary draft edits, use
+amux file share undo --help; inspect {mode:"undo",request:ORIGINAL_UNDO_PARAMS} after unknown.
+The original owner separately reports source restoration, retained shared files and deletion;
+keep known partial stages and never retry an unconfirmed deletion. Known terminal partial
+undo preserves the saved draft and permits further ordinary editing; unknown phases retain the
+same original request. Combine new promotions and removed uses with undoReferenceIds in file.share.
 For saved-version recovery or actor-batch undo, read amux file restore --help or amux file undo --help.
 Only for Note links, attribution or history, read amux notebook --skill. Unknown edits never authorize automatic replay.
 

@@ -1,5 +1,5 @@
 import { readNoteMarkdownHeader, rewriteNoteMarkdownTitle } from '@agentmux/core/note-format'
-import { noteHistoryRevision, type NoteHistoryRecord } from '@agentmux/core/note-history'
+import { noteHistoryRevision, type NoteHistoryWriteRecord } from '@agentmux/core/note-history'
 import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
 import { noteTitleEventId, noteTitleIntentFingerprint, parseNoteTitleIntent,
   type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle } from '@agentmux/core/note-title'
@@ -17,6 +17,7 @@ export class NoteTitleFileWriter {
     try {
       const original = await this.history.readHistoryOperation(noteTitleEventId(operationId))
       if (!original) return { status: 'absent', operationId }
+      if (original.operation !== 'edit') return { status: 'different-operation', operationId, reason: 'The original event is not a title edit.' }
       const header = readNoteMarkdownHeader(original.content)
       if (original.operation !== 'edit' || !original.actor || header.status !== 'valid' || header.title === undefined || header.noteId !== original.noteId) return { status: 'different-operation', operationId, reason: 'The original event does not confirm this title intent.' }
       const intent: NoteTitleIntent = { operationId, noteId: original.noteId, resource: original.originalResource, title: header.title, actor: original.actor }
@@ -54,7 +55,7 @@ export class NoteTitleFileWriter {
       return original
     }
     if (!this.matches(workspace, intent.resource)) return { status: 'unavailable', operationId: intent.operationId, reason: 'The original file mapping changed. Its body and title are retained.' }
-    let event: NoteHistoryRecord | undefined
+    let event: NoteHistoryWriteRecord | undefined
     try {
       const read = await this.files.read(workspace, intent.resource.path)
       if (read.status !== 'read') throw new Error(read.status === 'error' ? read.message : 'The current original Note file is unavailable.')
@@ -66,7 +67,7 @@ export class NoteTitleFileWriter {
       const eventId = noteTitleEventId(intent.operationId)
       // Only read the shared schema for existing stable IDs. Header changes never
       // canonicalize a body, mint identities, or attribute its blocks to the renamer.
-      let provenance: NoteHistoryRecord['provenance']
+      let provenance: NoteHistoryWriteRecord['provenance']
       const parsed = readNoteDocument(read.document.content)
       if (parsed.status === 'valid') {
         const blockIds: string[] = []
@@ -80,12 +81,12 @@ export class NoteTitleFileWriter {
       event = await this.history.recordHistory({ eventId, batchId: eventId, sequence: 0, noteId: intent.noteId, resource: intent.resource,
         originalResource: intent.resource, status: 'prepared', operation: 'edit', actor: intent.actor, at: Date.now(),
         requestFingerprint: noteTitleIntentFingerprint(intent), parentEventId: previous?.status === 'committed' && previous.revision === read.document.revision ? previous.eventId : null,
-        baseRevision: read.document.revision, beforeContent: read.document.content, revision: noteHistoryRevision(content), content, ...(provenance ? { provenance } : {}) })
+        baseRevision: read.document.revision, beforeContent: read.document.content, revision: noteHistoryRevision(content), content, ...(provenance ? { provenance } : {}) }) as NoteHistoryWriteRecord
       let result: Awaited<ReturnType<WorkspaceFiles['write']>>
       try { result = await this.files.write(workspace, { path: intent.resource.path, expectedRevision: read.document.revision, content }) }
       catch (error) { result = { status: 'unknown', code: 'FILE_WRITE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } }
       const status = result.status === 'written' && result.revision === event.revision ? 'committed' : result.status === 'conflict' || result.status === 'error' ? 'not-applied' : 'unconfirmed'
-      event = await this.history.recordHistory({ ...event, status })
+      event = await this.history.recordHistory({ ...event, status }) as NoteHistoryWriteRecord
       return { status: 'recorded', intent, resource: event.resource, revision: event.revision, history: { status, eventId: event.eventId, batchId: event.batchId } }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)

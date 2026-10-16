@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { noteHistoryRevision, parseNoteHistorySource, type NoteHistorySnapshot } from './note-history.js'
+import { noteHistoryRevision, parseNoteFileWitness, parseNoteHistorySource, type NoteHistorySnapshot } from './note-history.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite } from './note-provenance.js'
 import type { NoteResource, NotebookActor } from './notebook-catalog.js'
 import { parseFileReadParams, parseFileReadResult, type FileReadParams, type FileReadResource, type FileReadUnknown } from './public-rpc-files.js'
@@ -63,23 +63,25 @@ export function parseFileHistoryResult(value: unknown, params: FileHistoryParams
   const events = new Map<string, { batchId: string; actor: unknown; at: number }>()
   let previous = params.before ?? Infinity
   for (const raw of r.entries) {
-    const entry = rpcRecord(raw, ['eventId', 'sequence', 'batchId', 'parentEventId', 'noteId', 'resource', 'originalResource', 'status', 'at', 'actor', 'operation', 'source', 'baseRevision', 'revision', ...(params.includeContent ? ['beforeContent', 'content', 'provenance'] : [])], code)
+    const entry = rpcRecord(raw, ['eventId', 'sequence', 'batchId', 'parentEventId', 'noteId', 'resource', 'originalResource', 'status', 'at', 'actor', 'operation', 'source', 'baseRevision', 'revision', 'fileWitness', 'retainedPath', ...(params.includeContent ? ['beforeContent', 'content', 'provenance'] : [])], code)
     text(entry.eventId, code); text(entry.batchId, code); count(entry.sequence, code); count(entry.at, code); actor(entry.actor, code)
     if (entry.parentEventId !== null) text(entry.parentEventId, code)
     if (entry.parentEventId === entry.eventId) invalid('A history event cannot be its own parent.', code)
     if (entry.noteId !== params.noteId || events.has(entry.eventId) || Number(entry.sequence) >= previous || params.eventId !== undefined && entry.eventId !== params.eventId ||
-        !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(entry.status as string) || !['edit', 'restore', 'undo'].includes(entry.operation as string)) invalid('The original Note history event, ordering or status is invalid.', code)
+        !['prepared', 'committed', 'unconfirmed', 'not-applied'].includes(entry.status as string) || !['edit', 'restore', 'undo', 'delete'].includes(entry.operation as string)) invalid('The original Note history event, ordering or status is invalid.', code)
     try {
-      const source = parseNoteHistorySource(entry.operation as 'edit' | 'restore' | 'undo', entry.source)
-      if (source && ('eventId' in source ? source.eventId : source.lastEventId) === entry.eventId) throw Error('Self-selected history event')
+      const source = parseNoteHistorySource(entry.operation as import('./note-history.js').NoteHistoryRecord['operation'], entry.source)
+      if (source && ('eventId' in source ? source.eventId === entry.eventId : 'lastEventId' in source ? source.lastEventId === entry.eventId : source.eventIds.includes(entry.eventId as string))) throw Error('Self-selected history event')
     } catch { invalid('The original history action source is invalid.', code) }
     originalResource(entry.resource, params.expectedResource, code)
     try { noteProvenanceResourceKey(entry.originalResource as NoteResource) }
     catch { invalid('The historical original resource is invalid.', code) }
-    revision(entry.revision, code)
+    if (entry.operation === 'delete') { if (entry.revision !== null || entry.baseRevision === null) invalid('A deletion has no after revision.', code) } else revision(entry.revision, code)
+    if (entry.fileWitness !== undefined) parseNoteFileWitness(entry.fileWitness)
+    if (entry.retainedPath !== undefined) text(entry.retainedPath, code)
     if (entry.baseRevision !== null) revision(entry.baseRevision, code)
     if (params.includeContent) {
-      if (typeof entry.content !== 'string' || noteHistoryRevision(entry.content) !== entry.revision ||
+      if ((entry.operation === 'delete' ? entry.content !== null : typeof entry.content !== 'string' || noteHistoryRevision(entry.content) !== entry.revision) ||
           (entry.beforeContent === null ? entry.baseRevision !== null : typeof entry.beforeContent !== 'string' || noteHistoryRevision(entry.beforeContent) !== entry.baseRevision)) invalid('The historical content does not match its original revision.', code)
       if (entry.provenance !== undefined) {
         let provenance

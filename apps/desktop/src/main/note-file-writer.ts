@@ -49,7 +49,7 @@ export class NoteFileWriter {
       const previous = (await this.metadata.readHistory({ noteId, resource, limit: 1 })).entries[0]
       await this.metadata.recordHistory({ eventId, batchId: eventId, sequence: 0, noteId, resource, originalResource: resource, actor: context?.actor ?? null,
         parentEventId: previous?.status === 'committed' && previous.revision === current?.document.revision ? previous.eventId : null,
-        at: Date.now(), operation: action?.operation ?? 'edit', ...(action ? { source: action.source } : {}), requestFingerprint, status: 'not-applied', beforeContent: current?.document.content ?? null,
+        at: Date.now(), operation: action?.operation ?? 'edit', ...(action?.source ? { source: action.source } : {}), requestFingerprint, status: 'not-applied', beforeContent: current?.document.content ?? null,
         baseRevision: current?.document.revision ?? null, content: input.content, revision: noteHistoryRevision(input.content) })
       return { ...result, noteHistory: { status: 'not-applied', eventId, batchId: eventId } }
     } catch (error) { return { ...result, noteHistory: { status: 'unconfirmed', eventId, reason: error instanceof Error ? error.message : String(error) } } }
@@ -93,7 +93,10 @@ export class NoteFileWriter {
     const attributed = attributeNoteBlocks(before, normalize(proposed.note), context?.actor, Date.now())
     return this.writeOriginal(workspace, input, context, undefined, blockMetadata(attributed))
   }
+  /** Only the original shared owner may supply a verified inverse and trusted transferred creators. */
+  async writeSharedUndo(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context: FileWriteContext | undefined, action: NoteHistoryWriteAction, transferredBlocks?: Record<string, NoteBlockProvenance>): Promise<WorkspaceFileWriteResult> { return this.writeOriginal(workspace, input, context, action, transferredBlocks) }
   async write(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult> { return this.writeOriginal(workspace, input, context) }
+  private async writeOrdinaryFile(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput): Promise<WorkspaceFileWriteResult> { const result = await this.files.write(workspace, input); if (result.status !== 'written') return result; const { fileWitness: _internal, ...receipt } = result; return receipt }
   private async writeOriginal(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context?: FileWriteContext, action?: NoteHistoryWriteAction, transferredBlocks?: Record<string, NoteBlockProvenance>): Promise<WorkspaceFileWriteResult> {
     const submitted = { ...input }, enhanced = input.baseContent !== undefined || input.operationId !== undefined
     // Only the shared-file owner submits an operation-tagged exclusive creation.
@@ -101,7 +104,7 @@ export class NoteFileWriter {
     input = submitted
     if (!input.path.endsWith(NOTE_FILE_EXTENSION)) return enhanced
       ? { status: 'error', code: 'NOTE_SUBMISSION_UNSUPPORTED', message: 'Baseline-aware submissions apply to original Note Markdown files. Ordinary file revision saves remain available.' }
-      : this.files.write(workspace, input)
+      : this.writeOrdinaryFile(workspace, input)
     let candidate = readNoteDocument(input.content)
     let requestFingerprint: string | undefined, submissionBaseline: NoteDocument | undefined, submissionNoteId: string | undefined
     if (enhanced) {
@@ -194,8 +197,8 @@ export class NoteFileWriter {
         if (NOTE_BLOCK_TYPES.some(type => type === node.type) && node.attrs?.blockId == null) node.attrs = { ...node.attrs, blockId: randomUUID() }
         node.content?.forEach(identify)
       }
-      if (!action) identify(identified.content)
-      const prepared = action ? { note: identified, pending: [] } : prepareNoteWikiLinks(identified, randomUUID)
+      if (!action || action.draft) identify(identified.content)
+      const prepared = action && !action.draft ? { note: identified, pending: [] } : prepareNoteWikiLinks(identified, randomUUID)
       let linked = prepared.note
       if (prepared.pending.length && this.links) {
         try {
@@ -217,16 +220,16 @@ export class NoteFileWriter {
         }
         restoreCreators(next.content)
       }
-      if (transferredBlocks && creating) {
+      if (transferredBlocks && (creating || action)) {
         const restoreTransferred = (node: NoteDocument['content']) => {
           const original = typeof node.attrs?.blockId === 'string' ? transferredBlocks[node.attrs.blockId] : undefined
-          if (original) node.attrs = { ...node.attrs, provenance: original }
+          if (original) node.attrs = { ...node.attrs, provenance: creating ? original : { created: original.created, lastEdited: node.attrs?.provenance?.lastEdited ?? null } }
           node.content?.forEach(restoreTransferred)
         }
         restoreTransferred(next.content)
       }
       attributed = next
-      if (!action) content = serializeNoteDocument(next)
+      if (!action || action.draft) content = serializeNoteDocument(next)
       if (!context?.actor) reason = 'The original write actor is unknown; changed block attribution is unconfirmed.'
     }
     let journal: NoteHistoryRecord | undefined
@@ -243,7 +246,7 @@ export class NoteFileWriter {
         previous.actor !== null && actor !== null && previous.actor.kind === actor.kind && previous.actor.id === actor.id && at >= previous.at && at - previous.at <= NOTE_HISTORY_BATCH_WINDOW_MS
       historyIdentity = { eventId, batchId: sameActivity ? previous.batchId : eventId }
       journal = await this.metadata.recordHistory({ eventId, sequence: 0, batchId: sameActivity ? previous.batchId : eventId,
-        noteId, resource, originalResource: { ...resource }, status: 'prepared', at, actor, operation: action?.operation ?? 'edit', ...(action ? { source: action.source } : {}),
+        noteId, resource, originalResource: { ...resource }, status: 'prepared', at, actor, operation: action?.operation ?? 'edit', ...(action?.source ? { source: action.source } : {}),
         parentEventId: previous?.status === 'committed' && previous.revision === baseline?.document.revision ? previous.eventId : null,
         requestFingerprint: requestFingerprint ?? noteHistoryRevision(JSON.stringify([input.expectedRevision, input.content, actor])),
         baseRevision: baseline?.document.revision ?? null, beforeContent: baseline?.document.content ?? null,
@@ -273,7 +276,7 @@ export class NoteFileWriter {
       try {
         const status = result.status === 'written' && result.revision === journal.revision ? 'committed' : result.status === 'conflict' || result.status === 'error' ? 'not-applied' : 'unconfirmed'
         const provenance = attributed && result.status === 'written' ? { noteId: attributed.noteId, resource: journal.resource, revision: result.revision, blocks: blockMetadata(attributed) } : undefined
-        journal = await this.metadata!.recordHistory!({ ...journal, status, ...(provenance ? { provenance } : {}) })
+        journal = await this.metadata!.recordHistory!({ ...journal, status, ...(provenance ? { provenance } : {}), ...(result.status === 'written' && result.fileWitness ? { fileWitness: result.fileWitness } : {}) })
         noteHistory = { eventId: journal.eventId, batchId: journal.batchId, status }
         if (status === 'committed' && provenance) { noteProvenance = { ...provenance, status: 'recorded' }; reason = bodyReason }
       } catch (error) { noteHistory = { status: 'unconfirmed', eventId: journal.eventId, batchId: journal.batchId, reason: error instanceof Error ? error.message : String(error) } }
@@ -284,7 +287,9 @@ export class NoteFileWriter {
       try { noteTitleProjection = await this.metadata.refreshFileTitle(candidate.note.noteId, resource) }
       catch (error) { noteTitleProjection = { status: 'unconfirmed', noteId: candidate.note.noteId, resource, code: 'catalog-unavailable', message: error instanceof Error ? error.message : String(error) } }
     }
-    return result.status === 'written' ? { ...result, ...(enhanced || content !== input.content ? { content } : {}), noteHistory, ...(noteTitleProjection ? { noteTitleProjection } : {}),
-      ...(noteProvenance ? { noteProvenance } : {}), noteAttribution: reason ? { status: 'unconfirmed', reason } : { status: 'recorded' } } : { ...result, noteHistory }
+    if (result.status !== 'written') return { ...result, noteHistory }
+    const { fileWitness: _nativeWitness, ...publicResult } = result
+    return { ...publicResult, ...(enhanced || content !== input.content ? { content } : {}), noteHistory, ...(noteTitleProjection ? { noteTitleProjection } : {}),
+      ...(noteProvenance ? { noteProvenance } : {}), noteAttribution: reason ? { status: 'unconfirmed', reason } : { status: 'recorded' } }
   }
 }

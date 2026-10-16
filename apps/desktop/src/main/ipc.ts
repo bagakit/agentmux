@@ -1,3 +1,7 @@
+import { NoteFileMutations } from './note-file-mutations.js'
+import { parseFileShareUndoParams, parseFileShareUndoResult } from '@agentmux/core/files'
+import { NoteSharedUndoOwner } from './note-shared-undo-owner.js'
+import { NoteSharedFileDeleteOwner } from './note-shared-file-delete-owner.js'
 import { NoteSharedBlockOwner } from './note-shared-block-owner.js'
 import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult } from '@agentmux/core/files'
 import { RendererAllocationSampler } from './renderer-allocations.js'
@@ -901,10 +905,18 @@ export async function registerIpc(args: {
   const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
   let noteSharedBlocks: NoteSharedBlockOwner
-  const publicFiles = new FileReadOwner({ share: { share: (input, context) => noteSharedBlocks.share(input, context), inspectShare: (input, context) => noteSharedBlocks.inspectShare(input, context) }, files: { createShared: (owner, input, context, source) => notesStorageOwner.write(owner, input, actual => noteFileWriter.createShared(actual, input, context, source)), read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+  const publicFiles = new FileReadOwner({ share: { share: (input, context) => noteSharedBlocks.share(input, context), undoShare: (input, context) => noteSharedBlocks.undoShare(input, context), inspectShare: (input, context) => noteSharedBlocks.inspectShare(input, context) }, files: { writeSharedUndo: (owner, input, context, action, transferred) => notesStorageOwner.write(owner, input, actual => noteFileWriter.writeSharedUndo(actual, input, context, action, transferred)), createShared: (owner, input, context, source) => notesStorageOwner.write(owner, input, actual => noteFileWriter.createShared(actual, input, context, source)), read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     retiredZone: async id => (await spatialState.read())?.graph.resources['zone:' + id],
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
-  noteSharedBlocks = new NoteSharedBlockOwner({ files: publicFiles, historyOperation: notebookStore.readHistoryOperation.bind(notebookStore), withWriteLease: notebookStore.runWithWriteLease.bind(notebookStore) })
+  const noteFileMutations = new NoteFileMutations(files, notebookStore.runWithWriteLease.bind(notebookStore))
+  const sharedFileDeletion = new NoteSharedFileDeleteOwner(files, notebookStore)
+  const sharedUndo = new NoteSharedUndoOwner({ files, workspaces: () => config.workspaces, target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: notebookStore.readHistory.bind(notebookStore), operation: notebookStore.readHistoryOperation.bind(notebookStore), lease: notebookStore.runWithWriteLease.bind(notebookStore), delete: async (resource, input, context) => { const owner = titleWorkspace(resource); return owner ? notesStorageOwner.write(owner, input, actual => sharedFileDeletion.delete(actual, input, context)) : { status: 'unknown', code: 'NOTE_RESOURCE_CHANGED', message: 'The exact original shared deletion resource changed.' } } })
+  noteSharedBlocks = new NoteSharedBlockOwner({ undo: sharedUndo, files: { read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), createShared: publicFiles.createShared.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles) }, historyOperation: notebookStore.readHistoryOperation.bind(notebookStore), withWriteLease: notebookStore.runWithWriteLease.bind(notebookStore) })
+  handleWithEvent('files:shareUndoPublic', async (event, input: import('@agentmux/core').FileShareUndoParams) => {
+    requireTrustedSender('files:shareUndoPublic', event)
+    const params = parseFileShareUndoParams(input)
+    return parseFileShareUndoResult(await publicFiles.undoShare(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
+  })
   handleWithEvent('files:sharePublic', async (event, input: import('@agentmux/core').FileShareParams) => {
     requireTrustedSender('files:sharePublic', event)
     const params = parseFileShareParams(input)
@@ -1020,20 +1032,20 @@ export async function registerIpc(args: {
     await fileObservations.unobserve(key)
   })
   handle('files:create', async (workspaceId: string, input: CreateWorkspacePathInput) => {
-    await files.create(workspace(config, workspaceId), input)
+    await noteFileMutations.create(workspace(config, workspaceId), input)
   })
   handle('files:move', async (input: MoveWorkspacePathInput) => await nameAudit.run([{
     target: { kind: 'workspace-path', id: JSON.stringify([input.source.workspaceId, input.source.path]) },
     location: { workspaceId: input.source.workspaceId, cwd: workspace(config, input.source.workspaceId).path,
       hostId: workspace(config, input.source.workspaceId).hostId, destinationWorkspaceId: input.destination.workspaceId },
     before: input.source.path, requested: input.destination.path
-  }], () => files.move(workspace(config, input.source.workspaceId), workspace(config, input.destination.workspaceId), input),
+  }], () => noteFileMutations.move(workspace(config, input.source.workspaceId), workspace(config, input.destination.workspaceId), input),
   result => result.status === 'moved' ? { actual: input.destination.path } : {
     actual: result.finalLocation === 'source' ? input.source.path : null,
     status: result.finalLocation === 'source' ? 'failed' : 'unknown', reason: result.message
   }))
   handle('files:delete', async (workspaceId: string, path: string) => {
-    await files.delete(workspace(config, workspaceId), path)
+    await noteFileMutations.delete(workspace(config, workspaceId), path)
   })
   handle('files:openSystem', async (workspaceId: string, path: string) => {
     const error = await shell.openPath(await files.localPathForSystemOpen(workspace(config, workspaceId), path))
