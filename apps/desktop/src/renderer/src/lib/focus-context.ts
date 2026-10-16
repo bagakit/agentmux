@@ -21,6 +21,8 @@ import type { AgentObservation } from '@agentmux/core/agent-status'
 export const FOCUS_BUCKETS = ['attention', 'working', 'results', 'idle'] as const
 export type FocusBucket = typeof FOCUS_BUCKETS[number]
 export type FocusContext = {
+  /** Original semantic control, independent of a client's presentation id. */
+  control?: Extract<SessionSnapshot, { kind: 'agent' }>['control']
   id: string; name: string; detail: string; state: SessionSnapshot['status']['state']; stateLabel: string
   processState: SessionSnapshot['processState']
   runUnobserved?: boolean
@@ -216,7 +218,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
       ? 'running' : state
   const retainedRunIds = [...new Set(items.flatMap(item => item.activityState ? [item.activityState.run.runId] : []))]
   return { ...(retainedRunIds.length ? { retainedRunIds } : {}), id: session.id, ...(session.kind === 'agent' && (session.nativeHandle?.sessionId ?? session.nativeSessionId) ? { nativeSessionId: session.nativeHandle?.sessionId ?? session.nativeSessionId } : {}), name, detail, state: displayState, stateLabel, processState: session.processState, runUnobserved: session.runUnobserved === true, bucket, kind: session.kind, providerId: session.providerId,
-    ...(session.kind === 'agent' ? { executorId: session.executorId } : {}),
+    ...(session.kind === 'agent' ? { executorId: session.executorId, control: session.control } : {}),
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
     liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
     runId: session.control.run.runId, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }), workingEnteredAt: activitySemantic === 'active' && !(session.kind === 'agent' && session.currentActivity) ? workingEntryTime(session) : null, recap, detailIsRecap, detailKind,
@@ -233,7 +235,9 @@ function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot, now: nu
     && (a.kind === 'agent' ? a.currentActivity : undefined) === (b.kind === 'agent' ? b.currentActivity : undefined)
     && (a.kind !== 'terminal' || a.status.exitCode === b.status.exitCode && a.status.exitReason === b.status.exitReason)
     && activityEntryTime(a) === activityEntryTime(b)
-    && a.control.run.runId === b.control.run.runId && workingEntryTime(a) === workingEntryTime(b)
+    && a.control.run.runId === b.control.run.runId && a.control.hostId === b.control.hostId
+    && (a.control.kind === 'agent' ? a.control.agentSessionId : null) === (b.control.kind === 'agent' ? b.control.agentSessionId : null)
+    && workingEntryTime(a) === workingEntryTime(b)
     && agentStateEnteredAt(a, now) === agentStateEnteredAt(b, now)
     && (a.kind === 'agent' ? a.pendingInteraction : undefined) === (b.kind === 'agent' ? b.pendingInteraction : undefined)
 }

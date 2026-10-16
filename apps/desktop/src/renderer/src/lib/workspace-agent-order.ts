@@ -4,8 +4,8 @@ import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch
 import { workspaceAgentSessions } from './surface-tool-dock'
 
 export const EMPTY_WORKSPACE_AGENT_ORDER: readonly string[] = Object.freeze([])
-export function workspaceAgentOrderKey(session: { hostId: string; id: string }): string {
-  return JSON.stringify([session.hostId, session.id])
+export function workspaceAgentOrderKey(session: { hostId: string; id: string; control?: SessionSnapshot['control'] }): string {
+  return session.control?.kind === 'agent' ? JSON.stringify([session.control.hostId, session.control.agentSessionId]) : JSON.stringify([session.hostId, session.id])
 }
 function member(key: string): AgentMuxWorkspaceAgentOrderMember | null {
   try {
@@ -28,12 +28,13 @@ export function restoreWorkspaceAgentOrder(value: unknown): Record<string, strin
 /** Runtime activity and Run replacement never participate in list order. */
 export function orderedWorkspaceAgents<T extends { hostId: string; id: string; createdAt: number }>(sessions: readonly T[], order: readonly string[] = EMPTY_WORKSPACE_AGENT_ORDER): T[] {
   const ranks = new Map(order.map((key, index) => [key, index]))
+  const seen = new Set<string>()
   return [...sessions].sort((a, b) => {
     const ak = workspaceAgentOrderKey(a), bk = workspaceAgentOrderKey(b)
     const ar = ranks.get(ak), br = ranks.get(bk)
-    if (ar !== undefined || br !== undefined) return ar === undefined ? 1 : br === undefined ? -1 : ar - br
-    return a.createdAt - b.createdAt || (ak < bk ? -1 : ak > bk ? 1 : 0)
-  })
+    if (ar !== br) return ar === undefined ? 1 : br === undefined ? -1 : ar - br
+    return a.createdAt - b.createdAt || (ak < bk ? -1 : ak > bk ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+  }).filter(session => { const key = workspaceAgentOrderKey(session); if (seen.has(key)) return false; seen.add(key); return true })
 }
 type State = {
   config: AppConfig | null
@@ -57,7 +58,7 @@ export async function executeWorkspaceAgentOrder(ports: Ports, request: Request)
   const references = (keys: readonly string[]) => keys.flatMap(key => { const value = member(key); return value ? [value] : [] })
   const report = (outcome: AgentMuxWorkspaceAgentOrderReport['outcome'], issues: AgentMuxWorkspaceAgentOrderReport['issues'] = [], save: AgentMuxSpatialSave | null = null, stored = before): AgentMuxWorkspaceAgentOrderReport => ({
     scope: 'workspace-agent-list', displayWorkspaceId, storedOrder: references(stored),
-    effectiveOrder: orderedWorkspaceAgents(members, stored).map(value => ({ hostId: value.hostId, agentSessionId: value.id })),
+    effectiveOrder: references(orderedWorkspaceAgents(members, stored).map(workspaceAgentOrderKey)),
     changed: JSON.stringify(stored) !== JSON.stringify(before), outcome, save, issues
   })
   if (!workspace) return report('unknown', [{ step: 'target', code: 'WORKSPACE_LIST_UNCONFIRMED',
