@@ -508,7 +508,7 @@ it.each(['inflight', 'vault-committed'] as const)('a real process restart preser
     expect(selected(result(await cli(['setup', 'advance', '--input', '-'], originalInput)))).toEqual(selected(recovered))
   }
   expect(await readFile(join(root, 'native-effects.ndjson'), 'utf8')).toBe(effects)
-  expect(effects.trim().split('\n').map(line => JSON.parse(line).path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/app', '/developers/v1/app_role/permission/' + config.application.appId])
+  expect(effects.trim().split('\n').map(line => JSON.parse(line).path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app', '/developers/v1/app_role/permission/' + config.application.appId])
   expect(result<{ operation: unknown }>(await cli(['inspect', '--operation-id', 'inspection-child-save'])).operation).toEqual(saved)
   expect(result<{ connection: unknown }>(await cli(['inspect', '--connection', config.connectionId])).connection).toMatchObject({ config, revision: 1 })
 }, 60_000)

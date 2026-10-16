@@ -144,7 +144,7 @@ it('the real Settings task follows native scan and phone confirmation, then expl
   await click('[data-management-confirm]'); await waitStage('confirmed')
   const confirmed = setupCalls('connection.setup.advance').at(-1)!
   expect(confirmed.input).toEqual({ operationId: original.operationId, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: 'confirm' } })
-  expect(native.map(value => new URL(value.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+  expect(native.map(value => new URL(value.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
   expect(native[1]!.at).toBeGreaterThanOrEqual(view(started).challenge!.nextPollAt)
   await click('[data-management-console]'); expect(api.ui.openExternal).toHaveBeenCalledWith('https://open.feishu.cn/app')
   await leavePrivate()
@@ -308,7 +308,7 @@ it.each(['another target', 'Settings close'] as const)('a delayed real account r
   expect(dom.container.textContent).not.toContain(USER); expect(dom.container.textContent).not.toContain(TENANT)
   expect(stage()).not.toBe('account'); expect(panel()?.querySelector('[data-management-code]')).toBeNull()
   expect(setupCalls('connection.setup.advance').filter(call => (call.input as ConnectionSetupAdvance).decision.value === 'confirm')).toEqual([])
-  expect(native.map(value => new URL(value.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+  expect(native.map(value => new URL(value.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
   expectNoSetupWrites(); await unchanged(a); await unchanged(b)
 }, 30_000)
 
