@@ -344,12 +344,14 @@
 .log-turn__packet-text { margin-block: 0; }
 
 /* Authored context remains in its original record and is never an identity fact. */
-.log-turn__declared-context { margin-block: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
-.log-turn__declared-context > summary { display: inline-flex; align-items: center; gap: var(--sp-1); padding-block: var(--sp-1); list-style: none; cursor: pointer; }
-.log-turn__declared-context > summary::-webkit-details-marker { display: none; }
-.log-turn__declared-context > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
-.log-turn__declared-context[open] > summary svg { transform: rotate(90deg); }
-.log-turn__declared-context > pre { margin: var(--sp-2) 0; padding: var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+:is(.log-turn__declared-context, .log-turn__reminder) { margin-block: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+:is(.log-turn__declared-context, .log-turn__reminder) > summary { display: inline-flex; align-items: center; gap: var(--sp-1); padding-block: var(--sp-1); list-style: none; cursor: pointer; }
+:is(.log-turn__declared-context, .log-turn__reminder) > summary::-webkit-details-marker { display: none; }
+:is(.log-turn__declared-context, .log-turn__reminder) > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
+:is(.log-turn__declared-context, .log-turn__reminder)[open] > summary svg { transform: rotate(90deg); }
+:is(.log-turn__declared-context, .log-turn__reminder) > pre { margin: var(--sp-2) 0; padding: var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.log-turn__reminder { margin-block: var(--sp-2) 0; font-size: var(--fs-micro); }
+.log-turn__reminder > p { margin: var(--sp-1) 0; max-width: 72ch; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .log-turn__question-reply { min-width: 0; }
 .log-turn__question-reply > div + div { margin-block-start: var(--sp-3); }
 .log-turn__reply-detail { margin-block: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }

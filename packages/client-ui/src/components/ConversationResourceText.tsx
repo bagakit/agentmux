@@ -6,12 +6,13 @@ import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { ContentCopyButton } from './ContentCopyButton.js'
-import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
+import { type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 import { ConversationResourceFile } from './ConversationResourceFile.js'
+import { ConversationInputText } from './ConversationInputText.js'
 
 export function ConversationResourceText({ sources, active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
   openWorkspaceFile, readPastedImage, openHttpLink }: {
@@ -49,7 +50,8 @@ export function ConversationResourceText({ sources, active = true, part, partInd
   }
   const copyableText = content?.kind === 'text' ? content.text : content?.kind === 'resource' ? content.resourceType === 'image' || content.resourceType === 'file' ? part.reference : content.reference : null
   const text = content?.kind === 'text' ? sessionHistoryTextForReading(content) : ''
-  const prefix = inputMode && content?.kind === 'text' ? parseAgentMuxMessagePrefix(text) : null
+  const prefix = useMemo(() => inputMode && partIndex === 0 && content?.kind === 'text' ? parseAgentMuxMessagePrefix(text) : null,
+    [inputMode, partIndex, content, text])
   return <div className="conversation-resource-text">
     <div className="conversation-resource-text__controls">
       {!content ? <button type="button" onClick={() => { void load() }} disabled={loading}>
@@ -62,8 +64,7 @@ export function ConversationResourceText({ sources, active = true, part, partInd
     {error ? <p className="conversation-resource-text__error" role="alert">{error}</p> : null}
     {content?.kind === 'text' ? <div className="log-turn__text">
       {prefix?.sourceLabel ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
-      {prefix?.declaredContexts?.map((context, index) => <details key={index} className="log-turn__declared-context"><summary>Declared context</summary><pre>{context.raw}</pre></details>)}
-      <AgentMarkdown visible={active} content={prefix?.body ?? text} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
+      <ConversationInputText visible={active} text={text} prefix={prefix} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
         {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
     </div> :
       content?.kind === 'tool-call' || content?.kind === 'tool-result' ? <ConversationToolTrace sources={sources} copyIdentity={owner} part={content} workspaceRoot={workspaceRoot} /> :

@@ -14,6 +14,7 @@ import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from '
 import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 import { ConversationResourceText } from './ConversationResourceText.js'
+import { ConversationInputText } from './ConversationInputText.js'
 import { ConversationResourceFile } from './ConversationResourceFile.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
@@ -428,27 +429,12 @@ export function ConversationMessage({
               answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
-              {index === 0 ? prefix?.declaredContexts?.map((context, contextIndex) => <details key={contextIndex} className="log-turn__declared-context">
-                <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Declared context{prefix.declaredContexts!.length > 1 ? ` ${contextIndex + 1}` : ''}</summary>
-                <pre>{context.raw}</pre>
-              </details>) : null}
-              {index === 0 && prefix?.declaredContexts && prefix.body.length === 0 ? null : index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'
-              ? <MemoizedAgentMarkdown visible={active} key={packetIndex} className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
-                {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
-              : <blockquote key={packetIndex} className="log-turn__citation"><span className="log-turn__citation-from">{packetPart.from}</span>
-                {packetPart.reference ? <code className="log-turn__citation-ref">{packetPart.reference}</code> : null}
-                <MemoizedAgentMarkdown visible={active} className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
-                  {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown visible={active}
-              content={index === 0 && prefix
-                ? prefix.declaredContexts && !prefix.sourceLabel ? prefix.body.replace(/^(?:\r?\n){1,2}/u, '') : prefix.body
-                : sessionHistoryTextForReading(part)}
-              inputMode={inputMarkdown}
-              workspaceRoot={workspaceRoot}
-              homeDir={homeDir}
-              {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-              {...(readPastedImage ? { readPastedImage } : {})}
-              {...(openHttpLink ? { openHttpLink } : {})}
-            />}</div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
+              <ConversationInputText visible={active} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null}
+                inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
+                {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+                {...(readPastedImage ? { readPastedImage } : {})}
+                {...(openHttpLink ? { openHttpLink } : {})}
+              /></div> : part.kind === 'tool-call' || part.kind === 'tool-result' ? (
               <ConversationToolTrace sources={sources?.parts[index]} key={key} part={part} workspaceRoot={workspaceRoot}
                 copyIdentity={readingIdentity}
                 traceId={traceDisclosureKey(messageId, key)}
