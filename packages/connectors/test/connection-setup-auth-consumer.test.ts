@@ -161,10 +161,10 @@ it('compiled CLI and SDK consume one claimed HTTP per original action, then conf
     if (view.continuation?.stage !== 'account') expect(view.continuation?.account).toBeNull()
   }
   expect(view.continuation).toMatchObject({ stage: 'account', account: { userId: USER, tenantId: TENANT, userName: 'Fixture account', tenantName: 'Fixture enterprise' } })
-  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
   expect(new Set(steps).size).toBe(steps.length)
-  expect(claims).toHaveLength(5); expect(new Set(claims.map(claim => claim.attemptId)).size).toBe(1)
-  expect(new Set(claims.map(claim => claim.stepId)).size).toBe(5)
+  expect(claims).toHaveLength(6); expect(new Set(claims.map(claim => claim.attemptId)).size).toBe(1)
+  expect(new Set(claims.map(claim => claim.stepId)).size).toBe(6)
   const confirm = advanceInput(view, 'confirm-account'), calls = fetch.mock.calls.length
   view = result(await f.cli(['advance', '--input', '-'], confirm))
   expect(view.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
@@ -207,7 +207,7 @@ it('original v1 init and v2 authentication snapshots retain the exact saved appl
   for (const snapshot of completed) expect(snapshot).toMatchObject(scope)
   expect(completed.find(snapshot => snapshot.phase === 'account')).toMatchObject({ version: 2, phase: 'account', account: { userId: USER, tenantId: TENANT }, csrf: CSRF, consoleOrigin: 'https://open.feishu.cn' })
   for (const old of original) expect(privateRows(f.services.database!).find(row => row.operationId === old.operationId)?.bytes).toEqual(old.bytes)
-  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
   expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
@@ -256,10 +256,10 @@ it.each([1, 2] as const)('the Setup wrapper refuses foreign bindings in a v%s na
 }, 45_000)
 
 it('CookieJar selects domain, host, path and expiry cookies anew for each allowed origin and never forwards flow or CSRF headers', async () => {
-  const f = await fixture(), route = nativeRoute({ consoleRedirect: true }), requests: Array<{ url: string; cookies: string[] }> = []
+  const f = await fixture(), route = nativeRoute({ consoleRedirect: true }), requests: Array<{ url: string; cookies: string[]; referer: string | null }> = []
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = new URL(String(url)), headers = new Headers(init?.headers), cookies = (headers.get('cookie') ?? '').split(';').map(value => value.trim()).filter(Boolean).sort()
-    requests.push({ url: target.origin + target.pathname, cookies })
+    requests.push({ url: target.origin + target.pathname, cookies, referer: headers.get('referer') })
     expect(headers.get('x-csrf-token')).toBeNull()
     if (target.pathname !== '/accounts/qrlogin/polling') expect(headers.get('x-flow-key')).toBeNull()
     return await route(url, init)
@@ -267,12 +267,13 @@ it('CookieJar selects domain, host, path and expiry cookies anew for each allowe
   const view = await toAccount(f, await f.sdk.call('connection.setup.begin', f.input))
   expect(view.continuation?.account).toMatchObject({ userId: USER, tenantId: TENANT })
   expect(requests).toEqual([
-    { url: 'https://accounts.feishu.cn/accounts/qrlogin/init', cookies: [] },
-    { url: 'https://accounts.feishu.cn/accounts/qrlogin/polling', cookies: [`pollOnly=fixture-poll-cookie`, `session=${SESSION}`].sort() },
-    { url: 'https://accounts.feishu.cn/cross-login', cookies: [`crossOnly=fixture-cross-cookie`, `session=${SESSION}`].sort() },
-    { url: 'https://ask.feishu.cn/', cookies: [`session=${SESSION}`, 'web_session=fixture-console-session'].sort() },
-    { url: 'https://open.feishu.cn/app', cookies: [`session=${SESSION}`, 'web_session=fixture-console-session'].sort() },
-    { url: 'https://open.larkoffice.com/app', cookies: [] }
+    { url: 'https://accounts.feishu.cn/accounts/qrlogin/init', cookies: [], referer: null },
+    { url: 'https://accounts.feishu.cn/accounts/qrlogin/polling', cookies: [`pollOnly=fixture-poll-cookie`, `session=${SESSION}`].sort(), referer: null },
+    { url: 'https://accounts.feishu.cn/cross-login', cookies: [`crossOnly=fixture-cross-cookie`, `session=${SESSION}`].sort(), referer: null },
+    { url: 'https://ask.feishu.cn/', cookies: [`session=${SESSION}`, 'web_session=fixture-console-session'].sort(), referer: 'https://accounts.feishu.cn/cross-login' },
+    { url: 'https://ask.feishu.cn/', cookies: ['askOnly=fixture-ask-cookie', `session=${SESSION}`, 'web_session=fixture-console-session'].sort(), referer: 'https://ask.feishu.cn/' },
+    { url: 'https://open.feishu.cn/app', cookies: [`session=${SESSION}`, 'web_session=fixture-console-session'].sort(), referer: 'https://ask.feishu.cn/' },
+    { url: 'https://open.larkoffice.com/app', cookies: [], referer: 'https://open.feishu.cn/app' }
   ])
 }, 30_000)
 
@@ -399,7 +400,7 @@ it('only an active top-level console bootstrap supplies stable identity; display
     expect(view.continuation?.stage, 'bootstrap sample ' + index).toBe('unknown')
     expect(view.continuation?.account).toBeNull()
     expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
-    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
   }
   const fetch = vi.fn(nativeRoute({ html: bootstrap({ user_id: USER, tenant_id: TENANT }) })); vi.stubGlobal('fetch', fetch)
   const valid = await toAccount(f, await f.sdk.call('connection.setup.begin', { ...f.input, operationId: 'stable-id-without-display-names' }))
@@ -436,7 +437,8 @@ it('a Connection revision changed during console read preserves the original sav
     return await route(url, init)
   }); vi.stubGlobal('fetch', fetch)
   let view = await f.sdk.call('connection.setup.begin', f.input)
-  for (let step = 0; step < 3; step++) view = await advance(f, view)
+  // Poll, cross redirect, cross completion and fixed landing each own one request.
+  for (let step = 0; step < 4; step++) view = await advance(f, view)
   const input = advanceInput(view), inflight = f.sdk.call('connection.setup.advance', input)
   await Promise.race([entered.promise, inflight.then(value => { expect(value.continuation?.stage).toBe('account') })])
   const revised = await f.sdk.call('connection.configure', { operationId: 'auth-new-explicit-save', expectedRevision: 1, connection: { ...f.config, label: 'New saved bot revision' } })
@@ -530,7 +532,7 @@ it.each(['throw new Error("fixture-before-bootstrap");', 'for (;;) {}'] as const
   for (let step = 0; step < 8 && !['account', 'unknown'].includes(view.continuation!.stage); step++) view = await advance(f, view)
   expect(view.continuation).toMatchObject({ stage: 'unknown', account: null })
   expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
-  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+  expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
 }, 30_000)
 
 it.each(['https://open.feishu.cn/unqualified-bootstrap', 'https://open.feishu.cn/app?source=unqualified'] as const)('console redirects cannot promote an unsourced page %s to identity', async target => {
@@ -621,7 +623,7 @@ it('native literal IIFE encoding reaches exact account confirmation through comp
     expect(account.continuation?.account).toEqual(index === 0 ? { userId: USER, tenantId: TENANT, userName: 'Fixture IIFE account', tenantName: 'Fixture IIFE enterprise' } : { userId: USER, tenantId: TENANT })
     const confirmed = result(await f.cli(['advance', '--input', '-'], advanceInput(account, 'confirm-account')))
     expect(confirmed.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
-    expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
+    expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
     expect(JSON.stringify(confirmed.operation)).not.toContain(USER); expect(JSON.stringify(confirmed.operation)).not.toContain(TENANT)
   }
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
@@ -646,7 +648,7 @@ it('native identity survives harmless metadata and unrelated local window bindin
     expect(account.continuation?.account).toEqual({ userId: USER, tenantId: TENANT })
     const confirmed = result(await f.cli(['advance', '--input', '-'], advanceInput(account, 'confirm-account')))
     expect(confirmed.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
-    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'])
+    expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'])
   }
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
 }, 45_000)
@@ -666,7 +668,7 @@ it('optional display labels do not gate stable identity or original explicit acc
     const confirmed = result(await f.cli(['advance', '--input', '-'], advanceInput(account, 'confirm-account')))
     expect(confirmed.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
     expect(confirmed.operation?.operationId).toBe(input.operationId)
-    expect(fetch).toHaveBeenCalledTimes(5)
+    expect(fetch).toHaveBeenCalledTimes(6)
   }
 }, 45_000)
 
@@ -737,7 +739,7 @@ it('anonymous native shape and unqualified IIFE programs remain unknown without 
     for (let step = 0; step < 8 && !['account', 'unknown'].includes(view.continuation!.stage); step++) view = await advance(f, view)
     expect(view.continuation, 'initializer sample ' + index).toMatchObject({ stage: 'unknown', account: null })
     expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
-    expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
+    expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
   }
   expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
 }, 60_000)
@@ -802,5 +804,5 @@ it.each(['account', 'unknown'] as const)('a real owner process restart preserves
   expect(result<{ connection: unknown }>(await cli(['inspect', '--connection', input.connectionId])).connection).toMatchObject({ config, revision: 1 })
   expect(result<{ operation: unknown }>(await cli(['inspect', '--operation-id', 'auth-child-save'])).operation).toEqual(saved)
   const effects = (await readFile(join(root, 'native-effects.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
-  expect(effects.map(value => value.path)).toEqual(mode === 'account' ? ['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/app'] : ['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
+  expect(effects.map(value => value.path)).toEqual(mode === 'account' ? ['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross-login', '/', '/', '/app'] : ['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
 }, 60_000)

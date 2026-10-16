@@ -164,7 +164,7 @@ it('continues the original creation through current Host reads, explicit checks 
   await click('[data-connection-check]')
   await vi.waitFor(() => expect(stages()).toEqual({ authentication: 'ready', transport: 'ready', intake: 'ready', delivery: 'unknown' }))
   expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
-  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + feishuConfig.application.appId])
+  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + feishuConfig.application.appId])
   expect(trusted.mock.calls.map(call => call[0])).toContain('connections:call')
   expect(calls.filter(call => call.method.startsWith('connection.room.') || call.method.startsWith('connection.binding.') || call.method.startsWith('connection.profile.'))).toEqual([])
   expect(api.connections.storeCredential).not.toHaveBeenCalled()
@@ -223,7 +223,7 @@ it('keeps the saved creation and usable check when a current lookup or explicit 
   await vi.waitFor(() => expect(stages().transport).toBe('ready'))
   expect(result()?.textContent).not.toContain('Controlled check reply gap')
   expectNoAdditionalWrites()
-  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + feishuConfig.application.appId])
+  expect(platformCalls).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/', '/app', '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + feishuConfig.application.appId])
   expect((await forward('connection.enrollment.inspect', { operationId: operation.operationId })).operation?.configured).toEqual(operation.configured)
 })
 
