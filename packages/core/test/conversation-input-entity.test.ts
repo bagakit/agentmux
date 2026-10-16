@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it, vi } from 'vitest'
 import { appendFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -36,7 +37,7 @@ async function fixture() {
   const next = { ...f.session, promptCompletionAdmission: admission }
   await f.store.compareAndSwap(f.session, next); Object.assign(f.session, next)
   const captured: AgentTimelineItem = { id: 'original-captured', agentSessionId: f.session.agentSessionId, kind: 'user_message', source: 'user', status: 'complete',
-    title: 'Original input', content: 'Original user content', inputRef: key, publicContent: 'confirmed', authorHuman: true, createdAt: 1, updatedAt: 1 }
+    title: 'Original input', content: 'Original user content', inputRef: key, publicContent: 'confirmed', authorHuman: true, createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) }
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId, item: captured })
   const server = new AgentMuxControlServer({ socketPath: join(f.root, 'entity.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); closes.push(() => server.stop())
@@ -90,6 +91,14 @@ it('the raw public history keeps separate source records and their original iden
   expect(captured.userMessages).toHaveLength(1); expect(native.userMessages).toHaveLength(1)
   expect(captured.userMessages![0]).toMatchObject({ id: 'captured:' + f.captured.id, rawId: f.captured.id, author: { kind: 'human' }, publicContent: 'confirmed' })
   expect(native.userMessages![0]).toMatchObject({ author: { kind: 'unknown' }, publicContent: 'unknown', source: { kind: 'native', ...source } })
+  const nativeOriginal = reading.inputs[0]!.records.find(record => record.original.kind === 'native')!
+  expect(native.userMessages![0]!.sourceRecord).toEqual({ record: nativeOriginal.reference, revision: nativeOriginal.revision })
+  expect(reading.records[0]!.input!.sourceRecord).toEqual(native.userMessages![0]!.sourceRecord)
+  expect(reading.records[0]!.input!.author).toEqual({ kind: 'unknown' })
+  for (const record of reading.originalRecords) {
+    const original = record.records![0]!
+    expect(record.input!.sourceRecord).toEqual({ record: original.reference, revision: original.revision })
+  }
   expect(native.userMessages![0]!.id).toMatch(/^native:/)
   expect(native.userMessages![0]!.id).not.toBe(reading.inputs[0]!.id)
   expect('event' in captured.userMessages![0]!).toBe(false); expect('records' in native.userMessages![0]!).toBe(false)
