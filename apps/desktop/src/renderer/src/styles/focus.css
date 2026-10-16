@@ -58,6 +58,7 @@
 .focus-project-lanes__axis:hover { color: var(--text); }
 .focus-project-lanes__track { min-width: 0; overflow: hidden; }
 .focus-project-lanes__groups { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
+.focus-project-lanes__groups .focus-context-card { content-visibility: auto; contain-intrinsic-block-size: auto 52px; }
 .focus-context-group { min-width: min(100%, 180px); flex: 0 0 auto; width: min(100%, var(--focus-group-width, 180px)); }
 .focus-context-group__cards { display: grid; align-content: start; gap: var(--sp-1); }
 .focus-context-group__cards { grid-template-columns: repeat(var(--focus-card-columns, 1), minmax(0, 1fr)); }
@@ -84,6 +85,7 @@
 .focus-context__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .focus-context__identity { display: flex; align-items: baseline; min-width: 0; gap: var(--sp-2); }
 .focus-context__identity strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
+.focus-context-card[data-focus-card-body='pending'] .focus-context__copy > strong { min-width: 0; min-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
 .focus-context__state { flex: none; display: inline-flex; align-items: center; }
 .focus-state-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 5px; color: var(--text-3); background: color-mix(in srgb, currentColor 9%, transparent); }
 .focus-state-mark[data-focus-state-icon='working'] { color: var(--green); }
