@@ -93,7 +93,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const error = (automaticReadError ? null : view.error?.message) ?? view.observationError?.message ?? (bindingChanged ? 'Native source changed. The original window is retained; explicitly open Current source or Previous source.' : null)
   const currentOutside = Boolean(view.snapshot?.window.navigation.newer || view.newerAvailable || view.held)
   const expiredHistorical = view.historical && (view.error as { code?: string } | null)?.code === 'AGENT_CONVERSATION_VIEW_EXPIRED'
-  return { page, projection, snapshot: view.snapshot, inspect: view.inspect, capturedSnapshot: projection?.captured,
+  return { page, projection, snapshot: view.snapshot, readActivity: { sourceRead: view.sourceRead, loading: view.loading }, inspect: view.inspect, capturedSnapshot: projection?.captured,
     captured: projection?.captured.items ?? null, capturedLoading: view.loading, capturedHasMore: view.hasMore,
     readCapturedEarlier: () => { coverageDemand.current = false; void navigate('older') },
     historical: view.historical || previousSource || bindingChanged, hasEarlierNavigation: Boolean(boundary.current) || previousSource,

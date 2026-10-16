@@ -7,9 +7,10 @@ import type { AgentMuxClient } from '@agentmux/core'
 export type ConversationViewClient = Pick<AgentMuxClient, 'readAgentConversation' | 'readConversationChanges' | 'observeConversation' | 'releaseConversationView'>
 export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes' | 'resume' | 'reopen'
 type Operation = ConversationViewOperation
+export type ConversationSourceRead = { reference: ConversationRef; nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']> }
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'anchor'>
-type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
-const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
+type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
+const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
 const errorOf = (error: unknown) => error instanceof Error ? error : new Error(String(error))
 function sourceReadError(snapshot: ConversationWindowSnapshot): Error | null {
   const failures = snapshot.coverage.filter(source => source.current === 'unavailable')
@@ -48,7 +49,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
       binding: null as ConversationWindowSnapshot | null, invalidations: 0, unavailable: 0 }
     owner.current = current
     setState(value => value.snapshot?.hostId === reference.hostId && value.snapshot.agentSessionId === reference.agentSessionId
-      ? { ...value, loading: true, operation: parked ? 'resume' : 'latest' } : { ...empty(), loading: true, operation: 'latest' })
+      ? { ...value, loading: true, operation: parked ? 'resume' : 'latest', sourceRead: null } : { ...empty(), loading: true, operation: 'latest' })
     const signal = current.controller.signal
     const alive = () => owner.current === current && !signal.aborted
     const schedule = () => {
@@ -124,7 +125,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
       const change: ConversationChangesInput | null = kind === 'changes' && prior ? {
         ...ref, checkpoint: prior.window.checkpoint, view: prior.window.view!, limit: 100, maxBytes: CONVERSATION_MAX_READ_BYTES
       } : null
-      setState(value => ({ ...value, loading: true, operation: kind }))
+      // Presentation follows this original request, never a retained frame's
+      // source during an unqualified latest selection or a replay-only resume.
+      const nativeSource = kind === 'resume' ? undefined : request.nativeSource ??
+        (request.anchor?.record.source.kind === 'native' ? request.anchor.record.source : undefined) ??
+        (change || kind === 'older' || kind === 'newer' ? originalNative : undefined)
+      const sourceRead = nativeSource ? { reference: ref, nativeSource: { providerId: nativeSource.providerId, nativeSessionId: nativeSource.nativeSessionId } } : null
+      setState(value => ({ ...value, loading: true, operation: kind, sourceRead }))
       if (kind === 'changes' || kind === 'latest') current.dirty = false
       const pending = (async () => {
         let complete: ConversationWindowSnapshot | null = null
@@ -195,7 +202,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           signal.removeEventListener('abort', abortRead)
           if (!isCurrent()) { if (complete && complete.window.id !== current.snapshot?.window.id) release(complete); return }
           current.inFlight = null
-          setState(value => ({ ...value, loading: false, operation: null }))
+          setState(value => ({ ...value, loading: false, operation: null, sourceRead: null }))
           if (reopenExpired) void read('reopen')
           else if (current.dirty) schedule()
         }

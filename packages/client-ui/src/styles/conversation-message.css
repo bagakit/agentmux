@@ -383,6 +383,7 @@
 .conversation-submission-summary > span + span::before { content: ' · '; }
 .conversation-submission-summary[data-status='failed'] { color: var(--red-text); }
 .conversation-submission-record { width: fit-content; max-width: min(calc(100% - var(--sp-4)), 72ch); min-width: 0; margin: var(--sp-2) var(--sp-4) var(--sp-2) auto; color: var(--text-2); }
+.conversation-submission-record__reading { display: inline-flex; align-items: center; color: var(--text-3); }
 .conversation-submission-record__author { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); color: var(--text); }
 .conversation-submission-record__author code { font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .conversation-submission[data-status='failed'] > summary { color: var(--red-text); }
