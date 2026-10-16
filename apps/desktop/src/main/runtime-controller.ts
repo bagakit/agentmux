@@ -14,7 +14,7 @@ import {
   parseAgentNativeResumeSource,
   hostAgentCreationIntent,
   type AgentMuxHostAgentCreateInput,
-  AGENTMUX_AGENT_MESSAGING_GUIDANCE,
+  AGENTMUX_AGENT_MESSAGING_ENTRY,
   agentPromptPredecessor,
   agentPromptNotApplied,
   validateAgentPromptCondition,
@@ -1941,8 +1941,14 @@ export class RuntimeController {
     if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId || status.session.workspacePath !== loop.workspacePath || !loop.futureIntentId || !loop.creationOperationId) {
       throw new AgentMuxError('The original future-message target or intent is unconfirmed. Manual input remains available.', 'STALE_AGENT_SESSION')
     }
+    const original = await client.readAgentFuturePromptIntent(loop.agentSessionId, loop.futureIntentId)
+    if (original && (original.operationId !== loop.creationOperationId || original.message?.userContent !== loop.prompt)) {
+      throw new AgentMuxError('The original future-message operation or content is unconfirmed. Inspect the saved arrangement before retrying; manual input remains available.', 'AGENT_FUTURE_INTENT_CHANGED')
+    }
+    // Changing an arrangement's active state does not create a new message or adopt new guidance.
+    const agentMuxNote = original ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '')
     await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId: loop.creationOperationId,
-      prompt: loop.prompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : ''), active, ...(context?.caller ? { caller: context.caller } : {}) })
+      prompt: loop.prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), active, ...(context?.caller ? { caller: context.caller } : {}) })
   }
   async observeCheckIn(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, now: number, signal: AbortSignal, config: AppConfig): Promise<CheckInObservation> {
     signal.throwIfAborted()
