@@ -82,19 +82,20 @@ export class ConnectionEnrollmentStore {
       }
     })
   }
+  private decode(record: Record<string, unknown> | undefined): EnrollmentRow | null {
+    if (!record) return null
+    const row = JSON.parse(String(record.record_json)) as EnrollmentRow,
+      original = row.operation as unknown as Record<string, unknown>
+    row.operation = projectStoredEnrollmentOperation(original)
+    if (row.version !== 2)
+      Object.defineProperty(row, 'savedOperation', { value: original, enumerable: false })
+    return row
+  }
   read(operationId: string): EnrollmentRow | null {
-    return this.safe(() => {
-      const r = this.host.database
-        .prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?')
-        .get(operationId)
-      if (!r) return null
-      const row = JSON.parse(String(r.record_json)) as EnrollmentRow,
-        original = row.operation as unknown as Record<string, unknown>
-      row.operation = projectStoredEnrollmentOperation(original)
-      if (row.version !== 2)
-        Object.defineProperty(row, 'savedOperation', { value: original, enumerable: false })
-      return row
-    })
+    return this.safe(() => this.decode(this.host.database.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(operationId)))
+  }
+  readByConnection(connectionId: string): EnrollmentRow | null {
+    return this.safe(() => this.decode(this.host.database.prepare('SELECT record_json FROM connection_enrollment WHERE connection_id=?').get(connectionId)))
   }
   private write(row: EnrollmentRow): EnrollmentRow {
     row.operation = parseConnectionEnrollmentOperation(row.operation)
