@@ -435,10 +435,12 @@ it.each([
   ['missing-cross', {}], ['null-cross', { cross_login_uri: null }],
   ['direct-landing', { cross_login_uri: 'https://ask.feishu.cn/cross' }],
   ['accounts-handoff', { cross_login_uri: 'https://accounts.feishu.cn/cross' }],
-  ['missing-step', undefined], ['null-step', null]
+  ['missing-step', undefined], ['null-step', null],
+  ['empty-cross-local-only', { mode: 'dual_domain_sync', cross_login_uri: '', local_login_uri: 'https://unqualified.invalid/not-authorized' }],
+  ['array-step', []]
 ] as const)('follows original native handoff %s through Host, SDK and compiled CLI before account consent', async (name, info) => {
   pollReply = () => Response.json({ code: 0, data: { next_step: 'enter_app', step_info: info } })
-  const pending = await cli(['begin', '--input', '-'], input)
+  const pending = await client.call('connection.enrollment.begin', input)
   clock = pending.challenge!.nextPollAt + 1
   const next = await cli(['advance', '--input', '-'], decision(pending, 'continue-authentication'))
   expect(next.operation!.authentication!.stage).toBe('handoff')
@@ -460,7 +462,9 @@ it.each([
   expect(signedIn.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
   expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', ...handoffSteps])
   expect(calls.filter(call => call.path === '/accounts/qrlogin/polling')).toHaveLength(1)
+  expect(calls.some(call => call.url.startsWith('https://unqualified.invalid/'))).toBe(false)
   expect(signedIn.actions.map(action => action.kind)).toContain('confirm-account')
+  expect((await client.call('connection.enrollment.inspect', { operationId: input.operationId })).operation).toEqual(signedIn.operation)
   expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(signedIn.operation)
 })
 
