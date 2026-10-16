@@ -32,8 +32,8 @@ use <!--amux-empty:blockID-->. IDs in markers and note: targets use URI componen
 encode -- inside comment fields too, and decode once. Never derive identity from names or content.
 Ordinary new paragraphs may omit an anchor: reading does not mint IDs; the original writer
 allocates missing stable block IDs only when you explicitly save. Duplicated IDs are ambiguous,
-not permission to pick one copy. A block stays inside its original file when referenced;
-extracting an independent Note is a separate explicit content operation.
+not permission to pick one copy. Inline links and note-ref/note-embed address existing content
+inside its original file. A shared note-include instead addresses one independent Markdown file.
 The readable title belongs in this original header; it is not derived from the filename.
 An existing file title wins over an older catalog projection. A rename changes only this
 header, preserving body bytes and block authors. Inspect notebook --operation-id OP_ID after
@@ -56,6 +56,25 @@ Original [label](note:ID#block) bindings remain readable; a canonical save write
 Structural reference and embed blocks use leaf directives:
     ::note-ref{#sourceBlock ref="occurrence3" target="note:targetNote#targetBlock"}
     ::note-embed{#sourceEmbed ref="occurrence4" target="note:targetNote#targetBlock"}
+Whole-file shared content uses:
+    ::note-include{#hostBlock ref="occurrence5" target="note:sharedFileID" workspace="WORKSPACE_ID" path="block-shared.note.md"}
+The target is the shared file's note-id with kind: shared-block in its YAML frontmatter;
+its paragraphs can change without changing that file identity. Workspace/path are locator hints,
+not identity or uniqueness proof. Multiple Notes render and edit this same Markdown body.
+Copy/hover never creates an entity. Paste is a reversible draft; the first explicit save with
+that occurrence still present extracts the selected source into one shared .note.md and replaces
+the original position with an include. Do not duplicate its body or create files on copy/paste.
+Use amux file share --help for the original destination/source baselines and exact resources.
+Only the original source include may declare forwardedBlockIds (Markdown forwarded= with
+comma-separated URI-encoded IDs) for its existing extracted descendants. Its root ID stays
+on the source include. Preserve these old addresses there; do not copy the forwarding declaration
+to new occurrences. No paragraph IDs are invented to stand in for the shared file itself.
+Each create/source/destination outcome is separate; this is not an atomic cross-file commit.
+Inspect with amux file share inspect --input JSON: {mode:"request",request:ORIGINAL_SHARE_PARAMS}
+retains the original batch, or {mode:"shared",shared:FILE_READ_PARAMS} checks one discovered
+Markdown file's trusted creation and source/destination history without needing the original
+batch payload. An absent whole batch stays unknown. A current matching file is not an original
+write receipt. Keep original inputs/IDs after unknown; never automatically replay a write.
 These IDs are examples: use unique IDs for genuinely new objects and preserve originals on edits.
 Do not look up an existing binding's display label again after a rename or a name collision.
 Use amux notebook resolve --query TEXT for catalog candidates without reading bodies, then
@@ -124,8 +143,9 @@ cross-file snapshot. Occurrences are stored {kind:"stored",referenceId} or deriv
 not Markdown file byte positions, and are valid only at that exact saved revision.
 Raw wiki and saved unbound queries may be confirmed for one observation without being saved
 as bindings. Such edges retain query and their original occurrence. Existing targets stay by ID.
-Reading never rewrites a source or allocates persistent IDs. Unanchored blocks make the graph
-partial; an empty edge list with unread or unassigned sources does not prove no links.
+Reading never rewrites a source or allocates persistent IDs. Unanchored blocks make paragraph
+coverage partial, while fileIdentity separately reports whole-file uniqueness. An empty edge
+list with unread or unassigned sources does not prove no links.
 Graph/search indexes are derived from Markdown, never a second body or relationship authority.
 
 Rebuild knowledge from original files without a catalog using amux notebook scan --workspace

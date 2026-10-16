@@ -1,5 +1,6 @@
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
 import { noteContentInCatalogScope } from './notebook-observation.js'
+import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult } from './public-rpc-file-share.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult } from './application-access.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
@@ -289,6 +290,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isMoteAvatarSeriesMethod(method)) return parseMoteAvatarSeriesResult(method, value, parseMoteAvatarSeriesParams(method, params)) as unknown as Record<string, unknown>
     if (isAppWindowMethod(method)) return parseAppWindowPage(method, value, parseAppWindowParams(method, params)) as unknown as Record<string, unknown>
     if (isGitMethod(method)) return parseGitResult(method, value, parseGitParams(method, params)) as unknown as Record<string, unknown>
+    if (method === 'file.share.inspect') return parseFileShareInspectResult(value, parseFileShareInspectParams(params)) as unknown as Record<string, unknown>
+    if (method === 'file.share') return parseFileShareResult(value, parseFileShareParams(params)) as unknown as Record<string, unknown>
     if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.history' ? parseFileHistoryResult(value, parseFileHistoryParams(params)) : method === 'file.restore' ? parseFileRestoreResult(value, parseFileRestoreParams(params)) : method === 'file.undo' ? parseFileUndoResult(value, parseFileUndoParams(params)) : method === 'file.create' ? parseFileCreateResult(value, parseFileCreateParams(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
     if (isMoteConnectionMethod(method)) return parseMoteConnectionResult(method,value,parseMoteConnectionParams(method,params)) as unknown as Record<string,unknown>
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
