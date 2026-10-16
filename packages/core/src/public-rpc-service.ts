@@ -70,6 +70,7 @@ import { resolveAgentSessionId } from './agent-session-id.js'
 import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './agent-role-directory.js'
 import { DurableAgentMuxMessageQueue, readRoutedInputMailbox, appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
+import { assertAgentMessageRouteIntent, type AgentMessageRoute } from './agent-message-route.js'
 import { agentPromptCondition, validateAgentPromptCondition, validateAgentPromptInputKey, validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { validateAgentInputControlId, validateAgentInputWaitRef, type AgentInputSubmissionReceipt, type AgentInputCallContext } from './agent-input-wait.js'
@@ -1546,6 +1547,15 @@ export class AgentMuxRpcService {
         const hostId = p.hostId === undefined ? caller?.hostId : rpcString(p.hostId, 'Original message Host ID')
         if (hostId === undefined) throw new AgentMuxError('A trusted reader must select the exact original message Host.', 'INVALID_CONTROL_REQUEST')
         if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
+        if (method === 'message.read' && hostId === 'local') {
+          const route = await (await this.messageRouteJournal()).readMessageRoute(rpcString(p.operationId, 'Original message operation ID'))
+          if (route) {
+            const remote = await this.messageRouteOwner(route)
+            if (caller && caller.client !== remote.client) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
+            result = { ...await remote.client.forwardRpc!('message.read', { operationId: route.operationId, hostId: 'local' }, context), hostId }
+            break
+          }
+        }
         const scopes = caller ? [caller] : (await this.clients()).filter(scope => scope.hostId === hostId)
         if (scopes.length !== 1) throw new AgentMuxError('The exact message Host owner is unavailable or ambiguous. Keep the original source reference.', 'CONTROL_UNAVAILABLE')
         const owner = scopes[0]!
@@ -1789,6 +1799,27 @@ export class AgentMuxRpcService {
       (filters.since === undefined || goal.updatedAt >= rpcCount(filters.since, 0)))
       .slice(0, rpcCount(filters.limit, 100, 1000))
   }
+  /** The existing ingress Core journal retains only routing facts, never another envelope/body. */
+  private async messageRouteJournal() {
+    const local = (await this.clients()).filter(scope => scope.hostId === 'local')
+    if (local.length > 1) throw new AgentMuxError('The original message ingress journal is ambiguous. No input was rerouted.', 'CONTROL_UNAVAILABLE')
+    return new DurableAgentMuxMessageQueue(local.length === 1 ? local[0]!.client.agentMessageQueuePath() : undefined)
+  }
+  private async messageRouteOwner(route: AgentMessageRoute) {
+    const scopes = (await this.clients()).filter(scope => scope.hostId === route.hostId)
+    if (scopes.length !== 1 || !scopes[0]!.client.forwardRpc || this.endpointUnverified(scopes[0]!.client) ||
+        route.runtimeId !== null && scopes[0]!.client.runtimeOwnerIdentity?.()?.runtimeId !== route.runtimeId) throw new AgentMuxError(
+      'The original message Host is unavailable or changed. Keep this message and operation; no replacement owner received input.', 'CONTROL_UNAVAILABLE')
+    return scopes[0]!
+  }
+  private async forwardMessageRoute(route: AgentMessageRoute, p: Record<string, unknown>,
+    caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>, context: AgentMuxRpcCallContext) {
+    const owner = await this.messageRouteOwner(route)
+    if (caller && caller.client !== owner.client) throw new AgentMuxError('Managed credentials cannot cross semantic Runtime owners.', 'AGENT_CAPABILITY_INVALID')
+    return await owner.client.forwardRpc!('agent.send', { ...p, operationId: route.operationId, messageId: route.messageId,
+      expectedRun: route.expectedRun, target: { kind: 'agent-session', agentSessionId: route.agentSessionId } } as AgentMuxRpcParams<'agent.send'>,
+    await this.inputForwardContext(context))
+  }
   private async send(p: Record<string, unknown>, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>, context: AgentMuxRpcCallContext) {
     const target = rpcRecord(p.target)
     const sourceChannel = normalizeMessageChannel(p.sourceChannel ?? 'api')
@@ -1803,10 +1834,25 @@ export class AgentMuxRpcService {
     const messageId = p.messageId === undefined ? 'message-' + createHash('sha256').update(operationId).digest('hex') : rpcString(p.messageId, 'Message ID')
     if (p.execution !== undefined && p.execution !== 'default' && p.execution !== 'immediate') throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
     const execution = p.execution ?? 'default'
+    const threadId = p.threadId === undefined ? messageId : rpcString(p.threadId, 'Thread ID')
+    const correlationId = p.correlationId === undefined ? messageId : rpcString(p.correlationId, 'Correlation ID')
+    const replyTo = p.replyTo === undefined ? null : rpcString(p.replyTo, 'Reply message ID')
+    const intentDigest = createHash('sha256').update(JSON.stringify({ text, execution, sourceChannel, sourceDevice,
+      sender: caller ? { hostId: caller.hostId, agentSessionId: caller.agentSessionId, runId: caller.session.run.runId } : null,
+      principal: caller ? null : context.principal ?? null,
+      threadId, correlationId, replyTo,
+      admissionIntent: addressed ?? null })).digest('hex')
+    const routes = await this.messageRouteJournal()
+    const routed = await routes.readMessageRoute(operationId, messageId)
+    if (routed) {
+      assertAgentMessageRouteIntent(routed, { messageId, intentDigest, target: target as AgentMuxRpcParams<'agent.send'>['target'] })
+      if (expectedRun && expectedRun.runId !== routed.expectedRun.runId) throw new AgentMuxError('Expected Run conflicts with this original message route.', 'MESSAGE_RECIPIENT_MISMATCH')
+      return await this.forwardMessageRoute(routed, p, caller, context)
+    }
     // The retained operation belongs to the original local semantic endpoint.
     // It is checked before reading today's Tab/Region occupant, never by an
-    // all-Host lookup. Remote first-ACK route persistence remains a separate gap.
-    const local = (await this.clients()).filter(scope => scope.hostId === 'local' && !scope.client.forwardRpc)
+    // all-Host lookup. Remote ingress bindings above survive a lost first ACK.
+    const local = (await this.clients()).filter(scope => scope.hostId === 'local')
     const journal = local.length === 1 && (!caller || caller.client === local[0]!.client)
       ? new DurableAgentMuxMessageQueue(local[0]!.client.agentMessageQueuePath()) : null
     const original = journal ? await journal.readByOperationId(operationId) ??
@@ -1851,10 +1897,25 @@ export class AgentMuxRpcService {
     const recipientOwner = await this.owner(recipientId)
     if (recipientOwner.client.forwardRpc) {
       if (caller && caller.client !== recipientOwner.client) throw new AgentMuxError('Managed credentials cannot cross semantic Runtime owners.', 'AGENT_CAPABILITY_INVALID')
-      // Resolve presentation exactly once. The original remote owner alone queues
-      // the envelope and admits input against its current Session and Run.
-      return await recipientOwner.client.forwardRpc('agent.send', { ...p,
-        operationId, text, target: { kind: 'agent-session', agentSessionId: recipientId } }, await this.inputForwardContext(context))
+      // A local Hosted owner shares this journal. Its original first append is
+      // already before input effects; a second ingress binding would loop when
+      // that same Core receives it. Reuse that envelope on a lost-ACK retry.
+      if (recipientOwner.hostId === 'local') {
+        if (!original && expectedRun && expectedRun.runId !== recipientOwner.session.run.runId) throw new AgentMuxError('Expected Run does not match the original recipient.', 'MESSAGE_RECIPIENT_MISMATCH')
+        return await recipientOwner.client.forwardRpc('agent.send', {
+          ...p, text, operationId: original?.envelope.operationId ?? operationId, messageId: original?.envelope.messageId ?? messageId,
+          ...(original ? original.envelope.recipientRunId ? { expectedRun: { runId: original.envelope.recipientRunId } } : {}
+            : { expectedRun: { ...recipientOwner.session.run } }),
+          target: { kind: 'agent-session', agentSessionId: recipientId }
+        }, await this.inputForwardContext(context))
+      }
+      if (expectedRun && expectedRun.runId !== recipientOwner.session.run.runId) throw new AgentMuxError('Expected Run does not match the original recipient.', 'MESSAGE_RECIPIENT_MISMATCH')
+      const route = await routes.claimMessageRoute({ operationId, messageId, hostId: recipientOwner.hostId,
+        runtimeId: recipientOwner.client.runtimeOwnerIdentity?.()?.runtimeId ?? null,
+        agentSessionId: recipientId, expectedRun: { ...recipientOwner.session.run },
+        target: target as AgentMuxRpcParams<'agent.send'>['target'], intentDigest })
+      if (expectedRun && expectedRun.runId !== route.expectedRun.runId) throw new AgentMuxError('Expected Run conflicts with the first concurrent message route.', 'MESSAGE_RECIPIENT_MISMATCH')
+      return await this.forwardMessageRoute(route, p, caller, context)
     }
     const durable = (await recipientOwner.client.readAgentSessions()).find(session => session.agentSessionId === recipientId)
     if (!durable) throw new AgentMuxError('Recipient Session is no longer retained.', 'UNKNOWN_AGENT_SESSION')
@@ -1872,9 +1933,7 @@ export class AgentMuxRpcService {
       sender: caller ? { kind: 'agent-session' as const, agentSessionId: caller.agentSessionId }
         : { kind: 'human' as const, principal: 'local-cli' as const },
       recipient: { kind: 'agent-session' as const, agentSessionId: recipientId },
-      threadId: p.threadId === undefined ? messageId : rpcString(p.threadId, 'Thread ID'),
-      correlationId: p.correlationId === undefined ? messageId : rpcString(p.correlationId, 'Correlation ID'),
-      replyTo: p.replyTo === undefined ? null : rpcString(p.replyTo, 'Reply message ID'), workspaceId: null,
+      threadId, correlationId, replyTo, workspaceId: null,
       senderSessionId: caller?.agentSessionId ?? null, senderRunId: original ? original.envelope.senderRunId : caller?.session.run.runId ?? null,
       recipientSessionId: recipientId, recipientRunId: original ? original.envelope.recipientRunId : recipient.run.runId, body: text }
     // Both participant bindings came from their current Core owners. Public

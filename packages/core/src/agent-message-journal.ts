@@ -43,6 +43,13 @@ export const inputControlJournalSchema = `
   );
 `
 
+/** The source freezes routing before a remote effect; the target alone owns the message. */
+export const messageRouteJournalSchema = `
+  CREATE TABLE IF NOT EXISTS message_routes (
+    message_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL UNIQUE, sequence INTEGER NOT NULL UNIQUE
+  );
+`
+
 /** The original records remain the SSOT. These indexes select one participant's messages. */
 export const dispatchDiscoveryJournalSchema = `
   CREATE INDEX IF NOT EXISTS message_sender ON records(json_extract(json, '$.envelope.senderSessionId'))
@@ -191,6 +198,7 @@ export async function openMessageJournal(
     db.exec('BEGIN IMMEDIATE')
     db.exec(schema)
     db.exec(inputControlJournalSchema)
+    db.exec(messageRouteJournalSchema)
     db.prepare('INSERT INTO metadata VALUES (?, ?)').run(incarnation, sourceHash)
     if (archive) for await (const record of legacyRecords(archive)) importRecord(db, record)
     db.exec('COMMIT')
