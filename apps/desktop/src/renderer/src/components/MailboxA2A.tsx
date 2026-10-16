@@ -100,7 +100,7 @@ export function MailboxA2A(props: Props) {
         {...(reading?.openHttpLink ? { openHttpLink: reading.openHttpLink } : {})}
         active={active} compact recordedIdentity detailsOnlyMetadata conversationSessionId={record.envelope.recipientSessionId!}
         messageId={record.envelope.messageId} speaker={{ role: 'agent', id: record.envelope.senderSessionId! }}
-        name={name(record.envelope.senderSessionId!)} content={record.envelope.body} copyText={record.envelope.body}
+        name={name(record.envelope.senderSessionId!)} content={record.envelope.body} copyText={record.envelope.body} contentBoundary="body"
         createdAt={record.envelope.createdAt} {...(onCopy ? { onCopy } : {})}
         messageActions={<>{onFill ? <MailboxDraftAction value={record.envelope.messageId} onFill={() => onFill(record.envelope.body)} /> : null}{props.renderNavigation?.(record.envelope.messageId)}</>}
         messageDetails={<dl className="composer-mailbox__record-facts">
