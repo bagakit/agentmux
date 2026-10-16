@@ -69,7 +69,7 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     const reference: SessionHistoryReference = { hostId: 'original-host', agentSessionId: 'reader' }
     expect((await api.sessions.listMessages(reference, { direction: 'incoming', limit: 1 })).messages.map(item => item.envelope.messageId)).toEqual(['incoming'])
     expect((await api.sessions.listMessages(reference, { direction: 'outgoing', limit: 1 })).messages[0]).toMatchObject({ envelope: { messageId: 'outgoing' }, delivery: { state: 'failed' } })
-    expect((await api.sessions.readMessage(reference, 'incoming')).message!.envelope.body).toBe(body)
+    await expect(api.sessions.readMessage(reference, 'incoming')).resolves.toMatchObject({ hostId: reference.hostId, message: { envelope: { messageId: 'incoming', body } } })
     await expect(api.sessions.readMessage({ ...reference, agentSessionId: 'stranger' }, 'incoming')).rejects.toMatchObject({ code: 'MESSAGE_PARTICIPANT_MISMATCH' })
     await expect(api.sessions.listMessages({ ...reference, hostId: 'replacement-host' }, { direction: 'incoming' })).rejects.toThrow('not configured')
     await expect(bridge.handlers.get('sessions:message')!({ sender: {} }, reference, 'incoming')).rejects.toThrow('Untrusted')
