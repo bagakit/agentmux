@@ -195,6 +195,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'agent.view': case 'agent.rename': case 'agent.inspect':
       if (actual.agentSessionId !== request.agentSessionId) fail()
       break
+    case 'space.agent-order':
+      if (actual.displayWorkspaceId !== request.displayWorkspaceId) fail()
+      break
     case 'interrupt': case 'resume': case 'stop':
       if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail()
       break

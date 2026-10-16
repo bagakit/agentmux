@@ -39,7 +39,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'agent.open': 'agent.open', 'agent.rename': 'agent.rename', 'agent.view': 'agent.view',
   'agent.interrupt': 'interrupt', 'agent.resume': 'resume', 'agent.stop': 'stop',
   'space.mote.preferences.read': 'space.mote.preferences.read', 'space.mote.preferences.save': 'space.mote.preferences.save',
-  'space.ls': 'space.ls', 'space.inspect': 'space.inspect', 'space.rename': 'space.rename',
+  'space.ls': 'space.ls', 'space.inspect': 'space.inspect', 'space.rename': 'space.rename', 'space.agent-order': 'space.agent-order',
   'space.mv': 'space.mv', 'space.swap': 'space.swap', 'space.bind': 'space.bind',
   'space.unbind': 'space.unbind', 'space.focus': 'focus', 'space.promote': 'promote.region',
   'space.arrange': 'arrange', 'file.open': 'open.file', 'file.view': 'space.view', 'file.format': 'file.format', 'file.build': 'file.build', 'file.build.inspect': 'file.build.inspect', 'file.build.cancel': 'file.build.cancel',

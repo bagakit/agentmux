@@ -256,8 +256,18 @@ export type AgentMuxFileOpenReport = AgentMuxWorkfaceReport & {
   navigation: 'background' | 'applied' | 'cancelled' | 'unconfirmed'
   outcome: 'opened' | 'unchanged' | 'partial' | 'unknown' | 'refused'
 }
+export type AgentMuxWorkspaceAgentOrderMember = { hostId: string; agentSessionId: string }
+/** Client presentation preference; does not mutate Session identity or spatial topology. */
+export type AgentMuxWorkspaceAgentOrderReport = AgentMuxWorkfaceReport & {
+  scope: 'workspace-agent-list'
+  displayWorkspaceId: string
+  storedOrder: AgentMuxWorkspaceAgentOrderMember[]
+  effectiveOrder: AgentMuxWorkspaceAgentOrderMember[]
+  outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
+}
 type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
+  | { operation: 'space.agent-order'; displayWorkspaceId: string; order?: AgentMuxWorkspaceAgentOrderMember[]; expectedOrder?: AgentMuxWorkspaceAgentOrderMember[] }
   | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadInput)
   | ({ operation: 'space.mote.preferences.save' } & import('./mote-preferences.js').MotePreferencesSaveInput)
   | { operation: 'agent.view'; agentSessionId: string; mode?: AgentMuxAgentViewMode }
@@ -288,6 +298,7 @@ export type AgentMuxSpaceControlRequest = Base & (
       destination: AgentMuxSpaceDestination; focus: boolean }
 )
 export type AgentMuxSpaceControlResult =
+  | ({ operation: 'space.agent-order' } & AgentMuxWorkspaceAgentOrderReport)
   | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadResult)
   | ({ operation: 'space.mote.preferences.save'; requestId: string } & import('./mote-preferences.js').MotePreferencesSaveControlResult)
   | ({ operation: 'agent.view' } & AgentMuxAgentViewReport)
