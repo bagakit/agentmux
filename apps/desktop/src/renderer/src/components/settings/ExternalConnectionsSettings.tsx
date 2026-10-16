@@ -2,7 +2,7 @@ import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { ConnectionConfigureInput, ConnectionRecord } from '@agentmux/core/connections'
+import type { ConnectionConfigureInput, ConnectionRecord, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
 import { SettingsNavigation, type SettingsNavigationRequest, type MoteConnectorSettingsOrigin } from '../SettingsNavigation'
 import { useAppStore } from '../../store'
 import { isSessionSurface } from '../../lib/workbench-surface-kinds'
@@ -15,6 +15,7 @@ import { ConnectionManagementSetup } from './ConnectionManagementSetup'
 import { MoteConnectionPanel } from '../MoteConnectionIdentity'
 import { MoteIdentityCards } from './MoteIdentityCards'
 import '../../styles/connector-identity-cards.css'
+import '../../styles/connector-experience.css'
 import { useConnectionManagementSetup } from './useConnectionManagementSetup'
 
 const LinkIcon = semanticIconComponent('action.open-external')
@@ -49,6 +50,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const [saveNotice, setSaveNotice] = useState('')
   const [selected, setSelected] = useState<ConnectionRecord | null>(null), [label, setLabel] = useState(''), [appId, setAppId] = useState(''), [domain, setDomain] = useState('open.feishu.cn'), [secret, setSecret] = useState(''), [enabled, setEnabled] = useState(true)
   const [saveAbsent, setSaveAbsent] = useState(false)
+  const [continuation, setContinuation] = useState<{ connectionId: string; source: ConnectionSetupEnrollmentSource } | null>(null)
   const enrollment = useBotEnrollment(active && view === 'enrollment')
   const pending = useRef<ConnectionConfigureInput | null>(null), generation = useRef(0), reading = useRef(0), writing = useRef(false)
   const read = async (epoch = generation.current) => {
@@ -124,10 +126,10 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     try { await api.ui.openExternal(`https://${applicationDomain}/app`) }
     catch (error) { setIssue(presentError(error)) }
   }
-  const existing = () => { appliedRoute.current = navigationRequest; if (selected && !pending.current) edit(null); else setView('new') }
-  const startEnrollment = () => { appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
-  const openMote = (origin: MoteConnectorSettingsOrigin, create = false) => { appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
-  const library = () => { returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
+  const existing = () => { setContinuation(null); appliedRoute.current = navigationRequest; if (selected && !pending.current) edit(null); else setView('new') }
+  const startEnrollment = () => { setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
+  const openMote = (origin: MoteConnectorSettingsOrigin, create = false) => { setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
+  const library = () => { setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
   useLayoutEffect(() => {
     const scroll = pane.current?.closest<HTMLElement>('.settings-content__scroll')
     if (!scroll) return
@@ -144,12 +146,32 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     card?.querySelector<HTMLButtonElement>('.connector-mote-card__identity')?.focus({ preventScroll: true })
   }, [view])
   const current = view === 'enrollment' ? enrolled?.connection ?? null : selected && (records.find(record => record.config.connectionId === selected.config.connectionId) ?? selected)
-  const management = useConnectionManagementSetup(current, active && (view === 'saved' || view === 'management' || view === 'enrollment' && !!enrolled), view === 'management')
+  const management = useConnectionManagementSetup(current, active && (view === 'saved' || view === 'management' || view === 'enrollment' && !!enrolled || view === 'mote' && !!continuation), view === 'management')
   const continuationSupport = management.catalog?.value?.support
   const canContinueEnrollment = !!current && continuationSupport?.connectionRevision === current.revision && continuationSupport.capabilities.includes('enrollment-continuation')
   useEffect(() => {
+    if (!active || !continuation || current?.config.connectionId !== continuation.connectionId || !canContinueEnrollment) return
+    management.handoff(continuation.source)
+    setContinuation(null)
+    setView('management')
+  }, [active, continuation, current, canContinueEnrollment])
+  const continueMoteSetup = (record: ConnectionRecord, source: ConnectionSetupEnrollmentSource) => {
+    setSelected(record)
+    setRecords(previous => [...previous.filter(item => item.config.connectionId !== record.config.connectionId), record])
+    setContinuation({ connectionId: record.config.connectionId, source })
+  }
+  useEffect(() => {
     if (active && navigationRequest?.moteConnectorOrigin && appliedRoute.current !== navigationRequest) openMote(navigationRequest.moteConnectorOrigin)
   }, [active, navigationRequest])
+  const appliedContinuation = useRef<SettingsNavigationRequest | undefined>(undefined)
+  useEffect(() => {
+    const setup = navigationRequest?.moteConnectorOrigin?.setup
+    if (!active || !setup || appliedContinuation.current === navigationRequest) return
+    const record = records.find(item => item.config.connectionId === setup.connectionId)
+    if (!record) return
+    appliedContinuation.current = navigationRequest
+    continueMoteSetup(record, setup.source)
+  }, [active, navigationRequest, records])
   useEffect(() => {
     if (!active || appliedRoute.current === navigationRequest || !origin?.connectionId || pending.current) return
     const record = records.find(record => record.config.connectionId === origin.connectionId)
@@ -166,8 +188,9 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     {view === 'mote' && moteSelection ? <section className="connector-mote-detail" data-connector-mote-detail>
       <button type="button" className="connector-back small-button" onClick={library}>All identities</button>
       <header><h3>Identity for {moteSelection.origin.moteName}</h3><p>Use this identity for new group conversations with this Mote.</p></header>
-      <MoteConnectionPanel key={JSON.stringify([moteSelection.origin.target, moteSelection.origin.topicId])} {...moteSelection.origin} createOnOpen={moteSelection.create} inSettings
+      <MoteConnectionPanel key={JSON.stringify([moteSelection.origin.target, moteSelection.origin.topicId])} {...moteSelection.origin} createOnOpen={moteSelection.create} inSettings onContinueSetup={continueMoteSetup}
         onRead={() => {}} onCreateIntentConsumed={() => setMoteSelection(current => current?.origin === moteSelection.origin ? { ...current, create: false } : current)} onManageConnection={record => { edit(record); setView('saved') }} />
+      {continuation ? <p role="status" className="connector-check-feedback">{management.catalog?.issue || (management.catalog?.value && !canContinueEnrollment ? 'The saved sign-in cannot be handed off here. Open this bot’s management to continue; the original setup is kept.' : 'Reading this bot’s setup options…')}</p> : null}
     </section> : null}
     {view === 'enrollment' ? <><button type="button" className="connector-back small-button" onClick={library}>All identities</button><div className="connector-generic-context"><strong>New general identity</strong><p className="settings-group-note">For any Agent. You can choose it for a Mote later.</p></div><BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => saved(record, 'Application saved.')} onContinue={canContinueEnrollment ? record => {
       const operation = enrollment.operation
@@ -203,7 +226,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       </> : current ? <>
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{current.config.label}</h3><p>{platform(current.config.application.domain)} bot application</p></div></header>
         {saveNotice ? <p className="settings-group-note" role="status">{saveNotice}</p> : null}
-        {management.supported || management.choices.length ? <div className="connector-next-step"><div><strong>Prepare this bot for conversations</strong><p>Continue its account, message settings and publication in one place.</p></div><button className="primary-button" data-management-open onClick={() => setView('management')}>Continue bot setup</button></div> : null}
+        {management.supported || management.choices.length || management.catalog?.issue ? <div className="connector-next-step"><div><strong>Prepare this bot for conversations</strong><p>Continue its account, message settings and publication in one place.</p></div><button className="primary-button" data-management-open onClick={() => setView('management')}>Continue bot setup</button></div> : null}
         <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult record={current} active={active} /></details>
         <div className="connector-editor-actions"><button className="small-button" disabled={busy} onClick={() => edit(current)}>Edit application</button>{management.catalog?.issue ? <button className="small-button" onClick={() => void management.list()}>Check setup support</button> : null}</div>
         <details className="connector-setup-help"><summary>Finish setup in {platform(current.config.application.domain)}</summary><ol><li>Enable the bot capability in your application.</li><li>In Events & Callbacks, choose persistent connection and add <code>im.message.receive_v1</code>.</li><li>Enable the messaging and group permissions required by the features you use, then publish the application.</li></ol><p className="settings-group-note">Keep this application enabled here while finishing event setup.</p><button className="small-button" data-management-console onClick={() => void openConsole(current.config.application.domain)}>Open {platform(current.config.application.domain)} console <LinkIcon size={12} /></button></details>

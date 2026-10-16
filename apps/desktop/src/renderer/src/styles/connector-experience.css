@@ -1,0 +1,96 @@
+/* The connector is a focused task canvas using the shared Graphite / Mint system. */
+.connector-mod { max-width: 920px; }
+.connector-onboarding { container-name: connector; }
+.connector-mote-detail { gap: var(--sp-5); }
+.connector-mote-detail > header { padding-block: var(--sp-2) var(--sp-3); }
+.connector-mote-detail > header h3 { font-size: var(--fs-heading, 20px); letter-spacing: -.025em; }
+.connector-mote-detail > header p { max-width: 58ch; }
+.connector-onboarding .connector-back { background: transparent; border-color: transparent; color: var(--text-3); padding-inline: 0; }
+.connector-onboarding .connector-back:hover { color: var(--text); }
+.mote-bot-task {
+  display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-lg);
+  background: var(--surface-1); overflow: clip;
+}
+.mote-bot-task > .bot-setup-guide { border: 0; border-radius: 0; margin: 0; padding: var(--sp-4) var(--sp-5); }
+.mote-bot-task__content { min-width: 0; display: grid; align-content: start; gap: var(--sp-4); padding: var(--sp-5); }
+.mote-bot-task__content > .small-button { justify-self: start; color: var(--text-3); background: transparent; padding-inline: 0; }
+.mote-bot-task__content .mote-bot-request-heading { gap: var(--sp-2); padding-bottom: var(--sp-2); }
+.mote-bot-request-heading > strong { font-size: var(--fs-title); font-weight: 550; letter-spacing: -.015em; }
+.mote-bot-request-heading > span:last-child { color: var(--text); font-size: var(--fs-body); }
+.mote-bot-request-heading > span:not(:last-child) { font-size: var(--fs-meta); }
+.mote-bot-task__content .mote-bot-confirmation { justify-items: start; gap: var(--sp-4); }
+.mote-bot-confirmation > p { color: var(--text-2); line-height: 1.65; font-size: var(--fs-body); max-width: 42ch; }
+.mote-bot-task__content .connector-enrollment__code { width: 192px; border-radius: var(--radius); padding: var(--sp-3); }
+.mote-bot-task__content .mote-bot-profile { align-items: center; padding-bottom: var(--sp-3); }
+.mote-bot-profile strong { font-size: var(--fs-title); font-weight: 550; }
+.mote-bot-profile p { line-height: 1.6; font-size: var(--fs-meta); }
+.mote-bot-task__content :is(.mote-details__hint, .mote-details__issue) { margin: 0; font-size: var(--fs-body); line-height: 1.6; overflow-wrap: anywhere; }
+.mote-bot-task__content .mote-bot-actions { gap: var(--sp-3); align-items: center; }
+.mote-bot-task__content button { max-width: 100%; }
+.mote-bot-task__content .primary-button { min-height: 36px; padding: var(--sp-3) var(--sp-5); border-radius: var(--radius); }
+.mote-bot-task__content .mote-bot-stages { padding-block: var(--sp-3); gap: var(--sp-3); }
+.mote-bot-task__content .mote-bot-stages > div { grid-template-columns: minmax(88px, 1fr) minmax(0, 2fr); font-size: var(--fs-meta); line-height: 1.6; }
+.mote-bot-stages dt { color: var(--text-3); }
+.mote-bot-next { display: grid; gap: var(--sp-3); padding-block: var(--sp-3); }
+.mote-bot-next > strong { font-size: var(--fs-body); font-weight: 550; color: var(--text); }
+.mote-bot-next > p { color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; margin: 0; }
+.mote-bot-next > button { justify-self: start; }
+.mote-bot-creation { display: grid; gap: var(--sp-3); padding-block: var(--sp-3); border-block: 1px solid var(--line-soft); }
+.mote-bot-creation .mote-bot-profile { padding-bottom: 0; }
+.mote-bot-setup > .mote-bot-history { border-bottom: 1px solid var(--line-soft); padding-block: var(--sp-2); font-size: var(--fs-meta); }
+.mote-bot-setup > .mote-bot-history > summary { color: var(--text-3); cursor: pointer; padding-block: var(--sp-2); }
+.mote-bot-task__content .bot-profile-details { font-size: var(--fs-meta); }
+.mote-bot-task__content .bot-profile-details > summary { cursor: pointer; padding-block: var(--sp-2); color: var(--text-3); }
+.mote-bot-task__content .bot-profile-details[open] { border-top: 1px solid var(--line-soft); padding-top: var(--sp-3); }
+.mote-bot-task__content .bot-profile-details dl { font-size: var(--fs-meta); line-height: 1.6; }
+.mote-bot-task__content .bot-profile-details code { font-size: var(--fs-meta); user-select: text; }
+.connector-mote-detail .mote-identity-options { margin-top: var(--sp-2); }
+.connector-mote-detail .mote-identity-options > summary { color: var(--text-3); font-size: var(--fs-meta); }
+.connector-mote-detail .mote-identity-management { padding-top: var(--sp-3); }
+.connector-mote-detail .mote-identity-management > p { font-size: var(--fs-meta); color: var(--text-3); line-height: 1.6; }
+.connector-identities-heading { align-items: flex-start; padding-block: var(--sp-2) var(--sp-4); }
+.connector-identities-heading h3 { font-size: var(--fs-heading, 20px); letter-spacing: -.025em; }
+.connector-mote-card { padding: var(--sp-5); gap: var(--sp-4); background: var(--surface-1); transition: border-color 150ms ease; }
+.connector-mote-card:hover { border-color: var(--line); }
+.connector-mote-card__avatar { width: 48px; height: 48px; }
+.connector-mote-card__identity { gap: var(--sp-4); }
+.connector-mote-card__identity strong { font-size: var(--fs-title); }
+.connector-mote-card__actions .primary-button { min-height: 34px; }
+.connector-saved-identities { padding-top: var(--sp-5); }
+.connector-mod > .connector-service-control { margin-top: var(--sp-6); padding-top: var(--sp-5); }
+.connector-service-control__heading h3 { font-size: var(--fs-body); font-weight: 550; }
+.connector-service-control__heading .settings-group-note { font-size: var(--fs-meta); }
+.connector-service-control__setting { font-size: var(--fs-meta); }
+.connector-service-requests { font-size: var(--fs-meta); color: var(--text-3); }
+.connector-guided-task { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: stretch; gap: var(--sp-4); padding: var(--sp-5); border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); }
+.connector-guided-task > div { min-width: 0; }
+.connector-guided-task > div > strong { font-size: var(--fs-title); font-weight: 550; }
+.connector-guided-task > div > p { max-width: 48ch; line-height: 1.65; }
+.connector-guided-task > .primary-button { justify-self: start; }
+@container connector (width >= 640px) {
+  .mote-bot-task { grid-template-columns: minmax(208px, .8fr) minmax(0, 1.4fr); }
+  .mote-bot-task > .bot-setup-guide { display: flex; flex-direction: column; align-items: stretch; justify-content: center; padding: var(--sp-6); border-right: 1px solid var(--line-soft); }
+  .mote-bot-task > .bot-setup-guide svg { width: 100%; height: auto; max-height: 180px; }
+  .mote-bot-task > .bot-setup-guide > figcaption { max-width: 28ch; }
+  .mote-bot-task__content { padding: var(--sp-6); }
+  .connector-guided-task { grid-template-columns: minmax(208px, .8fr) minmax(0, 1.4fr); grid-template-rows: auto auto; gap: var(--sp-3) var(--sp-6); padding: var(--sp-6); align-items: center; }
+  .connector-guided-task > .bot-setup-guide { grid-column: 1; grid-row: 1 / span 2; align-self: center; padding-right: var(--sp-5); }
+  .connector-guided-task > div { grid-column: 2; align-self: end; }
+  .connector-guided-task > .primary-button { grid-column: 2; align-self: start; }
+}
+@container connector (width < 440px) {
+  .mote-bot-task > .bot-setup-guide { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: var(--sp-3); align-items: center; justify-items: start; padding: var(--sp-3) var(--sp-4); }
+  .mote-bot-task > .bot-setup-guide > svg { width: 84px; height: 68px; }
+  .mote-bot-task > .bot-setup-guide > figcaption { text-align: left; }
+  .mote-bot-task > .bot-setup-guide > figcaption p { display: none; }
+  .mote-bot-task__content { padding: var(--sp-4); }
+  .mote-bot-task__content .mote-bot-actions { align-items: stretch; }
+  .mote-bot-task__content .mote-bot-stages > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+  .connector-guided-task > .bot-setup-guide { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: var(--sp-3); align-items: center; justify-items: start; }
+  .connector-guided-task > .bot-setup-guide > svg { width: 84px; height: 68px; }
+  .connector-guided-task > .bot-setup-guide figcaption { text-align: left; }
+  .connector-guided-task > .bot-setup-guide figcaption p { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .connector-mote-card { transition: none; } }
+@media (pointer: coarse) { .mote-bot-task__content button { min-height: 44px; } }

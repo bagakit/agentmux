@@ -19,6 +19,7 @@ import { SelectionField } from '../SelectionField'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { BrandIcon } from '../BrandIcon'
 import { desktopBotCreationPreset } from '../../lib/bot-creation-preset'
+import { BotSetupGuide, type BotSetupGuideStage } from './BotSetupGuide'
 
 const BotIcon = semanticIconComponent('object.conversations')
 const BackIcon = semanticIconComponent('navigation.back')
@@ -373,6 +374,16 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
   const heading = setupHeading(operation, view, !!current, enrollment.preparing, platform, !!busy)
   const renew = view?.actions.find(action => action.kind === 'renew-authentication' && action.actionId !== primary?.actionId)
   const stage = saved ? 'saved' : operation?.application ? 'saving' : operation?.authentication?.stage ?? (current ? 'original' : 'start')
+  const creationUnconfirmed = operation?.creation && [operation.creation.upload, operation.creation.create].some(state => state === 'unknown' || state === 'dispatching')
+  const guideStage: BotSetupGuideStage = saved ? 'ready'
+    : operation?.application ? 'connect'
+    : creationUnconfirmed ? 'attention'
+    : enrollment.preparing ? 'scan'
+    : !current ? unfinished ? 'attention' : 'prepare'
+    : stage === 'account' ? 'account'
+    : stage === 'confirmed' ? 'create'
+    : view?.challenge || ['waiting', 'scanned', 'handoff'].includes(stage) ? 'scan'
+    : 'attention'
   const name = operation?.preset?.name ?? (submitted && 'preset' in submitted ? submitted.preset?.name : null) ?? current?.label ?? (label.trim() || 'AgentMux bot')
   const feedback = enrollment.issue ? <p role="status" className="connector-check-feedback" data-enrollment-feedback>{enrollment.issue}</p> : null
   const identity = <div className="connector-enrollment__bot-preview">
@@ -381,6 +392,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
   </div>
   return <section className="connector-setup connector-enrollment" data-bot-enrollment data-enrollment-operation={selectedId ?? undefined} data-enrollment-stage={stage}>
     {current ? <button className="connector-back connector-enrollment__text-action" onClick={() => { enrollment.select(null); void enrollment.read() }}><BackIcon size={13} />All bot setups</button> : null}
+    <BotSetupGuide stage={guideStage} title={enrollment.preparing ? 'Preparing your sign-in' : undefined} description={saved ? 'Continue with this saved identity. Your original setup is kept here.' : enrollment.preparing ? 'Preparing a sign-in code for this bot. You can return to this same setup.' : stage === 'scanned' ? 'Confirm the sign-in on your phone, then return to this same setup.' : stage === 'handoff' ? 'Your sign-in is being checked. Stay with this original setup.' : guideStage === 'connect' ? 'The bot has been created. Finish saving this same identity securely.' : undefined} />
     <header className="connector-enrollment__heading">
       {current ? <p className="connector-enrollment__identity"><strong>{current.label}</strong><span>{platform}</span></p> : null}
       <h3 className="connector-editor-title">{heading.title}</h3>
