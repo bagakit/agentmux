@@ -38,7 +38,7 @@ import { unobservedRecoveryReference, rereadUnobservedSession, type RecoverySour
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
-import { desktopQuestionReplyState, reconcileConversationQuestionReplies, editConversationQuestionDraft } from '../lib/conversation-question'
+import { desktopQuestionReplyState, reconcileConversationQuestionReplies, editConversationQuestionDraft, sendConversationQuestionReply } from '../lib/conversation-question'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
@@ -1011,13 +1011,14 @@ export function SessionPane({
     ...(session.kind === 'agent' ? { renderRecordActions: renderConversationLandmarkAction,
       renderReadingTools: (active: boolean) => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference)}/> } : {}),
     ...(hasAgentComposer ? { questionReplyRoute: session.capabilities.asyncQuestionReply,
-      questionTerminalTarget: !session.nativeSourceObservation && session.nativeHandle?.kind === 'provider' ? {
+      questionReplyTarget: !session.nativeSourceObservation && session.nativeHandle?.kind === 'provider' ? {
         source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.control.run
       } : undefined,
       questionDraftNotice: questionSaveWarning ? `Draft save unconfirmed. Your latest edits are kept in this running app; copy them before closing. ${questionSaveWarning}` : undefined,
       questionReplyContext: JSON.stringify([session.control.hostId, session.id, session.control.run.runId]),
       onOpenQuestionTerminal: openTerminal,
       questionReplyDraft: target => questionDrafts?.[questionReplyKey(sessionId, target)],
+      onQuestionReply: input => sendConversationQuestionReply(session.control, input),
       onQuestionDraftChange: (target, answers) => editConversationQuestionDraft(session.control, target, answers),
       questionReplyState: target => desktopQuestionReplyState(questionReplies, sessionId, target) } : {})
   }

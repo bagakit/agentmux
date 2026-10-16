@@ -3908,7 +3908,7 @@ export async function retainConversationQuestionReply(sessionId: string, key: st
     return { questionReplies: { ...state.questionReplies, [sessionId]: { ...state.questionReplies?.[sessionId], [key]: attempt } } }
   })
   if (!admitted) throw new Error('The original question reply record changed; this callback cannot replace it.')
-  await flushMessageWorkbench(true)
+  await flushMessageWorkbench(false)
 }
 /** Admit only the chosen recipient's correlation to the existing intent owner before queue input. */
 export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding): Promise<AgentMuxSpatialSave | null> {
