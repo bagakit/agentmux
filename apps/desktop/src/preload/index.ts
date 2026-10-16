@@ -248,6 +248,8 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('gh:createPullRequest', workspaceId, input)
   },
   files: {
+    sharePublic: params => ipcRenderer.invoke('files:sharePublic', params),
+    inspectSharePublic: params => ipcRenderer.invoke('files:inspectSharePublic', params),
     readPublic: (params: import('@agentmux/core').FileReadParams) => ipcRenderer.invoke('files:readPublic', params),
     createPublic: (params: import('@agentmux/core').FileCreateParams) => ipcRenderer.invoke('files:createPublic', params),
     historyPublic: params => ipcRenderer.invoke('files:historyPublic', params),

@@ -1,12 +1,13 @@
+import { retainNoteDraftEditor, retainNoteDraftNavigation, observeNoteDraftNavigation } from '../lib/note-share-staging'
+import { NoteSharedContext } from '../lib/note-shared-context'
 import { RovingToolbar, RovingToolbarButton } from './RovingToolbar'
-import { TextInput } from '@agentmux/client-ui/input'
 import { createContext, lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, NoteInlineLinkNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
+import { NOTE_BLOCK_TYPES, NoteIncludeNode, NoteBlockReferenceNode, NoteInlineLinkNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
 import { NoteInlineLinkView, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteInlineLink'
 import { noteWikiInputExtension } from '@agentmux/client-ui/note/note-wiki-input'
 import { noteWikiLiteralExtension } from '@agentmux/client-ui/note/note-wiki-view'
@@ -14,7 +15,7 @@ import { NoteSnapshotSync } from '@agentmux/client-ui/note/note-snapshot-sync'
 import type { NoteInlineLinkAttributes, NoteLinkTarget } from '@agentmux/core/note-links'
 import { bindNoteWikiLink, noteInlineLinkContent, noteWikiTextTokens } from '@agentmux/client-ui/note/note-wikilinks'
 import { useNoteWikiCompletion } from './NoteWikiCompletion'
-import { serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
+import { serializeNoteDocument, type NoteInclude, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteProvenanceAttributes } from '@agentmux/client-ui/note/note-provenance'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import { useNoteSourceTitle } from '../lib/note-source-name'
@@ -37,6 +38,15 @@ const targetKey = (target: NoteBlockTarget) => JSON.stringify([target.noteId, ta
 function referenceExtension() {
   return NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(NoteReferenceView) } })
 }
+function includeExtension(readOnly = false) { return NoteIncludeNode.extend({ addNodeView() { return ReactNodeViewRenderer(readOnly ? ReadOnlyIncludeView : NoteIncludeView) } }) }
+function ReadOnlyIncludeView({ node }: NodeViewProps) {
+  const context = useContext(NoteSharedContext)
+  return <NodeViewWrapper className="note-shared-block" contentEditable={false}>{context?.renderInclude(node.attrs as NoteInclude, () => {}, true) ?? <p role="status">The original shared content has not been read.</p>}</NodeViewWrapper>
+}
+function NoteIncludeView({ node, deleteNode }: NodeViewProps) {
+  const context = useContext(NoteSharedContext)
+  return <NodeViewWrapper className="note-shared-block" contentEditable={false} data-note-shared-id={node.attrs.noteId}>{context ? context.renderInclude(node.attrs as NoteInclude, deleteNode) : <p className="note-knowledge-notice" role="status">The original shared file is unavailable in this presentation. Its reference is kept.</p>}</NodeViewWrapper>
+}
 function inlineLinkExtension() { return NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLinkView) } }) }
 function InlineLinkView({ node, editor }: NodeViewProps) {
   const context = useContext(ReferenceContext)
@@ -46,7 +56,7 @@ function InlineLinkView({ node, editor }: NodeViewProps) {
 /** The canonical content schema plus two maintained identity allocators; read-only views use neither. */
 export function noteEditorExtensions(folded: () => ReadonlySet<string> = () => new Set()) {
   return [
-    ...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension),
+    ...noteContentExtensions().map(extension => extension.name === NoteIncludeNode.name ? includeExtension() : extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension),
     ...noteIdentityExtensions(),
     Extension.create({
       name: 'noteBlockFold',
@@ -71,25 +81,27 @@ function NoteReferenceView({ node }: NodeViewProps) {
   </p></NodeViewWrapper>
   const resolution = resolveNoteBlock(context.knowledge, reference.target), key = targetKey(reference.target)
   const cycle = context.trail.includes(key)
+  const writtenSources = context.knowledge.sources.filter(source => source.note.noteId === reference.target.noteId)
+  const navigationSource = writtenSources.length === 1 ? writtenSources[0]! : resolution.status === 'resolved' ? resolution.source : undefined
   return <NodeViewWrapper className={`note-reference note-reference--${reference.mode}`} contentEditable={false} {...noteProvenanceAttributes(node.attrs.provenance)}>
     <div className="note-reference__source"><ThemeObjectLinkIcon size={13} /><span>{reference.mode === 'embed' ? 'Embedded block' : 'Block reference'}</span>
-      {resolution.status === 'resolved' ? <button type="button" className="note-text-button" title={`${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`} aria-label={`Open original block in ${resolution.source.location.workspaceId} · ${resolution.source.location.path} · ${reference.target.blockId}`}
-        onClick={() => context.onOpen(resolution.source, reference.target.blockId)}>{context.sourceName(resolution.source) ?? resolution.source.location.path}<ThemeObjectLinkIcon size={12} /></button> : null}
+      {resolution.status === 'resolved' ? <button type="button" className="note-text-button" title={`${(navigationSource ?? resolution.source).location.workspaceId} · ${(navigationSource ?? resolution.source).location.path} · ${reference.target.blockId}`} aria-label={`Open original block in ${(navigationSource ?? resolution.source).location.workspaceId} · ${(navigationSource ?? resolution.source).location.path} · ${reference.target.blockId}`}
+        onClick={() => context.onOpen(navigationSource ?? resolution.source, reference.target.blockId)}>{context.sourceName(navigationSource ?? resolution.source) ?? (navigationSource ?? resolution.source).location.path}<ThemeObjectLinkIcon size={12} /></button> : null}
     </div>
     {cycle ? <p className="note-knowledge-notice" role="status">This reference is circular. The original reference is preserved.</p>
       : resolution.status !== 'resolved' ? <p className="note-knowledge-notice" role="status">{resolution.message}</p>
-      : reference.mode === 'embed' ? <ReferenceContext.Provider value={{ ...context, trail: [...context.trail, key] }}>
+      : reference.mode === 'embed' || resolution.block.content.type === 'noteInclude' ? <ReferenceContext.Provider value={{ ...context, trail: [...context.trail, key] }}>
         <ReadOnlyBlock content={resolution.block.content} />
       </ReferenceContext.Provider> : <p className="note-reference__excerpt">{resolution.block.text || 'Empty block'}</p>}
   </NodeViewWrapper>
 }
 
-function ReadOnlyBlock({ content }: { content: JSONContent }) {
+export function ReadOnlyBlock({ content }: { content: JSONContent }) {
   const ownerDocument = useWorkbenchDocument()
   // A list item requires its schema container even when its subtree is the requested projection.
-  const doc = useMemo(() => ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content] }), [content])
+  const doc = useMemo(() => content.type === 'doc' ? content : ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content] }), [content])
   const context = useContext(ReferenceContext), openLink = useRef(context?.onOpenLink); openLink.current = context?.onOpenLink
-  const editor = useEditor({ extensions: [...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
+  const editor = useEditor({ extensions: [...noteContentExtensions().map(extension => extension.name === NoteIncludeNode.name ? includeExtension(true) : extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
     editorProps: { attributes: { class: 'note-embedded-content', 'aria-label': 'Original block, read only' } } }, [])
   useLayoutEffect(() => { if (editor && !editor.isDestroyed) editor.view.updateRoot() }, [editor, ownerDocument])
   const [issue, setIssue] = useState<string | null>(null), snapshot = useRef<NoteSnapshotSync | null>(null)
@@ -102,7 +114,7 @@ function ReadOnlyBlock({ content }: { content: JSONContent }) {
   return <>{issue && <p role="status">{issue} <button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button></p>}<EditorContent editor={editor} /></>
 }
 
-export type NoteEditorHandle = { editor: Editor; focusBlock: (blockId: string, focus?: boolean, reveal?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
+export type NoteEditorHandle = { onNavigationReady?: (listener: () => void) => () => void; editor: Editor; focusBlock: (blockId: string, focus?: boolean, reveal?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
 export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onIssue, handleRef, onSelectedBlock, onOpenLink, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft, active = true, showBacklinks = true, sourceIdentity = note.noteId }: {
   note: NoteDocument; knowledge: NoteKnowledge; onChange: (raw: string, editorBefore?: string) => void; onOpen: (source: NoteSource, blockId: string) => void
   onSave: () => void; onIssue: (message: string | null) => void; handleRef?: Ref<NoteEditorHandle | null>; onSelectedBlock?: (target: NoteBlockTarget) => void
@@ -111,6 +123,8 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   onKeepDisplayedDraft?: ((displayedRaw: string, incomingRaw: string) => void) | undefined
 }) {
   const ownerDocument = useWorkbenchDocument()
+  const shared = useContext(NoteSharedContext), sharedRef = useRef(shared); sharedRef.current = shared
+  const [beside, setBeside] = useState<{ position: number; top: number } | null>(null)
   const sourceName = useNoteSourceTitle()
   const props = useRef({ note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft })
   props.current = { note, onChange, onSave, onIssue, onSelectedBlock, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }
@@ -118,7 +132,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   const composing = useRef(false), snapshot = useRef<NoteSnapshotSync | null>(null)
   const [mappingIssue, setMappingIssue] = useState<string | null>(null)
   const [mappingDrafts, setMappingDrafts] = useState<{ displayed: string; incoming: string } | null>(null), [compareIncoming, setCompareIncoming] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null), [picker, setPicker] = useState(false), [query, setQuery] = useState('')
+  const [selected, setSelected] = useState<string | null>(null)
   const [, setFoldRevision] = useState(0)
   const folded = useRef(new Set<string>())
   const wikiHandlers = useRef<{ created(link: NoteInlineLinkAttributes, previousReferenceId?: string): void; keyDown(event: KeyboardEvent): boolean; open(link: NoteLinkOpenRequest): void }>({ created() {}, keyDown: () => false, open() {} })
@@ -143,8 +157,10 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       if (typeof blockId === 'string') current.onSelectedBlock?.({ noteId: current.note.noteId, blockId })
     }
   }
+  const editorRef = useRef<Editor | null>(null)
   const editor = useEditor({ extensions, content: note.content, editorProps: {
     attributes: { class: 'note-block-content', role: 'textbox', 'aria-label': 'Note blocks', 'aria-multiline': 'true' },
+    handlePaste(_view, event) { return editorRef.current ? sharedRef.current?.paste(editorRef.current, event) ?? false : false },
     handleDOMEvents: { compositionstart(view) { if (!composing.current) { compositionBefore.current = view.state.doc.toJSON(); composing.current = true; snapshot.current?.pause(); props.current.onCompositionChange?.(true) }; return false } },
     handleKeyDown(view, event) {
       if (event.isComposing || view.composing) return false
@@ -170,6 +186,8 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   }, onUpdate({ editor, transaction }) {
     if (!composing.current && !transaction.getMeta('noteWikiCompositionEnd')) publishContent(editor, transaction.before.toJSON())
   } }, [note.noteId])
+  editorRef.current = editor
+  useEffect(() => editor && shared?.fileKey ? retainNoteDraftEditor(shared.fileKey, editor) : undefined, [editor, shared?.fileKey])
   useLayoutEffect(() => {
     if (!editor || editor.isDestroyed) return
     const updateRoot = () => { if (!editor.isDestroyed) editor.view.updateRoot() }
@@ -227,13 +245,14 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       if (typeof handleRef === 'function') handleRef(handle)
       else if (handleRef) handleRef.current = handle
     }
-    const detach = () => publish(null)
+    let releaseNavigation: (() => void) | undefined
+    const detach = () => { releaseNavigation?.(); releaseNavigation = undefined; publish(null) }
     if (!editor) { detach(); return }
     const attach = () => {
       // An Editor identity may survive without its view. Re-publish on every
       // real mount so retained restore/reveal/focus requests can resume.
       if (editor.isDestroyed) { detach(); return }
-      publish({ editor, bindLink(link, target) {
+      const handle: NoteEditorHandle = { editor, onNavigationReady(listener) { return sharedRef.current ? observeNoteDraftNavigation(sharedRef.current.occurrence, listener) : () => {} }, bindLink(link, target) {
         if (editor.isDestroyed || !link.referenceId) return false
         const original = { ...props.current.note, content: editor.getJSON() }
         const bound = bindNoteWikiLink(original, { referenceId: link.referenceId, text: link.text, target })
@@ -245,7 +264,14 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         return true
       }, focusBlock(blockId, focus = true, reveal = false) {
         if (editor.isDestroyed) return false
-        let position: number | null = null, blockPosition: number | null = null, textblock = false
+        let position: number | null = null, blockPosition: number | null = null, textblock = false, include: NoteInclude | null = null
+        let declarations = 0
+        editor.state.doc.descendants(node => {
+          if (node.attrs.blockId === blockId) declarations++
+          if (node.type.name === 'noteInclude') for (const forwarded of node.attrs.forwardedBlockIds ?? []) if (forwarded === blockId) { declarations++; include = node.attrs as NoteInclude }
+        })
+        if (declarations !== 1) return false
+        if (include) return sharedRef.current?.focusIncludedBlock(include, blockId, focus, reveal) ?? false
         editor.state.doc.descendants((node, pos) => { if (node.attrs.blockId === blockId) { blockPosition = pos; position = node.isTextblock ? pos + 1 : pos; textblock = node.isTextblock; return false } })
         if (position === null) return false
         if (reveal && !desktopElementVisible(editor.view.dom)) return false
@@ -274,13 +300,18 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         if (!focus) return true
         editor.view.focus()
         return editor.view.dom === editor.view.dom.ownerDocument.activeElement || editor.view.dom.contains(editor.view.dom.ownerDocument.activeElement)
-      } })
+      } }
+      publish(handle)
+      releaseNavigation?.()
+      const scope = sharedRef.current
+      if (scope) releaseNavigation = retainNoteDraftNavigation(scope.occurrence, scope.fileKey, handle)
     }
     editor.on('mount', attach).on('unmount', detach).on('destroy', detach)
     attach()
     return () => { editor.off('mount', attach).off('unmount', detach).off('destroy', detach); detach() }
   }, [editor, handleRef])
-  const formatting = useEditorState({ editor, selector: ({ editor }) => ({
+  const actionEditor = shared?.focusedEditor && !shared.focusedEditor.isDestroyed ? shared.focusedEditor : editor
+  const formatting = useEditorState({ editor: actionEditor, selector: ({ editor }) => ({
     heading: editor && !editor.isDestroyed ? editor.isActive('heading', { level: 1 }) : false,
     list: editor && !editor.isDestroyed ? editor.isActive('bulletList') : false,
     quote: editor && !editor.isDestroyed ? editor.isActive('blockquote') : false,
@@ -289,26 +320,30 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     from: editor?.state.selection.from, to: editor?.state.selection.to
   }) })
   const backlinks = selected ? noteBacklinks(knowledge, { noteId: note.noteId, blockId: selected }) : []
-  const candidates = useMemo(() => {
-    if (!picker) return []
-    const identityCounts = new Map<string, number>(), match = query.toLowerCase()
-    for (const source of knowledge.sources) identityCounts.set(source.note.noteId, (identityCounts.get(source.note.noteId) ?? 0) + 1)
-    return knowledge.sources.flatMap(source => identityCounts.get(source.note.noteId) !== 1 ? [] : [...source.blocks.values()].flatMap(block =>
-      `${sourceName(source) ?? ''} ${source.location.path} ${block.text}`.toLowerCase().includes(match) ? [{ source, block, target: { noteId: source.note.noteId, blockId: block.blockId } }] : []))
-  }, [picker, knowledge, query, sourceName])
   const foldTarget = () => {
     if (!editor || editor.isDestroyed) return null
     const { $from } = editor.state.selection
     for (let depth = $from.depth; depth > 0; depth--) { const node = $from.node(depth); if (node.attrs.blockId && node.childCount > 1 && !node.isTextblock) return String(node.attrs.blockId) }
     return null
   }
-  const foldId = foldTarget()
-  const insertReference = (target: NoteBlockTarget, mode: NoteBlockReference['mode']) => {
-    if (!editor) return
-    editor.chain().focus().insertContent({ type: 'blockReference', attrs: { target, mode } }).run()
-    setPicker(false); setQuery('')
+  const foldId = actionEditor === editor ? foldTarget() : null
+  const showBlockAction = (position: number) => {
+    if (!editor || editor.isDestroyed) return
+    const node = editor.state.doc.nodeAt(position)
+    if (!node || !NOTE_BLOCK_TYPES.includes(node.type.name as typeof NOTE_BLOCK_TYPES[number])) return
+    const element = editor.view.nodeDOM(position)
+    if (!(element instanceof ownerDocument.defaultView!.HTMLElement)) return
+    const top = element.getBoundingClientRect().top - editor.view.dom.parentElement!.getBoundingClientRect().top
+    setBeside(value => value?.position === position && value.top === top ? value : { position, top })
   }
-  return <ReferenceContext.Provider value={{ knowledge, trail: [], sourceName, onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
+  const showSelectedAction = () => {
+    if (!editor || editor.isDestroyed) return
+    const at = editor.state.selection.$from
+    if (at.depth) showBlockAction(at.before(at.depth))
+    else showBlockAction(editor.state.selection.from)
+  }
+  useEffect(() => { if (editor && !editor.isDestroyed && editor.view.hasFocus()) showSelectedAction() }, [editor, formatting?.from, formatting?.to])
+  return <ReferenceContext.Provider value={{ knowledge: shared?.knowledge ?? knowledge, trail: [], sourceName, onOpen, onOpenLink }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     {mappingIssue && <section className="note-knowledge-notice" aria-label="Incoming update recovery">
       <p>Both drafts are kept. If blocks moved or cannot be matched reliably, compare the drafts and choose which one to continue editing.</p>
       <button type="button" className="small-button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button>
@@ -325,31 +360,34 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     </section>}
     <RovingToolbar className="note-editor__tools" aria-label="Note block tools">
       <div className="note-editor__tool-group" role="group" aria-label="Block style">
-        <RovingToolbarButton type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></RovingToolbarButton>
-        <RovingToolbarButton type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" aria-pressed={formatting?.list ?? false} onClick={() => editor?.chain().focus().toggleBulletList().run()}><ThemeObjectListIcon size={15} /></RovingToolbarButton>
-        <RovingToolbarButton type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><ThemeActionQuoteIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => actionEditor?.chain().focus().toggleHeading({ level: 1 }).run()}><ThemeObjectHeadingIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" aria-pressed={formatting?.list ?? false} onClick={() => actionEditor?.chain().focus().toggleBulletList().run()}><ThemeObjectListIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => actionEditor?.chain().focus().toggleBlockquote().run()}><ThemeActionQuoteIcon size={15} /></RovingToolbarButton>
       </div>
       <div className="note-editor__tool-group" role="group" aria-label="Block structure">
-        <RovingToolbarButton type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><ThemeActionIndentIcon size={15} /></RovingToolbarButton>
-        <RovingToolbarButton type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => editor?.chain().focus().liftListItem('listItem').run()}><ThemeActionOutdentIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => actionEditor?.chain().focus().sinkListItem('listItem').run()}><ThemeActionIndentIcon size={15} /></RovingToolbarButton>
+        <RovingToolbarButton type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => actionEditor?.chain().focus().liftListItem('listItem').run()}><ThemeActionOutdentIcon size={15} /></RovingToolbarButton>
         <RovingToolbarButton type="button" className="note-tool" title="Fold or unfold nested blocks" aria-label="Fold or unfold nested blocks" disabled={!foldId} aria-pressed={foldId ? folded.current.has(foldId) : false} onClick={() => {
           if (!editor || !foldId) return
           if (folded.current.has(foldId)) folded.current.delete(foldId); else folded.current.add(foldId)
           editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
         }}><ThemeNavigationDownIcon size={15} /></RovingToolbarButton>
       </div>
-      <div className="note-editor__tool-group" role="group" aria-label="Block references"><RovingToolbarButton type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><ThemeObjectLinkIcon size={14} /><span>Reference block</span></RovingToolbarButton></div>
     </RovingToolbar>
-    {picker ? <section className="note-reference-picker" aria-label="Choose an original block">
-      <TextInput aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />
-      <p className="note-scope">{knowledge.scope === 'complete' ? 'Confirmed Note scope' : 'Loaded Notes only · more sources may exist'}</p>
-      <div className="note-reference-picker__results">{candidates.map(({ source, block, target }) => <div className="note-reference-picker__row" key={JSON.stringify([source.location.workspaceId, source.location.path, block.blockId])} title={`${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`}>
-        <span><strong title={block.text}>{block.text || 'Empty block'}</strong><small title={source.location.path}>{sourceName(source) ?? source.location.path}</small></span>
-        <button type="button" className="note-text-button" aria-label={`Reference ${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`} onClick={() => insertReference(target, 'reference')}>Reference</button>
-        <button type="button" className="note-text-button" aria-label={`Embed ${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`} onClick={() => insertReference(target, 'embed')}>Embed</button>
-      </div>)}{!candidates.length ? <p className="note-scope">No matching block is confirmed in this scope.</p> : null}</div>
-    </section> : null}
-    <div className="note-editor__body"><EditorContent editor={editor} /></div>
+    <div className="note-editor__body" onFocus={event => { if (editor && (event.target as HTMLElement).closest('.note-block-content') === editor.view.dom) { shared?.focusEditor(editor); showSelectedAction() } }} onPointerMove={event => {
+      if (!editor || editor.isDestroyed || !(event.target instanceof ownerDocument.defaultView!.Element)) return
+      const element = event.target.closest('p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,hr,[data-note-include]')
+      if (!element || element.closest('.note-block-content') !== editor.view.dom) return
+      const at = editor.state.doc.resolve(editor.view.posAtDOM(element, 0))
+      showBlockAction(at.depth ? at.before(at.depth) : Math.max(0, editor.view.posAtDOM(element, 0)))
+    }}>
+      {shared && <button type="button" className="note-block-action" aria-label="Copy shared block reference" title="Copy shared block reference" style={{ top: beside?.top ?? 0 }} onMouseDown={event => event.preventDefault()} onFocus={() => { if (!beside) showSelectedAction() }} onClick={() => {
+        if (!editor || editor.isDestroyed) return
+        const at = editor.state.selection.$from, position = beside?.position ?? (at.depth ? at.before(at.depth) : editor.state.selection.from)
+        void shared.copyBlock(editor, position).then(() => props.current.onIssue('Reference copied. Paste it into a Note to share this content.')).catch(error => props.current.onIssue(error instanceof Error ? error.message : String(error)))
+      }}><ThemeObjectLinkIcon size={13} /></button>}
+      <EditorContent editor={editor} />
+    </div>
     {wiki.popup}
     {showBacklinks ? <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>
       {selected ? backlinks.length ? backlinks.map(link => <button type="button" className="note-backlink" key={JSON.stringify([link.source.location.workspaceId, link.source.location.path, link.occurrence])}

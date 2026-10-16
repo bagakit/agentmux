@@ -1683,6 +1683,8 @@ export type AgentMuxDesktopApi = {
     keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome>
   }
   files: {
+    sharePublic(params: import('@agentmux/core/files').FileShareParams): Promise<import('@agentmux/core/files').FileShareResult>
+    inspectSharePublic(params: import('@agentmux/core/files').FileShareInspectParams): Promise<import('@agentmux/core/files').FileShareInspectResult>
     readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
     createPublic(params: AgentMuxRpcParams<'file.create'>): Promise<AgentMuxRpcResult<'file.create'>>
     historyPublic(params: AgentMuxRpcParams<'file.history'>): Promise<AgentMuxRpcResult<'file.history'>>

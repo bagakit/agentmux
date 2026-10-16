@@ -1,3 +1,5 @@
+import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
+import { fileDocumentConsumerKeys, hasFileDocumentConsumer } from './file-document-consumers'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { FileDocument, WorkspaceFileReadResult } from '../../../shared/contracts'
 import { activateTab, addTab, addTabOccurrence, groupIds, removeTab, type WorkspaceLayout } from '@agentmux/layout'
@@ -306,7 +308,7 @@ export function reduceDocumentAttached(
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   if (state.documents[key]) return state
-  if (!Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
+  if (!hasFileDocumentConsumer(key) && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
     surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path))) return state
   return {
     ...state,
@@ -343,7 +345,7 @@ export function reduceDocumentLoadFailed(
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   if (state.documents[key]) return state
-  if (!Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
+  if (!hasFileDocumentConsumer(key) && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
     surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path))) return state
   return { ...state, documentIssues: { ...state.documentIssues, [key]: issue } }
 }
@@ -358,10 +360,15 @@ export function reduceDocumentContent(
   if (!tab) return state
   const surface = regionId ? tab.regions[regionId] : titleWorkbenchSurface(tab)
   if (surface?.kind !== 'file') return state
-  const key = documentKey(surface.workspaceId, surface.path)
+  return reduceFileDocumentContent(state, surface.workspaceId, surface.path, content)
+}
+
+/** Exact resource input, shared by ordinary File Regions and embedded file presentations. */
+export function reduceFileDocumentContent(state: FileWorkbenchState, workspaceId: string, path: string, content: string): FileWorkbenchState {
+  const key = documentKey(workspaceId, path)
   const current = state.documents[key]
   if (!current) return state
-  const noteEditing = surface.path.endsWith('.note.md') && !state.dirtyDocuments[key]
+  const noteEditing = path.endsWith('.note.md') && !state.dirtyDocuments[key]
     ? { ...current.noteEditing, baseline: { content: current.content, revision: current.revision } } : current.noteEditing
   return {
     ...state,
@@ -528,7 +535,7 @@ export function reduceDocumentReloaded(state: FileWorkbenchState, workspaceId: s
     ...state,
     ...(state.dirtyDocuments[key] ? { retainedDocumentDrafts: { ...state.retainedDocumentDrafts,
       [key]: [...state.retainedDocumentDrafts?.[key] ?? [], state.documents[key]!] } } : {}),
-    documents: { ...state.documents, [key]: { ...document, ...(state.documents[key]?.noteConversion ? { noteConversion: state.documents[key]!.noteConversion } : {}) } },
+    documents: { ...state.documents, [key]: { ...document, ...(state.documents[key]?.noteConversion ? { noteConversion: state.documents[key]!.noteConversion } : {}), ...(state.documents[key]?.noteEditing?.share ? { noteEditing: { ...document.noteEditing, share: state.documents[key]!.noteEditing!.share } } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 },
     documentIssues: withoutIssue(state.documentIssues, key)
@@ -577,6 +584,13 @@ export function reconcileWorkbenchFileProjection(
       surface.kind === 'file' ? [documentKey(surface.workspaceId, surface.path)] : []
     ))
   )))
+  for (const key of fileDocumentConsumerKeys()) openDocumentKeys.add(key)
+  for (const [key, document] of Object.entries(documents)) if (document.noteEditing?.share) openDocumentKeys.add(key)
+  // A hidden/removed include cannot discard an unsaved shared-file draft.
+  for (const key of Object.keys(dirtyDocuments)) {
+    const header = dirtyDocuments[key] && documents[key] ? readNoteMarkdownHeader(documents[key]!.content) : null
+    if (header?.status === 'valid' && header.kind === 'shared-block') openDocumentKeys.add(key)
+  }
   for (const key of Object.keys(documents)) {
     if (!openDocumentKeys.has(key)) delete documents[key]
   }

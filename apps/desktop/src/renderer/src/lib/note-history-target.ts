@@ -37,3 +37,23 @@ export function confirmNoteHistoryTarget(params: FileReadParams, noteId: string,
   return { target: { zoneId: params.zoneId, ...(params.spaceId === undefined ? {} : { spaceId: params.spaceId }),
     path: params.path, expectedResource: receipt.resource, noteId }, document: receipt.result.document }
 }
+
+/** Map an already confirmed embedded resource through an existing exact directory Zone. No surface is invented. */
+export function noteResourceReadParams(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], resource: import('@agentmux/core/notebook-catalog').NoteResource): FileReadParams {
+  const workspace = state.config?.workspaces.find(item => item.id === resource.workspaceId)
+  if (!workspace || workspace.hostId !== resource.hostId || workspace.path !== resource.workspacePath) throw Error('The original shared file Workspace changed. Its draft is kept.')
+  const catalog = spatialCatalog(state, topics), candidates: FileReadParams[] = []
+  for (const zone of catalog.zones) {
+    if (zone.workspaceId !== resource.workspaceId) continue
+    try {
+      const directory = zoneFileResource(workspace, zone, '', topics), prefix = directory.relativeDirectory ? directory.relativeDirectory + '/' : ''
+      if (!resource.path.startsWith(prefix) || resource.path.length === prefix.length) continue
+      const path = resource.path.slice(prefix.length)
+      if (zoneFileResource(workspace, zone, path, topics).path === resource.path) candidates.push({ zoneId: zone.zoneId, path, expectedResource: { hostId: resource.hostId, workspaceId: resource.workspaceId, workspacePath: resource.workspacePath } })
+    } catch { /* This Zone does not own the exact known file; it cannot authorize this request. */ }
+  }
+  const root = candidates.filter(candidate => candidate.path === resource.path)
+  if (root.length === 1) return root[0]!
+  if (candidates.length === 1) return candidates[0]!
+  throw Error('The original shared file directory mapping is unconfirmed. Its draft is kept; restore that original directory before sharing into it.')
+}

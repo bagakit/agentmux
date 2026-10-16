@@ -236,3 +236,28 @@
 }
 .note-recovery-drawer--expanded { position: absolute; inset: 0; width: 100%; border-left: 0; }
 .note-recovery-drawer--expanded .note-version-history__diff { height: clamp(240px, 64vh, 900px); }
+
+/* Ordinary prose stays continuous; its nearby operation appears on pointer or keyboard intent. */
+.note-editor__body { position: relative; }
+.note-block-action { position: absolute; z-index: 2; inset-inline-start: -27px; width: 25px; height: 28px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); opacity: 0; cursor: pointer; }
+.note-editor__body:hover > .note-block-action, .note-editor__body:focus-within > .note-block-action { opacity: 1; }
+.note-block-action:hover { color: var(--text); background: var(--wash-1); }
+.note-block-action:focus-visible { opacity: 1; outline: 2px solid var(--green); outline-offset: 1px; }
+/* Permanent start/end boundaries distinguish the original shared file from its host prose. */
+.note-shared-block { position: relative; margin: var(--sp-5) 0; padding: var(--sp-2) 0 var(--sp-2) var(--sp-4); border-inline-start: 2px solid var(--line); }
+.note-shared-block::before, .note-shared-block::after { content: ''; position: absolute; inset-inline-start: -2px; width: 12px; height: 1px; background: var(--line); }
+.note-shared-block::before { top: 0; }
+.note-shared-block::after { bottom: 0; }
+.note-shared-block:focus-within { border-color: var(--green); }
+.note-shared-block__header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); }
+.note-shared-block__header > :nth-child(2) { margin-inline-start: auto; font-size: var(--fs-micro); }
+.note-shared-block__header .note-text-button { min-height: 24px; padding-inline: var(--sp-2); font: inherit; }
+.note-shared-block__header .note-text-button:disabled { opacity: .4; cursor: default; }
+.note-shared-block > .note-embedded-content { margin-top: 0; }
+.note-shared-block .note-editor { padding: 0; max-width: none; }
+.note-shared-block .note-editor__tools { display: none; }
+.note-shared-block .note-block-content { min-height: 0; padding-bottom: 0; }
+.note-shared-block .note-block-content > :last-child { margin-bottom: 0; }
+.note-shared-block__end { margin-top: var(--sp-2); color: var(--text-3); font: var(--fs-micro)/1.5 var(--font-sans); }
+@media (pointer: coarse) { .note-editor__body > .note-block-action { opacity: 1; } }
+.note-editor__body:has(.note-shared-block:hover) > .note-block-action, .note-editor__body:has(.note-shared-block:focus-within) > .note-block-action { opacity: 0; pointer-events: none; }

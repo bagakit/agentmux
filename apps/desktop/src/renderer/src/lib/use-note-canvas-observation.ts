@@ -5,7 +5,7 @@ import { documentKey } from './workbench-tabs'
 import { useAppStore } from '../store'
 
 /** A visible consumer of the existing owner, with explicit refresh and real cancellation. */
-export function useNoteCanvasObservation(active: boolean) {
+export function useNoteCanvasObservation(active: boolean, observeDocumentRevisions = true) {
   const [snapshot, setSnapshot] = useState<NotebookGraphSnapshot | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [stale, setStale] = useState(false), [busy, setBusy] = useState(false)
   const [attempt, setAttempt] = useState(0), accepted = useRef(-1), current = useRef(snapshot); current.current = snapshot
@@ -32,6 +32,9 @@ export function useNoteCanvasObservation(active: boolean) {
     if (!active || !snapshot) return
     const relevant = new Map(snapshot.graph.observations.map(observation => [documentKey(observation.resource.workspaceId, observation.resource.path), observation]))
     const offFiles = api.files.onInvalidated(event => { if (relevant.has(documentKey(event.workspaceId, event.path))) setStale(true) })
+    // Embedded editors already observe their exact Files and explicitly refresh after
+    // saves. Their keystrokes must not walk this catalog-sized graph subscription.
+    if (!observeDocumentRevisions) return offFiles
     const offStore = useAppStore.subscribe((state, previous) => {
       if (state.documents === previous.documents) return
       for (const [key, observation] of relevant) {
@@ -40,7 +43,7 @@ export function useNoteCanvasObservation(active: boolean) {
       }
     })
     return () => { offFiles(); offStore() }
-  }, [active, snapshot])
+  }, [active, snapshot, observeDocumentRevisions])
   const refresh = useCallback(() => setAttempt(value => value + 1), [])
   return { snapshot, issue, stale, busy, refresh }
 }

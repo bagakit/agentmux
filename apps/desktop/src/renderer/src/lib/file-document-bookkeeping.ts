@@ -1,3 +1,4 @@
+import { hasFileDocumentConsumer } from './file-document-consumers'
 import { api } from './api'
 import { isScratchWorkspaceId, type AppConfig } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
@@ -69,7 +70,7 @@ export async function disposeClosedFileOwners(
   const previous = openFileRefs(previousTabs)
   const next = openFileRefs(nextTabs)
   await Promise.all([...previous].flatMap(([key, surface]) => {
-    if (next.has(key)) return []
+    if (next.has(key) || hasFileDocumentConsumer(key)) return []
     advanceDocumentLifetime(key)
     return [api.files.unobserve(surface.workspaceId, surface.path)]
   }))

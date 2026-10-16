@@ -1,5 +1,8 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
+import { NoteSharedFileEditing } from './NoteSharedFileEditing'
+import { noteHistoryReadParams } from '../lib/note-history-target'
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentMuxSpaceLocation } from '@agentmux/core/control'
@@ -30,12 +33,13 @@ type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpa
 export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface: FileWorkbenchSurface }) {
   const ownerDocument = useWorkbenchDocument()
   const key = documentKey(surface.workspaceId, surface.path)
+  const presentationId = useId(), occurrence = `${surface.regionId}/${presentationId}`
   const presentation = useWorkbenchBrowserPresentation()
   // Retain the original editor without deriving a global graph for a hidden projection.
   // Pending input still finishes in its original owner; visibility does not cancel a save.
   const displayed = useRef<{ key: string; document: import('../../../shared/contracts').FileDocument | undefined; notes: ReturnType<typeof noteFilesFromDocuments> }>({ key, document: undefined, notes: {} })
-  const compositionChanged = useCallback((active: boolean) => setNoteComposition(key, surface.regionId, active), [key, surface.regionId])
-  useEffect(() => () => setNoteComposition(key, surface.regionId, false), [key, surface.regionId])
+  const compositionChanged = useCallback((active: boolean) => setNoteComposition(key, occurrence, active), [key, occurrence])
+  useEffect(() => () => setNoteComposition(key, occurrence, false), [key, occurrence])
   const document = useAppStore(state => presentation.active || displayed.current.key !== key ? state.documents[key] : displayed.current.document)
   const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
   const notes = useAppStore(useShallow(state => presentation.active || displayed.current.key !== key ? noteFilesFromDocuments(state.documents) : displayed.current.notes))
@@ -92,7 +96,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     const read = original ? parseNoteFile(original) : null
     const currentSource = original ? noteKnowledge([{ location: source.location, document: original }]).sources[0] : undefined
     if (!resource || !targetTab?.space || targetRegion?.kind !== 'file' || targetRegion.workspaceId !== source.location.workspaceId || targetRegion.path !== source.location.path ||
-      read?.status !== 'valid' || read.note.noteId !== source.note.noteId || !currentSource?.blocks.has(blockId)) {
+      read?.status !== 'valid' || read.note.noteId !== source.note.noteId || !currentSource || !currentSource.blocks.has(blockId) && !currentSource.blockForwardings?.some(forwarding => forwarding.blockId === blockId)) {
       setNotice('The original Note resource or display position is no longer confirmed. Its exact target is retained.'); return
     }
     const heldSelection = state.surveyZoneSelection
@@ -156,6 +160,18 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       { reference, space: tab.space, ...(presentation.projection ? { projection: presentation.projection } : {}) })
     if (!opened) throw new Error('Later navigation was kept. The original link is retained; choose it again when ready.')
   }
+  const sharedRead = useMemo(() => {
+    try { return noteHistoryReadParams(useAppStore.getState(), scratchTopicsForConfig(useAppStore.getState().config, useAppStore.getState().scratchTopicSnapshots) ?? [], tabId, surface.regionId) } catch { return undefined }
+  }, [tabId, surface.regionId, surface.workspaceId, surface.path, config])
+  const sharedNote = useMemo(() => document ? parseNoteFile(document) : null, [document])
+  const hasIncludes = useMemo(() => {
+    const has = (node: import('@tiptap/core').JSONContent): boolean => node.type === 'noteInclude' || Boolean(node.content?.some(has))
+    if (sharedNote?.status !== 'valid') return false
+    const originalReferences = new Set<string>()
+    const references = (node: import('@tiptap/core').JSONContent) => { if (node.type === 'blockReference' && typeof node.attrs?.target?.noteId === 'string') originalReferences.add(node.attrs.target.noteId); node.content?.forEach(references) }
+    references(sharedNote.note.content)
+    return has(sharedNote.note.content) || knowledge.sources.some(source => originalReferences.has(source.note.noteId) && has(source.note.content))
+  }, [sharedNote, knowledge])
   if (!document) return null
   return <div className="note-surface" style={noteReadingStyle(config?.notes)}>
 
@@ -179,6 +195,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
     </button>)}</div>
       </Dialog.Content></DocumentOverlayPortal>
     </Dialog.Root>
+    <NoteSharedFileEditing target={{ workspaceId: surface.workspaceId, path: surface.path, hostId: originalResource?.hostId ?? '', workspacePath: originalResource?.path ?? '', noteId: sharedNote?.status === 'valid' ? sharedNote.note.noteId : '' }} read={sharedRead} occurrence={occurrence} active={presentation.active} hasIncludes={hasIncludes} knowledge={knowledge} onOpen={onOpen}>
     <NoteFileView sourceCoverage={
       <details className="note-directory-sources" aria-label="Note sources"><summary>Source coverage <span>{!directoryFacts ? 'Loaded Notes only' : directoryFacts.status === 'reading' ? 'Checking this directory…'
         : directoryFacts.status === 'unknown' ? 'Directory unconfirmed' : directoryFacts.status === 'partial' ? 'Partial' : null}</span></summary>
@@ -195,5 +212,6 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
       {...(blockPresentation ? { onSelectedBlock } : {})} {...(restoredBlock ? { restoredBlock } : {})}
       {...(focusRequest !== undefined ? { focusRequest, canFocus, onFocused } : {})}
       {...(reveal?.noteBlock && presentation.active ? { revealBlock: reveal.noteBlock, onRevealed } : {})} />
+    </NoteSharedFileEditing>
   </div>
 }
