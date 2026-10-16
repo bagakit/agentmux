@@ -318,6 +318,18 @@ export class NativeJsonlHistoryReader {
     return position ? await this.parseRange(0, position) : null
   }
 
+  /** Read one Provider-issued byte identity without traversing unrelated history. */
+  async readAt(start: number): Promise<NativeJsonlHistoryRecord | null> {
+    if (!Number.isSafeInteger(start) || start < 0 || start >= this.cut ||
+        start > 0 && (await this.read(start - 1, 1))[0] !== 10) return null
+    const original = this.forwardPosition, originalLastStart = this.lastForwardStart
+    this.forwardPosition = start
+    try {
+      const record = await this.readNext()
+      return record?.start === start ? record : null
+    } finally { this.forwardPosition = original; this.lastForwardStart = originalLastStart }
+  }
+
   /** Forward metadata reads reuse the same bounded parser; large message text stays unmaterialized. */
   async readNext(): Promise<NativeJsonlHistoryRecord | null> {
     while (this.forwardPosition < this.cut) {
