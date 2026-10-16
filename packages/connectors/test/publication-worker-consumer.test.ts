@@ -13,7 +13,7 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const row = (id: string, text = 'Same original reply', content?: unknown[]) => JSON.stringify({ sessionId: 'original-native', uuid: id,
   type: 'assistant', message: { role: 'assistant', content: content ?? [{ type: 'text', text }] } }) + '\n'
-async function fixture(effect?: PublicationAdapter['dispatch']) {
+async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = false) {
   const original = await roomBindingFixture(); cleanup.push(() => original.close())
   const dispatched: Array<{ request: Parameters<PublicationAdapter['dispatch']>[0]; target: Parameters<PublicationAdapter['dispatch']>[1]; mapping?: Readonly<PublicationMapping> }> = []
   const adapter: PublicationAdapter = { adapterId: 'sample', renderVersion: 'speech-v1', supportedRenderVersions: ['speech-v1'], fragmentBytes: 8_192,
@@ -33,7 +33,7 @@ async function fixture(effect?: PublicationAdapter['dispatch']) {
   cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'original-credential-entry', secret: 'original-private-credential' })
   await services.connections.configure({ operationId: 'original-configuration', expectedRevision: null, connection: { ...config, credentialRef: credential.credentialRef } })
-  const binding = await services.connections.bindings!.bind(original.input, { actor: { kind: 'user', id: 'original-user' } })
+  const binding = await services.connections.bindings!.bind(original.input, { actor: agentActor ? { kind: 'agent', id: original.input.agentSessionId } : { kind: 'user', id: 'original-user' } })
   expect(binding.state).toBe('applied'); if (binding.state !== 'applied') throw new Error('Original fixture Binding not applied.')
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'publication.sock'), connections: services.connections, spatialState: original.spatial,
     coreClients: () => [{ hostId: 'local', client: original.client }] })
@@ -230,4 +230,15 @@ it('original worker passes durable message and thread mapping to update, inspect
     dispatches: f.dispatched, inspections, publicCall: { method: 'connection.delivery.inspect', params: { operationId: operation.operationId }, result: publicReceipt },
     originalMapping: mapping, originalSourceAndSessionRetained: true
   }, null, 2) + '\n')
+}, 20_000)
+
+it('publishes future native speech for the exact authenticated Agent author of its own Binding', async () => {
+  const f = await fixture(undefined, true)
+  expect(f.binding.authorizedBy).toEqual({ kind: 'agent', id: f.input.agentSessionId })
+  expect(f.services.bindings!.publicationAuthority(f.binding.bindingId, f.binding.revision).authorized).toBe(true)
+  await appendFile(f.transcript, row('agent-owned-reply', 'Original Agent publication'))
+  await vi.waitFor(() => expect(f.dispatched).toHaveLength(1), { timeout: 5_000 })
+  expect(f.dispatched[0]!.target.externalConversationId).toBe(f.input.externalConversationId)
+  expect(JSON.parse(f.dispatched[0]!.request.request.body!).text).toBe('Original Agent publication')
+  expect(f.services.publication!.store.list(f.binding)).toEqual([expect.objectContaining({ state: 'confirmed', reference: expect.objectContaining({ source: expect.objectContaining({ recordId: 'agent-owned-reply' }) }) })])
 }, 20_000)
