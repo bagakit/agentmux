@@ -13,8 +13,11 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteFileWriter } from '../src/main/note-file-writer'
 import { FileReadOwner } from '../src/main/file-read-owner'
 import { NoteSharedBlockOwner } from '../src/main/note-shared-block-owner'
+import { NoteSharedUndoOwner } from '../src/main/note-shared-undo-owner'
+import { NoteSharedFileDeleteOwner } from '../src/main/note-shared-file-delete-owner'
 import { NotebookObservationOwner } from '../src/main/notebook-observation-owner'
 import { NoteFileSurfaceView } from '../src/renderer/src/components/NoteFileSurfaceView'
+import { NoteVersionHistory } from '../src/renderer/src/components/NoteVersionHistory'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -26,6 +29,8 @@ import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../src
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 const dom = composerDOM(), cleanups: Array<() => Promise<unknown>> = []
+// These mounted cases run the real multi-stage file helpers and journals, not a fake in-memory save.
+vi.setConfig({ testTimeout: 20000 })
 class NoteWorker extends NoteSnapshotTestWorker {
   onmessageerror = null
   override postMessage(input: Parameters<NoteSnapshotTestWorker['postMessage']>[0] | { base: string; current: string; proposed: string }) {
@@ -35,7 +40,7 @@ class NoteWorker extends NoteSnapshotTestWorker {
 }
 beforeEach(() => vi.stubGlobal('Worker', NoteWorker))
 afterEach(async () => { await dom.render(null); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.unstubAllGlobals(); useNotebookLibrary.setState({ state: null, issue: null }) })
-async function fixture(count = 2) {
+async function fixture(count = 2, undoAfterStage?: import('../src/main/note-shared-undo-owner').NoteSharedUndoPorts['afterStage']) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-note-shared-ui-')))
   cleanups.push(() => rm(root, { recursive: true, force: true }))
   const workspace = { id: 'notes', hostId: 'local', name: 'Notes', path: root, kind: 'folder' as const }, birth = directoryIdentity('local', root), zoneId = homeZoneId(birth)
@@ -55,15 +60,19 @@ async function fixture(count = 2) {
   for (const surface of surfaces) { const read = await writer.read(workspace, surface.path); if (read.status !== 'read') throw Error('Original must read'); documents[documentKey(workspace.id, surface.path)] = read.document }
   useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace] }, activeWorkspaceId: workspace.id, tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: createWorkspaceLayout('group', tabs.map(tab => tab.id)) }, documents, dirtyDocuments: {}, savingDocuments: {}, documentIssues: {}, documentGenerations: {}, documentObservationGenerations: {}, workspaceFileRevisions: {}, documentRevealTargets: {}, noteBlockSelections: {}, noteDirectorySources: {}, spaceZoneBindings: { [zoneId]: { spaceId: birth, workspaceId: workspace.id, directoryPath: root } }, scratchTopicSnapshots: {}, retainedDocumentDrafts: {}, error: null })
   let sharing!: NoteSharedBlockOwner
-  const publicFiles = new FileReadOwner({ share: { share: (params, context) => sharing.share(params, context), inspectShare: (params, context) => sharing.inspectShare(params, context) }, catalog: async () => ({ zones: [{ zoneId, workspaceId: workspace.id, hostId: 'local', kind: 'directory', directoryPath: root }], bindings: [{ zoneId, spaceId: birth }] }) as never,
-    workspace: id => id === workspace.id ? workspace : undefined, files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer), write: writer.write.bind(writer), createShared: writer.createShared.bind(writer) } })
-  sharing = new NoteSharedBlockOwner({ files: publicFiles, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata) })
+  const publicFiles = new FileReadOwner({ share: { share: (params, context) => sharing.share(params, context), undoShare: (params, context) => sharing.undoShare(params, context), inspectShare: (params, context) => sharing.inspectShare(params, context) }, catalog: async () => ({ zones: [{ zoneId, workspaceId: workspace.id, hostId: 'local', kind: 'directory', directoryPath: root }], bindings: [{ zoneId, spaceId: birth }] }) as never,
+    workspace: id => id === workspace.id ? workspace : undefined, files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer), write: writer.write.bind(writer), writeSharedUndo: writer.writeSharedUndo.bind(writer), createShared: writer.createShared.bind(writer) } })
+  const deletion = new NoteSharedFileDeleteOwner(files, metadata)
+  const undo = new NoteSharedUndoOwner({ files, workspaces: () => [workspace], target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: metadata.readHistory.bind(metadata), operation: metadata.readHistoryOperation.bind(metadata), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspace, input, context), ...(undoAfterStage ? { afterStage: undoAfterStage } : {}) })
+  sharing = new NoteSharedBlockOwner({ undo, files: { read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), createShared: publicFiles.createShared.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles) }, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata) })
   const inFlight = new Set<Promise<unknown>>()
   const track = <T,>(promise: Promise<T>) => { inFlight.add(promise); void promise.then(() => inFlight.delete(promise), () => inFlight.delete(promise)); return promise }
   cleanups.push(async () => { while (inFlight.size) await Promise.allSettled([...inFlight]) })
-  vi.spyOn(api.files, 'readPublic').mockImplementation(input => publicFiles.read(input))
-  vi.spyOn(api.files, 'sharePublic').mockImplementation(input => publicFiles.share(input, { actor: { kind: 'user', id: 'person' } }))
-  vi.spyOn(api.files, 'inspectSharePublic').mockImplementation(input => publicFiles.inspectShare(input))
+  vi.spyOn(api.files, 'readPublic').mockImplementation(input => track(publicFiles.read(input)))
+  vi.spyOn(api.files, 'sharePublic').mockImplementation(input => track(publicFiles.share(input, { actor: { kind: 'user', id: 'person' } })))
+  vi.spyOn(api.files, 'shareUndoPublic').mockImplementation(input => track(publicFiles.undoShare(input, { actor: { kind: 'user', id: 'person' } })))
+  vi.spyOn(api.files, 'inspectSharePublic').mockImplementation(input => track(publicFiles.inspectShare(input)))
+  vi.spyOn(api.files, 'historyPublic').mockImplementation(input => track(publicFiles.history(input)))
   vi.spyOn(api.files, 'read').mockImplementation((_workspace, path) => track(writer.read(workspace, path)))
   vi.spyOn(api.files, 'write').mockImplementation((_workspace, input) => writer.write(workspace, input, { actor: { kind: 'user', id: 'person' } }))
   vi.spyOn(api.files, 'observe').mockResolvedValue(); vi.spyOn(api.files, 'unobserve').mockResolvedValue()
@@ -453,4 +462,279 @@ it('keeps IME ownership independent when the same durable Region is presented tw
   await act(async () => left.view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true })))
   await pending
   expect(completed).toBe(true)
+})
+
+it('saves a naturally undone saved use without losing ordinary prose and restores the original when it is the last use', async () => {
+  const f = await fixture(); await f.mount()
+  await act(async () => f.rich(1).commands.insertContentAt(1, 'Before sharing '))
+  await f.paste(await f.copy()); await act(async () => { await f.save() })
+  const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!
+  await act(async () => f.rich(1).view.dom.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })))
+  expect(f.rich(1).getJSON().content!.some(node => node.type === 'noteInclude')).toBe(false)
+  await act(async () => f.rich(1).commands.insertContentAt(1, 'After undo '))
+  await act(async () => { await f.save() })
+  const destination = await readFile(join(f.root, 'destination.note.md'), 'utf8'), source = await readFile(join(f.root, 'source.note.md'), 'utf8')
+  expect(destination).toContain('After undo Before sharing Destination prose')
+  expect(destination).not.toContain('::note-include')
+  expect(source).toContain('Original knowledge'); expect(source).toContain('Outside source'); expect(source).not.toContain('::note-include')
+  expect((await readdir(f.root)).includes(shared)).toBe(false)
+  await vi.waitFor(() => expect(f.rich(0).getText()).toContain('Original knowledge'))
+  const restored = readNoteDocument(source)
+  expect(restored).toMatchObject({ status: 'valid', note: { content: { content: expect.arrayContaining([expect.objectContaining({ attrs: expect.objectContaining({ blockId: 'source-first' }) })]) } } })
+})
+
+it('saves one naturally undone saved use while another Note keeps the same editable shared file', async () => {
+  const f = await fixture(3); await f.mount(); const clipboard = await f.copy(); await f.paste(clipboard); await act(async () => { await f.save() })
+  await f.paste(clipboard, 2); await act(async () => { await f.save(2) })
+  const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect(await readFile(join(f.root, 'another.note.md'), 'utf8')).toContain('::note-include')
+  expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toContain('::note-include')
+  expect(await readFile(join(f.root, shared), 'utf8')).toContain('Original knowledge')
+  await vi.waitFor(() => expect(f.rich(2, true).getText()).toContain('Original knowledge'))
+})
+
+it('saves a naturally undone saved use while preserving a known dirty shared draft and its original file', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2), { timeout: 3000 })
+  const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!, sharedKey = documentKey(f.workspace.id, shared)
+  await act(async () => f.rich(0, true).commands.insertContentAt(1, 'Later unsaved knowledge '))
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toContain('::note-include')
+  expect(await readFile(join(f.root, shared), 'utf8')).toContain('Original knowledge')
+  expect(useAppStore.getState().documents[sharedKey]!.content).toContain('Later unsaved knowledge ')
+  expect(useAppStore.getState().dirtyDocuments[sharedKey]).toBe(true)
+})
+
+it('saves a naturally undone saved use together with a later pending paste through one final destination save', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  const oldShared = (await readdir(f.root)).find(name => name.startsWith('block-'))!
+  await act(async () => f.rich(1).commands.undo())
+  await act(async () => { const source = f.rich(0); source.view.focus(); source.commands.setTextSelection(source.state.doc.content.size - 1) })
+  const outside = [...f.rich(0).view.dom.children].find(node => node.tagName === 'P' && node.textContent === 'Outside source')
+  expect(outside).toBeDefined()
+  await act(async () => outside!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
+  const nextClipboard = await f.copy()
+  expect(nextClipboard.getData('text/plain')).toBe('Outside source')
+  await f.paste(nextClipboard)
+  await act(async () => f.rich(1).commands.insertContentAt(1, 'Kept alongside new use '))
+  await act(async () => { await f.save() })
+  const files = (await readdir(f.root)).filter(name => name.startsWith('block-'))
+  const actual = await vi.mocked(api.files.sharePublic).mock.results.at(-1)?.value
+  const detail = JSON.stringify({ params: vi.mocked(api.files.sharePublic).mock.calls.at(-1)?.[0], actual, error: useAppStore.getState().error, issue: useAppStore.getState().documentIssues[documentKey(f.workspace.id, 'destination.note.md')] })
+  expect(files, detail).toHaveLength(1); expect(files, detail).not.toContain(oldShared)
+  const saved = await readFile(join(f.root, 'destination.note.md'), 'utf8')
+  expect(saved).toContain('Kept alongside new use Destination prose')
+  expect(saved.match(/::note-include/g)).toHaveLength(1)
+  expect(await readFile(join(f.root, files[0]!), 'utf8')).toContain('Outside source')
+  expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toContain('Original knowledge')
+  expect(api.files.shareUndoPublic).not.toHaveBeenCalled()
+  expect(vi.mocked(api.files.sharePublic).mock.calls.at(-1)![0]).toMatchObject({ undoReferenceIds: [expect.any(String)], promotions: [expect.any(Object)] })
+})
+
+it('keeps the same saved-use removal request through a lost real owner reply, watch and draft recovery until explicit inspection', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  const actualUndo = vi.mocked(api.files.shareUndoPublic).getMockImplementation()!
+  vi.mocked(api.files.shareUndoPublic).mockImplementationOnce(async params => { await actualUndo(params); throw Error('The original removal reply was lost') })
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  const key = documentKey(f.workspace.id, 'destination.note.md'), params = useAppStore.getState().documents[key]!.noteEditing!.shareUndo!.params
+  expect(params).toEqual(vi.mocked(api.files.shareUndoPublic).mock.calls[0]![0])
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toEqual([])
+  await act(async () => { await useAppStore.getState().refreshDocument(f.workspace.id, 'destination.note.md') })
+  expect(useAppStore.getState().documents[key]!.noteEditing?.shareUndo?.params).toEqual(params)
+  const persisted = useAppStore.persist.getOptions().partialize!(useAppStore.getState()) as { documents: Record<string, import('../src/shared/contracts').FileDocument> }
+  await dom.render(null)
+  await act(async () => useAppStore.setState({ documents: JSON.parse(JSON.stringify(persisted.documents)), documentIssues: {} }))
+  await f.mount([1])
+  const check = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check this removal')
+  expect(check).toBeDefined()
+  expect(dom.container.textContent).toContain('needs confirmation')
+  expect(api.files.shareUndoPublic).toHaveBeenCalledTimes(1)
+  await act(async () => check!.click())
+  expect(vi.mocked(api.files.inspectSharePublic).mock.calls.at(-1)![0]).toEqual({ mode: 'undo', request: params })
+  expect(api.files.shareUndoPublic).toHaveBeenCalledTimes(1)
+  await vi.waitFor(() => expect(useAppStore.getState().documents[key]!.noteEditing?.shareUndo).toBeUndefined())
+})
+
+it('keeps ordinary exact-file saving when removal cleanup cannot confirm the public mapping', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!
+  vi.mocked(api.files.readPublic).mockRejectedValue(Error('The original public mapping is unavailable'))
+  await act(async () => f.rich(1).commands.undo())
+  await act(async () => f.rich(1).commands.insertContentAt(1, 'Ordinary saving remains available '))
+  await act(async () => { await f.save() })
+  const saved = await readFile(join(f.root, 'destination.note.md'), 'utf8')
+  expect(saved).toContain('Ordinary saving remains available Destination prose'); expect(saved).not.toContain('::note-include')
+  expect(await readFile(join(f.root, shared), 'utf8')).toContain('Original knowledge')
+  expect(api.files.shareUndoPublic).not.toHaveBeenCalled()
+  expect(api.files.write).toHaveBeenCalledWith(f.workspace.id, expect.objectContaining({ path: 'destination.note.md', content: expect.stringContaining('Ordinary saving remains available ') }))
+  expect(dom.container.textContent).toContain('Shared-file cleanup was not checked: the original file mapping is unconfirmed.')
+})
+
+it.each(['noteInclude', 'blockReference', 'noteLink'])('preserves a shared file referenced only by another known unsaved %s draft', async type => {
+  const f = await fixture(3); await f.mount(); const clipboard = await f.copy(); await f.paste(clipboard); await act(async () => { await f.save() })
+  const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!, original = readNoteDocument(await readFile(join(f.root, shared), 'utf8'))
+  if (original.status !== 'valid') throw Error('The real shared file is required')
+  if (type === 'noteInclude') await f.paste(clipboard, 2)
+  else await act(async () => f.rich(2).commands.insertContentAt(f.rich(2).state.doc.content.size - 1, { type, attrs: { referenceId: 'draft-only-reference', ...(type === 'blockReference' ? { mode: 'reference' } : { text: 'Shared draft link' }), target: { noteId: original.note.noteId, ...(type === 'blockReference' ? { blockId: 'source-first' } : {}) } }, ...(type === 'noteLink' ? { content: [{ type: 'text', text: '[[Shared draft link]]' }] } : {}) }))
+  expect(await readFile(join(f.root, 'another.note.md'), 'utf8')).not.toContain(original.note.noteId)
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect(await readFile(join(f.root, shared), 'utf8')).toContain('Original knowledge')
+  expect(vi.mocked(api.files.shareUndoPublic).mock.calls.at(-1)![0].preserveNoteIds).toEqual(expect.arrayContaining(['another', original.note.noteId]))
+  expect(useAppStore.getState().dirtyDocuments[documentKey(f.workspace.id, 'another.note.md')]).toBe(true)
+  const kept = readNoteDocument(useAppStore.getState().documents[documentKey(f.workspace.id, 'another.note.md')]!.content)
+  if (kept.status !== 'valid') throw Error('The same readable draft must be kept')
+  const targets: string[] = [], visit = (node: typeof kept.note.content) => { const id = node.type === 'noteInclude' ? node.attrs?.noteId : node.attrs?.target?.noteId; if (typeof id === 'string') targets.push(id); node.content?.forEach(visit) }; visit(kept.note.content)
+  expect(targets).toContain(original.note.noteId)
+})
+
+it('undoes only the later saved occurrence when the same Note still contains another use', async () => {
+  const f = await fixture(); await f.mount(); const clipboard = await f.copy(); await f.paste(clipboard); await act(async () => { await f.save() })
+  const first = f.rich(1).getJSON().content!.find(node => node.type === 'noteInclude')!.attrs!.referenceId
+  await f.paste(clipboard); await act(async () => { await f.save() })
+  expect(f.rich(1).getJSON().content!.filter(node => node.type === 'noteInclude')).toHaveLength(2)
+  await act(async () => f.rich(1).commands.undo())
+  expect(f.rich(1).getJSON().content!.filter(node => node.type === 'noteInclude').map(node => node.attrs!.referenceId)).toEqual([first])
+  await act(async () => { await f.save() })
+  const saved = readNoteDocument(await readFile(join(f.root, 'destination.note.md'), 'utf8'))
+  expect(saved).toMatchObject({ status: 'valid', note: { content: { content: expect.arrayContaining([expect.objectContaining({ type: 'noteInclude', attrs: expect.objectContaining({ referenceId: first }) })]) } } })
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(1)
+})
+
+it('restores a promoted list through the original source editor while keeping its descendant identities', async () => {
+  const f = await fixture(); await f.mount()
+  await act(async () => { f.rich(0).view.focus(); f.rich(0).commands.setTextSelection(2); f.rich(0).commands.toggleBulletList() })
+  await f.paste(await f.copy()); await act(async () => { await f.save() })
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  const source = readNoteDocument(await readFile(join(f.root, 'source.note.md'), 'utf8'))
+  expect(source).toMatchObject({ status: 'valid', note: { content: { content: expect.arrayContaining([expect.objectContaining({ type: 'bulletList', content: [expect.objectContaining({ type: 'listItem', content: [expect.objectContaining({ type: 'paragraph', attrs: expect.objectContaining({ blockId: 'source-first' }) })] })] })]) } } })
+  await vi.waitFor(() => expect(f.rich(0).getJSON().content!.some(node => node.type === 'bulletList')).toBe(true))
+  expect(dom.container.querySelector('[data-test-note="source-region"]')!.textContent).not.toContain('Incoming update recovery')
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(0)
+})
+
+it('uses one destination save when the restored original and removed saved use belong to the same Note', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy(), 0); await act(async () => { await f.save(0) })
+  expect(f.rich(0).getJSON().content!.filter(node => node.type === 'noteInclude')).toHaveLength(2)
+  const beforeUndo = f.rich(0).getJSON()
+  await act(async () => f.rich(0).commands.undo())
+  expect(f.rich(0).getJSON().content!.filter(node => node.type === 'noteInclude'), JSON.stringify({ beforeUndo, afterUndo: f.rich(0).getJSON() })).toHaveLength(1)
+  await act(async () => f.rich(0).commands.insertContentAt(f.rich(0).state.doc.content.size - 1, ' Same-note prose kept'))
+  await act(async () => { await f.save(0) })
+  const source = await readFile(join(f.root, 'source.note.md'), 'utf8')
+  expect(source).toContain('Original knowledge'); expect(source).toContain('Same-note prose kept'); expect(source).not.toContain('::note-include')
+  expect(api.files.shareUndoPublic).toHaveBeenCalledTimes(1)
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(0)
+})
+
+it('keeps a shared file needed by queued input inside an existing retained File draft', async () => {
+  const f = await fixture(3); await f.mount(); const clipboard = await f.copy(); await f.paste(clipboard); await act(async () => { await f.save() }); await f.paste(clipboard, 2)
+  const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!, key = documentKey(f.workspace.id, 'another.note.md')
+  const proposed = useAppStore.getState().documents[key]!.content, clean = f.documents[key]!
+  await f.mount([0, 1])
+  await act(async () => useAppStore.setState(state => ({ documents: { ...state.documents, [key]: clean }, dirtyDocuments: { ...state.dirtyDocuments, [key]: false }, retainedDocumentDrafts: { ...state.retainedDocumentDrafts,
+    [key]: [{ ...clean, noteEditing: { input: { baseContent: clean.content, observedContent: clean.content, proposedContent: clean.content, resource: { hostId: f.workspace.hostId, workspaceId: f.workspace.id, workspacePath: f.workspace.path, path: clean.path }, phase: 'mapping', queued: [{ baseContent: clean.content, proposedContent: proposed }] } } }] } })))
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  expect(await readFile(join(f.root, shared), 'utf8')).toContain('Original knowledge')
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect(useAppStore.getState().retainedDocumentDrafts[key]![0]!.noteEditing!.input!.queued![0]!.proposedContent).toBe(proposed)
+})
+
+it('returns a definitively not-applied removal to the original conflict workflow and shares a later paste through exact overwrite', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  const external = readNoteDocument(await readFile(join(f.root, 'destination.note.md'), 'utf8'))
+  if (external.status !== 'valid') throw Error('The original saved destination is required')
+  external.note.content.content![0]!.content = [{ type: 'text', text: 'External overlapping destination' }]
+  const native = f.files.write.bind(f.files); let injected = false
+  vi.spyOn(f.files, 'write').mockImplementation(async (...args) => {
+    const [, input] = args
+    if (!injected && input.path === 'destination.note.md') { injected = true; await writeFile(join(f.root, input.path), serializeNoteDocument(external.note)) }
+    return native(...args)
+  })
+  await act(async () => f.rich(1).commands.undo())
+  await act(async () => f.rich(1).commands.insertContentAt(1, 'Local draft remains '))
+  await act(async () => { await f.save() })
+  const key = documentKey(f.workspace.id, 'destination.note.md'), state = useAppStore.getState()
+  expect(state.documents[key]!.noteEditing?.shareUndo).toBeUndefined()
+  expect(state.documents[key]!.noteEditing?.attempt).toBeUndefined()
+  expect(state.documents[key]!.content).toContain('Local draft remains ')
+  expect(state.documentIssues[key]?.kind).toBe('changed')
+  expect(api.files.shareUndoPublic).toHaveBeenCalledTimes(1)
+  const outside = [...f.rich(0).view.dom.children].find(node => node.tagName === 'P' && node.textContent === 'Outside source')!
+  await act(async () => outside.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
+  const clipboard = await f.copy(); expect(clipboard.getData('text/plain')).toBe('Outside source'); await f.paste(clipboard)
+  await act(async () => { await useAppStore.getState().overwriteDocument(f.tabs[1]!.id, f.surfaces[1]!.regionId) })
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).toContain('Local draft remains ')
+  expect((await readFile(join(f.root, 'destination.note.md'), 'utf8')).match(/::note-include/gu)).toHaveLength(1)
+  const shared = (await readdir(f.root)).filter(name => name.startsWith('block-'))
+  expect(shared).toHaveLength(1); expect(await readFile(join(f.root, shared[0]!), 'utf8')).toContain('Outside source')
+  expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toContain('Original knowledge')
+  expect(vi.mocked(api.files.sharePublic).mock.calls.at(-1)![0]).toMatchObject({ undoReferenceIds: [expect.any(String)], destination: { baseContent: serializeNoteDocument(external.note), expectedRevision: noteHistoryRevision(serializeNoteDocument(external.note)) } })
+  expect(api.files.write).not.toHaveBeenCalled()
+  expect(useAppStore.getState().documents[key]!.noteEditing?.shareUndo).toBeUndefined()
+})
+
+it('keeps confirmed source restoration visible through recovery when a later scope change prevents collection', async () => {
+  let root = ''
+  const f = await fixture(2, async stage => { if (stage === 'source') await writeFile(join(root, 'later.note.md'), serializeNoteDocument(newNoteDocument('A new managed Note', 'later', 'later-first'))) }); root = f.root
+  await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  const key = documentKey(f.workspace.id, 'destination.note.md')
+  expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toContain('Original knowledge')
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(1)
+  expect(useAppStore.getState().documents[key]!.noteEditing?.shareUndoReceipt?.status).toBe('partial')
+  expect(useAppStore.getState().documents[key]!.noteEditing?.shareUndo).toBeUndefined()
+  expect(dom.container.textContent).toContain('reference removal and original-source restoration were saved')
+  await act(async () => f.rich(1).commands.insertContentAt(1, 'Ordinary edits continue '))
+  const persisted = useAppStore.persist.getOptions().partialize!(useAppStore.getState()) as { documents: Record<string, import('../src/shared/contracts').FileDocument> }
+  await dom.render(null); await act(async () => useAppStore.setState({ documents: JSON.parse(JSON.stringify(persisted.documents)), documentIssues: {} })); await f.mount([1])
+  expect(dom.container.textContent).toContain('reference removal and original-source restoration were saved')
+  expect(dom.container.textContent).not.toContain('Check this removal')
+  await act(async () => { await f.save() })
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).toContain('Ordinary edits continue ')
+  expect(api.files.shareUndoPublic).toHaveBeenCalledTimes(1)
+})
+
+it('reads actual collected-file history from its retained trusted File occurrence without offering deleted-file restoration', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  const path = (await readdir(f.root)).find(name => name.startsWith('block-'))!, read = await f.writer.read(f.workspace, path)
+  if (read.status !== 'read') throw Error('The shared file must be observed before collection')
+  const parsed = readNoteDocument(read.document.content); if (parsed.status !== 'valid') throw Error('The original shared identity is required')
+  const sharedTab = { ...createWorkbenchTab('Original shared content', { kind: 'file', workspaceId: f.workspace.id, path, regionId: 'collected-shared' }), space: f.tabs[0]!.space }
+  const key = documentKey(f.workspace.id, path)
+  await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, [sharedTab.id]: sharedTab }, documents: { ...state.documents, [key]: read.document } })))
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  expect((await readdir(f.root)).includes(path)).toBe(false)
+  await dom.render(<NoteVersionHistory tabId={sharedTab.id} regionId="collected-shared" noteId={parsed.note.noteId} active />)
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Shared file collected'), { timeout: 5000 })
+  const response = await f.metadata.readHistory({ noteId: parsed.note.noteId, resource: { hostId: f.workspace.hostId, workspaceId: f.workspace.id, workspacePath: f.workspace.path, path } })
+  const deletion = response.entries.find(value => value.operation === 'delete')!
+  expect(deletion.status).toBe('committed')
+  const preview = dom.container.querySelector<HTMLButtonElement>(`[aria-label="Preview version ${deletion.eventId}"]`)
+  expect(preview).not.toBeNull(); await act(async () => preview!.click())
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('It has no saved document after the change.'))
+  expect(dom.container.textContent).not.toContain('Restore this entire version…')
+  expect(dom.container.textContent).not.toContain('Undo this activity…')
+  expect(api.files.historyPublic).toHaveBeenCalledWith(expect.objectContaining({ noteId: parsed.note.noteId, expectedResource: expect.objectContaining({ path }) }))
+})
+
+it('keeps a shared file owned by another live IME composition before its text becomes a published dirty draft', async () => {
+  const f = await fixture(); await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-shared-block .note-block-content')).toHaveLength(2))
+  const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!, key = documentKey(f.workspace.id, shared), source = f.rich(0, true)
+  const original = readNoteDocument(useAppStore.getState().documents[key]!.content)
+  if (original.status !== 'valid') throw Error('The original shared file is required')
+  expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true)
+  await act(async () => source.view.dom.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })))
+  try {
+    await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+    expect(await readFile(join(f.root, shared), 'utf8')).toContain('Original knowledge')
+    expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+    expect(vi.mocked(api.files.shareUndoPublic).mock.calls.at(-1)![0].preserveNoteIds).toContain(original.note.noteId)
+  } finally { await act(async () => source.view.dom.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))) }
 })
