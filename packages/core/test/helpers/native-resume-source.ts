@@ -4,6 +4,10 @@ import { relative, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../../..')
 const mutants: Record<string, [string, string, string]> = {
+  'ignore-backend-signal-exit': ['codex-managed-run.ts', "resolve({ code: code ?? (signal ? 1 : 0) })", "if (code !== null) resolve({ code })"],
+  'kill-backend-on-detach': ['codex-managed-run.ts', '      tui = undefined', "      tui = undefined; server.kill('SIGTERM')"],
+  'replay-initial-prompt': ['codex-managed-run.ts', "['resume', request.nativeSessionId, ...flags]", 'plan.args'],
+  'forget-frontend-generation': ['codex-managed-run.ts', "frontend.frontendId === expectedId", "true"],
   'skip-bypass-create': ['codex-native-input.ts', 'if (arg === BYPASS_PERMISSIONS) {\n      if (bypass) return null', 'if (arg === BYPASS_PERMISSIONS) {\n      return null'],
   'keep-bypass-token': ['codex-native-input.ts', "resume.approvalPolicy = 'never'; removed.add(i)", "resume.approvalPolicy = 'never'"],
   'wrong-bypass-policy': ['codex-native-input.ts', "resume.sandbox = 'danger-full-access'; resume.approvalPolicy = 'never'", "resume.sandbox = 'read-only'; resume.approvalPolicy = 'on-request'"],

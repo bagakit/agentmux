@@ -1,3 +1,4 @@
+import { codexFrontendSocketPath, observeCodexTerminalFrontend, reconnectCodexTerminalFrontend, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from '../src/providers/codex-managed-frontend.js'
 import { fixturePath as _historyFixturePath } from "./helpers/fixture-values.js"
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile, rm, readFile, realpath } from 'node:fs/promises'
@@ -30,7 +31,7 @@ it.runIf(process.platform === 'darwin')('qualifies create, preserving the origin
   expect(prepared.plan.env).toMatchObject({ ORIGINAL_FIXTURE: 'kept', ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: prepared.nativeActor!.token })
   expect(prepared.plan.command).toBe(process.execPath)
   const helper = JSON.parse(prepared.plan.args[1]!)
-  expect(helper).toEqual({ command: original.command, args: original.args, serverConfig: [] })
+  expect(helper).toEqual({ command: original.command, args: original.args, serverConfig: [], frontendArgs: ['--no-alt-screen', '--dangerously-bypass-hook-trust'] })
   expect(JSON.stringify(prepared.plan.args)).not.toContain(prepared.nativeActor!.token)
   expect(original.env).toEqual({ ORIGINAL_FIXTURE: 'kept' })
 })
@@ -61,7 +62,7 @@ it.runIf(process.platform === 'darwin').each([false, true])('prepares normal Cor
     const tuiArgs = ['resume', sid, '--dangerously-bypass-hook-trust', ...(withPrompt ? [prompt] : []), '--no-alt-screen', '--model', 'original-model', '-C', f.root, '--enable', 'original-feature']
     expect(prepared.nativeActor?.launch).toEqual({ command: original.command, args: tuiArgs })
     expect(prepared.nativeActor?.lifecycleOperationId).toBe('original-resume-lifecycle')
-    expect(JSON.parse(prepared.plan.args[1]!)).toEqual({ command: original.command, args: tuiArgs, serverConfig: ['--enable', 'original-feature'],
+    expect(JSON.parse(prepared.plan.args[1]!)).toEqual({ command: original.command, args: tuiArgs, serverConfig: ['--enable', 'original-feature'], frontendArgs: ['--dangerously-bypass-hook-trust', '--no-alt-screen'],
       resume: { threadId: sid, model: 'original-model', cwd: f.root, ...(sandbox ? { sandbox } : {}), ...(approval ? { approvalPolicy: approval } : {}) } })
     expect(prepared.plan.env).toMatchObject({ ...original.env, [CODEX_NATIVE_TOKEN_ENV]: prepared.nativeActor!.token })
     expect(original.args).toEqual(args)
@@ -96,13 +97,13 @@ it.runIf(process.platform === 'darwin')('qualifies the configured bypass for cre
   const create = { command: f.path, args: [flag, '--dangerously-bypass-hook-trust', 'Original initial prompt'], env: {} }
   const first = await prepareCodexManagedLaunch(create, 'original-create', { kind: 'create', prompt: 'Original initial prompt' })
   expect(first.nativeActor?.launch).toEqual({ command: create.command, args: create.args })
-  expect(JSON.parse(first.plan.args[1]!)).toEqual({ command: create.command, args: create.args, serverConfig: [] })
+  expect(JSON.parse(first.plan.args[1]!)).toEqual({ command: create.command, args: create.args, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'] })
   for (const prompt of ['Original continuation', flag]) {
     const args = ['resume', sid, '--dangerously-bypass-hook-trust', prompt, flag, '--model', 'original-model', '-C', '.']
     const next = await prepareCodexManagedLaunch({ ...create, args }, 'original-resume', { kind: 'resume', prompt })
     const actualArgs = args.filter((_, index) => index !== 4)
     expect(next.nativeActor?.launch).toEqual({ command: create.command, args: actualArgs })
-    expect(JSON.parse(next.plan.args[1]!)).toEqual({ command: create.command, args: actualArgs, serverConfig: [],
+    expect(JSON.parse(next.plan.args[1]!)).toEqual({ command: create.command, args: actualArgs, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'],
       resume: { threadId: sid, sandbox: 'danger-full-access', approvalPolicy: 'never', model: 'original-model', cwd: '.' } })
   }
 })
@@ -140,7 +141,8 @@ it.runIf(process.platform === 'darwin' || process.platform === 'linux')('reads a
 it('never replaces a failed frozen native bootstrap with an embedded TUI', async () => {
   const f = await command(), marker = join(f.root, 'unexpected-tui')
   vi.stubEnv(CODEX_NATIVE_TOKEN_ENV, 'a'.repeat(64))
-  await expect(runCodexManaged({ command: process.execPath, serverConfig: ['--eval', 'process.exit(7)'], args: ['--eval', `require('node:fs').writeFileSync(${JSON.stringify(marker)},'wrong actor')`] })).rejects.toThrow('did not publish')
+  vi.stubEnv(CODEX_ACTOR_ID_ENV, 'original-actor'); vi.stubEnv(CODEX_ACTOR_LIFECYCLE_ENV, 'original-lifecycle')
+  await expect(runCodexManaged({ command: process.execPath, frontendArgs: [], serverConfig: ['--eval', 'process.exit(7)'], args: ['--eval', `require('node:fs').writeFileSync(${JSON.stringify(marker)},'wrong actor')`] })).rejects.toThrow('did not publish')
   await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
@@ -155,6 +157,7 @@ const { WebSocketServer } = NativeWebSocket
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 const args=process.argv.slice(2), log=${JSON.stringify(log)}, marker=${JSON.stringify(marker)}, gate=${JSON.stringify(gate)}, connection=${JSON.stringify(connection)}
 if(args.includes('app-server')) {
+  setInterval(()=>writeFileSync(marker+'.heartbeat',String(Date.now())),20)
   const server=new WebSocketServer({port:0,host:'127.0.0.1'})
   server.on('connection',(ws,req)=>{
     if(req.headers.authorization!=='Bearer '+process.env.${CODEX_NATIVE_TOKEN_ENV}) process.exit(9)
@@ -164,32 +167,46 @@ if(args.includes('app-server')) {
       const request=JSON.parse(String(bytes));appendFileSync(log,JSON.stringify(request)+'\\n')
       if(!Object.hasOwn(request,'id'))return
       if(request.method==='thread/resume')while(!existsSync(gate))await new Promise(done=>setTimeout(done,10))
-      ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result:request.method==='thread/resume'?${JSON.stringify(expected)}:{}}))
+      ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result:['thread/resume','thread/read'].includes(request.method)?${JSON.stringify(expected)}:{}}))
     })
   })
 } else {
+  appendFileSync(marker+'.events',JSON.stringify({args})+'\\n')
   writeFileSync(marker,JSON.stringify({args,connected:existsSync(connection)?JSON.parse(readFileSync(connection,'utf8')).open:false,requests:existsSync(log)?readFileSync(log,'utf8').trim().split('\\n').map(JSON.parse):[]}))
 }
 `, { mode: 0o700 })
   vi.stubEnv(CODEX_NATIVE_TOKEN_ENV, 'a'.repeat(64))
-  const plan: CodexManagedRunPlan = { command: script, args: ['resume', sid, 'Original continuation prompt'], serverConfig: [],
+  vi.stubEnv(CODEX_ACTOR_ID_ENV, 'original-actor'); vi.stubEnv(CODEX_ACTOR_LIFECYCLE_ENV, 'original-lifecycle')
+  const plan: CodexManagedRunPlan = { command: script, args: ['resume', sid, 'Original continuation prompt'], serverConfig: [], frontendArgs: [],
     resume: { threadId: sid, sandbox: 'read-only', approvalPolicy: 'on-request', model: 'original-model', cwd: f.root } }
   return { ...f, log, marker, gate, plan }
 }
 
-async function runNativeLifecycle(f: Awaited<ReturnType<typeof nativeLifecycleFixture>>) {
+async function runNativeLifecycle(f: Awaited<ReturnType<typeof nativeLifecycleFixture>>, settlementGate?: string) {
   const entry = join(f.root, 'managed-entry.mjs')
   await build({ entryPoints: [new URL('../src/providers/codex-managed-run.ts', import.meta.url).pathname], outfile: entry,
     bundle: true, platform: 'node', format: 'esm', target: 'node24',
     banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
-    plugins: [{ name: 'exact-native-resume-source', setup(b) { b.onLoad({ filter: /\.ts$/ }, async ({ path }) => ({ contents: nativeResumeSource(await readFile(path, 'utf8'), path), loader: 'ts' })) } }]
+    plugins: [{ name: 'exact-native-resume-source', setup(b) { b.onLoad({ filter: /\.ts$/ }, async ({ path }) => {
+      let contents = nativeResumeSource(await readFile(path, 'utf8'), path)
+      // Schedule-only fault injection: let the OS exit happen before the tail consumes its latch.
+      if (settlementGate && path.endsWith('/codex-managed-run.ts')) contents = contents.replace('    const ended = await backendExit',
+        '    while (!require(\'node:fs\').existsSync(' + JSON.stringify(settlementGate) + ') && !stopping) await new Promise(resolve => setTimeout(resolve, 10))\n    const ended = await backendExit')
+      return { contents, loader: 'ts' }
+    }) } }]
   })
   const child = spawn(process.execPath, [entry, JSON.stringify(f.plan)], { cwd: f.root, env: process.env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
-  cleanup.push(async () => { if (child.exitCode === null) { process.kill(-child.pid!, 'SIGTERM'); await once(child, 'close') } })
+  cleanup.push(async () => { if (child.exitCode === null && child.signalCode === null) {
+    process.kill(-child.pid!, 'SIGTERM')
+    const timer = setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL') } catch {} }, 1000)
+    try { await once(child, 'close') } finally { clearTimeout(timer) }
+  }
+    await rm(codexFrontendSocketPath('a'.repeat(64)), { force: true })
+  })
   let stderr = ''
   child.stderr.on('data', bytes => { stderr += String(bytes) })
   child.stdout.resume()
-  return { completed: new Promise<{ exitCode: number | null; stderr: string }>((resolve, reject) => {
+  return { child, stop: () => child.kill('SIGTERM'), completed: new Promise<{ exitCode: number | null; stderr: string }>((resolve, reject) => {
     child.once('error', reject); child.once('close', exitCode => resolve({ exitCode, stderr }))
   }) }
 }
@@ -197,13 +214,15 @@ async function runNativeLifecycle(f: Awaited<ReturnType<typeof nativeLifecycleFi
 it.runIf(process.platform === 'darwin')('starts the real child TUI only after authenticated native resume confirms its exact policy and keeps that original subscription', async () => {
   const f = await nativeLifecycleFixture()
   f.plan.resume!.cwd = '.' // Core service and actual child Run cwd differ.
-  const { completed } = await runNativeLifecycle(f)
+  const { completed, stop } = await runNativeLifecycle(f)
   try {
     await expect.poll(async () => await readFile(f.log, 'utf8').then(text => text.includes('thread/resume'), () => false) ||
       await readFile(f.marker).then(() => true, () => false), { timeout: 10_000 }).toBe(true)
     await expect(readFile(f.marker)).rejects.toMatchObject({ code: 'ENOENT' })
   } finally { await writeFile(f.gate, 'ready') }
-  await expect(completed).resolves.toEqual({ exitCode: 0, stderr: '' })
+  await expect.poll(() => readFile(f.marker, 'utf8').then(() => true, () => false), { timeout: 10_000 }).toBe(true)
+  stop()
+  await expect(completed).resolves.toEqual({ exitCode: 1, stderr: '' })
   const actual = JSON.parse(await readFile(f.marker, 'utf8'))
   expect(actual.connected).toBe(true)
   expect(actual.requests.filter((row: { method: string }) => row.method !== 'initialized').map((row: { method: string }) => row.method)).toEqual(['initialize', 'thread/resume'])
@@ -217,4 +236,60 @@ it.runIf(process.platform === 'darwin').each(['wrong-policy', 'wrong-thread', 'n
   const { completed } = await runNativeLifecycle(f)
   await expect(completed).resolves.toMatchObject({ exitCode: 1, stderr: expect.stringContaining('did not confirm') })
   await expect(readFile(f.marker)).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+
+it.runIf(process.platform === 'darwin')('keeps the original backend working after exact child exit and reconnects once without replay after a lost receipt', async () => {
+  const f = await nativeLifecycleFixture()
+  await writeFile(f.gate, 'ready')
+  const running = await runNativeLifecycle(f)
+  const context = { processId: running.child.pid!, nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor',
+    lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: f.plan.command, args: f.plan.args } },
+    workspacePath: f.root, signal: new AbortController().signal }
+  let latest: import('../src/agent-terminal-frontend.js').AgentTerminalFrontendObservation | undefined
+  await expect.poll(() => readFile(f.marker, 'utf8').then(() => true, () => false), { timeout: 10_000 }).toBe(true)
+  const observer = await observeCodexTerminalFrontend({ ...context, onFrontend: value => { latest = value }, onUnavailable: () => {} })
+  cleanup.push(async () => observer.dispose())
+  await expect.poll(() => latest?.state).toBe('detached')
+  const original = latest!, heartbeat = await readFile(f.marker + '.heartbeat', 'utf8')
+  await expect.poll(() => readFile(f.marker + '.heartbeat', 'utf8')).not.toBe(heartbeat)
+  expect(running.child.exitCode).toBeNull()
+  await expect(reconnectCodexTerminalFrontend(context, { operationId: 'wrong-target', expectedFrontendId: original.frontendId,
+    nativeSessionId: 'foreign-native-thread' })).rejects.toThrow('original loaded native thread')
+  expect((await readFile(f.marker + '.events', 'utf8')).trim().split('\n')).toHaveLength(1)
+  const request = { operationId: 'same-original-reconnect', expectedFrontendId: original.frontendId, nativeSessionId: f.plan.resume!.threadId }
+  // Abandon only the response; the wrapper retains this same original operation.
+  const { createConnection } = await import('node:net')
+  const { codexFrontendSocketPath } = await import('../src/providers/codex-managed-frontend.js')
+  const socket = createConnection(codexFrontendSocketPath(context.nativeActor.token))
+  await once(socket, 'connect')
+  socket.end(JSON.stringify({ ...request, method: 'reconnect', token: context.nativeActor.token,
+    actorId: context.nativeActor.actorId, lifecycleOperationId: context.nativeActor.lifecycleOperationId, processId: context.processId }) + '\n')
+  await expect.poll(async () => (await readFile(f.marker + '.events', 'utf8')).trim().split('\n').length).toBe(2)
+  const resumed = await reconnectCodexTerminalFrontend(context, request)
+  expect(resumed.frontendId).not.toBe(original.frontendId)
+  expect(await reconnectCodexTerminalFrontend(context, request)).toEqual(resumed)
+  const events = (await readFile(f.marker + '.events', 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+  expect(events).toHaveLength(2)
+  expect(events[1].args.slice(4)).toEqual(['resume', request.nativeSessionId])
+  expect(JSON.stringify(events[1])).not.toContain('Original continuation prompt')
+  await expect.poll(() => latest?.frontendId === resumed.frontendId && latest.state === 'detached', { timeout: 10_000 }).toBe(true)
+  await expect(reconnectCodexTerminalFrontend(context, { ...request, operationId: 'stale-reconnect' })).rejects.toThrow('generation changed')
+  running.stop()
+  await expect(running.completed).resolves.toEqual({ exitCode: 1, stderr: '' })
+})
+
+
+it.runIf(process.platform === 'darwin')('settles the original wrapper when its backend exits by signal during frontend startup', async () => {
+  const f = await nativeLifecycleFixture()
+  await writeFile(f.gate, 'ready')
+  // Hold only the tail's schedule while the exact backend exits by signal.
+  const gate = join(f.root, 'settle-backend')
+  const running = await runNativeLifecycle(f, gate)
+  await expect.poll(() => readFile(f.marker, 'utf8').then(() => true, () => false), { timeout: 10_000 }).toBe(true)
+  const listener = (await nativeProcessTcpListeners(running.child.pid!, new AbortController().signal))[0]!
+  process.kill(listener.processId, 'SIGTERM')
+  await expect.poll(async () => (await nativeProcessTcpListeners(running.child.pid!, new AbortController().signal)).length).toBe(0)
+  await writeFile(gate, 'consume original backend exit')
+  await expect(running.completed).resolves.toEqual({ exitCode: 1, stderr: '' })
 })
