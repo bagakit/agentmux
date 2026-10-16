@@ -33,9 +33,12 @@ function authentication(receipt: EnrollmentAuthenticationReceipt) {
 }
 it.each([
   ['unknown-step', 'another-step', 1, null],
+  ['unknown-step-zero', 'another-step', 0, null],
   ['cancel-is-not-handoff', 'qr_login_polling', 3, null],
   ['error-is-not-handoff', 'qr_login_polling', 4, null],
-  ['success-marker-is-not-handoff', 'qr_login_polling', 0, null],
+  ['native-zero-waiting', 'qr_login_polling', 0, 'waiting'],
+  ['legacy-zero-waiting', null, 0, 'waiting'],
+  ['string-zero-is-unknown', 'qr_login_polling', '0', null],
   ['string-status', 'qr_login_polling', '1', null],
   ['missing-status', 'qr_login_polling', undefined, null],
   ['native-polling-expired', 'qr_login_polling', 5, 'expired'],
@@ -53,6 +56,27 @@ it.each([
   const result = await adapter.advance({ ...original, privateState: initial.privateState })
   expect(result).toMatchObject(stage ? { kind: 'authentication', stage, challenge: stage === 'expired' ? null : { qrPayload: initial.challenge!.qrPayload }, account: null } : { kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed' } })
   expect(network.calls).toHaveLength(2)
+})
+it('zero waiting preserves the original poll identity and rotated cookies with a fresh observation deadline', async () => {
+  const now = Date.now(), clock = vi.spyOn(Date, 'now').mockReturnValue(now)
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-zero-qr' } } }, { headers: { 'x-flow-key': 'private-zero-flow' } }),
+    Response.json({ code: 0, data: { next_step: 'qr_login_polling', step_info: { status: 0 } } }, { headers: { 'set-cookie': 'rotated=private-zero-cookie; Domain=.feishu.cn; Path=/; Secure' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: {} } })
+  )
+  const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
+  clock.mockReturnValue(now + 1600)
+  const waiting = authentication(await adapter.advance({ ...original, privateState: initial.privateState }))
+  expect(waiting.stage).toBe('waiting'); expect(waiting.account).toBeNull()
+  expect(waiting.challenge).toEqual({ ...initial.challenge!, nextPollAt: now + 3100 })
+  expect(JSON.parse(waiting.privateState).authentication).toMatchObject({ phase: 'poll', token: 'private-zero-qr', flowKey: 'private-zero-flow' })
+  expect(network.calls).toHaveLength(2)
+  clock.mockReturnValue(now + 3200)
+  const handoff = authentication(await adapter.advance({ ...original, privateState: waiting.privateState }))
+  expect(handoff.stage).toBe('handoff'); expect(handoff.account).toBeNull(); expect(handoff.challenge).toBeNull()
+  expect(new Headers(network.calls[2]!.options.headers).get('cookie')).toBe('rotated=private-zero-cookie')
+  expect(new Headers(network.calls[2]!.options.headers).get('x-flow-key')).toBe('private-zero-flow')
+  expect(network.calls.map(call => new URL(call.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling'])
 })
 it.each([{}, { status: null }, { status: 0 }, { status: 2 }])('uses enter_app handoff fields independently of polling status: %j', async fields => {
   const network = remote(
