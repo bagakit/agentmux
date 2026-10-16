@@ -1,3 +1,4 @@
+import type { FileShareParams, FileShareResult, FileShareInspectParams, FileShareInspectResult, AgentMuxRpcFileShareOwner } from '@agentmux/core/files'
 import { AgentMuxError, parseFileReadParams, parseFileCreateParams, type FileCreateParams, type FileCreateResult, parseFileWriteParams, type FileWriteParams, type FileWriteResult, type FileWriteContext, parseFileListParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult } from '@agentmux/core'
 import type { AgentMuxSpaceCatalog, AgentMuxZoneFact } from '@agentmux/core/control'
 import type { WorkspaceRecord, WorkspaceFileRestoreInput, WorkspaceFileUndoInput, WorkspaceFileWriteResult } from '../shared/contracts'
@@ -11,6 +12,7 @@ import type { NoteHistoryQuery, NoteHistorySnapshot } from '@agentmux/core/note-
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner implements AgentMuxRpcFilesOwner {
   constructor(private readonly ports: {
+    share?: AgentMuxRpcFileShareOwner
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     /** Original closed Zone descriptor from the same durable spatial resource owner. */
     retiredZone?(zoneId: string): Promise<unknown>
@@ -18,11 +20,38 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     workspace(id: string): WorkspaceRecord | undefined
     files: Pick<WorkspaceFiles, 'read' | 'listFiles'> & {
       write(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context?: FileWriteContext): ReturnType<WorkspaceFiles['write']>
+      createShared?(workspace: WorkspaceRecord, input: Parameters<WorkspaceFiles['write']>[1], context: FileWriteContext | undefined, source: { workspace: WorkspaceRecord; input: Parameters<WorkspaceFiles['write']>[1] }): Promise<WorkspaceFileWriteResult>
       history?(workspace: WorkspaceRecord, input: Omit<NoteHistoryQuery, 'resource'> & { path: string }): Promise<NoteHistorySnapshot>
       restore?(workspace: WorkspaceRecord, input: WorkspaceFileRestoreInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
       undo?(workspace: WorkspaceRecord, input: WorkspaceFileUndoInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult>
     }
   }) {}
+  async share(input: FileShareParams, context?: FileWriteContext): Promise<FileShareResult> {
+    if (!this.ports.share) throw new AgentMuxError('The original shared Markdown owner is unavailable; ordinary files remain available.', 'CONTROL_UNAVAILABLE')
+    return this.ports.share.share(input, context)
+  }
+  async inspectShare(input: FileShareInspectParams, context?: FileWriteContext): Promise<FileShareInspectResult> {
+    if (!this.ports.share) throw new AgentMuxError('The original shared Markdown owner is unavailable; ordinary files remain available.', 'CONTROL_UNAVAILABLE')
+    return this.ports.share.inspectShare(input, context)
+  }
+  /** Trusted original-owner-only exclusive creation, with its durable per-file history operation. */
+  async createShared(input: FileCreateParams, operationId: string, context?: FileWriteContext, source?: FileWriteParams): Promise<FileCreateResult> {
+    const params = parseFileCreateParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: resolved.message } }
+    const { resource, workspace } = resolved
+    if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original shared Markdown mapping changed. Keep the original draft and inspect that target.', 'FILE_RESOURCE_MISMATCH')
+    try {
+      const write = { path: resource.path, content: params.content, expectedRevision: null, operationId }
+      if (source) {
+        const original = await this.resolve(source)
+        if ('message' in original || !this.ports.files.createShared) return { resource, result: { status: 'unknown', code: 'NOTE_SHARE_SOURCE_UNCONFIRMED', message: 'The original source owner is unavailable. Original files and drafts are retained.' } }
+        if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => original.resource[key as keyof FileReadResource] !== source.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original source mapping changed before extraction.', 'FILE_RESOURCE_MISMATCH')
+        return { resource, result: await this.ports.files.createShared(workspace, write, context, { workspace: original.workspace, input: { path: original.resource.path, content: source.content, expectedRevision: source.expectedRevision, ...(source.baseContent === undefined ? {} : { baseContent: source.baseContent }) } }) }
+      }
+      return { resource, result: await this.ports.files.write(workspace, write, context) }
+    }
+    catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
+  }
   async history(input: FileHistoryParams): Promise<FileHistoryResult> {
     const params = parseFileHistoryParams(input), resolved = await this.resolve(params)
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_HISTORY_UNCONFIRMED', message: resolved.message } }

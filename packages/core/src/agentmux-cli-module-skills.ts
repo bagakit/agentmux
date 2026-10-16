@@ -229,6 +229,12 @@ and build output do not certify a user's acceptance. Wrong targets reject only t
 unavailable resource reads never authorize removing a view, replacing content or stopping a Run.
 
 For concurrent .note.md edits and save/conflict receipts, read amux file write --help.
+For first reuse as a shared Markdown entity, read amux file share --help. Stage the source
+and surviving include occurrence without creating a file on copy/paste. Explicit save uses
+file.share for exclusive shared creation, original source replacement and destination save.
+Keep each original operation and bytes after unknown; file share inspect reads the original
+per-file history and current observations separately. A current matching file cannot certify
+an earlier lost receipt. Never manufacture a second body/relationship store.
 For saved-version recovery or actor-batch undo, read amux file restore --help or amux file undo --help.
 Only for Note links, attribution or history, read amux notebook --skill. Unknown edits never authorize automatic replay.
 

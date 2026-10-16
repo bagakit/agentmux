@@ -1,3 +1,5 @@
+import { NoteSharedBlockOwner } from './note-shared-block-owner.js'
+import { parseFileShareParams, parseFileShareResult, parseFileShareInspectParams, parseFileShareInspectResult } from '@agentmux/core/files'
 import { RendererAllocationSampler } from './renderer-allocations.js'
 import type { PerformanceSceneOwner } from './performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
@@ -898,9 +900,21 @@ export async function registerIpc(args: {
   const noteTitleWriter: NoteTitleFileWriter = new NoteTitleFileWriter(files, notebookStore)
   const notebookObservation = createNotebookObservationServices(notebookStore, { files, workspace: id => config.workspaces.find(item => item.id === id) }, () => notesStorageReady)
   const noteFileWriter = new NoteFileWriter(files, { state: async () => { await notesStorageReady; return notebookStore.read() }, owner: notebookObservation.owner }, notebookStore)
-  const publicFiles = new FileReadOwner({ files: { read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
+  let noteSharedBlocks: NoteSharedBlockOwner
+  const publicFiles = new FileReadOwner({ share: { share: (input, context) => noteSharedBlocks.share(input, context), inspectShare: (input, context) => noteSharedBlocks.inspectShare(input, context) }, files: { createShared: (owner, input, context, source) => notesStorageOwner.write(owner, input, actual => noteFileWriter.createShared(actual, input, context, source)), read: noteFileWriter.read.bind(noteFileWriter), listFiles: files.listFiles.bind(files), history: noteFileWriter.history.bind(noteFileWriter), restore: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.restore(actual, input, context)), undo: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.undo(actual, input, context)), write: (owner, input, context) => notesStorageOwner.write(owner, input, actual => noteFileWriter.write(actual, input, context)) }, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     retiredZone: async id => (await spatialState.read())?.graph.resources['zone:' + id],
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
+  noteSharedBlocks = new NoteSharedBlockOwner({ files: publicFiles, historyOperation: notebookStore.readHistoryOperation.bind(notebookStore), withWriteLease: notebookStore.runWithWriteLease.bind(notebookStore) })
+  handleWithEvent('files:sharePublic', async (event, input: import('@agentmux/core').FileShareParams) => {
+    requireTrustedSender('files:sharePublic', event)
+    const params = parseFileShareParams(input)
+    return parseFileShareResult(await publicFiles.share(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
+  })
+  handleWithEvent('files:inspectSharePublic', async (event, input: import('@agentmux/core').FileShareInspectParams) => {
+    requireTrustedSender('files:inspectSharePublic', event)
+    const params = parseFileShareInspectParams(input)
+    return parseFileShareInspectResult(await publicFiles.inspectShare(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
+  })
   const moteConnectionPreferences = new MoteConnectionPreferences({ files: publicFiles,
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
     connections: () => connectorServices.connections.list(), quick: (request, signal) => controlBridge.execute(request, signal) })

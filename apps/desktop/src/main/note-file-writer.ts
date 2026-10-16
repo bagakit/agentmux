@@ -80,9 +80,24 @@ export class NoteFileWriter {
     return new NoteHistoryActions({ runWithWriteLease: metadata.runWithWriteLease.bind(metadata), readHistoryOperation: metadata.readHistoryOperation.bind(metadata), readHistoryBatch: metadata.readHistoryBatch.bind(metadata), readHistory: metadata.readHistory.bind(metadata), readProvenance: metadata.readProvenance.bind(metadata), recordHistory: metadata.recordHistory.bind(metadata) },
       this.read.bind(this), (owner, request, author, action) => this.writeOriginal(owner, request, author, action)).apply(workspace, input, context)
   }
+  /** Trusted extraction only: move original authorship, never accept attribution from request YAML. */
+  async createShared(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context: FileWriteContext | undefined,
+    source: { workspace: WorkspaceRecord; input: WorkspaceFileWriteInput }): Promise<WorkspaceFileWriteResult> {
+    const observed = await this.read(source.workspace, source.input.path)
+    if (observed.status !== 'read') return { status: 'unknown', code: 'NOTE_SHARE_SOURCE_UNCONFIRMED', message: 'The original source and trusted authorship could not be read. No shared file was created.' }
+    if (observed.document.revision !== source.input.expectedRevision) return { status: 'error', code: 'NOTE_SHARE_SOURCE_CHANGED', message: 'The exact original source revision changed before extraction. No shared file was created; refresh the source draft before deciding another save.' }
+    const baseline = readNoteDocument(observed.document.content), proposed = readNoteDocument(source.input.content)
+    if (baseline.status !== 'valid' || proposed.status !== 'valid' || baseline.note.noteId !== proposed.note.noteId) return { status: 'error', code: 'NOTE_SHARE_SOURCE_INVALID', message: 'The exact source Note identity and structure are required for extraction.' }
+    const normalize = (note: NoteDocument): NoteDocument => ({ ...note, content: noteContentSchema.nodeFromJSON(note.content).toJSON() })
+    const before = hydrateNoteProvenance(normalize(baseline.note), observed.document.noteProvenance, observed.document.revision)
+    const attributed = attributeNoteBlocks(before, normalize(proposed.note), context?.actor, Date.now())
+    return this.writeOriginal(workspace, input, context, undefined, blockMetadata(attributed))
+  }
   async write(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context?: FileWriteContext): Promise<WorkspaceFileWriteResult> { return this.writeOriginal(workspace, input, context) }
-  private async writeOriginal(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context?: FileWriteContext, action?: NoteHistoryWriteAction): Promise<WorkspaceFileWriteResult> {
+  private async writeOriginal(workspace: WorkspaceRecord, input: WorkspaceFileWriteInput, context?: FileWriteContext, action?: NoteHistoryWriteAction, transferredBlocks?: Record<string, NoteBlockProvenance>): Promise<WorkspaceFileWriteResult> {
     const submitted = { ...input }, enhanced = input.baseContent !== undefined || input.operationId !== undefined
+    // Only the shared-file owner submits an operation-tagged exclusive creation.
+    const creating = input.expectedRevision === null && input.baseContent === undefined && typeof input.operationId === 'string'
     input = submitted
     if (!input.path.endsWith(NOTE_FILE_EXTENSION)) return enhanced
       ? { status: 'error', code: 'NOTE_SUBMISSION_UNSUPPORTED', message: 'Baseline-aware submissions apply to original Note Markdown files. Ordinary file revision saves remain available.' }
@@ -90,11 +105,11 @@ export class NoteFileWriter {
     let candidate = readNoteDocument(input.content)
     let requestFingerprint: string | undefined, submissionBaseline: NoteDocument | undefined, submissionNoteId: string | undefined
     if (enhanced) {
-      if (typeof input.baseContent !== 'string' || typeof input.operationId !== 'string' || !input.operationId || /[\0\r\n]/u.test(input.operationId) || input.expectedRevision === null || noteHistoryRevision(input.baseContent) !== input.expectedRevision) {
+      if (typeof input.operationId !== 'string' || !input.operationId || /[\0\r\n]/u.test(input.operationId) || (!creating && (typeof input.baseContent !== 'string' || input.expectedRevision === null || noteHistoryRevision(input.baseContent) !== input.expectedRevision))) {
         return { status: 'error', code: 'NOTE_SUBMISSION_INVALID', message: 'Keep the original operation ID and exact baseline bytes matching expectedRevision. The original file and draft are unchanged.' }
       }
-      const base = readNoteDocument(input.baseContent)
-      const header = action ? readNoteMarkdownHeader(input.baseContent) : undefined
+      const base = creating ? candidate : readNoteDocument(input.baseContent!)
+      const header = action ? readNoteMarkdownHeader(input.baseContent!) : undefined
       if (action ? header?.status !== 'valid' || header.noteId !== action.noteId : base.status !== 'valid') return { status: 'error', code: 'NOTE_SUBMISSION_INVALID', message: 'The original Note baseline is not valid. Preserve its bytes and inspect the same source before another submission.' }
       submissionBaseline = base.status === 'valid' ? base.note : undefined
       submissionNoteId = action?.noteId ?? submissionBaseline!.noteId
@@ -122,7 +137,7 @@ export class NoteFileWriter {
       try { baselineObservation = await this.read(workspace, input.path); if (baselineObservation.status === 'read') { if (baselineObservation.document.path === input.path) baseline = baselineObservation; else baselineObservation = { status: 'error', code: 'NOTE_READ_TARGET_MISMATCH', message: 'The original reader returned another file path.' } } }
       catch (error) { baselineIssue = error instanceof Error ? error.message : String(error) }
     }
-    if (enhanced) {
+    if (enhanced && !creating) {
       const conflict = (why: 'overlap' | 'identity' | 'invalid-structure') => this.rejectedSubmission(workspace, submitted, submissionNoteId!, requestFingerprint!, baseline, why, context, action)
       if (!baseline) {
         if (baselineObservation?.status === 'deleted' || baselineObservation?.status === 'directory' || baselineObservation?.status === 'binary') return conflict('invalid-structure')
@@ -201,6 +216,14 @@ export class NoteFileWriter {
           node.content?.forEach(restoreCreators)
         }
         restoreCreators(next.content)
+      }
+      if (transferredBlocks && creating) {
+        const restoreTransferred = (node: NoteDocument['content']) => {
+          const original = typeof node.attrs?.blockId === 'string' ? transferredBlocks[node.attrs.blockId] : undefined
+          if (original) node.attrs = { ...node.attrs, provenance: original }
+          node.content?.forEach(restoreTransferred)
+        }
+        restoreTransferred(next.content)
       }
       attributed = next
       if (!action) content = serializeNoteDocument(next)
