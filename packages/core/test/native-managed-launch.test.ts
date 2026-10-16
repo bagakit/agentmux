@@ -28,6 +28,7 @@ it.runIf(process.platform === 'darwin')('qualifies create, preserving the origin
   const prepared = await prepareCodexManagedLaunch(original, 'original-lifecycle', { kind: 'create', prompt: 'Original initial prompt' })
   expect(prepared.nativeActor?.launch).toEqual({ command: original.command, args: original.args })
   expect(prepared.nativeActor?.lifecycleOperationId).toBe('original-lifecycle'); expect(prepared.nativeActor?.token).toMatch(/^[a-f0-9]{64}$/u)
+  expect(prepared.nativeActor?.frontendControl).toBe(true)
   expect(prepared.plan.env).toMatchObject({ ORIGINAL_FIXTURE: 'kept', ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: prepared.nativeActor!.token })
   expect(prepared.plan.command).toBe(process.execPath)
   const helper = JSON.parse(prepared.plan.args[1]!)
