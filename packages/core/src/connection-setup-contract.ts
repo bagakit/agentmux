@@ -171,7 +171,7 @@ export interface ConnectionSetupPort {
   begin(input: ConnectionSetupBegin, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
   advance(input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
   inspect(input: ConnectionSetupInspect, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
-  list(input: ConnectionSetupList): Promise<ConnectionSetupListing>
+  list(input: ConnectionSetupList, context?: ConnectionEnrollmentCallContext): Promise<ConnectionSetupListing>
 }
 export type ConnectionSetupParamsMap = { 'connection.setup.begin': ConnectionSetupBegin; 'connection.setup.advance': ConnectionSetupAdvance; 'connection.setup.inspect': ConnectionSetupInspect; 'connection.setup.ls': ConnectionSetupList }
 export type ConnectionSetupResultMap = { 'connection.setup.begin': ConnectionSetupView; 'connection.setup.advance': ConnectionSetupView; 'connection.setup.inspect': ConnectionSetupView; 'connection.setup.ls': ConnectionSetupListing }

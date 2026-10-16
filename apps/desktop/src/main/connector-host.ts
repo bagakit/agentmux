@@ -62,6 +62,7 @@ export async function createDesktopConnections(options: { directory: string; enc
     get database() { return live?.database ?? null },
     openDatabase: async () => (await ensure()).database,
     connections: {
+      ownsEnrollmentConnection: async (connectionId, agentSessionId) => (await ensure()).connections.ownsEnrollmentConnection(connectionId, agentSessionId),
       service: {
         get: async () => (await ensure()).connections.service.get(),
         configure: async input => { const owner = await ensure(); const result = await owner.connections.service.configure(input); owner.receivers?.refresh(); owner.publication?.refresh(); return result },
@@ -71,20 +72,20 @@ export async function createDesktopConnections(options: { directory: string; enc
         get: async (input, context) => (await ensure()).connections.profile!.get(input, context),
         sync: async (input, context) => (await ensure()).connections.profile!.sync(input, context),
         advance: async (input, context) => (await ensure()).connections.profile!.advance(input, context),
-        inspect: async input => (await ensure()).connections.profile!.inspect(input),
-        list: async input => (await ensure()).connections.profile!.list(input)
+        inspect: async (input, context) => (await ensure()).connections.profile!.inspect(input, context),
+        list: async (input, context) => (await ensure()).connections.profile!.list(input, context)
       },
       setup: {
         begin: async (input, context) => (await ensure()).connections.setup!.begin(input, context),
         advance: async (input, context) => (await ensure()).connections.setup!.advance(input, context),
         inspect: async (input, context) => (await ensure()).connections.setup!.inspect(input, context),
-        list: async input => (await ensure()).connections.setup!.list(input)
+        list: async (input, context) => (await ensure()).connections.setup!.list(input, context)
       },
       enrollment: {
         begin: async (input, context) => (await ensure()).connections.enrollment!.begin(input, context),
         advance: async (input, context) => { const owner = await ensure(); const result = await owner.connections.enrollment!.advance(input, context); if (result.operation?.configuration === 'configured') { owner.receivers?.refresh(); owner.publication?.refresh() }; return result },
         inspect: async (input, context) => (await ensure()).connections.enrollment!.inspect(input, context),
-        list: async input => (await ensure()).connections.enrollment!.list(input)
+        list: async (input, context) => (await ensure()).connections.enrollment!.list(input, context)
       },
       rooms: {
         list: async input => (await ensure()).connections.rooms!.list!(input),

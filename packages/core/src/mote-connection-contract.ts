@@ -70,6 +70,6 @@ export interface MoteConnectionPort {
   create(input: MoteConnectionCreate, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation>
   sync(input: MoteConnectionSync, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation>
   advance(input: MoteConnectionAdvanceInput, context: ConnectionEnrollmentCallContext): Promise<MoteConnectionOperation>
-  inspect(input: MoteConnectionOperationInput): Promise<{ operation: MoteConnectionOperation | null }>
-  list(input: MoteConnectionListInput): Promise<{ operations: MoteConnectionOperation[]; next: string | null }>
+  inspect(input: MoteConnectionOperationInput, context?: ConnectionEnrollmentCallContext): Promise<{ operation: MoteConnectionOperation | null }>
+  list(input: MoteConnectionListInput, context?: ConnectionEnrollmentCallContext): Promise<{ operations: MoteConnectionOperation[]; next: string | null }>
 }

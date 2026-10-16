@@ -3,7 +3,7 @@ import type { ConversationCheckpoint } from './conversation-changes.js'
 import type { ConnectionApplication, ConnectionGrant } from './connections-contract.js'
 import type { AgentSessionHistorySource } from './types.js'
 
-export type RoomBindingAuthority = { kind: 'user' | 'device'; id: string }
+export type RoomBindingAuthority = { kind: 'user' | 'device' | 'agent'; id: string }
 export type RoomBindingScope = {
   input: 'mentions-and-replies' | 'all-messages'
   /** Existing grants retain assistant speech. Broader content requires an explicit new Binding revision and cut. */

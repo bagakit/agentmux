@@ -62,6 +62,7 @@ export function createRoomDiscovery(connections: Pick<ConnectionHost, 'database'
       const input = parseRoomDiscoveryParams('connection.room.link.create', value), authorizedBy = parseRoomBindingAuthority(context.actor)
       const existing = original(input.operationId)
       if (existing) {
+        if (existing.authorizedBy.kind !== authorizedBy.kind || existing.authorizedBy.id !== authorizedBy.id) throw new AgentMuxError('The original link operation belongs to its original actor.', 'CONTROL_PERMISSION_DENIED')
         if (JSON.stringify(existing.input) !== JSON.stringify(input)) throw new AgentMuxError('The original link operation has another target. Inspect it without replacing its identity.', 'ROOM_OPERATION_CONFLICT')
         return existing
       }
@@ -73,6 +74,7 @@ export function createRoomDiscovery(connections: Pick<ConnectionHost, 'database'
           database.exec('BEGIN IMMEDIATE')
           try {
             const prior = original(input.operationId)
+            if (prior && (prior.authorizedBy.kind !== authorizedBy.kind || prior.authorizedBy.id !== authorizedBy.id)) throw new AgentMuxError('The original link operation belongs to its original actor.', 'CONTROL_PERMISSION_DENIED')
             if (prior && JSON.stringify(prior.input) !== JSON.stringify(input)) throw new AgentMuxError('The original link operation has another target.', 'ROOM_OPERATION_CONFLICT')
             const operation = prior ?? refused(reason)
             if (!prior) save(operation)
@@ -99,6 +101,7 @@ export function createRoomDiscovery(connections: Pick<ConnectionHost, 'database'
         try {
           const prior = original(input.operationId)
           if (prior) {
+            if (prior.authorizedBy.kind !== authorizedBy.kind || prior.authorizedBy.id !== authorizedBy.id) throw new AgentMuxError('The original link operation belongs to its original actor.', 'CONTROL_PERMISSION_DENIED')
             if (JSON.stringify(prior.input) !== JSON.stringify(input)) throw new AgentMuxError('The original link operation has another target.', 'ROOM_OPERATION_CONFLICT')
             database.exec('COMMIT'); return { operation: prior, claimed: false }
           }

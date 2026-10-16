@@ -338,7 +338,8 @@ export class ConnectionEnrollmentStore {
   }
   page(
     cursor: string | undefined,
-    limit: number
+    limit: number,
+    actor?: ConnectionEnrollmentCallContext['actor']
   ): {
     operations: ConnectionEnrollmentOperation[]
     next: string | null
@@ -360,9 +361,9 @@ export class ConnectionEnrollmentStore {
       }
       const rows = this.host.database
           .prepare(
-            'SELECT sequence,record_json FROM connection_enrollment WHERE sequence<? ORDER BY sequence DESC LIMIT ?'
+            actor ? "SELECT sequence,record_json FROM connection_enrollment WHERE sequence<? AND json_extract(record_json,'$.actor.kind')=? AND json_extract(record_json,'$.actor.id')=? ORDER BY sequence DESC LIMIT ?" : 'SELECT sequence,record_json FROM connection_enrollment WHERE sequence<? ORDER BY sequence DESC LIMIT ?'
           )
-          .all(before, limit + 1),
+          .all(...(actor ? [before, actor.kind, actor.id, limit + 1] : [before, limit + 1])),
         page = rows.slice(0, limit)
       return {
         operations: page.map((r) =>

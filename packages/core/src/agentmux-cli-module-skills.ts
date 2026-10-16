@@ -120,7 +120,25 @@ ${SPATIAL_GUIDE}`
     roles: 'Authorized connection operators and coordinating Agents',
     when: 'Inspect or operate an exact external communication connection',
     guide: `The connection owner holds configured adapters, bindings, grants, ingress and delivery
-receipts. Begin with connection ls/inspect; configuration, a successful test, an enabled
+receipts. Managed Agents authenticate with their original Session capability, never as a user.
+Start with connection enrollment ls to discover adapterId/domain and your own original operations.
+Use connection enrollment begin --input FILE|- with exact operationId, connectionId, adapterId,
+domain, label and preset {name,avatar:{pngDataUrl}}. Only a person can scan/authorize the platform
+challenge; keep active QR data on its original confirmation surface and out of ordinary logs.
+Copy an offered action into connection enrollment advance --input FILE|- as
+{operationId,ownRevision,decision:{actionId,kind}}. Confirm the exact account before choosing create.
+Continue or inspect the same operation after an unknown response; never replace its IDs to retry.
+An Agent can inspect/continue only its own private enrollment and management operations.
+Once configured, its Connection appears in connection ls and can be used for setup/profile/room
+operations. setup begin accepts the exact source enrollment to reuse its login; the separate
+management account confirmation and finite offered actions still apply. A binding/room creation
+must name that same Agent Session, never another Agent. Global service/configuration, external
+actor grants and existing human/device bot operations require their original trusted operator.
+For saved Mote identity use space mote connection create/sync/advance/inspect/ls through the same
+owner; exact Mote sources stay on the authenticated Agent Host and Workspace. Saved identity,
+application creation, profile write and Mote default save retain separate original receipts.
+
+Begin with connection ls/inspect; configuration, a successful test, an enabled
 binding, ingress and actual outgoing delivery are distinct facts. Keep the exact connection,
 binding and source identities rather than matching human labels or assuming transport trust.
 connection service get reads the complete Connector policy on the current endpoint. Service
