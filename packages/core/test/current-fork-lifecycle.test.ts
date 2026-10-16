@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
@@ -13,6 +14,7 @@ import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-s
 import { AgentMuxError } from '../src/errors.js'
 import type { CtxmuxAdapterRun, CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
+import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => {
@@ -22,8 +24,12 @@ afterEach(async () => {
   const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
   if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Private fixture cleanup failed')
 })
-async function fixture(providerId: 'codex' | 'claude' = 'claude') {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-fork-lifecycle-'))), provider = new AgentProviderRegistry().get(providerId)
+async function fixture(providerId: 'codex' | 'claude' = 'claude', cold = false) {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-fork-lifecycle-'))), originalProvider = new AgentProviderRegistry().get(providerId)
+  // This cold-source test uses a real writable transcript witness. Managed actor
+  // preparation is a separate Provider collaborator, as Hook/probe/Adapter below.
+  const { prepareManagedLaunch: _managed, ...transcriptProvider } = originalProvider
+  const provider = cold ? transcriptProvider : originalProvider
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.jsonl'))
   const file = join(root, providerId === 'codex' ? 'rollout-original.jsonl' : 'original.jsonl')
   await writeFile(file, JSON.stringify(providerId === 'codex' ? { type: 'session_meta', payload: { id: 'original', source: 'cli' } }
@@ -38,11 +44,12 @@ async function fixture(providerId: 'codex' | 'claude' = 'claude') {
   const original = await holder(file), capability = issueAgentCapability()
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const source: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-session', providerId, executorId: 'private', hostId: 'local', workspacePath: root,
-    run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1, capabilityHash: hashAgentCapability(capability), hookBindingId: 's'.repeat(43), hookToken: 'o'.repeat(43),
-    nativeHandle: { kind: 'provider', providerId, sessionId: 'original', transcriptPath: file }, nativeBinding: { source: 'process-witness', run: { runId: 'original-run' }, observedAt: 1 } }
+    run: { runId: 'original-run' }, retiredRuns: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), capabilityHash: hashAgentCapability(capability), hookBindingId: 's'.repeat(43), hookToken: 'o'.repeat(43),
+    nativeHandle: { kind: 'provider', providerId, sessionId: 'original', transcriptPath: file }, nativeBinding: { source: 'process-witness', run: { runId: 'original-run' }, observedAt: _tailFixtureEpoch(0, 0, 1) } }
   await store.compareAndSwap(null, source)
   const client = new AgentMuxClient({ store, providers: [provider] }), inner = client as any
-  await inner.registry.load('local'); inner.connected = true
+  if (!cold) await inner.registry.load('local')
+  inner.connected = true
   const kernel = inner.kernel as CtxmuxRunAdapter, runs: CtxmuxAdapterRun[] = [{ runId: 'original-run', lifecycleOperationId: null, program: process.execPath, args: [], workspacePath: root,
     pid: original.pid!, state: { type: 'running' }, cols: null, rows: null, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }]
   vi.spyOn(kernel, 'isConnected').mockReturnValue(true)
@@ -74,6 +81,28 @@ async function fixture(providerId: 'codex' | 'claude' = 'claude') {
     injectAgentMuxGuide: true, prompt: 'same prompt', env: { PRIVATE_SECRET: 'must-not-be-written', OTHER_PRIVATE: 'second' }, args: ['--private'], cols: 80, rows: 24 }
   return { root, client, inner, store, source, capability, kernel, runs, create, start, stop, input, bind, close, handshake }
 }
+
+it('Hosted cold fork adopts only its exact source and keeps an old receipt after the source changes', async () => {
+  const f = await fixture('claude', true)
+  expect(f.client.agentSessions()).toEqual([])
+  const load = vi.spyOn(f.inner.registry, 'load')
+  const global = vi.spyOn(f.client, 'connect').mockRejectedValue(new Error('Unrelated private recovery is unavailable'))
+  const h = await hostedTestClient(f.client)
+  expect(f.client.agentSessions()).toEqual([]) // SDK metadata projection did not adopt the source.
+  try {
+    const created = await h.sdk.createAgentWithDelivery(f.create)
+    expect(created.session.forkedFrom).toEqual(f.create.forkSource)
+    expect(f.start).toHaveBeenCalledOnce(); expect(f.input).not.toHaveBeenCalled()
+    expect(f.client.agentSession(f.source.agentSessionId).run).toEqual(f.source.run)
+    const { nativeHandle: _handle, nativeBinding: _binding, ...changedSource } = f.source
+    await f.store.compareAndSwapMetadata(f.source, { ...changedSource, run: { runId: 'replacement-source-run' }, retiredRuns: [f.source.run], updatedAt: _tailFixtureEpoch(0, 0, 2) })
+    expect((await h.sdk.createAgentWithDelivery(f.create)).session.run).toEqual(created.session.run)
+    await expect(h.sdk.createAgentWithDelivery({ ...f.create, agentSessionId: 'changed-source-fork', createOperationId: 'changed-source-operation' }))
+      .rejects.toMatchObject({ code: 'AGENT_FORK_SOURCE_CHANGED' })
+    expect(f.start).toHaveBeenCalledOnce(); expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+    expect(global).not.toHaveBeenCalled(); expect(load).not.toHaveBeenCalled()
+  } finally { await h.dispose() }
+})
 
 it.each(['codex', 'claude'] as const)('keeps a healthy %s fork through commit failure, preserves no-Run seed and reconciles the same operation without replay', async provider => {
   const f = await fixture(provider), commit = vi.spyOn(f.store, 'commitLifecycle').mockRejectedValue(new Error('private disk unavailable'))
