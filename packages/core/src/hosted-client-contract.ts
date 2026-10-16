@@ -25,7 +25,7 @@ export const AGENTMUX_HOSTED_METHODS = [
 
 /** Physical Runtime operations do not require general Session recovery observation. */
 export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
-  'connectRuntime', 'observeRunStorage', 'listRuns', 'runtimeProjection',
+  'connectRuntime', 'observeRunStorage', 'listRuns', 'runtimeProjection', 'runtimeSubject',
   'reattachAgent', 'writeAgent', 'pasteAgent', 'resizeAgent', 'signalAgent',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal'
