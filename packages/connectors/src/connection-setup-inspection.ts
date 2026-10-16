@@ -2,19 +2,21 @@ import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { CONNECTION_SETUP_READ_ACTIONS, parseConnectionSetupReadSummary, parseConnectionSetupInspectionReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupInspect, type ConnectionSetupInspectionAction, type ConnectionSetupInspectionReceipt, type ConnectionSetupOperation, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
+import type { SetupAuthenticationSource } from './connection-setup.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 
 type Parent = { operation: ConnectionSetupOperation; actor: ConnectionEnrollmentCallContext['actor']; privateRef: string | null }
-type Snapshot = { stepId: string; attemptId: string; stage: string; privateState: string }
+type Snapshot = SetupAuthenticationSource
 type Child = { receipt: ConnectionSetupInspectionReceipt; authenticationStepId: string; recoveryActionId: string; privateRef: string | null }
-type Envelope = { binding: string; stepId: string; applicationInfoReadPermission?: 'confirmed' | 'unknown'; readResult?: ConnectionSetupReadSummary; privateState: string }
-export type SetupConfigurationSource = { receipt: ConnectionSetupInspectionReceipt & { subject: ConnectionSetupReadSubject }; authenticationStepId: string; attemptId: string; privateState: string; originalReadState: string }
+type Envelope = { binding: string; stepId: string; applicationInfoReadPermission?: 'confirmed' | 'unknown'; readResult?: ConnectionSetupReadSummary; privateState?: string; authentication?: string }
+export type SetupConfigurationSource = { receipt: ConnectionSetupInspectionReceipt & { subject: ConnectionSetupReadSubject }; authenticationStepId: string; attemptId: string; privateState: string; originalReadState: string; captureAuthentication: SetupAuthenticationSource['captureAuthentication'] }
 type Owner = {
   connections: ConnectionHost; secrets: EnrollmentSecrets | undefined
   read(id: string): Parent | null
   authority(context: ConnectionEnrollmentCallContext, row: Parent): Promise<void>
   current(row: Parent): boolean
   snapshot(row: Parent): Promise<Snapshot | null>
+  acceptAuthentication(row: Parent, field: string | undefined, childStepId: string, authenticationStepId: string, credentialRef: string): void
   touch(row: Parent): void
   view(row: Parent, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView>
 }
@@ -68,7 +70,9 @@ export class SetupApplicationInspection {
     try {
       if (value === null) return null
       const p = JSON.parse(value) as Envelope
-      if (p.binding !== this.binding(row, child) || p.stepId !== child.receipt.stepId || typeof p.privateState !== 'string') return null
+      if (p.binding !== this.binding(row, child) || p.stepId !== child.receipt.stepId || (p.privateState !== undefined && typeof p.privateState !== 'string' || p.authentication !== undefined && typeof p.authentication !== 'string')) return null
+      if (child.receipt.request !== 'confirmed') return p.privateState === undefined && typeof p.authentication === 'string' ? p : null
+      if (typeof p.privateState !== 'string') return null
       if (child.receipt.subject) {
         const summary = parseConnectionSetupReadSummary(p.readResult)
         return summary.subject === child.receipt.subject && (summary.subject !== 'publication-version' || summary.versionId === child.receipt.versionId) && p.applicationInfoReadPermission === undefined ? { ...p, readResult: summary } : null
@@ -110,7 +114,7 @@ export class SetupApplicationInspection {
     try {
       const original = this.envelope(await this.owner.secrets?.resolve(child.privateRef) ?? null, row, child)
       if (!original) return null
-      const source: SetupConfigurationSource = { receipt: { ...structuredClone(child.receipt), subject }, authenticationStepId: authentication.stepId, attemptId: authentication.attemptId, privateState: authentication.privateState, originalReadState: original.privateState }
+      const source: SetupConfigurationSource = { receipt: { ...structuredClone(child.receipt), subject }, authenticationStepId: authentication.stepId, attemptId: authentication.attemptId, privateState: authentication.privateState, originalReadState: original.privateState!, captureAuthentication: authentication.captureAuthentication }
       return this.configurationSourceCurrent(this.owner.read(row.operation.operationId)!, source) ? source : null
     } catch { return null }
   }
@@ -138,7 +142,7 @@ export class SetupApplicationInspection {
     const current = source && this.currentAuthentication(fresh) && fresh.operation.authentication?.stepId === source.stepId
     if (!current) { permission = 'unknown'; readResult = undefined }
     const actions: ConnectionSetupInspectionAction[] = []
-    if (selected?.receipt.request === 'confirmed' && selected.receipt.secureStorage !== 'stored') actions.push({ kind: 'recover-application-inspection', actionId: selected.recoveryActionId, expectedRevision: selected.receipt.input.expectedRevision })
+    if (selected && ['confirmed', 'unknown'].includes(selected.receipt.request) && ['storing', 'unknown'].includes(selected.receipt.secureStorage)) actions.push({ kind: 'recover-application-inspection', actionId: selected.recoveryActionId, expectedRevision: selected.receipt.input.expectedRevision })
     if (current && this.eligible(fresh)) {
       actions.push(this.newAction(fresh))
       for (const subject of readSubjects) if (this.eligible(fresh, subject)) actions.push(this.newAction(fresh, subject))
@@ -167,14 +171,17 @@ export class SetupApplicationInspection {
   }
   private async secure(row: Parent, child: Child): Promise<Child> {
     const secrets = this.owner.secrets
-    if (!secrets || child.receipt.request !== 'confirmed' || child.receipt.secureStorage === 'stored') return child
+    if (!secrets || !['confirmed', 'unknown'].includes(child.receipt.request) || child.receipt.secureStorage === 'stored' || child.receipt.secureStorage === 'not-started') return child
     try {
       await secrets.assertAvailable()
       const operationId = 'connection-setup-inspection:' + child.receipt.stepId
       let saved = await secrets.inspect(operationId)
       const value = this.unsettled.get(child.receipt.stepId)
       if (!saved && value) saved = await secrets.store({ operationId, secret: JSON.stringify(value) })
-      if (!saved || !this.envelope(await secrets.resolve(saved.credentialRef), row, child)) return child
+      if (!saved) return child
+      const envelope = this.envelope(await secrets.resolve(saved.credentialRef), row, child)
+      if (!envelope) return child
+      this.owner.acceptAuthentication(row, envelope.authentication, child.receipt.stepId, child.authenticationStepId, saved.credentialRef)
       child = this.update(this.find(row.operation.operationId, { stepId: child.receipt.stepId })!, { secureStorage: 'stored' }, saved.credentialRef)
       this.unsettled.delete(child.receipt.stepId)
       return child
@@ -231,6 +238,7 @@ export class SetupApplicationInspection {
   }
   private async run(row: Parent, child: Child, source: Snapshot, input: ConnectionSetupAdvance, context: ConnectionEnrollmentCallContext): Promise<ConnectionSetupView> {
     let value: Envelope | null = null
+    let authentication: string | undefined
     try {
       await this.owner.authority(context, row)
       const fresh = this.owner.read(input.operationId)!, adapter = this.owner.connections.registeredAdapter(row.operation.adapterId)?.setup?.applicationInspection
@@ -238,21 +246,25 @@ export class SetupApplicationInspection {
         const target = { operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState }
         if (child.receipt.subject && adapter.read) {
           const receipt = await adapter.read({ ...target, subject: child.receipt.subject, ...(child.receipt.subject === 'publication-version' ? { versionId: child.receipt.versionId } : {}) }, context.signal)
+          if (typeof receipt.authentication === 'string') authentication = source.captureAuthentication(receipt.authentication, child.receipt.stepId)
           if (receipt.kind === 'observed' && typeof receipt.privateState === 'string') {
             const readResult = parseConnectionSetupReadSummary(receipt.readResult)
             if (readResult.subject === child.receipt.subject && (readResult.subject !== 'publication-version' || readResult.versionId === child.receipt.versionId)) value = { binding: this.binding(row, child), stepId: child.receipt.stepId, readResult, privateState: receipt.privateState }
           }
         } else if (!child.receipt.subject) {
           const receipt = await adapter.inspect(target, context.signal)
+          if (typeof receipt.authentication === 'string') authentication = source.captureAuthentication(receipt.authentication, child.receipt.stepId)
           if (receipt.kind === 'observed' && ['confirmed', 'unknown'].includes(receipt.applicationInfoReadPermission) && typeof receipt.privateState === 'string') value = { binding: this.binding(row, child), stepId: child.receipt.stepId, applicationInfoReadPermission: receipt.applicationInfoReadPermission, privateState: receipt.privateState }
         }
       }
     } catch { /* Keep this exact preclaim unknown. No native replay or health inference. */ }
     if (this.closed) return { operation: row.operation, challenge: null, reason: 'challenge-unavailable', receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: 'unknown' } }
-    if (!value) child = this.update(child, { request: 'unknown' })
+    if (!value && !authentication) child = this.update(child, { request: 'unknown' })
     else {
+      const confirmed = Boolean(value)
+      value = { ...(value ?? { binding: this.binding(row, child), stepId: child.receipt.stepId }), ...(authentication ? { authentication } : {}) }
       this.unsettled.set(child.receipt.stepId, value)
-      child = this.update(child, { request: 'confirmed', secureStorage: 'storing' })
+      child = this.update(child, { request: confirmed ? 'confirmed' : 'unknown', secureStorage: 'storing' })
       child = await this.secure(row, child)
     }
     return this.result(child, input, context)
