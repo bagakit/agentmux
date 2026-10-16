@@ -300,7 +300,7 @@ it('actual ingress submission carries its typed original Input key through Core 
     recorded = (await f.client.sessionTimeline(f.session.agentSessionId)).items.find(item => item.authorExternal?.externalMessageId === received.ingress.externalMessageId)
     expect(recorded?.inputRef).toEqual({ kind: 'message', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, messageId: input.messageId })
   }, { timeout: 10_000 })
-  expect(recorded).toMatchObject({ source: 'user', kind: 'user_message', publicContent: 'confirmed', content: renderAgentMuxMessageEnvelope({ sender: input.author, senderSessionId: null, body: received.ingress.body }), authorExternal: input.author })
+  expect(recorded).toMatchObject({ source: 'user', kind: 'user_message', publicContent: 'confirmed', content: renderAgentMuxMessageEnvelope({ messageId: input.messageId, sender: input.author, senderSessionId: null, body: received.ingress.body }), authorExternal: input.author })
   host.refresh()
   await vi.waitFor(() => expect(host.store.coverage(binding).origins).toHaveLength(1), { timeout: 10_000 })
   const represented = host.store.coverage(binding).origins[0]!
@@ -367,6 +367,53 @@ it('actual ingress submission carries its typed original Input key through Core 
   expect(current).not.toHaveProperty('inputRef'); expect(current).not.toHaveProperty('publicContent')
   const old = (await f.store.readCapturedHistory(f.session.agentSessionId, { recordId: original.id, recordRevision: represented.part.recordRevision })).records[0]!.item
   expect(old.inputRef).toEqual(original.inputRef); expect(old.content).toBe(original.content)
+}, 20_000)
+
+it('retained ingress wire keeps its typed platform origin across formatter changes; a content edit loses that boundary', async () => {
+  const remote = await feishuPublicationHttp(); cleanup.push(remote.close)
+  const adapter = new FeishuAdapter({ http: remote.http })
+  const f = await ingressFixture(true, feishuConfig, { resolve: async () => 'isolated-credential' }, { adapters: [adapter], publication: 'future-shared-conversation' }); cleanup.push(f.close)
+  const binding = f.bindings.readCurrent(f.input.bindingId)!, port = createPublicationConversationPort(f.coreClients)
+  const connections = new ConnectionHost({ database: f.connections.database, secrets: { resolve: async () => 'isolated-credential' }, adapters: [adapter] }); cleanup.push(() => connections.close())
+  const host = new PublicationHost({ connections, bindings: f.bindings, conversation: port }); cleanup.push(() => host.close())
+  const received = await f.receive()
+  if (received.ingress.kind === 'action') throw Error('Expected the original message')
+  const source = [received.ingress.actor.application.domain, received.ingress.actor.application.appId,
+    received.ingress.actor.idType, received.ingress.actor.userId, received.ingress.externalConversationId].map(encodeURIComponent).join('/')
+  const previousWire = `[Message from External ${source}]\n${received.ingress.body}`
+  const producer = f.client as unknown as { submitPromptInternal(input: { prompt: string }, ...rest: unknown[]): Promise<void> }
+  const submit = producer.submitPromptInternal.bind(producer)
+  // The earlier generation changes only its wire producer. The original ingress
+  // author, journal, Input admission and captured writer remain the real chain.
+  const oldProducer = vi.spyOn(producer, 'submitPromptInternal').mockImplementationOnce((input, ...rest) => submit({ ...input, prompt: previousWire }, ...rest))
+  const dispatched = await f.ingress.dispatch(received.ingress.ingressId)
+  if (!dispatched.ingress || dispatched.ingress.kind === 'action' || !dispatched.ingress.input) throw Error('Expected the original input claim')
+  let original: AgentTimelineItem | undefined
+  await vi.waitFor(async () => {
+    original = (await f.client.sessionTimeline(f.session.agentSessionId)).items.find(item => item.authorExternal?.externalMessageId === received.ingress.externalMessageId)
+    expect(original?.content).toBe(previousWire)
+  }, { timeout: 10_000 })
+  oldProducer.mockRestore()
+  const input = dispatched.ingress.input
+  expect(original).toMatchObject({ publicContent: 'confirmed', authorExternal: input.author,
+    inputRef: { kind: 'message', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, messageId: input.messageId } })
+  expect(previousWire).not.toBe(renderAgentMuxMessageEnvelope({ messageId: input.messageId, sender: input.author, senderSessionId: null, body: received.ingress.body }))
+  host.refresh()
+  await vi.waitFor(() => expect(host.store.coverage(binding).origins).toHaveLength(1), { timeout: 10_000 })
+  const origin = host.store.coverage(binding).origins[0]!
+  expect(origin.origin).toMatchObject({ externalMessageId: received.ingress.externalMessageId, externalConversationId: binding.externalConversationId })
+  expect(host.store.list(binding)).toEqual([]); expect(remote.messageCalls()).toEqual([])
+
+  await f.store.applyTimelineMutation({ type: 'update', agentSessionId: input.agentSessionId, itemId: original!.id,
+    updatedAt: original!.updatedAt + 1, content: 'An ordinary edited body' })
+  const edited = (await f.store.readCapturedHistory(input.agentSessionId, { recordId: original!.id })).records[0]!.item
+  expect(edited).not.toHaveProperty('inputRef'); expect(edited).not.toHaveProperty('publicContent')
+  host.refresh()
+  await vi.waitFor(() => expect(host.store.coverage(binding).gaps).toContainEqual(expect.objectContaining({
+    reason: 'public-content-unconfirmed', part: expect.objectContaining({ record: expect.objectContaining({ source: expect.objectContaining({ recordId: original!.id }) }) })
+  })), { timeout: 10_000 })
+  expect(host.store.coverage(binding).origins).toEqual([origin])
+  expect(host.store.list(binding)).toEqual([]); expect(remote.messageCalls()).toEqual([])
 }, 20_000)
 
 it('a separate original outbox process reopens the same vector cut, unknown frozen effect, part intents and exact unsupported gap without dispatch', async () => {
