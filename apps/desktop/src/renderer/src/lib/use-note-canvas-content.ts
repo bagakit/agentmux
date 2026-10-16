@@ -11,6 +11,7 @@ type Request = { full: boolean; attempt: number }
 
 /** One ephemeral observation per original/snapshot, shared by every reader on this surface. */
 export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, active: boolean, visible: readonly string[], priority: readonly string[]) {
+  const observed = useMemo(() => new Set(snapshot?.graph.observations.filter(value => value.status === 'read' && value.kind === 'shared-block').map(value => value.noteId)), [snapshot])
   const [results, setResults] = useState<Record<string, CanvasContent>>({})
   const [explicit, setExplicit] = useState<Record<string, Request>>({})
   const jobs = useRef(new Map<string, { controller: AbortController; snapshot: NotebookGraphSnapshot; request: Request }>())
@@ -31,12 +32,12 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
       return
     }
     const admitted = Object.keys(results).filter(id => results[id]?.snapshot === snapshot)
-    const automatic = [...new Set([...priority, ...visible])].filter(id => snapshot.catalog.pages[id] && !snapshot.graph.duplicateNoteIds.includes(id))
+    const automatic = [...new Set([...priority, ...visible])].filter(id => (snapshot.catalog.pages[id] || observed.has(id)) && !snapshot.graph.duplicateNoteIds.includes(id))
     const withinBudget = automatic.filter(id => { if (admitted.includes(id)) return true; if (admitted.length >= AUTO_FILES) return false; admitted.push(id); return true })
     const wanted = [...new Set([...Object.keys(explicit), ...priority, ...withinBudget])]
     for (const id of wanted) {
       if (jobs.current.size >= CONCURRENCY) break
-      if (jobs.current.has(id) || !snapshot.catalog.pages[id]) continue
+      if (jobs.current.has(id) || (!snapshot.catalog.pages[id] && !observed.has(id))) continue
       const intent = explicit[id] ?? { full: false, attempt: 0 }, held = results[id]
       if (explicit[id] && held?.snapshot === snapshot && held.value?.status === 'read' && noteContentMatchesGraph(snapshot, held.value)) {
         setExplicit(values => Object.fromEntries(Object.entries(values).filter(([key]) => key !== id)))
@@ -58,7 +59,7 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
         setExplicit(values => values[id] === intent ? Object.fromEntries(Object.entries(values).filter(([key]) => key !== id)) : values)
       })
     }
-  }, [active, snapshot, visible, priority, results, explicit])
+  }, [active, snapshot, visible, priority, results, explicit, observed])
   // Stop this observation only; the original files and other clients remain unaffected.
   useEffect(() => {
     if (!active) setResults(values => Object.fromEntries(Object.entries(values).filter(([, value]) => !value.pending)))

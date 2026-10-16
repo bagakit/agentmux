@@ -23,10 +23,13 @@ import { NoteFileIdentity } from './NoteFileIdentity'
 
 /** Only an in-flight explicit reveal observes its original editor and ancestor visibility. */
 function observeRevealDOM(handle: NoteEditorHandle, attempt: () => boolean): () => void {
-  const observer = new MutationObserver(() => { if (attempt()) observer.disconnect() })
+  let stopNavigation = () => {}
+  const retry = () => { if (attempt()) { observer.disconnect(); stopNavigation() } }
+  const observer = new MutationObserver(retry)
+  stopNavigation = handle.onNavigationReady?.(retry) ?? (() => {})
   observer.observe(handle.editor.view.dom, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'inert', 'aria-hidden'] })
   for (let ancestor = handle.editor.view.dom.parentElement; ancestor; ancestor = ancestor.parentElement) observer.observe(ancestor, { attributes: true, attributeFilter: ['class', 'style', 'hidden', 'inert', 'aria-hidden'] })
-  return () => observer.disconnect()
+  return () => { observer.disconnect(); stopNavigation() }
 }
 
 /** Presentation of the original FileDocument. Invalid source remains available through Source. */
@@ -63,12 +66,14 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       for (let depth = selection.$from.depth; depth > 0 && !selected; depth--) selected = selection.$from.node(depth).attrs.blockId
       let originalTargetPresent = false
       handle.editor.state.doc.descendants(node => { if (node.attrs.blockId === restoredBlock.blockId) originalTargetPresent = true })
-      // The focused view owns its current selection, including a new block
-      // without a durable ID. A canonical echo must not replay an older ID.
-      if (selected === restoredBlock.blockId || originalTargetPresent && handle.editor.state.doc.eq(handle.editor.schema.nodeFromJSON(read.note.content))) { setRestoreIssue(null); return }
+      // Local input and a pending canonical echo can differ for a moment. Neither
+      // is a new navigation request: the focused view keeps its actual caret.
+      setRestoreIssue(selected === restoredBlock.blockId || originalTargetPresent ? null : 'The saved block selection is not confirmed in this Note. Its exact target is retained. Select another block to recover.')
+      return
     }
     if (read.status !== 'valid' || read.note.noteId !== restoredBlock.noteId || !handle.focusBlock(restoredBlock.blockId, false)) {
-      setRestoreIssue('The saved block selection is not confirmed in this Note. Its exact target is retained. Select another block to recover.'); return
+      setRestoreIssue('The saved block selection is not confirmed in this Note. Its exact target is retained. Select another block to recover.')
+      return handle.onNavigationReady?.(() => { if (!handle.editor.isDestroyed && !handle.editor.view.hasFocus() && read.status === 'valid' && read.note.noteId === restoredBlock.noteId && handle.focusBlock(restoredBlock.blockId, false)) setRestoreIssue(null) })
     }
     setRestoreIssue(null)
   }, [read, restoredBlock, handle])
