@@ -18,12 +18,12 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 const field = () => host.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: What should remain available?"]')!
 async function type(value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field(), value); field().dispatchEvent(new Event('input', { bubbles: true })) }) }
 async function render(extra: Partial<Parameters<typeof AgentAsyncQuestionCard>[0]> = {}, identity = 'original') {
-  await act(async () => root.render(<ClientUiProvider platform={platform}><AgentAsyncQuestionCard key={identity} request={request} recordedAnswers={new Map()} replyRoute="terminal" terminalCurrent onDraftChange={changed} onOpenTerminal={terminal} {...extra}/></ClientUiProvider>))
+  await act(async () => root.render(<ClientUiProvider platform={platform}><AgentAsyncQuestionCard key={identity} request={request} recordedAnswers={new Map()} replyTargetCurrent onDraftChange={changed} onOpenTerminal={terminal} {...extra}/></ClientUiProvider>))
 }
 it('edits multiple answers without a submit callback, copies only one plain answer and opens the original terminal without submitting', async () => {
   await render(); expect(field().disabled).toBe(false)
-  expect(host.textContent).toContain('答案草稿（尚未提交）')
-  expect(host.textContent).toContain('这里只整理答案；复制后到原终端粘贴并确认。')
+  expect(host.textContent).toContain('答案草稿')
+  expect(host.textContent).toContain('准确回复通道暂不可用')
   await type('  保留原始草稿\n不猜确认  ')
   await act(async () => host.querySelector<HTMLButtonElement>('[data-question-id="opaque-choice"] button')!.click())
   expect(changed.mock.lastCall?.[0]).toEqual([{ questionId: 'opaque-free', answer: '  保留原始草稿\n不猜确认  ' }, { questionId: 'opaque-choice', answer: 'Keep original' }])
@@ -58,14 +58,40 @@ it('reports clipboard false and ignores a late result after changing the origina
 })
 it('keeps draft editing and terminal navigation available with an undeclared route and a save failure notice', async () => {
   await render({ replyRoute: undefined, draftNotice: 'Save unconfirmed; latest edits are kept in this running app.' })
-  expect(field().disabled).toBe(false); await type('Still editable'); expect(host.textContent).toContain('Answer route undeclared')
+  expect(field().disabled).toBe(false); await type('Still editable'); expect(host.textContent).toContain('准确回复通道暂不可用')
   expect(host.textContent).toContain('Save unconfirmed'); await act(async () => host.querySelector<HTMLButtonElement>('.agent-question__footer button')!.click()); expect(terminal).toHaveBeenCalledOnce()
 })
 
 it('uses a neutral terminal viewing action when the original current source is unknown or changed, while preserving edit/copy/navigation', async () => {
-  await render({ terminalCurrent: false }); await type('Kept independent draft')
+  await render({ replyTargetCurrent: false }); await type('Kept independent draft')
   expect(host.querySelector('.agent-question__footer button')?.textContent).toContain('打开原终端')
-  expect(host.textContent).toContain('retained question'); expect(field().disabled).toBe(false)
+  expect(host.textContent).toContain('准确回复通道暂不可用'); expect(field().disabled).toBe(false)
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Copy answer: What should remain available?"]')!.click())
   expect(copyText.mock.calls[0]![0]).toBe('Kept independent draft')
+})
+
+it('sends selected and typed answers explicitly through the native reply callback without copying or navigating', async () => {
+  const send = vi.fn(async () => {})
+  await render({ replyRoute: 'native-input', onSend: send })
+  const action = () => host.querySelector<HTMLButtonElement>('[data-question-action="send"]')!
+  expect(action().disabled).toBe(true)
+  await type('  Exact answer\n保留空白  ')
+  expect(action().disabled).toBe(true)
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-question-id="opaque-choice"] button')!.click())
+  expect(send).not.toHaveBeenCalled()
+  expect(action().disabled).toBe(false)
+  await act(async () => action().click())
+  expect(send).toHaveBeenCalledExactlyOnceWith([{ questionId: 'opaque-free', answer: '  Exact answer\n保留空白  ' }, { questionId: 'opaque-choice', answer: 'Keep original' }])
+  expect(copyText).not.toHaveBeenCalled(); expect(terminal).not.toHaveBeenCalled()
+  expect(host.querySelector('[data-question-action="terminal"]')).toBeNull()
+})
+it('shows a failed direct reply locally while leaving the draft and original terminal usable', async () => {
+  await render({ replyRoute: 'native-input', onSend: async () => { throw Error('Original reply unavailable') } })
+  await type('Kept answer')
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-question-id="opaque-choice"] button')!.click())
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-question-action="send"]')!.click())
+  expect(host.textContent).toContain('Original reply unavailable')
+  expect(field().value).toBe('Kept answer'); expect(field().disabled).toBe(false)
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-question-action="terminal"]')!.click())
+  expect(terminal).toHaveBeenCalledOnce()
 })
