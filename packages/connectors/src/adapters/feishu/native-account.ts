@@ -256,19 +256,21 @@ export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: Abo
         boundary = 'envelope'
         const data = record(body?.data), info = record(data?.step_info)
         if (Number.isSafeInteger(body?.code) && body!.code !== 0) return failed('platform-error', Number(body!.code))
-        if (body?.code !== 0 || !data || data.step_info != null && !info) return failed()
+        if (body?.code !== 0 || !data) return failed()
         boundary = 'transition'
         const polling = data.next_step === null || data.next_step === 'qr_login_polling'
         if (polling && info?.status === 5) { state.phase = 'expired'; stage = 'expired' }
         else if (data.next_step === 'enter_app') {
           // Cross-login is optional; the fixed landing and console still prove the account.
           boundary = 'handoff'
-          if (info?.cross_login_uri === undefined || info.cross_login_uri === null) {
+          const cross = info?.cross_login_uri
+          if (typeof cross === 'number') return failed()
+          if (typeof cross !== 'string' || cross === '') {
             state.url = LANDING; state.phase = 'landing'; state.referer = target.href
           } else {
-            if (!text(info.cross_login_uri)) return failed()
+            if (!text(cross)) return failed()
             failure = 'redirect-unconfirmed'
-            state.url = url(info.cross_login_uri, CROSS_LOGIN_HOSTS).href; state.phase = 'cross-login'
+            state.url = url(cross, CROSS_LOGIN_HOSTS).href; state.phase = 'cross-login'
           }
         } else if (polling && info && Number.isSafeInteger(info.status) && [1, 2].includes(Number(info.status))) stage = info.status === 2 ? 'scanned' : 'waiting'
         else return failed()
