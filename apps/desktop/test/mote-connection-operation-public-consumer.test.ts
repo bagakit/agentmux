@@ -142,8 +142,14 @@ it('creates from original Main saved files and PNG through default Host, officia
   const complete = body(await cli(f, 'advance', await moteChildDecision(f, input.operationId, 'create')))
   const nativeUpload = native.calls.find(call => call.target.pathname === '/developers/v1/app/upload/image')!.input.body as FormData
   expect(Buffer.from(await (nativeUpload.get('file') as File).arrayBuffer())).toEqual(imagePng())
-  const nativeCreate = JSON.parse(String(native.calls.find(call => call.target.pathname === '/developers/v1/app/create')!.input.body))
-  expect(nativeCreate).toMatchObject({ name: 'Saved public name', desc: 'Saved public summary.' })
+  const creationRequests = native.calls.filter(call => call.target.pathname === '/developers/v1/manifest/upsert_by_template')
+  expect(creationRequests).toHaveLength(1)
+  expect(native.calls.some(call => call.target.pathname === '/developers/v1/app/create')).toBe(false)
+  const nativeCreate = JSON.parse(String(creationRequests[0]!.input.body))
+  expect(nativeCreate).toMatchObject({ appManifestTemplateID: 'developer_console', createAppUserCustomField: {
+    i18n: { zh_cn: { name: 'Saved public name', description: 'Saved public summary.' } },
+    avatar: 'https://images.example.invalid/mote-1.png', primaryLang: 'zh_cn'
+  } })
   expect(Buffer.from(http.find((r) => r.url?.endsWith('/app_avatar/upload'))!.data!.avatar as Buffer)).toEqual(imagePng())
   expect(complete).toMatchObject({
     operationId: input.operationId,
@@ -152,7 +158,7 @@ it('creates from original Main saved files and PNG through default Host, officia
     enrollment: { configuration: 'configured' },
     profile: { upload: { state: 'confirmed' }, patch: { state: 'confirmed' }, publication: 'platform-review-required' }
   })
-  expect(effects).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential', 'upload', 'patch'].map((kind) => ({ kind, preclaimed: true })))
+  expect(effects).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential', 'upload', 'patch'].map((kind) => ({ kind, preclaimed: true })))
   expect(http.find((r) => r.method === 'PATCH')!.data).toMatchObject({
     i18ns: [
       { i18n_key: 'en_us', name: 'Keep English' },
@@ -578,7 +584,12 @@ it('recovers the same parent after a real child is killed after Files commit and
         }) {
           b.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'controlled' }))
           b.onLoad({ filter: /.*/, namespace: 'controlled' }, () => ({
-            contents: 'export const nativeImage={createFromBuffer(){throw Error("No native image fallback")}};'
+            contents: `const unexpected=()=>{throw Error("Unexpected native Electron capability in Files process fixture")};
+              export const nativeImage={createFromBuffer:unexpected};
+              export const app={whenReady:unexpected};
+              export const session={fromPartition:unexpected};
+              export class WebContentsView {constructor(){unexpected()}};
+              export const nativeTheme={get shouldUseDarkColors(){return unexpected()}};`
           }))
           b.onResolve({ filter: /^@agentmux\// }, (args) => ({ path: packagePath(args.path), external: true }))
           b.onResolve({ filter: /^[^./]/ }, (args) =>
