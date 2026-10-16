@@ -950,10 +950,18 @@ export function ActivityView({
     !earlierReadPending && (readPending || emptyReadFailed) ? (
     <div className="activity-feed__empty-reading" data-read-state={emptyReadFailed ? 'interrupted' : 'pending'}
       role="status" aria-live="polite" aria-busy={!emptyReadFailed || undefined}>
-      <div className="activity-feed__reading-signal" aria-hidden="true"><span /><span /><span /></div>
+      {!emptyReadFailed ? <div className="activity-feed__reading-landscape" aria-hidden="true">
+        <div className="activity-feed__reading-field">
+          <svg viewBox="0 0 1000 600" preserveAspectRatio="none" fill="none" stroke="currentColor">
+            {Array.from({ length: 9 }, (_, line) => <path key={line}
+              d={`M -240 ${line * 76 - 130} C 80 ${line * 76 - 270}, 330 ${line * 76 + 130}, 620 ${line * 76 - 25} S 1060 ${line * 76 - 100}, 1300 ${line * 76 + 40}`} />)}
+          </svg>
+        </div>
+        <div className="activity-feed__reading-sweep" />
+      </div> : null}
       <div className="activity-feed__reading-caption">
         <strong>{emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'}</strong>
-        <span>{emptyReadFailed ? 'Retry the source above to continue reading.' : 'Messages and activity'}</span>
+        {emptyReadFailed ? <span>Retry the source above to continue reading.</span> : null}
       </div>
     </div>
   ) : null
