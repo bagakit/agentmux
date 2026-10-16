@@ -46,6 +46,18 @@ let calls: Array<{ url: string; path: string; preclaimed: boolean }>
 let authorize: boolean
 let clock: number
 let secureAvailable: boolean
+let rejectedCookieStage: 'initialize' | 'console' | 'creation' | null
+let sentCookies: Array<{ path: string; cookie: string }>
+
+function cookies(stage: 'initialize' | 'console' | 'creation', initial?: HeadersInit): Headers {
+  const headers = new Headers(initial)
+  if (rejectedCookieStage === stage) {
+    headers.append('set-cookie', 'foreign=discard; Domain=unrelated.invalid; Path=/; Secure')
+    headers.append('set-cookie', 'invalid-cookie')
+    headers.append('set-cookie', 'continued=valid-' + stage + '; Path=/; Secure; HttpOnly')
+  }
+  return headers
+}
 
 beforeEach(async () => {
   original = await ingressFixture(true, feishuConfig)
@@ -54,6 +66,8 @@ beforeEach(async () => {
   calls = []
   authorize = true
   secureAvailable = true
+  rejectedCookieStage = null
+  sentCookies = []
   clock = Date.now()
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
   const key = randomBytes(32)
@@ -72,7 +86,7 @@ beforeEach(async () => {
   }
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string | URL | Request) => {
+    vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
       const target = new URL(String(url)),
         row = services
           .database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?')
@@ -85,6 +99,7 @@ beforeEach(async () => {
             )
             .get(originalAttempt)
         : null
+      sentCookies.push({ path: target.pathname, cookie: new Headers(options?.headers).get('cookie') ?? '' })
       calls.push({
         url: target.href,
         path: target.pathname,
@@ -94,10 +109,10 @@ beforeEach(async () => {
         return Response.json(
           { code: 0, data: { step_info: { token: privateToken } } },
           {
-            headers: {
+            headers: cookies('initialize', {
               'x-flow-key': 'original-private-flow',
               'set-cookie': 'session=original-private-cookie; Domain=.feishu.cn; Path=/; Secure; HttpOnly'
-            }
+            })
           }
         )
       if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling')
@@ -116,12 +131,12 @@ beforeEach(async () => {
       if (target.href === 'https://open.feishu.cn/app')
         return new Response(
           '<script>window.user={"id":"original-user","tenantId":"original-tenant"};window.csrfToken="original-private-csrf";</script>',
-          { headers: { 'content-type': 'text/html' } }
+          { headers: cookies('console', { 'content-type': 'text/html' }) }
         )
       if (target.pathname === '/developers/v1/app/upload/image')
         return Response.json({ code: 0, data: { url: 'https://images.example.test/original.png' } })
       if (target.pathname === '/developers/v1/manifest/upsert_by_template')
-        return Response.json({ code: 0, data: { ClientID: feishuConfig.application.appId } })
+        return Response.json({ code: 0, data: { ClientID: feishuConfig.application.appId } }, { headers: cookies('creation') })
       if (target.pathname === '/developers/v1/secret/' + feishuConfig.application.appId)
         return Response.json({ code: 0, data: { secret: applicationSecret } })
       throw new Error('Unexpected bootstrap network request')
@@ -278,6 +293,24 @@ it('default Host creates through compiled CLI and the original SDK receiver with
   expect((await client.call('connection.enrollment.advance', create)).operation).toEqual(saved.operation)
   expect(calls).toHaveLength(beforeDuplicate)
   expect(calls.map((call) => call.path)).not.toContain('/oauth/v1/app/registration')
+})
+
+it.each(['initialize', 'console', 'creation'] as const)('preserves the original application after rejected %s cookies', async stage => {
+  rejectedCookieStage = stage
+  const signedIn = await account(await client.call('connection.enrollment.begin', input), true)
+  expect(signedIn.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
+  const confirmed = await cli(['advance', '--input', '-'], decision(signedIn, 'confirm-account'))
+  const create = decision(confirmed, 'create')
+  const saved = await cli(['advance', '--input', '-'], create)
+  expect(saved.operation).toMatchObject({ application: feishuConfig.application, configuration: 'configured', credential: 'stored' })
+  const continuedRequest = stage === 'initialize' ? '/accounts/qrlogin/polling' : '/developers/v1/secret/' + feishuConfig.application.appId
+  expect(sentCookies.find(call => call.path === continuedRequest)?.cookie).toContain('continued=valid-' + stage)
+  expect(sentCookies.every(call => !call.cookie.includes('foreign=') && !call.cookie.includes('invalid-cookie'))).toBe(true)
+  const beforeReadback = calls.length
+  expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(saved.operation)
+  expect((await cli(['advance', '--input', '-'], create)).operation).toEqual(saved.operation)
+  expect(calls).toHaveLength(beforeReadback)
+  expect(calls.filter(call => call.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
 })
 
 it('pending inspection remains passive and advancing respects the original platform interval', async () => {
