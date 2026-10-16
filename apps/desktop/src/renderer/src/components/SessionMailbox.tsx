@@ -1,6 +1,6 @@
 import { api } from '../lib/api'
 import { inputMailboxKey, inputMailboxItemKey, useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
-import { InputMailboxRecords, type InputMailboxDisplayRow } from '@agentmux/client-ui/components/InputMailboxRecords'
+import { InputMailboxRecords, inputMailboxPresentation, type InputMailboxDisplayRow } from '@agentmux/client-ui/components/InputMailboxRecords'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { MailboxLocationContext } from './MailboxLocationContext'
@@ -300,6 +300,11 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
           fact.type === 'connection-state' && fact.state === 'restored') void inputMailbox.refresh()
     })
   }, [open, visible, inputMailboxHost, mailboxSessionId, inputMailbox.refresh])
+  // The shared input inventory also owns Agent inputs; this face retains only human and unconfirmed authors.
+  const userInputMailbox = useMemo(() => ({ ...inputMailbox,
+    items: inputMailbox.items.filter(item => inputMailboxPresentation(item).speaker.role !== 'agent'),
+    failures: inputMailbox.failures.filter(item => inputMailboxPresentation(item).speaker.role !== 'agent')
+  }), [inputMailbox])
   const displayedMessages = useMemo(() => mailboxMessages(mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId), [mailboxSessionId,timeline,effectiveUserMessages,effectiveControl?.hostId])
   const sent = useMemo(() => displayedMessages.filter(item => item.message.author.kind !== 'agent'), [displayedMessages])
   const messageReference = useMemo(() => ({ hostId: inputMailboxHost, agentSessionId: mailboxSessionId ?? '' }), [inputMailboxHost, mailboxSessionId])
@@ -331,7 +336,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const pendingIntents = queued.filter((item) => !item.archived && (item.inputControlled || !deliveredIds.has(item.id) && !deliveredIds.has(`prompt:${item.id}`)))
   const pending = pendingIntents.filter(item => !item.inputOrigin || !journalKeys.has(inputMailboxKey(item.inputOrigin.hostId,item.inputOrigin.key)))
   const archived = localOnly.filter(item => item.archived).map(item => ({...item,confirmed: item.confirmed || !item.inputControlled && deliveredIds.has(`prompt:${item.id}`)}))
-  const hasUserInputs = pending.length + archived.length + inputMailbox.items.length > 0
+  const hasUserInputs = pending.length + archived.length + userInputMailbox.items.length > 0
   // Re-evaluate priority only on opening. A new arrival never moves the reader's selected folder.
   function openFolder(): Folder {
     return receipts.unread.length ? 'inbox' : system.unread.length ? 'system' : hasUserInputs || sent.length ? 'user' : 'inbox'
@@ -513,7 +518,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       })}
       <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
-          <InputMailboxRecords mailbox={inputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
+          <InputMailboxRecords mailbox={userInputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
             renderLocal={item => {
               const original = journalLocal.get(inputMailboxItemKey(inputMailboxHost,item))
               if (!original) return null
