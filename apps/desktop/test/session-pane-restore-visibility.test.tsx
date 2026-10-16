@@ -55,6 +55,46 @@ function notice(){const node=container.querySelector('.activity-feed__read-notic
 function unchanged(session:SessionSnapshot){expect(useAppStore.getState().sessions).toEqual([session]);expect(useAppStore.getState().agentComposerDrafts.a).toBe('UNSENT_REAL_STORE_DRAFT')}
 
 describe('actual SessionPane restoration presentation',()=>{
+ it('keeps unknown frontend observation off the connected terminal and rechecks the same Session without Resume or input',async()=>{
+  const original=agent('a');original.terminalFrontend={run:original.control.run,frontendId:'original-frontend',state:'unknown',backendState:'unknown',source:'managed-process',observedAt:_historyFixtureEpoch(0, 0, 100),message:'Original frontend control observation unavailable'}
+  seed(original,'terminal')
+  const recover=vi.spyOn(useAppStore.getState(),'recoverSession').mockResolvedValue(undefined)
+  const read=vi.spyOn(api.sessions,'refresh').mockResolvedValue(original)
+  await render(pane('a'))
+  const terminal=container.querySelector('[data-leaf="terminal"]')!;expect(terminal).not.toBeNull()
+  // Controlled terminal leaf: prove SessionPane does not replace its mounted reader.
+  // Actual xterm bytes and geometry are qualified by the private product fixture.
+  const reader=document.createElement('textarea');reader.value='Original terminal reading selection';terminal.append(reader);reader.focus();reader.setSelectionRange(9,17)
+  expect(container.querySelector('.terminal-recovery')).toBeNull()
+  expect(container.querySelector('.service-disclosure')?.textContent).toContain('Original frontend control observation unavailable')
+  expect([...container.querySelectorAll('button')].some(button=>button.textContent?.trim()==='Resume')).toBe(false)
+  const refresh=()=>[...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.includes('Refresh observation'))!
+  expect(refresh()).toBeDefined();await act(async()=>refresh().click());await flush()
+  expect(read).toHaveBeenCalledExactlyOnceWith(original.control);expect(recover).not.toHaveBeenCalled()
+  expect(container.querySelector('.service-disclosure')).not.toBeNull();expect(container.querySelector('.terminal-recovery')).toBeNull()
+  read.mockRejectedValueOnce(new Error('Original Host recheck unavailable'))
+  await act(async()=>refresh().click());await flush()
+  expect(container.querySelector('.service-disclosure')?.textContent).toContain('Original Host recheck unavailable')
+  expect(container.querySelector('.terminal-recovery')).toBeNull();expect(recover).not.toHaveBeenCalled()
+  const attached={...original,terminalFrontend:{...original.terminalFrontend!,state:'attached' as const,backendState:'running' as const,observedAt:_historyFixtureEpoch(0, 0, 200)}}
+  read.mockResolvedValue(attached);await act(async()=>refresh().click());await flush()
+  expect(read).toHaveBeenCalledTimes(3);expect(recover).not.toHaveBeenCalled();expect(container.querySelector('.service-disclosure')).toBeNull()
+  expect(container.querySelector('[data-leaf="terminal"]')).toBe(terminal);expect(reader.isConnected).toBe(true)
+  expect(reader.value).toBe('Original terminal reading selection');expect([reader.selectionStart,reader.selectionEnd]).toEqual([9,17])
+  expect(useAppStore.getState().sessions[0]?.control).toEqual(original.control);expect(useAppStore.getState().agentComposerDrafts.a).toBe('UNSENT_REAL_STORE_DRAFT')
+ })
+ it('keeps confirmed detached Resume separate from unknown and ignores a frontend observation for another Run',async()=>{
+  const original=agent('a');original.terminalFrontend={run:original.control.run,frontendId:'original-frontend',state:'detached',backendState:'running',source:'managed-process',observedAt:_historyFixtureEpoch(0, 0, 100)}
+  seed(original,'terminal');const recover=vi.spyOn(useAppStore.getState(),'recoverSession').mockResolvedValue(undefined);const refresh=vi.spyOn(api.sessions,'refresh')
+  await render(pane('a'));const terminal=container.querySelector('[data-leaf="terminal"]')!
+  expect(container.querySelector('.terminal-recovery')?.textContent).toContain('Terminal disconnected')
+  const resume=[...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent?.trim()==='Resume')!;expect(resume).toBeDefined()
+  await act(async()=>resume.click());expect(recover).toHaveBeenCalledWith(original.id,expect.any(String));expect(refresh).not.toHaveBeenCalled()
+  const wrongRun={...original,terminalFrontend:{...original.terminalFrontend!,state:'unknown' as const,run:{runId:'previous-run'}}}
+  await act(async()=>useAppStore.setState({sessions:[wrongRun]}));await flush()
+  expect(container.querySelector('.terminal-recovery')).toBeNull();expect(container.querySelector('.service-disclosure')).toBeNull()
+  expect(container.querySelector('[data-leaf="terminal"]')).toBe(terminal);expect(useAppStore.getState().agentComposerDrafts.a).toBe('UNSENT_REAL_STORE_DRAFT')
+ })
  it('shows exact automatic Core starting in both original stage and retained history without a local recovery request',async()=>{
   const original=retained('starting','interrupted-working');seed(original);const recover=vi.spyOn(useAppStore.getState(),'recoverSession'),reopen=vi.spyOn(useAppStore.getState(),'reopenRetiredSession');await render(pane('a'))
   expect(stage().getAttribute('data-loading-phase')).toBe('recovering');expect(stage().textContent).toContain('Restoring your session');expect(stage().getAttribute('aria-busy')).toBe('true')
