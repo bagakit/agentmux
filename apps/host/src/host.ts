@@ -6,6 +6,8 @@ import { AgentMuxFileAgentSessionStore, AgentMuxError,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
   type AgentProvider, type AgentMuxRpcMobileAccessState } from '@agentmux/core'
 import { isAppWindowMethod } from '@agentmux/core/control'
+import { isConnectionMethod } from '@agentmux/core/connections'
+import { isMoteConnectionMethod } from '@agentmux/core/mote-connections'
 import { DeviceAuthority } from './device-authority.js'
 import { networkInterfaces } from 'node:os'
 import { startLocalRelay } from '@agentmux/relay/local'
@@ -62,6 +64,10 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
       if (isAppWindowMethod(method) && !context.caller && context.principal?.kind === 'device') {
         throw new AgentMuxError('This desktop bridge cannot preserve the authenticated device identity for window control. Use the original desktop workface; original workfaces and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      }
+      if ((isConnectionMethod(method) || isMoteConnectionMethod(method)) && !context.caller &&
+          (context.transport !== 'unix' || context.principal?.kind !== 'user' || context.principal.id !== `local-user:${process.getuid?.() ?? 'current'}`)) {
+        throw new AgentMuxError('This desktop bridge cannot preserve the original connection operator identity. Use its original local desktop operator or authenticated Agent; saved bot operations and healthy Agents remain available.', 'CONTROL_UNAVAILABLE')
       }
       const desktop = await desktopClient(context)
       try { return await desktop.call(method, params, context.signal ? { signal: context.signal } : {}) }
