@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "../src/renderer/src/global.d.ts",
+    "focus-cards-viewport.test.tsx",
+    "focus-lane-measurement.test.tsx",
+    "vitest.focus-cards-viewport.config.mts",
+    "vitest.focus-lane-measurement.config.mts"
+  ]
+}
