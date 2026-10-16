@@ -53,8 +53,10 @@ export function useAgentBookmarkWindow(bookmark: AgentBookmark | undefined, pane
     apply(commit ? current.current : current.start)
     if (current.mode === 'resize') {
       if (current.reading) restoreReadingAnchor(current.reading, current.anchor)
-      rememberReading()
     }
+    // Handoff once, including a new Pin dragged back to its starting position.
+    // A later viewport reflow still needs the character visible before it changed.
+    rememberReading()
     const changed = (['x', 'y', 'width', 'height'] as const).some(key => current.current[key] !== current.start[key])
     if (commit && changed && current.key) agentBookmarks.setBounds(current.key, current.current)
     if (!commit) current.cancelPin?.()
