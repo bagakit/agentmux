@@ -60,4 +60,6 @@
 
 [历史清理改坏引用与候选代码](casestudy/history-hygiene-changes-semantics.md)记录隐私扫描越过语义边界的红线事件，区分候选验证故障、审查拒收与尚未证实的线上影响。
 
+[重开后 Terminal 无法加载](casestudy/terminals-stuck-after-reopen.md)说明原 Attachment 已取得、回执投影却误等全局恢复的故障，以及完整调用链的准入与回归边界。
+
 **过程性文档不提交。** 调研、计划、评审、交接、交付清单、状态快照和原型留本机，目录与已有暂存文件的保全规则见[过程资料边界](process-directories.md)。它们帮助追溯，不取代长期设计或官方任务状态。受控仓库中的长期入口应独立可读；本机资料缺席须明确缺证，不把缺席伪装成通过。
