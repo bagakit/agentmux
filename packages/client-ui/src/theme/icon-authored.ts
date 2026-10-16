@@ -146,9 +146,9 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "resize-corner": {
-    shapes: [["path",{"d":"M0 0H24V24H18V6H0Z","fill":"currentColor","stroke":"none"}]],
+    shapes: [["path",{"d":"M5 19 19 5M11 19l8-8M17 19l2-2"}]],
     design: {
-      rest: "贴边L形实心角，不当居中对象插图",
+      rest: "右下三条递短斜纹表示可拖拽缩放，与斜向指针及角部命中区一致",
       motion: { kind: "still", animation: "none", description: "特殊填充几何或身份不应套循环、禁止遮罩或斜杠。", trigger: "原工具/resize/身份槽职责，不存在可泛化的busy事实" }
     }
   },
