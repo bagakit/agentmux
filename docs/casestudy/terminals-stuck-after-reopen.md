@@ -2,7 +2,7 @@
 
 ## 定性
 
-P0：原 Run 仍在运行，客户端却因无关恢复观察无法交付原终端，触犯健康能力与工作面恢复红线。本案例复盘已证实的 Hosted 附着阻断，以及 `fd437cbb11` 的限定修复；它不把资源占用、创建失败或其它启动故障归为同一根因。
+P0：原 Run 仍在运行，客户端却因无关恢复观察无法交付原终端，触犯健康能力与工作面恢复红线。本案例复盘 Hosted 附着阻断、`fd437cbb11` 的限定修复，以及随后在新建 Agent 消费者证实的同类准入遗漏与 `3f7ef43c0a` 修复；资源占用与其它启动故障仍分别归因。
 
 ## 用户可见症状
 
@@ -19,6 +19,8 @@ P0：原 Run 仍在运行，客户端却因无关恢复观察无法交付原终�
 **交付受阻的能力**是 Hosted 路径下原 Agent 与普通 Terminal 的完整附着回执：物理 Attachment 可以建立，Main 仍可能在生成 Session 投影时等待无关语义恢复，因而无法把初始内容交给 Renderer。全局恢复尚未完成和兄弟 Session 的握手已确认失败，均有真实私有链路反例；不是某个站点或 Provider 文案触发的分支。
 
 **以下事实和能力不因这条失败而失效**：Native 的原 Run、进程身份与保留输出继续存在，公开 Runtime 身份／Run 查询仍可用。修复前后的实际安装元信息确认原 Native 与原 Run／PID 保留；[真实附着夹具](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts) 又核对已知初始输出、后续字节和原握手记录。这些证据不代签所有 Session 的语义状态、所有终端都已读取，或新输入已被 Provider 消费。
+
+原附着恢复后，用户继续反馈“还没法新建 terminal”。实际普通 shell 的公开创建与显示成功，新 Agent 却仍停在原创建界面，尚无确认的 Core Session／Run。两条消费者必须分开核对；新增的真实 Main 创建夹具证实，Agent 创建入口也会等待无关恢复，原附着修复没有覆盖这条链。
 
 ## 止血措施
 
@@ -43,8 +45,9 @@ git log --follow --format='%h %s' -- packages/core/src/hosted-client-contract.ts
 | `0046c02b11` | `feat(remote): expose passive Host runtime observations in Settings and CLI`：将两个被动 Runtime 诊断移入 offline 分类 | 改善诊断观察的前提，没有覆盖附着后的 Session 投影 |
 | `4cae4223c5` | `fix(runtime): restore cold Host membership independently of recovery`：加入 `runtimeProjection`，让冷 Host 的原绑定可先投影 | 解决全量 membership 的前一步，回归没有消费 `attachSession` 的最终回执，因此仍留下 `sessionByTarget` 的等待 |
 | `fd437cbb11` | `fix(core): attach original terminals without waiting for unrelated recovery`：将 `runtimeSubject` 加入同一 shared Runtime 分类 | 把原 Agent／raw Terminal 的真实 Main 附着回执和后续输出接入同一回归 |
+| `3f7ef43c0a` | `fix(core): create agents without waiting for unrelated recovery`：补齐准确创建、原回执读取与来源授权的既有准入 | 独立验证新建链，并补足冷 fork 准确来源采用；不是附着成功即可代签创建 |
 
-指定分类段的 Git 沿革显示，从引入到本修复之间，改过该段的是上述被动诊断分类与冷 Host membership 两项；文件其它方法的改动不等于检查过这一段附着依赖。
+指定分类段的 Git 沿革显示，从 Runtime 分类引入到 `fd437cbb11` 附着修复之前，改过该段的是上述被动诊断分类与冷 Host membership 两项；文件其它方法的改动不等于检查过这一段附着依赖。
 
 ## 根因分析
 
@@ -56,6 +59,8 @@ git log --follow --format='%h %s' -- packages/core/src/hosted-client-contract.ts
 
 **已有规则没有被完整消费者约束住。** [Durable Runtime 健康](../design/behavior/session-recovery.md#durable-runtime-健康) 已要求观察失败不撤销健康通道，但此前证据在首个物理入口或全量投影处结束，没有核对回执的全部必要依赖。修复把原规则落实到真实交付链与承重变异，而不是再加一套健康状态、等待门或恢复调度器。
 
+**附着修复仍漏了独立的新建消费者。** Main `launchAdmittedAgent` 调用 Hosted `createAgentWithDelivery`；SDK 的 `createAgent`、远端目标的 `createHostAgentWithDelivery` 同样未列入 Runtime 分类，于是在进入准确创建 owner 前等待完整 `connect()`。这些入口在引入 Runtime 分类时已存在，不能把遗漏说成后一次附着修复新增的回归。原创建检查与来源 attest 也沿默认全局连接，妨碍未知结果核对和准确授权。修正分类后还须去掉两个隐含前提：prepared 检查自行连接原 Runtime，新的冷 fork 只采用准确原来源，再执行原校验；不能依赖先前全局恢复偷偷填好 registry。
+
 ## 改进措施
 
 1. **在原 shared admission owner 修正回执投影分类。** `runtimeSubject` 与原 attach、`runtimeProjection` 使用相同 Runtime 前提；完整依赖边界原位合入既有健康合同，实际分类和链路见 [Terminal Runtime 架构](../architecture/terminal-runtime.md#11-原终端附着与-hosted-准入)。
@@ -66,6 +71,10 @@ git log --follow --format='%h %s' -- packages/core/src/hosted-client-contract.ts
    - **是否足够 root**：同一条完整交付链验证两个目标、两个阶段，并保留 owner／换 Run 拒绝、reader 清理和原握手记录。新建 Agent 链和全部终端遍历不在这项覆盖内。
    - **能否彻底避免**：承重变异能抓住本次分类回退，帮助更早发现同一交付链断裂；不能代替新依赖或新消费者的真实验证。
    - **是否降低系统熵**：扩展一个现有真实夹具，以全局恢复实际被调用的事件作反例 oracle，避免把机器负载当作业务失败，不增加生产门控。
+3. **为新建、原创建检查和来源授权分别闭合真实消费者。** 复用 shared Runtime／offline 分类和原创建 owner，保留意图摘要、权限、Executor revision、prepared seed 与未知首次投递，不扩大为所有 SDK 方法的放行。
+   - **是否足够 root**：本地 Main、SDK alias、远端目标、原回执、来源授权与冷 fork 的准确依赖各有消费者；原附着测试保持独立。
+   - **能否彻底避免**：七项实际加载生产变异能抓住本次回退，不能保证未覆盖的所有操作或 Provider 原生 fork 都正确。已有回执先读取，新的来源采用与最终检查后执行，不因来源后来变化撤销原回执。
+   - **是否降低系统熵**：修正现有 owner 的前提，没有新健康状态、缓存、API、schema、fallback 或重试层。
 
 ## 验证
 
@@ -85,9 +94,13 @@ env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_RUNTIME_DIRECTORY -u AGENTMUX_ST
 
 实际 clean App 安装后，公开 `space.inspect` 确认原 Agent 与 raw Terminal 的准确 Region／Run，二者可见、liveReady、acceptsInput；独立看图确认同屏真实内容可读。原 Native、Run／PID、持久 Session、Tab／Region 和 Core 布局保留。GUI 观察与原身份核对分别成立，不把截图当作新输入已被消费或完整旧焦点相等的证明。原始 receipt 与截图保留本机，本文不复制身份、机器信息或终端正文。
 
+创建修复 `3f7ef43c0a` 的同一真实 Main 夹具共三项通过：新增创建项在 pending／failed 两阶段分别创建一个 Agent 和一个 raw Terminal，核准确 Native／Run／PID、非空初始内容与后续有序字节；重复原 operation 不新增启动或输入，原首次投递未知保持未知。六项 Hosted 定点测试通过。撤销三项创建分类、inspect／attest 分类、prepared 重连与冷 fork 来源采用，共七项实际加载生产变异，均在对应消费者产生语义失败，恢复后通过。生产构建与类型检查通过，测试类型无新增诊断。
+
+相关 Core 套件合计五十一项通过、五项失败；五项失败已用精确基线 `ceddee1ef6` 的原源码和测试实际对照，分别是四项旧 Provider fork 夹具与一项旧消息展示断言。新增冷 fork 用明确 Provider collaborator 保留真实原来源 witness 校验，不代签当前全部 Provider 原生 fork 集成；不能把这批结果描述为 Core 全量测试通过。
+
 ## 遗留
 
 - **性能归因仍未完成。** Host 高 CPU、Renderer 高内存与交互成本仍需分开归因，已有观察尚不能完成全部因果归因。终端恢复可读不代签整体资源优化、长期稳定性或活跃长历史连续阅读。
 - **旧 GUI 的完整即时恢复未确认。** 缺少退出前完整观察，原持久拓扑相等不证明所有焦点、阅读位置或未持久界面状态都相等；安装事务的 unknown 保留。
-- **新建能力另查。** 用户随后反馈“还没法新建terminal”。普通 shell 已有真实 `terminal.open` 成功及可见性证明；新的 Agent 创建尚未确认 Run，原创建操作与未知结果继续保留。其是否受语义准备阻塞仍待完整因果验证（PARTIAL），不能把原终端 attach 修复称为所有创建链已解决。
+- **原待创建请求仍须对账。** 普通 shell 与私有 Main 新建分别有证据；原用户请求尚无确认 Run，不能用新的测试目标替代。待创建请求和错误通知仅在 Renderer 内存，完整旧提交参数未持久保全的缺口仍在；先保全可确认正文与身份，缺少原结果、prepared 关联或完整旧 intent 时保持未知，不补造参数或重放首句。
 - **覆盖范围有限。** 已验证原 Agent 与 raw Terminal 两类实际消费者，没有逐个遍历所有终端，也没有证明未知 Level B 上下文恢复。Timeline／名称元数据的全体等待仅是独立静态风险，没有本次现场因果证明，不夹入此修复。
