@@ -84,6 +84,8 @@ flowchart LR
 
 [`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 以实际阅读需求启用 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts)。共同 [`useConversationView`](../../packages/client-ui/src/lib/use-conversation-view.ts) 经 Desktop 的 [`conversation-read-api`](../../apps/desktop/src/renderer/src/lib/conversation-read-api.ts)、preload 与 Main [`conversation-read-ipc`](../../apps/desktop/src/main/conversation-read-ipc.ts) 调用原公共服务。IPC 只持 sender trust、取消与观察资源；完整窗口严格校验后才交呈现。首读的同页 changes cut 关闭 read→watch 间隙；短暂通知合并只唤醒变化读取。隐藏时取消观察而保留原 frame，重新可见按原 view 恢复；卸载或身份切换显式释放。观察断开在仍相关的消费者内重开原 view，不更换来源或重放输入。
 
+Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/conversation-changes.ts) 的 `parseConversationReadPageForWindow`／`parseConversationChangesPageForWindow`，严格解析后持有本次响应的不可变副本。窗口组装只复用该准确对象已经完成的 unit 校验，不重复规范化原记录和计算 revision；拷贝或 raw 页仍走原严格校验，fragment 完整后仍校验其原内容。该私有持有权不跨响应缓存或 wire，不改变普通 SDK parser 的可变 DTO，也不授予作者、输入或恢复权限。
+
 [`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持阅读锚点、返回位置与选区，沿同一 view 的 `navigation.older`／`navigation.newer` 补充相邻范围。时间范围读取、Current／Previous source 仍是明确阅读意图。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。选中的原节点或 pin 需要保留时，客户端持前一个完整 accepted frame，解除保护后接受新 frame，不裁出 records 再重投影。
 
 [`RecentFocusTimeline`](../../apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx) 仅为已选择的 Context 挂载共同 view；已读 Context 的完整 frame 在原呈现预算内保留，未选中的观察停放且不读。淘汰以完整 frame 为单位，当前和 pin 的原内容保留；Core 暂存已过期时明确显示错误，不能把旧 frame 当可继续的 cursor。Context 目录、已记录工作区间与时间尺仍由原 Focus owner 提供，不成为对话关联来源。
