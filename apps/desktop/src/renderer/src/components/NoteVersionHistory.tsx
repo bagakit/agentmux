@@ -14,10 +14,10 @@ const ReadonlyDiffEditor = lazy(() => import('./ReadonlyDiffEditor').then(module
 const DisclosureIcon = semanticIconComponent('navigation.disclosure')
 const HistoryIcon = semanticIconComponent('object.history')
 const RefreshIcon = semanticIconComponent('action.refresh')
-type Timeline = { target: NoteHistoryTarget; entries: NoteHistoryEntry[]; hasMore: boolean; reason?: string }
-type Preview = { target: NoteHistoryTarget; entry: NoteHistoryEntry & { content: string; beforeContent: string | null } }
+type Timeline = { target: NoteHistoryTarget; entries: NoteHistoryEntry[]; hasMore: boolean; reason?: string; readOnly?: true }
+type Preview = { target: NoteHistoryTarget; entry: NoteHistoryEntry & { content: string | null; beforeContent: string | null }; readOnly?: true }
 const statusLabel = { committed: 'Saved', prepared: 'Awaiting confirmation', unconfirmed: 'Unconfirmed', 'not-applied': 'Not applied' }
-const operationLabel = { edit: 'Edit', restore: 'Full restore', undo: 'Activity undo' }
+const operationLabel = { edit: 'Edit', restore: 'Full restore', undo: 'Activity undo', delete: 'Shared file collected' }
 function EventTime({ at, timeOnly = false }: { at: number; timeOnly?: boolean }) {
   const date = new Date(at)
   return Number.isFinite(date.getTime()) ? <time dateTime={date.toISOString()}>{timeOnly ? date.toLocaleTimeString() : date.toLocaleString()}</time>
@@ -64,7 +64,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
           const value = await api.files.historyPublic({ ...original.target, limit: 50 })
           if (!current(ticket)) return
           const result = checkedHistory(original.target, value)
-          setTimeline({ target: original.target, entries: result.entries, hasMore: result.hasMore, ...(result.status === 'unconfirmed' ? { reason: result.reason } : {}) })
+          setTimeline({ target: original.target, entries: result.entries, hasMore: result.hasMore, ...('deleted' in original ? { readOnly: true } : {}), ...(result.status === 'unconfirmed' ? { reason: result.reason } : {}) })
         } catch (error) { if (current(ticket)) setIssue(presentError(error)) }
         finally { if (current(ticket)) setLoading(false) }
       })()
@@ -103,6 +103,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
       const result = checkedHistory(held.target, value, { before })
       const existing = new Set(held.entries.map(entry => entry.eventId))
       setTimeline({ target: held.target, entries: [...held.entries, ...result.entries.filter(entry => !existing.has(entry.eventId))], hasMore: result.hasMore,
+        ...(held.readOnly ? { readOnly: true } : {}),
         ...(result.status === 'unconfirmed' ? { reason: result.reason } : held.reason ? { reason: held.reason } : {}) })
     } catch (error) { if (current(ticket) && readRequest.current === request) setIssue(presentError(error)) }
     finally { if (current(ticket) && readRequest.current === request) setLoading(false) }
@@ -118,7 +119,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
       if (!current(ticket) || previewRequest.current !== request) return
       const result = checkedHistory(target, value, params), original = result.entries.find(item => item.eventId === entry.eventId)
       if (result.status !== 'read' || !original || original.content === undefined || original.beforeContent === undefined) throw Error(result.status === 'unconfirmed' ? result.reason : 'This original saved version is unavailable. Its history and your current draft are kept.')
-      setPreview({ target, entry: { ...original, content: original.content, beforeContent: original.beforeContent } })
+      setPreview({ target, entry: { ...original, content: original.content, beforeContent: original.beforeContent }, ...(timeline.readOnly ? { readOnly: true } : {}) })
     } catch (error) { if (current(ticket) && previewRequest.current === request) setPreviewIssue(presentError(error)) }
     finally { if (current(ticket) && previewRequest.current === request) setPreviewing(null) }
   }
@@ -156,7 +157,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
       {timeline && !timeline.entries.length && !timeline.reason ? <div className="note-version-history__empty"><HistoryIcon size={24} /><h3>No saved versions yet</h3><p>Recorded edits will appear here.</p></div> : null}
       {timeline ? <>
         <div className="note-version-history__activities">{activities.map(([batchId, entries]) => {
-          const latest = entries[0]!, canUndo = entries.every(entry => entry.status === 'committed' && entry.operation === 'edit')
+          const latest = entries[0]!, canUndo = !timeline.readOnly && entries.every(entry => entry.status === 'committed' && entry.operation === 'edit')
           return <details className="note-version-history__activity" key={batchId}>
             <summary><DisclosureIcon size={12} /><span className="note-version-history__activity-label"><EventTime at={latest.at} />
               <span className="note-version-history__activity-meta">{author(latest.actor)}<span>{entries.length} loaded {entries.length === 1 ? 'revision' : 'revisions'}</span></span>
@@ -185,9 +186,9 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
         {previewing ? <p role="status">Reading saved version…</p> : null}
         {previewIssue ? <p className="note-version-history__issue" role="status">{previewIssue}</p> : null}
         {preview ? <>
-          {preview.entry.status === 'committed' ? <button type="button" className="note-text-button" disabled={!active || working} onClick={() => setAction({ target: preview.target, eventId: preview.entry.eventId })}>Restore this entire version…</button> : null}
-          <p>{preview.entry.beforeContent === null ? 'Before: file did not exist' : 'Before this change'} → After this change</p>
-          <div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening version comparison…</p>}><ReadonlyDiffEditor original={preview.entry.beforeContent ?? ''} modified={preview.entry.content} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div>
+          {preview.entry.status === 'committed' && preview.entry.content !== null && !preview.readOnly ? <button type="button" className="note-text-button" disabled={!active || working} onClick={() => setAction({ target: preview.target, eventId: preview.entry.eventId })}>Restore this entire version…</button> : null}
+          <p>{preview.entry.beforeContent === null ? 'Before: file did not exist' : 'Before this change'} → {preview.entry.content === null ? 'Shared file collected' : 'After this change'}</p>
+          {preview.entry.content === null ? <p role="status">This event records removal of the shared file. It has no saved document after the change.</p> : <div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening version comparison…</p>}><ReadonlyDiffEditor original={preview.entry.beforeContent ?? ''} modified={preview.entry.content} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div>}
         </> : null}
       </section> : null}
       {action && 'eventId' in action ? confirmation : null}

@@ -176,6 +176,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     setSelected(id)
     if (id && !transaction.getMeta('noteSelectionRestore') && !editor.isDestroyed && editor.view.hasFocus()) props.current.onSelectedBlock?.({ noteId: props.current.note.noteId, blockId: id })
   }, onTransaction({ editor, transaction }) {
+    if (transaction.getMeta('noteSharedReceiptEcho')) snapshot.current?.pause()
     // The original wiki plugin completes normalization before this event. Publish
     // final local input before the owner recomputes a queued incoming snapshot.
     if (transaction.getMeta('noteWikiCompositionEnd') && !editor.view.composing) {

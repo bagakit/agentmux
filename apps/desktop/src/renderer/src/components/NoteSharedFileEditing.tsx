@@ -2,6 +2,7 @@ import type { Editor } from '@tiptap/core'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { FileReadParams } from '@agentmux/core/files'
 import type { NoteInclude } from '../../../shared/note-document'
+import { closeHistory } from '../../../shared/note-content-schema'
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
 import { NoteSharedContext } from '../lib/note-shared-context'
@@ -11,6 +12,7 @@ import { useAppStore } from '../store'
 import { setNoteComposition } from '../lib/note-live-merge'
 import { NoteBlockEditor, ReadOnlyBlock } from './NoteBlockEditor'
 import { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
+import { noteShareUndoRecoveryMessage } from '../lib/note-share-removal'
 
 type EditorOwner = { focusedEditor: Editor | null; focusEditor(editor: Editor): void }
 type Observation = ReturnType<typeof useNoteCanvasObservation>
@@ -51,7 +53,7 @@ function SharedScope({ children, graph, trail, owner, ...scope }: Scope & { chil
       if (!copy) return false
       event.preventDefault()
       const destination = documentKey(current.current.target.workspaceId, current.current.target.path)
-      return editor.chain().focus().insertContent({ type: 'noteInclude', attrs: stageNoteShare(destination, copy) }).run()
+      return editor.chain().focus().command(({ tr }) => { closeHistory(tr); tr.setMeta('uiEvent', 'paste'); return true }).insertContent({ type: 'noteInclude', attrs: stageNoteShare(destination, copy) }).run()
     }
   }), [scope.target.workspaceId, scope.target.path, scope.target.noteId, scope.occurrence, scope.active, scope.knowledge, scope.onOpen, graph.snapshot, graph.issue, graph.busy, graph.refresh, trail, owner.focusedEditor])
   return <NoteSharedContext.Provider value={value}>{children}</NoteSharedContext.Provider>
@@ -114,7 +116,9 @@ function SharedFile({ include, scope, graph, trail, owner, remove, readOnly }: {
   if (!target || !original || read?.status !== 'valid' || read.note.noteId !== include.noteId || read.note.kind !== 'shared-block') return <><div className="note-shared-block__header">Shared content</div><p className="note-knowledge-notice" role="status">{graph.issue ?? (graph.snapshot?.graph.duplicateNoteIds.includes(include.noteId) ? 'Multiple files have this shared identity. The original reference is kept.' : graph.busy ? 'Reading shared sources…' : fileIssue && 'message' in fileIssue ? fileIssue.message : 'The original shared content is not confirmed. Its reference is kept.')} <button type="button" className="note-text-button" onClick={graph.refresh}>Check shared sources</button></p></>
   return <><div className="note-shared-block__header"><span title={target.path}>Shared content</span><span role="status">{saving ? 'Saving…' : dirty ? 'Unsaved changes' : 'Shared across notes'}</span>
     {!readOnly && dirty && <button type="button" className="note-text-button" onClick={() => void useAppStore.getState().saveNoteFile(target)} disabled={saving}>Save</button>}</div>
-    {issue || fileIssue ? <p className="note-knowledge-notice" role="status">{issue ?? (fileIssue && 'message' in fileIssue ? fileIssue.message : 'This shared file changed. Your draft is kept; inspect its original source before saving.')}<button type="button" className="note-text-button" onClick={() => void useAppStore.getState().refreshDocument(target.workspaceId, target.path)}>Check original</button></p> : null}
+    {original.noteEditing?.shareUndo ? <p className="note-knowledge-notice" role="status">{saving ? 'Saving this shared-reference removal…' : fileIssue && 'message' in fileIssue ? fileIssue.message : noteShareUndoRecoveryMessage(original.noteEditing)}
+      {!saving && <><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().inspectNoteShareUndo(target.workspaceId, target.path)}>Check this removal</button><button type="button" className="note-text-button" onClick={() => void useAppStore.getState().continueNoteShareUndo(target.workspaceId, target.path)}>Continue this removal</button></>}
+    </p> : issue || fileIssue ? <p className="note-knowledge-notice" role="status">{issue ?? (fileIssue && 'message' in fileIssue ? fileIssue.message : 'This shared file changed. Your draft is kept; inspect its original source before saving.')}<button type="button" className="note-text-button" onClick={() => void useAppStore.getState().refreshDocument(target.workspaceId, target.path)}>Check original</button></p> : original.noteEditing?.shareUndoReceipt?.retained.length ? <p className="note-knowledge-notice" role="status">{original.noteEditing.shareUndoReceipt.status === 'partial' ? noteShareUndoRecoveryMessage(original.noteEditing) : [...new Set(original.noteEditing.shareUndoReceipt.retained.map(value => value.message))].join(' ')}</p> : null}
     <SharedScope {...scope} target={target} include={include} read={undefined} occurrence={occurrence} graph={graph} trail={nextTrail} owner={owner}>
       {readOnly ? <ReadOnlyBlock content={read.note.content} /> : <NoteBlockEditor note={read.note} knowledge={scope.knowledge} active={scope.active} showBacklinks={false} sourceIdentity={key}
         onChange={(raw, before) => useAppStore.getState().updateNoteFile(target, raw, before ?? original.content)}

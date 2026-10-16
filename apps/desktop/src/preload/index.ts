@@ -249,6 +249,7 @@ const api: AgentMuxPreloadApi = {
   },
   files: {
     sharePublic: params => ipcRenderer.invoke('files:sharePublic', params),
+    shareUndoPublic: params => ipcRenderer.invoke('files:shareUndoPublic', params),
     inspectSharePublic: params => ipcRenderer.invoke('files:inspectSharePublic', params),
     readPublic: (params: import('@agentmux/core').FileReadParams) => ipcRenderer.invoke('files:readPublic', params),
     createPublic: (params: import('@agentmux/core').FileCreateParams) => ipcRenderer.invoke('files:createPublic', params),

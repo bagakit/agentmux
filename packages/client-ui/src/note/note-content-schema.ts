@@ -76,3 +76,4 @@ export function noteIdentityExtensions() {
     UniqueID.extend({ name: 'noteReferenceUniqueId', onCreate() {} }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name, NoteIncludeNode.name, NoteInlineLinkNode.name], generateID: () => crypto.randomUUID(), filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') })
   ]
 }
+export { closeHistory } from '@tiptap/pm/history'

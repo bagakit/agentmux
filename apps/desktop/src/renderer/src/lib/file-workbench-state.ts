@@ -535,7 +535,8 @@ export function reduceDocumentReloaded(state: FileWorkbenchState, workspaceId: s
     ...state,
     ...(state.dirtyDocuments[key] ? { retainedDocumentDrafts: { ...state.retainedDocumentDrafts,
       [key]: [...state.retainedDocumentDrafts?.[key] ?? [], state.documents[key]!] } } : {}),
-    documents: { ...state.documents, [key]: { ...document, ...(state.documents[key]?.noteConversion ? { noteConversion: state.documents[key]!.noteConversion } : {}), ...(state.documents[key]?.noteEditing?.share ? { noteEditing: { ...document.noteEditing, share: state.documents[key]!.noteEditing!.share } } : {}) } },
+    documents: { ...state.documents, [key]: { ...document, ...(state.documents[key]?.noteConversion ? { noteConversion: state.documents[key]!.noteConversion } : {}), ...(state.documents[key]?.noteEditing?.share || state.documents[key]?.noteEditing?.shareUndo ? { noteEditing: { ...document.noteEditing,
+      ...(state.documents[key]?.noteEditing?.share ? { share: state.documents[key]!.noteEditing!.share } : {}), ...(state.documents[key]?.noteEditing?.shareUndo ? { shareUndo: state.documents[key]!.noteEditing!.shareUndo } : {}) } } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 },
     documentIssues: withoutIssue(state.documentIssues, key)
@@ -585,7 +586,7 @@ export function reconcileWorkbenchFileProjection(
     ))
   )))
   for (const key of fileDocumentConsumerKeys()) openDocumentKeys.add(key)
-  for (const [key, document] of Object.entries(documents)) if (document.noteEditing?.share) openDocumentKeys.add(key)
+  for (const [key, document] of Object.entries(documents)) if (document.noteEditing?.share || document.noteEditing?.shareUndo) openDocumentKeys.add(key)
   // A hidden/removed include cannot discard an unsaved shared-file draft.
   for (const key of Object.keys(dirtyDocuments)) {
     const header = dirtyDocuments[key] && documents[key] ? readNoteMarkdownHeader(documents[key]!.content) : null
