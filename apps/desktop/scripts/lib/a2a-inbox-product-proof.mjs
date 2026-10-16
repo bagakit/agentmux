@@ -199,6 +199,20 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
   for (const frame of review.frames) assert.equal(frame.verdict, 'pass')
   assert.ok(product.mailbox?.pages?.every(page => ['inbox', 'outbox', 'user'].includes(page)) && product.mailbox.pages.length === 3)
   assert.equal(product.mailbox.copyExact, true); assert.equal(product.mailbox.clipboardPort.text, product.chain.scenarios.find(item => item.kind === 'normal').body); assert.equal(product.mailbox.clipboardPort.port, 'electron.clipboard.writeText'); assert.equal(product.mailbox.humanReadDidNotAcknowledgeAgent, true)
+  const runIds = product.restart.first.runBirths.map(run => run.agentSessionId)
+  const originalIds = [product.chain.normal.senderSessionId, product.chain.scenarios.find(item => item.kind === 'normal').original.envelope.recipientSessionId,
+    product.chain.scenarios.find(item => item.kind === 'unsubmitted').original.envelope.recipientSessionId]
+  const verifyNoInputEffect = pair => {
+    assert.ok(originalIds.every(id => Object.hasOwn(pair.before, id)), 'Every original Session is observed, including the uninvolved recipient')
+    assert.ok(Object.keys(pair.before).every(id => runIds.includes(id)))
+    for (const rows of Object.values(pair.before)) assert.ok(Array.isArray(rows))
+    assert.deepEqual(pair.after, pair.before, 'Exact native turn and manual-input effects stay unchanged')
+  }
+  verifyNoInputEffect(product.mailbox.readingEffects); verifyNoInputEffect(product.mailbox.localReadingEffects)
+  assert.ok(Object.values(product.mailbox.readingEffects.before).some(rows => rows.length > 0), 'The real input-effect baseline is not vacuous')
+  for (const operation of ['message.read', 'message.inbox.check', 'nativeHistory', 'conversation']) assert.ok(product.chain.readEffects.some(read => read.operation === operation))
+  for (const read of product.chain.readEffects) verifyNoInputEffect(read)
+  verifyNoInputEffect(product.mailbox.themeMatrix.effects)
   assert.deepEqual(product.mailbox.themeMatrix.restoredAppearance, product.mailbox.themeMatrix.originalAppearance)
   assert.deepEqual(product.mailbox.themeMatrix.transitions.map(item => item.requested).sort(), ['dark', 'light'])
   for (const transition of product.mailbox.themeMatrix.transitions) {
@@ -235,6 +249,19 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
     assert.deepEqual(second.runBirths, first.runBirths); assert.deepEqual(second.messages, first.messages)
     assert.equal(product.restart.replayCount, 0); assert.equal(product.restart.wrongRunAckRefused, true); assert.equal(product.restart.staleGenerationRefused, true)
     assert.equal(product.restart.reboundOccupantInputCount, 0); assert.equal(product.restart.unknownReplay.nativeInputCount, 1); assert.equal(product.restart.unknownReplay.originalMessageId, product.chain.scenarios.find(item => item.kind === 'unknown').journalMessageId); assert.equal(product.restart.healthyManualInput, true)
+    for (const pair of [product.restart.routeEffects, product.restart.workfaceEditingEffects, product.restart.inputEffects, product.restart.observationReadEffects]) verifyNoInputEffect(pair)
+    const { ackReceipts, agentConsumption, unknownReplay } = product.restart
+    assert.equal(ackReceipts.wrongRun.error.code, 'MESSAGE_ACK_GENERATION_STALE')
+    assert.ok(first.runBirths.some(run => run.runId === ackReceipts.wrongReaderRun.runId)); assert.notEqual(ackReceipts.wrongReaderRun.runId, agentConsumption.originalBatch.readerRun.runId)
+    assert.equal(ackReceipts.lateGeneration.error.code, 'MESSAGE_ACK_GENERATION_STALE')
+    assert.ok(agentConsumption.nextBatch.generation > agentConsumption.originalBatch.generation); assert.deepEqual(agentConsumption.nextBatch.readerRun, agentConsumption.originalBatch.readerRun)
+    assert.deepEqual(agentConsumption.nextBatch.messages.map(item => item.envelope.messageId).sort(), product.chain.scenarios.filter(item => ['failed', 'unknown'].includes(item.kind)).map(item => item.journalMessageId).sort())
+    assert.ok(agentConsumption.nextBatch.messages.length > 0); assert.deepEqual(agentConsumption.retainedNextBatch, agentConsumption.nextBatch)
+    const firstUnknown = product.chain.scenarios.find(item => item.kind === 'unknown').cli
+    assert.deepEqual(unknownReplay.firstReceipt, firstUnknown)
+    assert.equal(firstUnknown.ok, false); assert.equal(firstUnknown.error.code, 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+    assert.equal(unknownReplay.retry.ok, false); assert.equal(unknownReplay.retry.error.code, firstUnknown.error.code)
+    assert.equal(unknownReplay.retry.operation, firstUnknown.operation); assert.equal(unknownReplay.retry.operationId, firstUnknown.operationId)
   }
   return { passed: true, scope, sourceCommit: product.sourceCommit, frames: product.frames.length }
 }
