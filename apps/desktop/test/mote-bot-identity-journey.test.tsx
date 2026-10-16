@@ -177,7 +177,10 @@ it('synchronizes only the exact selected bot and preserves an unknown patch with
   const before = f.calls.filter(r => r.method === 'PATCH').length
   await f.click('Check saved progress'); await text('The profile write is not confirmed')
   expect(f.calls.filter(r => r.method === 'PATCH')).toHaveLength(before)
-  expect(f.registration.mock.calls).toHaveLength(8)
+  expect(f.registration.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+    '/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/cross', '/', '/', '/app',
+    '/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/cli_mote_1'
+  ])
 })
 
 it('keeps a lost default ACK separate from the current file and allows a new association of the same created app', async () => {
