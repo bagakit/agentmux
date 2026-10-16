@@ -44,7 +44,7 @@ it('shows original packet citations and a secondary reminder without changing re
   expect(host.querySelector('.log-turn__text')?.textContent).not.toContain('bagakit-msg')
   const reminder = host.querySelector<HTMLDetailsElement>('.log-turn__reminder')!
   expect(reminder).not.toBeNull(); expect(reminder.open).toBe(false)
-  expect(reminder.querySelector('p')?.textContent).toContain('not a new user authorization')
+  expect(reminder.querySelector('p')?.textContent).toContain('grants no new user authorization')
   expect(host.querySelector('.log-turn__text')!.lastElementChild).toBe(reminder)
 })
 
@@ -87,6 +87,25 @@ it('only reads a complete leading resource on demand, shares citations/reminder,
   expect(read).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source, recordId, partIndex: 0, expectedReference: reference, offsetBytes: 0, maxBytes: 128 * 1024 }))
   expect(host.querySelector('.conversation-resource-text .log-turn__citation-from')?.textContent).toBe('User')
   expect(host.querySelector('.conversation-resource-text .log-turn__reminder')).not.toBeNull()
+  await click('[aria-label="Copy complete content"]')
+  expect(copy).toHaveBeenCalledExactlyOnceWith(resourceWire)
+  await click('[aria-label="Copy message"]')
+  expect(copy.mock.calls.at(-1)?.[0]).toBe(resourceWire)
+})
+
+it('keeps an already decoded body boundary through explicit complete-resource reading and Copy', async () => {
+  const read = vi.fn(readResource), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await render(<ConversationMessage messageId={recordId} content={[resource]} contentBoundary="body" conversationSessionId="reader" speaker={{ role: 'agent', id: 'reviewer' }}
+    readHistoryResource={read} nativeResourceRecord={{ source, recordId }} />)
+  expect(read).not.toHaveBeenCalled()
+  await click('.conversation-resource-text__controls button')
+  expect(read).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source, recordId, partIndex: 0, expectedReference: reference }))
+  const text = host.querySelector('.conversation-resource-text .log-turn__text')!
+  expect(text.textContent).toContain('<amux>')
+  expect(text.textContent).toContain('<amux:a2a from="reviewer" msg-id="review:resource">')
+  expect(text.querySelector('.log-turn__reminder')).toBeNull()
+  expect(text.querySelector('.log-turn__declared-context')).toBeNull()
+  expect(text.querySelector('.log-turn__citation')).toBeNull()
   await click('[aria-label="Copy complete content"]')
   expect(copy).toHaveBeenCalledExactlyOnceWith(resourceWire)
   await click('[aria-label="Copy message"]')
