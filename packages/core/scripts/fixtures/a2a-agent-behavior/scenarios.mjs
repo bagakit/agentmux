@@ -42,12 +42,14 @@ export function assertProgressiveDiscovery({ scenario, commands, messageModule, 
       } catch { return false }
     }))
   const communicates = firstSendIndex >= 0 || ['native-and-independent-channels', 'short-reminder-accepted-delegation'].includes(scenario.name)
+  // A short-reminder reply tests an accepted task, not a new startup handshake.
+  const startupRequiresWhoami = communicates && scenario.guide
   if (communicates) {
     assert.ok(messageRead, 'No actual consumption of this candidate message module before communicating')
     assert.ok(sendHelpRead, 'No actual consumption of this candidate agent send leaf help')
-    assert.ok(whoamiRead, 'No actual successful whoami for the original model Session/Run before communicating')
   }
-  return { communicationRequiresDiscovery: communicates, messageRead, sendHelpRead, whoamiRead, firstSendIndex }
+  if (startupRequiresWhoami) assert.ok(whoamiRead, 'No actual successful whoami for the original model Session/Run before communicating')
+  return { communicationRequiresDiscovery: communicates, startupRequiresWhoami, messageRead, sendHelpRead, whoamiRead, firstSendIndex }
 }
 
 export function progressiveDiscoveryEvidenceGuard(facts) {
@@ -56,13 +58,15 @@ export function progressiveDiscoveryEvidenceGuard(facts) {
   const rejects = {
     'missing-message-module': value => { value.messageModule += '\nmissing candidate rule' },
     'missing-send-help': value => { value.sendHelp += '\nmissing candidate option' },
-    'foreign-whoami-session': value => { value.agentSessionId += '-foreign' },
-    'foreign-whoami-run': value => { value.runId += '-foreign' },
     'read-after-send': value => {
       const index = value.commands.findIndex(item => /\bagent\s+send\b/u.test(item.command ?? '') && !item.command.includes('--help'))
       assert.ok(index >= 0, 'Original observed send is required for the ordering guard')
       value.commands.unshift(value.commands.splice(index, 1)[0])
     }
+  }
+  if (observed.startupRequiresWhoami) {
+    rejects['foreign-whoami-session'] = value => { value.agentSessionId += '-foreign' }
+    rejects['foreign-whoami-run'] = value => { value.runId += '-foreign' }
   }
   for (const [name, mutate] of Object.entries(rejects)) {
     const copy = structuredClone(facts)
