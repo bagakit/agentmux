@@ -48,7 +48,7 @@ async function fixture() {
     if (target.href === 'https://ask.feishu.cn/') return new Response('Landing is not account identity')
     if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};window.csrfToken="continuation-private-csrf";</script>`, { headers: { 'content-type': 'text/html' } })
     if (target.pathname === '/developers/v1/app/upload/image') return Response.json({ code: 0, data: { url: 'https://images.example.test/original.png' } })
-    if (target.pathname === '/developers/v1/app/create') return Response.json({ code: 0, data: { ClientID: APP } })
+    if (target.pathname === '/developers/v1/manifest/upsert_by_template') return Response.json({ code: 0, data: { ClientID: APP } })
     if (target.pathname === '/developers/v1/secret/' + APP) return Response.json({ code: 0, data: { secret: 'continuation-private-app-secret' } })
     if (target.pathname === '/developers/v1/robot/' + APP) {
       expect(new Headers(options?.headers).get('x-csrf-token')).toBe('continuation-private-csrf')
@@ -98,7 +98,7 @@ it('saved creation hands its original account to the same Setup with zero HTTP, 
   expect(f.calls.slice(before.length)).toEqual(['/developers/v1/robot/' + APP])
   expect((await f.sdk.call('connection.enrollment.inspect', { operationId: f.enrollment.operation!.operationId })).operation).toEqual(f.enrollment.operation)
   const list = await f.sdk.call('connection.setup.ls', { connectionId: f.input.connectionId })
-  expect(list.support).toEqual({ connectionRevision: f.saved.revision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'enrollment-continuation'] })
+  expect(list.support).toEqual({ connectionRevision: f.saved.revision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'] })
   expect(await f.cli<ConnectionSetupListing>(['ls', '--connection', f.input.connectionId])).toEqual(list)
   for (const value of [USER, TENANT, 'continuation-private']) expect(JSON.stringify(list)).not.toContain(value)
 }, 20_000)

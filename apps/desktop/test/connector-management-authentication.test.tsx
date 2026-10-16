@@ -66,10 +66,10 @@ function nativeRoute(options: { scanned?: boolean; poll?: () => Response | Promi
   return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const target = new URL(String(url)); native.push({ url: target.href, at: Date.now() })
     expect(init?.redirect).toBe('manual')
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: {
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: {
       'x-flow-key': FLOW, 'set-cookie': 'session=fixture-settings-private-cookie; Domain=.feishu.cn; Path=/; Secure; HttpOnly'
     } })
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') {
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') {
       expect(new Headers(init?.headers).get('x-flow-key')).toBe(FLOW)
       expect(JSON.parse(String(init?.body))).toEqual({ biz_type: null })
       if (options.poll) return await options.poll()

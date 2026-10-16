@@ -57,10 +57,10 @@ function nativeRoute(read: (subject: ConnectionSetupReadSubject, target: URL, in
   let accountIndex = 0
   const route = async (url: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const target = new URL(String(url))
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: [
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') return Response.json({ code: 0, data: { step_info: { token: TOKEN } } }, { headers: [
       ['x-flow-key', FLOW], ['set-cookie', `session=${SESSION}; Domain=.feishu.cn; Path=/; Secure; HttpOnly`], ['set-cookie', 'pollOnly=fixture-poll-cookie; Path=/accounts/qrlogin; Secure']
     ] })
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross-login' } } })
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross-login' } } })
     if (target.href === 'https://accounts.feishu.cn/cross-login') return new Response('', { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
     if (target.href === 'https://ask.feishu.cn/') return new Response('Landing text is not account identity')
     if (target.href === 'https://open.feishu.cn/app') {
@@ -162,7 +162,7 @@ it('SDK and compiled CLI explicitly enable one exact original bot with a durable
   expect(reads.applicationInspection?.observations).toEqual([source]); expect(reads.applicationInspection?.readResult).toEqual({ subject: 'bot-settings' })
   expect(readBytes(f, source.stepId)).toEqual(bytes)
   const list = await f.sdk.call('connection.setup.ls', { connectionId: f.input.connectionId }); assertPrivateFree(list)
-  expect(list.support?.capabilities).toEqual(['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'enrollment-continuation'])
+  expect(list.support?.capabilities).toEqual(['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'])
   expect(JSON.stringify(list)).not.toContain('sourceStepId')
   expect(await f.sdk.call('connection.service.get', {})).toEqual(off.service)
   expect((await f.sdk.call('connection.inspect', { operationId: 'configuration-original-save' })).operation).toEqual(f.saved)

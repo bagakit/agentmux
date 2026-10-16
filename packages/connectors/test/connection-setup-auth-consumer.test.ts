@@ -106,7 +106,7 @@ function authenticationSnapshots(f: Fixture, operationId: string): Record<string
 }
 async function assertSafeDiscovery(f: Fixture, view: ConnectionSetupView) {
   const listed = result<{ operations: unknown[]; next: string | null }>(await f.cli(['ls', '--connection', f.input.connectionId]))
-  expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'enrollment-continuation'] } })
+  expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'] } })
   const tables = f.services.database!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
   expect(tables.length).toBeGreaterThan(0)
   const records = tables.map(table => f.services.database!.prepare('SELECT * FROM "' + String(table.name).replaceAll('"', '""') + '"').all())
@@ -259,7 +259,7 @@ it('CookieJar selects domain, host, path and expiry cookies anew for each allowe
   const f = await fixture(), route = nativeRoute({ consoleRedirect: true }), requests: Array<{ url: string; cookies: string[] }> = []
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const target = new URL(String(url)), headers = new Headers(init?.headers), cookies = (headers.get('cookie') ?? '').split(';').map(value => value.trim()).filter(Boolean).sort()
-    requests.push({ url: target.href, cookies })
+    requests.push({ url: target.origin + target.pathname, cookies })
     expect(headers.get('x-csrf-token')).toBeNull()
     if (target.pathname !== '/accounts/qrlogin/polling') expect(headers.get('x-flow-key')).toBeNull()
     return await route(url, init)
@@ -538,7 +538,7 @@ it.each(['https://open.feishu.cn/unqualified-bootstrap', 'https://open.feishu.cn
   }); vi.stubGlobal('fetch', fetch)
   let view = await f.sdk.call('connection.setup.begin', f.input)
   for (let step = 0; step < 8 && !['account', 'unknown'].includes(view.continuation!.stage); step++) view = await advance(f, view)
-  expect(fetch.mock.calls.map(([url]) => String(url))).not.toContain(target)
+  expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).not.toContain(target)
   expect(view.continuation).toMatchObject({ stage: 'unknown', account: null })
   expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
 }, 30_000)
@@ -617,7 +617,7 @@ it('native literal IIFE encoding reaches exact account confirmation through comp
     expect(account.continuation?.account).toEqual(index === 0 ? { userId: USER, tenantId: TENANT, userName: 'Fixture IIFE account', tenantName: 'Fixture IIFE enterprise' } : { userId: USER, tenantId: TENANT })
     const confirmed = result(await f.cli(['advance', '--input', '-'], advanceInput(account, 'confirm-account')))
     expect(confirmed.continuation).toMatchObject({ stage: 'confirmed', account: { userId: USER, tenantId: TENANT } })
-    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
+    expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
     expect(JSON.stringify(confirmed.operation)).not.toContain(USER); expect(JSON.stringify(confirmed.operation)).not.toContain(TENANT)
   }
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
@@ -677,7 +677,7 @@ it('anonymous native shape and unqualified IIFE programs remain unknown without 
     for (let step = 0; step < 8 && !['account', 'unknown'].includes(view.continuation!.stage); step++) view = await advance(f, view)
     expect(view.continuation, 'initializer sample ' + index).toMatchObject({ stage: 'unknown', account: null })
     expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account')
-    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
+    expect(fetch.mock.calls.map(([url]) => { const u = new URL(String(url)); return u.origin + u.pathname })).toEqual(['https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling', 'https://accounts.feishu.cn/cross-login', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app'])
   }
   expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
 }, 60_000)

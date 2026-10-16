@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { createFeishuEnrollment } from '../src/adapters/feishu/enrollment.js'
+import { createFeishuEnrollment, FEISHU_ENROLLMENT_PROTOCOL } from '../src/adapters/feishu/enrollment.js'
 import type { EnrollmentAdapterInput, EnrollmentAuthenticationReceipt, EnrollmentUploadReceipt, EnrollmentCreateReceipt, EnrollmentCredentialReceipt } from '../src/connection-enrollment-adapter.js'
 
 const pngDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg=='
@@ -91,7 +91,7 @@ async function signedIn(origin = 'https://open.feishu.cn') {
     expect(network.calls).toHaveLength(before + 1)
   }
   expect(view).toMatchObject({ stage: 'account', challenge: null, account: { userId: 'original-user', tenantId: 'original-tenant' } })
-  expect(network.calls.map(call => call.url)).toEqual([
+  expect(network.calls.map(call => { const u = new URL(call.url); return u.origin + u.pathname })).toEqual([
     'https://accounts.feishu.cn/accounts/qrlogin/init', 'https://accounts.feishu.cn/accounts/qrlogin/polling',
     'https://accounts.feishu.cn/cross', 'https://ask.feishu.cn/', 'https://open.feishu.cn/app',
     ...(origin === 'https://open.feishu.cn' ? [] : [origin + '/app'])
@@ -123,6 +123,54 @@ it('uses the original target-free account leaf and keeps authentication separate
   for (const field of ['operationId', 'connectionId', 'attemptId', 'application']) expect(state.authentication).not.toHaveProperty(field)
   expect(f.original.assertCurrent).toHaveBeenCalledTimes(5)
   expect(f.network.queue).toEqual([])
+  for (const call of f.network.calls) expect(new Headers(call.options.headers).get('user-agent')).toContain('Chrome/145.0.0.0')
+  for (const call of f.network.calls.slice(0, 2)) expect(new URL(call.url).search).toMatch(/^\?_r\d+=\d+$/u)
+  expect(new Headers(f.network.calls[3]!.options.headers).get('referer')).toBe('https://accounts.feishu.cn/cross')
+  expect(new Headers(f.network.calls[4]!.options.headers).get('referer')).toBe('https://ask.feishu.cn/')
+})
+
+it.each(['ClientID', 'clientID', 'clientId', 'appId'] as const)('creates through the frozen developer-console template and accepts its exact %s receipt', async key => {
+  const f = await withIcon(), before = f.network.calls.length
+  expect(f.adapter.protocolId).toBe(FEISHU_ENROLLMENT_PROTOCOL)
+  f.network.queue.push(Response.json({ code: 0, data: { [key]: application.appId } }))
+  const receipt = created(await f.adapter.create({ ...f.original, protocolId: FEISHU_ENROLLMENT_PROTOCOL, privateState: f.privateState, preset }))
+  expect(receipt.application).toEqual(application)
+  expect(f.network.calls).toHaveLength(before + 1)
+  const call = f.network.calls.at(-1)!
+  expect(call.url).toBe('https://open.feishu.cn/developers/v1/manifest/upsert_by_template')
+  expect(JSON.parse(call.options.body as string)).toEqual({
+    appManifestTemplateID: 'developer_console',
+    createAppUserCustomField: { i18n: { zh_cn: preset }, avatar: icon, primaryLang: 'zh_cn' },
+    cid: f.original.attemptId, HTTPHead: {}
+  })
+  expect(new Headers(call.options.headers).get('user-agent')).toContain('Chrome/145.0.0.0')
+})
+
+it.each([
+  () => Response.json({ code: 0, data: {} }),
+  () => Response.json({ code: 0, data: { ClientID: application.appId, clientId: 'cli_conflicting' } }),
+  () => Response.json({ code: 17, message: 'private-tenant-message' }),
+  () => new Response(null, { status: 502 }),
+  () => { throw new TypeError('private-lost-response') }
+])('never crosses to ordinary creation after a template failure or unconfirmed result, case %#', async response => {
+  const f = await withIcon(), before = f.network.calls.length
+  f.network.queue.push(async () => response())
+  const result = await f.adapter.create({ ...f.original, protocolId: FEISHU_ENROLLMENT_PROTOCOL, privateState: f.privateState, preset })
+  expect(result.kind).toBe('unknown')
+  expect(f.network.calls.slice(before).map(call => call.url)).toEqual(['https://open.feishu.cn/developers/v1/manifest/upsert_by_template'])
+  expect(JSON.stringify(result)).not.toContain('private-')
+})
+
+it.each([
+  [() => new Response(null, { status: 503 }), { step: 'initialize', failure: 'http-status', httpStatus: 503 }],
+  [() => Response.json({ code: 901, message: 'private-native-error' }), { step: 'initialize', failure: 'platform-error', httpStatus: 200, nativeCode: 901 }],
+  [() => Response.json({ code: 0, data: {} }), { step: 'initialize', failure: 'invalid-response', httpStatus: 200 }],
+  [() => { throw new TypeError('private-native-network') }, { step: 'initialize', failure: 'transport-unconfirmed' }]
+] as const)('reports safe native initialization facts without private material, case %#', async (response, diagnostic) => {
+  remote(async () => response())
+  const result = await createFeishuEnrollment().begin(input())
+  expect(result).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', ...diagnostic } })
+  expect(JSON.stringify(result)).not.toContain('private-')
 })
 
 it('uploads the exact PNG and creates one ordinary self-built application before reading its exact nonrotating credential', async () => {
@@ -295,6 +343,6 @@ it('keeps cancelled requests separate from an original late, validated creation 
 
 it('keeps opaque authentication failure named without inventing a response status', async () => {
   const network = remote(new TypeError('private-auth-detail'))
-  expect(await createFeishuEnrollment().begin(input())).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed' } })
+  expect(await createFeishuEnrollment().begin(input())).toMatchObject({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'initialize' } })
   expect(network.calls).toHaveLength(1)
 })

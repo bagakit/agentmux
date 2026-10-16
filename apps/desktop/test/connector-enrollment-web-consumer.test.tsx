@@ -40,7 +40,7 @@ beforeEach(async () => {
     const target = new URL(String(url))
     platform.push({ path: target.pathname, body: options.body })
     expect(options.redirect).toBe('manual')
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/init') {
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/init') {
       initSignals.push(options.signal)
       const waitForAbort = () => new Promise<never>((_, reject) => {
         const finish = () => {
@@ -59,7 +59,7 @@ beforeEach(async () => {
       if (initWait === 'body') Object.defineProperty(response, 'json', { value: waitForAbort })
       return response
     }
-    if (target.href === 'https://accounts.feishu.cn/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
+    if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling') return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
     if (target.href === 'https://accounts.feishu.cn/cross') return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
     if (target.href === 'https://ask.feishu.cn/') return new Response('This landing page is not account authority')
     if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: 'settings-user', tenantId: 'settings-enterprise', name: 'Bot owner', tenantName: 'Original enterprise' })};window.csrfToken=${JSON.stringify(CSRF)};</script>`, { headers: { 'content-type': 'text/html' } })
@@ -67,7 +67,7 @@ beforeEach(async () => {
     expect(new Headers(options.headers).get('x-csrf-token')).toBe(CSRF)
     expect(new Headers(options.headers).get('cookie')).toContain(`session=${COOKIE}`)
     if (target.pathname === '/developers/v1/app/upload/image') return Response.json({ code: 0, data: { url: 'https://images.example.test/settings-bot.png' } })
-    if (target.pathname === '/developers/v1/app/create') {
+    if (target.pathname === '/developers/v1/manifest/upsert_by_template') {
       if (loseCreate) throw new Error('Controlled original create reply loss')
       return Response.json({ code: 0, data: { ClientID: APP.appId } })
     }
@@ -108,8 +108,15 @@ function MountedSettings() {
   return <SettingsPanel visible={visible} initialSection="chat-connections" onClose={closeSettings} />
 }
 async function click(selector: string) {
+  if (selector === '[data-enrollment-create]') {
+    await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector(selector) ?? dom.container.querySelector('[data-enrollment-new]')).not.toBeNull() })
+    if (!dom.container.querySelector(selector)) await click('[data-enrollment-new]')
+  }
   let button: HTMLButtonElement | null = null
   await vi.waitFor(async () => { await act(async () => {}); button = dom.container.querySelector(selector); expect(button, selector).not.toBeNull(); expect(button!.disabled).toBe(false) })
+  const disclosures: HTMLDetailsElement[] = []
+  for (let node = button!.parentElement; node; node = node.parentElement) if (node.matches('details:not([open])')) disclosures.push(node as HTMLDetailsElement)
+  for (const disclosure of disclosures.reverse()) await act(async () => disclosure.querySelector<HTMLElement>('summary')!.click())
   expect(button!.closest('details:not([open])'), 'Use a control through its actual disclosure').toBeNull()
   await act(async () => button!.click())
 }
@@ -125,6 +132,7 @@ it('keeps independently available creation after list failure and reaches native
   await dom.render(<MountedSettings />)
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Controlled saved-bot list gap'))
   expect(dom.container.querySelector('[data-enrollment-existing]')).not.toBeNull()
+  await click('[data-enrollment-new]')
   const field = dom.container.querySelector<HTMLInputElement>('[aria-label="New bot name"]')!
   expect(field, 'Independent creation remains available after a saved-bot list gap').not.toBeNull()
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'My Agent bot'); field.dispatchEvent(new Event('input', { bubbles: true })) })
@@ -141,8 +149,8 @@ it('keeps independently available creation after list failure and reaches native
   await click('[data-enrollment-action="create"]')
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull() }, { timeout: 6000 })
   expect((await services.connections.list()).connections[0]!.config).toMatchObject({ connectionId: begin.connectionId, application: APP, label: 'My Agent bot' })
-  expect(platform.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/app/create', '/developers/v1/secret/' + APP.appId])
-  expect(JSON.parse(String(platform.find(call => call.path === '/developers/v1/app/create')!.body)).name).toBe('My Agent bot')
+  expect(platform.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/app/upload/image', '/developers/v1/manifest/upsert_by_template', '/developers/v1/secret/' + APP.appId])
+  expect(JSON.parse(String(platform.find(call => call.path === '/developers/v1/manifest/upsert_by_template')!.body)).createAppUserCustomField.i18n.zh_cn.name).toBe('My Agent bot')
   expect(trusted).toHaveBeenCalled()
   for (const privateText of [QR, COOKIE, CSRF, 'settings-private-app-secret']) expect(dom.container.textContent).not.toContain(privateText)
   expect(dom.draft('agent-1')).toBe('Keep my draft')
@@ -160,7 +168,7 @@ it.each(['headers', 'body'] as const)('ends only the original QR init observatio
   })
   const original = lastBegin!.operation
   assert.ok(original)
-  expect(original.diagnostic).toEqual({ stage: 'authentication', code: 'native-unconfirmed' })
+  expect(original.diagnostic).toEqual({ stage: 'authentication', code: 'native-unconfirmed', step: 'initialize', failure: phase === 'headers' ? 'transport-unconfirmed' : 'invalid-response', ...(phase === 'body' ? { httpStatus: 200 } : {}) })
   expect(initSignals[0]?.aborted).toBe(true)
   expect(platform.map(call => call.path)).toEqual(['/accounts/qrlogin/init'])
   expect(dom.container.querySelector('[data-enrollment-code]')).toBeNull()
@@ -223,7 +231,7 @@ it('keeps an unknown create on the same original request without another native 
   expect(dom.container.querySelector('[data-enrollment-action="create"]')).toBeNull()
   await click('[data-enrollment-action="recover-local"]')
   expect(platform).toHaveLength(count)
-  expect(platform.filter(call => call.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(platform.filter(call => call.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
   expect(dom.container.querySelector<HTMLElement>('[data-bot-enrollment]')!.dataset.enrollmentOperation).toBe(operationId)
   expect((await services.connections.enrollment!.list({})).operations.map(item => item.operationId)).toEqual([operationId])
   expect((await services.connections.list()).connections).toEqual([])
@@ -276,7 +284,7 @@ it('keeps the offered sign-in recovery reachable for the same known bot after a 
   await act(async () => disclosure.querySelector<HTMLElement>('summary')!.click())
   await click('[data-enrollment-renew]')
   await vi.waitFor(() => expect(platform.filter(call => call.path === '/accounts/qrlogin/init')).toHaveLength(2))
-  expect(platform.filter(call => call.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(platform.filter(call => call.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
   expect((await services.connections.enrollment!.list({})).operations).toHaveLength(1)
 }, 20_000)
 
@@ -291,11 +299,11 @@ it('keeps the offered same-application credential read reachable when its create
   await dom.render(<MountedSettings />)
   await reachAccount(); await click('[data-enrollment-action="confirm-account"]'); await click('[data-enrollment-action="create"]')
   await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-action="read-credential"]'), 'The offered same-bot read must remain reachable despite the local snapshot gap').not.toBeNull())
-  expect(platform.filter(item => item.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(platform.filter(item => item.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
   expect(platform.filter(item => item.path.startsWith('/developers/v1/secret/'))).toHaveLength(0)
   await click('[data-enrollment-action="read-credential"]')
   await vi.waitFor(() => expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull())
-  expect(platform.filter(item => item.path === '/developers/v1/app/create')).toHaveLength(1)
+  expect(platform.filter(item => item.path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
   expect(platform.filter(item => item.path === '/developers/v1/secret/' + APP.appId)).toHaveLength(1)
   expect((await services.connections.list()).connections[0]?.config.application).toEqual(APP)
 }, 20_000)
