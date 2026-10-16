@@ -67,7 +67,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
 
 /** Inspect held Topic text without growing or repacking the original lane. */
 function FocusLaneArticle({ name, summary, visible, children, ...props }: ComponentProps<'article'> & { name: string; summary: string | null; visible: boolean }) {
-  const tooltip = useWorkbenchNameTooltip(name, summary ?? '', !visible || !summary)
+  const tooltip = useWorkbenchNameTooltip(name, summary ?? '', !visible || !summary, { placement: 'top-start', pointerPassThrough: true })
   const inspect = (event: SyntheticEvent<HTMLElement>) => {
     const heading = event.currentTarget.querySelector<HTMLElement>('.focus-project-lanes__heading')
     const target = event.target as Node

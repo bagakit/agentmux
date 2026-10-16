@@ -1,10 +1,12 @@
-import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
 import { useEffect, useId, useRef, useState, type MouseEvent, type FocusEvent } from 'react'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
 /** Full names and descriptions stay outside their original surface’s overflow. */
-export function useWorkbenchNameTooltip(name: string, detail: string, suppressed: boolean) {
+export function useWorkbenchNameTooltip(name: string, detail: string, suppressed: boolean,
+  { placement = 'bottom-start', pointerPassThrough = false }: { placement?: Placement; pointerPassThrough?: boolean } = {}) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const [overflowing, setOverflowing] = useState(false)
   const surface = useRef<HTMLDivElement>(null), id = useId()
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const keepOpen = () => clearTimeout(departure.current)
@@ -20,9 +22,12 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
     let disposed = false
     const panel = surface.current, document = anchor.ownerDocument, window = document.defaultView!
     const update = async () => {
-      const position = await computePosition(anchor, panel, { strategy: 'fixed', placement: 'bottom-start',
+      const position = await computePosition(anchor, panel, { strategy: 'fixed', placement,
         middleware: [offset(8), flip(), shift({ padding: 8 })] })
-      if (!disposed) Object.assign(panel.style, { left: `${position.x}px`, top: `${position.y}px`, visibility: 'visible' })
+      if (!disposed) {
+        Object.assign(panel.style, { left: `${position.x}px`, top: `${position.y}px`, visibility: 'visible' })
+        if (pointerPassThrough) setOverflowing(panel.scrollHeight > panel.clientHeight + 1)
+      }
     }
     const stop = autoUpdate(anchor, panel, () => { void update() })
     const hide = () => setAnchor(null)
@@ -31,11 +36,11 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
     window.addEventListener('keydown', key)
     return () => { disposed = true; stop(); window.removeEventListener('blur', hide)
       document.removeEventListener('visibilitychange', hide); window.removeEventListener('keydown', key) }
-  }, [visible, anchor, name, detail])
+  }, [visible, anchor, name, detail, placement, pointerPassThrough])
   const show = (event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => showFor(event.currentTarget)
   return { showFor, hide, props: { onMouseEnter: show, onMouseLeave: hide, onFocus: show,
     onBlur: hide, 'aria-describedby': visible ? id : undefined },
-    content: visible ? <WindowOverlayPortal layer="tooltip"><div ref={surface} id={id} role="tooltip" tabIndex={0} className="workbench-tab-name-tooltip" onMouseEnter={keepOpen} onMouseLeave={hide} onFocus={keepOpen} onBlur={hide}>
+    content: visible ? <WindowOverlayPortal layer="tooltip"><div ref={surface} id={id} role="tooltip" tabIndex={0} className="workbench-tab-name-tooltip" style={pointerPassThrough && !overflowing ? { pointerEvents: 'none' } : undefined} onMouseEnter={keepOpen} onMouseLeave={hide} onFocus={keepOpen} onBlur={hide}>
       <strong>{name}</strong>{detail ? <span>{detail}</span> : null}
     </div></WindowOverlayPortal> : null }
 }
