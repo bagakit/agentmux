@@ -445,7 +445,7 @@ export function MoteBotSetup({
                       <dd>{operation.issue}</dd>
                     </div>
                   ) : null}
-                  {enrollment?.diagnostic ? <div><dt>Platform check</dt><dd>{enrollment.diagnostic.stage} · {enrollment.diagnostic.code}{enrollment.diagnostic.stage === 'authentication' && enrollment.diagnostic.step ? ` · ${enrollment.diagnostic.step}` : ''}{'httpStatus' in enrollment.diagnostic && enrollment.diagnostic.httpStatus ? ` · HTTP ${enrollment.diagnostic.httpStatus}` : ''}</dd></div> : null}
+                  {enrollment?.diagnostic ? <div><dt>Platform check</dt><dd>{enrollment.diagnostic.stage} · {enrollment.diagnostic.code}{enrollment.diagnostic.stage === 'authentication' ? [enrollment.diagnostic.step, enrollment.diagnostic.failure, enrollment.diagnostic.boundary].filter(Boolean).map(value => ` · ${value}`).join('') : ''}{'httpStatus' in enrollment.diagnostic && enrollment.diagnostic.httpStatus ? ` · HTTP ${enrollment.diagnostic.httpStatus}` : ''}</dd></div> : null}
                 </dl>
               </details>
             </>
