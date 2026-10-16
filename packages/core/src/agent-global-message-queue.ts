@@ -776,9 +776,9 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** Indexed ingress facts never replay or load unrelated messages. */
-  private messageRoute(operationId: string, messageId?: string): AgentMessageRoute | null {
+  private messageRoute(operationId?: string, messageId?: string): AgentMessageRoute | null {
     const select = `SELECT r.json FROM message_routes m JOIN records r ON r.sequence=m.sequence WHERE `
-    const byOperation = this.db.prepare(select + 'm.operation_id=?').get(operationId)
+    const byOperation = operationId === undefined ? undefined : this.db.prepare(select + 'm.operation_id=?').get(operationId)
     const byMessage = messageId === undefined ? undefined : this.db.prepare(select + 'm.message_id=?').get(messageId)
     const parse = (row: Record<string, unknown> | undefined) => row ?
       (JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'message-route' }>).route : null
@@ -789,10 +789,12 @@ export class DurableAgentMuxMessageQueue {
     return original ?? selected
   }
 
-  async readMessageRoute(operationId: string, messageId?: string): Promise<AgentMessageRoute | null> {
+  async readMessageRoute(operationId?: string, messageId?: string): Promise<AgentMessageRoute | null> {
     // A retry may follow a committed route whose first fsync ACK was lost. Confirm
     // that same journal before allowing its binding to precede a remote effect.
-    return this.withLock(async () => this.messageRoute(nonEmpty(operationId, 'Message operation'), messageId), true)
+    if (operationId === undefined && messageId === undefined) throw new AgentMuxError('An original message operation or message ID is required.', 'INVALID_CONTROL_REQUEST')
+    return this.withLock(async () => this.messageRoute(operationId === undefined ? undefined : nonEmpty(operationId, 'Message operation'),
+      messageId === undefined ? undefined : nonEmpty(messageId, 'Message ID')), true)
   }
 
   /** Atomic first binding and durability ACK precede any remote input or receipt lookup. */

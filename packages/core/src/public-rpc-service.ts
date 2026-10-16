@@ -1545,15 +1545,20 @@ export class AgentMuxRpcService {
       case 'message.read': case 'message.ls': case 'message.dispatch.read': case 'message.dispatch.ls': {
         if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim())) throw new AgentMuxError(
           'Message reading requires an authenticated Agent participant or a transport-approved user/device. Original communication and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
+        if (method === 'message.read' && (p.operationId !== undefined) === (p.messageId !== undefined)) throw new AgentMuxError(
+          'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
+        const messageSelector = method !== 'message.read' ? undefined : p.messageId === undefined
+          ? { operationId: rpcString(p.operationId, 'Original message operation ID') }
+          : { messageId: rpcString(p.messageId, 'Original message ID') }
         const hostId = p.hostId === undefined ? caller?.hostId : rpcString(p.hostId, 'Original message Host ID')
         if (hostId === undefined) throw new AgentMuxError('A trusted reader must select the exact original message Host.', 'INVALID_CONTROL_REQUEST')
         if (caller && caller.hostId !== hostId) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
         if (method === 'message.read' && hostId === 'local') {
-          const route = await (await this.messageRouteJournal()).readMessageRoute(rpcString(p.operationId, 'Original message operation ID'))
+          const route = await (await this.messageRouteJournal()).readMessageRoute(messageSelector!.operationId, messageSelector!.messageId)
           if (route) {
             const remote = await this.messageRouteOwner(route)
             if (caller && caller.client !== remote.client) throw new AgentMuxError('Agent authority cannot read another semantic Host journal.', 'CONTROL_PERMISSION_DENIED')
-            result = { ...await remote.client.forwardRpc!('message.read', { operationId: route.operationId, hostId: 'local' }, context), hostId }
+            result = { ...await remote.client.forwardRpc!('message.read', { ...messageSelector!, hostId: 'local' }, context), hostId }
             break
           }
         }
@@ -1565,11 +1570,7 @@ export class AgentMuxRpcService {
         }
         const auth = caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}
         if (method === 'message.read') {
-          if ((p.operationId !== undefined) === (p.messageId !== undefined)) throw new AgentMuxError(
-            'Choose exactly one original message operationId or messageId.', 'INVALID_CONTROL_REQUEST')
-          const selector = p.messageId === undefined ? { operationId: rpcString(p.operationId, 'Original message operation ID') }
-            : { messageId: rpcString(p.messageId, 'Original message ID') }
-          result = { message: await owner.client.readMessage({ ...selector, ...auth }), hostId }
+          result = { message: await owner.client.readMessage({ ...messageSelector!, ...auth }), hostId }
         } else if (method === 'message.ls') {
           if (p.direction !== 'incoming' && p.direction !== 'outgoing') throw new AgentMuxError('Message direction must be incoming or outgoing.', 'INVALID_CONTROL_REQUEST')
           result = { ...await owner.client.listMessages({
