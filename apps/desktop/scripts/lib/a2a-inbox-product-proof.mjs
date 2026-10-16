@@ -180,6 +180,14 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
   for (const dependency of product.dependencies) { const bytes = await readFile(join(dependency.target, 'package.json')); assert.equal(a2aProofSha(bytes), dependency.sha256); assert.equal(JSON.parse(bytes).version, dependency.locked.split('(')[0]) }
   assert.equal(a2aProofSha(await readFile(join(product.privateRoot, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch, 'manifest.json'))), product.ctxmux.manifest)
   assert.equal(product.cleanup.processesReaped, true); assert.equal(product.cleanup.outerProcessesReaped, true); assert.equal(product.workerOutcome.exitConfirmed, true); assert.equal(product.workerOutcome.originalExitCode, 0); assert.equal(product.cleanup.userRunTouched, false)
+  assert.equal(product.homeIsolation.privateHome, join(product.privateRoot, 'home'))
+  assert.deepEqual(product.homeIsolation.launches.map(launch => launch.label), ['first', 'second'])
+  for (const launch of product.homeIsolation.launches) {
+    assert.equal(launch.home, product.homeIsolation.privateHome); assert.equal(launch.nativeHome, launch.home)
+    assert.notEqual(launch.originalHome, launch.home); assert.ok(!JSON.stringify(launch.catalog).includes(launch.originalHome))
+    assert.ok(launch.pauses.at(-1).hitBreakpoints.includes(launch.breakpoint.id)); assert.equal(launch.breakpoint.url, pathToFileURL(join(product.privateRoot, 'apps/desktop/out/main/index.js')).href)
+    assert.equal(launch.pid, product.restart[launch.label].pid)
+  }
   assert.ok(product.frames.length >= 9)
   for (const frame of product.frames) { assert.ok(isAbsolute(frame.path)); assert.equal(a2aProofSha(await readFile(frame.path)), frame.sha256); assert.ok(frame.width >= 400 && frame.height >= 500) }
   const review = JSON.parse(await readFile(product.reviewPath, 'utf8'))
