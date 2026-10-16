@@ -10,12 +10,12 @@ const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosu
 export type FullPageLoadingPhase = 'loading' | 'recovering' | 'failed' | 'parked'
 
 /** Local waiting time is presentation, never evidence of Agent or Runtime progress. */
-function WaitingActivity({ surface }: { surface: RefObject<HTMLElement | null> }) {
+function WaitingActivity({ surface, visible }: { surface: RefObject<HTMLElement | null>; visible: boolean }) {
   const [seconds, setSeconds] = useState(0)
-  const [visible, setVisible] = useState(true)
+  const [shown, setShown] = useState(visible)
+  const startedAt = useRef(Date.now()).current
   const activity = useRef<SVGSVGElement>(null)
   useEffect(() => {
-    const startedAt = Date.now()
     let inView = true
     let timer: ReturnType<typeof setInterval> | undefined
     const tick = () => setSeconds(Math.floor((Date.now() - startedAt) / 1000))
@@ -23,14 +23,14 @@ function WaitingActivity({ surface }: { surface: RefObject<HTMLElement | null> }
       if (timer !== undefined) clearInterval(timer)
       timer = undefined
       const node = surface.current
-      const style = node && window.getComputedStyle(node)
+      if (!visible || !inView || document.hidden || node?.isConnected !== true) { setShown(false); return }
+      const style = window.getComputedStyle(node)
       // Retained hosts keep their geometry. Their existing parking CSS pauses
       // motion even when IntersectionObserver still reports an intersection.
       const parked = activity.current && window.getComputedStyle(activity.current).animationPlayState === 'paused'
-      const shown = inView && !document.hidden && node?.isConnected === true &&
-        style?.display !== 'none' && style?.visibility !== 'hidden' && !parked
-      setVisible(shown)
-      if (shown) { tick(); timer = setInterval(tick, 1000) }
+      const showing = style.display !== 'none' && style.visibility !== 'hidden' && !parked
+      setShown(showing)
+      if (showing) { tick(); timer = setInterval(tick, 1000) }
     }
     const observer = typeof IntersectionObserver === 'undefined' ? undefined : new IntersectionObserver(entries => {
       inView = entries.some(entry => entry.isIntersecting)
@@ -56,9 +56,9 @@ function WaitingActivity({ surface }: { surface: RefObject<HTMLElement | null> }
       ancestors.disconnect()
       document.removeEventListener('visibilitychange', syncVisibility)
     }
-  }, [surface])
-  return <span className="full-page-loading__waiting" data-waiting-visible={visible} aria-live="off">
-    <ThemeStatusWaitingIcon ref={activity} animation={visible ? 'wait' : 'none'} className="full-page-loading__activity" size={18} aria-hidden="true" />
+  }, [surface, visible, startedAt])
+  return <span className="full-page-loading__waiting" data-waiting-visible={shown} aria-live="off">
+    <ThemeStatusWaitingIcon ref={activity} animation={shown ? 'wait' : 'none'} className="full-page-loading__activity" size={18} aria-hidden="true" />
     <span>{seconds >= 15 ? 'Still waiting' : 'Waiting'}</span>
     <span className="full-page-loading__elapsed" aria-label="Time waiting in this view">{seconds}s</span>
   </span>
@@ -78,7 +78,8 @@ export function FullPageLoadingSurface({
   details,
   supplement,
   children,
-  className
+  className,
+  visible = true
 }: {
   phase: FullPageLoadingPhase
   scope: 'app' | 'region'
@@ -90,6 +91,7 @@ export function FullPageLoadingSurface({
   supplement?: ReactNode
   children?: ReactNode
   className?: string
+  visible?: boolean
 }) {
   const failed = phase === 'failed'
   const busy = phase === 'loading' || phase === 'recovering'
@@ -138,7 +140,7 @@ export function FullPageLoadingSurface({
       </div> : null}
       <div className="full-page-loading__stage">
         {children ?? <div className="full-page-loading__heading">
-            {busy ? <WaitingActivity key={phase} surface={surfaceRef} /> : null}
+            {busy ? <WaitingActivity key={phase} surface={surfaceRef} visible={visible} /> : null}
             <h1>{title}</h1>
             {!busy && scope === 'region' ? <span className="full-page-loading__mark" aria-hidden="true"><ThemeObjectTerminalIcon size={18} /></span> : null}
         </div>}

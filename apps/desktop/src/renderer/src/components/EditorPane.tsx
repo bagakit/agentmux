@@ -195,7 +195,7 @@ export function EditorPane({
   if (released) return <EditorReleasedState />
 
   if (!document) {
-    if (!issue) return <FullPageLoadingSurface scope="region" phase="loading" title="Loading file" detail={visible ? 'Reading file content' : 'File content loads when shown'} />
+    if (!issue) return <FullPageLoadingSurface scope="region" phase="loading" visible={visible} title="Loading file" detail={visible ? 'Reading file content' : 'File content loads when shown'} />
     return (
       <EditorUnavailableState
         {...(issue.kind === 'read-error' ? { message: issue.message, onRetry: () => { void reload(tabId, surface.regionId) } } : {})}
@@ -277,7 +277,7 @@ export function EditorPane({
       </div>
       <div className="editor-workspace">
       <div className="editor-canvas" inert={drawerOpen && expanded}>
-        <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" title="Loading editor" detail="Preparing the editor" />}>
+        <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" visible={visible} title="Loading editor" detail="Preparing the editor" />}>
         {note ? <>
           <div className="note-document-projection" hidden={!previewing} inert={!previewing}>
             <WorkbenchPresentationContext.Provider value={{ ...presentation, active: presentation.active && visible && previewing }}>{preview}</WorkbenchPresentationContext.Provider>

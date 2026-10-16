@@ -2091,6 +2091,7 @@ export function TerminalView({
             <FullPageLoadingSurface
               key="terminal-recovery"
               scope="region"
+              visible={visible}
               phase="recovering"
               eyebrow="Terminal recovery"
               title="Restoring terminal"
@@ -2107,6 +2108,7 @@ export function TerminalView({
             <FullPageLoadingSurface
               key="terminal-recovery"
               scope="region"
+              visible={visible}
               phase="loading"
               eyebrow="Terminal attach"
               title={`Starting ${agentProviderLabel(session.providerId)}`}
