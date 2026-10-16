@@ -1,7 +1,7 @@
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
-import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
+import { AGENTMUX_AGENT_MESSAGING_ENTRY } from './agent-messaging-guidance.js'
 
 /**
  * AgentMux 对 Agent 说的话，收敛到这一个模块。
@@ -21,27 +21,20 @@ import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js
  * 信封 `<amux>…</amux>` 只做**署名与可读性**：它把 "AgentMux 在对你说话" 与
  * "用户在对你说话" 分开，让 Agent 一眼能辨。它**不做认证**——标签是声明而非凭证，可被伪造
  * （见设计文档《AgentMux 对 Agent 说的话》的威胁模型），不签名、不校验、不引入 capability
- * ledger。格式人类可读、可嵌进自然语言，不是需要解析器的线协议。
+ * ledger。共享 reader 只解释可读边界，不从这些标签派发控制动作；格式合同归 amux 协议 SSOT。
  *
  * **用户原文永不被信封改写**：它照旧原样送达，不塞进属性、不被转义成另一种形状。信封包裹的
  * 只有 AgentMux 自己的话。
  */
 
-// 启动定向握手挂在这段引导里：让 Agent 第一步就去问自己的坐标与能力，而不是等到要开分屏那一刻才发现
-// 自己在 AgentMux 里。引导负责的是**发现**——让 Agent 知道这些能力存在（自定义 Executor 按名可开、
-// 可把一格搬进独立 Tab、按方向查看会落到可见 Region 或相邻 Tab 这两种不同的位置），并把「拆哪格」交给
-// 它自己按可见版面判断、事后回读实际落点；确切语法一律去 --skill 查，绝不把 flag 语法抄进来——语法的
-// 唯一真相在 skill，抄进来会在语法演进时立刻过期（与《不与 skill 争夺唯一真相》同源）。也因此这里不列
-// 窄/宽格子的特例：由 Agent 从可见版面自行决定，不给一张按尺寸查的表。
-//
-// 「驱动已开的 Browser」也在发现面里，理由同上：这个能力挂在一个**顶层动词**上（`amux browser run`），
-// 而顶层动词不像 open 的子命令那样会在别处被顺带提到——Agent 不知道它存在，就只会退回去让用户自己看页面，
-// 或者更糟，去猜坐标点击。这里只说"能做"与"按读到的元素动，不按坐标"，不写命令与 flag。
+// Bootstrap teaches discovery, not every future operation. Domain owners retain the
+// detailed contracts; reading a guide grants no permission and is not an input gate.
 const AGENTMUX_RUNTIME_GUIDE = `AgentMux runtime guide:
-You are running inside AgentMux. Before acting, run "$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB} once to learn who and where you are — your Session, View, Region, Workspace, and which capabilities are available to you.
-Before delegating, distinguish a Provider-native subagent from an independent AgentMux Session by the user's intent. Before opening an Agent or file, consider a new Tab or directional Region, readable layout, related Tab order and focus; use the skill's advisory opening playbook and briefly explain your choice.
-For web pages, prefer AgentMux's embedded Browser and public CLI. Reuse the exact Browser already confirmed for this task. If a new page is needed, inspect your own actual Tab/Region and the whole Tab's visible layout, then prefer a directional Region in that same Tab so the Agent and page stay readable together. Choose the direction from actual geometry and content. A crowded layout, a full workface for reading, an unsuitable capability or a user-specified Browser/tool can justify a related new Tab or the specified tool; briefly explain the reason and location. Placement does not authorize replacing existing content, changing focus, taking human control or bypassing refusal. Keep the original page, user input and unknown operation receipts; confirm the returned Browser, Tab, Region and navigation receipt.
-You can open a terminal, a browser, or another agent — including an executor someone configured, found by name — into a split beside your view (left, right, above, or below), move a region out into its own tab, and rearrange a tab's layout. A Browser that is already open can also be driven: you send it a program that reads the page, acts on the elements that reading names, and reads the result — so debugging a page you opened is something you do yourself, not something you ask the user to look at. Asking what is in a direction answers with the visible region beside you, or the adjacent tab when nothing is split there — not the same place. A link that belongs to a desktop app rather than to the web does not navigate that Browser: the person is asked once whether to hand it to their system, so a page can stay put for a reason that is theirs rather than a failure of yours. Split where both the old and the new content stay readable with the least disturbance, decide that from the visible view yourself, then confirm where it landed. ${AGENTMUX_AGENT_MESSAGING_GUIDANCE} An amux:// link identifies an Agent or spatial object; read the skill before inspecting, messaging or navigating its exact identity. For Goal execution or management, read ${AGENTMUX_GOAL_SKILL_ENTRY}; the application supplies accurate roles and original sources for each actual input. Updating guidance does not update a live model context. For the exact commands behind whoami or any capability, run "$AGENTMUX_CLI" --skill before acting.`
+You are in AgentMux. Run "$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB} once for your exact identity, capabilities and unavailable facts.
+Load only the relevant "$AGENTMUX_CLI" MODULE --skill before using that capability; use leaf --help for arguments. Use "$AGENTMUX_CLI" --skill to find an unknown module.
+${AGENTMUX_AGENT_MESSAGING_ENTRY}
+For web work, read browser --skill first; prefer AgentMux's Browser, reuse the confirmed Browser and honor the user's tool choice. Before opening an Agent/file/page or navigating, read space --skill, inspect your actual Tab/layout and choose a readable placement. For an amux:// link, read its object's module and use its exact identity. Preserve content, input and focus; confirm returned identities/receipts.
+For Goal work read ${AGENTMUX_GOAL_SKILL_ENTRY}; each actual input supplies its original role/source. Guidance grants no permissions; reading it does not prove adoption or update a live context.`
 
 // 引出紧随其后的用户原文——这句是 AgentMux 的引导语，不是用户的话，因此留在信封内。
 const USER_REQUEST_FOLLOWS = 'The user request follows.'
@@ -91,7 +84,7 @@ export function composeAgentPrompt(
  * restored by their original lifecycle owner, never recomposed here on retry. */
 export function composeAgentResumePrompt(prompt: string | undefined, agentMuxNote?: string): { text: string; systemContext?: string } {
   if (!prompt?.trim() && !agentMuxNote?.trim()) return composeAgentPrompt(prompt, agentMuxNote)
-  return composeAgentPrompt(prompt, [AGENTMUX_AGENT_MESSAGING_GUIDANCE, agentMuxNote?.trim() ? agentMuxNote : undefined].filter(Boolean).join('\n\n'))
+  return composeAgentPrompt(prompt, [AGENTMUX_AGENT_MESSAGING_ENTRY, agentMuxNote?.trim() ? agentMuxNote : undefined].filter(Boolean).join('\n\n'))
 }
 
 /**
