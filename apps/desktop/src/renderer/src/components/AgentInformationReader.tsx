@@ -354,16 +354,19 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     if (!surface || !visible) return
     let current = true
     const update = async () => {
+      if (bookmarkWindow.isGesturing()) return
+      const epoch = bookmarkWindow.positionEpoch()
+      const canPosition = () => current && !bookmarkWindow.isGesturing() && bookmarkWindow.positionEpoch() === epoch
       const { x, y } = await computePosition(request.anchor, surface, {
         strategy: 'fixed', placement: 'right-start', middleware: [offset(8),
           flip({ padding: 10, fallbackPlacements: ['left-start', 'bottom-start', 'top-start'] }), shift({ padding: 10 }),
           size({ padding: 10, apply({ availableHeight, elements }) {
             // Preserve room for title/actions when every side is constrained; fit the body by scrolling.
             const height = Math.min(620, window.innerHeight - 20, Math.max(Math.min(160, window.innerHeight - 20), availableHeight))
-            if (current && !bookmarkWindow.isGesturing()) elements.floating.style.maxHeight = `${height}px`
+            if (canPosition()) elements.floating.style.maxHeight = `${height}px`
           } }), shift({ padding: 10, crossAxis: true })]
       })
-      if (current && !bookmarkWindow.isGesturing()) {
+      if (canPosition()) {
         Object.assign(surface.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
         if (request.enterReading && document.activeElement === request.anchor && !request.anchor.closest('[inert]')) reading.current?.focus({ preventScroll: true })
       }
