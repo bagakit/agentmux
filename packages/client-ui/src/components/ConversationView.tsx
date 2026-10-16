@@ -32,7 +32,7 @@ export type ConversationReadActivity = {
 type Props = ReadingProps & {
   readActivity?: ConversationReadActivity
   questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
-  questionTerminalTarget?: { source: AgentSessionHistorySource; run: AgentMuxRunRef } | undefined
+  questionReplyTarget?: { source: AgentSessionHistorySource; run: AgentMuxRunRef } | undefined
   /** Changes reset only transient card actions; drafts remain in the host's original owner. */
   questionDraftNotice?: string | undefined
   questionReplyContext?: string
@@ -40,6 +40,7 @@ type Props = ReadingProps & {
   questionReplyState?: (target: ConversationQuestionTarget) => QuestionReplyState | undefined
   questionReplyDraft?: (target: ConversationQuestionTarget) => ConversationQuestionInput['answers'] | undefined
   onQuestionDraftChange?: (target: ConversationQuestionTarget, answers: ConversationQuestionInput['answers']) => void
+  onQuestionReply?: (input: ConversationQuestionInput) => Promise<void>
   renderQuestionNotice?: QuestionNoticeRenderer
   page?: AgentSessionHistoryPage | null
   timeline?: AgentTimelineSnapshot | undefined
@@ -68,7 +69,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
+  page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
 }: Props) {
   const projection = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
     coverage: coverage ?? acceptedRecords[0]?.coverage ?? [] }), [acceptedRecords, acceptedOriginals, coverage])
@@ -165,9 +166,9 @@ export const ConversationView = memo(function ConversationView({
       const recordId = record.id
       const question = questions.get(item.id)
       const questionAttempt = question && questionReplyState && question.turnId ? questionReplyState({ source: question.source, turnId: question.turnId, recordId: question.recordId }) : undefined
-      const terminalCurrent = Boolean(question && questionTerminalTarget && question.source.providerId === questionTerminalTarget.source.providerId
-        && question.source.nativeSessionId === questionTerminalTarget.source.nativeSessionId
-        && (!questionAttempt?.original || questionAttempt.original.input.expectedRun.runId === questionTerminalTarget.run.runId))
+      const replyTargetCurrent = Boolean(question && questionReplyTarget && question.source.providerId === questionReplyTarget.source.providerId
+        && question.source.nativeSessionId === questionReplyTarget.source.nativeSessionId
+        && (!questionAttempt?.original || questionAttempt.original.input.expectedRun.runId === questionReplyTarget.run.runId))
       const user = record.input
       const itemRef = conversationItemRef(record)
       const speaker = record.role === 'process' ? undefined : record.speaker
@@ -191,13 +192,14 @@ export const ConversationView = memo(function ConversationView({
           {...reading} />
       return <div key={recordId} data-conversation-layout-key={record.presentationKey ?? record.id} className="conversation-native-thread__record" data-native-source={JSON.stringify([page.source.providerId, page.source.nativeSessionId])} data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}
-        {question ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId, reading.executionHostId, questionReplyContext])} request={question.request} recordedAnswers={question.recordedAnswers} terminalCurrent={terminalCurrent}
+        {question ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId, reading.executionHostId, questionReplyContext])} request={question.request} recordedAnswers={question.recordedAnswers} replyTargetCurrent={replyTargetCurrent}
           {...(questionDraftNotice ? { draftNotice: questionDraftNotice } : {})}
           {...(questionReplyRoute ? { replyRoute: questionReplyRoute } : {})}
           {...(onOpenQuestionTerminal ? { onOpenTerminal: onOpenQuestionTerminal } : {})}
           {...(questionAttempt ? { attempt: questionAttempt } : {})}
           {...(questionReplyDraft && question.turnId ? { draftAnswers: questionReplyDraft({ source: question.source, turnId: question.turnId, recordId: question.recordId }) } : {})}
           {...(onQuestionDraftChange && question.turnId ? { onDraftChange: selected => onQuestionDraftChange({ source: question.source, turnId: question.turnId!, recordId: question.recordId }, selected) } : {})}
+          {...(onQuestionReply && question.turnId ? { onSend: answers => onQuestionReply({ source: question.source, turnId: question.turnId!, recordId: question.recordId, answers }) } : {})}
           {...(renderQuestionNotice ? { renderNotice: renderQuestionNotice } : {})} /> : null}
         {!original ? renderOriginals(record) : null}
         {item.questionDiagnostic ? renderQuestionNotice ? renderQuestionNotice(item.questionDiagnostic)
