@@ -29,7 +29,7 @@ const originalConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify(originalConfig))
 const children = new Set(), sessions = [], frames = [], cliCalls = []
-const facts = { frames, chain: { scenarios: [], cliCalls }, mailbox: {}, restart: {}, cleanup: { userRunTouched: false, processesReaped: false },
+const facts = { frames, chain: { scenarios: [], cliCalls, readEffects: [] }, mailbox: {}, restart: {}, cleanup: { userRunTouched: false, processesReaped: false },
   homeIsolation: { privateHome: process.env.HOME, launches: [] },
   syntheticNativeBoundary: 'Authenticated Codex 0.163 actor-shaped fixture, exact native UserMessage/client_id persisted by that actor. No model or vendor acceptance claim.' }
 let client, daemon, rpc, failure
@@ -57,6 +57,9 @@ async function credential(session) {
   })
 }
 async function cli(args, caller = null, expectSuccess = true) {
+  const readOperation = args[0] === 'message' && args[1] === 'read' ? 'message.read'
+    : args[0] === 'message' && args[1] === 'inbox' && args[2] === 'check' ? 'message.inbox.check' : null
+  const readEffectsBefore = readOperation ? await inputEffects() : null
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   if (caller) { const identity = await credential(caller); env.AGENTMUX_AGENT_SESSION_ID = identity.agentSessionId; env.AGENTMUX_AGENT_CAPABILITY = identity.capability }
   else { delete env.AGENTMUX_AGENT_SESSION_ID; delete env.AGENTMUX_AGENT_CAPABILITY }
@@ -71,6 +74,10 @@ async function cli(args, caller = null, expectSuccess = true) {
   if (expectSuccess) { assert.equal(child.exitCode, 0, diagnostic); assert.equal(receipt.ok, true, diagnostic) }
   else if (expectSuccess === false) { assert.equal(child.exitCode, 1, diagnostic); assert.equal(receipt.ok, false, diagnostic) }
   else { assert.ok([0, 1].includes(child.exitCode), diagnostic); assert.equal(receipt.ok, child.exitCode === 0, diagnostic) }
+  if (readOperation) {
+    const after = await inputEffects(); assert.deepEqual(after, readEffectsBefore, readOperation + ' must produce no native input effect')
+    facts.chain.readEffects.push({ operation: readOperation, args, before: readEffectsBefore, after })
+  }
   return receipt
 }
 async function cdpConnect(url) {
@@ -168,9 +175,18 @@ async function snapshot(app, ids, messageIds) {
   return { pid: app.child.pid, ...ui, runBirths, messages, seedControlsAbsent: app.seedControlsAbsent, origin: app.origin }
 }
 async function nativeRequests(session) { try { return (await readFile(join(controls, session.agentSessionId + '.requests.jsonl'), 'utf8')).split('\n').filter(Boolean).map(line => JSON.parse(line)) } catch (error) { if (error.code === 'ENOENT') return []; throw error } }
-async function history(session) { return await client.readAgentSessionHistory({ hostId: 'local', agentSessionId: session.agentSessionId, source: 'native', kind: 'user-message', limit: 100 }) }
+async function history(session) {
+  const before = await inputEffects()
+  const page = await client.readAgentSessionHistory({ hostId: 'local', agentSessionId: session.agentSessionId, source: 'native', kind: 'user-message', limit: 100 })
+  const after = await inputEffects(); assert.deepEqual(after, before, 'The original native history read must produce no input effect')
+  facts.chain.readEffects.push({ operation: 'nativeHistory', agentSessionId: session.agentSessionId, before, after })
+  return page
+}
 async function conversationInput(session, messageId) {
+  const before = await inputEffects()
   const page = await client.readAgentConversation({ hostId: 'local', agentSessionId: session.agentSessionId, limit: 100, maxBytes: 4 * 1024 * 1024 })
+  const after = await inputEffects(); assert.deepEqual(after, before, 'The original Conversation read must produce no input effect')
+  facts.chain.readEffects.push({ operation: 'conversation', agentSessionId: session.agentSessionId, before, after })
   assert.equal(page.window.complete, true); assert.equal(page.nextCursor, null)
   assert.ok(page.items.every(entry => entry.kind === 'item'), 'This bounded fixture produces complete source units')
   const units = page.items.map(entry => entry.item).filter(unit => unit.records.some(record => {
@@ -180,6 +196,10 @@ async function conversationInput(session, messageId) {
   return { page, units }
 }
 const inputRequests = rows => rows.filter(row => ['turn/start', 'turn/steer'].includes(row.method))
+async function inputEffects() {
+  return Object.fromEntries(await Promise.all(sessions.map(async session => [session.agentSessionId,
+    (await nativeRequests(session)).filter(row => ['turn/start', 'turn/steer'].includes(row.method) || typeof row.manualInput === 'string') ])))
+}
 try {
   daemon = spawn(join(root, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch, 'bin/ctxmuxd'), ['--socket', join(runtime, 'ctxmux.sock'), '--state-dir', join(state, 'ctxmux'), '--readiness-fd', '3'], {
     detached: true, env: process.env, stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
@@ -212,6 +232,7 @@ try {
   const normalId = 'a2a-normal-' + randomUUID(), normalOperation = randomUUID()
   const sendArgs = ['agent', 'send', '--to-tab', recipientPlace.to.tabId, '--text', normalBody, '--operation-id', normalOperation, '--message-id', normalId]
   const normal = await cli(sendArgs, author)
+  const readingEffectsBefore = await inputEffects()
   const original = (await cli(['message', 'read', '--host', 'local', '--message-id', normalId])).result.message
   assert.equal(original.envelope.senderSessionId, author.agentSessionId); assert.equal(original.envelope.recipientSessionId, recipient.agentSessionId); assert.equal(original.envelope.body, normalBody)
   await waitFor('native actor receives original input', async () => inputRequests(await nativeRequests(recipient)).some(row => row.params.input[0].text.includes(normalId)))
@@ -251,9 +272,11 @@ try {
   await activate(first.cdp, `${region(authorPlace.to.regionId)}.querySelector('[data-record-key="a2a:${normalId}"]')`)
   await waitFor('original Outbox body', () => first.cdp.evaluate(`${region(authorPlace.to.regionId)}.querySelector('.composer-mailbox__detail .log-turn__body')?.textContent.includes('the exact original')`))
   await screenshot(first, 'outbox-original')
+  const readingEffectsAfter = await inputEffects(); assert.deepEqual(readingEffectsAfter, readingEffectsBefore, 'Original reading, check, Copy and both A2A pages must produce no native input effect')
   // Local CLI ingress has a durable original but no authenticated human or Agent author.
   const localId = 'local-cli-original-' + randomUUID(), localBody = 'Local CLI original · Keep unattributed input separate from A2A'
   const localReceipt = await cli(['agent', 'send', '--to-session', author.agentSessionId, '--text', localBody, '--message-id', localId, '--operation-id', randomUUID()])
+  const localReadingEffectsBefore = await inputEffects()
   const localOriginal = (await cli(['message', 'read', '--host', 'local', '--message-id', localId])).result.message
   assert.equal(localOriginal.envelope.sender.kind, 'human'); assert.equal(localOriginal.envelope.senderSessionId, null)
   await openMailbox(first.cdp, authorPlace.to.regionId, 'inbox')
@@ -268,8 +291,10 @@ try {
   assert.ok(!userPage.text.includes('A2A original review'), 'The same accepted A2A original does not become another User Message')
   assert.ok(!userPage.keys.some(key => key.includes(normalId)))
   await screenshot(first, 'user-messages')
+  const localReadingEffectsAfter = await inputEffects(); assert.deepEqual(localReadingEffectsAfter, localReadingEffectsBefore, 'Reading an unattributed original must produce no native input effect')
   facts.chain.localCli = { cli: localReceipt, original: localOriginal, body: localBody, inbox, userPage }
-  facts.mailbox = { pages: ['inbox', 'outbox', 'user'], copyExact: copied === 'copied', humanReadDidNotAcknowledgeAgent: JSON.stringify(afterHumanRead) === JSON.stringify(batch), recipientUserPage, clipboardPort, clipboardBoundary: 'Only electron.clipboard.writeText is controlled; no user clipboard was read or written', beforeBatch: batch, afterHumanRead, bodyText: bodyCopy }
+  facts.mailbox = { pages: ['inbox', 'outbox', 'user'], copyExact: copied === 'copied', humanReadDidNotAcknowledgeAgent: JSON.stringify(afterHumanRead) === JSON.stringify(batch), recipientUserPage, clipboardPort, clipboardBoundary: 'Only electron.clipboard.writeText is controlled; no user clipboard was read or written', beforeBatch: batch, afterHumanRead, bodyText: bodyCopy,
+    readingEffects: { before: readingEffectsBefore, after: readingEffectsAfter }, localReadingEffects: { before: localReadingEffectsBefore, after: localReadingEffectsAfter } }
   facts.chain.scenarios.push({ kind: 'normal', cliMessageId: normalId, journalMessageId: original.envelope.messageId, body: normalBody, original, cli: normal })
   facts.chain.normal = { nativeInputCount: input.length, conversationCount: adopted.units.length, conversation: adopted.page, authorSessionId: adopted.units[0].event.author.agentSessionId, senderSessionId: author.agentSessionId, nativeInput: input[0], history: native }
   // Explicit native rejection and missing native receipt originate at the actor, never journal writes.
@@ -285,10 +310,11 @@ try {
   }
   const initialOperation = randomUUID(), initialBody = 'Original first A2A message before its recipient Run is selected'
   const initialOpened = (await cli(['agent', 'open', '--executor', 'proof', '--zone', zone.zoneId, '--new-tab', '--prompt', initialBody, '--operation-id', initialOperation], author)).result
+  const initialSession = (await client.readAgentSessions()).find(session => session.creation?.createOperationId === initialOperation)
+  assert.ok(initialSession?.run); sessions.push(initialSession)
   const initialOriginal = (await cli(['message', 'read', '--host', 'local', '--operation-id', initialOperation])).result.message
   assert.equal(initialOriginal.envelope.recipientRunId, null); assert.equal(initialOriginal.envelope.senderSessionId, author.agentSessionId); assert.equal(initialOriginal.envelope.body, initialBody)
-  const initialSession = (await client.readAgentSessions()).find(session => session.agentSessionId === initialOriginal.envelope.recipientSessionId)
-  assert.ok(initialSession?.run); sessions.push(initialSession)
+  assert.equal(initialOriginal.envelope.recipientSessionId, initialSession.agentSessionId)
   facts.chain.initial = { cli: initialOpened, original: initialOriginal, body: initialBody, runAtLaunch: initialSession.run }
   await writeFile(join(controls, other.agentSessionId + '.control.json'), JSON.stringify({ effect: 'unavailable' }))
   const unsubmittedId = 'a2a-unsubmitted-' + randomUUID(), unsubmittedBody = 'Original never adopted body ' + unsubmittedId
@@ -303,6 +329,7 @@ try {
   const originalAppearance = await first.cdp.evaluate('(async()=>(await window.agentmux.config.get()).appearance)()')
   const originalRendered = await first.cdp.evaluate('({appearance:document.documentElement.dataset.appearance,theme:document.documentElement.dataset.theme})')
   facts.mailbox.themeMatrix = { originalAppearance, originalRendered, transitions: [] }
+  const themeEffectsBefore = await inputEffects()
   try {
     for (const appearance of ['dark', 'light']) {
       const committed = await first.cdp.evaluate(`(async()=>{const expected=await window.agentmux.config.get();return(await window.agentmux.config.save({...expected,appearance:{...expected.appearance,appAppearance:${JSON.stringify(appearance)}}},expected)).appearance})()`)
@@ -321,6 +348,9 @@ try {
     facts.mailbox.themeMatrix.restoredAppearance = restored
     await waitFor('original production appearance restored', () => first.cdp.evaluate(`document.documentElement.dataset.appearance===${JSON.stringify(originalRendered.appearance)}`))
   }
+  const themeEffectsAfter = await inputEffects(); assert.deepEqual(themeEffectsAfter, themeEffectsBefore, 'Theme changes and all twelve original page captures must produce no native input effect')
+  facts.mailbox.themeMatrix.effects = { before: themeEffectsBefore, after: themeEffectsAfter }
+  const routeEffectsBefore = await inputEffects()
   const addition = (await cli(['agent', 'open', '--session', other.agentSessionId, '--region', recipientPlace.to.regionId, '--split', 'right', '--focus'])).result
   assert.equal(addition.to.tabId, recipientPlace.to.tabId)
   const pinnedRetry = await cli(sendArgs, author); assert.equal(pinnedRetry.result.envelope.recipientSessionId, recipient.agentSessionId)
@@ -328,11 +358,13 @@ try {
   assert.equal(inputRequests(await nativeRequests(other)).filter(row => row.params.input?.some(part => part.text.includes(normalId))).length, 0)
   facts.restart.routeChange = { subject: { kind: 'tab', tabId: recipientPlace.to.tabId }, first: recipientPlace, added: addition, operation: 'agent.open --session C --region B --split right', retry: pinnedRetry, boundary: 'Original Tab gained a second participant; no occupied Region was replaced' }
   facts.restart.reboundOccupantInputCount = 0
-  const wrongRun = await cli(['message', 'inbox', 'ack', '--generation', String(batch.generation), '--reader-run', 'wrong-private-run'], recipient, false)
-  const staleGeneration = await cli(['message', 'inbox', 'ack', '--generation', String(batch.generation + 100), '--reader-run', batch.readerRun.runId], recipient, false)
-  assert.equal(wrongRun.error.code, 'MESSAGE_ACK_GENERATION_STALE'); assert.equal(staleGeneration.error.code, 'MESSAGE_ACK_GENERATION_STALE')
-  facts.restart.wrongRunAckRefused = true; facts.restart.staleGenerationRefused = true
-  facts.restart.ackReceipts = { wrongRun, staleGeneration }
+  const wrongRun = await cli(['message', 'inbox', 'ack', '--generation', String(batch.generation), '--reader-run', author.run.runId], recipient, false)
+  assert.equal(wrongRun.error.code, 'MESSAGE_ACK_GENERATION_STALE')
+  facts.restart.wrongRunAckRefused = true
+  facts.restart.ackReceipts = { wrongRun, wrongReaderRun: author.run }
+  const routeEffectsAfter = await inputEffects(); assert.deepEqual(routeEffectsAfter, routeEffectsBefore, 'A presentation split, same-MID replay and rejected ack must produce no native input effect')
+  facts.restart.routeEffects = { before: routeEffectsBefore, after: routeEffectsAfter }
+  const workfaceEffectsBefore = await inputEffects()
   await cli(['space', 'focus', '--region', recipientPlace.to.regionId]); await openMailbox(first.cdp, recipientPlace.to.regionId, 'inbox')
   await screenshot(first, 'inbox-states'); await screenshot(first, 'inbox-states-narrow', 750, 900)
   await activate(first.cdp, `${region(recipientPlace.to.regionId)}.querySelector('.composer__mailbox')`)
@@ -352,7 +384,8 @@ try {
   const messageIds = [...facts.chain.scenarios.map(item => item.cliMessageId), initialOriginal.envelope.messageId, localId], ids = sessions.map(session => session.agentSessionId)
   const before = await snapshot(first, ids, messageIds); facts.restart.first = before
   for (const run of before.runBirths) { const group = run.birth.split(/\s+/)[1]; assert.notEqual(Number(group), first.child.pid, 'Healthy Run stays outside the killed Electron group') }
-  const inputBefore = Object.fromEntries(await Promise.all(sessions.map(async session => [session.agentSessionId, inputRequests(await nativeRequests(session)).length])))
+  const inputBefore = await inputEffects(); assert.deepEqual(inputBefore, workfaceEffectsBefore, 'Inbox state reading, queue-only Enter, retained draft and snapshot must produce no native input effect')
+  facts.restart.workfaceEditingEffects = { before: workfaceEffectsBefore, after: inputBefore }
   first.main.close(); first.cdp.close(); await stop(first.child, 'SIGKILL'); facts.restart.first.signal = first.child.signalCode
   const second = await launch('second')
   await waitFor('original Region and draft restored without a seed', () => second.cdp.evaluate(`${region(recipientPlace.to.regionId)}?.querySelector('.composer [role="textbox"]')?.textContent.includes('Original unsent draft')`))
@@ -363,25 +396,41 @@ try {
   const replay = (await cli(['message', 'inbox', 'check', '--limit', '100'], recipient)).result; assert.deepEqual(replay, batch)
   const acknowledged = (await cli(['message', 'inbox', 'ack', '--generation', String(batch.generation), '--reader-run', batch.readerRun.runId], recipient)).result
   assert.deepEqual(acknowledged.acknowledgedMessageIds, [normalId])
-  facts.restart.agentConsumption = { originalBatch: batch, replay, acknowledged }
+  const nextBatch = (await cli(['message', 'inbox', 'check', '--limit', '100'], recipient)).result
+  const nextIds = facts.chain.scenarios.filter(item => ['failed', 'unknown'].includes(item.kind)).map(item => item.journalMessageId).sort()
+  assert.deepEqual(nextBatch.messages.map(item => item.envelope.messageId).sort(), nextIds); assert.ok(nextBatch.messages.length > 0)
+  assert.ok(nextBatch.generation > batch.generation); assert.deepEqual(nextBatch.readerRun, batch.readerRun)
+  const lateGeneration = await cli(['message', 'inbox', 'ack', '--generation', String(batch.generation), '--reader-run', batch.readerRun.runId], recipient, false)
+  assert.equal(lateGeneration.error.code, 'MESSAGE_ACK_GENERATION_STALE')
+  const retainedNextBatch = (await cli(['message', 'inbox', 'check', '--limit', '100'], recipient)).result
+  assert.deepEqual(retainedNextBatch, nextBatch, 'A genuine late ack cannot advance the next original batch')
+  facts.restart.staleGenerationRefused = true; facts.restart.ackReceipts.lateGeneration = lateGeneration
+  facts.restart.agentConsumption = { originalBatch: batch, replay, acknowledged, nextBatch, retainedNextBatch }
   const unknownCase = facts.chain.scenarios.find(item => item.kind === 'unknown')
   const unknownRetry = await cli(unknownCase.args, author, null)
+  assert.equal(unknownCase.cli.ok, false); assert.equal(unknownCase.cli.error.code, 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+  assert.equal(unknownRetry.ok, false); assert.equal(unknownRetry.error.code, unknownCase.cli.error.code, 'Retry must report the original unknown input, never a new conflict or authority failure')
+  assert.equal(unknownRetry.operation, unknownCase.cli.operation); assert.equal(unknownRetry.operationId, unknownCase.cli.operationId)
   const retainedUnknown = await client.inspectAgentPromptSubmission({ kind: 'message', agentSessionId: recipient.agentSessionId, expectedRun: recipient.run, messageId: unknownCase.journalMessageId })
   assert.deepEqual(retainedUnknown, unknownCase.claim, 'A lost native receipt retry keeps the exact original claim')
   const unknownNativeCount = inputRequests(await nativeRequests(recipient)).filter(row => row.params.input.some(part => part.text.includes(unknownCase.journalMessageId))).length
   assert.equal(unknownNativeCount, 1)
-  facts.restart.unknownReplay = { originalMessageId: unknownCase.journalMessageId, retry: unknownRetry, retainedClaim: retainedUnknown, nativeInputCount: unknownNativeCount }
-  const inputAfter = Object.fromEntries(await Promise.all(sessions.map(async session => [session.agentSessionId, inputRequests(await nativeRequests(session)).length])))
+  facts.restart.unknownReplay = { originalMessageId: unknownCase.journalMessageId, firstReceipt: unknownCase.cli, retry: unknownRetry, retainedClaim: retainedUnknown, nativeInputCount: unknownNativeCount }
+  const inputAfter = await inputEffects()
   assert.deepEqual(inputAfter, inputBefore); facts.restart.replayCount = 0
+  facts.restart.inputEffects = { before: inputBefore, after: inputAfter }
   const marker = 'private-manual-after-restart-' + randomUUID()
   const metadata = (await client.readAgentSessions()).find(session => session.agentSessionId === recipient.agentSessionId)
   const originalNativePath = metadata.nativeHandle.transcriptPath
   assert.ok(originalNativePath.startsWith(nativeHome + '/'))
   await rename(originalNativePath, originalNativePath + '.proof-unavailable')
   try {
+    const observationEffectsBefore = await inputEffects()
     const observed = await cli(['agent', 'history', '--host', 'local', '--session', recipient.agentSessionId, '--source', 'native', '--kind', 'user-message'], null, false)
     facts.restart.observationFailure = observed
     assert.deepEqual((await cli(['message', 'read', '--host', 'local', '--message-id', normalId])).result.message, original)
+    const observationEffectsAfter = await inputEffects(); assert.deepEqual(observationEffectsAfter, observationEffectsBefore, 'A failed native observation and original message read must produce no input effect')
+    facts.restart.observationReadEffects = { before: observationEffectsBefore, after: observationEffectsAfter }
     await client.writeAgent({ agentSessionId: recipient.agentSessionId, expectedRun: recipient.run, data: marker + '\r', source: 'user' })
   } finally { await rename(originalNativePath + '.proof-unavailable', originalNativePath) }
   await waitFor('same healthy Run accepts manual input', async () => (await nativeRequests(recipient)).some(row => row.manualInput?.includes(marker)))
