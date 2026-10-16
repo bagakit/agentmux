@@ -19,7 +19,7 @@ it('moves focus across the actual Note tools without formatting or moving the ed
   const changed = vi.fn()
   await act(async () => root.render(<NoteBlockEditor note={note} knowledge={noteKnowledge([])} onChange={changed} onOpen={() => {}} onSave={() => {}} onIssue={() => {}} />))
   const toolbar = host.querySelector<HTMLElement>('[role="toolbar"]')!
-  const buttons = [...toolbar.querySelectorAll<HTMLButtonElement>('button')]
+  const buttons = [...toolbar.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
   expect(buttons.filter(button => button.tabIndex === 0)).toHaveLength(0)
   expect(toolbar.tabIndex).toBe(0)
   const editor = (host.querySelector('.note-block-content') as HTMLElement & { editor: import('@tiptap/core').Editor }).editor
@@ -32,7 +32,7 @@ it('moves focus across the actual Note tools without formatting or moving the ed
   await key(buttons[0]!, 'End')
   expect(document.activeElement).toBe(buttons.at(-1))
   await key(buttons.at(-1)!, 'ArrowLeft')
-  expect(document.activeElement?.getAttribute('aria-label')).toBe('Quote')
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('Bullet list')
   await key(document.activeElement as HTMLElement, 'Home')
   expect(document.activeElement).toBe(buttons[0])
   expect(editor.state.selection.toJSON()).toEqual(before)

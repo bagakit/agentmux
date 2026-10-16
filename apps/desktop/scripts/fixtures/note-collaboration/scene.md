@@ -1,6 +1,6 @@
 # Note collaboration and recovery review
 
-This private fixture mounts the original `FileSurfaceView`, Store, rich editor, source Monaco and workers. Its Host uses the original Note writer, workspace files, SQLite history and Core public file service. HTTP/SSE replace Electron transport. It does not exercise an installed application or a native Agent Run. Host title and graph capabilities that are absent from this fixture remain explicitly unavailable.
+This private fixture mounts the original `FileSurfaceView`, Store, rich editor, source Monaco and workers. Its Host uses the original Note writer, shared-block owner, workspace files, SQLite history, title/graph owners and Core public file service. HTTP/SSE replace Electron transport. It does not exercise an installed application or a native Agent Run.
 
 Use a fresh disposable directory under the short system temporary directory using the `amux-note-t5-*` prefix as `AGENTMUX_NOTE_FIXTURE_ROOT`, and run the existing `vite.config.mts` with the workspace's installed Vite after building the workspace dependencies. Never point it at user data. Keep the same directory when checking a real process restart. The fixture defaults to port 4209 and refuses an unrelated root.
 
@@ -12,5 +12,14 @@ Review the [Note presentation contract](../../../../../docs/design/presentation/
 - Retain a draft, an unknown original save and a conversion backup; also overlap a real external edit. Check the one concise status, the distinct Versions and Drafts & recovery sections, the three original conflict sources and the explicit overwrite action.
 - At wide, narrow and short Region sizes in both themes, open, expand, return and close the reader. Switch Source/Note/Graph, retain incomplete Source, and verify editor identity, selection, composition and undo. Only the review area expands; the editing tree is retained.
 - Drop a write reply in the private transport, flush, stop only this fixture process and restart with the same data. Verify the original Note, Tab, Regions, layout, later input and operation. Checking the original event must not issue a replacement write.
+
+For the shared Markdown workflow, start in explicit Notebook mode (`AGENTMUX_NOTE_FIXTURE_MODE=notebook`) and open `notebook.html`. Use the real Recall page-creation and navigation controls:
+
+- Write ordinary content in two Notes. Hover or focus the source block, then use `Copy shared block reference`. Copying alone must not create a shared file or rewrite the source.
+- Paste in the destination and undo before saving. Check the real directory through Files: no shared entity was created. Paste again, save, and confirm the source position and destination both include the same independently saved Markdown identity.
+- Edit the shared content from each Note in turn, including adding an ordinary paragraph. The other view must show the same content after navigation; the two host files must contain includes rather than copies of the expanded body. Ctrl-S and the format toolbar must address the focused shared editor, while edits outside its boundary address the host.
+- At wide and narrow sizes in both themes, review the permanent start/end boundary, focused block actions, pending/cancel state, shared save state and continuous ordinary text. Avoid repeated editor toolbars, a card wall or invisible boundaries that appear only on hover.
+- Retain a pending pasted use, flush and restart this private Host/Renderer with the same data and browser storage. The original draft must still support save or undo without a replacement entity or operation. Repeat with an interrupted sharing operation and inspect the original request rather than replaying it.
+- Use the compiled CLI against the fixture socket to read the same shared Markdown and graph, and inspect the sharing operation. Source, shared-file and destination receipts remain distinct; an observed file is not an original commit receipt. Removal of one use does not authorize deletion of content needed elsewhere.
 
 Save full screenshots and exact loaded-source receipts locally. Capture is not aesthetic approval: an independent reviewer must actually open the final images, and any visual correction requires fresh captures. Close this fixture's browser/process and remove disposable data after preserving necessary evidence.
