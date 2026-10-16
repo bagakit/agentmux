@@ -23,7 +23,7 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
     const panel = surface.current, document = anchor.ownerDocument, window = document.defaultView!
     const update = async () => {
       const position = await computePosition(anchor, panel, { strategy: 'fixed', placement,
-        middleware: [offset(8), flip(), shift({ padding: 8 })] })
+        middleware: [offset(8), flip(), shift({ padding: 8, crossAxis: true })] })
       if (!disposed) {
         Object.assign(panel.style, { left: `${position.x}px`, top: `${position.y}px`, visibility: 'visible' })
         if (pointerPassThrough) setOverflowing(panel.scrollHeight > panel.clientHeight + 1)
