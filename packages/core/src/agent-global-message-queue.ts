@@ -18,7 +18,8 @@ import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOp
 import { normalizeMessageChannel } from './message-origin.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { configureMessageJournal, inputControlJournalSchema, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
+import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, openMessageJournal, syncMessageJournal } from './agent-message-journal.js'
+import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
 import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWaitRef,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
@@ -107,6 +108,7 @@ type InputMailboxJournalItem = { sequence: number; recordedAt: number } & (
 
 export type AgentMuxMessageJournalRecord =
   | AgentInputWaitJournalRecord
+  | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
   | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
   | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
@@ -238,6 +240,7 @@ export class DurableAgentMuxMessageQueue {
       // Existing journals are validated by their original owner before this
       // writer transaction adds its own bounded internal projections.
       this.db.exec(inputControlJournalSchema)
+      this.db.exec(messageRouteJournalSchema)
       stage = 'operation'
       result = await operation()
       stage = 'journal-commit'
@@ -581,7 +584,10 @@ export class DurableAgentMuxMessageQueue {
       this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
       return
     }
-    if (record.kind === 'message') {
+    if (record.kind === 'message-route') {
+      const route = validateAgentMessageRoute(record.route)
+      this.db.prepare('INSERT INTO message_routes VALUES (?, ?, ?)').run(route.messageId, route.operationId, record.sequence)
+    } else if (record.kind === 'message') {
       if (record.execution !== undefined && record.execution !== 'default' && record.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'MESSAGE_QUEUE_UNAVAILABLE')
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
       if (record.admissionIntent !== undefined) {
@@ -681,6 +687,9 @@ export class DurableAgentMuxMessageQueue {
         JSON.stringify(existing.sourceDevice) === JSON.stringify(sourceDevice) &&
         (newMessage !== undefined && input.admissionIntent === undefined || JSON.stringify(existing.admissionIntent) === JSON.stringify(admissionIntent))
       const envelope = validateAgentMuxMessageEnvelope({ ...input, schema: 'agentmux.a2a.v1', messageId })
+      const route = this.messageRoute(envelope.operationId, messageId)
+      if (route && (route.hostId !== 'local' || route.agentSessionId !== envelope.recipientSessionId)) throw new AgentMuxError(
+        'The original message belongs to another retained route. No local replacement was appended.', 'MESSAGE_RECIPIENT_MISMATCH')
       const existingId = this.operationMessageId(envelope.operationId)
       if (existingId) {
         const existing = this.message(existingId)!
@@ -762,6 +771,39 @@ export class DurableAgentMuxMessageQueue {
       }
       await this.appendRecord({ kind: 'prompt-condition', sequence: this.nextSequence, messageId, condition: candidate })
       return structuredClone(candidate)
+    }, true)
+  }
+
+  /** Indexed ingress facts never replay or load unrelated messages. */
+  private messageRoute(operationId: string, messageId?: string): AgentMessageRoute | null {
+    const select = `SELECT r.json FROM message_routes m JOIN records r ON r.sequence=m.sequence WHERE `
+    const byOperation = this.db.prepare(select + 'm.operation_id=?').get(operationId)
+    const byMessage = messageId === undefined ? undefined : this.db.prepare(select + 'm.message_id=?').get(messageId)
+    const parse = (row: Record<string, unknown> | undefined) => row ?
+      (JSON.parse(String(row.json)) as Extract<JournalRecord, { kind: 'message-route' }>).route : null
+    const original = parse(byOperation), selected = parse(byMessage)
+    if (original && messageId !== undefined && original.messageId !== messageId ||
+        original && selected && original.messageId !== selected.messageId) throw new AgentMuxError(
+      'Message operation and message ID name different original routes.', 'MESSAGE_ID_CONFLICT')
+    return original ?? selected
+  }
+
+  async readMessageRoute(operationId: string, messageId?: string): Promise<AgentMessageRoute | null> {
+    // A retry may follow a committed route whose first fsync ACK was lost. Confirm
+    // that same journal before allowing its binding to precede a remote effect.
+    return this.withLock(async () => this.messageRoute(nonEmpty(operationId, 'Message operation'), messageId), true)
+  }
+
+  /** Atomic first binding and durability ACK precede any remote input or receipt lookup. */
+  async claimMessageRoute(input: AgentMessageRoute): Promise<AgentMessageRoute> {
+    const candidate = validateAgentMessageRoute(input)
+    return this.withLock(async () => {
+      const original = this.messageRoute(candidate.operationId, candidate.messageId)
+      if (original) { assertAgentMessageRouteIntent(original, candidate); return original }
+      if (this.operationMessageId(candidate.operationId) || this.message(candidate.messageId)) throw new AgentMuxError(
+        'This message already belongs to the local journal. It cannot acquire a different route.', 'MESSAGE_ID_CONFLICT')
+      await this.appendRecord({ kind: 'message-route', sequence: this.nextSequence, route: candidate })
+      return candidate
     }, true)
   }
 
