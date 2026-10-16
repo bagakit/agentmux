@@ -6,6 +6,7 @@ import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixture
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
+import { observeWorkbenchNativeVisibility, registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-window-registry'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
@@ -80,6 +81,9 @@ it.each(['projection', 'observation'] as const)('actual Focus %s reads pending â
   const gate = new Promise<void>(resolve => { release = resolve })
   h.reads.mockImplementation(async (...args) => { await gate; if (fail) throw Object.assign(Error('Isolated original conversation read unavailable'), { code: 'CONTROL_UNAVAILABLE' }); return originalRead(...args) })
   closes.push(() => release())
+  const identity = { windowId: 'reading-window', documentGeneration: 'reading-document' }
+  const disposeDocument = registerWorkbenchDocument(document, identity)
+  closes.push(async () => { await act(async () => disposeDocument()) })
   await h.render(); await wait(() => expect(h.reads.mock.calls.length).toBeGreaterThan(0)); h.assertRoute()
   expect(h.feed().textContent).toContain('Reading conversationâ€¦')
   expect(h.feed().textContent).not.toContain('Reading interrupted'); expect(h.feed().querySelector('[role="slider"]')).toBeNull()
@@ -89,6 +93,15 @@ it.each(['projection', 'observation'] as const)('actual Focus %s reads pending â
   expect(scene.querySelector('.full-page-loading__waiting'), 'Reading does not mount an elapsed waiting observer').toBeNull()
   expect(scene.querySelector('.activity-feed__reading-light')?.getAttribute('aria-hidden')).toBe('true')
   expect(scene.querySelector('.activity-feed__reading-caption')?.textContent).toBe('Reading conversationâ€¦')
+  const presentation = (value: 'hidden' | 'visible') => observeWorkbenchNativeVisibility([{ ...identity, target: null, presentation: value, bounds: null, focused: null }])
+  await act(async () => presentation('hidden'))
+  const hiddenLight = h.feed().querySelector<HTMLElement>('.activity-feed__reading-light')
+  if (route === 'observation') expect(hiddenLight).not.toBeNull()
+  if (hiddenLight) expect(hiddenLight.style.animationPlayState, 'The original hidden document stops decorative reading motion').toBe('paused')
+  const hiddenCalls = h.reads.mock.calls.length; await pause(80); expect(h.reads).toHaveBeenCalledTimes(hiddenCalls)
+  await act(async () => presentation('visible'))
+  await wait(() => expect(h.feed().querySelector('.activity-feed__reading-light')).not.toBeNull())
+  expect(h.feed().querySelector<HTMLElement>('.activity-feed__reading-light')?.style.animationPlayState).not.toBe('paused')
   await act(async () => release()); await wait(() => expect(h.feed().textContent).toContain('Reading interrupted'))
   expect(h.feed().textContent).toContain('Isolated original conversation read unavailable')
   expect(h.feed().textContent).toContain('Retry the source above to continue reading.')
