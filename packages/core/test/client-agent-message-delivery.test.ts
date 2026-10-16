@@ -100,6 +100,19 @@ async function fixture() {
 }
 
 describe('Core owns authenticated durable Agent delivery', () => {
+  it.each(['exact-condition', 'manual-actor'] as const)('keeps local-cli transport authors unconfirmed through %s input acceptance', async mode => {
+    const f = await fixture(), condition = f.input().condition
+    const envelope: AgentMuxMessageEnvelope = { ...f.envelope, sender: { kind: 'human', principal: 'local-cli' }, senderSessionId: null, senderRunId: null }
+    await f.client.submitAgentMessage({ agentSessionId: 'recipient', envelope, execution: 'immediate',
+      ...(mode === 'exact-condition' ? { condition } : { admissionIntent: { kind: 'manual-actor', expectedRun: condition.expectedRun } }) })
+    const key = { kind: 'message' as const, agentSessionId: 'recipient', expectedRun: condition.expectedRun, messageId: envelope.messageId }
+    await vi.waitFor(async () => expect((await f.client.inspectAgentPromptSubmission(key))?.admission?.intent?.message?.userContent).toBe(body))
+    const original = await f.client.inspectAgentPromptSubmission(key)
+    expect(original?.admission?.intent?.message?.authorHuman).toBeUndefined()
+    expect(original?.admission?.intent?.message?.authorAgentSessionId).toBeUndefined()
+    expect((await f.queue.readByMessageId(envelope.messageId))?.envelope).toEqual(envelope)
+  })
+
   it('carries actual CLI input through public RPC, Core journal and Provider Input with the same MID', async () => {
     const f = await fixture()
     const server = new AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: async () => [{ hostId: 'local', client: f.client }] })
@@ -220,6 +233,7 @@ describe('Core owns authenticated durable Agent delivery', () => {
     const f = await fixture()
     await f.client.submitAgentPrompt({ ...f.input().condition, agentSessionId: 'recipient', operationId: 'manual', prompt: body, authorHuman: true })
     expect(f.writes).toEqual([body + '\r']); expect(await f.queue.listAfter()).toEqual([])
+    expect((await f.store.loadTimeline('recipient')).items[0]?.authorHuman).toBe(true)
     await expect(f.client.submitAgentPrompt({ ...f.input().condition, agentSessionId: 'recipient', operationId: 'raw-agent', prompt: body,
       ...{ authorAgentSessionId: 'sender' } })).rejects.toMatchObject({ code: 'MESSAGE_ENVELOPE_REQUIRED' })
     await f.client.createAgentWithDelivery({ agentSessionId: 'human-created', createOperationId: 'human-create', providerId: 'claude',

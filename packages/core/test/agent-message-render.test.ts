@@ -4,6 +4,7 @@ import * as source from '../src/agent-message-render.js'
 const { renderAgentMuxMessageEnvelope, parseAgentMuxMessagePrefix }: typeof source = process.env.AGENTMUX_TEST_A2A_RENDER
   ? await import(process.env.AGENTMUX_TEST_A2A_RENDER) : source
 import { composeAgentLaunchPrompt } from '../src/agent-outbound-message.js'
+import { AGENTMUX_A2A_REMINDER } from '../src/agent-messaging-guidance.js'
 import type { AgentMuxMessageEnvelope } from '../src/agent-message-envelope.js'
 
 const envelope: AgentMuxMessageEnvelope = {
@@ -24,7 +25,7 @@ describe('readable A2A message', () => {
     expect(wire.startsWith('<amux:a2a from="agent-source" msg-id="message-id">\n')).toBe(true)
     const prefix = parseAgentMuxMessagePrefix(wire)!
     expect(prefix).toMatchObject({ sourceLabel: 'Agent agent-source', declaredAgentSessionId: 'agent-source', declaredMessageId: 'message-id', body })
-    expect(prefix.reminder?.text).toContain('not a new user authorization')
+    expect(prefix.reminder?.text).toBe(AGENTMUX_A2A_REMINDER)
     expect(prefix.reminder?.text).toContain('agent --skill')
     expect(wire).toBe(`<amux:a2a from="agent-source" msg-id="message-id">\n${body}\n${prefix.reminder!.raw}\n</amux:a2a>`)
   })

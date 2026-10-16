@@ -254,7 +254,7 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
 
   it('resume（resumeAgentRun）经出口产出原用户段与显式系统上下文', () => {
     const resume = clientSlice('private async resumeAgentRun(', 'let reservation =')
-    expect(resume).toContain('composeAgentPrompt(input.prompt, input.agentMuxNote)')
+    expect(resume).toContain('composeAgentResumePrompt(input.prompt, input.agentMuxNote)')
     expect(resume).toContain('const prompt = composed.text || undefined')
     expect(resume).toContain('systemContext: composed.systemContext')
   })
