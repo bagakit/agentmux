@@ -50,6 +50,33 @@ export const messageRouteJournalSchema = `
   );
 `
 
+/** Future sequence positions only: no history backfill, copied message or consumption state. */
+export const messageObservationJournalSchema = `
+  CREATE TABLE IF NOT EXISTS message_observation_records (sequence INTEGER PRIMARY KEY);
+  CREATE TRIGGER IF NOT EXISTS message_observation_record_insert AFTER INSERT ON records
+    WHEN (json_extract(NEW.json, '$.kind') = 'message'
+      AND json_extract(NEW.json, '$.envelope.sender.kind') = 'agent-session'
+      AND json_extract(NEW.json, '$.envelope.recipient.kind') = 'agent-session')
+    OR (json_extract(NEW.json, '$.kind') IN ('delivery', 'delivery-issue') AND EXISTS (
+      SELECT 1 FROM messages m JOIN records original ON original.sequence=m.message_sequence
+      WHERE m.message_id=json_extract(NEW.json, '$.messageId')
+        AND json_extract(original.json, '$.envelope.sender.kind') = 'agent-session'
+        AND json_extract(original.json, '$.envelope.recipient.kind') = 'agent-session'))
+    BEGIN INSERT INTO message_observation_records VALUES (NEW.sequence); END;
+`
+
+export const messageObservationQuery = `WITH changed AS (
+  SELECT position.sequence, COALESCE(json_extract(r.json, '$.envelope.messageId'), json_extract(r.json, '$.messageId')) AS message_id
+  FROM message_observation_records position JOIN records r ON r.sequence=position.sequence
+  WHERE position.sequence > ? AND position.sequence <= ? ORDER BY position.sequence LIMIT 100)
+  SELECT changed.sequence, changed.message_id,
+    json_extract(original.json, '$.envelope.senderSessionId') AS sender_id,
+    json_extract(original.json, '$.envelope.recipientSessionId') AS recipient_id,
+    json_extract(original.json, '$.envelope.sender.kind') AS sender_kind,
+    json_extract(original.json, '$.envelope.recipient.kind') AS recipient_kind
+  FROM changed JOIN messages m ON m.message_id=changed.message_id
+    JOIN records original ON original.sequence=m.message_sequence ORDER BY changed.sequence`
+
 /** The original records remain the SSOT. These indexes select one participant's messages. */
 export const dispatchDiscoveryJournalSchema = `
   CREATE INDEX IF NOT EXISTS message_sender ON records(json_extract(json, '$.envelope.senderSessionId'))
@@ -70,6 +97,18 @@ export function configureMessageJournal(db: DatabaseSync): void {
   // DELETE + EXTRA keeps SQLite's atomic rollback protocol and its directory-sync ACK.
   // No synchronous busy wait may occupy the terminal/Hook event loop.
   db.exec('PRAGMA busy_timeout = 0; PRAGMA journal_mode = DELETE; PRAGMA synchronous = EXTRA')
+}
+
+/** Open only while holding the original writer mutex; a reader must not race a DELETE-mode commit. */
+export async function openMessageJournalSnapshot(path: string): Promise<DatabaseSync> {
+  const { DatabaseSync } = await import('node:sqlite')
+  const db = new DatabaseSync(path, { readOnly: true })
+  try {
+    db.exec('PRAGMA busy_timeout = 0; BEGIN')
+    if (db.prepare('PRAGMA application_id').get()?.application_id !== applicationId ||
+        db.prepare('PRAGMA user_version').get()?.user_version !== 1) throw new Error('The original AgentMux message journal is unconfirmed.')
+    return db
+  } catch (error) { db.close(); throw error }
 }
 
 export async function syncMessageJournal(path: string): Promise<void> {

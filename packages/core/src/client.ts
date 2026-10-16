@@ -99,6 +99,7 @@ import {
 import { advanceDelivery, type AgentThread } from './agent-message.js'
 import type { AgentMuxExecutorProbeResult } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
+import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
   type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
@@ -826,6 +827,9 @@ export class AgentMuxClient {
   private readonly continuityInputs: AgentSessionContinuityInputs
   private readonly continuityInputsUnsubscribe: () => void
   private readonly publisher = new AgentMuxClientEventPublisher()
+  private messageReadUsed = false
+  private messageObservationDisposed = false
+  private messageObservation: ReturnType<typeof observeMessageJournal> | undefined
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
   private readonly hookInstaller: AgentManagedHookInstaller
@@ -1851,6 +1855,7 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    this.messageObservationDisposed = true; this.messageObservation?.dispose(); this.messageObservation = undefined
     await this.continuityInputs.dispose()
     this.continuityInputsUnsubscribe()
     await this.continuitySupervisor.dispose()
@@ -1893,7 +1898,21 @@ export class AgentMuxClient {
    * subscribe again. Other Consumers and Run capabilities remain available.
    */
   onEvent<Result>(listener: AgentMuxClientEventListener<Result>, options?: AgentMuxClientEventListenerOptions): () => void {
-    return this.publisher.onEvent(listener, options)
+    const release = this.publisher.onEvent(listener, options)
+    this.observeMessageReads()
+    return () => {
+      release()
+      if (!this.publisher.hasEventListeners) { this.messageObservation?.dispose(); this.messageObservation = undefined }
+    }
+  }
+
+  private observeMessageReads() {
+    if (this.messageObservationDisposed || !this.messageReadUsed || !this.publisher.hasEventListeners) return
+    this.messageObservation ??= observeMessageJournal(this.messageQueue, event => {
+      this.publisher.publish(event)
+      if (!this.publisher.hasEventListeners) { this.messageObservation?.dispose(); this.messageObservation = undefined }
+    })
+    return this.messageObservation
   }
 
   /** A scoped, fresh observation; intentionally available before Runtime connection or repair. */
@@ -3960,6 +3979,8 @@ export class AgentMuxClient {
     const caller = input.caller
     if (caller && caller.agentSessionId !== input.participantSessionId) throw new AgentMuxError(
       'An Agent can only browse its own original messages.', 'MESSAGE_PARTICIPANT_MISMATCH')
+    this.messageReadUsed = true
+    void this.observeMessageReads()?.refresh()
     return this.messageQueue.listMessages(input, async () => {
       if (caller) await this.authorizeRetainedAgentCaller(caller.capability, caller.agentSessionId)
     })
