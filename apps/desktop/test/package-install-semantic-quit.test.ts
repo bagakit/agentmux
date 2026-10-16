@@ -12,6 +12,7 @@ type Scope = {
   root: string; home: string; app: string; candidate: string; store: string
   gui: Row | null; host: Row | null; worker: Row | null
   hostMode: string; workerMode?: string; retainNamespaceWorker?: boolean; publicPid: number; publicStore: string
+  omitSystemAncestor?: boolean
   events: string[]; signals: [number, string][]; cutover: boolean
   beforeQuit?: () => Promise<void>
   afterGuiQuit?: () => void
@@ -29,7 +30,7 @@ vi.mock('node:child_process', async importOriginal => {
     if (!f) throw new Error('No owned installer OS scope')
     const system: Row = { uid: process.getuid!(), pid: 1, ppid: 0, birth: _hygiene_fixturePsBirth(24019200000), command: '/sbin/launchd' }
     const daemon: Row = { ...system, pid: 999, ppid: 1, command: `${f.app}/Contents/Resources/app/vendor/ctxmuxd --socket ${f.root}/native.sock` }
-    const rows = [system, f.gui, f.host, f.worker, daemon].filter((row): row is Row => row !== null)
+    const rows = [f.omitSystemAncestor ? null : system, f.gui, f.host, f.worker, daemon].filter((row): row is Row => row !== null)
     if (command === process.execPath && args[1] === '--bootstrap') {
       expect(args[0]).toMatch(/package-semantic-host\.mjs$/)
       f.events.push('public-owner')
@@ -167,6 +168,16 @@ async function install(f: Scope, intent = 'full') {
 it('the default full installer completes GUI quit while only its fenced semantic owner survives', async () => {
   const f = await fixture(), outcome = await install(f)
   expect(outcome.error, 'Normal GUI quit must complete while its exact fenced semantic Host remains alive').toBe('OWNED_CUTOVER_BOUNDARY')
+  expect(f.events.filter(event => event !== 'public-owner')).toEqual(['normal-gui-quit', 'semantic-host-shutdown', 'cutover'])
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.cutover).toBe(true)
+})
+
+it('the default installer shuts down its exact semantic owner when only unrelated system ancestry is unavailable', async () => {
+  const f = await fixture()
+  f.afterGuiQuit = () => { f.omitSystemAncestor = true }
+  const outcome = await install(f, 'ui-only')
+  expect(f.signals, 'The confirmed owner must receive its shutdown after GUI exit despite missing unrelated ancestry').toEqual([[211, 'SIGTERM']])
+  expect(outcome.error, 'Confirmed GUI exit and exact owner must reach cutover without a second external-ancestry admission').toBe('OWNED_CUTOVER_BOUNDARY')
   expect(f.events.filter(event => event !== 'public-owner')).toEqual(['normal-gui-quit', 'semantic-host-shutdown', 'cutover'])
   expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.cutover).toBe(true)
 })
