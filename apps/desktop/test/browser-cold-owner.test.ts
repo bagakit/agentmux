@@ -1,4 +1,13 @@
+// @vitest-environment happy-dom
 const { fixtureFileUrl: _hygiene_fixtureFileUrl, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { act, createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
+import { api } from '../src/renderer/src/lib/api'
+import { useAppStore } from '../src/renderer/src/store'
+import { createWorkbenchTab, type BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
+import { verifiedBrowserWorkspace } from '../src/main/browser-workspace-binding.js'
+import type { AppConfig } from '../src/shared/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
@@ -96,8 +105,12 @@ import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { browserOperationAlreadyExistsError } from '../src/main/browser-operation-journal.js'
 import { browserRunResult, unwrapBrowserRunResult } from '../src/shared/browser-run-result.js'
 
-const managers: BrowserViewManager[] = [], roots: string[] = []
+const managers: BrowserViewManager[] = [], roots: string[] = [], originalApp = useAppStore.getState()
+let mounted: Root | undefined, container: HTMLDivElement | undefined
 afterEach(async () => {
+  if (mounted) await act(async () => mounted!.unmount())
+  mounted = undefined; container?.remove(); container = undefined
+  useAppStore.setState(originalApp, true)
   for (const manager of managers.splice(0)) manager.dispose()
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
   vi.restoreAllMocks()
@@ -249,6 +262,31 @@ describe('cold Browser ownership through the original Main owner', () => {
     const restored = await manager.ensure('page-0', cold)
     expect(cold).not.toHaveBeenCalled(); expect(views).toHaveLength(1)
     expect(restored).toMatchObject({ id: 'page-0', url: 'https://fixture.invalid/later', profileId: 'original', viewport: 'desktop' })
+  })
+  it('a real GUI stale projection cannot replace the released Main profile or viewport', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    const { manager } = fixture(), ports = mainPorts(manager)
+    const actual = await manager.create('page-0', 'https://fixture.invalid/later', 'workspace', 'original', 'normal', 'desktop')
+    await manager.release('page-0')
+    const restore = ipcFunction('browser:restore', { ...ports, verifiedBrowserWorkspace })
+    const bridge = vi.spyOn(api.browser, 'restore').mockImplementation((id, input) => restore(id, input))
+    const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private fixture' }], executors: {},
+      workspaces: [{ id: 'workspace', name: 'Private fixture', hostId: 'local', path: _hygiene_fixturePath('private/browser-stale'), kind: 'folder' }],
+      appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
+    container = document.createElement('div'); document.body.append(container); mounted = createRoot(container)
+    const tab = { ...actual, kind: 'browser' as const, regionId: 'region-0', browserId: actual.id, workspaceId: 'workspace',
+      nativeOwnerDeferred: true as const, profileId: 'stale-profile', viewport: 'mobile' as const }
+    const workbench = createWorkbenchTab('stale-tab', tab)
+    useAppStore.setState({ config, toolsOpen: false, tabs: { [workbench.id]: workbench } })
+    function ActualPane() {
+      const original = useAppStore(state => state.tabs[workbench.id]!.regions[tab.regionId] as BrowserWorkbenchSurface)
+      return createElement(BrowserPane, { tab: original, visible: true })
+    }
+    await act(async () => mounted!.render(createElement(ActualPane)))
+    expect(bridge).toHaveBeenCalledExactlyOnceWith(actual.id, { workspaceId: 'workspace', mode: 'normal', profileId: 'stale-profile', viewport: 'mobile' })
+    const confirmed = await manager.ensure(actual.id, async () => { throw new Error('Existing owner must not read Core') })
+    expect(confirmed).toMatchObject({ profileId: 'original', viewport: 'desktop', url: actual.url })
+    expect(useAppStore.getState().tabs[workbench.id]!.regions[tab.regionId]).toMatchObject({ profileId: 'original', viewport: 'desktop' })
   })
   it('keeps a concurrently acquired healthy owner when an older cold observation fails or returns stale data', async () => {
     const { manager, views } = fixture()
