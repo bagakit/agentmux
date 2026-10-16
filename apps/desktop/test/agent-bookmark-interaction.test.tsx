@@ -5,9 +5,10 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
+import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { agentBookmarks } from '../src/renderer/src/lib/agent-bookmarks'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
-import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 import * as Modal from '@agentmux/client-ui/components/Modal'
@@ -20,9 +21,9 @@ const entries = () => [...panel().querySelectorAll<HTMLElement>('.agent-input-re
 const inspection = () => panel().querySelector<HTMLElement>('.agent-input-recall__original')
 const sourceModalOpenChange = vi.fn()
 async function open() {
-  await dom.render(<WorkspaceAgentRow context={agentContextForSession(agent, timeline, 'Pinned reading', composerConfig.workspaces[0]!, null)} percent={null} onOpen={() => {}} />)
-  await act(async () => dom.container.querySelector<HTMLElement>('.workspace-agent-row')!.focus())
-  await act(async () => vi.waitFor(() => expect(entries()).toHaveLength(2)))
+  await dom.render(<WorkspaceAgentRow context={agentContextForSession(agent, timeline, 'Pinned reading', composerConfig.workspaces[0]!, null)} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => {}} />)
+  await act(async () => dom.container.querySelector<HTMLElement>('.focus-context')!.focus())
+  await waitForAgentCardReading(() => expect(entries()).toHaveLength(2))
 }
 async function sourceModal(open: boolean) {
   await dom.render(<Modal.Root open={open} onOpenChange={sourceModalOpenChange}>
@@ -30,15 +31,15 @@ async function sourceModal(open: boolean) {
       <Modal.Overlay className="dialog-scrim" />
       <Modal.Content className="dialog-surface" aria-describedby={undefined}>
         <Modal.Title>Source Agent</Modal.Title>
-        <WorkspaceAgentRow context={agentContextForSession(agent, timeline, 'Pinned reading', composerConfig.workspaces[0]!, null)} percent={null} onOpen={() => {}} />
+        <WorkspaceAgentRow context={agentContextForSession(agent, timeline, 'Pinned reading', composerConfig.workspaces[0]!, null)} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => {}} />
       </Modal.Content>
     </DocumentOverlayPortal>
   </Modal.Root>)
 }
 async function openFromModal() {
   await sourceModal(true)
-  await act(async () => document.querySelector<HTMLElement>('.dialog-surface .workspace-agent-row')!.focus())
-  await act(async () => vi.waitFor(() => expect(entries()).toHaveLength(2)))
+  await act(async () => document.querySelector<HTMLElement>('.dialog-surface .focus-context')!.focus())
+  await waitForAgentCardReading(() => expect(entries()).toHaveLength(2))
   return document.querySelector<HTMLElement>('[data-overlay-modal-slot]')!
 }
 async function retireSourceModal(mode: 'close' | 'presentation failure') {
@@ -61,7 +62,7 @@ async function settle() { await act(async () => new Promise(resolve => setTimeou
 async function pointer(target: Element, type: string, id: number, x: number, y: number) {
   await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerId: id, clientX: x, clientY: y })))
 }
-beforeEach(() => {
+beforeEach(async () => {
   sourceModalOpenChange.mockClear()
   for (const bookmark of agentBookmarks.get().bookmarks) agentBookmarks.remove(bookmark.key)
   useAppStore.setState({ sessions: [agent], timelines: { [agent.id]: timeline }, demands: {}, agentNames: {} })
@@ -69,6 +70,7 @@ beforeEach(() => {
     items: [0, 1].map(index => ({ id: 'input-' + index, kind: 'user-message' as const, startedAt: index + 1, contentParts: [{ kind: 'text' as const, text: 'Original input ' + index }] })) })
   vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'pinned-original' }, dispose() {} }))
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+  await agentCardConversationFixture(() => ({ providerId: 'codex', nativeSessionId: 'pinned-original' }))
 })
 afterEach(async () => { await act(async () => { for (const bookmark of agentBookmarks.get().bookmarks) agentBookmarks.remove(bookmark.key); await agentBookmarks.flush() }) })
 it('dismisses a transient reading only on its exact source slot lifecycle receipt before the anchor leaves', async () => {

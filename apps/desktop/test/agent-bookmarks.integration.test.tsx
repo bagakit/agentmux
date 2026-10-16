@@ -5,9 +5,10 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { agentBookmarks } from '../src/renderer/src/lib/agent-bookmarks'
-import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
+import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 import * as Modal from '@agentmux/client-ui/components/Modal'
@@ -19,16 +20,17 @@ const context = (agent = a) => agentContextForSession(agent, useAppStore.getStat
 const panels = () => [...document.querySelectorAll<HTMLElement>('.agent-information-reader')]
 const panel = (id = a.id) => panels().find(node => node.querySelector('.focus-context-hover__recap')?.textContent?.includes(id))!
 async function scene(origin = true) {
-  await dom.render(<>{origin ? <WorkspaceAgentRow context={context()} percent={null} onOpen={() => {}} /> : null}<FocusContextRow context={context(b)} selected={false} onSelect={() => {}} /></>)
+  await dom.render(<>{origin ? <WorkspaceAgentRow context={context()} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => {}} /> : null}<FocusContextRow context={context(b)} selected={false} onSelect={() => {}} /></>)
 }
-async function open(id = a.id) { await act(async () => dom.container.querySelector<HTMLElement>(`[data-session-id="${id}"]`)!.focus()); await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }) }
+async function open(id = a.id) { await act(async () => dom.container.querySelector<HTMLElement>(`[data-session-id="${id}"]`)!.focus()); await waitForAgentCardReading(() => expect(api.sessions.observeHistory).toHaveBeenCalled()) }
 async function pin(id = a.id) { expect(panel(id)).toBeDefined(); await act(async () => panel(id).querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click()); expect(panel(id)).toBeDefined() }
-beforeEach(() => {
+beforeEach(async () => {
   for (const bookmark of agentBookmarks.get().bookmarks) agentBookmarks.remove(bookmark.key)
   useAppStore.setState({ sessions: [a, b, neighbor], timelines: { [a.id]: timeline(a.id, a.id + ' original reply'), [b.id]: timeline(b.id, b.id + ' original reply') }, demands: {}, agentNames: {} })
   vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: control.agentSessionId }, nextCursor: null, items: [] }))
   vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: control.agentSessionId }, dispose() {} }))
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+  await agentCardConversationFixture(control => ({ providerId: 'codex', nativeSessionId: control.agentSessionId }))
 })
 afterEach(async () => { await act(async () => { for (const bookmark of agentBookmarks.get().bookmarks) agentBookmarks.remove(bookmark.key); await agentBookmarks.flush() }) })
 it('pins different Agents together and duplicate aliases reuse the same original bookmark tree', async () => {
@@ -68,7 +70,7 @@ it('stops the held source on Run replacement and adopts only the same canonical 
   expect(original.querySelector('.focus-context-hover__recap p')).toBe(prose); expect(document.getSelection()!.toString()).toBe(a.id + ' original reply')
   expect(original.textContent).toContain('earlier Run or source'); expect(api.sessions.historyPage).toHaveBeenCalledTimes(reads)
   await act(async () => original.querySelector<HTMLButtonElement>('.agent-information-reader__update button')!.click())
-  expect(original.textContent).toContain('next Run reply'); expect(api.sessions.historyPage).toHaveBeenLastCalledWith(replacement.control, { limit: 30 })
+  expect(original.textContent).toContain('next Run reply'); await waitForAgentCardReading(() => expect(api.sessions.historyPage).toHaveBeenLastCalledWith(replacement.control, expect.objectContaining({ limit: 100 })))
   expect(agentBookmarks.get().bookmarks).toHaveLength(1)
 })
 it('retains the saved presentation while its original Runtime subject is unavailable', async () => {
