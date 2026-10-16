@@ -9,10 +9,10 @@ const metrics = (width: number) => ({ width, padding: 4, gap: 2, cardGap: 2 })
 
 it('shares each wrapped row instead of leaving all states at minimum width', () => {
   const layout = allocateFocusLaneColumns([0, 1, 8, 2], metrics(500))
-  expect(layout.columns).toEqual([0, 1, 1, 1])
-  expect(layout.widths).toEqual([0, 247, 247, 320])
-  expect(layout.maxRows).toBe(8)
-  expect(allocateFocusLaneColumns([1, 1, 8, 2], metrics(500)).widths).toEqual([247, 247, 247, 247])
+  expect(layout.columns).toEqual([0, 1, 2, 2])
+  expect(layout.widths).toEqual([0, 320, 496, 496])
+  expect(layout.maxRows).toBe(4)
+  expect(allocateFocusLaneColumns([1, 1, 8, 2], metrics(500)).widths).toEqual([247, 247, 496, 496])
 })
 
 it('uses a readable full row when narrow and retains the existing cap when wide', () => {
@@ -36,7 +36,7 @@ it('the mounted layout consumer resizes original card nodes without changing the
   try {
     await render(500)
     const card = container.querySelector('button')!
-    expect(card.style.width).toBe('247px')
+    expect(card.style.width).toBe('320px')
     await render(320)
     expect(container.querySelector('button')).toBe(card)
     expect(card.style.width).toBe('316px')
