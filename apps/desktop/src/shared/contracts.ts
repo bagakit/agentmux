@@ -18,7 +18,6 @@ import type {
   AgentPromptCondition,
   AgentPromptExecution,
   AgentMessageChannel,
-  AgentMuxAgentMessageSubmission,
   AgentMuxSessionQuestionReplyInput,
   AgentSessionQuestionReplyReceipt,
   AgentMuxAgentCreateInput,
@@ -1919,7 +1918,6 @@ export type AgentMuxDesktopApi = {
     recordDeliveryFailure(record: DeliveryAttempt): Promise<DeliveryAttemptLookup>
     submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: import('@agentmux/core').AgentPromptInputBinding, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence }, authorHuman?: boolean, agentMuxNote?: string, sourceChannel?: AgentMessageChannel, goalContinuation?: { goalId: string; loopId: string }, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent, goalDispatch?: import('./goal-dispatch').GoalDispatchReference): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
     replyQuestion(session: AgentSessionControl, input: SessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt>
-    submitMessage(session: AgentSessionControl, message: AgentMuxAgentMessageSubmission): Promise<void | import('@agentmux/core').AgentInputSubmissionReceipt>
     inputMailbox(session: SessionHistoryReference, options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>): Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
     inspectInput(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>
     stopInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string): Promise<import('@agentmux/core').AgentInputWaitStopReceipt>
@@ -2097,12 +2095,11 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'submitMessage' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting'> & {
     /** Plain envelopes cross both IPC and contextBridge; Renderer restores typed failures. */
     write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputWriteResult>
     paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
     submitPrompt(...args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']>): Promise<SessionInputWriteResult>
-    submitMessage(...args: Parameters<AgentMuxDesktopApi['sessions']['submitMessage']>): Promise<SessionInputWriteResult>
     inspectInput(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectInput']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectInput']>>>>
     stopInputWaiting(...args: Parameters<AgentMuxDesktopApi['sessions']['stopInputWaiting']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['stopInputWaiting']>>>>
     rejoinInputWaiting(...args: Parameters<AgentMuxDesktopApi['sessions']['rejoinInputWaiting']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['rejoinInputWaiting']>>>>

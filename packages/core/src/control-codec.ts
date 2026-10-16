@@ -11,11 +11,9 @@ import { parseDemandDispatches, parseDemandProgressUpdates } from '@agentmux/dem
 import { parseDemandParticipations, parseDemandCreationOrigin } from '@agentmux/demand/goals'
 import { parseDemandContentReferences } from '@agentmux/demand'
 import { parseGoalContinuationLoop } from './continuous-progress-scheduler.js'
-import { normalizeMessageChannel } from './message-origin.js'
 import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
 import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
-import { validateAgentPromptAdmissionIntent, validateAgentPromptCondition } from './agent-prompt-condition.js'
-import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
+import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts } from './browser-completion-facts.js'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -57,7 +55,6 @@ import {
   type AgentMuxDemandStatus,
   type AgentMuxControlSuccessReceipt,
   type AgentMuxInspectedRegion,
-  type AgentMuxMessageTarget,
   type AgentMuxOpenDestination,
   type AgentMuxRegion,
   type AgentMuxRegionAnchor,
@@ -81,7 +78,6 @@ import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemot
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { parseMoteContextEvidenceTarget, parseMoteContextObservation } from './mote-context-observation.js'
 import { isSplitDirection } from './split-direction-ssot.js'
-import { validateAgentMuxMessageEnvelope, type AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 
 const MAX_MESSAGE_BYTES = AGENTMUX_CONTROL_MAX_MESSAGE_BYTES
 const MAX_ID_BYTES = 512
@@ -148,15 +144,6 @@ function tabAnchor(value: unknown): AgentMuxTabAnchor {
   if (source.kind === 'self') return { kind: 'self' }
   if (source.kind === 'tab') return { kind: source.kind, tabId: identity(source.tabId, 'Tab anchor is invalid.', 'INVALID_CONTROL_REQUEST') }
   throw new AgentMuxError('Tab anchor is invalid.', 'INVALID_CONTROL_REQUEST')
-}
-
-function messageTarget(value: unknown): AgentMuxMessageTarget {
-  const source = object(value, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST')
-  if (source.kind === 'self') return { kind: source.kind }
-  if (source.kind === 'agent-session') return { kind: source.kind, agentSessionId: identity(source.agentSessionId, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST') }
-  if (source.kind === 'tab') return { kind: source.kind, tabId: identity(source.tabId, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST') }
-  if (source.kind === 'region') return { kind: source.kind, regionId: identity(source.regionId, 'Message target is invalid.', 'INVALID_CONTROL_REQUEST') }
-  throw new AgentMuxError('Message target is invalid.', 'INVALID_CONTROL_REQUEST')
 }
 
 function sessionSelector(value: unknown): { kind: 'self' } | { kind: 'agent-session'; agentSessionId: string } {
@@ -484,34 +471,6 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
           destination,
           ...(owner ? { caller: owner } : {})
         }
-  }
-  if (source.operation === 'send') {
-    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','admissionIntent','execution','sourceChannel','caller','message'], 'INVALID_CONTROL_REQUEST')
-    if (source.execution !== undefined && source.execution !== 'default' && source.execution !== 'immediate') {
-      throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
-    }
-    const target = messageTarget(source.target)
-    const owner = optionalCaller(source.caller)
-    if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
-    const message = validateAgentMuxMessageEnvelope(source.message)
-    if (message.body !== source.text) throw new AgentMuxError('Message body must equal Control text.', 'MESSAGE_ENVELOPE_INVALID')
-    if (owner && message.sender.kind !== 'agent-session') throw new AgentMuxError('Managed send requires an Agent envelope.', 'MESSAGE_SENDER_MISMATCH')
-    if (message.sender.kind === 'agent-session' && (!owner || !owner.capability || message.sender.agentSessionId !== owner.agentSessionId || message.senderSessionId !== owner.agentSessionId)) {
-      throw new AgentMuxError('Message sender does not match the managed caller.', 'MESSAGE_SENDER_MISMATCH')
-    }
-    if (message.recipient.kind === 'agent-session' && target.kind === 'agent-session' && message.recipient.agentSessionId !== target.agentSessionId) {
-      throw new AgentMuxError('Message recipient does not match the Control target.', 'MESSAGE_RECIPIENT_MISMATCH')
-    }
-    const intent = source.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(source.admissionIntent)
-    if (intent && (intent.kind !== 'manual-actor' || Object.hasOwn(source, 'promptCondition') || source.execution !== 'immediate' ||
-        intent.expectedRun.runId !== message.recipientRunId)) throw new AgentMuxError('Control manual input cannot replace an exact condition or Run.', 'INVALID_CONTROL_REQUEST')
-    const common = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
-      text: text(source.text, 'Message text'),
-      ...(source.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(source.sourceChannel) }),
-      ...(owner ? { caller: owner } : {}), message }
-    if (intent?.kind === 'manual-actor') return { ...common, admissionIntent: intent, execution: 'immediate' }
-    return { ...common, promptCondition: validateAgentPromptCondition(source.promptCondition),
-      ...(source.execution === undefined ? {} : { execution: source.execution }) }
   }
   if (source.operation === 'list.agents') {
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation }
@@ -1423,14 +1382,6 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (isSpaceControlOperation(operation)) return parseSpaceControlSuccessReceipt(source)
   if (operation === 'open.terminal') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseTerminalRegion(result.region) } }
   if (operation === 'open.browser') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { region: parseBrowserRegion(result.region) } }
-  if (operation === 'send') {
-    const agentSessionId = identity(result.agentSessionId, 'Control send result is invalid.', 'CONTROL_PROTOCOL_ERROR')
-    const inputReceipt = result.inputReceipt === undefined ? undefined : parseAgentInputSubmissionReceipt(result.inputReceipt)
-    if (inputReceipt && inputReceipt.key.agentSessionId !== agentSessionId) throw new AgentMuxError(
-      'Control send receipt changed its original Session.', 'CONTROL_PROTOCOL_ERROR')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { agentSessionId,
-      ...(inputReceipt ? { inputReceipt } : {}) } }
-  }
   if (operation === 'focus') return parseDesktopFocusSuccessReceipt(source)
   if (operation === 'arrange') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tab: parseTab(result.tab) } }
   if (operation === 'promote.region') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { tabId: identity(result.tabId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), regionId: identity(result.regionId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR'), workspaceId: id(result.workspaceId, 'Control promote result is invalid.', 'CONTROL_PROTOCOL_ERROR') } }

@@ -25,7 +25,6 @@ import {
   type AgentPromptExecution,
   type AgentMessageChannel,
   type AgentSessionQuestionReplyReceipt,
-  type AgentMuxAgentMessageSubmission,
   type AgentMuxRpcCallContext,
   type AgentMuxNativeSessionConfirmationInput,
   type AgentMuxNativeSessionConfirmation,
@@ -1896,16 +1895,6 @@ export class RuntimeController {
       return await client.replySessionQuestion({ ...condition, ...original, agentSessionId,
         ...executor,
         authorHuman: true, sourceChannel: 'question-reply' })
-    })
-  }
-
-  async submitMessage(control: AgentSessionControl, message: AgentMuxAgentMessageSubmission): Promise<void | AgentInputSubmissionReceipt> {
-    return await this.trackHostLifecycleOperation(control.hostId, async () => {
-      const client = message.admissionIntent ? this.configuredClient(control.hostId) : await this.connectedClient(control.hostId)
-      if (control.run.runId !== (message.admissionIntent?.expectedRun ?? message.condition!.expectedRun).runId) {
-        throw new AgentMuxError('Message intent targets another Run.', 'STALE_AGENT_SESSION')
-      }
-      return await client.submitAgentMessage({ ...message, agentSessionId: control.agentSessionId })
     })
   }
 
