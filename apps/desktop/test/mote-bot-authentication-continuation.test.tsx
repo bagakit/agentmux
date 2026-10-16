@@ -53,7 +53,11 @@ it('automatically follows the original Mote sign-in through pending and scanned 
     expect(document.querySelector('.mote-bot-confirmation svg')).toBe(qr)
   }
   await visible('[data-mote-enrollment-action="confirm-account"]', 7000)
-  expect(views.map(view => view.operation!.authentication!.stage)).toEqual(['waiting', 'waiting', 'waiting', 'scanned', 'handoff', 'handoff', 'handoff', 'account'])
+  expect(views.map(view => view.operation!.authentication!.stage)).toEqual(['waiting', 'waiting', 'waiting', 'scanned', 'handoff', 'handoff', 'handoff', 'handoff', 'account'])
+  expect(f.registration.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual([
+    '/accounts/qrlogin/init', ...Array<string>(4).fill('/accounts/qrlogin/polling'),
+    '/cross', '/', '/', '/app'
+  ])
   expect(views.every(view => view.operation!.authentication!.attemptId === original.operation!.authentication!.attemptId)).toBe(true)
   const advances = f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')
   for (const [index, [, input]] of advances.entries()) {
@@ -104,4 +108,25 @@ it('stops on an unknown native result and reads the same recorded request withou
   expect(f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')).toHaveLength(count + 1)
   expect(f.registration.mock.calls).toHaveLength(platformRequests)
   expect(f.beginCount).toBe(1)
+})
+
+
+it('Mote keeps the failed original request and displays its actual safe parsing boundary', async () => {
+  const native = f.registration.getMockImplementation()!
+  f.registration.mockImplementation(async (url, input) => new URL(String(url)).pathname === '/accounts/qrlogin/polling'
+    ? new Response('private-unparsed-body', { status: 200 }) : native(url, input))
+  await create()
+  await visible('[data-mote-enrollment-action="renew-authentication"]', 6000)
+  await f.click('Original setup details')
+  expect(document.querySelector('.bot-profile-details')?.textContent).toContain('poll · invalid-response · json')
+  expect(document.body.textContent).not.toContain('private-unparsed-body')
+  expect(f.creationCount).toBe(0)
+  const count = f.registration.mock.calls.length
+  const checks = f.parentCalls.mock.calls.length, observations = f.connectionCalls.mock.calls.length
+  await f.click('Check saved progress')
+  expect(f.parentCalls).toHaveBeenCalledTimes(checks + 1)
+  await act(async () => { await f.parentCalls.mock.results[checks]!.value })
+  await vi.waitFor(() => expect(f.connectionCalls).toHaveBeenCalledTimes(observations + 1))
+  await act(async () => { await f.connectionCalls.mock.results[observations]!.value })
+  expect(f.registration).toHaveBeenCalledTimes(count)
 })

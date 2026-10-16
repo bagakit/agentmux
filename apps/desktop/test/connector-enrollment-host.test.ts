@@ -43,6 +43,7 @@ let server: AgentMuxControlServer
 let client: Awaited<ReturnType<typeof connectAgentMuxRpc>>
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>
 let calls: Array<{ url: string; path: string; preclaimed: boolean }>
+let pollReply: (() => Response) | undefined
 let authorize: boolean
 let clock: number
 let secureAvailable: boolean
@@ -65,6 +66,7 @@ beforeEach(async () => {
   sdk = defaultFeishuSdkTransport()
   calls = []
   authorize = true
+  pollReply = undefined
   secureAvailable = true
   rejectedCookieStage = null
   sentCookies = []
@@ -115,6 +117,7 @@ beforeEach(async () => {
             })
           }
         )
+      if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling' && pollReply) return pollReply()
       if (target.origin === 'https://accounts.feishu.cn' && target.pathname === '/accounts/qrlogin/polling')
         return Response.json({
           code: 0,
@@ -125,6 +128,7 @@ beforeEach(async () => {
               }
             : { next_step: null, step_info: { status: 1 } }
         })
+      if (target.href === 'https://ask.feishu.cn/cross') return new Response('Cross-login is not account authority')
       if (target.href === 'https://accounts.feishu.cn/cross')
         return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
       if (target.href === 'https://ask.feishu.cn/') return new Response('Landing is not an account identity')
@@ -424,4 +428,60 @@ it('an enrollment-only schema failure preserves existing connection administrati
   unavailable = false
   expect((await publicClient.call('connection.enrollment.ls', {})).operations).toEqual([])
   expect((await publicClient.call('connection.ls', {})).connections).toEqual([manual.connection])
+})
+
+
+it.each([
+  ['missing-cross', {}], ['null-cross', { cross_login_uri: null }],
+  ['direct-landing', { cross_login_uri: 'https://ask.feishu.cn/cross' }],
+  ['accounts-handoff', { cross_login_uri: 'https://accounts.feishu.cn/cross' }],
+  ['missing-step', undefined], ['null-step', null]
+] as const)('follows original native handoff %s through Host, SDK and compiled CLI before account consent', async (name, info) => {
+  pollReply = () => Response.json({ code: 0, data: { next_step: 'enter_app', step_info: info } })
+  const pending = await cli(['begin', '--input', '-'], input)
+  clock = pending.challenge!.nextPollAt + 1
+  const next = await cli(['advance', '--input', '-'], decision(pending, 'continue-authentication'))
+  expect(next.operation!.authentication!.stage).toBe('handoff')
+  expect(next.account).toBeNull()
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
+  const handoffSteps = name === 'accounts-handoff' ? ['/cross', '/', '/', '/app']
+    : name === 'direct-landing' ? ['/cross', '/', '/app'] : ['/', '/app']
+  let signedIn = next
+  for (const path of handoffSteps) {
+    const before = calls.length
+    signedIn = await cli(['advance', '--input', '-'], decision(signedIn, 'continue-authentication'))
+    expect(calls).toHaveLength(before + 1)
+    expect(calls.at(-1)!.path).toBe(path)
+    expect(signedIn.operation!.authentication!.stage).toBe(path === '/app' ? 'account' : 'handoff')
+    if (path !== '/app') expect(signedIn.account).toBeNull()
+    expect(signedIn.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  }
+  expect(signedIn.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
+  expect(signedIn.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', ...handoffSteps])
+  expect(calls.filter(call => call.path === '/accounts/qrlogin/polling')).toHaveLength(1)
+  expect(signedIn.actions.map(action => action.kind)).toContain('confirm-account')
+  expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(signedIn.operation)
+})
+
+it.each([
+  ['json', 'invalid-response', () => new Response('not-json', { status: 200 })],
+  ['transition', 'invalid-response', () => Response.json({ code: 0, data: { next_step: 'unrecognized-native-step', step_info: {} } })],
+  ['handoff', 'redirect-unconfirmed', () => Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: 'https://foreign.example/private-token' } } })]
+] as const)('preserves the actual %s failure boundary through the original public owner and CLI without replay', async (boundary, failure, response) => {
+  pollReply = response
+  const pending = await client.call('connection.enrollment.begin', input)
+  clock = pending.challenge!.nextPollAt + 1
+  const advance = decision(pending, 'continue-authentication')
+  const unknown = await client.call('connection.enrollment.advance', advance)
+  expect(unknown.operation!.diagnostic).toMatchObject({ stage: 'authentication', step: 'poll', failure, httpStatus: 200, boundary })
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
+  const count = calls.length
+  const observed = await cli(['inspect', '--operation-id', input.operationId])
+  expect(observed.operation).toEqual(unknown.operation)
+  expect((await client.call('connection.enrollment.advance', advance)).operation).toEqual(unknown.operation)
+  expect(calls).toHaveLength(count)
+  expect(observed.actions.map(action => action.kind)).not.toContain('continue-authentication')
+  expect(JSON.stringify(observed)).not.toContain('private-token')
+  expect(observed.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
 })

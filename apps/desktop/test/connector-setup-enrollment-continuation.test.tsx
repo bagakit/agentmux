@@ -41,10 +41,10 @@ beforeEach(async () => {
       if (previous?.challenge) expect(Date.now()).toBeGreaterThanOrEqual(previous.challenge.nextPollAt)
       const status = pendingPolls.shift()
       return Response.json({ code: 0, data: status === undefined
-        ? { next_step: 'enter_app', step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross' } }
+        ? { next_step: 'enter_app', step_info: { cross_login_uri: 'https://ask.feishu.cn/cross' } }
         : { next_step: 'qr_login_polling', step_info: { status } } })
     }
-    if (target.href === 'https://accounts.feishu.cn/cross') return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
+    if (target.href === 'https://ask.feishu.cn/cross') return new Response('Cross-login is not account identity')
     if (target.href === 'https://ask.feishu.cn/') return new Response('Landing is not account identity')
     if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};window.csrfToken="settings-continuation-private-csrf";</script>`, { headers: { 'content-type': 'text/html' } })
     if (target.pathname === '/developers/v1/app/upload/image') return Response.json({ code: 0, data: { url: 'https://images.example.test/original.png' } })
@@ -202,3 +202,23 @@ it.each(['leave', 'source'] as const)('a late call-through handoff does not redi
     expect(calls.filter(call => call.method === 'connection.setup.advance')).toEqual([]); expect(native).toEqual(before)
   } finally { api.connections.call = source }
 }, 20_000)
+
+
+it('Settings reads the exact safe authentication failure from its original durable request', async () => {
+  const nativeFetch = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, options) => String(url).startsWith('https://accounts.feishu.cn/accounts/qrlogin/polling?')
+    ? new Response('private-unparsed-body', { status: 200 }) : nativeFetch(url, options))
+  await dom.render(<MountedSettings />); await click('[data-enrollment-new]'); await click('[data-enrollment-create]')
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    expect(dom.container.querySelector('.connector-enrollment .connector-diagnostics')?.textContent).toContain('poll · invalid-response · json')
+  }, { timeout: 6000 })
+  expect(dom.container.textContent).not.toContain('private-unparsed-body')
+  expect(dom.container.querySelector('[data-enrollment-action="create"]')).toBeNull()
+  const before = vi.mocked(fetch).mock.calls.length
+  const checks = calls.length
+  await click('[data-enrollment-recover], [data-enrollment-inspect]')
+  await vi.waitFor(() => expect(calls).toHaveLength(checks + 1))
+  expect(calls.at(-1)!.result).toMatchObject({ operation: { diagnostic: { boundary: 'json' } } })
+  expect(fetch).toHaveBeenCalledTimes(before)
+}, 10_000)
