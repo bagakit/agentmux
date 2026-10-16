@@ -114,26 +114,8 @@ export class AgentMuxAgentSessionRegistry {
   async load(hostId: string, assertCurrent?: () => void): Promise<void> {
     await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
     assertCurrent?.()
-    // Record only changes during this read. Object equality cannot distinguish
-    // an initially absent binding admitted and then removed before the reply.
-    const cut: AgentSessionLoadCut = { sessions: new Set(), retirements: new Set(), runs: new Set() }
-    this.metadataLoadCuts.add(cut)
-    try {
-      const [sessions, retiredRuns, retiredAgentSessions] = await Promise.all([
-        loadAgentSessionMetadata(this.store),
-        this.store.loadRetiredRuns(),
-        this.store.loadRetiredAgentSessions()
-      ])
+    await this.withMetadataSnapshot(hostId, async () => undefined, (_value, current, unbound, retired) => {
       assertCurrent?.()
-      const projected = await Promise.all(sessions.filter(session => session.hostId === hostId &&
-        !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId)).map(session => this.readStartedResume(session)))
-      const current = projected.filter(session => !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId))
-      for (const session of this.sessions.values()) if (session.hostId === hostId &&
-        (cut.sessions.has(session.agentSessionId) || this.unconfirmedDurability.has(session.agentSessionId))) current.push(session)
-      const retired = retiredAgentSessions.filter(session => session.hostId === hostId && !cut.retirements.has(session.agentSessionId))
-      for (const session of this.retiredAgentSessions.values()) if (session.hostId === hostId && cut.retirements.has(session.agentSessionId)) retired.push(session)
-      const unbound = retiredRuns.filter(run => !cut.runs.has(run.runId))
-      for (const runId of this.unboundRetiredRuns) if (cut.runs.has(runId)) unbound.push({ runId })
       // Publishing this cut also changes the same owner for other in-flight reads.
       for (const id of this.sessions.keys()) this.noteMetadataChange('sessions', id)
       for (const id of this.retiredAgentSessions.keys()) this.noteMetadataChange('retirements', id)
@@ -153,6 +135,34 @@ export class AgentMuxAgentSessionRegistry {
         this.noteMetadataChange('retirements', session.agentSessionId)
         this.retiredAgentSessions.set(session.agentSessionId, structuredClone(session))
       }
+    })
+  }
+
+  /** Read original metadata alongside a Runtime observation, without adopting or replacing it. */
+  async withMetadataSnapshot<T, R>(hostId: string, read: () => Promise<T>, consume: (
+    value: T, sessions: AgentMuxStoredAgentSession[], retiredRuns: readonly AgentMuxRunRef[], retiredSessions: readonly AgentMuxRetiredAgentSession[]
+  ) => R): Promise<R> {
+    // Record only changes during this read. Object equality cannot distinguish
+    // an initially absent binding admitted and then removed before the reply.
+    const cut: AgentSessionLoadCut = { sessions: new Set(), retirements: new Set(), runs: new Set() }
+    this.metadataLoadCuts.add(cut)
+    try {
+      const [sessions, retiredRuns, retiredAgentSessions, value] = await Promise.all([
+        loadAgentSessionMetadata(this.store),
+        this.store.loadRetiredRuns(),
+        this.store.loadRetiredAgentSessions(),
+        read()
+      ])
+      const projected = await Promise.all(sessions.filter(session => session.hostId === hostId &&
+        !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId)).map(session => this.readStartedResume(session)))
+      const current = projected.filter(session => !cut.sessions.has(session.agentSessionId) && !this.unconfirmedDurability.has(session.agentSessionId))
+      for (const session of this.sessions.values()) if (session.hostId === hostId &&
+        (cut.sessions.has(session.agentSessionId) || this.unconfirmedDurability.has(session.agentSessionId))) current.push(session)
+      const retired = retiredAgentSessions.filter(session => session.hostId === hostId && !cut.retirements.has(session.agentSessionId))
+      for (const session of this.retiredAgentSessions.values()) if (session.hostId === hostId && cut.retirements.has(session.agentSessionId)) retired.push(session)
+      const unbound = retiredRuns.filter(run => !cut.runs.has(run.runId))
+      for (const runId of this.unboundRetiredRuns) if (cut.runs.has(runId)) unbound.push({ runId })
+      return consume(value, current, unbound, retired)
     } finally {
       this.metadataLoadCuts.delete(cut)
     }

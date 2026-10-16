@@ -3476,14 +3476,14 @@ export class AgentMuxClient {
     return await classifyExecutable(resolvedCommand, context)
   }
 
-  private async withRunSnapshot<T, R>(target: string | null, read: () => Promise<T>,
+  private async withRunSnapshot<T, R>(target: string | null, read: (wasRemoved: (runId: string) => boolean) => Promise<T>,
     consume: (snapshot: T, wasRemoved: (runId: string) => boolean) => R | Promise<R>): Promise<R> {
     const removed = new Set<string>()
     const readers = this.pendingRunSnapshots.get(target) ?? new Set<Set<string>>()
     readers.add(removed)
     this.pendingRunSnapshots.set(target, readers)
     try {
-      return await consume(await read(), runId => removed.has(runId))
+      return await consume(await read(runId => removed.has(runId)), runId => removed.has(runId))
     } finally {
       readers.delete(removed)
       if (!readers.size) this.pendingRunSnapshots.delete(target)
@@ -3501,11 +3501,26 @@ export class AgentMuxClient {
   }
 
   async runtimeProjection(): Promise<AgentMuxRuntimeProjection> {
-    const runs = await this.listRuns()
-    return {
-      hostId: 'local',
-      subjects: projectAgentMuxRuntimeSubjects('local', runs, this.registry.list().map(session => this.projectSession(session)))
-    }
+    this.requireConnected()
+    // A cold semantic owner may still be recovering lifecycle/handshake observations.
+    // Read original durable bindings without replacing its active registry or adopting Runs.
+    return await this.withRunSnapshot(null, wasRemoved => this.registry.withMetadataSnapshot('local', () => this.kernel.list(),
+      (runs, currentSessions, retiredRuns, retiredSessions) => {
+        // As in readAgentSessions(), only an actual unconfirmed creation may
+        // supplement a missing durable binding; canonical identities take precedence.
+        const started = this.registry.list().filter(session => session.hostId === 'local' && session.creation?.persistence === 'unconfirmed' &&
+          !currentSessions.some(current => current.agentSessionId === session.agentSessionId))
+        const sessions = [...currentSessions, ...started].map(session => this.projectSession(session))
+        const byRun = new Map(sessions.map(session => [session.run.runId, session]))
+        const retired = new Set([...retiredRuns, ...retiredSessions.map(session => session.run),
+          ...sessions.flatMap(session => session.retiredRuns)].map(run => run.runId))
+        const current = runs.flatMap(run => {
+          if (wasRemoved(run.runId) || retired.has(run.runId) || this.registry.isRetiredRun(runRef(run.runId))) return []
+          this.runPids.set(run.runId, run.pid)
+          return [this.projectRun(run, byRun.get(run.runId))]
+        })
+        return { hostId: 'local', subjects: projectAgentMuxRuntimeSubjects('local', current, sessions) }
+      }), projection => projection)
   }
 
   /**
