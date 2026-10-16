@@ -42,15 +42,23 @@ it('the actual Reader through IPC renders an unassociated A2A send row and a dis
   await flush(() => expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(2))
   const row = host.querySelector<HTMLElement>('[data-submission-id="original-message"]')!
   expect(row, host.textContent).not.toBeNull(); expect(row.querySelector<HTMLDetailsElement>('details')!.open).toBe(false)
-  expect(row.textContent).toContain('original-sender'); expect(row.textContent).toContain('提交已记录'); expect(row.querySelector('.log-turn')).toBeNull()
+  const summary = row.querySelector('summary')!
+  expect(summary.textContent).toContain('消息发送'); expect(summary.textContent).not.toContain('original-sender'); expect(summary.textContent).not.toContain('Message Tool')
+  expect(summary.querySelector('.message-disclosure__preview')?.textContent).toContain('Original ending.')
+  expect(summary.textContent).toContain('提交已记录'); expect(row.querySelector('.log-turn')).toBeNull()
   const nativeCard = host.querySelector('[data-native-record-id="exact-native"]')!
   expect(nativeCard.querySelector('[data-submission-record]')).not.toBeNull()
+  expect(nativeCard.querySelectorAll('[data-original-contribution]')).toHaveLength(0)
+  expect(nativeCard.querySelector('[data-submission-record] summary')?.textContent).toContain('已进入对话')
+  expect(nativeCard.querySelector('[data-submission-record] details[open]')).toBeNull()
   expect(host.querySelector('[data-submission-id="exact-message"]')).toBeNull()
   const originalRef = row.dataset.conversationItemRef, originalId = row.dataset.conversationEventId
   await act(async () => { const detail = row.querySelector<HTMLDetailsElement>('details')!; detail.open = true; detail.dispatchEvent(new Event('toggle')) })
   expect(row.querySelector('.log-turn__body')?.textContent).toContain('Original ending.')
   await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
   expect(copied).toHaveBeenLastCalledWith(body)
+  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
+  expect(row.textContent).toContain('original-sender'); expect(row.textContent).toContain('Message Tool')
   expect(row.dataset.conversationItemRef).toBe(originalRef); expect(row.dataset.conversationEventId).toBe(originalId)
   expect(read).toHaveBeenCalled(); expect(rawNative).not.toHaveBeenCalled(); expect(rawCaptured).not.toHaveBeenCalled()
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
