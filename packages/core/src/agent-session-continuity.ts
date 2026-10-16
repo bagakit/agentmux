@@ -117,6 +117,9 @@ export type AgentMuxContinuityInputDelivery = {
   observedAt: number
   reminder: AgentMuxContinuityInputPart
   continuation: AgentMuxContinuityInputPart
+  /** Platform content frozen for this original input, independently of selected parts.
+   * Historical packets without it keep their original selected reminder content. */
+  systemContext?: string
   receipt?: { key: AgentPromptInputKey; status: 'terminal-confirmed' | 'native-admitted' | 'launch-carried' | 'not-applied' | 'unknown'; observedAt: number }
 }
 /** New authored input which has not yet acquired its resumed Run binding. */
@@ -290,6 +293,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     !['waiting', 'dispatching', 'unknown', 'accepted', 'not-applied', 'superseded'].includes(delivery.phase) ||
     typeof delivery.reason !== 'string' || !Number.isSafeInteger(delivery.observedAt) || delivery.observedAt < 0 ||
     delivery.initialInputByte !== undefined && (!Number.isSafeInteger(delivery.initialInputByte) || delivery.initialInputByte < 0) ||
+    delivery.systemContext !== undefined && typeof delivery.systemContext !== 'string' ||
     [delivery.reminder, delivery.continuation].some(part => !part || typeof part.selected !== 'boolean' || typeof part.text !== 'string' ||
       typeof part.digest !== 'string' || !['not-selected', 'waiting', 'dispatching', 'unknown', 'accepted', 'not-applied', 'superseded'].includes(part.status) || part.receiptRef && JSON.stringify(part.receiptRef) !== JSON.stringify(delivery.key)) ||
     delivery.receipt && JSON.stringify(delivery.receipt.key) !== JSON.stringify(delivery.key))) throw new TypeError('Invalid continuity input delivery.')

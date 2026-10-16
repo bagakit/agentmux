@@ -86,6 +86,14 @@ export function composeAgentPrompt(
   }
 }
 
+/** Only an already requested resume input carries fresh platform guidance.
+ * No-input restoration must not become a new turn. Existing frozen packets are
+ * restored by their original lifecycle owner, never recomposed here on retry. */
+export function composeAgentResumePrompt(prompt: string | undefined, agentMuxNote?: string): { text: string; systemContext?: string } {
+  if (!prompt?.trim() && !agentMuxNote?.trim()) return composeAgentPrompt(prompt, agentMuxNote)
+  return composeAgentPrompt(prompt, [AGENTMUX_AGENT_MESSAGING_GUIDANCE, agentMuxNote?.trim() ? agentMuxNote : undefined].filter(Boolean).join('\n\n'))
+}
+
 /**
  * 启动 Prompt：把 AgentMux 要说的话（运行时引导 + 可选的 `agentMuxNote`，如 Scratch Topic 说明）
  * 署名进信封，用户的原始请求原样透传进 `user` 段。Agent 首条消息也走这里——其经过 Core 核验的来源头与原正文
