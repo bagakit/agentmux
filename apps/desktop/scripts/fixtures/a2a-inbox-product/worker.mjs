@@ -207,17 +207,24 @@ try {
   await activate(first.cdp, `${region(authorPlace.to.regionId)}.querySelector('[data-record-key="a2a:${normalId}"]')`)
   await waitFor('original Outbox body', () => first.cdp.evaluate(`${region(authorPlace.to.regionId)}.querySelector('.composer-mailbox__detail .log-turn__body')?.textContent.includes('the exact original')`))
   await screenshot(first, 'outbox-original')
-  const humanId = 'human-original-' + randomUUID(), humanBody = 'Explicit user original · Keep my own message separate from A2A'
-  const humanReceipt = await cli(['agent', 'send', '--to-session', author.agentSessionId, '--text', humanBody, '--message-id', humanId, '--operation-id', randomUUID()])
-  const humanOriginal = (await cli(['message', 'read', '--host', 'local', '--message-id', humanId])).result.message
-  assert.equal(humanOriginal.envelope.sender.kind, 'human'); assert.equal(humanOriginal.envelope.senderSessionId, null)
+  // Local CLI ingress has a durable original but no authenticated human or Agent author.
+  const localId = 'local-cli-original-' + randomUUID(), localBody = 'Local CLI original · Keep unattributed input separate from A2A'
+  const localReceipt = await cli(['agent', 'send', '--to-session', author.agentSessionId, '--text', localBody, '--message-id', localId, '--operation-id', randomUUID()])
+  const localOriginal = (await cli(['message', 'read', '--host', 'local', '--message-id', localId])).result.message
+  assert.equal(localOriginal.envelope.sender.kind, 'human'); assert.equal(localOriginal.envelope.senderSessionId, null)
+  await openMailbox(first.cdp, authorPlace.to.regionId, 'inbox')
+  await waitFor('actual A2A Inbox completed empty observation', () => first.cdp.evaluate(`${region(authorPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-inbox"]')?.textContent.includes('No A2A messages received')`))
+  const inbox = await first.cdp.evaluate(`(()=>{const page=${region(authorPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-inbox"]');return{agentSessionId:${JSON.stringify(author.agentSessionId)},text:page.textContent,keys:[...page.querySelectorAll('[data-record-key]')].map(row=>row.dataset.recordKey)}})()`)
+  assert.ok(!inbox.text.includes(localBody), 'A durable local CLI original is outside the Agent-to-Agent Inbox')
+  assert.ok(!inbox.keys.some(key => key.includes(localId)))
   await openMailbox(first.cdp, authorPlace.to.regionId, 'user')
-  await waitFor('actual human user input in User Messages', () => first.cdp.evaluate(`${region(authorPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-user"]')?.textContent.includes(${JSON.stringify(humanBody)})`))
-  const userPage = await first.cdp.evaluate(`(()=>{const page=${region(authorPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-user"]');return{text:page.textContent,keys:[...page.querySelectorAll('[data-record-key]')].map(row=>row.dataset.recordKey)}})()`)
+  await waitFor('actual unattributed CLI input in User Messages', () => first.cdp.evaluate(`(()=>{const page=${region(authorPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-user"]');return [...(page?.querySelectorAll('[data-input-mailbox-key]')??[])].some(row=>row.querySelector('.input-history__excerpt')?.textContent===${JSON.stringify(localBody)})})()`))
+  const userPage = await first.cdp.evaluate(`(()=>{const page=${region(authorPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-user"]');const row=[...page.querySelectorAll('[data-input-mailbox-key]')].find(row=>row.querySelector('.input-history__excerpt')?.textContent===${JSON.stringify(localBody)});return{text:page.textContent,keys:[...page.querySelectorAll('[data-record-key]')].map(row=>row.dataset.recordKey),authorLabel:row?.querySelector('[data-mailbox-author]')?.textContent}})()`)
+  assert.equal(userPage.authorLabel, 'Author unknown', 'The local CLI transport kind does not authenticate a person')
   assert.ok(!userPage.text.includes('A2A original review'), 'The same accepted A2A original does not become another User Message')
   assert.ok(!userPage.keys.some(key => key.includes(normalId)))
   await screenshot(first, 'user-messages')
-  facts.chain.human = { cli: humanReceipt, original: humanOriginal, body: humanBody, userPage }
+  facts.chain.localCli = { cli: localReceipt, original: localOriginal, body: localBody, inbox, userPage }
   facts.mailbox = { pages: ['inbox', 'outbox', 'user'], copyExact: copied === 'copied', humanReadDidNotAcknowledgeAgent: JSON.stringify(afterHumanRead) === JSON.stringify(batch), recipientUserPage, clipboardPort, clipboardBoundary: 'Only electron.clipboard.writeText is controlled; no user clipboard was read or written', beforeBatch: batch, afterHumanRead, bodyText: bodyCopy }
   facts.chain.scenarios.push({ kind: 'normal', cliMessageId: normalId, journalMessageId: original.envelope.messageId, body: normalBody, original, cli: normal })
   facts.chain.normal = { nativeInputCount: input.length, conversationCount: adopted.units.length, conversation: adopted.page, authorSessionId: adopted.units[0].event.author.agentSessionId, senderSessionId: author.agentSessionId, nativeInput: input[0], history: native }
@@ -276,7 +283,7 @@ try {
   const editor = `${region(recipientPlace.to.regionId)}.querySelector('.composer [role="textbox"]')`
   await activate(first.cdp, editor); await first.cdp.call('Input.insertText', { text: 'Original unsent draft retained across actual Electron restart 中🙂' })
   await waitFor('original edited draft persisted by product', () => first.cdp.evaluate(`JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.agentComposerDrafts[${JSON.stringify(recipient.agentSessionId)}]?.includes('Original unsent draft')`))
-  const messageIds = [...facts.chain.scenarios.map(item => item.cliMessageId), initialOriginal.envelope.messageId, humanId], ids = sessions.map(session => session.agentSessionId)
+  const messageIds = [...facts.chain.scenarios.map(item => item.cliMessageId), initialOriginal.envelope.messageId, localId], ids = sessions.map(session => session.agentSessionId)
   const before = await snapshot(first, ids, messageIds); facts.restart.first = before
   for (const run of before.runBirths) { const group = run.birth.split(/\s+/)[1]; assert.notEqual(Number(group), first.child.pid, 'Healthy Run stays outside the killed Electron group') }
   const inputBefore = Object.fromEntries(await Promise.all(sessions.map(async session => [session.agentSessionId, inputRequests(await nativeRequests(session)).length])))
