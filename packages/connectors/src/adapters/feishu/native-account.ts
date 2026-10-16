@@ -16,6 +16,7 @@ const POLL = 'https://accounts.feishu.cn/accounts/qrlogin/polling'
 const LANDING = 'https://ask.feishu.cn/'
 const CONSOLE = 'https://open.feishu.cn/app'
 const CONSOLE_HOSTS = ['open.feishu.cn', 'open.larkoffice.com']
+const CROSS_LOGIN_HOSTS = ['accounts.feishu.cn', 'ask.feishu.cn']
 type Phase = 'poll' | 'cross-login' | 'landing' | 'console' | 'account' | 'expired'
 /** Private issuer facts only. The caller owns the intent, actor and any application binding. */
 export type NativeAccountState = {
@@ -28,7 +29,7 @@ type AuthenticationDiagnostic = Extract<ConnectionEnrollmentDiagnostic, { stage:
 type NativeAccountUnknown = { kind: 'unknown'; diagnostic: AuthenticationDiagnostic }
 type NativeAccountChallenge = { kind: 'challenge'; challenge: ConnectionSetupChallenge; state: NativeAccountInitialState } | NativeAccountUnknown
 type NativeAccountProgress = { kind: 'progress'; stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired'; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; state: NativeAccountState } | NativeAccountUnknown
-const unconfirmed = (step: NonNullable<AuthenticationDiagnostic['step']>, failure: NonNullable<AuthenticationDiagnostic['failure']>, httpStatus?: number, nativeCode?: number): NativeAccountUnknown => ({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step, failure, ...(httpStatus === undefined ? {} : { httpStatus }), ...(nativeCode === undefined ? {} : { nativeCode }) } })
+const unconfirmed = (step: NonNullable<AuthenticationDiagnostic['step']>, failure: NonNullable<AuthenticationDiagnostic['failure']>, httpStatus?: number, nativeCode?: number, boundary?: AuthenticationDiagnostic['boundary']): NativeAccountUnknown => ({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step, failure, ...(httpStatus === undefined ? {} : { httpStatus }), ...(nativeCode === undefined ? {} : { nativeCode }), ...(boundary === undefined ? {} : { boundary }) } })
 const uncached = (endpoint: string) => endpoint + `?_r${10000 + Math.floor(Math.random() * 80000)}=${Date.now()}`
 type Ast = Node & Record<string, unknown>
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
@@ -82,6 +83,7 @@ export function readNativeAccountState(snapshot: unknown): { state: NativeAccoun
 /** Authentication initialization only; it never creates or selects an application. */
 export async function beginFeishuNativeAccount(signal?: AbortSignal): Promise<NativeAccountChallenge> {
   let failure: NonNullable<AuthenticationDiagnostic['failure']> = 'transport-unconfirmed', httpStatus: number | undefined
+  let boundary: AuthenticationDiagnostic['boundary']
   try {
     // Bound this observation only; the durable caller keeps the original unknown intent.
     const bounded = AbortSignal.timeout(20_000)
@@ -92,14 +94,17 @@ export async function beginFeishuNativeAccount(signal?: AbortSignal): Promise<Na
     httpStatus = response.status
     if (!response.ok || response.status >= 300) return unconfirmed('initialize', 'http-status', httpStatus)
     failure = 'invalid-response'
-    const body = record(await response.json()), data = record(body?.data), step = record(data?.step_info)
+    boundary = 'json'
+    const body = record(await response.json())
+    boundary = 'envelope'
+    const data = record(body?.data), step = record(data?.step_info)
     const flowKey = response.headers.get('x-flow-key')
     const token = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !/[\u0000-\u0020\u007f]/u.test(value)
     if (Number.isSafeInteger(body?.code) && body!.code !== 0) return unconfirmed('initialize', 'platform-error', httpStatus, Number(body!.code))
-    if (body?.code !== 0 || !token(step?.token) || !token(flowKey)) return unconfirmed('initialize', failure, httpStatus)
+    if (body?.code !== 0 || !token(step?.token) || !token(flowKey)) return unconfirmed('initialize', failure, httpStatus, undefined, boundary)
     const challenge = { qrPayload: JSON.stringify({ qrlogin: { token: step.token } }), expiresAt: null, nextPollAt: Date.now() + 1500 }
     return { kind: 'challenge', challenge, state: { version: 1, flowKey, token: step.token, setCookies: response.headers.getSetCookie() } }
-  } catch { return unconfirmed('initialize', failure, httpStatus) }
+  } catch { return unconfirmed('initialize', failure, httpStatus, undefined, boundary) }
 }
 
 function alias(p: Record<string, unknown>, names: readonly string[]): string {
@@ -212,57 +217,76 @@ export async function readNativeAccountResponse(response: Response): Promise<str
 /** One native request only. Its next URL and cookies are returned privately for the next durable action. */
 export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: AbortSignal): Promise<NativeAccountProgress> {
   let step: NonNullable<AuthenticationDiagnostic['step']> = 'account', failure: NonNullable<AuthenticationDiagnostic['failure']> = 'invalid-state', httpStatus: number | undefined
+  let boundary: AuthenticationDiagnostic['boundary'] = 'saved-state'
+  const failed = (reason = failure, nativeCode?: number) => unconfirmed(step, reason, httpStatus, nativeCode, boundary)
   try {
     const { state, cookies } = readNativeAccountState(snapshot)
-    if (['account', 'expired'].includes(state.phase)) return unconfirmed(step, failure)
+    if (['account', 'expired'].includes(state.phase)) return failed()
     step = state.phase as typeof step
-    failure = 'redirect-unconfirmed'
-    const hosts = state.phase === 'poll' ? ['accounts.feishu.cn'] : state.phase === 'cross-login' ? ['accounts.feishu.cn', 'ask.feishu.cn'] : state.phase === 'landing' ? ['ask.feishu.cn'] : CONSOLE_HOSTS
+    failure = 'redirect-unconfirmed'; boundary = 'request-target'
+    const hosts = state.phase === 'poll' ? ['accounts.feishu.cn'] : state.phase === 'cross-login' ? CROSS_LOGIN_HOSTS : state.phase === 'landing' ? ['ask.feishu.cn'] : CONSOLE_HOSTS
     const target = url(state.phase === 'poll' ? uncached(POLL) : state.url ?? '', hosts)
     if (state.phase === 'console') consoleUrl(target.href)
     const headers: Record<string, string> = state.phase === 'poll' ? { ...FEISHU_QR_HEADERS, 'x-flow-key': state.flowKey } : { accept: 'text/html', 'user-agent': FEISHU_BROWSER_USER_AGENT }
     if (state.referer) headers.referer = state.referer
+    boundary = 'saved-state'
     const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
     const bounded = AbortSignal.timeout(20_000)
-    failure = 'transport-unconfirmed'
+    failure = 'transport-unconfirmed'; boundary = undefined
     const response = await fetch(target.href, { method: state.phase === 'poll' ? 'POST' : 'GET', redirect: 'manual', headers, ...(state.phase === 'poll' ? { body: JSON.stringify({ biz_type: null }) } : {}), signal: signal ? AbortSignal.any([signal, bounded]) : bounded })
-    httpStatus = response.status; failure = 'invalid-response'
-    if (response.url && new URL(response.url).href !== target.href) return unconfirmed(step, failure, httpStatus)
+    httpStatus = response.status; failure = 'invalid-response'; boundary = 'response-target'
+    if (response.url && new URL(response.url).href !== target.href) return failed()
+    boundary = 'cookie-update'
     for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href, { ignoreError: true })
     let stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired' = 'handoff'
     if (response.status >= 300 && response.status < 400) {
-      failure = 'redirect-unconfirmed'
-      if (state.phase === 'poll' || ++state.hops > 8) return unconfirmed(step, failure, httpStatus)
-      const location = response.headers.get('location'); if (!location) return unconfirmed(step, failure, httpStatus)
+      failure = 'redirect-unconfirmed'; boundary = 'handoff'
+      if (state.phase === 'poll' || ++state.hops > 8) return failed()
+      const location = response.headers.get('location'); if (!location) return failed()
       state.url = url(new URL(location, target).href, hosts).href
       state.referer = target.href
       if (state.phase === 'console') consoleUrl(state.url)
-      if (state.phase === 'cross-login' && new URL(state.url).hostname === 'ask.feishu.cn') state.phase = 'landing'
     } else {
-      if (!response.ok) return unconfirmed(step, 'http-status', httpStatus)
+      boundary = undefined
+      if (!response.ok) return failed('http-status')
       state.hops = 0
       if (state.phase === 'poll') {
-        const body = record(await response.json()), data = record(body?.data), step = record(data?.step_info)
-        if (Number.isSafeInteger(body?.code) && body!.code !== 0) return unconfirmed('poll', 'platform-error', httpStatus, Number(body!.code))
-        if (body?.code !== 0 || !data || !step) return unconfirmed('poll', failure, httpStatus)
+        boundary = 'json'
+        const body = record(await response.json())
+        boundary = 'envelope'
+        const data = record(body?.data), info = record(data?.step_info)
+        if (Number.isSafeInteger(body?.code) && body!.code !== 0) return failed('platform-error', Number(body!.code))
+        if (body?.code !== 0 || !data || data.step_info != null && !info) return failed()
+        boundary = 'transition'
         const polling = data.next_step === null || data.next_step === 'qr_login_polling'
-        if (polling && step!.status === 5) { state.phase = 'expired'; stage = 'expired' }
+        if (polling && info?.status === 5) { state.phase = 'expired'; stage = 'expired' }
         else if (data.next_step === 'enter_app') {
-          // enter_app has its own handoff fields; status belongs to QR polling.
-          if (!text(step.cross_login_uri)) return unconfirmed('poll', failure, httpStatus)
-          state.url = url(step!.cross_login_uri, ['accounts.feishu.cn']).href; state.phase = 'cross-login'
-        } else if (polling && Number.isSafeInteger(step.status) && [1, 2].includes(Number(step.status))) stage = step.status === 2 ? 'scanned' : 'waiting'
-        else return unconfirmed('poll', failure, httpStatus)
-      } else if (state.phase === 'cross-login') { state.phase = 'landing'; state.url = LANDING; state.referer = target.href }
+          // Cross-login is optional; the fixed landing and console still prove the account.
+          boundary = 'handoff'
+          if (info?.cross_login_uri === undefined || info.cross_login_uri === null) {
+            state.url = LANDING; state.phase = 'landing'; state.referer = target.href
+          } else {
+            if (!text(info.cross_login_uri)) return failed()
+            failure = 'redirect-unconfirmed'
+            state.url = url(info.cross_login_uri, CROSS_LOGIN_HOSTS).href; state.phase = 'cross-login'
+          }
+        } else if (polling && info && Number.isSafeInteger(info.status) && [1, 2].includes(Number(info.status))) stage = info.status === 2 ? 'scanned' : 'waiting'
+        else return failed()
+      } else if (state.phase === 'cross-login') {
+        // Finish the cross-login chain before the original fixed landing, even on the same host.
+        state.phase = 'landing'; state.url = LANDING; state.referer = target.href
+      }
       else if (state.phase === 'landing') { state.phase = 'console'; state.url = CONSOLE; state.referer = target.href }
       else {
-        if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'text/html') return unconfirmed(step, failure, httpStatus)
+        boundary = 'bootstrap'
+        if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'text/html') return failed()
         failure = 'bootstrap-unconfirmed'
         const identity = bootstrap(await readNativeAccountResponse(response)); state.account = identity.account; state.csrf = identity.csrf; state.consoleOrigin = target.origin; state.phase = 'account'; stage = 'account'
       }
     }
+    failure = 'invalid-response'; boundary = 'snapshot'
     state.cookieJar = serialize(cookies)
     const challenge = state.phase === 'poll' ? { qrPayload: JSON.stringify({ qrlogin: { token: state.token } }), expiresAt: null, nextPollAt: Date.now() + 1500 } : null
     return { kind: 'progress', stage, challenge, account: stage === 'account' ? state.account! : null, state }
-  } catch { return unconfirmed(step, failure, httpStatus) }
+  } catch { return failed() }
 }
