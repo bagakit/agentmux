@@ -295,8 +295,15 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     reflowAnchor.current = container ? { container, anchor: captureReadingAnchor(container) } : null
   }
   function pinFromDrag(bounds: AgentBookmarkBounds) {
+    const sourceSlot = readingHost.parentElement?.hasAttribute('data-overlay-modal-slot') ? readingHost.parentElement : null
     rememberPinReading()
-    return agentInformationPreview.ensurePinned(request.token, bounds)
+    const promotion = agentInformationPreview.ensurePinned(request.token, bounds)
+    if (!promotion) return
+    return { key: promotion.key, cancel() {
+      // Explicit undo returns only to this gesture's still-live source, never a later modal.
+      if (promotion.created && sourceSlot?.isConnected && sourceSlot.ownerDocument === document && getModalOverlayContainer(opening.anchor) === sourceSlot) detachedFromModal.current = false
+      promotion.cancel()
+    } }
   }
   function togglePin() {
     rememberPinReading()
