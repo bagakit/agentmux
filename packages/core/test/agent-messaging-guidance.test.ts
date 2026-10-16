@@ -109,7 +109,10 @@ it('real creation and CLI disclose only the task entry, with complete rules avai
     expect(JSON.stringify(output)).not.toContain(issued.capability)
     const readings: Record<string, string> = {}
     for (const args of [['--skill'], ['agent', '--skill'], ['message', '--skill'], ['--help'], ['--help', 'agent', 'send'], ['--help', 'message', 'read']]) {
-      const guide = (await exec(process.execPath, [cli, ...args], { env })).stdout
+      const result = await exec(process.execPath, [cli, ...args], { env })
+        .then(value => ({ ...value, code: 0 }), error => ({ stdout: error.stdout, stderr: error.stderr, code: error.code }))
+      expect(result.code, `${args.join(' ')}: ${result.stderr}`).toBe(0)
+      const guide = result.stdout
       readings[args.join(' ')] = guide
       if (args.join(' ') === 'message --skill') expect(guide).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
       else expect(guide, args.join(' ')).not.toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
