@@ -118,6 +118,16 @@ P00 可靠性原则已原位写入[低资源原则](../design/behavior/shared-ru
 
 该恢复切片的十三条实际编译 Core 变异与四条实际加载 Main 变异分别产生业务失败，恢复后八十三项相关 Core 测试、八项真实 Main 消费者与拒绝对照通过。真实隔离 Native 和新语义进程使用同一原文件、Run 与 PID；准确 ended Session 的合成 Provider 恢复保原 native target 和操作，但不代签真实 Provider 上下文。宽回归仍有经准确基线复现的旧失败，不宣称全量通过。managed Hook 配置 helper 原有的无 Session 事件诊断尚未补成准确 late-subscriber 回执，本轮没有借用另一类 Hook 观察替它签字。
 
+## 新增观察口误套原活 Run
+
+另一次现场出现终端已有输出，页面仍持续显示“连接未确认／Resume”。准确 Runtime 观察确认原 Run 仍在运行、输出服务可用、输入开放；Core 的受管前台观察则报告原控制通道不存在。两种观察属于不同对象，不能以终端画面代签前台 attached，也不能以辅助通道缺失推断原 Agent 已退出。
+
+原因有两层。Core 只要看到原 `nativeActor` 和当前 Provider 的观察方法，就要求原活进程提供后来新增的前台控制通道；原 `protocolId` 实际只承诺原生输入能力，没有承诺该通道。Renderer 又把前台 unknown 与确认 detached 共用 Resume 横幅，使观察缺口遮住仍可工作的终端。终端 attach 成功只更新自己的连接状态，不能解除另一 owner 持有的 unknown；单纯隐藏横幅也会掩盖真实前台断开。
+
+修正在原启动与呈现 owner 分别收敛：[Provider 启动计划](../../packages/core/src/providers/codex-native-input.ts) 只为实际具备通道的新启动冻结私有 `frontendControl` 声明，[Session Store](../../packages/core/src/agent-session-store.ts) 原样保留准确声明，[Core](../../packages/core/src/client.ts) 的观察和手动重连只消费该原声明，不追认或回填原活 Run。缺声明不猜附着状态；声明存在但通道失败继续保留准确 unknown。[SessionPane](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 将 unknown 放入不遮挡终端的服务窗，提供只读原对象重查，确认 detached 才保留原显式 Resume。行为边界归[Session 恢复](../design/behavior/session-recovery.md)。
+
+回归分别覆盖原声明缺席、声明存在但通道丢失，以及确认前台断开的真实恢复。公共 Hosted／CLI 消费者核对语义 owner 重启后的原 Session、Run、PID、原生身份、输入计数与子进程数；呈现消费者核对刷新不执行恢复、准确 attached 后撤下告示以及原终端节点和草稿保留。隔离夹具的通过不代签用户现场已安装新候选，也不证明全部资源或极端事件问题已关闭。
+
 ## 遗留
 
 - **性能归因仍未完成。** Host 高 CPU、Renderer 高内存与交互成本仍需分开归因，已有观察尚不能完成全部因果归因。终端恢复可读不代签整体资源优化、长期稳定性或活跃长历史连续阅读。
