@@ -50,7 +50,7 @@ export default defineConfig({ ...sourceConfig, cacheDir: resolve(root, '.tmp/mai
   ...clientUiAliases,
   ...sourceConfig.resolve!.alias
 ] }, test: { ...sourceConfig.test, reporters: ['default', 'json', discovery], outputFile: { json: resolve(root, '.tmp/mailbox-reading-flow/mounted/results.json') }, environmentMatchGlobs: [['packages/client-ui/test/**', 'happy-dom']], include: [
-  'apps/desktop/test/mailbox-a2a.test.tsx', 'apps/desktop/test/session-mailbox-a2a.test.tsx', 'apps/desktop/test/session-messages-read.test.tsx',
+  'apps/desktop/test/session-mailbox-author-boundary.test.tsx', 'apps/desktop/test/mailbox-a2a.test.tsx', 'apps/desktop/test/session-mailbox-a2a.test.tsx', 'apps/desktop/test/session-messages-read.test.tsx',
   'apps/desktop/test/session-mailbox.test.tsx', 'apps/desktop/test/session-mailbox-receipts.test.tsx',
   'apps/desktop/test/session-mailbox-native-messages.integration.test.tsx',
   'apps/desktop/test/provider-user-message-mailbox-spine.integration.test.tsx',
