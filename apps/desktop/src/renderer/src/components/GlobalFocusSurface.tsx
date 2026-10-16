@@ -239,24 +239,36 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     if (at > 0) setHistoryWindowRequest(current => ({ at, sequence: (current?.sequence ?? 0) + 1 }))
   }
   const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
+  const [documentActive, setDocumentActive] = useState(document.visibilityState !== 'hidden')
+  useEffect(() => {
+    const observe = () => setDocumentActive(document.visibilityState !== 'hidden')
+    observe(); document.addEventListener('visibilitychange', observe)
+    return () => document.removeEventListener('visibilitychange', observe)
+  }, [])
   const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
   const hasBoardCards = boardLanes.length > 0
   useLayoutEffect(() => {
     const rows = boardRowsRef.current
-    if (!visible || !hasBoardCards || !rows || typeof ResizeObserver === 'undefined') return
-    const measure = () => {
+    if (!visible || !documentActive || !hasBoardCards || !rows || typeof ResizeObserver === 'undefined') return
+    let active = true
+    const measure: ResizeObserverCallback = entries => {
+      if (!active || document.visibilityState === 'hidden') return
+      // Rows stretch each lane's grid across this content box. Its RO width
+      // already excludes the scroll bar and preserves fractional CSS pixels;
+      // mount/reveal must not force the parked workbench through layout.
+      const width = entries.find(entry => entry.target === rows)?.contentRect.width ?? 0
+      if (width <= 0) return
       const groups = rows.querySelector<HTMLElement>('.focus-project-lanes__groups')
-      if (!groups || rows.clientWidth <= 0) return
+      if (!groups) return
       const style = getComputedStyle(groups), cards = groups.querySelector<HTMLElement>('.focus-context-group__cards')
       const gap = parseFloat(style.columnGap) || 0
-      const next = { width: groups.getBoundingClientRect().width, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
+      const next = { width, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
       setLaneMetrics(current => current.width === next.width && current.padding === next.padding && current.gap === next.gap && current.cardGap === next.cardGap ? current : next)
     }
-    measure()
     const observer = new ResizeObserver(measure)
     observer.observe(rows)
-    return () => observer.disconnect()
-  }, [visible, hasBoardCards])
+    return () => { active = false; observer.disconnect() }
+  }, [visible, documentActive, hasBoardCards])
   const matchingGroups = groupFocusContexts(matching)
   const neutralSummary = focusNeutralGroupSummary(matchingGroups.idle)
   const bucketMeta = { attention: { label: 'Attention', icon: ThemeObjectInboxIcon }, working: { label: 'Working', icon: ThemeStatusWorkingIcon }, results: { label: 'Results', icon: ThemeStatusCompletedIcon }, idle: { label: neutralSummary.label, icon: ThemeStatusNeutralIcon } }

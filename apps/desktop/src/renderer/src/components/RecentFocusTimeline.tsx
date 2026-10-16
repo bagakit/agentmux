@@ -590,21 +590,29 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     setWidth: saveNameWidth, onDraftWidthChange: applyNameWidth
   })
   useLayoutEffect(() => {
+    if (!documentVisible || mode === 'collapsed') return
     const timeline = timelineRef.current
     if (!timeline || typeof ResizeObserver === 'undefined') return
-    const update = () => {
-      const available = timeline.getBoundingClientRect().width
-      const name = timeline.querySelector('.recent-focus__ruler > .recent-focus__gutter')?.getBoundingClientRect().width ?? 0
-      const scale = timeline.querySelector('.recent-focus__time-scale')?.getBoundingClientRect().width ?? 0
-      const usable = name + scale || available
+    const gutter = timeline.querySelector('.recent-focus__ruler > .recent-focus__gutter')
+    const scale = timeline.querySelector('.recent-focus__time-scale')
+    const targets = [timeline, gutter, scale].filter((node): node is Element => node !== null)
+    const widths = new Map<Element, number>()
+    let active = true
+    const update: ResizeObserverCallback = entries => {
+      if (!active || document.visibilityState === 'hidden') return
+      for (const entry of entries) widths.set(entry.target, entry.borderBoxSize[0]?.inlineSize ?? entry.contentRect.width)
+      if (targets.some(target => !widths.has(target))) return
+      const available = widths.get(timeline) ?? 0
+      const usable = (gutter ? widths.get(gutter) ?? 0 : 0) + (scale ? widths.get(scale) ?? 0 : 0) || available
       // Measure the canvas after its existing padding and gaps, preserving time
-      // space without changing a wider saved preference.
+      // space without changing a wider saved preference. Initial RO entries
+      // already carry layout sizes; do not flush the parked workbench here.
       if (available > 0) setNameMaximum(Math.min(FOCUS_TIMELINE_NAME_WIDTH_MAX, Math.max(FOCUS_TIMELINE_NAME_WIDTH_MIN, Math.floor(usable - 160))))
     }
     const observer = new ResizeObserver(update)
-    observer.observe(timeline); update()
-    return () => observer.disconnect()
-  }, [])
+    for (const target of targets) observer.observe(target, { box: 'border-box' })
+    return () => { active = false; observer.disconnect() }
+  }, [documentVisible, mode])
   const viewportRef = useRef<HTMLDivElement>(null)
   const [scaleWidth, setScaleWidth] = useState(0)
   const headerRef = useRef<HTMLElement>(null)
@@ -875,13 +883,19 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const ticks = useMemo(() => focusRulerTicks(range, displayedRuler), [range, displayedRuler])
   const tickLabels = useMemo(() => focusRulerLabels(ticks, range, scaleWidth), [ticks, range, scaleWidth])
   useLayoutEffect(() => {
+    if (!documentVisible || mode === 'collapsed') return
     const scale = viewportRef.current?.querySelector<HTMLElement>('.recent-focus__time-scale')
     if (!scale || typeof ResizeObserver === 'undefined') return
     const labels = [...scale.querySelectorAll<HTMLTimeElement>('.recent-focus__tick > time')]
     const priority = { major: 0, short: 1, shorter: 2, fine: 3 }
-    const update = () => {
+    let active = true, width = 0
+    const update: ResizeObserverCallback = entries => {
+      if (!active || document.visibilityState === 'hidden') return
+      const entry = entries.find(entry => entry.target === scale)
+      if (entry) width = entry.borderBoxSize[0]?.inlineSize ?? entry.contentRect.width
+      if (width <= 0) return
+      setScaleWidth(width)
       const bounds = scale.getBoundingClientRect()
-      setScaleWidth(bounds.width)
       // Read every candidate first, including density-hidden text. Visibility
       // preserves border-box size, so these writes do not feed back into resize.
       const measured = labels.map(node => ({ node, rect: node.getBoundingClientRect(),
@@ -898,11 +912,10 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
       }
     }
     const observer = new ResizeObserver(update)
-    observer.observe(scale)
+    observer.observe(scale, { box: 'border-box' })
     for (const label of labels) observer.observe(label, { box: 'border-box' })
-    update()
-    return () => observer.disconnect()
-  }, [mode, tickLabels, time])
+    return () => { active = false; observer.disconnect() }
+  }, [documentVisible, mode, tickLabels, time])
   const gridPaths = useMemo(() => (['major', 'short', 'shorter', 'fine'] as const).map(tier => ({ tier,
     path: ticks.filter(tick => tick.tier === tier).map(tick => `M${focusTimePosition(tick.instant, range)} 0V1`).join(' ')
   })), [ticks, range])
