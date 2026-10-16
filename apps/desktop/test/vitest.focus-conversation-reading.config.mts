@@ -13,6 +13,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/focus-conversation-read
     if (mutation && path === 'apps/desktop/src/renderer/src/components/ActivityView.tsx') {
       const replacements: Record<string, [string, string]> = {
         'failure-remains-pending': ['const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError || !readingWindow.historical && userMessageRead?.error)', 'const emptyReadFailed = false'],
+        'decorate-source-failure': ['{!emptyReadFailed ? <div className="activity-feed__reading-landscape"', '{true ? <div className="activity-feed__reading-landscape"'],
         'hide-retained-reading-feedback': ['pending={readPending && !earlierReadPending}', 'pending={false}']
       }
       const change = replacements[mutation]

@@ -83,10 +83,16 @@ it.each(['projection', 'observation'] as const)('actual Focus %s reads pending �
   await h.render(); await wait(() => expect(h.reads.mock.calls.length).toBeGreaterThan(0)); h.assertRoute()
   expect(h.feed().textContent).toContain('Reading conversation…')
   expect(h.feed().textContent).not.toContain('Reading interrupted'); expect(h.feed().querySelector('[role="slider"]')).toBeNull()
+  const scene = h.feed().querySelector('.activity-feed__empty-reading[data-read-state="pending"]')!
+  expect(scene.getAttribute('aria-busy')).toBe('true')
+  expect(scene.querySelector('.activity-feed__reading-landscape')?.getAttribute('aria-hidden')).toBe('true')
+  expect(scene.querySelector('.activity-feed__reading-caption')?.textContent).toBe('Reading conversation…')
   await act(async () => release()); await wait(() => expect(h.feed().textContent).toContain('Reading interrupted'))
   expect(h.feed().textContent).toContain('Isolated original conversation read unavailable')
   expect(h.feed().textContent).toContain('Retry the source above to continue reading.')
   expect(h.feed().textContent).not.toContain('Reading conversation…')
+  expect(h.feed().querySelector('.activity-feed__reading-landscape'), 'A source failure ends the pending decorative scene').toBeNull()
+  expect(h.feed().querySelector('.activity-feed__empty-reading')?.hasAttribute('aria-busy')).toBe(false)
   const retries = [...h.feed().querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === 'Retry')
   expect(retries.length).toBeGreaterThan(0); expect(h.feed().querySelector('.activity-feed__empty-reading button')).toBeNull()
   const calls = h.reads.mock.calls.length; await pause(180); expect(h.reads).toHaveBeenCalledTimes(calls)
@@ -96,6 +102,7 @@ it.each(['projection', 'observation'] as const)('actual Focus %s reads pending �
   expect(h.reads.mock.calls.length).toBeGreaterThan(calls)
   expect(h.feed().textContent).not.toContain('Reading interrupted'); expect(h.feed().textContent).not.toContain('Reading conversation…')
   expect(h.feed().textContent).toContain('The original selected words remain readable.')
+  expect(h.feed().querySelector('.activity-feed__empty-reading'), 'Accepted content replaces the complete initial scene').toBeNull()
   h.assertRoute(); h.unchanged()
 })
 
@@ -103,15 +110,17 @@ it('actual projected Focus retains the exact body, selection, focused control an
   const h = await fixture('projection'); await h.render()
   await wait(() => expect(h.feed().querySelector('[data-native-record-id="original-answer"] strong')).not.toBeNull()); h.assertRoute()
   const body = h.feed().querySelector('[data-native-record-id="original-answer"] strong')!, range = document.createRange()
-  range.selectNodeContents(body); getSelection()!.addRange(range)
-  const control = h.panel().querySelector<HTMLButtonElement>('.agent-region-header__more, button')!; control.focus()
+  const control = h.panel().querySelector<HTMLButtonElement>('.agent-region-header__more, button')!
   const originalChanges = h.actualChanges, frontendChanges = vi.spyOn(api.conversation, 'readConversationChanges')
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve }); closes.push(() => release())
   h.changes.mockImplementation(async (...args) => { await gate; throw Object.assign(Error('Later original read unavailable'), { code: 'CONTROL_UNAVAILABLE' }) })
   await act(async () => appendFile(h.f.path, jsonl([row('new-answer', 'New independently recorded answer.')])))
   await wait(() => expect(frontendChanges.mock.calls.length).toBeGreaterThan(0))
-  const retained = () => { expect(body.isConnected).toBe(true); expect(getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('selected words'); expect(document.activeElement).toBe(control); expect(h.feed().textContent).not.toContain('Reading interrupted'); expect(h.feed().textContent).not.toContain('Reading conversation…') }
+  // A selected range intentionally holds new reads. Establish the selection
+  // only after the real later request is pending, then verify it survives.
+  range.selectNodeContents(body); getSelection()!.addRange(range); control.focus()
+  const retained = () => { expect(body.isConnected).toBe(true); expect(getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('selected words'); expect(document.activeElement).toBe(control); expect(h.feed().textContent).not.toContain('Reading interrupted'); expect(h.feed().textContent).not.toContain('Reading conversation…'); expect(h.feed().querySelector('.activity-feed__empty-reading')).toBeNull() }
   retained()
   const pendingStatus = h.feed().querySelector('.activity-ruler__pending[role="status"]')
   expect(pendingStatus, 'Later reads retain their existing ruler status rather than inserting an empty scaffold').not.toBeNull()
@@ -127,5 +136,6 @@ it('actual observed Focus distinguishes an accepted empty source from pending an
   const h = await fixture('observation', []); await h.render(); await wait(() => expect(h.reads.mock.calls.length).toBeGreaterThan(0))
   await wait(() => expect(h.feed().textContent).toContain('No structured activity yet. Terminal remains available.'))
   expect(h.feed().textContent).not.toContain('Reading conversation…'); expect(h.feed().textContent).not.toContain('Reading interrupted')
+  expect(h.feed().querySelector('.activity-feed__empty-reading'), 'An accepted empty source is a result rather than pending work').toBeNull()
   expect(h.feed().querySelector('[role="slider"]')).toBeNull(); h.assertRoute(); h.unchanged()
 })
