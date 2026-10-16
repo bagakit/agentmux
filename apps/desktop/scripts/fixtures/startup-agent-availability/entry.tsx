@@ -80,7 +80,7 @@ const scene = {
   state() {
     const state = useAppStore.getState()
     return { loading: state.loading, progress: state.startupProgress, agents: state.startupAgentAvailability,
-      skip: state.config?.startup?.skipAgentAvailabilityCheckWait, detections: state.executorDetections, error: state.error }
+      paths: state.config?.copyPathsAsAbsolute, detections: state.executorDetections, error: state.error }
   },
   async checkpoint() { await prepareRendererUpdate('quit'); return { surface: scene.surface(), config: await bridge.config(), spatial: await bridge.readSpatial() } },
   async theme(mode: 'dark' | 'light') {

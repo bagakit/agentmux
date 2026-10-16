@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -159,8 +160,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls[1]).toEqual([
-      { copyPathsAsAbsolute: false, skipAgentAvailabilityCheckWait: false },
-      { copyPathsAsAbsolute: true, skipAgentAvailabilityCheckWait: false }
+      { copyPathsAsAbsolute: false },
+      { copyPathsAsAbsolute: true }
     ])
     await act(async () => finish())
   })
@@ -173,8 +174,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave).toHaveBeenCalledWith(
-      { copyPathsAsAbsolute: true, skipAgentAvailabilityCheckWait: false },
-      { copyPathsAsAbsolute: false, skipAgentAvailabilityCheckWait: false }
+      { copyPathsAsAbsolute: true },
+      { copyPathsAsAbsolute: false }
     )
     expect(saveButton().disabled).toBe(true)
   })
@@ -189,8 +190,8 @@ describe('Settings drafts across external commits', () => {
     expect(saveButton().disabled).toBe(false)
     await dom.click('[data-settings-save-bar] button')
     expect(onSave.mock.calls).toEqual(Array.from({ length: 2 }, () => [
-      { copyPathsAsAbsolute: true, skipAgentAvailabilityCheckWait: false },
-      { copyPathsAsAbsolute: false, skipAgentAvailabilityCheckWait: false }
+      { copyPathsAsAbsolute: true },
+      { copyPathsAsAbsolute: false }
     ]))
     expect(saveButton().disabled).toBe(true)
   })
@@ -234,8 +235,8 @@ describe('Settings drafts across external commits', () => {
   })
 
   it('keeps known Executor and Host diagnostics when an ordinary setting commits', () => {
-    const diagnostics = { codex: { state: 'ready' as const, detail: 'Known available', observedAt: 123 } }
-    const checks = { local: { state: 'ready' as const, detail: 'Known healthy', observedAt: 123 } }
+    const diagnostics = { codex: { state: 'ready' as const, detail: 'Known available', observedAt: _tailFixtureEpoch(0, 0, 123) } }
+    const checks = { local: { state: 'ready' as const, detail: 'Known healthy', observedAt: _tailFixtureEpoch(0, 0, 123) } }
     useAppStore.setState({ config: composerConfig, executorDetections: diagnostics, hostChecks: checks })
     useAppStore.getState().setConfig({ ...composerConfig, copyPathsAsAbsolute: true,
       appearance: { ...composerConfig.appearance, appAppearance: 'light' } })

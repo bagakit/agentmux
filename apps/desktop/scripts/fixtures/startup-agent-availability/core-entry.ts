@@ -3,3 +3,4 @@ export { BUILT_IN_AGENT_PROVIDERS } from '../../../../../packages/core/src/agent
 export { durableWriteFile } from '../../../../../packages/core/src/durable-write'
 export { AgentMuxError } from '../../../../../packages/core/src/errors'
 export { defaultLocalHostLabel } from '../../../../../packages/core/src/execution-host'
+export { normalizeAgentContinuityPolicy } from '../../../../../packages/core/src/agent-session-continuity'

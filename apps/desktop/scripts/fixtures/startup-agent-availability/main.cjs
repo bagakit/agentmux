@@ -34,7 +34,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('startup-proof:spatial:commit', (_event, input) => spatial.commit(input))
     ipcMain.handle('startup-proof:spatial:retain', (_event, values) => spatial.retainDisplayLabels(values))
     ipcMain.handle('startup-proof:flush', async () => { await win.webContents.session.flushStorageData() })
-    win = new BrowserWindow({ width: 1280, height: 900, show: false,
+    win = new BrowserWindow({ width: 1280, height: 900, minWidth: 980, minHeight: 660, show: false,
       webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true,
         backgroundThrottling: false, additionalArguments: ['--startup-proof-stage=' + stage] } })
     unsubscribeSpatial = spatial.subscribe(value => { if (!win.isDestroyed()) win.webContents.send('startup-proof:spatial:changed', value) })
@@ -62,9 +62,15 @@ app.whenReady().then(async () => {
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0, buttons: 0 })
       const actualCSS = await read('({width:innerWidth,height:innerHeight,pixelRatio:devicePixelRatio,scrollWidth:document.documentElement.scrollWidth})')
       assert.ok(actualCSS.scrollWidth <= actualCSS.width, 'Actual product has no page horizontal overflow')
+      const geometry = await read(`(()=>{const box=n=>{const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}};return{shell:box(document.querySelector('.app-shell')),regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.checkVisibility()).map(box)}})()`)
+      assert.equal(geometry.shell.width, actualCSS.width, 'The real App fills its viewport; fixture CSS must not shrink it')
+      if (name === 'workface-pending') {
+        assert.equal(geometry.regions.length, 2)
+        for (const r of geometry.regions) assert.ok(r.width > 80 && r.height > 80 && r.x >= 0 && r.x + r.width <= actualCSS.width + 1, 'Both original Regions are painted within the actual viewport')
+      }
       const png = (await win.webContents.capturePage()).toPNG(), file = `${stage}-${name}-${width}.png`
       assert.ok(png.length > 0); await fs.writeFile(path.join(evidence, file), png)
-      receipt.frames.push({ file, sha256: sha(png), requested: { width, height: 900 }, actualCSS, contentSize: win.getContentSize(), pngPixels: { width: png.readUInt32BE(16), height: png.readUInt32BE(20) } })
+      receipt.frames.push({ file, sha256: sha(png), requested: { width, height: 900 }, actualCSS, geometry, contentSize: win.getContentSize(), pngPixels: { width: png.readUInt32BE(16), height: png.readUInt32BE(20) } })
     }
     const node = selector => `document.querySelector(${JSON.stringify(selector)})`
     const button = label => `Array.from(document.querySelectorAll('button')).find(n=>n.textContent.trim()===${JSON.stringify(label)})`
@@ -75,9 +81,7 @@ app.whenReady().then(async () => {
     assert.equal(initial.agents.total, 2)
     assert.equal(initial.agents.current, 0)
     if (stage === 'failure-restart') {
-      assert.notEqual(initial.skip, true, 'The failed-check startup uses the original default waiting policy')
-      assert.equal(initial.agents.waiting, true)
-      await until(`${startup}?.textContent.includes('Checking your Agents')`)
+      assert.equal(await read(`Boolean(${startup})`), false, 'Pending checks do not cover the restored workface')
       const original = JSON.parse(await fs.readFile(path.join(evidence, 'original-workface.json'), 'utf8'))
       await read('window.startupScene.fail()')
       await until(`!window.startupScene.state().agents.pending && !${startup}`)
@@ -123,25 +127,11 @@ app.whenReady().then(async () => {
       await until('Object.values(window.startupScene.state().detections).length===2 && Object.values(window.startupScene.state().detections).every(check=>check.state==="ready")')
       await until(`!${item}`)
       assert.deepEqual(await read('window.startupScene.surface()'), original, 'Successful retry retains the exact original workface')
-      receipt.failureRecovery = { defaultWaitReleasedAutomatically: true, originalCode, originalMessage, rejectionCode, rejectionMessage,
+      receipt.failureRecovery = { workfaceAvailableBeforeFailure: true, originalCode, originalMessage, rejectionCode, rejectionMessage,
         originalText, pendingText, retryInputs: retry.calls.slice(2), pendingCauseRetained: true, clearedAfterSuccessfulChecks: true, originalWorkfaceRetained: true, noReseed: true }
-    } else if (stage === 'skip-restart') {
-      assert.equal(initial.skip, true, 'Original disk preference is read after real process restart')
-      assert.equal(initial.agents.waiting, false)
-      assert.equal(await read(`Boolean(${startup})`), false, 'Saved preference releases the production startup screen while checks continue')
-      assert.deepEqual(await read('window.startupScene.surface()'), JSON.parse(await fs.readFile(path.join(evidence, 'original-workface.json'), 'utf8')))
-      receipt.skipBackground = { ...initial, originalWorkfaceRetained: true }
-      await read('window.startupScene.release()'); await until('!window.startupScene.state().agents.pending')
     } else {
-      assert.notEqual(initial.skip, true, 'Default and saved unchecked preference both wait')
-      assert.equal(initial.agents.waiting, true)
-      await until(`${startup}?.textContent.includes('Checking your Agents')`)
-      if (stage === 'restart') for (const width of [1280, 360]) await picture('checking', width)
-      await click(button('Continue to workspace'))
-      await until(`!${startup}`)
-      assert.equal(await read('window.startupScene.state().agents.pending'), true, 'Continue does not cancel or complete the observation')
-      assert.equal(await read('window.startupScene.state().skip===true'), false, 'Continue does not save a skip preference')
-      receipt.continue = { pending: true, savedPreferenceUnchanged: true }
+      assert.equal(await read(`Boolean(${startup})`), false, 'Usable workface is visible before detection completes')
+      receipt.background = { pending: true, workfaceReleased: true }
       win.setContentSize(1280, 900); await until('innerWidth===1280')
       if (stage === 'control') {
         const original = await read('window.startupScene.seed()')
@@ -153,32 +143,33 @@ app.whenReady().then(async () => {
         const original = JSON.parse(await fs.readFile(path.join(evidence, 'original-workface.json'), 'utf8'))
         assert.deepEqual(await read('window.startupScene.surface()'), original, 'Second independent Electron process restores exact original Tab, Region, layouts, focus and drafts without reseeding')
         const regions = await read('Array.from(document.querySelectorAll("[data-workbench-region-id]")).filter(n=>n.checkVisibility()).map(n=>n.dataset.workbenchRegionId)')
-        assert.equal(regions.length, 2, 'The original workface is visibly mounted after trusted Continue')
+        assert.equal(regions.length, 2, 'The original workface is visibly mounted while checks remain pending')
         receipt.restart = { sameIdentityAndContent: true, originalWorkfaceVisible: true, regions, noReseed: true }
       }
+      if (stage === 'restart') for (const width of [1280, 980]) await picture('workface-pending', width)
+      win.setContentSize(1280, 900); await until('innerWidth===1280')
       await read('window.startupScene.release()'); await until('!window.startupScene.state().agents.pending')
       await click(node('.window-status-bar [aria-label="Settings"]'))
       await until('!!document.querySelector(".settings-page")')
       await click(node('[data-settings-target="general"]'))
       await until('!!document.querySelector("[data-settings-pane=general]")')
-      const checkbox = `Array.from(document.querySelectorAll('[data-settings-pane=general] label')).find(n=>n.textContent.includes('Continue startup without waiting for Agent availability')).querySelector('input')`
-      assert.equal(await read(`${checkbox}.checked`), false)
-      receipt.defaultUnchecked = true
+      assert.equal(await read('Boolean(document.querySelector("[data-settings-field=startup-checks]"))'), false, 'Obsolete wait preference is absent')
+      const checkbox = `document.querySelector('[data-settings-field="copy-paths"] input')`
       if (stage === 'restart') {
-        for (const width of [1280, 360]) await picture('general-default', width)
+        for (const width of [1280, 980]) await picture('general', width)
         win.setContentSize(1280, 900); await until('innerWidth===1280')
         await click(checkbox)
         await click(`Array.from(document.querySelectorAll('[data-settings-pane=general] [data-settings-save-bar] button')).find(n=>n.textContent.trim()==='Save')`)
-        await until('window.startupScene.state().skip===true')
-        assert.equal(owner.current.startup.skipAgentAvailabilityCheckWait, true)
+        await until('window.startupScene.state().paths===true')
+        assert.equal(owner.current.copyPathsAsAbsolute, true)
         const reloaded = configStore.validate(JSON.parse(await fs.readFile(configFile, 'utf8')))
-        assert.equal(reloaded.startup.skipAgentAvailabilityCheckWait, true)
+        assert.equal(reloaded.copyPathsAsAbsolute, true)
         receipt.actualSettingsSaveReadback = true
       }
     }
     receipt.checkpoint = await read('window.startupScene.checkpoint()')
     receipt.events = await read('window.startupScene.events')
-    if (stage !== 'skip-restart') assert.ok(receipt.events.some(event => event.type === 'click' && event.trusted), 'Actual Renderer receives trusted pointer events')
+    assert.ok(receipt.events.some(event => event.type === 'click' && event.trusted), 'Actual Renderer receives trusted pointer events')
     receipt.completed = true
   } catch (error) {
     receipt.failure = { name: error.name, message: error.message, stack: error.stack }

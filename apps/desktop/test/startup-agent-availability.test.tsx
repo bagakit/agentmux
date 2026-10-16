@@ -8,7 +8,6 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { StartupLoadingSurface } from '../src/renderer/src/components/StartupLoadingSurface'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
 import type { AppConfig, ExecutorDetection, RuntimeSnapshot } from '../src/shared/contracts'
@@ -89,7 +88,7 @@ it('starts both Agent checks without mounting a Launcher and publishes the durab
   await boot()
   expect(api.executors.detect).toHaveBeenCalledTimes(2)
   expect(api.sessions.snapshot).toHaveBeenCalled()
-  expect(useAppStore.getState().startupAgentAvailability).toEqual({ hostId: 'local', current: 0, total: 2, pending: true, waiting: true })
+  expect(useAppStore.getState().startupAgentAvailability).toEqual({ hostId: 'local', current: 0, total: 2, pending: true })
   originalWorkface()
   checks.codex!.resolve(result('codex')); await ticks()
   expect(useAppStore.getState().startupAgentAvailability?.current).toBe(1)
@@ -103,13 +102,14 @@ it('starts both Agent checks without mounting a Launcher and publishes the durab
   expect(desktopWorkbenchObservationSchema.parse(observed.observation).startupAgentAvailability).toMatchObject({ current: 2, total: 2, pending: false })
 })
 
-it('the saved skip preference releases only presentation waiting and still checks every configured command', async () => {
-  config.startup = { skipAgentAvailabilityCheckWait: true }
+it.each([undefined, false, true])('historical startup preference %s cannot gate or skip observation', async value => {
+  if (value !== undefined) config.startup = { skipAgentAvailabilityCheckWait: value }
   await boot()
   expect(api.executors.detect).toHaveBeenCalledTimes(2)
-  expect(useAppStore.getState().startupAgentAvailability).toMatchObject({ pending: true, waiting: false })
+  expect(useAppStore.getState().startupAgentAvailability).toMatchObject({ pending: true })
+  originalWorkface()
   checks.codex!.resolve(result('codex')); checks.custom!.resolve(result('custom')); await ticks()
-  expect(useAppStore.getState().startupAgentAvailability).toMatchObject({ current: 2, pending: false, waiting: false })
+  expect(useAppStore.getState().startupAgentAvailability).toMatchObject({ current: 2, pending: false })
   originalWorkface()
 })
 
@@ -150,30 +150,9 @@ it('joining an already running check waits for its original result without probi
   expect(useAppStore.getState().startupAgentAvailability?.pending).toBe(false)
 })
 
-it('Continue to workspace releases only this wait and late results cannot reopen the startup stage', async () => {
-  await boot()
-  const container = document.createElement('div'); document.body.append(container)
-  const root = createClientUiRoot(container), state = useAppStore.getState()
-  try {
-    await act(async () => root.render(<StartupLoadingSurface loading={state.loading} progress={state.startupProgress}
-      agents={state.startupAgentAvailability} hostLabel="This Mac" onContinue={state.continueStartup} />))
-    expect(container.textContent).toContain('Checking your Agents')
-    expect(container.textContent).toContain('This Mac · 0 of 2 checked')
-    const button = container.querySelector<HTMLButtonElement>('button')!
-    expect(button.textContent).toBe('Continue to workspace')
-    button.focus(); expect(document.activeElement).toBe(button)
-    await act(async () => button.click())
-    expect(useAppStore.getState().startupAgentAvailability).toMatchObject({ waiting: false, pending: true })
-    expect(useAppStore.getState().config?.startup).toBeUndefined()
-    checks.codex!.resolve(result('codex')); checks.custom!.resolve(result('custom')); await ticks()
-    expect(useAppStore.getState().startupAgentAvailability).toMatchObject({ waiting: false, pending: false })
-    originalWorkface()
-  } finally { await act(async () => root.unmount()); container.remove() }
-})
-
 it('disposing the startup observer prevents late progress from mutating its replacement', async () => {
   await boot(); dispose?.(); dispose = undefined
-  const replacement = { hostId: 'replacement', current: 0, total: null, waiting: false, pending: true }
+  const replacement = { hostId: 'replacement', current: 0, total: null, pending: true }
   useAppStore.setState({ startupAgentAvailability: replacement })
   checks.codex!.resolve(result('codex')); checks.custom!.resolve(result('custom')); await ticks()
   expect(useAppStore.getState().startupAgentAvailability).toBe(replacement)

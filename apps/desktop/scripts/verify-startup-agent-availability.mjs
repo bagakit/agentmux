@@ -16,7 +16,8 @@ const store = 'apps/desktop/src/renderer/src/store.ts'
 const mainSettings = 'apps/desktop/src/main/settings/modules/general.ts'
 const agentTest = 'apps/desktop/test/startup-agent-availability.test.tsx'
 const settingsTest = 'apps/desktop/test/startup-settings-control.test.ts'
-const tests = [agentTest, settingsTest, 'apps/desktop/test/startup-settings-pane.test.tsx']
+const tests = [agentTest, settingsTest, 'apps/desktop/test/startup-settings-pane.test.tsx',
+  'apps/desktop/test/settings-save-action-continuity.test.tsx', 'apps/desktop/test/settings-draft-conflict.test.tsx']
 const sources = [store, mainSettings, 'apps/desktop/src/renderer/src/App.tsx',
   'apps/desktop/src/renderer/src/components/StartupLoadingSurface.tsx',
   'apps/desktop/src/renderer/src/components/GlobalSystemNotices.tsx',
@@ -78,17 +79,10 @@ try {
   receipt.green = await test('candidate-green', tests)
   assert.equal(receipt.green.code, 0); assert.equal(receipt.green.passed, receipt.green.total)
   const mutations = [
-    { name: 'default-wait-removed', file: store,
-      from: 'pending: true, waiting: config.startup?.skipAgentAvailabilityCheckWait !== true', to: 'pending: true, waiting: false', tests: [agentTest] },
-    { name: 'joined-diagnostic-completes-too-early', file: store,
-      from: 'if (targets.length === 0) { await Promise.all(inFlight); return }', to: 'if (targets.length === 0) return', tests: [agentTest] },
-    { name: 'continue-reopens-wait', file: store,
-      from: 'if (check?.waiting) set({ startupAgentAvailability: { ...check, waiting: false } })',
-      to: 'if (check?.waiting) set({ startupAgentAvailability: { ...check, waiting: true } })', tests: [agentTest] },
+    { name: 'background-checks-suppressed', file: store,
+      from: 'void get().detectExecutors(initialHost.id).catch(error => {', to: 'void Promise.resolve().catch(error => {', tests: [agentTest] },
     { name: 'failure-notice-disconnected', file: 'apps/desktop/src/renderer/src/components/GlobalSystemNotices.tsx',
-      from: 'const inboxes = [agentChecksInbox, environmentInbox,', to: 'const inboxes = [environmentInbox,', tests: [agentTest] },
-    { name: 'public-setting-default-inverted', file: mainSettings,
-      from: "booleanSetting('startup.skipAgentAvailabilityCheckWait', false,", to: "booleanSetting('startup.skipAgentAvailabilityCheckWait', true,", tests: [settingsTest] }
+      from: 'const inboxes = [agentChecksInbox, environmentInbox,', to: 'const inboxes = [environmentInbox,', tests: [agentTest] }
   ]
   for (const mutation of mutations) {
     const original = await readFile(join(root, mutation.file), 'utf8')
@@ -133,13 +127,43 @@ export default mergeConfig(base, { plugins: [{ name: 'actual-startup-mutation', 
     assert.equal(found.size, names.length, 'Nonempty outside-definition consumer group: ' + file)
     receipt.callers.push({ file, names: [...found], sha256: digest(source) })
   }
-  const productDirectory = join(evidence, 'product')
-  const product = await captureStartupProduct({ root, evidence: productDirectory })
+  let productDirectory = join(evidence, 'product'), product
+  if (process.env.AGENTMUX_STARTUP_PRODUCT_EVIDENCE) {
+    productDirectory = resolve(root, process.env.AGENTMUX_STARTUP_PRODUCT_EVIDENCE)
+    assert.ok(productDirectory.startsWith(root + '/'), 'Reuse only a repository-local captured product')
+    product = JSON.parse(await readFile(join(productDirectory, 'capture.json'), 'utf8'))
+    assert.equal(product.completed, true)
+    assert.ok(Object.keys(product.inputs).length > 0)
+    for (const [file, input] of Object.entries(product.inputs)) assert.equal(digest(await readFile(join(root, file))), input.sha256, 'Exact captured input: ' + file)
+    for (const frame of product.frames) assert.equal(digest(await readFile(join(productDirectory, frame.file))), frame.sha256)
+  } else product = await captureStartupProduct({ root, evidence: productDirectory })
   assert.equal(product.completed, true)
-  assert.equal(product.phases.length, 4, 'Default, failed-check restart, durable restart and skip restart all run')
-  assert.ok(product.frames.length >= 5, 'Normal/narrow startup and settings, plus original failure service window')
+  assert.equal(product.phases.length, 3, 'Initial background checks, failed-check restart and durable workface restart all run')
+  assert.ok(product.frames.length >= 5, 'Normal/narrow workface and settings, plus original failure service window')
   receipt.product = { directory: relative(root, productDirectory), sourceIdentity: product.sourceIdentity,
     phases: product.phases, frames: product.frames, aestheticReview: 'independent-review-required' }
+  const rendererMutation = { file: 'apps/desktop/src/renderer/src/App.tsx', from: 'if (loading) {',
+    to: 'if (loading || useAppStore.getState().startupAgentAvailability?.pending) {' }
+  let mutantDirectory = join(evidence, 'app-gate-mutant')
+  if (process.env.AGENTMUX_STARTUP_APP_MUTANT_EVIDENCE) {
+    mutantDirectory = resolve(root, process.env.AGENTMUX_STARTUP_APP_MUTANT_EVIDENCE)
+    assert.ok(mutantDirectory.startsWith(root + '/'))
+  } else {
+    let rejected = false
+    try { await captureStartupProduct({ root, evidence: mutantDirectory, rendererMutation }) }
+    catch { rejected = true }
+    assert.equal(rejected, true, 'Reinstated gate must fail in the actual App consumer')
+  }
+  const mutant = JSON.parse(await readFile(join(mutantDirectory, 'capture.json'), 'utf8'))
+  assert.ok(Object.keys(mutant.inputs).length > 0)
+  for (const [file, input] of Object.entries(mutant.inputs)) assert.equal(digest(await readFile(join(root, file))), input.sha256, 'Exact mutated App consumer input: ' + file)
+  const scene = JSON.parse(await readFile(join(mutantDirectory, 'control-scene.json'), 'utf8'))
+  assert.equal(scene.failure?.name, 'AssertionError', 'Collection/import failure or timeout is not a semantic RED')
+  assert.match(scene.failure.message, /Usable workface is visible before detection completes/)
+  assert.equal(mutant.rendererMutation.original, receipt.sourceBefore[rendererMutation.file])
+  assert.equal(mutant.rendererMutation.loaded, digest((await readFile(join(root, rendererMutation.file), 'utf8')).replace(rendererMutation.from, rendererMutation.to)))
+  receipt.mutations.push({ name: 'app-availability-gate-reintroduced', loaded: mutant.rendererMutation,
+    red: { assertionRed: [scene.failure.message], privateProcessesReleased: mutant.privateRootRemoved } })
   receipt.sourceAfter = await pin(sources)
   assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore, 'Accepted input Source must remain unchanged')
   receipt.passed = true
