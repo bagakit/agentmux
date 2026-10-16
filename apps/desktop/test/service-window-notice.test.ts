@@ -15,6 +15,7 @@ import {
   CONNECTION_UNRECOVERABLE_DETAIL
 } from '../src/renderer/src/lib/session-state.js'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
+import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices.js'
 
 /**
  * 服务窗的判定层（AGENTS.md 原则 11）。
@@ -135,6 +136,33 @@ describe('把一处失败分成四类', () => {
 })
 
 describe('把一个 Agent Session 映成步骤结局：看进程，不看我们的连接', () => {
+  it('retains the exact unconfirmed handshake cause and observation time without refusing a healthy Agent', () => {
+    const observedAt = _reshape_fixtureEpoch(0, 0, 25)
+    const session = agentSession({ terminalCapability: {
+      state: 'unknown', mode: 'degraded', reason: 'handshake-unconfirmed', run: { runId: 'r' }, observedAt,
+      diagnostic: { code: 'INPUT_CURSOR_MISMATCH', message: 'Original handshake expected 0; current Native cursor is 66.' }
+    } })
+    const outcome = agentSessionServiceOutcome(session)
+    expect(classifyServiceNotice(outcome).kind).toBe('process-degraded')
+    const notice = sessionServiceNotices(session).find(item => item.id === 'connection')!
+    expect(notice).toBeDefined()
+    expect(notice.observedAt).toBe(observedAt)
+    expect(notice.notice.notice.mode).toContain('INPUT_CURSOR_MISMATCH')
+    expect(notice.notice.notice.mode).toContain('current Native cursor is 66')
+    expect(notice.notice.notice.mode).toContain('prompts remain available')
+    expect(notice.notice.notice.restore).toContain('not replayed')
+    expect(notice.notice.notice.restore).not.toMatch(/\bResume\b/)
+    expect(session.terminalCapability).toMatchObject({ reason: 'handshake-unconfirmed', observedAt })
+  })
+
+  it('does not present an old Run capability observation as the current Run failure', () => {
+    const session = agentSession({ terminalCapability: {
+      state: 'unknown', mode: 'degraded', reason: 'handshake-unconfirmed', run: { runId: 'previous-run' },
+      observedAt: _reshape_fixtureEpoch(0, 0, 25), diagnostic: { code: 'INPUT_CURSOR_MISMATCH', message: 'Old Run only' }
+    } })
+    expect(agentSessionServiceOutcome(session)).toEqual({ completed: true })
+    expect(sessionServiceNotices(session).find(item => item.id === 'connection')).toBeUndefined()
+  })
   it('Core 的握手超时事实即使 status 仍是 working 也必须显示服务窗', () => {
     const outcome = agentSessionServiceOutcome(handshakeDegraded)
     const rendered = serviceNoticeToRender(classifyServiceNotice(outcome))

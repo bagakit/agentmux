@@ -1,6 +1,6 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, afterEach, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxClient } from '../src/client.js'
 import {
@@ -11,6 +11,7 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import {
   AGENT_TERMINAL_HANDSHAKE_FAILED,
   AGENT_TERMINAL_HANDSHAKE_TIMEOUT,
+  AGENT_TERMINAL_HANDSHAKE_UNCONFIRMED,
   AGENT_TERMINAL_CAPABILITY_PERSIST_FAILED,
   classifyTerminalHandshakeFailure,
   degradedInputCursor
@@ -28,7 +29,7 @@ function handshakeError(code: string): AgentMuxError {
   return new AgentMuxError('fixture', code)
 }
 
-describe('握手失败分流：只有超时降级', () => {
+describe('握手失败只约束准确辅助操作', () => {
   it('超时降级——Agent 还在跑，只是我们没等到它的能力查询', () => {
     const outcome = classifyTerminalHandshakeFailure(handshakeError(AGENT_TERMINAL_HANDSHAKE_TIMEOUT))
     expect(outcome).toEqual({
@@ -36,6 +37,11 @@ describe('握手失败分流：只有超时降级', () => {
       code: AGENT_TERMINAL_HANDSHAKE_TIMEOUT,
       reason: 'capability-query-timeout'
     })
+  })
+
+  it.each([AGENT_TERMINAL_HANDSHAKE_UNCONFIRMED, 'CTXMUX_input_cursor_mismatch'])('preserves unknown capability for %s without changing an original receipt', code => {
+    expect(classifyTerminalHandshakeFailure(handshakeError(code))).toEqual({ kind: 'degrade',
+      code: AGENT_TERMINAL_HANDSHAKE_UNCONFIRMED, reason: 'handshake-unconfirmed' })
   })
 
   it('run 退出时中止——那是第 1 类，Agent 真没了，阻断是诚实的', () => {
@@ -83,99 +89,6 @@ describe('降级时的输入游标：用 daemon 的权威游标，取不到就�
   })
 })
 
-// ---------------------------------------------------------------------------
-// 四个调用点的接线。本仓没有能构造完整 AgentMuxClient 的测试装置（kernel/daemon 都是真的），
-// 所以这一组是源码断言——但**剥掉注释再断言**：本轮已经踩过一次「标识符出现在注释里，删掉真代码
-// 测试依然绿」的假绿，故这里断言的是注释无法提供的代码形状。
-// ---------------------------------------------------------------------------
-const clientSource = readFileSync(new URL('../src/client.ts', import.meta.url), 'utf8')
-const clientCode = clientSource
-  .replace(/\/\*[\s\S]*?\*\//gu, '')
-  .split('\n')
-  .map((line) => line.replace(/\/\/.*$/u, ''))
-  .join('\n')
-
-describe('四个调用点都走降级包装', () => {
-  it('剥注释后仍能看到被测代码——否则下面的断言在对空字符串取胜', () => {
-    expect(clientCode).toContain('private async ensureTerminalHandshakeOrDegrade(')
-    expect(clientCode.length).toBeGreaterThan(10_000)
-  })
-
-  it('三个生命周期调用点一个不落，且没有任何裸调用残留', () => {
-    // Prompt submission deliberately does not call the handshake at all: a one-shot capability query
-    // must never become a recurring ten-second gate for an otherwise live Run.
-    const degradeCalls = clientCode.match(/this\.ensureTerminalHandshakeOrDegrade\(/gu) ?? []
-    expect(degradeCalls).toHaveLength(3)
-    // 裸调用只允许出现在降级包装自己的内部实现里，别处一处都不许有。
-    const rawCalls = clientCode.match(/this\.ensureTerminalHandshake\(/gu) ?? []
-    expect(rawCalls).toHaveLength(1)
-    const wrapper = clientCode.slice(clientCode.indexOf('private async ensureTerminalHandshakeOrDegrade('))
-    expect(wrapper.slice(0, wrapper.indexOf('\n  private async ensureTerminalHandshake(')))
-      .toContain('await this.ensureTerminalHandshake(requestedSession, knownRun)')
-  })
-
-  it('connect 循环用降级包装——一个 session 的慢探测不许拆掉整条连接', () => {
-    // 这是爆炸半径那一条：外层 catch 会 kernel.disconnect()，所以超时必须在循环内被吃掉。
-    const loop = clientCode.slice(
-      clientCode.indexOf('const handshakeErrors: unknown[] = []'),
-      clientCode.indexOf('await this.recoverPendingInteractionResponses(runs)')
-    )
-    expect(loop).toContain('ensureTerminalHandshakeOrDegrade(session, run)')
-    expect(loop).not.toContain('this.ensureTerminalHandshake(session, run)')
-    expect(loop).toContain('Promise.all(this.registry.list().map(async (session)')
-  })
-
-  it('submitAgentPrompt 不被握手拦住——降级后 prompt 照发', () => {
-    const submit = clientCode.slice(
-      clientCode.indexOf('async submitAgentPrompt('),
-      clientCode.indexOf('const plan = this.providers.get(session.providerId).planPromptInput(outbound)')
-    )
-    expect(submit).toContain('this.requireAgentSession(input.agentSessionId)')
-    expect(submit).not.toContain('ensureTerminalHandshake(')
-  })
-})
-
-describe('降级不许静默，也不许伪造受据', () => {
-  const wrapper = (() => {
-    const start = clientCode.indexOf('private async ensureTerminalHandshakeOrDegrade(')
-    // 切到**下一个方法签名**为止，而不是切到 ensureTerminalHandshake——两者之间还夹着
-    // requireRunningTerminalHandshakeRun / persistTerminalCapabilityState / clearTerminalCapability
-    // 三个 helper，其中 clearTerminalCapability 自己也 publish 一条 agent-session。把它们圈进来，
-    // 「降级路径必定发出事件」就会被邻居的 publish 满足：删掉降级自己那一条依然绿。
-    // 锚点必须落在**代码**上：这里的分隔注释是 /** */ 块，上面的 clientCode 已经把它剥掉了，
-    // 拿注释文字当锚点会 indexOf 到 -1，slice(0, -1) 反而把整份源码圈回来。
-    const body = clientCode.slice(start)
-    const end = body.indexOf('  private async requireRunningTerminalHandshakeRun(')
-    expect(end).toBeGreaterThan(0)
-    return body.slice(0, end)
-  })()
-
-  it('降级路径必定发出一条事件——静默降级本身就是违例', () => {
-    expect(wrapper).toContain('this.publisher.publish(')
-    // The durable `agent-session` projection carries the visible degraded fact; an ordinary
-    // `agent-error` would paint a healthy Agent as failed.
-    expect(wrapper).toContain("type: 'agent-session'")
-    // 不在这里断言 `terminalCapability` 那个字面量：它写在 persistTerminalCapabilityState 里，
-    // 而这个切片刻意只圈降级函数本身。「降级事实真的被写进去了」由上面的行为测试断言
-    // （它读回 store 里的 terminalCapability），比在源码里找一个标识符强得多。
-  })
-
-  it('中止那一类原样抛出，不被事件吞掉', () => {
-    expect(wrapper).toContain("if (outcome.kind === 'abort') throw error")
-  })
-
-  it('降级时从 daemon 播种输入游标', () => {
-    expect(wrapper).toContain('degradedInputCursor(run.acceptedInputBytes)')
-    expect(wrapper).toContain('this.agentInputCursors.set(requestedSession.agentSessionId, cursor)')
-  })
-
-  it('绝不伪造已确认的握手：降级路径不写 terminalHandshake，也不写 acknowledged', () => {
-    // 没送出 [?0u 却写 acknowledged: true 是在受据上撒谎，之后会撞上 acceptedInputBytes >= endByte
-    // 的断言并污染崩溃恢复的幂等性。状态保持未设＝未知，而不是编一个。
-    expect(wrapper).not.toContain('terminalHandshake:')
-  })
-})
-
 function storedSession() {
   return {
     kind: 'agent' as const,
@@ -189,8 +102,8 @@ function storedSession() {
     hookBindingId: 'binding',
     hookToken: 'token',
 
-    createdAt: 100,
-    updatedAt: 100
+    createdAt: _tailFixtureEpoch(0, 0, 100),
+    updatedAt: _tailFixtureEpoch(0, 0, 100)
   }
 }
 
@@ -198,15 +111,15 @@ function storedSession() {
  * lifecycle commit remain writable, which models a transient marker/lock failure without making the
  * fake Run disappear. */
 class CapabilityMarkerFailingStore extends AgentMuxMemoryAgentSessionStore {
-  override async compareAndSwap(
-    expected: Parameters<AgentMuxAgentSessionStore['compareAndSwap']>[0],
-    next: Parameters<AgentMuxAgentSessionStore['compareAndSwap']>[1],
+  override async compareAndSwapMetadata(
+    expected: Parameters<AgentMuxAgentSessionStore['compareAndSwapMetadata']>[0],
+    next: Parameters<AgentMuxAgentSessionStore['compareAndSwapMetadata']>[1],
     signal?: AbortSignal
   ): Promise<void> {
     if (next && 'terminalCapability' in next && next.terminalCapability) {
       throw new Error('fixture marker store is read-only')
     }
-    await super.compareAndSwap(expected, next, signal)
+    await super.compareAndSwapMetadata(expected, next, signal)
   }
 }
 

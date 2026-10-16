@@ -23,7 +23,7 @@ afterEach(async () => {
 })
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done }); return { promise, resolve } }
 
-it('cold actual Host/Main delivers original Agent and Terminal attachments before recovery and after a sibling handshake failure', async () => {
+it('cold actual Host/Main delivers original Agent and Terminal attachments before recovery and with a retained unconfirmed sibling reply', async () => {
   const scope = await headlessFixture(); cleanup.push(scope.cleanup)
   await scope.stopOwner()
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
@@ -156,7 +156,7 @@ it('cold actual Host/Main delivers original Agent and Terminal attachments befor
   await expect(host.client.runtimeSubject({ kind: 'agent-session', agentSessionId: healthy.agentSessionId }, healthyBefore.run))
     .rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
   const attachmentProofs: Array<{ phase: string; runId: string; pid: number | null; initialBytes: number; liveBytes: number }> = []
-  const attachOriginals = async (phase: 'pending' | 'failed') => {
+  const attachOriginals = async (phase: 'pending' | 'degraded') => {
     const inputCount = input.mock.calls.length
     for (const target of targets) {
       const projected = opening.snapshot!.sessions.find(session => session.id === target.id)!
@@ -230,27 +230,30 @@ it('cold actual Host/Main delivers original Agent and Terminal attachments befor
   await controller.rpcClients()[0]!.client.connect()
   const observation = host.client.connect().then(() => null, error => error)
   release.resolve()
-  expect(await observation).toMatchObject({ code: 'CTXMUX_input_cursor_mismatch' })
-  expect(events.some(event => event.type === 'agent-error' && event.code === 'CTXMUX_CONNECTION_OBSERVATION_FAILED')).toBe(true)
+  expect(await observation).toBeNull()
+  expect(events.some(event => event.type === 'agent-session' && event.session.agentSessionId === uncertain.agentSessionId &&
+    event.session.terminalCapability?.reason === 'handshake-unconfirmed')).toBe(true)
   const attempted = input.mock.calls.length
-  expect(attempted).toBeGreaterThan(0)
+  expect(attempted).toBe(0)
   assertMembers(await controller.snapshot(config))
   assertMembers(await controller.snapshot(config))
   expect(input).toHaveBeenCalledTimes(attempted) // Reading membership never retries terminal input.
-  await attachOriginals('failed')
+  await attachOriginals('degraded')
   expect(host.client.runtimeIdentity()).toEqual(nativeBefore)
   expect((await host.client.statusAgent(uncertain.agentSessionId)).run).toMatchObject({
     runId: uncertain.run.runId, pid: before.run.pid, state: 'running', acceptedInputBytes: before.run.acceptedInputBytes })
   expect((await store.readMetadata(uncertain.agentSessionId))!.terminalHandshake).toEqual(pending.terminalHandshake)
-  await until(() => delivered, values => values.some(event => event.type === 'core' && event.event.type === 'connection-state' &&
-    event.event.diagnostic?.code === 'CTXMUX_CONNECTION_OBSERVATION_FAILED'), 'ongoing original service window')
-  expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({
-    scope: 'observation', availability: 'connected', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED' }))
+  await until(() => delivered, values => values.some(event => event.type === 'core' && event.event.type === 'agent-session' &&
+    event.event.session.agentSessionId === uncertain.agentSessionId && event.event.session.terminalCapability?.reason === 'handshake-unconfirmed'),
+    'ongoing exact original capability service window')
+  const degraded = (await controller.snapshot(config)).sessions.find(session => session.id === uncertain.agentSessionId)
+  if (degraded?.kind !== 'agent') throw new Error('The exact original capability belongs to its Agent Session')
+  expect(degraded.terminalCapability?.reason).toBe('handshake-unconfirmed')
   console.info('PRIVATE_ORIGINAL_ATTACHMENTS=' + JSON.stringify({ nativeProcessId, nativeInstanceId: nativeBefore.instanceId,
     attachmentProofs, inputCalls: input.mock.calls.length, startCalls: start.mock.calls.length }))
 }, 60_000)
 
-it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pending and failed recovery without replaying an unknown creation', async () => {
+it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pending recovery and unconfirmed capability without replaying an unknown creation', async () => {
   const scope = await headlessFixture(); cleanup.push(scope.cleanup); await scope.stopOwner()
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   for (const [key, value] of Object.entries(scope.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, value!)
@@ -314,7 +317,7 @@ it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pendi
     return await save(...args)
   })
   const proofs: unknown[] = []
-  for (const phase of ['pending', 'failed'] as const) {
+  for (const phase of ['pending', 'degraded'] as const) {
     const agentFile = join(scope.root, phase + '-agent'), rawFile = join(scope.root, phase + '-raw')
     await writeFile(agentFile, `private-${phase}-agent-initial`); await writeFile(rawFile, `private-${phase}-raw-initial`)
     config.executors.codex = { ...config.executors.codex!, command: cli, args: [], injectAgentMuxGuide: false,
@@ -364,15 +367,15 @@ it('cold actual Host/Main creates Terminal and Agent Runs during unrelated pendi
       expect(observation).not.toHaveBeenCalled(); observation.mockRestore()
       await controller.rpcClients()[0]!.client.connect()
       const recovering = host.client.connect().then(() => null, error => error); release.resolve()
-      expect(await recovering).toMatchObject({ code: 'CTXMUX_input_cursor_mismatch' })
+      expect(await recovering).toBeNull()
     }
   }
   expect(start).toHaveBeenCalledTimes(4)
-  expect(input.mock.calls.filter(call => call[0] === sibling.run.runId)).toHaveLength(1) // original failed recovery only
+  expect(input.mock.calls.filter(call => call[0] === sibling.run.runId)).toHaveLength(0) // old claim is never automatically resent
   expect((await host.client.statusAgent(sibling.agentSessionId)).run).toMatchObject({ runId: sibling.run.runId, pid: siblingBefore.run.pid,
     acceptedInputBytes: siblingBefore.run.acceptedInputBytes, state: 'running' })
   expect((await store.readMetadata(sibling.agentSessionId))!.terminalHandshake).toEqual(original.terminalHandshake)
-  expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ scope: 'observation', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED' }))
+  expect((await store.readMetadata(sibling.agentSessionId))!.terminalCapability?.reason).toBe('handshake-unconfirmed')
   console.info('PRIVATE_NEW_CREATIONS=' + JSON.stringify({ nativePid, nativeInstanceId: native.instanceId, proofs, receiptFaults,
     startCalls: start.mock.calls.length, siblingInputCalls: input.mock.calls.filter(call => call[0] === sibling.run.runId).length }))
 }, 60_000)
