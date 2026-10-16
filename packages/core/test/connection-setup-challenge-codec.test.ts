@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { parseConnectionEnrollmentDiagnostic, parseConnectionSetupResult as decodePublicResult, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
-import { parseConnectionSetupResult } from '../src/connection-setup-codec.js'
+import { parseConnectionSetupConfigurationReceipt, parseConnectionSetupResult } from '../src/connection-setup-codec.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -87,4 +87,34 @@ it('authentication diagnostics retain bounded failure locations and keep histori
   }
   expect(() => parseConnectionEnrollmentDiagnostic({ ...original, boundary: 'https://private.example/token' })).toThrow()
   expect(() => parseConnectionEnrollmentDiagnostic({ stage: 'response', code: 'invalid-response', boundary: 'json' })).toThrow()
+})
+
+it('publication consumers share owner-declared subjects without vendor entry values or weakened source provenance', () => {
+  const draft = { kind: 'create-version', version: '1.0.0', notes: 'Original release', visibility: 'creator-only', desktopEntry: 'chat-entry', mobileEntry: 'chat-entry' } as const
+  const selected = { subject: 'publication-versions', stepId: 'original-version-list', input: { ...input, expectedRevision: 11, decision: { actionId: 'setup-read:versions', value: 'continue' } }, request: 'confirmed', secureStorage: 'stored' } as const
+  const review = { versions: [], selectedVersion: null, changes: [], audience: null, proposedAudience: { include: { all: false, departments: [], people: ['original-creator'], groups: [] }, exclude: { all: false, departments: [], people: [], groups: [] } }, entries: { desktop: { current: null, choices: ['chat-entry'] }, mobile: { current: null, choices: ['chat-entry'] } }, sharing: null, reasonRequired: null, creatorAudienceAvailable: true, issues: [] }
+  const value: ConnectionSetupView = { ...reply({ ...authentication, stage: 'confirmed' }), challenge: null }
+  value.operation!.source = { kind: 'enrollment', operationId: 'original-enrollment', expectedRevision: 2 }
+  value.operation!.request.kind = 'enrollment-handoff'
+  value.applicationConfiguration = { effect: 'create-application-version', subject: 'publication-pending', effects: [], selected: null, next: null, sources: { versions: selected }, requiredSubjects: ['publication-versions'], draft, review, capability: 'disabled', actions: [{ kind: 'create-application-version', expectedRevision: 11, actionId: 'setup-publish-create:original' }] }
+  const selector = { ...input, applicationConfiguration: { effect: 'create-application-version' as const, draft } }
+  for (const decode of decoders) {
+    expect(decode('connection.setup.inspect', value, selector)).toEqual(value)
+    for (const requiredSubjects of [[], ['publication-pending'], ['publication-versions', 'bot-settings'], ['publication-versions', 'publication-versions']]) {
+      expect(() => decode('connection.setup.inspect', { ...value, applicationConfiguration: { ...value.applicationConfiguration!, requiredSubjects } }, selector)).toThrow()
+    }
+    const { source, ...unrelated } = value.operation!
+    unrelated.request = { state: 'confirmed', attemptId: 'original-init-attempt' }
+    expect(() => decode('connection.setup.inspect', { ...value, operation: unrelated }, selector)).toThrow()
+    expect(() => decode('connection.setup.inspect', { ...value, applicationConfiguration: { ...value.applicationConfiguration!, sources: { versions: { ...selected, request: 'unknown' } } } }, selector)).toThrow()
+    expect(() => decode('connection.setup.inspect', { ...value, applicationConfiguration: { ...value.applicationConfiguration!, sources: {} } }, selector)).toThrow()
+    expect(() => decode('connection.setup.inspect', { ...value, applicationConfiguration: { ...value.applicationConfiguration!, review: { ...review, versions: [{ versionId: 'existing-version', version: '1.0.0', status: 'draft' }] } } }, selector)).toThrow()
+    expect(() => decode('connection.setup.inspect', { ...value, applicationConfiguration: { ...value.applicationConfiguration!, draft: { ...draft, visibility: 'current' } } }, { ...selector, applicationConfiguration: { effect: 'create-application-version', draft: { ...draft, visibility: 'current' } } })).toThrow()
+  }
+})
+
+it('complete publication receipts retain their canonical source binding order', () => {
+  const receipt = { effect: 'create-application-version', stepId: 'original-create', input: { ...input, expectedRevision: 11, decision: { actionId: 'setup-publish-create:original', value: 'confirm' }, publicationDraft: { kind: 'create-version', version: '1.0.0', notes: 'Original release', visibility: 'current' } }, request: 'confirmed', secureStorage: 'stored', sourceStepIds: { features: 'features-read', sharing: 'sharing-read', visibility: 'visibility-read', versions: 'versions-read', pending: 'pending-read' }, versionId: 'created-version', submission: null }
+  const parsed = parseConnectionSetupConfigurationReceipt(receipt)
+  expect('sourceStepIds' in parsed && Object.keys(parsed.sourceStepIds)).toEqual(['pending', 'versions', 'visibility', 'sharing', 'features'])
 })
