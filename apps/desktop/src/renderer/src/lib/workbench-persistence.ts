@@ -1,5 +1,5 @@
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
-import { cloneBrowserViewport, isBrowserViewport, type BrowserViewport } from '../../../shared/browser-viewport'
+import { cloneBrowserViewport, isBrowserViewport } from '../../../shared/browser-viewport'
 import {
   createWorkspaceLayout,
   groupIds,
@@ -28,17 +28,8 @@ import {
 } from './workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 
-/**
- * 一个 browser 面**存到盘上的**最小可再实例化子集：browserId + Profile 资源身份 + url（+ title 供加载完成前
- * 先画个标签），以及可选的稳定书签来源 path/binary。整个活体 `BrowserSnapshot` 的其余字段（navigationId/loading/canGoBack/canGoForward/
- * driving/appLinkPrompt/error/id）都是**每次运行**的瞬时事实，不进盘——它们由冷启动
- * 重建 WebContentsView 那一刻的真快照补回（见 store 启动路径的 browser 复活循环 + `reduceBrowserEvent`）。
- *
- * 为什么是这个形状而不是整面剥离：旧决定「browser 面整面剥离」的顾虑本身是对的——硬存整个活体结构
- * 会 ship 一个没有后端 WebContentsView 的死面板。但被推翻的不是顾虑，而是它的**前提**「没有一条能把
- * 持久 browser 复活成可用页的生命周期」。现在补上了 store 启动路径的 `api.browser.create` 接缝，那个
- * 前提不再成立，于是用户的显式决定「存完整 URL、恢复到原页」得以落地。浏览历史这一档敏感度按用户
- * 决定接受（与逐字持久化的 file path 同一档：collapsedProjectGroups/pinnedItems 也都存目录路径）。
+/** Durable Browser resource fields; navigation, control and native availability remain Main facts.
+ * A missing viewport in an older record is unknown; hydration retains the former display default.
  */
 export type PersistedBrowserSurface = {
   regionId: string
@@ -49,7 +40,7 @@ export type PersistedBrowserSurface = {
   profileId?: string | null
   url: string
   title: string
-  viewport?: BrowserViewport
+  viewport?: BrowserWorkbenchSurface['viewport']
   bookmarkOrigin?: BrowserWorkbenchSurface['bookmarkOrigin']
 }
 
@@ -72,11 +63,7 @@ export type PersistedWorkbench = {
   layouts: Record<string, WorkspaceLayout>
 }
 
-/**
- * 载入路径的产物：与存盘形态同构，但 browser 面是**活体** surface（`hydratePersistedBrowserSurface`
- * 补齐了瞬时位的默认值）。它直接灌进 `state.tabs`（都是活体 `WorkbenchTab`），冷启动的 browser 复活
- * 循环随后为每个 browser 面 `api.browser.create` 出真 WebContentsView，用真快照覆盖那些默认位。
- */
+/** Restored descriptions are rendered before Main acquires any native Browser owner. */
 export type RestoredWorkbench = {
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
@@ -95,8 +82,10 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     url: privateMode ? 'about:blank' : surface.url,
     title: privateMode ? 'Private page' : surface.title,
     ...(privateMode ? { privateSessionEnded: true as const } : surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {}),
-    // 瞬时位：由 store 启动路径 create 出真 WebContentsView 后的快照经 applyBrowserEvent 覆盖。
+    // Only a real Main snapshot clears the deferred description.
     navigationId: '',
+    nativeOwnerDeferred: true,
+    ...(!isBrowserViewport(surface.viewport) ? { restoredViewportUnknown: true as const } : {}),
     profileId: privateMode ? null : surface.profileId ?? '',
     loading: false,
     canGoBack: false,
@@ -113,7 +102,7 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
   if (surface.mode === 'private') return {
     regionId: surface.regionId, kind: 'browser', workspaceId: surface.workspaceId,
     browserId: surface.browserId, mode: 'private', url: 'about:blank', title: 'Private page',
-    viewport: cloneBrowserViewport(surface.viewport)
+    ...(!surface.restoredViewportUnknown ? { viewport: cloneBrowserViewport(surface.viewport) } : {})
   }
   return {
     regionId: surface.regionId,
@@ -123,7 +112,7 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
     ...(surface.profileId ? { profileId: surface.profileId } : {}),
     url: surface.url,
     title: surface.title,
-    viewport: cloneBrowserViewport(surface.viewport),
+    ...(!surface.restoredViewportUnknown ? { viewport: cloneBrowserViewport(surface.viewport) } : {}),
     ...(surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {})
   }
 }
@@ -479,14 +468,8 @@ function persistedSurfaceSurvives(
     case 'git-diff':
       return true
     case 'browser':
-      // browser 面活过重启（用户显式决定「存完整 URL、恢复到原页」，推翻了旧的「整面剥离」）。
-      // 旧决定的顾虑本身是对的——硬存整个活体 `BrowserSnapshot`（navigationId/loading/driving… 全是
-      // 瞬时运行时位）会 ship 一个没有后端 WebContentsView 的死面板。被推翻的不是那个顾虑，而是它的
-      // **前提**「冷启动没有一条能把持久 browser 复活成可用页的生命周期」：现在 store 启动路径补上了
-      // `api.browser.create` 接缝（见其 browser 复活循环），前提不再成立。故这里放行 browser 面，但
-      // 存盘只留最小可再实例化子集（`reduceBrowserSurfaceForPersistence`：browserId+profileId+url+title），瞬时/
-      // 敏感位一律不进盘。浏览历史这一档敏感度按用户决定接受，与逐字持久化的 file path 同一档。
-      // create 失败不留死壳：那条由 store 复活循环删 Region + 报错兜住（旧顾虑在那里被真正回答）。
+      // Keep the original identity and minimal durable resource description. Main acquires the
+      // native page on actual consumption; recovery failure retains this Region and its Retry.
       return true
     default:
       return assertUnreachableSurface(surface)

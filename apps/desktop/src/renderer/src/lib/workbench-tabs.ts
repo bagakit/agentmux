@@ -88,6 +88,10 @@ export type BrowserWorkbenchSurface = BrowserSnapshot & {
   privateSessionEnded?: true
   /** Exact Main unavailable event; transient, cleared by its next confirmed snapshot. */
   nativeOwnerUnavailable?: true
+  /** A restored description has not acquired its native owner in this client. */
+  nativeOwnerDeferred?: true
+  /** A restored descriptor did not save a viewport; the display default is not a durable fact. */
+  restoredViewportUnknown?: true
   regionId: string
   kind: 'browser'
   workspaceId: string
