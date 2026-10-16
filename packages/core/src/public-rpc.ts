@@ -280,8 +280,7 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'name.history': import('./display-label.js').AgentMuxNameHistoryPage
   'name.confirm': { state: import('./spatial-state.js').AgentMuxSpatialState }
   whoami: { session: ReturnType<AgentMuxClient['agentSession']>; status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null;
-    view: import('./agent-self-context.js').SelfViewOutcome; topic: string;
-    messaging: typeof import('./agent-messaging-guidance.js').AGENTMUX_AGENT_MESSAGING_RULES; unavailable: AgentMuxRpcUnavailable[] }
+    view: import('./agent-self-context.js').SelfViewOutcome; unavailable: AgentMuxRpcUnavailable[] }
   'agent.ls': { sessions: AgentMuxRpcAgentObservation[];
     errors: Array<{ agentSessionId: string | null; hostId: string; code: string; message: string }> }
   'agent.inspect': AgentMuxRpcAgentInspection

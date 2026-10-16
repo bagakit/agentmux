@@ -51,7 +51,6 @@ import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedBootstrap } from './hosted-value.js'
-import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { normalizeInteractionOperationReceipt, normalizeAgentSession } from './agent-session-store.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
@@ -457,7 +456,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'agent.inspect': case 'whoami': {
-        record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['routeHostId', 'session', 'status', 'displayName', 'unavailable'])
+        record(p, method === 'whoami' ? ['session', 'status', 'view', 'unavailable'] : ['routeHostId', 'session', 'status', 'displayName', 'unavailable'])
         const session = parseRpcAgentSession(p.session), target = method === 'whoami' ? { kind: 'self' } : record(input.target)
         if (target.kind === 'agent-session' && !rpcSessionTargetMatches(target.agentSessionId, session.agentSessionId) ||
           target.kind === 'self' && !rpcSessionTargetMatches('self', session.agentSessionId, credentials) ||
@@ -469,9 +468,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         if (p.status !== null) status(p.status, session); issues(p.unavailable)
         if (method === 'agent.inspect') { string(p.routeHostId); const name = record(p.displayName, ['override', 'source', 'nameRevision', 'availability']); if (name.override !== null) text(name.override); if (name.source !== null) member(name.source, ['manual', 'launch', 'derived', 'retained']); if (name.nameRevision !== null) count(name.nameRevision); member(name.availability, ['observed', 'unavailable']) }
-        else { text(p.topic); const messaging = record(p.messaging, Object.keys(AGENTMUX_AGENT_MESSAGING_RULES))
-          for (const [key, rule] of Object.entries(AGENTMUX_AGENT_MESSAGING_RULES)) if (messaging[key] !== rule) fail()
-          const view = record(p.view); bool(view.attached)
+        else { const view = record(p.view); bool(view.attached)
           if (view.attached) { record(view, ['attached', 'region']); const region = record(view.region); if (region.agentSessionId !== session.agentSessionId) fail()
             // Reuse the existing presentation codec, including geometry and terminal facts.
             const { parseAgentMuxControlReceipt } = controlCodec
