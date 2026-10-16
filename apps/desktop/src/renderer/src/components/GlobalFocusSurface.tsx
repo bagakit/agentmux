@@ -310,7 +310,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         if (grouped.length === 0) return null
         const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
         const label = neutral?.label ?? meta.label
-        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
+        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ gridRow: layout.rowByBucket[index]! + 1, '--focus-group-offset': `${layout.columnStart[index]}px`, '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
           {!sparse ? groupHeader(bucket) : null}
             <FocusContextCards contexts={grouped} columns={layout.columns[index]!} layoutReady={laneMetrics.measured} scrollRef={boardRowsRef} visible={visible && documentActive} selectedId={shownSessionId} goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession} />
         </section>

@@ -5,12 +5,12 @@ import { allocateFocusLaneColumns, type FocusLaneCounts, type FocusLaneLayout, t
 export function FocusLaneGroups({ counts, metrics, children }: {
   counts: FocusLaneCounts; metrics: FocusLaneMetrics; children(layout: FocusLaneLayout): ReactNode
 }) {
-  const previous = useRef<readonly number[] | undefined>(undefined)
+  const previous = useRef<FocusLaneLayout | undefined>(undefined)
   const pressedSession = useRef<string | undefined>(undefined)
   const [attention, working, results, idle] = counts
   const { width, padding, gap, cardGap } = metrics
   const layout = useMemo(() => allocateFocusLaneColumns([attention, working, results, idle], { width, padding, gap, cardGap }, previous.current), [attention, working, results, idle, width, padding, gap, cardGap])
-  useLayoutEffect(() => { previous.current = layout.columns }, [layout])
+  useLayoutEffect(() => { previous.current = layout }, [layout])
   return <div className="focus-project-lanes__groups" data-focus-card-slots={layout.slots} data-focus-max-rows={layout.maxRows}
     onPointerDownCapture={event => {
       if (event.button === 0) pressedSession.current = (event.target as Element).closest<HTMLElement>('.focus-context[data-session-id]')?.dataset.sessionId
