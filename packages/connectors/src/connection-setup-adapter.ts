@@ -33,6 +33,12 @@ export interface ConnectionSetupAdapter {
     messagingCapability(originalReadState: string): Promise<ConnectionSetupCapability>
     /** Local interpretation of the original raw event mode; missing native fields stay unknown. */
     eventTransportCapability(originalReadState: string): Promise<ConnectionSetupCapability>
+    /** Independent callback delivery; exact original callback settings, never event settings. */
+    callbackTransportCapability?(originalReadState: string): Promise<ConnectionSetupCapability>
+    usePersistentCallback?(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
+    /** Adds only the consumer's card action callback, carrying the checked persistent mode. */
+    cardActionsCapability?(originalReadState: string): Promise<ConnectionSetupCapability>
+    addCardActions?(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt>
     /** Pure interpretation of two exact original read snapshots; IDs remain native and private. */
     permissionPlan(catalogState: string, appliedState: string, purpose: ConnectionSetupPermissionPurpose): Promise<SetupPermissionPlan>
     messageReceptionPlan(catalogState: string, settingsState: string): Promise<SetupMessageReceptionPlan>

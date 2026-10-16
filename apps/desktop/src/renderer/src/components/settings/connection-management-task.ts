@@ -1,6 +1,6 @@
 import type { ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
 
-const checkTitles: Partial<Record<ConnectionSetupReadSubject, string>> = { 'bot-settings': 'Bot message check', 'event-settings': 'Delivery check', 'permission-catalog': 'Permission directory check', 'application-permissions': 'Permission check', 'event-catalog': 'Event directory check' }
+const checkTitles: Partial<Record<ConnectionSetupReadSubject, string>> = { 'bot-settings': 'Bot message check', 'event-settings': 'Delivery check', 'callback-settings': 'Card interaction check', 'permission-catalog': 'Permission directory check', 'application-permissions': 'Permission check', 'event-catalog': 'Event directory check' }
 
 /** A view of one original receipt, never a second progress or eligibility owner. */
 export function connectionManagementTask(view: ConnectionSetupView | null) {
@@ -24,6 +24,8 @@ export function connectionManagementTask(view: ConnectionSetupView | null) {
   if (offered) {
     if (offered.kind === 'enable-messaging') return { kind: 'action' as const, action: offered, title: 'Turn on bot messages', summary: 'Allow this application to send and receive bot messages.', label: 'Turn on bot messages' }
     if (offered.kind === 'use-persistent-connection') return { kind: 'action' as const, action: offered, title: 'Use a persistent connection', summary: 'This changes delivery for the whole application, including its other event consumers.', label: 'Use persistent connection' }
+    if (offered.kind === 'use-persistent-callback') return { kind: 'action' as const, action: offered, title: 'Connect card interactions', summary: 'Use a persistent connection for card actions. This changes callback delivery for the whole application, including existing consumers.', label: 'Connect card interactions' }
+    if (offered.kind === 'add-card-actions') return { kind: 'action' as const, action: offered, title: 'Enable replies from cards', summary: 'Add the card action callback so people can answer questions and permission requests from the conversation.', label: 'Enable card replies' }
     if (offered.kind === 'add-application-permissions') return { kind: 'action' as const, action: offered, title: 'Request conversation permissions', summary: 'Request the missing permissions for messages and creating or connecting groups. Effective access still needs platform approval.', label: 'Request required permissions' }
     if (offered.kind === 'add-message-reception') return { kind: 'action' as const, action: offered, title: 'Receive conversation messages', summary: 'Add the required message event, keeping the last checked persistent delivery mode for the whole application.', label: 'Add message reception' }
   }

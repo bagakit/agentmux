@@ -159,8 +159,9 @@ export function parseConnectionEnrollmentAccount(value: unknown): ConnectionEnro
 export function parseConnectionEnrollmentDiagnostic(
   value: unknown
 ): ConnectionEnrollmentDiagnostic {
-  const p = object(value, ['stage', 'code', 'httpStatus'])
-  if (p.stage !== 'response' && p.httpStatus !== undefined) fail()
+  const p = object(value, ['stage', 'code', 'httpStatus', 'step', 'failure', 'nativeCode'])
+  if (!['response', 'authentication'].includes(String(p.stage)) && p.httpStatus !== undefined) fail()
+  if (p.stage !== 'authentication' && (p.step !== undefined || p.failure !== undefined || p.nativeCode !== undefined)) fail()
   switch (p.stage) {
     case 'request':
       return { stage: p.stage, code: choice(p.code, ['transport-unconfirmed', 'cancelled']) }
@@ -176,7 +177,13 @@ export function parseConnectionEnrollmentDiagnostic(
         code: choice(p.code, ['missing-verification', 'unsafe-verification', 'invalid-challenge'])
       }
     case 'authentication':
-      return { stage: p.stage, code: choice(p.code, ['native-unconfirmed']) }
+      return {
+        stage: p.stage, code: choice(p.code, ['native-unconfirmed']),
+        ...(p.step === undefined ? {} : { step: choice(p.step, ['initialize', 'poll', 'cross-login', 'landing', 'console', 'account']) }),
+        ...(p.failure === undefined ? {} : { failure: choice(p.failure, ['transport-unconfirmed', 'http-status', 'platform-error', 'invalid-response', 'redirect-unconfirmed', 'bootstrap-unconfirmed', 'invalid-state']) }),
+        ...(p.httpStatus === undefined ? {} : { httpStatus: integer(p.httpStatus, 100, 599) }),
+        ...(p.nativeCode === undefined ? {} : { nativeCode: integer(p.nativeCode, Number.MIN_SAFE_INTEGER) })
+      }
     case 'preparation':
       return {
         stage: p.stage,

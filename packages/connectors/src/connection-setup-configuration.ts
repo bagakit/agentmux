@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { AgentMuxError } from '@agentmux/core'
 import { connectionSetupPublicationSubjects, parseConnectionSetupPublicationReview, connectionSetupConfigurationSubject, connectionSetupPermissionActionPurpose, parseConnectionSetupMessageReceptionReview, parseConnectionSetupPermissionReview, parseConnectionSetupConfigurationReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupConfigurationEffect, type ConnectionSetupScalarEffect, type ConnectionSetupPublicationEffect, type ConnectionSetupPublicationDraft, type ConnectionSetupAccount, type ConnectionSetupSubmissionResponse, type ConnectionSetupPermissionPurpose, type ConnectionSetupConfigurationAction, type ConnectionSetupConfigurationReceipt, type ConnectionSetupInspect, type ConnectionSetupOperation, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
-import type { SetupMessageReceptionPlan, SetupPermissionPlan, SetupPublicationPlan } from './connection-setup-adapter.js'
+import type { ConnectionSetupAdapter, SetupMessageReceptionPlan, SetupPermissionPlan, SetupPublicationPlan } from './connection-setup-adapter.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
 import type { SetupApplicationInspection, SetupConfigurationSource } from './connection-setup-inspection.js'
 
@@ -26,6 +26,12 @@ type Owner = {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const failure = (message: string, code = 'CONNECTION_SETUP_UNCONFIRMED') => new AgentMuxError(message, code)
+const scalarActions = {
+  'enable-messaging': { prefix: 'setup-enable:', desired: true },
+  'use-persistent-connection': { prefix: 'setup-persistent:', desired: 'persistent-connection' },
+  'use-persistent-callback': { prefix: 'setup-callback-persistent:', desired: 'persistent-callback' },
+  'add-card-actions': { prefix: 'setup-card-actions:', desired: 'card-actions' }
+} as const
 
 /** Explicit finite effect children in the original setup journal. No current configuration Store. */
 export class SetupApplicationConfiguration {
@@ -52,7 +58,7 @@ export class SetupApplicationConfiguration {
   }
   private find(operationId: string, selector: { effect?: ConnectionSetupConfigurationEffect; stepId?: string; actionId?: string }): Child | null {
     return this.safe(() => {
-      const filters = ["operation_id=?", "json_extract(record_json,'$.effect') IN ('enable-messaging','use-persistent-connection','add-application-permissions','add-message-reception','create-application-version','submit-application-version')"], values: string[] = [operationId]
+      const filters = ["operation_id=?", "json_extract(record_json,'$.effect') IN ('enable-messaging','use-persistent-connection','use-persistent-callback','add-card-actions','add-application-permissions','add-message-reception','create-application-version','submit-application-version')"], values: string[] = [operationId]
       if (selector.effect) { filters.push("json_extract(record_json,'$.effect')=?"); values.push(selector.effect) }
       if (selector.stepId) { filters.push('step_id=?'); values.push(selector.stepId) }
       if (selector.actionId) { filters.push('(action_id=? OR recovery_action_id=?)'); values.push(selector.actionId, selector.actionId) }
@@ -71,7 +77,7 @@ export class SetupApplicationConfiguration {
     if (child.receipt.effect === 'add-message-reception') return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: { messageReception: true, transport: child.receipt.transport, nativeIntentDigest: child.receptionIntentDigest }, authenticationStepId: child.authenticationStepId, sourceStepIds: child.receipt.sourceStepIds })
     if (child.receipt.effect === 'add-application-permissions') return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: { purpose: child.receipt.purpose, scopeNames: child.receipt.scopeNames, nativeIntentDigest: child.permissionIntentDigest }, authenticationStepId: child.authenticationStepId, sourceStepIds: child.receipt.sourceStepIds })
     const scalar = child.receipt as Extract<ConnectionSetupConfigurationReceipt, { effect: ConnectionSetupScalarEffect }>
-    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: effect === 'enable-messaging' ? true : 'persistent-connection', authenticationStepId: child.authenticationStepId, sourceStepId: scalar.sourceStepId })
+    return digest({ operationId: o.operationId, connectionId: o.connectionId, revision: o.expectedConnectionRevision, application: o.application, adapterId: o.adapterId, goal: o.goal, actor: row.actor, effect, desired: scalarActions[scalar.effect].desired, authenticationStepId: child.authenticationStepId, sourceStepId: scalar.sourceStepId })
   }
   private envelope(value: string | null, row: Parent, child: Child): Envelope | null {
     try {
@@ -84,7 +90,15 @@ export class SetupApplicationConfiguration {
     if (publicationEffect(effect)) return adapter?.domains.includes(row.operation.application.domain) && typeof adapter.publicationPlan === 'function' && typeof adapter.createVersion === 'function' && typeof adapter.submitVersion === 'function' ? adapter : null
     if (effect === 'add-message-reception') return adapter?.domains.includes(row.operation.application.domain) && typeof adapter.messageReceptionPlan === 'function' && typeof adapter.addMessageReception === 'function' ? adapter : null
     if (effect === 'add-application-permissions') return adapter?.domains.includes(row.operation.application.domain) && typeof adapter.permissionPlan === 'function' && typeof adapter.addApplicationPermissions === 'function' ? adapter : null
-    return adapter?.domains.includes(row.operation.application.domain) && (effect === 'enable-messaging' ? typeof adapter.messagingCapability === 'function' && typeof adapter.enableMessaging === 'function' : typeof adapter.eventTransportCapability === 'function' && typeof adapter.usePersistentConnection === 'function') ? adapter : null
+    return adapter?.domains.includes(row.operation.application.domain) && this.scalar(adapter, effect) ? adapter : null
+  }
+  private scalar(adapter: ConnectionSetupAdapter['applicationConfiguration'], effect: ConnectionSetupScalarEffect) {
+    if (!adapter) return null
+    const pair = effect === 'enable-messaging' ? { capability: adapter.messagingCapability, execute: adapter.enableMessaging }
+      : effect === 'use-persistent-connection' ? { capability: adapter.eventTransportCapability, execute: adapter.usePersistentConnection }
+      : effect === 'use-persistent-callback' ? { capability: adapter.callbackTransportCapability, execute: adapter.usePersistentCallback }
+      : { capability: adapter.cardActionsCapability, execute: adapter.addCardActions }
+    return typeof pair.capability === 'function' && typeof pair.execute === 'function' ? { capability: pair.capability, execute: pair.execute } : null
   }
   private targetFact(row: Parent, effect: ConnectionSetupConfigurationEffect, unresolved: boolean): string | null {
     return this.safe(() => {
@@ -102,12 +116,19 @@ export class SetupApplicationConfiguration {
     })
   }
   private currentSource(row: Parent, source: SetupConfigurationSource, effect: ConnectionSetupScalarEffect, admittedStepId?: string): boolean {
-    return (effect !== 'use-persistent-connection' || this.eventSettingsCurrent(row, source, admittedStepId)) && source.receipt.subject === connectionSetupConfigurationSubject(effect) && this.owner.current(row) && this.owner.inspection.configurationSourceCurrent(row, source) && this.targetFact(row, effect, false) === (admittedStepId ?? source.receipt.stepId)
+    return (effect !== 'use-persistent-connection' || this.eventSettingsCurrent(row, source, admittedStepId)) && (!['use-persistent-callback', 'add-card-actions'].includes(effect) || this.callbackSettingsCurrent(row, source, admittedStepId)) && source.receipt.subject === connectionSetupConfigurationSubject(effect) && this.owner.current(row) && this.owner.inspection.configurationSourceCurrent(row, source) && this.targetFact(row, effect, false) === (admittedStepId ?? source.receipt.stepId)
   }
   /** These two concrete writers carry the same event delivery field. Catalog reads cannot refresh it. */
   private eventSettingsCurrent(row: Parent, source: SetupConfigurationSource, admittedStepId?: string): boolean {
     return this.safe(() => {
       const writer = this.owner.connections.database.prepare("SELECT i.step_id,i.ordinal FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND json_extract(i.record_json,'$.effect') IN ('use-persistent-connection','add-message-reception') ORDER BY i.ordinal DESC LIMIT 1").get(row.operation.application.domain, row.operation.application.appId)
+      const current = this.owner.connections.database.prepare('SELECT ordinal FROM connection_setup_inspection WHERE step_id=?').get(source.receipt.stepId)
+      return !writer || (admittedStepId ? writer.step_id === admittedStepId : Boolean(current && Number(current.ordinal) > Number(writer.ordinal)))
+    })
+  }
+  private callbackSettingsCurrent(row: Parent, source: SetupConfigurationSource, admittedStepId?: string): boolean {
+    return this.safe(() => {
+      const writer = this.owner.connections.database.prepare("SELECT i.step_id,i.ordinal FROM connection_setup_inspection i JOIN connection_setup_operation p ON p.operation_id=i.operation_id WHERE json_extract(p.record_json,'$.application.domain')=? AND json_extract(p.record_json,'$.application.appId')=? AND json_extract(i.record_json,'$.effect') IN ('use-persistent-callback','add-card-actions') ORDER BY i.ordinal DESC LIMIT 1").get(row.operation.application.domain, row.operation.application.appId)
       const current = this.owner.connections.database.prepare('SELECT ordinal FROM connection_setup_inspection WHERE step_id=?').get(source.receipt.stepId)
       return !writer || (admittedStepId ? writer.step_id === admittedStepId : Boolean(current && Number(current.ordinal) > Number(writer.ordinal)))
     })
@@ -140,7 +161,7 @@ export class SetupApplicationConfiguration {
     })
   }
   private action(row: Parent, source: SetupConfigurationSource, effect: ConnectionSetupScalarEffect): ConnectionSetupConfigurationAction {
-    return { kind: effect, expectedRevision: row.operation.revision, actionId: (effect === 'enable-messaging' ? 'setup-enable:' : 'setup-persistent:') + digest({ operation: row.operation, actor: row.actor, sourceStepId: source.receipt.stepId, authenticationStepId: source.authenticationStepId, desired: effect === 'enable-messaging' ? true : 'persistent-connection' }) }
+    return { kind: effect, expectedRevision: row.operation.revision, actionId: scalarActions[effect].prefix + digest({ operation: row.operation, actor: row.actor, sourceStepId: source.receipt.stepId, authenticationStepId: source.authenticationStepId, desired: scalarActions[effect].desired }) }
   }
   async attach(base: ConnectionSetupView, row: Parent, context: ConnectionEnrollmentCallContext, selector: NonNullable<ConnectionSetupInspect['applicationConfiguration']>): Promise<ConnectionSetupView> {
     if (publicationEffect(selector.effect)) return this.attachPublication(base, row, context, selector as PublicationSelector)
@@ -162,7 +183,7 @@ export class SetupApplicationConfiguration {
     else {
       source = await this.owner.inspection.configurationSource(row, connectionSetupConfigurationSubject(effect))
       if (source) {
-        try { capability = await (effect === 'enable-messaging' ? adapter.messagingCapability(source.originalReadState) : adapter.eventTransportCapability(source.originalReadState)) } catch { /* Keep this source unconfirmed. */ }
+        try { capability = await this.scalar(adapter, effect)!.capability(source.originalReadState) } catch { /* Keep this source unconfirmed. */ }
         if (!['enabled', 'disabled', 'unknown'].includes(capability)) capability = 'unknown'
       }
     }
@@ -229,11 +250,11 @@ export class SetupApplicationConfiguration {
     if (input.decision.actionId.startsWith('setup-publish-create:') || input.decision.actionId.startsWith('setup-publish-submit:')) return this.advancePublication(row, input, context)
     if (input.decision.actionId.startsWith('setup-reception:')) return this.advanceReception(row, input, context)
     if (input.decision.actionId.startsWith('setup-permissions:')) return this.advancePermissions(row, input, context)
-    const effect: ConnectionSetupScalarEffect | null = input.decision.actionId.startsWith('setup-enable:') ? 'enable-messaging' : input.decision.actionId.startsWith('setup-persistent:') ? 'use-persistent-connection' : null
+    const effect = (Object.keys(scalarActions) as ConnectionSetupScalarEffect[]).find(effect => input.decision.actionId.startsWith(scalarActions[effect].prefix)) ?? null
     if (!effect) return null
     const adapter = this.adapter(row, effect), source = await this.owner.inspection.configurationSource(row, connectionSetupConfigurationSubject(effect))
     let capability = 'unknown'
-    if (adapter && source) { try { capability = await (effect === 'enable-messaging' ? adapter.messagingCapability(source.originalReadState) : adapter.eventTransportCapability(source.originalReadState)) } catch { /* No native request. */ } }
+    if (adapter && source) { try { capability = await this.scalar(adapter, effect)!.capability(source.originalReadState) } catch { /* No native request. */ } }
     await this.owner.authority(context, row)
     previous = this.find(input.operationId, { actionId: input.decision.actionId })
     if (previous) return repeat(previous)
@@ -585,7 +606,7 @@ export class SetupApplicationConfiguration {
         if (this.closed || this.adapter(fresh, effect) !== adapter || !this.currentSource(fresh, source, effect, child.receipt.stepId)) throw failure('The original configuration source changed before its native request.')
       }
       assertCurrent()
-      const result = await (effect === 'enable-messaging' ? adapter!.enableMessaging : adapter!.usePersistentConnection)({ operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState, assertCurrent }, context.signal)
+      const result = await this.scalar(adapter ?? undefined, effect)!.execute({ operationId: input.operationId, connectionId: row.operation.connectionId, attemptId: source.attemptId, application: row.operation.application, privateState: source.privateState, assertCurrent }, context.signal)
       if (result.kind === 'accepted' && typeof result.privateState === 'string') original = { binding: this.binding(row, child), stepId: child.receipt.stepId, privateState: result.privateState }
     } catch { /* Only this original request is unconfirmed; never replay it or infer health. */ }
     if (this.closed) return { operation: row.operation, challenge: null, reason: 'challenge-unavailable', receipt: { actionId: input.decision.actionId, stepId: child.receipt.stepId, state: 'unknown' } }

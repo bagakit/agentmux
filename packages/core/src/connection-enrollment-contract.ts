@@ -50,6 +50,11 @@ export type ConnectionEnrollmentDiagnostic =
   | {
       stage: 'authentication'
       code: 'native-unconfirmed'
+      /** Safe machine facts only; QR payloads, URLs, cookies and native messages remain private. */
+      step?: 'initialize' | 'poll' | 'cross-login' | 'landing' | 'console' | 'account'
+      failure?: 'transport-unconfirmed' | 'http-status' | 'platform-error' | 'invalid-response' | 'redirect-unconfirmed' | 'bootstrap-unconfirmed' | 'invalid-state'
+      httpStatus?: number
+      nativeCode?: number
     }
   | {
       stage: 'preparation'

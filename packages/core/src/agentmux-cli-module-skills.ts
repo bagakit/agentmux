@@ -131,7 +131,11 @@ Continue or inspect the same operation after an unknown response; never replace 
 An Agent can inspect/continue only its own private enrollment and management operations.
 Once configured, its Connection appears in connection ls and can be used for setup/profile/room
 operations. setup begin accepts the exact source enrollment to reuse its login; the separate
-management account confirmation and finite offered actions still apply. A binding/room creation
+management account confirmation and finite offered actions still apply. For card interaction,
+read-callback-settings first, select --application-configuration use-persistent-callback and
+confirm its exact offered action to switch application-wide callback delivery. Read callback
+settings again before a separate --application-configuration add-card-actions confirmation.
+These two finite effects have separate receipts; event delivery does not configure callbacks. A binding/room creation
 must name that same Agent Session, never another Agent. Global service/configuration, external
 actor grants and existing human/device bot operations require their original trusted operator.
 For saved Mote identity use space mote connection create/sync/advance/inspect/ls through the same

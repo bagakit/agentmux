@@ -309,7 +309,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
   ): Promise<ConnectionEnrollmentView> {
     const input = parseConnectionEnrollmentParams('connection.enrollment.begin', value)
     await this.authority(this.store.read(input.operationId), context)
-    const admitted = this.store.admit(input, context.actor)
+    const admitted = this.store.admit(input, context.actor, this.options.connections.registeredAdapter(input.adapterId)?.enrollment?.protocolId)
     await this.join(input.operationId, async () => {
       let row = this.store.read(input.operationId)!
       if (row.attemptId || row.operation.authentication?.stage !== 'not-started') return
@@ -483,6 +483,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
       domain,
       label,
       attemptId: row.attemptId!,
+      ...(row.adapterProtocolId === undefined ? {} : { protocolId: row.adapterProtocolId }),
       assertCurrent: () => {
         this.current()
         context.signal?.throwIfAborted()

@@ -18,6 +18,8 @@ export type EnrollmentAdapterInput = Readonly<{
   attemptId: string
   domain: string
   label: string
+  /** Adapter-owned immutable protocol selection, frozen when the original intent is admitted. */
+  protocolId?: string
   assertCurrent(): void
 }>
 export type EnrollmentUnknownReceipt = {
@@ -55,6 +57,7 @@ export type EnrollmentCredentialReceipt =
     }
   | EnrollmentUnknownReceipt
 export interface ConnectionEnrollmentAdapter {
+  readonly protocolId?: string
   readonly domains: readonly Readonly<{
     domain: string
     label: string

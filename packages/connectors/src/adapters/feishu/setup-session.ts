@@ -1,6 +1,6 @@
 import type { ConnectionSetupReadSubject, ConnectionSetupReadSummary } from '@agentmux/core/connections'
 import type { SetupAdapterInput, SetupChallengeReceipt, SetupAuthenticationReceipt, SetupInspectionReceipt, SetupReadReceipt, SetupConfigurationReceipt, SetupPublicationReceipt } from '../../connection-setup-adapter.js'
-import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, type NativeAccountInitialState, type NativeAccountState } from './native-account.js'
+import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, FEISHU_BROWSER_USER_AGENT, type NativeAccountInitialState, type NativeAccountState } from './native-account.js'
 import { supportedScopeId } from './setup-permissions.js'
 import { enrollmentAccountSession } from './enrollment.js'
 import { feishuMessageReceptionIntent } from './setup-message-reception.js'
@@ -49,7 +49,7 @@ async function applicationRequest(input: SetupAdapterInput & { privateState: str
     const { state, cookies } = readNativeAccountState(snapshot(input))
     if (state.phase !== 'account' || !state.account || !opaque(state.csrf) || state.consoleOrigin !== 'https://open.feishu.cn') return null
     const target = new URL(path, state.consoleOrigin)
-    const headers: Record<string, string> = { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
+    const headers: Record<string, string> = { accept: 'application/json, text/plain, */*', 'content-type': 'application/json', 'user-agent': FEISHU_BROWSER_USER_AGENT, origin: state.consoleOrigin, referer: state.consoleOrigin + '/app/' + encodeURIComponent(input.application.appId), 'x-csrf-token': state.csrf, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
     if (developerPanel) headers['X-AppPlatform-RequestFrom'] = 'develop_panel'
     const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
     const bounded = AbortSignal.timeout(20_000)
@@ -89,6 +89,30 @@ export async function feishuEventTransportCapability(originalReadState: string):
 
 export async function useFeishuPersistentConnection(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
   const envelope = await applicationEnvelope(input, '/developers/v1/event/switch/', { eventMode: 4 }, signal)
+  return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
+}
+
+export async function feishuCallbackTransportCapability(originalReadState: string): Promise<'enabled' | 'disabled' | 'unknown'> {
+  try {
+    const data = record(JSON.parse(originalReadState))
+    return data?.callbackMode === 4 ? 'enabled' : [0, 1, 2, 3].includes(data?.callbackMode as number) ? 'disabled' : 'unknown'
+  } catch { return 'unknown' }
+}
+export async function useFeishuPersistentCallback(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
+  const envelope = await applicationEnvelope(input, '/developers/v1/callback/switch/', { clientId: input.application.appId, callbackMode: 4 }, signal)
+  return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
+}
+export async function feishuCardActionsCapability(originalReadState: string): Promise<'enabled' | 'disabled' | 'unknown'> {
+  try {
+    const data = record(JSON.parse(originalReadState))
+    if (data?.callbackMode !== 4 || !Array.isArray(data.callbacks)) return 'unknown'
+    const callbacks = data.callbacks.map(value => typeof value === 'string' ? value : record(value)?.id)
+    if (!callbacks.every(opaque) || new Set(callbacks).size !== callbacks.length) return 'unknown'
+    return callbacks.includes('card.action.trigger') ? 'enabled' : 'disabled'
+  } catch { return 'unknown' }
+}
+export async function addFeishuCardActions(input: SetupAdapterInput & { privateState: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupConfigurationReceipt> {
+  const envelope = await applicationEnvelope(input, '/developers/v1/callback/update/', { clientId: input.application.appId, operation: 'add', callbacks: ['card.action.trigger'], callbackMode: 4 }, signal)
   return envelope ? { kind: 'accepted', privateState: JSON.stringify(envelope) } : { kind: 'unknown' }
 }
 
