@@ -1,10 +1,6 @@
 import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
-import { AGENTMUX_NOTE_GUIDE } from './agentmux-cli-note-guide.js'
-import { AGENTMUX_BROWSER_PROGRAM_GUIDE, AGENTMUX_BROWSER_TASK_GUIDE, AGENTMUX_BROWSER_TARGET_GUIDE } from './agentmux-cli-browser-guide.js'
-import { AGENTMUX_SETTINGS_RESOURCE_GUIDE, AGENTMUX_TOOLKIT_GUIDE, AGENTMUX_GOAL_CREATE_GUIDE } from './agentmux-cli-resource-guide.js'
-import { AGENT_OPEN_WORKFLOW, DEVICE_GUIDE, DIAGNOSTIC_GUIDE, GIT_GUIDE, GOAL_ACTIVITY_GUIDE, NATIVE_RESUME_GUIDE, SPATIAL_GUIDE } from './agentmux-cli-shared-guides.js'
-import { browserPageCapabilityNames } from './browser-page-capability.js'
+import { DIAGNOSTIC_GUIDE, GOAL_ACTIVITY_GUIDE, SPATIAL_GUIDE } from './agentmux-cli-shared-guides.js'
 import { goalRoleGuidanceContract } from './goal-role-guidance.js'
 
 interface ModuleDefinition {
@@ -20,52 +16,20 @@ const definitions: Readonly<Record<string, ModuleDefinition>> = {
     summary: 'Agent Sessions, original inputs, conversation and lifecycle',
     roles: 'All Agents; execution and coordination',
     when: 'Inspect, open, communicate with or recover an Agent',
-    guide: `Core owns AgentSession, Provider semantic state, input permission and recovery; ctxmux
-owns Run/process/output facts. Executor configuration, durable Session, one Run and its
-display Regions are distinct objects. Begin with agent ls and agent inspect for the exact
-Session and routeHostId. Use configured settings executors discovery before opening.
-agent continuity control --input FILE|- continues or cancels the exact original recovery intent.
-Preserve its full packet and operationId after an unknown receipt. continue requires positive
-additionalAttempts; cancel stops future unclaimed attempts, never a healthy Run or unknown Start.
-The original receipt remains readable after retirement; prior input is never replayed.
-agent refresh --session ID re-reads the complete original Session ID without starting,
-resuming, stopping or sending input. Passive identity confirmation may finish later;
-the reply neither promises a native identity nor reopens a retired Session.
-Choose Provider-native collaboration or an independent Session from the user's purpose.
-Keep original operation, Session, Run and resource identities; a new display is not a new task.
+    guide: `Core owns Session identity, Provider semantics, input permission and recovery; ctxmux
+owns Run/process/bytes. Executor, durable Session, current Run and display Region are distinct.
+Begin with agent ls/inspect for the exact Session and routeHostId; preserve original identities
+and unknown receipts. A failed observation never authorizes stopping a healthy Run.
 
-agent output reads ordered original bytes; closing the reader does not stop the Agent.
-Typed agent history --kind user-message reads expose publicContent independently of recorded
-authors. A content boundary grants no sharing authorization; read the leaf help for its exact
-confirmed and unknown meanings. Original text and copyable parts remain complete.
-agent conversation inspect reads newest-first semantic units from the same Core timeline as clients.
-Each unit carries one event and all original source records. Reassemble complete JSON UTF-8 fragments
-before interpreting content; retain its scoped continuation. checkpoint freezes the exact source vector;
-changes upserts original versions inside the backend view and advances cuts only after a complete
-replacement window. Keep window.view for following reads; assemble window.complete before replacing
-the displayed snapshot. watch invalidates that reader and --view retains its temporary window;
-Ctrl-C or agent conversation release releases only that reader, never the Agent. Source gaps retain exact retry scope.
-Original agent history/resource reads retain their own provenance and cursor. Status prose is not permission or input proof.
-agent conversation landmark ls/apply manage explicit user-named original record references,
-not generated chapters or copied bodies. A saved point is not record availability. Keep its
-full source and the original operation after an unknown save; ls --operation-id inspects that
-receipt. Offline targets retain their points; original conversation readers own reachability.
-Ordinary input must use the original public input/message owner and returned admission facts.
-agent input ls --host-id HOST --session SID reads the original bounded sending mailbox, including
-prompt and connector message inputs. Reassemble complete JSON entries before interpreting their
-original controls or receipts. Older unrecorded claims remain a coverage gap; a read never sends,
-acknowledges, recreates waiting or proves native adoption.
-agent interrupt, stop, resume and reopen are distinct explicit lifecycle operations. Observe
-the original input after an uncertain send; inspect a creation/move operation before another
-action. A handshake or status probe failure never authorizes stopping a healthy Run.
-
-${AGENTMUX_AGENT_MESSAGING_GUIDANCE}
-
-${NATIVE_RESUME_GUIDE}
-
-${AGENT_OPEN_WORKFLOW}
-
-${SPATIAL_GUIDE}`
+Load only the journey needed now:
+- Independent Session communication: amux message --skill for the full shared contract.
+- Create an Agent: amux agent open --help for configured Executor discovery and opening workflow.
+- Saved native conversations or resume: amux agent native --help.
+- Original output, input mailbox, history or conversation: use that agent action's --help.
+- Recovery or lifecycle: use the exact action's --help; interrupt, stop, resume and reopen differ.
+Before opening or rearranging a workface, read amux space --skill for placement and focus.
+Readers keep their original source/cursor and release only their reader, not the Agent;
+reading, input admission, native adoption and task completion remain separate facts.`
   },
   app: {
     summary: 'Global resource discovery, search and application navigation',
@@ -98,22 +62,19 @@ For Agent/File/Browser opening or layout changes, read their module and the spac
     summary: 'Embedded Browser targets, page programs, tasks and original receipts',
     roles: 'Agents reading or operating web pages',
     when: 'Open, inspect, automate or recover a Browser operation',
-    guide: `The Browser owner holds exact Browser/page targets, page capabilities and operation
-receipts. Core does not infer website-specific state from labels. Read targets and the exact
-Browser identity before a program; use only capabilities and elements named by that read.
-Keep action/navigation/delivery and business completion separate. An application link may
-await a person's system handoff while the original page remains unchanged.
+    guide: `The Browser owner holds exact page identities, capabilities and operation receipts.
+Reuse the Browser already confirmed for this task. Read its actual target/capabilities before
+acting; labels do not establish website state, permission or completion. Keep the original
+page, user input and unknown operation identity; do not bypass refusal or human control.
 
-Page capabilities come from the actual owner:
-${(['observe', 'act', 'wait', 'navigate'] as const).map(effect => `${effect}: ${browserPageCapabilityNames(effect).map(name => `\`${name}\``).join(', ')}`).join('\n')}
-
-${AGENTMUX_BROWSER_TARGET_GUIDE}
-
-${AGENTMUX_BROWSER_PROGRAM_GUIDE}
-
-${AGENTMUX_BROWSER_TASK_GUIDE}
-
-${SPATIAL_GUIDE}`
+Read only the matching local help:
+- amux browser targets --help: discover available exact targets and their readiness.
+- amux browser run --help: page-program API, capability names and original result/receipt reads.
+- amux browser task --help: saved task versions and their run/stop/inspect journey.
+- amux browser open --help: open a new page only when needed.
+Before opening a page or changing layout, read amux space --skill for same-Tab readable
+placement, its exceptions and separate navigation/input focus. An app link may await a
+person's system handoff while the original page stays unchanged.`
   },
   connection: {
     summary: 'External connection configuration, bindings, ingress and delivery',
@@ -248,7 +209,8 @@ one device, not a general user approval. Read device ls before administering an 
 Pairing changes connectivity and does not create an Agent or accept a Goal. Retain the complete
 returned offer and exact deviceId. Current discovery cannot certify an earlier lost revocation.
 
-${DEVICE_GUIDE}`
+Read amux device --help for the pairing, identity and revocation contract; use the exact
+action's help before changing it.`
   },
   file: {
     summary: 'Exact file resources, editor presentation, saves, uploads and builds',
@@ -259,36 +221,19 @@ Identify the original Host, Zone/workspace and literal path independently from t
 display Tab/Region. file read/ls access resources; file open/view access presentation. Opening
 does not save or overwrite a file. Inspect the original view and preserve unsaved user drafts.
 
-Use file write/create with the exact current contract and retain the original result. A save
+Pin file write/create to the original resource and observed revision; retain the original result. A save
 request is not a confirmed disk write; partial or unknown results remain unconfirmed. Upload
 and build operations have their own retained identities and inspect/cancel paths. Inspect the
 same upload/build after a lost reply instead of issuing a new logical operation. Formatting
 and build output do not certify a user's acceptance. Wrong targets reject only that request;
 unavailable resource reads never authorize removing a view, replacing content or stopping a Run.
 
-For concurrent .note.md edits, file write accepts --base FILE together with --operation-id ID.
-Keep the exact observed UTF-8 base and its sha256 expected revision; the proposed body remains
-stdin. The original Note owner merges safe changes and preserves overlapping base/current/proposed
-content as a conflict. Preserve the same operation and inputs after an unknown result; do not
-automatically retry or replace the ID. A committed replay receipt is observation of the original
-edit, never permission to overwrite later work. Ordinary writes without this pair retain CAS.
-When three conflict bodies cannot fit one RPC frame, the confirmed conflict and original history
-status/IDs remain in the receipt with noteConflictUnavailable; read the original file and, when
-available, the selected history event for content. This does not authorize resubmitting the edit.
-Use file restore with a selected committed --event-id to restore that whole saved version as
-a new revision. Use file undo with --batch and --batch-last-event to reverse one complete
-trusted actor batch while keeping later nonconflicting edits. The original owner reads the
-full batch; a history page is never complete membership. Both actions pin the current
-resource/revision and require an explicit operation ID; they accept no replacement body or actor.
-Undoing a confirmed creation batch removes its created body while retaining the Note identity,
-title, directory and permanent links; it never deletes the page. An unknown prior body is not
-creation evidence. Later overlapping edits remain conflicts; independent additions are retained.
-If a written receipt has contentUnavailable, the write succeeded: its canonical body and attached
-metadata could not fit that response. Keep the revision and original event, read them separately,
-and preserve any later unsaved draft; missing inline content never authorizes overwriting it.
-Read amux notebook --skill for exact Note links, attribution and history recovery.
+For concurrent .note.md edits and save/conflict receipts, read amux file write --help.
+For saved-version recovery or actor-batch undo, read amux file restore --help or amux file undo --help.
+Only for Note links, attribution or history, read amux notebook --skill. Unknown edits never authorize automatic replay.
 
-${SPATIAL_GUIDE}`
+Before opening or moving an editor workface, read amux space --skill for placement and focus.
+Use the exact file action's --help for its arguments, original revision and receipt contract.`
   },
   git: {
     summary: 'Git history/diff, exact Desktop presentation and worktree closeout',
@@ -309,7 +254,8 @@ Keep the original operation ID and exact Host/path
 when recovering an unknown result. Discarding Git changes never authorizes stopping a healthy
 Agent or deleting its cwd.
 
-${GIT_GUIDE}`
+Read amux git --help for repository/history contracts and amux git worktree close --help
+for the exact closeout journey.`
   },
   goal: {
     summary: 'Goal scope, execution responsibility, reports and PMO patrol',
@@ -326,7 +272,8 @@ ${goalRoleGuidanceContract()}
 
 ${GOAL_ACTIVITY_GUIDE}
 
-${AGENTMUX_GOAL_CREATE_GUIDE}`
+Read amux goal create --help only when creating or promoting a Goal; that leaf owns the
+exact scope, confirmation and source contract.`
   },
   message: {
     summary: 'Authenticated messages, pending input, inbox and original dispatch reports',
@@ -450,7 +397,8 @@ their real filesystem source. Begin with notebook ls/resolve/inspect, retain exa
 and revision, then apply only the authorized graph/content changes. A visual link or name
 is not a source identity, and unavailable notes are not an empty catalog.
 
-${AGENTMUX_NOTE_GUIDE}`
+Read amux notebook --help for exact links, graph edits and original Note history; use the
+matching leaf help before changing the original catalog or content.`
   },
   schedule: {
     summary: 'Explicit scheduled-task discovery and lifecycle',
@@ -477,7 +425,8 @@ installing a recurring patrol, new task ledger or automatic resend.`
 resource revisions. Inspect the exact current owner and supported fields before changing
 them. A saved route/template is not a connected Host, running Agent or human approval.
 
-${AGENTMUX_SETTINGS_RESOURCE_GUIDE}`
+Read amux settings --help to select the exact configuration domain, then the matching leaf
+help for its fields, authority, revision and save receipt. Discovering settings saves nothing.`
   },
   space: {
     summary: 'Durable spatial identities, display layout and exact navigation',
@@ -487,6 +436,12 @@ ${AGENTMUX_SETTINGS_RESOURCE_GUIDE}`
 owns presentation, navigation and input focus. Inspect exact locations and display
 Workspace/Group occurrences before changing a layout. A presentation move leaves execution
 Host, cwd, Session and Run intact. Keep original operation receipts and all location candidates.
+
+Read the client-owned Agent list order with amux space agent-order --display-workspace WORKSPACE.
+With --input FILE|- provide {order:[{hostId,agentSessionId}],expectedOrder?:[...]} to change that
+exact Workspace preference. An empty order restores creation order; new Sessions append.
+This changes no placement, focus or Run. Applied order and confirmed storage durability are
+separate receipts. After a partial/unknown save, read that exact scope before another write.
 
 ${SPATIAL_GUIDE}`
   },
@@ -534,7 +489,8 @@ split/Tab, read amux space --skill first and choose from the actual visible geom
 module, configuration and passive readers do not execute scripts. Distinguish configuration,
 action execution, display evaluation and each retained invocation identity before acting.
 
-${AGENTMUX_TOOLKIT_GUIDE}`
+Read amux toolkit --help for the configuration/execution journey and the exact action's help
+before running or changing a tool. Preserve the original operation after unknown results.`
   },
   topic: {
     summary: 'Topic categories, real knowledge sources and scoped migration',
@@ -608,41 +564,20 @@ export function agentMuxModuleSkill(root: string): string | null {
 
 export function agentMuxBaseSkill(): string {
   const directory = agentMuxCliModuleCatalog().map(module =>
-    `| ${module.root} | ${module.summary} | ${module.roles}; ${module.when} | \`${module.readCommand}\` |`).join('\n')
+    `| ${module.root} | ${module.when} | \`${module.readCommand}\` |`).join('\n')
   return `---\nname: amux\ndescription: Discover AgentMux identity, common boundaries and local module guides.\n---\n
-Start with \`amux whoami\` once to learn your verified Session, Run, Host, presentation
-and capabilities. Discover exact objects before acting; the current UI or cwd is not a
-global inventory. Endpoint, Host route, execution identity and display location are distinct.
-Core owns Agent identity, permission, input and recovery; ctxmux owns Run/process/bytes;
-the original business or client owner holds its own records and presentation.
+Run \`amux whoami\` once on entry for your original identity and current unavailable facts.
+Load only the module relevant to the task; if you know the domain, skip this directory.
+Keep original operation identities after unknown replies; never automatically repeat effects.
 
-RPC wire IDs only correlate transport messages; the business operation ID identifies the
-original action. Without a complete success reply, the commit result is unconfirmed;
-do not automatically retry the write. A current read cannot certify an earlier lost receipt.
-Unknown/stale/unavailable observations retain original identities, requests, healthy input
-and durable work surfaces. Reader cancellation only detaches that reader. Selection,
-presentation and input eligibility have separate receipts. Guidance changes no SOUL/Wiki/user profile.
+## Module directory
 
-${AGENTMUX_AGENT_MESSAGING_GUIDANCE}
-
-## Load only the needed modules
-
-Read \`amux MODULE --skill\` before working in that domain. The directory below follows
-this version's actual registered command roots. Each module supplies its owner, journey,
-responsibility and failure/recovery guidance. Before opening an Agent/file/page or changing
-layout, read its module and \`amux space --skill\` for the advisory opening playbook; inspect
-the actual visible layout and briefly explain the chosen location.
-
-| Module | Scope | Roles and trigger | Local read |
-| --- | --- | --- | --- |
+| Module | Read when | Local guide |
+| --- | --- | --- |
 ${directory}
 
-Module reads and \`--help\` are local: they do not connect to Runtime, launch a Run,
-send a task or register a role. Use \`amux MODULE --help\` and leaf \`--help\` for exact
-arguments in this version; IDs and text are literal data. For positional data, prefer
-\`amux --help MODULE ACTION\` so help flags cannot be mistaken for that data. A missing
-module rejects only that read; retain original healthy Agents and requests. Goal executors
-and managers read \`amux goal --skill\`; the default PMO handbook is discovered in \`amux mote --skill\`.
-Reading a module is not proof that an existing live model adopted its instructions.
+Module and help reads are local: they do not connect, launch, send or register anything.
+Use the needed action's \`--help\` for exact arguments and receipts. For literal positional
+data, use \`amux --help MODULE ACTION\`. Guidance grants no permissions or proof of adoption.
 `
 }
