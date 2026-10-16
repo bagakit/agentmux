@@ -203,8 +203,10 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
     assert.equal(joined.length, 1); assert.equal(joined[0].item.event.author.agentSessionId, product.chain.normal.senderSessionId)
     for (const kind of ['failed', 'unknown']) assert.equal(product.chain.scenarios.find(item => item.kind === kind).claim.admission.native.outcome, kind === 'failed' ? 'not-applied' : 'unknown')
     assert.equal(product.chain.unsubmitted.conversationCount, 0)
-    assert.equal(product.chain.human.original.envelope.sender.kind, 'human'); assert.equal(product.chain.human.original.envelope.senderSessionId, null); assert.equal(product.chain.human.original.envelope.body, product.chain.human.body)
-    assert.ok(product.chain.human.userPage.text.includes(product.chain.human.body)); assert.ok(!product.chain.human.userPage.text.includes('A2A original review'))
+    const localCli = product.chain.localCli
+    assert.equal(localCli.original.envelope.sender.kind, 'human'); assert.equal(localCli.original.envelope.senderSessionId, null); assert.equal(localCli.original.envelope.body, localCli.body)
+    assert.equal(localCli.inbox.agentSessionId, localCli.original.envelope.recipientSessionId); assert.ok(!localCli.inbox.text.includes(localCli.body)); assert.ok(!localCli.inbox.keys.some(key => key.includes(localCli.original.envelope.messageId)))
+    assert.ok(localCli.userPage.text.includes(localCli.body)); assert.equal(localCli.userPage.authorLabel, 'Author unknown'); assert.ok(!localCli.userPage.text.includes('A2A original review'))
     assert.equal(product.chain.initial.original.envelope.recipientRunId, null); assert.equal(product.chain.initial.original.envelope.body, product.chain.initial.body)
   }
   if (scope === 'restart') {
