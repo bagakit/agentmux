@@ -10560,8 +10560,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         { controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
     const attemptKey = JSON.stringify([sessionId, operationId])
     const admission = manualSteerAttempts.get(attemptKey)
-    const seed = admission?.stage === 'queue-admission' ? admission.seed : startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
-      operationId, hostId: session?.hostId ?? null, condition: entry?.promptCondition,
+    const retainedControl = entry?.directInputBinding ? entry.directInputControl : undefined
+    const seed = admission?.stage === 'queue-admission' ? admission.seed : startDeliveryAttempt({ agentSessionId: retainedControl?.agentSessionId ?? (session?.kind === 'agent' ? session.control.agentSessionId : sessionId),
+      operationId, hostId: retainedControl?.hostId ?? session?.hostId ?? null, condition: entry?.promptCondition,
       ...(entry?.execution ? { execution: entry.execution } : {}),
       ...(entry ? { prompt: composeAgentPrompt(entry.text, entry.agentMuxNote).text } : {}) })
     const attempt: SteerDeliveryAttempt = admission?.stage === 'queue-admission' ? admission : { seed, stage: 'queue-validation' }
@@ -10571,51 +10572,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (entry.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived. Restore it before choosing Send.')
 
       if (get().agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original message already has an active send attempt. Its original input is kept.')
-      if (entry.directInputBinding) {
-        const control = entry.directInputControl
-        if (!control || control.agentSessionId !== sessionId || control.run.runId !== entry.directInputBinding.expectedRun.runId) throw controlFailure(
-          'CONTROL_REQUEST_CONFLICT', 'The original manual input control is missing or conflicts with its bound Session and Run. The original key is retained; no current-route replacement was used.')
-        attempt.stage = 'core-submit'
-        set(current => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: operationId },
-          agentSteerInFlightPhase: { ...current.agentSteerInFlightPhase, [sessionId]: 'preparing' },
-          agentSteerQueues: { ...current.agentSteerQueues, [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item =>
-            item.operationId === operationId ? { ...item, inputIntakeStarted: true as const } : item) } }))
-        try {
-          const observed = await api.sessions.inspectInput(control, { kind: 'prompt', agentSessionId: sessionId,
-            expectedRun: entry.directInputBinding.expectedRun, submissionId: operationId })
-          const receipt = observed
-            ? observed.status === 'stopped' || observed.status === 'waiting' && (observed.observation === 'rejoin-needed' || observed.control.waiting?.wake === 'explicit-rejoin')
-              ? await api.sessions.rejoinInputWaiting(control, observed.ref) : observed
-            : await api.sessions.submitPrompt(control, entry.text, operationId, entry.directInputBinding,
-                { execution: 'immediate' }, true, entry.agentMuxNote, entry.sourceChannel)
-          if (!receipt) throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original manual input has no typed receipt. Its text and identity are retained.')
-          consumeInputReceipt(sessionId, receipt)
-          return (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') ? 'submitted' : 'unconfirmed'
-        } finally {
-          set(current => {
-            if (current.agentSteerInFlight[sessionId] !== operationId) return current
-            const agentSteerInFlight = { ...current.agentSteerInFlight }, agentSteerInFlightPhase = { ...current.agentSteerInFlightPhase }
-            delete agentSteerInFlight[sessionId]; delete agentSteerInFlightPhase[sessionId]
-            return { agentSteerInFlight, agentSteerInFlightPhase }
-          })
-        }
-      }
-      if (session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session is unavailable. No replacement or input was created.')
-      const changedRun = entry.runId !== undefined && !steerEntryTargetsRun(entry, session.control.run.runId)
-      if (changedRun && (entry.promptCondition !== null || entry.goalContinuation !== undefined)) {
-        throw controlFailure('STALE_AGENT_SESSION', `The original delivery belongs to Run ${entry.runId}; the Session now points to Run ${session.control.run.runId}. Inspect the original delivery before sending it to another Run.`, {
-          detail: JSON.stringify({ queuedRunId: entry.runId, currentRunId: session.control.run.runId,
+      if (!entry.directInputBinding && session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session is unavailable. No replacement or input was created.')
+      const currentRunId = session?.kind === 'agent' ? session.control.run.runId : undefined
+      const changedRun = currentRunId !== undefined && entry.runId !== undefined && !steerEntryTargetsRun(entry, currentRunId)
+      if (!entry.directInputBinding && changedRun && (entry.promptCondition !== null || entry.goalContinuation !== undefined)) {
+        throw controlFailure('STALE_AGENT_SESSION', `The original delivery belongs to Run ${entry.runId}; the Session now points to Run ${currentRunId}. Inspect the original delivery before sending it to another Run.`, {
+          detail: JSON.stringify({ queuedRunId: entry.runId, currentRunId,
             conditionState: entry.promptCondition === undefined ? 'unknown' : 'bound' })
         })
       }
       manualSteerAttempts.set(attemptKey, attempt)
+      const rebindRun = changedRun && !entry.directInputBinding
       set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
         [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
           if (item.operationId !== operationId) return item
           const { awaitingExplicitSend: _pause, preparationWait: _wait, preparationInputNotApplied: _safe, ...pending } = item
           // A new explicit selection binds a never-dispatched intent, just like admission.
           // The ordered consumer still freezes fresh Core conditions before real input.
-          return { ...pending, ...(changedRun ? { runId: session.control.run.runId } : {}),
+          return { ...pending, ...(rebindRun ? { runId: currentRunId } : {}),
             status: item.status === 'restoring' ? 'restoring' : 'queued' }
         }) } }))
       attempt.stage = 'ordered-queue'
@@ -10625,8 +10599,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const carrier = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)?.resumeInputReceipt
       if (carrier?.state === 'launch-carried' || carrier?.state === 'terminal-confirmed') return 'submitted'
       if (carrier?.state === 'not-applied') return 'unconfirmed'
-      if (originalDrain?.submitted.has(operationId) || confirmedSteerDelivery(get().timelines[sessionId], session?.kind === 'agent' ? session.control : undefined, operationId)) return 'submitted'
+      if (originalDrain?.submitted.has(operationId) || !entry.directInputBinding && confirmedSteerDelivery(get().timelines[sessionId], session?.kind === 'agent' ? session.control : undefined, operationId)) return 'submitted'
       if (originalDrain?.failures.has(operationId)) throw originalDrain.failures.get(operationId)
+      // Core owns accepted waiting after its typed receipt. It is not a failed
+      // submission, and another caller must not dispatch it through a second route.
+      const receipt = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)?.inputReceipt
+      if (receipt) return (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') ? 'submitted' : 'unconfirmed'
       if (originalDrain?.waitingForInteraction.has(operationId)) return 'unconfirmed'
       throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original selection left the ordered consumer without a confirmed submission. No new operation was created; inspect the original queue and retry this message.')
     } catch (error) {
@@ -10688,14 +10666,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const current = get()
     const target = current.sessions.find(item => item.id === sessionId)
     const selected = current.agentSteerQueues[sessionId]?.find(entry => entry.operationId === explicitOperationId)
-    const requested = explicitOperationId !== undefined && selected && !selected.archived && target?.kind === 'agent' &&
-      (selected.runId === undefined || steerEntryTargetsRun(selected, target.control.run.runId))
+    // Controlled input keeps its original Core route even when its presentation is absent.
+    const requested = explicitOperationId !== undefined && selected && !selected.archived &&
+      (selected.directInputBinding || target?.kind === 'agent' && (selected.runId === undefined || steerEntryTargetsRun(selected, target.control.run.runId)))
       ? explicitOperationId : undefined
-    if (requested !== undefined && target?.kind === 'agent' && selected?.promptCondition === null && selected.execution === undefined) {
+    if (requested !== undefined && selected?.promptCondition === null && selected.execution === undefined) {
       // Accept the exact user's selection synchronously. Async coordination is not its owner:
       // recovery, interaction and storage waits retain this choice in the one durable queue.
-      const execution = agentSteerExecution(selected, target.capabilities)
-      set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
+      const execution = selected.directInputBinding ? 'immediate' : target?.kind === 'agent' ? agentSteerExecution(selected, target.capabilities) : undefined
+      if (execution !== undefined) set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
         [sessionId]: state.agentSteerQueues[sessionId]!.map(entry =>
           entry.operationId === requested && entry.promptCondition === null && entry.execution === undefined
             ? { ...entry, execution } : entry) } }))
@@ -10727,21 +10706,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const refuseSelections = (code: AgentMuxControlErrorCode, reason: string) => {
             for (const id of drain.explicitSteers) drain.failures.set(id, controlFailure(code, reason))
           }
-          if (session?.kind !== 'agent') { refuseSelections('UNKNOWN_AGENT_SESSION', 'The original Agent Session disappeared before queue dispatch.'); return }
-          const sessionHostId = session.hostId
+          const sessionHostId = session?.hostId
           const endpointIssue = state.runtimeEndpointWarnings?.find(warning => warning.scope !== 'observation' && warning.hostId === sessionHostId && warning.availability !== 'connected')
           if (endpointIssue && drain.explicitSteers.size === 0) { refuseSelections('CONTROL_UNAVAILABLE', `Original Host ${sessionHostId} endpoint is ${endpointIssue.availability}: ${endpointIssue.message}`); return }
-          const currentRunId = session.control.run.runId
+          const currentRunId = session?.kind === 'agent' ? session.control.run.runId : undefined
           const pendingEntries = state.agentSteerQueues[sessionId]?.filter(item =>
-            (!item.directInputBinding || item.freshComposerIntent && !item.inputIntakeStarted && !item.inputReceipt) &&
+            (!item.directInputBinding || drain.explicitSteers.has(item.operationId) || item.freshComposerIntent && !item.inputIntakeStarted && !item.inputReceipt) &&
             !item.archived && !item.awaitingExplicitSend &&
-            (item.runId === undefined || steerEntryTargetsRun(item, currentRunId)))
+            (item.directInputBinding && drain.explicitSteers.has(item.operationId) || currentRunId !== undefined && (item.runId === undefined || steerEntryTargetsRun(item, currentRunId))))
           // Explicit steer selects its exact intent, leaving queue-only work untouched. Multiple
           // explicit requests retain their author order in this one queue, including across awaits.
           const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ??
             pendingEntries?.find(item => item.promptCondition === null && item.execution !== undefined) ?? pendingEntries?.[0]
-          if (!entry) { refuseSelections('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived, paused or belongs to a different Run before dispatch.'); return }
-          if (entry.goalDispatch && confirmedSteerDelivery(state.timelines[sessionId], session.control, entry.operationId)) {
+          if (!entry) {
+            if (session?.kind !== 'agent') refuseSelections('UNKNOWN_AGENT_SESSION', 'The original Agent Session disappeared before queue dispatch.')
+            else refuseSelections('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived, paused or belongs to a different Run before dispatch.')
+            return
+          }
+          if (!entry.directInputBinding && session?.kind === 'agent' && entry.goalDispatch && confirmedSteerDelivery(state.timelines[sessionId], session.control, entry.operationId)) {
             try {
               await api.demands.reconcileDispatch(entry.goalDispatch)
               await get().refreshDemand(entry.goalDispatch.goalId)
@@ -10753,7 +10735,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               throw error
             }
           }
-          if (entry.goalPmo?.creationOperationId !== undefined && confirmedSteerDelivery(state.timelines[sessionId], session.control, entry.operationId)) {
+          if (!entry.directInputBinding && session?.kind === 'agent' && entry.goalPmo?.creationOperationId !== undefined && confirmedSteerDelivery(state.timelines[sessionId], session.control, entry.operationId)) {
             try {
               await api.demands.reconcilePmoInput(entry.goalPmo, session.control, entry.operationId)
               await get().refreshDemand(entry.goalPmo.goalId)
@@ -10769,20 +10751,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               throw error
             }
           }
-          if (entry.runId === currentRunId && entry.promptCondition === null && entry.execution !== undefined && session.pendingInteraction) {
-            retainWaitingSelections(currentRunId)
+          if (!entry.directInputBinding && session?.kind === 'agent' && entry.runId === currentRunId && entry.promptCondition === null && entry.execution !== undefined && session.pendingInteraction) {
+            retainWaitingSelections(session.control.run.runId)
             return
           }
-          // Only a fresh explicitly selected manual producer enters the original Core
-          // intake. Queue-only Enter and old exact/unknown records keep their contract.
-          if (entry.freshComposerIntent && !entry.resumeInputIntent && entry.execution === 'immediate' && entry.promptCondition === null && session.processState === 'running' && !session.pendingInteraction) {
-            drain.explicitSteers.delete(entry.operationId)
-            try {
-              if (await get().sendQueuedAgentSteer(sessionId, entry.operationId) === 'submitted') drain.submitted.add(entry.operationId)
-            } catch (error) { drain.failures.set(entry.operationId, error); return }
-            continue
-          }
-          if (!drain.explicitSteers.has(entry.operationId) && entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) {
+          if (!entry.directInputBinding && session?.kind === 'agent' && !drain.explicitSteers.has(entry.operationId) && entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) {
             refuseSelections('CONTROL_UNAVAILABLE', session.pendingInteraction ? 'The original Agent is waiting for an interaction response. Answer it before retrying this message.' : `Original Run ${session.control.run.runId} is ${session.processState}; Agent status is ${session.status.state}${session.status.detail ? `: ${session.status.detail}` : ''}`)
             return
           }
@@ -10790,7 +10763,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // outlive it. Unknown/historical or boot-paused inputs never gain auto-retry authority.
           const explicitAttempt = drain.explicitSteers.delete(entry.operationId) ||
             entry.promptCondition === null && entry.execution !== undefined
-          if (!explicitAttempt && entry.promptCondition === null && session.status.state === 'working') return
+          if (!explicitAttempt && entry.promptCondition === null && session?.kind === 'agent' && session.status.state === 'working') return
           if (!explicitAttempt && entry.promptCondition !== null) {
             // A prepared durable intent may already have crossed admission. A late completion,
             // startup or reconnect wake is no proof that it was never delivered. Only a fresh
@@ -10801,11 +10774,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             return
           }
           // Capture before recovery: a newly restored binding grants no save bypass.
-          const explicitlyBound = explicitAttempt && entry.runId === currentRunId
+          const explicitlyBound = explicitAttempt && currentRunId !== undefined && entry.runId === currentRunId
           let preparedHere = false
           let dispatchStarted = false
-          const attemptHostId = session.hostId
-          const attemptSessionId = session.control.agentSessionId
+          const attemptControl = entry.directInputBinding ? entry.directInputControl : session?.kind === 'agent' ? session.control : undefined
+          const attemptHostId = attemptControl?.hostId ?? null
+          const attemptSessionId = attemptControl?.agentSessionId ?? sessionId
           let attemptRunId = entry.runId
           let attemptCondition = entry.promptCondition
           let attemptExecution = entry.execution
@@ -10827,6 +10801,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             agentSteerInFlightPhase: { ...current.agentSteerInFlightPhase, [sessionId]: 'preparing' }
           }))
           try {
+            if (entry.directInputBinding) {
+              const control = entry.directInputControl
+              if (!control || control.agentSessionId !== sessionId || control.run.runId !== entry.directInputBinding.expectedRun.runId) throw controlFailure(
+                'CONTROL_REQUEST_CONFLICT', 'The original manual input control is missing or conflicts with its bound Session and Run. The original key is retained; no current-route replacement was used.')
+              // All producers share this consumer, including the asynchronous read
+              // before first Core intake. Core serializes any subsequent accepted waiting.
+              deliveryAttempt.stage = 'core-submit'
+              set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
+                [sessionId]: (current.agentSteerQueues[sessionId] ?? []).map(item => item.operationId === entry.operationId
+                  ? { ...item, inputIntakeStarted: true as const } : item) } }))
+              const observed = await api.sessions.inspectInput(control, { kind: 'prompt', agentSessionId: sessionId,
+                expectedRun: entry.directInputBinding.expectedRun, submissionId: entry.operationId })
+              dispatchStarted = true
+              const receipt = observed
+                ? observed.status === 'stopped' || observed.status === 'waiting' && (observed.observation === 'rejoin-needed' || observed.control.waiting?.wake === 'explicit-rejoin')
+                  ? await api.sessions.rejoinInputWaiting(control, observed.ref) : observed
+                : await api.sessions.submitPrompt(control, entry.text, entry.operationId, entry.directInputBinding,
+                    { execution: 'immediate' }, entry.origin === 'manual', entry.agentMuxNote, entry.sourceChannel)
+              if (!receipt) throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original manual input has no typed receipt. Its text and identity are retained.')
+              consumeInputReceipt(sessionId, receipt)
+              if (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed') drain.submitted.add(entry.operationId)
+              if (!get().agentSteerQueues[sessionId]?.some(item => drain.explicitSteers.has(item.operationId))) return
+              continue
+            }
+            if (session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session disappeared before queue dispatch. No replacement or input was created.')
             if (entry.runId === undefined || entry.resumeInputIntent) {
               set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
                 [sessionId]: current.agentSteerQueues[sessionId]!.map(item => {
@@ -11011,8 +11010,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             set((current) => {
               const pending = current.agentSteerQueues[sessionId]
               const target = current.sessions.find(item => item.id === sessionId)
-              if (!pending || target?.kind !== 'agent' || target.hostId !== attemptHostId ||
-                target.control.agentSessionId !== attemptSessionId) return current
+              if (!pending || !entry.directInputBinding && (target?.kind !== 'agent' || target.hostId !== attemptHostId ||
+                target.control.agentSessionId !== attemptSessionId)) return current
               return {
                 agentSteerQueues: {
                   ...current.agentSteerQueues,
@@ -11036,9 +11035,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const stillPending = get().agentSteerQueues[sessionId]?.some((item) => item.operationId === entry.operationId)
             const fresh = get()
             const freshSession = fresh.sessions.find(item => item.id === sessionId)
-            const explicitPending = freshSession?.kind === 'agent' && fresh.agentSteerQueues[sessionId]?.some(item =>
+            const explicitPending = fresh.agentSteerQueues[sessionId]?.some(item =>
               drain.explicitSteers.has(item.operationId) && !item.archived && !item.awaitingExplicitSend &&
-              (item.runId === undefined || steerEntryTargetsRun(item, freshSession.control.run.runId)))
+              (item.directInputBinding || freshSession?.kind === 'agent' && (item.runId === undefined || steerEntryTargetsRun(item, freshSession.control.run.runId))))
             if (!explicitPending && (explicitAttempt || stillPending && !drain.wake)) return
           }
         }
