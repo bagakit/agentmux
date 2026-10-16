@@ -19,6 +19,10 @@ async function confirmAndCreate() {
   expect([...document.querySelectorAll('.mote-bot-auth-actions .primary-button')].map(node => node.textContent)).toEqual(['Confirm this account'])
   expect(document.querySelector('.mote-bot-setup > [aria-label="Original bot setup results"]')).toBeNull()
   await f.click('Confirm this account'); expect(f.creationCount).toBe(0)
+  await vi.waitFor(async () => { await f.settle(); expect(document.querySelector('[aria-label="Bot to create"]')).not.toBeNull() })
+  expect(document.querySelector('[aria-label="Bot to create"]')?.textContent).toContain('Saved public name')
+  expect(document.querySelector('[aria-label="Bot to create"] img')?.getAttribute('alt')).toBe('Avatar chosen for this bot')
+  expect(document.querySelector('[aria-label="Bot to create"]')?.textContent).toContain('Creates one bot')
   await f.click('Create this bot')
 }
 
@@ -48,6 +52,25 @@ it('creates from the saved public profile through original IPC/Core/Main/default
   expect(f.calls.some(r => r.url?.endsWith('/publish'))).toBe(false)
 })
 
+it('continues the saved Mote identity into the same bot setup with its original enrollment source', async () => {
+  await create(); await confirmAndCreate(); await text('Original save confirmed')
+  const parent = (await f.client.call('space.mote.connection.inspect', { operationId: original().operationId })).operation!
+  expect(parent.enrollment?.configured).not.toBeNull()
+  await f.click('Continue bot setup')
+  expect(f.navigation.openMoteConnector).toHaveBeenCalledWith({
+    target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title,
+    setup: { connectionId: parent.enrollment!.configured!.connection.config.connectionId,
+      source: { kind: 'enrollment', operationId: parent.enrollment!.operationId, expectedRevision: parent.enrollment!.revision } }
+  })
+  const origin = f.navigation.openMoteConnector.mock.calls[0]![0]
+  await f.render(0, true, { section: 'chat-connections', moteConnectorOrigin: origin })
+  await vi.waitFor(async () => { await f.settle(); expect(document.querySelector('[data-management-confirm]')).not.toBeNull() }, { timeout: 8000 })
+  const handoff = f.connectionCalls.mock.calls.find(([method]) => method === 'connection.setup.begin')!
+  expect(handoff[1]).toMatchObject({ connectionId: parent.enrollment!.configured!.connection.config.connectionId,
+    source: { kind: 'enrollment', operationId: parent.enrollment!.operationId, expectedRevision: parent.enrollment!.revision } })
+  expect(f.beginCount).toBe(1)
+})
+
 it('names the original advertised platform in its confirmation surface', async () => {
   await f.close(); f = await moteBotUi({ generic: true })
   await create(false); await text('Check the account and enterprise')
@@ -61,7 +84,7 @@ it('names the original advertised platform in its confirmation surface', async (
   expect(details.textContent).toContain('Check saved progress')
   expect(document.querySelector('.mote-details__issue')).toBeNull()
   await f.click('Original setup details')
-  await f.click('View original result')
+  await f.click('Check saved progress')
   await text('Saved progress checked.')
   expect(document.querySelector('.mote-details__issue')).toBeNull()
   expect(f.counts.begin).toBe(1); expect(f.counts.authentication).toBe(1); expect(f.counts.create).toBe(0)

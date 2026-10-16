@@ -33,6 +33,7 @@ async function mount() {
   await dom.render(<ExternalConnectionsSettings active />)
   await ready('[data-enrollment-new]'); await click('[data-enrollment-new]')
   await ready('[data-enrollment-create]')
+  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('prepare')
 }
 async function ready(selector: string) {
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector(selector), selector).not.toBeNull() })
@@ -73,11 +74,14 @@ async function finishCreation() {
   if (dom.container.querySelector('[data-enrollment-action="continue-authentication"]'))
     await click('[data-enrollment-action="continue-authentication"]')
   await ready('[data-enrollment-action="confirm-account"]')
+  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('account')
   await click('[data-enrollment-action="confirm-account"]')
   await ready('[data-enrollment-action="create"]')
+  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('create')
   expect(fixture.create).not.toHaveBeenCalled()
   await click('[data-enrollment-action="create"]')
   await ready('[data-enrollment-saved]')
+  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('ready')
 }
 
 it('reads earlier durable setups by their real cursor without selecting or recreating the first pending entry', async () => {
@@ -114,11 +118,13 @@ it('explicitly recovers an unknown encrypted handoff locally before a separate u
   const original = (await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]!
   expect(original.diagnostic).toEqual({ stage: 'secure-storage', code: 'challenge-unconfirmed' })
   expect(dom.container.querySelector('[data-enrollment-diagnosis]')?.textContent).toBe('Secure confirmation progress could not be checked or saved here.')
+  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('attention')
   expect(dom.container.querySelectorAll('[data-bot-enrollment] .primary-button')).toHaveLength(1)
   await inspectOriginal()
   expect(fixture.authentication).not.toHaveBeenCalled()
   await click('[data-enrollment-advance]')
   await ready('[data-enrollment-code] svg')
+  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('scan')
   expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).not.toHaveBeenCalled()
   await finishCreation()
   const final = (await fixture.sdk.call('connection.enrollment.inspect', { operationId: original!.operationId })).operation!
