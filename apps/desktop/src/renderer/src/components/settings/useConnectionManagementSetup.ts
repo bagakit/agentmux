@@ -36,7 +36,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const configurationSelector: ConnectionSetupConfigurationSelector = !configuration && visible?.intent ? visible.intent : configuration?.effect === 'add-application-permissions' ? { effect: 'add-application-permissions', purpose: configuration.purpose }
     : configuration?.effect === 'create-application-version' ? { effect: configuration.effect, ...(configuration.draft?.kind === 'create-version' ? { draft: configuration.draft } : {}) }
     : configuration?.effect === 'submit-application-version' ? { effect: configuration.effect, ...(configuration.draft?.kind === 'submit-version' ? { draft: configuration.draft } : {}) }
-    : { effect: configurationEffect as 'enable-messaging' | 'use-persistent-connection' | 'add-message-reception' }
+    : { effect: configurationEffect as 'enable-messaging' | 'use-persistent-connection' | 'use-persistent-callback' | 'add-card-actions' | 'add-message-reception' }
   const supported = !!record && visibleCatalog?.value?.support?.connectionRevision === record.revision && visibleCatalog.value.support.capabilities.includes('management-authentication')
   const originals = visibleCatalog?.value?.operations ?? []
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
@@ -194,13 +194,13 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     const inspect = (selector: ConnectionSetupConfigurationSelector) => accepted(() => source('connection.setup.inspect', { operationId: id, applicationInspection: {}, applicationConfiguration: selector }), selector)
     try {
       // One explicit bounded check; writes are never part of this loop.
-      for (const effect of ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'add-message-reception'] as const) {
+      for (const effect of ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'add-message-reception', 'use-persistent-callback', 'add-card-actions'] as const) {
         const selector: ConnectionSetupConfigurationSelector = effect === 'add-application-permissions' ? { effect, purpose: 'agent-conversation' } : { effect }
         let result = await inspect(selector)
         if (!result || result.applicationConfiguration?.effect !== effect) return
         const task = connectionManagementTask(result)
         if (task.kind === 'original' || task.kind === 'console' || task.kind === 'action' && (task.action.kind === 'recover-configuration-effect' || task.action.kind === 'recover-application-inspection')) return
-        const subjects = effect === 'enable-messaging' ? ['bot-settings'] as const : effect === 'use-persistent-connection' ? ['event-settings'] as const : effect === 'add-application-permissions' ? ['permission-catalog', 'application-permissions'] as const : ['event-settings', 'event-catalog'] as const
+        const subjects = effect === 'enable-messaging' ? ['bot-settings'] as const : effect === 'use-persistent-connection' ? ['event-settings'] as const : effect === 'use-persistent-callback' || effect === 'add-card-actions' ? ['callback-settings'] as const : effect === 'add-application-permissions' ? ['permission-catalog', 'application-permissions'] as const : ['event-settings', 'event-catalog'] as const
         for (const subject of subjects) {
           const configuration = result.applicationConfiguration
           if (!configuration || configuration.effect !== effect) return

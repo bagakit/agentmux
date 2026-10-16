@@ -1,9 +1,11 @@
-import type { ConnectionSetupAccount, ConnectionSetupChallenge } from '@agentmux/core/connections'
+import type { ConnectionEnrollmentDiagnostic, ConnectionSetupAccount, ConnectionSetupChallenge } from '@agentmux/core/connections'
 import { parse as parseHtml, type DefaultTreeAdapterTypes } from 'parse5'
 import { parse as parseScript, type Node, type Program } from 'acorn'
 import { Cookie, CookieJar, type SerializedCookieJar } from 'tough-cookie'
 
+export const FEISHU_BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36'
 const FEISHU_QR_HEADERS = {
+  'user-agent': FEISHU_BROWSER_USER_AGENT,
   'x-app-id': '12', 'x-api-version': '1.0.28', accept: 'application/json', 'content-type': 'application/json',
   'x-locale': 'zh-CN', 'x-terminal-type': '2',
   // Issuer web-client metadata is not the caller's trusted identity.
@@ -19,10 +21,15 @@ type Phase = 'poll' | 'cross-login' | 'landing' | 'console' | 'account' | 'expir
 export type NativeAccountState = {
   version: 2; flowKey: string; token: string; cookieJar: SerializedCookieJar; phase: Phase; hops: number
   url?: string; account?: ConnectionSetupAccount; csrf?: string; consoleOrigin?: string
+  referer?: string
 }
 export type NativeAccountInitialState = { version: 1; flowKey: string; token: string; setCookies: string[] }
-type NativeAccountChallenge = { kind: 'challenge'; challenge: ConnectionSetupChallenge; state: NativeAccountInitialState } | { kind: 'unknown' }
-type NativeAccountProgress = { kind: 'progress'; stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired'; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; state: NativeAccountState } | { kind: 'unknown' }
+type AuthenticationDiagnostic = Extract<ConnectionEnrollmentDiagnostic, { stage: 'authentication' }>
+type NativeAccountUnknown = { kind: 'unknown'; diagnostic: AuthenticationDiagnostic }
+type NativeAccountChallenge = { kind: 'challenge'; challenge: ConnectionSetupChallenge; state: NativeAccountInitialState } | NativeAccountUnknown
+type NativeAccountProgress = { kind: 'progress'; stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired'; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; state: NativeAccountState } | NativeAccountUnknown
+const unconfirmed = (step: NonNullable<AuthenticationDiagnostic['step']>, failure: NonNullable<AuthenticationDiagnostic['failure']>, httpStatus?: number, nativeCode?: number): NativeAccountUnknown => ({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step, failure, ...(httpStatus === undefined ? {} : { httpStatus }), ...(nativeCode === undefined ? {} : { nativeCode }) } })
+const uncached = (endpoint: string) => endpoint + `?_r${10000 + Math.floor(Math.random() * 80000)}=${Date.now()}`
 type Ast = Node & Record<string, unknown>
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const text = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && !/[\u0000-\u001f\u007f]/u.test(v)
@@ -58,7 +65,8 @@ export function readNativeAccountState(snapshot: unknown): { state: NativeAccoun
   const state: NativeAccountState = {
     version: 2, flowKey: original.flowKey, token: original.token, cookieJar: original.cookieJar, phase: original.phase, hops: original.hops,
     ...(original.url !== undefined ? { url: original.url } : {}), ...(original.account !== undefined ? { account: original.account } : {}),
-    ...(original.csrf !== undefined ? { csrf: original.csrf } : {}), ...(original.consoleOrigin !== undefined ? { consoleOrigin: original.consoleOrigin } : {})
+    ...(original.csrf !== undefined ? { csrf: original.csrf } : {}), ...(original.consoleOrigin !== undefined ? { consoleOrigin: original.consoleOrigin } : {}),
+    ...(original.referer !== undefined ? { referer: url(original.referer, ['accounts.feishu.cn', 'ask.feishu.cn', ...CONSOLE_HOSTS]).href } : {})
   }
   const cookies = CookieJar.deserializeSync(state.cookieJar)
   // Reconstitute through the same strict policy rather than trusting serialized options.
@@ -73,21 +81,25 @@ export function readNativeAccountState(snapshot: unknown): { state: NativeAccoun
 
 /** Authentication initialization only; it never creates or selects an application. */
 export async function beginFeishuNativeAccount(signal?: AbortSignal): Promise<NativeAccountChallenge> {
+  let failure: NonNullable<AuthenticationDiagnostic['failure']> = 'transport-unconfirmed', httpStatus: number | undefined
   try {
     // Bound this observation only; the durable caller keeps the original unknown intent.
     const bounded = AbortSignal.timeout(20_000)
-    const response = await fetch(INIT, {
+    const response = await fetch(uncached(INIT), {
       method: 'POST', redirect: 'manual', signal: signal ? AbortSignal.any([signal, bounded]) : bounded, headers: FEISHU_QR_HEADERS,
       body: JSON.stringify({ biz_type: null, redirect_uri: LANDING })
     })
-    if (!response.ok || response.status >= 300) return { kind: 'unknown' }
+    httpStatus = response.status
+    if (!response.ok || response.status >= 300) return unconfirmed('initialize', 'http-status', httpStatus)
+    failure = 'invalid-response'
     const body = record(await response.json()), data = record(body?.data), step = record(data?.step_info)
     const flowKey = response.headers.get('x-flow-key')
     const token = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !/[\u0000-\u0020\u007f]/u.test(value)
-    if (body?.code !== 0 || !token(step?.token) || !token(flowKey)) return { kind: 'unknown' }
+    if (Number.isSafeInteger(body?.code) && body!.code !== 0) return unconfirmed('initialize', 'platform-error', httpStatus, Number(body!.code))
+    if (body?.code !== 0 || !token(step?.token) || !token(flowKey)) return unconfirmed('initialize', failure, httpStatus)
     const challenge = { qrPayload: JSON.stringify({ qrlogin: { token: step.token } }), expiresAt: null, nextPollAt: Date.now() + 1500 }
     return { kind: 'challenge', challenge, state: { version: 1, flowKey, token: step.token, setCookies: response.headers.getSetCookie() } }
-  } catch { return { kind: 'unknown' } }
+  } catch { return unconfirmed('initialize', failure, httpStatus) }
 }
 
 function alias(p: Record<string, unknown>, names: readonly string[], required: boolean): string | undefined {
@@ -179,47 +191,57 @@ export async function readNativeAccountResponse(response: Response): Promise<str
 }
 /** One native request only. Its next URL and cookies are returned privately for the next durable action. */
 export async function advanceFeishuNativeAccount(snapshot: unknown, signal?: AbortSignal): Promise<NativeAccountProgress> {
+  let step: NonNullable<AuthenticationDiagnostic['step']> = 'account', failure: NonNullable<AuthenticationDiagnostic['failure']> = 'invalid-state', httpStatus: number | undefined
   try {
     const { state, cookies } = readNativeAccountState(snapshot)
-    if (['account', 'expired'].includes(state.phase)) return { kind: 'unknown' }
+    if (['account', 'expired'].includes(state.phase)) return unconfirmed(step, failure)
+    step = state.phase as typeof step
+    failure = 'redirect-unconfirmed'
     const hosts = state.phase === 'poll' ? ['accounts.feishu.cn'] : state.phase === 'cross-login' ? ['accounts.feishu.cn', 'ask.feishu.cn'] : state.phase === 'landing' ? ['ask.feishu.cn'] : CONSOLE_HOSTS
-    const target = url(state.phase === 'poll' ? POLL : state.url ?? '', hosts)
+    const target = url(state.phase === 'poll' ? uncached(POLL) : state.url ?? '', hosts)
     if (state.phase === 'console') consoleUrl(target.href)
-    const headers: Record<string, string> = state.phase === 'poll' ? { ...FEISHU_QR_HEADERS, 'x-flow-key': state.flowKey } : { accept: 'text/html' }
+    const headers: Record<string, string> = state.phase === 'poll' ? { ...FEISHU_QR_HEADERS, 'x-flow-key': state.flowKey } : { accept: 'text/html', 'user-agent': FEISHU_BROWSER_USER_AGENT }
+    if (state.referer) headers.referer = state.referer
     const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
     const bounded = AbortSignal.timeout(20_000)
+    failure = 'transport-unconfirmed'
     const response = await fetch(target.href, { method: state.phase === 'poll' ? 'POST' : 'GET', redirect: 'manual', headers, ...(state.phase === 'poll' ? { body: JSON.stringify({ biz_type: null }) } : {}), signal: signal ? AbortSignal.any([signal, bounded]) : bounded })
-    if (response.url && new URL(response.url).href !== target.href) return { kind: 'unknown' }
+    httpStatus = response.status; failure = 'invalid-response'
+    if (response.url && new URL(response.url).href !== target.href) return unconfirmed(step, failure, httpStatus)
     for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href)
     let stage: 'waiting' | 'scanned' | 'handoff' | 'account' | 'expired' = 'handoff'
     if (response.status >= 300 && response.status < 400) {
-      if (state.phase === 'poll' || ++state.hops > 8) return { kind: 'unknown' }
-      const location = response.headers.get('location'); if (!location) return { kind: 'unknown' }
+      failure = 'redirect-unconfirmed'
+      if (state.phase === 'poll' || ++state.hops > 8) return unconfirmed(step, failure, httpStatus)
+      const location = response.headers.get('location'); if (!location) return unconfirmed(step, failure, httpStatus)
       state.url = url(new URL(location, target).href, hosts).href
+      state.referer = target.href
       if (state.phase === 'console') consoleUrl(state.url)
       if (state.phase === 'cross-login' && new URL(state.url).hostname === 'ask.feishu.cn') state.phase = 'landing'
     } else {
-      if (!response.ok) return { kind: 'unknown' }
+      if (!response.ok) return unconfirmed(step, 'http-status', httpStatus)
       state.hops = 0
       if (state.phase === 'poll') {
         const body = record(await response.json()), data = record(body?.data), step = record(data?.step_info)
-        if (body?.code !== 0 || !data || !Number.isSafeInteger(step?.status)) return { kind: 'unknown' }
+        if (Number.isSafeInteger(body?.code) && body!.code !== 0) return unconfirmed('poll', 'platform-error', httpStatus, Number(body!.code))
+        if (body?.code !== 0 || !data || !Number.isSafeInteger(step?.status)) return unconfirmed('poll', failure, httpStatus)
         const polling = data.next_step === null || data.next_step === 'qr_login_polling'
         if (data.next_step === null && step!.status === 5) { state.phase = 'expired'; stage = 'expired' }
         else if (data.next_step === 'enter_app') {
-          if (step!.status !== 1 || !text(step!.cross_login_uri)) return { kind: 'unknown' }
+          if (step!.status !== 1 || !text(step!.cross_login_uri)) return unconfirmed('poll', failure, httpStatus)
           state.url = url(step!.cross_login_uri, ['accounts.feishu.cn']).href; state.phase = 'cross-login'
         } else if (polling && [1, 2].includes(Number(step!.status))) stage = step!.status === 2 ? 'scanned' : 'waiting'
-        else return { kind: 'unknown' }
-      } else if (state.phase === 'cross-login') { state.phase = 'landing'; state.url = LANDING }
-      else if (state.phase === 'landing') { state.phase = 'console'; state.url = CONSOLE }
+        else return unconfirmed('poll', failure, httpStatus)
+      } else if (state.phase === 'cross-login') { state.phase = 'landing'; state.url = LANDING; state.referer = target.href }
+      else if (state.phase === 'landing') { state.phase = 'console'; state.url = CONSOLE; state.referer = target.href }
       else {
-        if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'text/html') return { kind: 'unknown' }
+        if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'text/html') return unconfirmed(step, failure, httpStatus)
+        failure = 'bootstrap-unconfirmed'
         const identity = bootstrap(await readNativeAccountResponse(response)); state.account = identity.account; state.csrf = identity.csrf; state.consoleOrigin = target.origin; state.phase = 'account'; stage = 'account'
       }
     }
     state.cookieJar = serialize(cookies)
     const challenge = state.phase === 'poll' ? { qrPayload: JSON.stringify({ qrlogin: { token: state.token } }), expiresAt: null, nextPollAt: Date.now() + 1500 } : null
     return { kind: 'progress', stage, challenge, account: stage === 'account' ? state.account! : null, state }
-  } catch { return { kind: 'unknown' } }
+  } catch { return unconfirmed(step, failure, httpStatus) }
 }

@@ -30,6 +30,8 @@ export type EnrollmentRow = {
   confirmedAccountDigest?: string
   creationAccountDigest?: string
   activeActionId?: string
+  /** Omitted on old intents; their original adapter route must not change after renewal. */
+  adapterProtocolId?: string
   /** Read-only original record material, never serialized as an added field. */
   savedOperation?: Record<string, unknown>
 }
@@ -106,7 +108,8 @@ export class ConnectionEnrollmentStore {
   }
   admit(
     input: ConnectionEnrollmentBeginInput,
-    actor: ConnectionEnrollmentCallContext['actor']
+    actor: ConnectionEnrollmentCallContext['actor'],
+    adapterProtocolId?: string
   ): EnrollmentRow {
     return this.transaction(() => {
       const saved = this.read(input.operationId),
@@ -137,6 +140,7 @@ export class ConnectionEnrollmentStore {
       const row: EnrollmentRow = {
         version: 2,
         inputDigest,
+        ...(adapterProtocolId === undefined ? {} : { adapterProtocolId }),
         assetOperationId: randomUUID(),
         operation: {
           ...identity,

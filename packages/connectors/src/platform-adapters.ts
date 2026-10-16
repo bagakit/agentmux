@@ -1,6 +1,7 @@
 import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionAdapter } from './connection-host.js'
 import { FeishuPublicationAdapter } from './adapters/feishu/publication.js'
+import { FEISHU_ENROLLMENT_PROTOCOL } from './adapters/feishu/enrollment-protocol.js'
 
 /** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
 export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] {
@@ -31,6 +32,10 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
         messagingCapability: async state => (await feishu()).setup.applicationConfiguration!.messagingCapability(state),
         eventTransportCapability: async state => (await feishu()).setup.applicationConfiguration!.eventTransportCapability(state),
         usePersistentConnection: async (input, signal) => (await feishu()).setup.applicationConfiguration!.usePersistentConnection(input, signal),
+        callbackTransportCapability: async state => (await feishu()).setup.applicationConfiguration!.callbackTransportCapability!(state),
+        usePersistentCallback: async (input, signal) => (await feishu()).setup.applicationConfiguration!.usePersistentCallback!(input, signal),
+        cardActionsCapability: async state => (await feishu()).setup.applicationConfiguration!.cardActionsCapability!(state),
+        addCardActions: async (input, signal) => (await feishu()).setup.applicationConfiguration!.addCardActions!(input, signal),
         permissionPlan: async (...input) => (await feishu()).setup.applicationConfiguration!.permissionPlan(...input),
         messageReceptionPlan: async (...input) => (await feishu()).setup.applicationConfiguration!.messageReceptionPlan(...input),
         addMessageReception: async (input, signal) => (await feishu()).setup.applicationConfiguration!.addMessageReception(input, signal),
@@ -44,6 +49,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       }
     },
     enrollment: {
+      protocolId: FEISHU_ENROLLMENT_PROTOCOL,
       domains: [{ domain: 'open.feishu.cn', label: 'Feishu' }],
       begin: async (input, signal) => (await feishu()).enrollment.begin(input, signal),
       advance: async (input, signal) => (await feishu()).enrollment.advance(input, signal),

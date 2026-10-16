@@ -1,6 +1,8 @@
 import type { ConnectionEnrollmentDiagnostic } from '@agentmux/core/connections'
 import type { ConnectionEnrollmentAdapter, EnrollmentAdapterInput, EnrollmentUnknownReceipt } from '../../connection-enrollment-adapter.js'
-import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse } from './native-account.js'
+import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, FEISHU_BROWSER_USER_AGENT } from './native-account.js'
+import { FEISHU_ENROLLMENT_PROTOCOL } from './enrollment-protocol.js'
+export { FEISHU_ENROLLMENT_PROTOCOL } from './enrollment-protocol.js'
 
 const DOMAIN = 'open.feishu.cn'
 const ORIGIN = 'https://open.feishu.cn'
@@ -53,7 +55,7 @@ function png(value: string): { bytes: Buffer; width: number; height: number } | 
 async function request(input: EnrollmentAdapterInput, saved: Session, path: string, body: Record<string, unknown> | FormData, signal?: AbortSignal): Promise<Reply> {
   if (signal?.aborted) return unknown({ stage: 'request', code: 'cancelled' })
   const { native, cookies } = saved, target = new URL(path, ORIGIN)
-  const headers: Record<string, string> = { accept: 'application/json', origin: ORIGIN, referer: ORIGIN + '/app', 'x-csrf-token': native.csrf!, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
+  const headers: Record<string, string> = { accept: 'application/json, text/plain, */*', 'user-agent': FEISHU_BROWSER_USER_AGENT, origin: ORIGIN, referer: ORIGIN + '/app', 'x-csrf-token': native.csrf!, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
   const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
   const multipart = body instanceof FormData
   if (!multipart) headers['content-type'] = 'application/json'
@@ -81,16 +83,17 @@ async function request(input: EnrollmentAdapterInput, saved: Session, path: stri
   return { kind: 'response', payload, httpStatus: response.status }
 }
 
-/** Ordinary Feishu Web account creation only. No device registration, template or fallback route. */
+/** The current console template route is frozen by the original Host; old intents retain their original route. */
 export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
   return {
+    protocolId: FEISHU_ENROLLMENT_PROTOCOL,
     domains: [{ domain: DOMAIN, label: 'Feishu' }],
     async begin(input, signal) {
       if (input.domain !== DOMAIN) return preparation('unsupported-domain')
       if (signal?.aborted) return unknown({ stage: 'request', code: 'cancelled' })
       input.assertCurrent()
       const result = await beginFeishuNativeAccount(signal)
-      return result.kind === 'challenge' ? { kind: 'authentication', stage: 'waiting', challenge: result.challenge, account: null, privateState: JSON.stringify({ version: 1, authentication: result.state } satisfies State) } : unknown({ stage: 'authentication', code: 'native-unconfirmed' })
+      return result.kind === 'challenge' ? { kind: 'authentication', stage: 'waiting', challenge: result.challenge, account: null, privateState: JSON.stringify({ version: 1, authentication: result.state } satisfies State) } : result
     },
     async advance(input, signal) {
       if (input.domain !== DOMAIN) return preparation('unsupported-domain')
@@ -98,7 +101,7 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
       if (signal?.aborted) return unknown({ stage: 'request', code: 'cancelled' })
       input.assertCurrent()
       const result = await advanceFeishuNativeAccount(saved.value.authentication, signal)
-      return result.kind === 'progress' ? { kind: 'authentication', stage: result.stage, challenge: result.challenge, account: result.account, privateState: JSON.stringify({ ...saved.value, authentication: result.state }) } : unknown({ stage: 'authentication', code: 'native-unconfirmed' })
+      return result.kind === 'progress' ? { kind: 'authentication', stage: result.stage, challenge: result.challenge, account: result.account, privateState: JSON.stringify({ ...saved.value, authentication: result.state }) } : result
     },
     async upload(input, signal) {
       const saved = authenticated(input); if ('kind' in saved) return saved
@@ -115,11 +118,19 @@ export function createFeishuEnrollment(): ConnectionEnrollmentAdapter {
     async create(input, signal) {
       const saved = authenticated(input); if ('kind' in saved) return saved
       if (!saved.value.avatar || saved.value.appId || !text(input.preset.name) || input.preset.description !== undefined && (typeof input.preset.description !== 'string' || input.preset.description.includes('\0'))) return preparation('invalid-state')
+      if (input.protocolId !== undefined && input.protocolId !== FEISHU_ENROLLMENT_PROTOCOL) return preparation('invalid-state')
       const name = input.preset.name, description = input.preset.description ?? ''
-      const response = await request(input, saved, '/developers/v1/app/create', { appSceneType: 0, name, desc: description, avatar: saved.value.avatar.url, i18n: { zh_cn: { name, description } }, primaryLang: 'zh_cn' }, signal)
+      const template = input.protocolId === FEISHU_ENROLLMENT_PROTOCOL
+      const body = template
+        ? { appManifestTemplateID: 'developer_console', createAppUserCustomField: { i18n: { zh_cn: { name, description } }, avatar: saved.value.avatar.url, primaryLang: 'zh_cn' }, cid: input.attemptId, HTTPHead: {} }
+        : { appSceneType: 0, name, desc: description, avatar: saved.value.avatar.url, i18n: { zh_cn: { name, description } }, primaryLang: 'zh_cn' }
+      const response = await request(input, saved, template ? '/developers/v1/manifest/upsert_by_template' : '/developers/v1/app/create', body, signal)
       if (response.kind === 'unknown') return response
-      const data = record(response.payload.data); if (!data || !applicationId(data.ClientID)) return invalidResponse(response.httpStatus)
-      return { kind: 'created', application: { domain: DOMAIN, appId: data.ClientID }, privateState: JSON.stringify({ ...saved.value, appId: data.ClientID }) }
+      const data = record(response.payload.data)
+      const values = template ? [data, response.payload].flatMap(p => p ? ['ClientID', 'clientID', 'clientId', 'appId'].filter(key => Object.hasOwn(p, key)).map(key => p[key]) : []) : [data?.ClientID]
+      if (!values.length || values.some(value => !applicationId(value)) || new Set(values).size !== 1) return invalidResponse(response.httpStatus)
+      const appId = values[0] as string
+      return { kind: 'created', application: { domain: DOMAIN, appId }, privateState: JSON.stringify({ ...saved.value, appId }) }
     },
     async credential(input, signal) {
       const saved = authenticated(input); if ('kind' in saved) return saved

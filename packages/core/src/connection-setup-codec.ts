@@ -11,7 +11,7 @@ function text(value: unknown): string { if (typeof value !== 'string' || !value.
 function id(value: unknown): string { const v = text(value); if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(v)) fail(); return v }
 function integer(value: unknown, min = 1, max = Number.MAX_SAFE_INTEGER): number { if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) fail(); return value as number }
 function choice<T extends string>(value: unknown, values: readonly T[]): T { if (!values.includes(value as T)) fail(); return value as T }
-const configurationEffect = (value: unknown) => choice(value, ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version'] as const)
+const configurationEffect = (value: unknown) => choice(value, ['enable-messaging', 'use-persistent-connection', 'use-persistent-callback', 'add-card-actions', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version'] as const)
 const permissionPurpose = (value: unknown) => choice(value, ['agent-conversation', 'mote-profile-sync'] as const)
 const names = (value: unknown): string[] => { if (!Array.isArray(value)) fail(); const result = (value as unknown[]).map(text); if (new Set(result).size !== result.length) fail(); return result }
 const stage = (value: unknown) => choice(value, ['waiting', 'scanned', 'handoff', 'account', 'confirmed', 'expired', 'unknown'] as const)
@@ -218,7 +218,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
     let support: ConnectionSetupResultMap['connection.setup.ls']['support'] = null
     if (p.support !== null) {
       const s = object(p.support, ['connectionRevision', 'capabilities'])
-      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'application-publication', 'enrollment-continuation'] as const
+      const supportedCapabilities = ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation'] as const
       if (!Array.isArray(s.capabilities) || s.capabilities.length > supportedCapabilities.length) fail()
       const capabilities = (s.capabilities as unknown[]).map(value => choice(value, supportedCapabilities))
       if (new Set(capabilities).size !== capabilities.length) fail()
@@ -314,7 +314,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       if (source.input.operationId !== operation!.operationId || source.subject !== subject || source.request !== 'confirmed' || source.secureStorage !== 'stored') fail()
       return source
     }
-    const actions = (c.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['enable-messaging', 'use-persistent-connection', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version', 'recover-configuration-effect'] as const) } })
+    const actions = (c.actions as unknown[]).map(value => { const a = object(value, ['actionId', 'expectedRevision', 'kind']); return { actionId: id(a.actionId), expectedRevision: integer(a.expectedRevision), kind: choice(a.kind, ['enable-messaging', 'use-persistent-connection', 'use-persistent-callback', 'add-card-actions', 'add-application-permissions', 'add-message-reception', 'create-application-version', 'submit-application-version', 'recover-configuration-effect'] as const) } })
     if (new Set(actions.map(a => a.actionId)).size !== actions.length || new Set(actions.map(a => a.kind)).size !== actions.length) fail()
     if (actions.some(a => a.kind !== 'recover-configuration-effect' && (a.kind !== effect || capability !== 'disabled' || a.expectedRevision !== operation!.revision || c.reason !== undefined))) fail()
     if (actions.some(a => a.kind === 'recover-configuration-effect') && (!selected || selected.request !== 'confirmed' || selected.secureStorage === 'stored')) fail()
