@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { createRequire } from 'node:module'
@@ -15,6 +16,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import * as topics from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { sessionNameMetadataRecord } from '../src/renderer/src/lib/session-name-metadata'
 import { composerDOM, composerSession, composerConfig } from './helpers/composer-dom-fixture'
 
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
@@ -39,7 +41,13 @@ async function unrelatedUpdates() {
     await act(async () => useAppStore.setState(state => ({
       agentNames: { ...state.agentNames, unrelated: `Name ${index}` },
       agentComposerDrafts: { ...state.agentComposerDrafts, unrelated: `Draft ${index}` },
-      timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: index, items: [] } }
+      timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: index, items: [] } },
+      sessionNameMetadata: sessionNameMetadataRecord([
+        ...Object.values(state.sessionNameMetadata).filter(entry => entry.agentSessionId !== 'unrelated'),
+        ...(index % 3 === 2 ? [] : [{ agentSessionId: 'unrelated', hostId: index < 4 ? 'local' : 'other-host',
+          providerId: 'codex', executorId: 'codex', workspacePath: _hygiene_fixturePath('repo'),
+          label: `Unrelated snapshot ${index}`, state: 'active' as const }])
+      ], state.sessionNameMetadata)
     })))
   }
 }
@@ -65,7 +73,8 @@ for (const count of [1, 32, 100]) it(`production mounted ${count} retained Pane/
   expect(editors[0]!.textContent).toBe('Draft retained-0')
   const before = checks()
   await unrelatedUpdates()
-  expect(checks()).toEqual(before)
+  const after = checks()
+  expect(after, JSON.stringify({ count, before, after })).toEqual(before)
   expect(useAppStore.getState().sessions.find(session => session.id === 'unrelated')?.status.state).toBe('working')
   expect(useAppStore.getState().tabs['browser-tab']?.regions['browser-region']).toMatchObject({ title: 'Page 7', loading: false })
   await act(async () => useAppStore.getState().setAgentComposerDraft(ids[0]!, 'Fresh hidden draft'))
@@ -84,6 +93,42 @@ for (const count of [1, 32, 100]) it(`production mounted ${count} retained Pane/
   expect(editors[0]!.textContent).toBe('Fresh hidden draft')
   expect(useAppStore.getState().sessions.find(session => session.id === ids[0])?.control.run.runId).toBe('run-retained-0')
   expect([...dom.container.querySelectorAll('.ProseMirror')]).toEqual(editors)
+})
+
+it('the original pending Pane keeps exact name metadata live through rename, Host changes and removal', async () => {
+  const id = 'pending-original-name'
+  const original = { agentSessionId: id, hostId: 'local', providerId: 'codex', executorId: 'codex',
+    workspacePath: _hygiene_fixturePath('repo'), label: 'Original retained identity', state: 'active' as const }
+  useAppStore.setState({ sessions: [], pendingAgentLaunches: { [id]: { events: [], overflowed: false,
+    request: { executorId: 'codex', hostId: 'local', workspacePath: original.workspacePath } } },
+    sessionNameMetadata: sessionNameMetadataRecord([original]), agentComposerDrafts: { [id]: 'Original unsent draft' },
+    recoveryCandidates: [], timelines: {} })
+  const pane = (visible: boolean) => <SessionPane sessionId={id} surfaceKind="agent" interactiveResize={false}
+    visible={visible} linkOrigin={{ workspaceId: 'workspace' }} />
+  await dom.render(pane(true))
+  expect(dom.container.textContent).toContain(original.label)
+  const editor = dom.container.querySelector('.ProseMirror')
+  await dom.render(pane(false))
+  const before = checks()
+  await act(async () => useAppStore.setState(state => ({ sessionNameMetadata: sessionNameMetadataRecord([
+    { ...original, label: 'Renamed retained identity' }, { ...original, hostId: 'remote', label: 'Foreign identity' }
+  ], state.sessionNameMetadata) })))
+  expect(dom.container.textContent).toContain('Renamed retained identity')
+  expect(dom.container.textContent).not.toContain('Foreign identity')
+  expect(checks().pane).toBeGreaterThan(before.pane)
+  await act(async () => useAppStore.setState(state => ({ sessionNameMetadata: sessionNameMetadataRecord([
+    { ...original, hostId: 'remote', label: 'Foreign identity' }
+  ], state.sessionNameMetadata) })))
+  expect(dom.container.textContent).not.toContain('Renamed retained identity')
+  expect(dom.container.textContent).not.toContain('Foreign identity')
+  await act(async () => useAppStore.setState(state => ({ sessionNameMetadata: sessionNameMetadataRecord([
+    { ...original, label: 'Reinserted original identity' }
+  ], state.sessionNameMetadata) })))
+  expect(dom.container.textContent).toContain('Reinserted original identity')
+  await dom.render(pane(true))
+  expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
+  expect(dom.draft(id)).toBe('Original unsent draft')
+  expect(useAppStore.getState().pendingAgentLaunches[id]?.request?.hostId).toBe('local')
 })
 
 it('the mounted Workbench uses its cheap-facts mode cache and preserves invalidation', async () => {
@@ -114,13 +159,13 @@ it('accepted submits protect an immediate remount duplicate, release expired pro
   const guard = new ComposerResubmitGuard()
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout', 'performance'] })
   try {
-    vi.setSystemTime(10_000)
+    vi.setSystemTime(_tailFixtureEpoch(0, 0, 10_000))
     const retained = Object.getOwnPropertyDescriptor(guard, 'submissions')!.value as Map<string, { text: string; at: number }>
     for (let n = 0; n < 100; n++) guard.record(`guard-${n}`, 'Large accepted prompt '.repeat(1000))
     expect(vi.getTimerCount()).toBe(1)
     expect(retained.size).toBe(100)
     expect(guard.isDuplicate('guard-0', 'Large accepted prompt '.repeat(1000))).toBe(true)
-    vi.setSystemTime(-1_000_000) // A wall-clock adjustment must not extend a transient duplicate gate.
+    vi.setSystemTime(_tailFixtureEpoch(0, 0, -1_000_000)) // A wall-clock adjustment must not extend a transient duplicate gate.
     await vi.advanceTimersByTimeAsync(400)
     guard.record('guard-0', 'new prompt')
     await vi.advanceTimersByTimeAsync(400)
@@ -161,7 +206,7 @@ it('accepted submits protect an immediate remount duplicate, release expired pro
 it('the actual Pane keeps current cross-session speaker identity in its notification scope', async () => {
   const recipient = composerSession('speaker-recipient'), speaker = composerSession('recorded-speaker')
   const captured = { id: 'recorded-agent-input', agentSessionId: recipient.id, kind: 'user_message' as const,
-    source: 'user' as const, status: 'complete' as const, createdAt: 1, updatedAt: 1,
+    source: 'user' as const, status: 'complete' as const, createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     title: 'Captured agent input', content: 'Original related speaker passage', authorAgentSessionId: speaker.id }
   const history = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: recipient.id,
     source: { providerId: 'codex', nativeSessionId: 'private-observation-only' }, items: [], nextCursor: null })
@@ -184,7 +229,7 @@ it('a hidden mounted Composer observes a published in-place timeline revision wi
   const own = { agentSessionId: 'timeline-own', revision: 1, items: [] as import('../src/shared/contracts').AgentTimelineSnapshot['items'] }
   useAppStore.setState({ sessions: [composerSession('timeline-own')], timelines: { 'timeline-own': own }, agentComposerDrafts: { 'timeline-own': 'Untouched draft' } })
   await dom.render(<AgentSessionComposer sessionId="timeline-own" visible={false} />)
-  own.items.push({ id: 'new-own-prompt', agentSessionId: 'timeline-own', kind: 'user_message', title: 'Prompt', source: 'user', status: 'complete', createdAt: 1, updatedAt: 1, content: 'Fresh revision prompt' })
+  own.items.push({ id: 'new-own-prompt', agentSessionId: 'timeline-own', kind: 'user_message', title: 'Prompt', source: 'user', status: 'complete', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), content: 'Fresh revision prompt' })
   own.revision++
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines } })))
   expect(dom.container.querySelector('.composer-agent-identity button')?.getAttribute('aria-label')).toContain('Fresh revision prompt')
@@ -220,7 +265,7 @@ it('the shared notification owner subscribes once and releases its final mounted
 it('direct production Pane retains Activity body, reading Range and original editor through hidden updates and reveal', async () => {
   const session = composerSession('reading-own')
   const message = { id: 'reading-body', agentSessionId: session.id, kind: 'assistant_message' as const,
-    source: 'native-hook' as const, status: 'complete' as const, createdAt: 1, updatedAt: 1,
+    source: 'native-hook' as const, status: 'complete' as const, createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     title: 'Original response', content: 'Original continuous reading passage' }
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: session.id,
     source: { providerId: 'codex', nativeSessionId: 'private-reading-observation' }, items: [], nextCursor: null })
