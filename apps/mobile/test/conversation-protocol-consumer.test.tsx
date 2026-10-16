@@ -2,7 +2,7 @@
 import './device-locks'
 import { act } from 'react'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, mkdir, writeFile, appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -26,6 +26,7 @@ import { questionReplyKey } from '@agentmux/client-ui/conversation-question-repl
 import { createBrowserPlatform } from '../src/platform/browser'
 import { getDeviceWorkface, emptyDeviceWorkface, DEVICE_WORKFACE_KEY } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, mount, mounted, paste } from './conversation-fixture'
+import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { fixtureEpoch as _historyTailFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 // Preserve Node's real HTTP/streams/AbortSignal primitives while mounting the original UI.
@@ -620,4 +621,50 @@ it('authenticated Mobile reads confirmed source labels from the original Core ev
   expect([history.mock.calls.length,raw.mock.calls.length]).toEqual(counts)
   expect(view.element.querySelector('[aria-label="Native asynchronous question"]')).not.toBeNull()
   expect(f.writes).toHaveLength(0);expect(f.submit).not.toHaveBeenCalled();expect(f.reply).not.toHaveBeenCalled()
+})
+
+it('authenticated Mobile shows submission activity only for the original exact source read and settles its canonical card', async () => {
+  const body = 'Original shared submission stays distinct from equal native content.'
+  const row = (id: string) => ({ type: 'user', uuid: id, sessionId: 'native-main', message: { role: 'user', content: body } })
+  const native = await nativeHistoryFixture('claude', jsonl([row('original-unrelated')])); closes.push(native.close)
+  // Only Runtime connection/identity is controlled. Native records, Core
+  // membership, authenticated HTTP/Hosted and the Mobile consumer stay real.
+  const inner = native.client as unknown as { connected: boolean; registry: { load(host: string): Promise<void> }; kernel: Record<string, any> }
+  await inner.registry.load('local'); inner.connected = true
+  inner.kernel.isConnected = () => true
+  inner.kernel.identity = () => ({ daemonInstanceId: 'private-mobile-runtime', protocolVersion: 1, buildIdentity: 'fixture' })
+  vi.spyOn(native.client, 'connect').mockResolvedValue()
+  vi.spyOn(inner.kernel, 'list').mockResolvedValue([])
+  const f = await authenticatedConsumer(native.client, native.root, native.session.agentSessionId)
+  const target = { hostId: 'local', agentSessionId: native.session.agentSessionId, source: { kind: 'native' as const, providerId: 'claude', nativeSessionId: 'native-main', recordId: 'canonical-input' } }
+  let submitted!: AgentTimelineItem
+  for (const [id, exact] of [['known-submission', true], ['unrelated-submission', false]] as const) {
+    const item: AgentTimelineItem = { id, agentSessionId: native.session.agentSessionId, kind: 'user_message', source: 'user', status: 'complete', authorHuman: true, title: 'Original submission', content: body,
+      createdAt: _historyTailFixtureEpoch(0, 0, 1), updatedAt: _historyTailFixtureEpoch(0, 0, 1), ...(exact ? { conversation: { sameEvent: target } } : {}) }
+    if (exact) submitted = item
+    await native.store.applyTimelineMutation({ type: 'append', agentSessionId: native.session.agentSessionId, item })
+  }
+  const view = await mount(f.surface()), submission = (id = 'known-submission') => view.element.querySelector<HTMLElement>(`[data-submission-id="${id}"]`)!
+  await vi.waitFor(() => { expect(submission()).not.toBeNull(); expect(view.element.querySelector('[data-native-record-id="original-unrelated"]')).not.toBeNull() })
+  expect(submission().querySelector('[data-icon-animation]')).toBeNull()
+  let release!: () => void, once = true
+  const real = native.client.readConversationChanges.bind(native.client); closes.push(async () => release?.())
+  vi.spyOn(native.client, 'readConversationChanges').mockImplementation(async (input, options) => {
+    const result = await real(input, options)
+    if (once && result.items.some(unit => unit.kind === 'item' && unit.item.records.some(record => record.original.item.id === 'canonical-input'))) {
+      once = false; await new Promise<void>(resolve => { release = resolve })
+    }
+    return result
+  })
+  await appendFile(native.path, jsonl([row('canonical-input')]))
+  await Reflect.get(native.client, 'persistAndPublishTimeline').call(native.client, { type: 'upsert', agentSessionId: native.session.agentSessionId, item: { ...submitted, updatedAt: _historyTailFixtureEpoch(0, 0, 2) } })
+  await vi.waitFor(() => expect(typeof release).toBe('function'))
+  await vi.waitFor(() => expect(submission().querySelector('[data-icon-animation="spin"]')).not.toBeNull())
+  expect(submission('unrelated-submission').querySelector('[data-icon-animation]')).toBeNull()
+  expect(view.element.querySelector('[data-native-record-id="canonical-input"]')).toBeNull()
+  await act(async () => release())
+  await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id="canonical-input"] [data-submission-record]'), view.element.textContent ?? '').not.toBeNull())
+  expect(submission()).toBeNull(); expect(submission('unrelated-submission')).not.toBeNull()
+  expect(view.element.querySelector('[data-native-record-id="canonical-input"] [data-icon-animation]')).toBeNull()
+  expect(native.controls.slice(0, 5).map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0]); expect(f.openTerminal).not.toHaveBeenCalled()
 })

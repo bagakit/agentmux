@@ -40,7 +40,7 @@ export function StaticActivityView(props: ComponentProps<typeof AcceptedActivity
     page, projection: { ...accepted, historyPage: page ?? undefined, captured }, snapshot: null, capturedSnapshot: captured,
     captured: captured.items, capturedLoading: false, capturedHasMore: false, capturedError: null,
     historical: false, hasEarlierNavigation: false, previousSource: false, coverageLoading: false,
-    loading: false, error: null, held: false, loadingEarlier: false, historyBoundary: null,
+    loading: false, error: null, readActivity: { sourceRead: null, loading: false }, held: false, loadingEarlier: false, historyBoundary: null,
     currentOutside: false, newerOutside: false, hasNewer: false, hasMore: Boolean(page?.nextCursor),
     readCapturedEarlier: noop, readEarlier: noop, readNewer: noop, retry: noop, showLatestAutomatically: noop,
     showCurrent: noop, showCurrentSource: noop, showPreviousSource: noop
