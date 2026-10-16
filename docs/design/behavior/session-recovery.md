@@ -124,6 +124,8 @@ Focus、Space、Goals 的共享目标，以及 Survey、Recall、左下 Mote 面
 
 ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux Core 负责把目标 Run 与 AgentSession 组合成 Runtime Subject；Desktop 负责工作面恢复和服务窗。Runtime 暂时不可用或流程握手失败时，保留原 Tab、Region 和 Session 引用，明确显示失败步骤与恢复动作；投影的移除资格沿本页[《联邦 Runtime 与远端恢复边界》](#联邦-runtime-与远端恢复边界)。
 
+全量工作面投影消费已确认的 Native Run 事实与原持久 Session／退休记录，不以所有 Session 的握手或整体恢复观察完成为前置。冷语义 owner 尚未装入活动 registry 时，仍须从原元数据 owner 取得准确绑定，不能把已有 Agent 误作普通 Terminal，也不能覆盖期间已受理的绑定或复活退休 Run。单个握手的失败、未知回执与实际输入资格继续由原 owner 保留和表达；可读取进程投影不证明握手成功，不授予新的输入或恢复权限。
+
 ### 联邦 Runtime 与远端恢复边界
 
 远程管理的产品范围、连接拓扑、监控与维护入口归 [Remote 管理 PRD](remote-management.md)；本节持有联邦 Runtime 的身份、生命周期、故障隔离与恢复合同，管理页面引用本节，不另定义恢复语义。
