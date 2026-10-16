@@ -327,6 +327,10 @@ async function runLocalWorker(
   const stdout: Buffer[] = []
   let stderr = ''
   let inputSent = false
+  let inputError: Error | undefined
+  // Cancellation or an early worker exit can close this pipe before READY is consumed.
+  // Keep its failure on this original request, including after the child emits AbortError.
+  child.stdin.on('error', error => { inputError = error })
   child.stdout.on('data', (chunk: Buffer) => stdout.push(Buffer.from(chunk)))
   child.stderr.setEncoding('utf8')
   child.stderr.on('data', (chunk: string) => {
@@ -341,7 +345,7 @@ async function runLocalWorker(
     child.once('error', reject)
     child.once('close', (code, signal) => resolve({ code, signal }))
   })
-  if (result.code === 0) return Buffer.concat(stdout)
+  if (result.code === 0 && !inputError) return Buffer.concat(stdout)
   const record = stderr.split('\n').find((line) => line.startsWith(LOCAL_WORKER_ERROR))
   if (record) {
     const detail = JSON.parse(record.slice(LOCAL_WORKER_ERROR.length)) as {
@@ -353,7 +357,7 @@ async function runLocalWorker(
     throw Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {},
       detail.writeOutcomeUnknown ? { writeOutcomeUnknown: true } : {}, detail.readCost ? { readCost: detail.readCost } : {})
   }
-  throw Object.assign(new Error(
+  throw Object.assign(inputError ?? new Error(
     `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
   ), request.action === 'write' && inputSent ? { code: 'WORKSPACE_FILE_RESULT_UNKNOWN', writeOutcomeUnknown: true } : {})
 }
