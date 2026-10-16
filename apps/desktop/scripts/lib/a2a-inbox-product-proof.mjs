@@ -189,6 +189,8 @@ export async function verifyA2aInboxProductProof(product, { root, scope }) {
   assert.equal(product.homeIsolation.privateHome, join(product.privateRoot, 'home'))
   assert.equal(product.semanticOwner.owner.availability, 'connected')
   assert.notEqual(product.semanticOwner.owner.processId, product.semanticOwner.workerPid)
+  assert.equal(product.semanticOwner.executor.runtimeId, product.semanticOwner.owner.runtimeId)
+  assert.equal(product.semanticOwner.executor.executor.executorId, 'proof')
   assert.deepEqual(product.homeIsolation.launches.map(launch => launch.label), ['first', 'second'])
   for (const launch of product.homeIsolation.launches) {
     assert.equal(launch.home, product.homeIsolation.privateHome); assert.equal(launch.nativeHome, launch.home)

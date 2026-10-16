@@ -232,6 +232,9 @@ try {
   const owner = client.runtimeOwnerIdentity()
   assert.equal(owner.availability, 'connected'); assert.notEqual(owner.processId, process.pid)
   facts.semanticOwner = { workerPid: process.pid, owner, boundary: 'Public Hosted consumer of the original product Host; no worker-local semantic Core' }
+  const executor = await client.configureHostExecutor({ executorId: 'proof', config: originalConfig.executors.proof })
+  assert.equal(executor.runtimeId, owner.runtimeId); assert.equal(executor.executor.executorId, 'proof')
+  facts.semanticOwner.executor = executor
   for (const label of ['Author', 'Recipient', 'Other recipient']) {
     const session = await client.createAgent({ createOperationId: randomUUID(), executorId: 'proof', providerId: 'codex', workspacePath: workspace,
       commandOverride: executable, env: { HOME: process.env.HOME, CODEX_HOME: nativeHome, AGENTMUX_A2A_PROOF_DIRECTORY: controls }, injectAgentMuxGuide: false, cols: 100, rows: 30 })
