@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement, Profiler } from 'react'
@@ -13,10 +14,11 @@ let root: Root, container: HTMLDivElement
 const commits = vi.fn()
 const preview = () => document.querySelector<HTMLElement>('#surface-navigation-tooltip-focus')
 const focus = () => container.querySelector<HTMLButtonElement>('button[aria-label^="Focus: show execution contexts."]')!
-const hover = () => act(async () => focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+const hover = () => act(async () => { focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); vi.advanceTimersByTime(150) })
 const leave = () => act(async () => focus().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body })))
-const items = (id: string, kind: string, content: string) => ({ items: [{ id: `${id}-item`, kind, status: 'complete', title: content, content, createdAt: 1000, updatedAt: 1000 }] }) as never
+const items = (id: string, kind: string, content: string) => ({ items: [{ id: `${id}-item`, kind, status: 'complete', title: content, content, createdAt: _tailFixtureEpoch(0, 0, 1000), updatedAt: _tailFixtureEpoch(0, 0, 1000) }] }) as never
 beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config = await api.config.get(), { sessions } = await api.sessions.snapshot(), base = sessions[0]!
@@ -27,7 +29,7 @@ beforeEach(async () => {
   commits.mockClear()
   await act(async () => root.render(createElement(Profiler, { id: 'navigation', onRender: commits }, createElement(SurfaceSwitch))))
 })
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); document.getElementById('agentmux-window-overlay-host')?.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
 it('opens a bounded live snapshot on hover, retaining the current context and prioritizing attention and work', async () => {
   expect(preview()).toBeNull(); await hover(); expect(preview()?.getAttribute('role')).toBe('tooltip')
   expect(preview()?.querySelector('[data-preview-count="working"]')?.textContent).toBe('1Working')
@@ -52,6 +54,48 @@ it('ignores unrelated bytes and detaches detailed preview when closed', async ()
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, working: items('working', 'assistant_message', 'Changed while closed') } })))
   expect(commits.mock.calls.length).toBe(closed)
   await hover(); expect(preview()?.textContent).toContain('Response · Changed while closed')
+})
+it('dismisses the mounted preview when its surface is activated and preserves the original context', async () => {
+  await hover()
+  expect(preview()?.querySelectorAll('[data-preview-session]').length).toBe(3)
+  const context = useAppStore.getState().agentFocus.execution.sessionId
+  await act(async () => focus().click())
+  expect(useAppStore.getState().mainSurface).toBe('agents')
+  expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(context)
+  expect(preview()).toBeNull()
+  expect(focus().hasAttribute('aria-describedby')).toBe(false)
+  await leave(); await hover()
+  expect(preview()).not.toBeNull()
+})
+it('does not build a pointer preview on the way to activating its surface', async () => {
+  await act(async () => focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  expect(preview()).toBeNull()
+  await act(async () => {
+    focus().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    focus().focus()
+  })
+  expect(preview()).toBeNull()
+  await act(async () => focus().click())
+  await act(async () => vi.advanceTimersByTime(1000))
+  expect(useAppStore.getState().mainSurface).toBe('agents')
+  expect(preview()).toBeNull()
+})
+it('cancels pending hover on Escape or window blur and preserves keyboard focus after a cancelled pointer gesture', async () => {
+  await act(async () => focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+  await act(async () => vi.advanceTimersByTime(150))
+  expect(preview()).toBeNull()
+  await leave()
+  await act(async () => focus().dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+  await act(async () => window.dispatchEvent(new Event('blur')))
+  await act(async () => vi.advanceTimersByTime(150))
+  expect(preview()).toBeNull()
+  await act(async () => focus().focus())
+  expect(preview()).not.toBeNull()
+  await act(async () => focus().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  await act(async () => focus().blur())
+  await act(async () => focus().focus())
+  expect(preview()).not.toBeNull()
 })
 it('keeps selected disconnected contexts count-only without changing the original focus', async () => {
   await act(async () => useAppStore.setState(state => ({
@@ -101,4 +145,6 @@ it('supports keyboard reading, Escape and blur without navigation, and preserves
   await act(async () => useAppStore.setState({ sessions: [], timelines: {} })); await hover()
   expect(preview()?.textContent).toContain('No execution contexts yet'); expect(preview()?.textContent).toContain('0 contexts')
   await act(async () => focus().click()); expect(useAppStore.getState().mainSurface).toBe('agents')
+  expect(preview()).toBeNull()
+  expect(focus().hasAttribute('aria-describedby')).toBe(false)
 })
