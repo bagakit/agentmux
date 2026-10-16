@@ -455,7 +455,13 @@ export class AgentMuxRpcService {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Mote bot operations require an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseMoteConnectionParams(method, params), owner = this.ports.moteConnections
-      if (!owner) throw new AgentMuxError('Mote bot operations are unavailable on this Host. Original files and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      if (!owner) {
+        if (this.ports.forwardControl) {
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          return parseMoteConnectionResult(method, await this.ports.forwardControl<MoteConnectionMethod>(method, input, context), input) as unknown as AgentMuxRpcResult<M>
+        }
+        throw new AgentMuxError('Mote bot operations are unavailable on this Host. Original files and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user'|'device', id: context.principal!.id }
       const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
@@ -484,7 +490,13 @@ export class AgentMuxRpcService {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Connection administration requires an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseConnectionParams(method, params)
-      if (!this.ports.connections) throw new AgentMuxError('The connection owner is not enabled on this Host. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
+      if (!this.ports.connections) {
+        if (this.ports.forwardControl) {
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          return parseConnectionResult(method, await this.ports.forwardControl<ConnectionMethod>(method, input, context), input) as unknown as AgentMuxRpcResult<M>
+        }
+        throw new AgentMuxError('The connection owner is not enabled on this Host. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
+      }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const owner = this.ports.connections
       const administration = { actor: caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
