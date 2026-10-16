@@ -4,6 +4,7 @@ import type { Token } from 'stream-json/parser.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { projectSessionUserMessages, sessionHistoryTextForReading } from './session-user-messages.js'
+import { conversationRevision } from './conversation-timeline.js'
 import type { AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionHistoryReader, AgentSessionHistoryReadContext } from './session-history-reader.js'
 import type { AgentSessionHistoryDescriptor, AgentSessionHistoryPage, AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistoryContentPart, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource, AgentCapturedTimelinePage } from './types.js'
 
@@ -272,7 +273,11 @@ export async function readAgentSessionHistoryQuery(owner: Reader, input: AgentSe
           .filter((text): text is string => text !== undefined).map(text => ({ kind: 'text', text })) }
       : message ? { contentParts: message.contentParts, questionAnswers: message.questionAnswers, native } : undefined
     if (record && await matches(owner, input, record, signal)) {
-      const matched = textMode ? { items: [...result.items, { kind: 'item' as const, item }] } : { userMessages: [...result.userMessages!, message!] }
+      const revision = textMode ? undefined : captured ? captured.records[position.index]?.revision : conversationRevision(item)
+      const sourceRecord = revision ? { record: { hostId: descriptor.hostId, agentSessionId: input.agentSessionId,
+        source: input.source === 'native' ? { kind: 'native' as const, ...view.nativeSource!, recordId: item.id } : { kind: 'captured' as const, recordId: item.id } }, revision } : undefined
+      const matched = textMode ? { items: [...result.items, { kind: 'item' as const, item }] }
+        : { userMessages: [...result.userMessages!, { ...message!, ...(sourceRecord ? { sourceRecord } : {}) }] }
       const serializedBytes = Buffer.byteLength(JSON.stringify({ ...result, ...matched, availability: 'available', nextCursor: cursor() }))
       if (serializedBytes > budgetBytes - 1024) {
         if (!matchCount()) {

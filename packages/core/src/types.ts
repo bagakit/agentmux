@@ -1119,6 +1119,8 @@ export type AgentSessionUserMessage = {
   agentSessionId: string
   turnId?: string
   source: AgentSessionUserMessageSource
+  /** Exact original record/version reading fact; absence is unknown and conveys no author, adoption or input authority. */
+  sourceRecord?: import('./conversation-changes.js').ConversationWindowBoundary
   author: AgentSessionUserMessageAuthor
   /** Original user-content boundary only; absence is unknown. Not sharing authority, safety or identity. */
   publicContent?: 'confirmed' | 'unknown'
