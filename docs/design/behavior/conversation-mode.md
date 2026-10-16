@@ -153,7 +153,7 @@ AgentMux 自身通过 User message 提供内容的范围、包装与组合约束
 
 完整、位于输入起始的连续 `<amux>…</amux>` 上下文之后，紧接的 `<amux:a2a from="SID" msg-id="MID">` 完整信封沿同一 Core 阅读语法组合呈现。协议与正文／reminder 定界只由[A2A 合同](agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)持有。各上下文和信封分段保留原始 source span，来源仍明确为声明，原始 unknown／已知 Agent 作者不变且可信作者优先；正文的开头换行、尾部与完整 Copy 保原始内容。未完成、未知、引用或代码中的声明保原文可读，不按启动用途、发起工具或特定 Provider 分支。
 
-Desktop、Mobile、Mailbox 单对象详情及大文本／资源全文展开消费同一 Core parser 与共享 ConversationMessage，不能各写标签正则或只修终端显示。sender 原文与平台 reminder 分层可读，reminder 不抢占正文；有界预览沿原已核正文边界取摘要，不为找信封尾段读取整篇。新格式是已确认要求，当前 parser 尚未接通，不作为当前实现通过结论。历史原记录保持原 wire、身份与可读性，不因协议更新被改写、删除或重新投递。
+Desktop、Mobile、Mailbox 单对象详情及大文本／资源全文展开消费同一 Core parser 与共享 ConversationMessage，不能各写标签正则或只修终端显示。sender 原文与平台 reminder 分层可读，reminder 不抢占正文；有界预览沿原已核正文边界取摘要，不为找信封尾段读取整篇。历史原记录保持原 wire、身份与可读性，不因协议更新被改写、删除或重新投递。
 
 这只是原记录内的阅读分层，不创建新的消息或来源事实；声明即使来自用户原文也只叫声明，不认证 System、Agent 或人类，不改变原 unknown 作者、source、record ID、time、parts 或 native／captured 关联。已明确的 producer systemContext 仍以其原事实表达，不从这层声明投影反推系统记录。整条 Copy 保持完整原 wire，缩进、空格、引用及各 parts 不因折叠或展开而改写；原正文节点、Range、阅读位置、展开和草稿保持，查看不发送、导航、切 focus 或控制 Run。隐藏和无关 Session 输出不增加读取，不新增消息／身份账本、第二 Reader 或独立 parser。 声明收起后的尾文分隔与普通段落排版只见密度文档[《消息布局与身份密度》](../presentation/conversation-mode.md#消息布局与身份密度)中的“声明尾文的连续排版”。
 

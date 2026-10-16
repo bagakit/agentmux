@@ -22,7 +22,7 @@
 
 ## 可读信封与原输入
 
-Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 生成无 `from` 属性的 `<amux>` 平台说明；[`agent-message-render`](../../packages/core/src/agent-message-render.ts) 生成并共享解析 `amux:a2a` 的 canonical `from`、稳定 `msg-id`、原正文及末尾 Core reminder。该 codec 无 Node 或 UI 依赖；精确语法由[协议](../specs/conversation-protocol.md#readable-agentmux-envelopes)唯一持有。外部来源继续保其 typed participant，人工／未核原文不会被格式化成 Agent 身份。客户端读取声明不改变原作者、投递和权限事实；共同呈现与完整资源展开的接线单独验收。
+Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 生成无 `from` 属性的 `<amux>` 平台说明；[`agent-message-render`](../../packages/core/src/agent-message-render.ts) 生成并共享解析 `amux:a2a` 的 canonical `from`、稳定 `msg-id`、原正文及末尾 Core reminder。该 codec 无 Node 或 UI 依赖；精确语法由[协议](../specs/conversation-protocol.md#readable-agentmux-envelopes)唯一持有。外部来源继续保其 typed participant，人工／未核原文不会被格式化成 Agent 身份。客户端读取声明不改变原作者、投递和权限事实；共同 [`ConversationInputText`](../../packages/client-ui/src/components/ConversationInputText.tsx) 只呈现 Core 返回的上下文、正文、既有 packet 引用及末尾 reminder，不重新解析。消息首 text part 与显式打开的首 part 完整文本资源复用同一阅读面；后续 parts 保其原正文。Copy 继续从原 parts／资源取完整 wire，与阅读投影分离。
 
 原输入 coordinator 的 admission intent 保存实际 wire 与 producer 事实。`AgentMuxClient` 重试已保存 A2A Input 时复用该原配方；人工 note 的重试还需原显式正文、平台内容及来源一致。原 claim、条件和当前授权继续核验，unknown 不因格式更新获得第二次发送。Connector publication 沿原 captured writer 的 typed `inputRef`／`publicContent` 核对来源，不重算当前显示模板比较历史 wire；普通正文编辑仍由原 reducer 取消该已核边界。
 
