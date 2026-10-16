@@ -19,12 +19,14 @@ export default defineConfig({
     let code = path === owner && process.env.AGENTMUX_TIMELINE_MEASUREMENT_SOURCE ? readFileSync(process.env.AGENTMUX_TIMELINE_MEASUREMENT_SOURCE, 'utf8') : original
     const effective = code, mutant = process.env.AGENTMUX_TIMELINE_MEASUREMENT_MUTANT
     if (mutant) {
-      assert(['name-inactive', 'ruler-inactive', 'queued-inactive', 'ruler-queued', 'ruler-rects', 'fixed-label-width', 'css-offset-owner', 'initial-empty'].includes(mutant), 'Known timeline measurement inverse')
+      assert(['name-inactive', 'ruler-inactive', 'queued-inactive', 'ruler-queued', 'ruler-rects', 'fixed-label-width', 'css-offset-owner', 'initial-empty', 'clock-initial-refresh'].includes(mutant), 'Known timeline measurement inverse')
       const replace = (from: string, to: string) => { assert.equal(code.split(from).length - 1, 1, 'Unique loaded ruler inverse'); code = code.replace(from, to) }
       if (mutant === 'css-offset-owner') {
         if (path === cssOwner) replace('translateX(var(--focus-label-offset, -50%))', 'translateX(-50%)')
       } else if (path === cssOwner) {
         // Other inverses change the actual TSX owner, leaving its original CSS.
+      } else if (mutant === 'clock-initial-refresh') {
+        replace('if (refresh) setNow(Date.now())', 'setNow(Date.now())')
       } else if (mutant === 'initial-empty') {
         replace('scaleWidth > 0 ? focusRulerLabels(ticks, range, scaleWidth) : new Set(ticks.map(tick => tick.instant))', 'focusRulerLabels(ticks, range, scaleWidth)')
       } else if (mutant === 'ruler-rects') {

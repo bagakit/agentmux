@@ -18,13 +18,14 @@ let root: Root | undefined, host: HTMLElement | undefined, stylesheet: HTMLStyle
 afterEach(async () => {
   if (root) await act(async () => root!.unmount())
   root = undefined; host?.remove(); host = undefined; stylesheet?.remove(); stylesheet = undefined
-  useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  useAppStore.setState(baseline, true); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
   document.getElementById('agentmux-window-overlay-host')?.remove()
 })
 
-async function fixture(initialVisible = true, options: { now?: number; ruler?: Partial<FocusRulerPreferences>; labelWidth?: (node: Element) => number } = {}) {
+async function fixture(initialVisible = true, options: { now?: number; ruler?: Partial<FocusRulerPreferences>; labelWidth?: (node: Element) => number; advancingClock?: boolean } = {}) {
   const fixtureNow = options.now ?? now
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.spyOn(Date, 'now').mockReturnValue(fixtureNow)
+  let clockReads = 0
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.spyOn(Date, 'now').mockImplementation(() => fixtureNow + (options.advancingClock ? clockReads++ * 10 : 0))
   let documentVisible = true, width = 800
   vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => documentVisible ? 'visible' : 'hidden')
   vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
@@ -91,6 +92,21 @@ async function fixture(initialVisible = true, options: { now?: number; ruler?: P
   return { timeline, render, resize, observers, measurementObservers, measurementReads, deliver, geometry, click, key, range, onSelect, labelWidths,
     documentVisibility: async (visible: boolean) => act(async () => { documentVisible = visible; document.dispatchEvent(new Event('visibilitychange')) }) }
 }
+
+it('retains the freshly mounted clock until a real tick and refreshes on document reveal', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  const h = await fixture(true, { advancingClock: true })
+  const current = () => Number(host!.querySelector<HTMLElement>('.recent-focus__playhead--ruler')!.dataset.now)
+  expect(current(), 'Mount must not replace its fresh clock and rebuild the ruler immediately').toBe(now)
+  await act(async () => { vi.advanceTimersByTime(30_000) })
+  expect(current()).toBeGreaterThan(now)
+  const ticking = current()
+  await h.documentVisibility(false)
+  await act(async () => { vi.advanceTimersByTime(60_000) })
+  expect(current()).toBe(ticking)
+  await h.documentVisibility(true)
+  expect(current()).toBeGreaterThan(ticking)
+})
 
 it.each([false, true])('the first actual ruler RO reveals correct labels without a second observer cycle (split delivery: %s)', async split => {
   const h = await fixture(true, { labelWidth: () => 32 })
