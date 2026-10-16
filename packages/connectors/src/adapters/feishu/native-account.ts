@@ -141,7 +141,8 @@ function nodes(value: unknown, includeLocalScopes = true): Ast[] {
       const members = record(p.body)?.body as Ast[]
       const active = isWindow(p.id) ? [] : members.flatMap(member => {
         if (member.type === 'StaticBlock') return (member.body as Ast[]).some(windowBinding) || hoistedWindow(member.body) ? [] : nodes(member.body, false)
-        return member.static ? nodes(member.value, false) : []
+        const key = member.computed ? nodes(member.key, false) : []
+        return member.static ? [...key, ...nodes(member.value, false)] : key
       })
       return [p as Ast, ...nodes(p.superClass, false), ...active]
     }
