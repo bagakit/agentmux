@@ -102,7 +102,9 @@ it('persists completed pointer gestures, cancels unfinished geometry and keeps h
   const header = original.querySelector<HTMLElement>('header')!
   const pointer = async (target: HTMLElement, type: string, x: number, y: number) => act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, isPrimary: true, pointerId: 7, clientX: x, clientY: y })))
   await pointer(header, 'pointerdown', 100, 100); await pointer(header, 'pointermove', -1000, -1000)
-  expect(original.style.left).toBe('8px'); expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(saved)
+  await act(async () => new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())))
+  expect(original.style.transform).toBe(`translate3d(${8 - saved.x}px, ${8 - saved.y}px, 0)`)
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(saved)
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
   expect(original.style.left).toBe(saved.x + 'px'); expect(panels()).toContain(original)
   await pointer(header, 'pointerdown', 100, 100); await pointer(header, 'pointermove', 140, 120); await pointer(header, 'pointerup', 140, 120)

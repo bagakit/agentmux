@@ -10,8 +10,14 @@ import { agentBookmarks, createAgentBookmarks, type AgentBookmarkBounds } from '
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 import { useAppStore } from '../src/renderer/src/store'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
+import * as readingAnchor from '../src/renderer/src/lib/reading-anchor'
+import * as floating from '@floating-ui/dom'
 
 vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
+vi.mock('@floating-ui/dom', async importOriginal => {
+  const original = await importOriginal<typeof import('@floating-ui/dom')>()
+  return { ...original, computePosition: vi.fn(original.computePosition), autoUpdate: vi.fn(original.autoUpdate) }
+})
 
 const dom = composerDOM({ agentInformation: true }), agent = composerSession('drag-pin-agent')
 const onOpen = vi.fn()
@@ -136,7 +142,8 @@ it('continues one threshold-crossing gesture without replacing the short reading
   expect(captured).toBe(7)
   expect(release).not.toHaveBeenCalled()
   await pointer(header, 'pointermove', 7, 140, 125)
-  expect(original.style.left).toBe(`${start.x + 40}px`); expect(original.style.top).toBe(`${start.y + 25}px`)
+  await act(async () => new Promise<void>(resolve => window.requestAnimationFrame(() => resolve())))
+  expect(original.style.transform).toBe('translate3d(40px, 25px, 0)')
   expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(start)
   await pointer(header, 'pointerup', 7, 140, 125)
   expect(promote).toHaveBeenCalledTimes(1)
@@ -152,6 +159,119 @@ it('continues one threshold-crossing gesture without replacing the short reading
   expect(reading.scrollTop).toBe(37)
   expect(document.getSelection()!.toString()).toBe(selected)
   expect(api.sessions.historyPage).toHaveBeenCalledTimes(reads)
+  expectOriginalWorkface()
+})
+
+it('coalesces movement without measuring or scrolling the original reading and commits the latest unpainted position', async () => {
+  const original = await open(), header = measuredPanel(original), start = bounds(original)
+  await act(async () => original.querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click())
+  const reading = original.querySelector<HTMLElement>('.agent-information-reader__reading')!
+  reading.scrollTop = 71
+  const capture = vi.spyOn(readingAnchor, 'captureReadingAnchor'), restore = vi.spyOn(readingAnchor, 'restoreReadingAnchor')
+  const frames = new Map<number, FrameRequestCallback>(); let sequence = 0
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.set(++sequence, callback); return sequence })
+  const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id) })
+  await pointer(header, 'pointerdown', 7, 100, 100)
+  await act(async () => { for (let x = 110; x <= 150; x++) header.dispatchEvent(pointerEvent('pointermove', 7, x, 120)) })
+  await act(async () => reading.dispatchEvent(new Event('scroll', { bubbles: true })))
+  expect(frames.size).toBe(1)
+  expect(original.style.transform).toBe('')
+  expect(capture).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled()
+  const frame = [...frames.values()][0]!; frames.clear()
+  await act(async () => frame(0))
+  expect(original.style.transform).toBe('translate3d(50px, 20px, 0)')
+  expect(capture).not.toHaveBeenCalled(); expect(restore).not.toHaveBeenCalled()
+  expect(reading.scrollTop).toBe(71)
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(start)
+  await pointer(header, 'pointermove', 7, 170, 140)
+  const staleFrame = [...frames.values()][0]!
+  await pointer(header, 'pointerup', 7, 170, 140)
+  const committed = { ...start, x: start.x + 70, y: start.y + 40 }
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(committed)
+  expect(bounds(original)).toEqual(committed)
+  expect(cancel).toHaveBeenCalled(); expect(frames.size).toBe(0)
+  expect(original.style.transform).toBe(''); expect(original.style.willChange).toBe('')
+  const finalCaptures = capture.mock.calls.length, finalRestores = restore.mock.calls.length
+  await act(async () => staleFrame(1))
+  expect(bounds(original)).toEqual(committed)
+  expect(capture).toHaveBeenCalledTimes(finalCaptures); expect(restore).toHaveBeenCalledTimes(finalRestores)
+  expectOriginalWorkface()
+})
+
+it('restores resize reading once per displayed frame and ignores its own scroll feedback while captured', async () => {
+  const original = await open(); measuredPanel(original)
+  await act(async () => original.querySelector<HTMLButtonElement>('.agent-information-reader__pin')!.click())
+  const reading = original.querySelector<HTMLElement>('.agent-information-reader__reading')!
+  const handle = original.querySelector<HTMLElement>('.agent-bookmark__resize')!
+  const capture = vi.spyOn(readingAnchor, 'captureReadingAnchor'), restore = vi.spyOn(readingAnchor, 'restoreReadingAnchor')
+  const frames: FrameRequestCallback[] = []
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length })
+  vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+  await pointer(handle, 'pointerdown', 7, 100, 100)
+  expect(capture).toHaveBeenCalledTimes(1)
+  await act(async () => { for (let x = 110; x <= 160; x++) handle.dispatchEvent(pointerEvent('pointermove', 7, x, 140)) })
+  expect(restore).not.toHaveBeenCalled(); expect(frames).toHaveLength(1)
+  await act(async () => frames[0]!(0))
+  expect(restore).toHaveBeenCalledTimes(1)
+  await act(async () => reading.dispatchEvent(new Event('scroll', { bubbles: true })))
+  expect(capture).toHaveBeenCalledTimes(1)
+  expect(original.style.width).toBe('480px')
+  await pointer(handle, 'pointerup', 7, 160, 140)
+  expect(agentBookmarks.get().bookmarks[0]!.bounds.width).toBe(480)
+  expectOriginalWorkface()
+})
+
+it('rejects a placement result that began before a completed pointer gesture', async () => {
+  const placements: (() => void)[] = []
+  const compute = (await vi.importActual<typeof import('@floating-ui/dom')>('@floating-ui/dom')).computePosition
+  let defer = false, reposition: (() => void) | undefined
+  vi.spyOn(floating, 'computePosition').mockImplementation((...args) => defer
+    ? new Promise(resolve => placements.push(() => resolve({ x: 999, y: 666, placement: 'right-start', strategy: 'fixed', middlewareData: {} }))) : compute(...args))
+  vi.spyOn(floating, 'autoUpdate').mockImplementation((_anchor, _surface, update) => { reposition = update; update(); return () => {} })
+  const original = await open(), header = measuredPanel(original), start = bounds(original)
+  defer = true
+  expect(reposition).toBeTypeOf('function')
+  await act(async () => reposition!())
+  expect(placements).toHaveLength(1)
+  await pointer(header, 'pointerdown', 7, 100, 100)
+  await pointer(header, 'pointerup', 7, 100, 100)
+  await act(async () => placements[0]!())
+  expect(panel()).toBe(original)
+  expect(bounds(original)).toEqual(start)
+  expect(original.style.left).not.toBe('999px')
+  expectOriginalWorkface()
+})
+
+it('does not replay a queued drag frame after cancellation', async () => {
+  const original = await open(), header = measuredPanel(original), start = bounds(original)
+  const frames: FrameRequestCallback[] = []
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length })
+  const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+  await beginDrag(header)
+  await pointer(header, 'pointermove', 7, 160, 130)
+  expect(frames).toHaveLength(1)
+  await pointer(header, 'pointercancel', 7, 160, 130)
+  expect(cancel).toHaveBeenCalledExactlyOnceWith(1)
+  await act(async () => frames[0]!(0))
+  expect(bounds(original)).toEqual(start)
+  expect(original.style.transform).toBe('')
+  expect(agentBookmarks.get().bookmarks).toHaveLength(0)
+  expectOriginalWorkface()
+})
+
+it('hands off the visible reading anchor when drag Pin finishes back at its original position', async () => {
+  const original = await open(), header = measuredPanel(original), start = bounds(original)
+  const reading = original.querySelector<HTMLElement>('.agent-information-reader__reading')!
+  reading.scrollTop = 71
+  const capture = vi.spyOn(readingAnchor, 'captureReadingAnchor')
+  await beginDrag(header)
+  await pointer(header, 'pointermove', 7, 100, 100)
+  capture.mockClear()
+  await pointer(header, 'pointerup', 7, 100, 100)
+  expect(agentBookmarks.get().bookmarks[0]!.bounds).toEqual(start)
+  expect(capture).toHaveBeenCalledExactlyOnceWith(reading)
+  expect(reading.scrollTop).toBe(71)
+  expect(original.style.transform).toBe('')
   expectOriginalWorkface()
 })
 
