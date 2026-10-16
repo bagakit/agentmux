@@ -6210,7 +6210,6 @@ export class AgentMuxClient {
     if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context, intent.admissionIntent)
     return { input: { agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun, operationId: agentPromptInputId(intent.key),
       prompt: renderAgentMuxMessageEnvelope(envelope), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate',
-      ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
       ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) },
       ...(envelope.sender.kind === 'agent-session' ? { authorAgentSessionId: envelope.sender.agentSessionId } : {}), ...(authority ? { authority } : {}) }
   }
@@ -6765,7 +6764,6 @@ export class AgentMuxClient {
     this.requireConnected()
     const promptInput = { agentSessionId: input.agentSessionId,
       operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,
-      ...(envelope.sender.kind === 'human' ? { authorHuman: true } : {}),
       ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}) }
     const submission: AgentMuxAgentPromptInput = originalIntent.kind !== 'exact-condition'
       ? { ...promptInput, expectedRun: originalIntent.expectedRun, admissionIntent: (() => { const { expectedRun: _run, ...target } = originalIntent; return target })(), execution: 'immediate' }
