@@ -108,7 +108,7 @@ flowchart LR
 | --- | --- |
 | 普通消息、Queue／steer | Desktop [`AgentSessionComposer`](../../apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx) → 原 store.send／enqueueAgentSteer；Mobile → Hosted Core 输入。草稿、入队、投递与原生采用分别解释。 |
 | 当前同步问题／权限 | [`AgentInteractionCard`](../../packages/client-ui/src/components/AgentInteractionCard.tsx) → 原 interaction owner；历史记录不取得当前 pending 资格。 |
-| 原生异步问题 | [`projectConversationQuestions`](../../packages/core/src/conversation-questions.ts) → [`AgentAsyncQuestionCard`](../../packages/client-ui/src/components/AgentAsyncQuestionCard.tsx) → Provider 声明的原 Terminal 路由；`replySessionQuestion` 明确拒绝无原生协议的自动回复。选项、草稿、Copy 和导航不派发输入。 |
+| 原生异步问题 | [`projectConversationQuestions`](../../packages/core/src/conversation-questions.ts) → [`AgentAsyncQuestionCard`](../../packages/client-ui/src/components/AgentAsyncQuestionCard.tsx) → 共同 [`submitQuestionReply`](../../packages/client-ui/src/lib/conversation-question-reply.ts)；Desktop／Mobile 原宿主先保存完整意图，再调用既有 `agent.question.reply`／`replySessionQuestion`。Provider 读取准确原记录并编码原生异步答复；Core 复用原输入 journal、条件与 native input owner。选项、草稿、Copy 和导航不派发输入，未知结果只续接原操作。 |
 | 显式打开原终端 | SessionPane 选择原展示 Region，再向原 caret owner 请求该终端；[`TerminalView`](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 只消费准确、可见且非 inert 的目标，保留后来的人工焦点。 |
 | reaction／Mailbox | [`useConversationReactions`](../../apps/desktop/src/renderer/src/lib/conversation-reactions.tsx) 沿原输入队列；[`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 保原消息和 read-marker，详情复用共同 Message。 |
 
