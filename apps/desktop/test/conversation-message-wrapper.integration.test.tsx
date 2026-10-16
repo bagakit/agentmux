@@ -1,110 +1,140 @@
-import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
+import { createHash } from 'node:crypto'
 import { act } from 'react'
-import { type Root } from 'react-dom/client'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { parseAgentMuxMessagePrefix, renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
-import type { AgentMuxMessageEnvelope, AgentSessionHistoryPage } from '@agentmux/core'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import type { AgentSessionHistoryContentPart, AgentSessionHistoryResourceRequest } from '@agentmux/core'
+import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-
+import { ConversationResourceText } from '@agentmux/client-ui/components/ConversationResourceText'
+import { MobileConversationSurface } from '../../mobile/src/conversation/MobileConversationSurface'
+import { createBrowserPlatform } from '../../mobile/src/platform/browser'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { api } from '../src/renderer/src/lib/api'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { activityReadingProps } from './helpers/activity-reading-props'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
-vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
-vi.stubGlobal('ResizeObserver',class {observe(){} disconnect(){}})
-vi.stubGlobal('IntersectionObserver',class {observe(){} disconnect(){}})
-let host:HTMLDivElement, root:Root
-beforeEach(()=>{host=document.createElement('div');document.body.append(host);root=createRoot(host)})
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();window.getSelection()?.removeAllRanges();vi.restoreAllMocks()})
-const packet=("<bagakit-msg type=\"agent-v1\" name=\"Review team\" time=\"" + _hygiene_fixtureIso(23817600000, "zone-second", 480) + "\">\n**Original quote** &amp; context\n<cite from=\"User\" ref=\"message-7\">Keep both original IDs.</cite>\nContinue here.\n</bagakit-msg>")
-const wire='[Message from Agent reviewer]\n'+packet
-const page:AgentSessionHistoryPage={agentSessionId:'reader',source:{providerId:'claude',nativeSessionId:'native'},items:[
- {id:'input-one',kind:'user-message',contentParts:[{kind:'text',text:wire}]},
- {id:'input-two',kind:'user-message',contentParts:[{kind:'text',text:wire}]}
-],nextCursor:null}
-it('interprets a complete packet once, preserving declarations and mixed citation order',()=>{
- const parsed=parseAgentMuxMessagePrefix(wire)!;expect(parsed).not.toBeNull()
- expect(parsed.sourceLabel).toBe('Agent reviewer');expect(parsed.declaredAgentSessionId).toBe('reviewer')
- expect(parsed.packet).toEqual({profile:'agent-v1',name:'Review team',time:_hygiene_fixtureIso(23817600000, "zone-second", 480),parts:[
- {kind:'text',text:'\n**Original quote** & context\n'},{kind:'citation',from:'User',reference:'message-7',text:'Keep both original IDs.'},{kind:'text',text:'\nContinue here.\n'}]})
- expect(parseAgentMuxMessagePrefix(packet)?.declaredAgentSessionId).toBeNull()
+import { complete, packet, wire, plain, incomplete, quoted, resourceWire, source, recordId, reference } from '../scripts/fixtures/conversation-message-wrapper/inputs.mjs'
+
+let host: HTMLDivElement, root: Root
+const cleanup: Array<() => Promise<void>> = []
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
-it('leaves malformed, unknown, incomplete and quoted packets entirely readable',()=>{
- const rejected=[packet.replace('</bagakit-msg>',''),packet.replace('name="Review team"',''),packet.replace('type="agent-v1"','type="agent-v1" permission="allow"'),packet.replace('<cite from="User" ref="message-7">','<unknown>'),packet.replace('Keep both original IDs.','<cite from="Other">nested</cite>'),packet.replace((_hygiene_fixtureClock(0, 0, 0) + "+08:00"),_hygiene_fixtureClock(0, 0, 0)),packet.replace(_hygiene_fixtureCivil(10, 4),_hygiene_fixtureCivil(2, 30)),packet+'\n'+packet,'> '+packet,'```xml\n'+packet+'\n```',packet.replace('Original quote','<![CDATA[Original quote]]>'),packet.replace('Original quote','<!--Original quote-->'),'<!DOCTYPE bagakit-msg [<!ENTITY xx "text">]>\n'+packet,packet.replace('Original quote','<?test?>')]
- expect(rejected).toHaveLength(14)
- for(const text of rejected)expect(parseAgentMuxMessagePrefix(text)).toBeNull()
- expect(parseAgentMuxMessagePrefix('[Message from Agent reviewer]\n'+rejected[0])).toBeNull()
+afterEach(async () => {
+  await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges()
+  for (const close of cleanup.splice(0).reverse()) await close()
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear()
 })
-it('uses declarations for reading without replacing trusted sender identity or recorded time',async()=>{
- await act(async()=>root.render(<ConversationMessage messageId="trusted" speaker={{role:'agent',id:'reviewer'}} conversationSessionId="reader" name="Verified review Agent" content={wire} createdAt={1000} timeFormatter={t=>`Recorded ${t}`} />))
- const turn=host.querySelector<HTMLElement>('.log-turn')!;expect(turn.dataset.speakerRole).toBe('agent')
- expect(turn.querySelector('.log-turn__who')?.textContent).toBe('Verified review Agent')
- expect(turn.querySelector('.log-turn__time')?.textContent).toBe('Recorded 1000')
- expect(turn.querySelector('.log-turn__packet-declaration')?.textContent).toBe('From Review team')
- expect(turn.querySelector('.log-turn__text')?.textContent).not.toContain('bagakit-msg')
- expect([...turn.querySelectorAll('.log-turn__text > *')].map(e=>e.textContent)).toEqual(['Original quote & context','Usermessage-7Keep both original IDs.','\nContinue here.\n'])
- expect(turn.querySelector('.log-turn__citation-from')?.textContent).toBe('User')
- expect(turn.querySelector('.log-turn__citation-ref')?.textContent).toBe('message-7')
+const render = async (value: React.ReactNode) => { await act(async () => root.render(value)) }
+const click = async (selector: string) => { await act(async () => host.querySelector<HTMLElement>(selector)!.click()) }
+const card = (content = complete, status: 'complete' | 'failed' = 'complete') => <ConversationMessage content={content} messageId="original-input"
+  conversationSessionId="reader" speaker={{ role: 'agent', id: 'reviewer' }} name="Recorded review Agent" status={status} createdAt={1000} timeFormatter={time => `Recorded ${time}`} />
+
+it('shows original packet citations and a secondary reminder without changing recorded identity or time', async () => {
+  await render(card())
+  expect(host.querySelector('.log-turn__who')?.textContent).toBe('Recorded review Agent')
+  expect(host.querySelector('.log-turn__time')?.textContent).toBe('Recorded 1000')
+  expect(host.querySelector('.log-turn__citation-from')?.textContent).toBe('User')
+  expect(host.querySelector('.log-turn__citation-ref')?.textContent).toBe('message-7')
+  expect(host.querySelector('.log-turn__text strong')?.textContent).toBe('Original quote')
+  expect(host.querySelector('.log-turn__text')?.textContent).not.toContain('bagakit-msg')
+  const reminder = host.querySelector<HTMLDetailsElement>('.log-turn__reminder')!
+  expect(reminder).not.toBeNull(); expect(reminder.open).toBe(false)
+  expect(reminder.querySelector('p')?.textContent).toContain('not a new user authorization')
+  expect(host.querySelector('.log-turn__text')!.lastElementChild).toBe(reminder)
 })
-it('native input and captured Core rendering use the same product parser without body dedup',async()=>{
- const envelope:AgentMuxMessageEnvelope={schema:'agentmux.a2a.v1',messageId:'original',operationId:'private-operation',createdAt:1000,
-  sender:{kind:'agent-session',agentSessionId:'reviewer'},recipient:{kind:'agent-session',agentSessionId:'reader'},
-  threadId:'thread',correlationId:'correlation',replyTo:null,workspaceId:null,senderSessionId:'reviewer',senderRunId:null,
-  recipientSessionId:'reader',recipientRunId:null,body:packet}
- const captured=renderAgentMuxMessageEnvelope(envelope);expect(captured).toBe(wire)
- const messages=projectSessionUserMessages({agentSessionId:'reader',historyPage:page})
- expect(messages.map(m=>[m.rawId,m.author.kind])).toEqual([['input-one','unknown'],['input-two','unknown']])
- await act(async()=>root.render(<ActivityView sessionId="reader" capability="complete-events" displayState="done" items={[]} userMessages={messages} nativeHistoryPage={page} />))
- expect(host.querySelectorAll('.log-turn')).toHaveLength(2)
- expect([...host.querySelectorAll('.log-turn__text')].map(e=>e.textContent)).toEqual(Array(2).fill('Original quote & contextUsermessage-7Keep both original IDs.\nContinue here.\n'))
- expect([...host.querySelectorAll<HTMLElement>('.log-turn')].map(e=>e.dataset.speakerRole)).toEqual(['human','human'])
+
+it('keeps leading contexts and reminder disclosure, body Range and full Copy across a status update', async () => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await render(card())
+  const selected = host.querySelector('.log-turn__text strong')!, range = document.createRange()
+  range.selectNodeContents(selected); window.getSelection()!.addRange(range)
+  const context = host.querySelector<HTMLDetailsElement>('.log-turn__declared-context')!, reminder = host.querySelector<HTMLDetailsElement>('.log-turn__reminder')!
+  context.open = true; reminder.open = true
+  await render(card(complete, 'failed'))
+  expect(host.querySelector('.log-turn__text strong')).toBe(selected)
+  expect(window.getSelection()!.toString()).toBe('Original quote')
+  expect(context.open).toBe(true); expect(reminder.open).toBe(true)
+  await click('[aria-label="Copy message"]')
+  expect(copy).toHaveBeenCalledExactlyOnceWith(complete)
 })
-it('reads the same escaped packet from the built-in Claude reader through public Core and private FileStore',async()=>{
- const fixture=await nativeHistoryFixture('claude',jsonl(['actual-one','actual-two'].map(uuid=>({sessionId:'native-main',uuid,type:'user',
-  message:{role:'user',content:wire},timestamp:_hygiene_fixtureIso(23846400000)}))))
- try {
-  const nativePage=await fixture.client.sessionHistoryPage(fixture.session.agentSessionId,{limit:30})
-  expect(nativePage.items.map(item=>[item.id,item.kind])).toEqual([['actual-one','user-message'],['actual-two','user-message']])
-  const messages=projectSessionUserMessages({agentSessionId:fixture.session.agentSessionId,historyPage:nativePage})
-  expect(messages.map(message=>[message.rawId,message.author.kind])).toEqual([['actual-one','unknown'],['actual-two','unknown']])
-  await act(async()=>root.render(<ActivityView sessionId={fixture.session.agentSessionId} capability="complete-events" displayState="done"
-   items={[]} userMessages={messages} nativeHistoryPage={nativePage} />))
-  expect([...host.querySelectorAll('.activity-feed [data-native-record-id]')].map(el=>el.getAttribute('data-native-record-id'))).toEqual(['actual-one','actual-two'])
-  expect([...host.querySelectorAll('.log-turn__citation-from')].map(el=>el.textContent)).toEqual(['User','User'])
-  expect(fixture.controls.map(control=>control.mock.calls.length)).toEqual([0,0,0,0,0,0])
-  expect(await fixture.bytes()).toEqual(fixture.before)
- } finally {await fixture.close()}
+
+it.each([quoted, incomplete, 'Ordinary body\n\n' + plain])('keeps nonleading, quoted or incomplete declarations entirely readable', async content => {
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await render(card(content))
+  expect(host.querySelector('.log-turn__reminder')).toBeNull()
+  expect(host.querySelector('.log-turn__declared-context')).toBeNull()
+  await click('[aria-label="Copy message"]')
+  expect(copy).toHaveBeenCalledExactlyOnceWith(content)
 })
-it('actual History shares this packet reading and keeps the exact native record IDs',async()=>{
- vi.spyOn(api.sessions,'historyPage').mockResolvedValue(page)
- await act(async()=>root.render(<ActivityView {...activityReadingProps({ control: {kind:'agent',hostId:'local',agentSessionId:'reader',run:{runId:'original-run'}}, visible: true, label: "Reader", workspaceRoot: _hygiene_fixturePath("private"), openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
- expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(e=>e.dataset.nativeRecordId)).toEqual(['input-one','input-two'])
- expect(host.querySelectorAll('.log-turn__citation')).toHaveLength(2)
- expect(host.querySelector('.log-turn__text')?.textContent).not.toContain('bagakit-msg')
+
+const bytes = Buffer.from(JSON.stringify({ kind: 'text', text: resourceWire })), sha256 = createHash('sha256').update(bytes).digest('hex')
+const resource: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }> = { kind: 'resource', resourceType: 'text', reference,
+  content: { encoding: 'json-utf8', kind: 'text', byteLength: bytes.length, sha256 } }
+const readResource = (request: AgentSessionHistoryResourceRequest) => Promise.resolve({ agentSessionId: 'reader', source, recordId, partIndex: request.partIndex, reference,
+  result: { status: 'fragment' as const, encoding: 'json-utf8' as const, dataBase64: bytes.toString('base64'), byteLength: bytes.length, offsetBytes: 0, totalBytes: bytes.length, sha256, nextOffsetBytes: null } })
+
+it('only reads a complete leading resource on demand, shares citations/reminder, and copies its original wire', async () => {
+  const read = vi.fn(readResource), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await render(<ConversationMessage messageId={recordId} content={[resource]} conversationSessionId="reader" speaker={{ role: 'agent', id: 'reviewer' }}
+    readHistoryResource={read} nativeResourceRecord={{ source, recordId }} />)
+  expect(read).not.toHaveBeenCalled()
+  await click('.conversation-resource-text__controls button')
+  expect(read).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source, recordId, partIndex: 0, expectedReference: reference, offsetBytes: 0, maxBytes: 128 * 1024 }))
+  expect(host.querySelector('.conversation-resource-text .log-turn__citation-from')?.textContent).toBe('User')
+  expect(host.querySelector('.conversation-resource-text .log-turn__reminder')).not.toBeNull()
+  await click('[aria-label="Copy complete content"]')
+  expect(copy).toHaveBeenCalledExactlyOnceWith(resourceWire)
+  await click('[aria-label="Copy message"]')
+  expect(copy.mock.calls.at(-1)?.[0]).toBe(resourceWire)
 })
-it('keeps full authored Copy and body Range across a normal status update',async()=>{
- const clipboard=vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue(undefined),annotation=vi.fn()
- const draw=(status:'complete'|'failed')=><ConversationMessage messageId="retained" conversationSessionId="reader" speaker={{role:'unknown',id:'unknown'}} content={[{kind:'text',text:wire},{kind:'resource',resourceType:'file',reference:'original.txt'}]} status={status} onSelectAnnotation={annotation} />
- await act(async()=>root.render(draw('complete')))
- const selected=host.querySelector('.log-turn__text strong')!,range=document.createRange();range.selectNodeContents(selected);window.getSelection()!.addRange(range)
- await act(async()=>selected.dispatchEvent(new MouseEvent('mouseup',{bubbles:true})))
- expect(annotation).toHaveBeenCalledOnce();expect(annotation.mock.calls[0]![0].quote).toBe('Original quote')
- await act(async()=>root.render(draw('failed')))
- expect(host.querySelector('.log-turn__text strong')).toBe(selected);expect(window.getSelection()!.toString()).toBe('Original quote')
- await act(async()=>host.querySelector<HTMLButtonElement>('[title="Copy message"]')!.click())
- expect(clipboard).toHaveBeenCalledExactlyOnceWith(wire+'\noriginal.txt')
+
+it('does not reinterpret an envelope in a later resource as a leading declaration', async () => {
+  await render(<ConversationResourceText part={resource} partIndex={1} record={{ source, recordId }} readResource={readResource} inputMode />)
+  await click('.conversation-resource-text__controls button')
+  expect(host.querySelector('.log-turn__reminder')).toBeNull()
+  expect(host.querySelector('.log-turn__declared-context')).toBeNull()
+  expect(host.querySelector('.conversation-resource-text')?.textContent).toContain('<amux:a2a')
 })
-it('does not turn current Agent, System or code samples into incoming packet cards',async()=>{
- await act(async()=>root.render(<>
- <ConversationMessage messageId="answer" speaker={{role:'agent',id:'reader'}} conversationSessionId="reader" content={wire}/>
- <ConversationMessage messageId="system" speaker={{role:'system',id:'agentmux'}} conversationSessionId="reader" content={wire}/>
- <ConversationMessage messageId="code" speaker={{role:'human',id:'human'}} content={'```xml\n'+packet+'\n```'} />
- </>))
- expect(host.querySelectorAll('.log-turn')).toHaveLength(3)
- expect(host.querySelectorAll('.log-turn__packet-declaration')).toHaveLength(0)
- expect(host.querySelector('[data-message-id="answer"]')?.getAttribute('data-declared-source')).toBeNull()
- expect(host.querySelector('[data-message-id="code"] code')?.textContent).toContain('bagakit-msg')
+
+async function realReader() {
+  const bodies = [complete, plain, incomplete, quoted]
+  const f = await nativeHistoryFixture('claude', jsonl(bodies.map((text, index) => ({ sessionId: 'native-main', uuid: 'original-' + index,
+    type: 'user', message: { role: 'user', content: text } }))), { agentSessionId: 'reader' })
+  cleanup.push(f.close)
+  return f
+}
+
+it('actual Desktop reads nonempty new packets through its public Core conversation consumer', async () => {
+  const f = await realReader(), reads = vi.spyOn(api.conversation, 'readAgentConversation').mockImplementation((...args) => f.client.readAgentConversation(...args))
+  vi.spyOn(api.conversation, 'readConversationChanges').mockImplementation((...args) => f.client.readConversationChanges(...args))
+  vi.spyOn(api.conversation, 'observeConversation').mockImplementation((...args) => f.client.observeConversation(...args))
+  vi.spyOn(api.conversation, 'releaseConversationView').mockImplementation((...args) => f.client.releaseConversationView(...args))
+  await render(<ActivityView {...activityReadingProps({ control: { hostId: 'local', agentSessionId: 'reader' } })} />)
+  await vi.waitFor(() => expect(host.querySelectorAll('.log-turn__reminder')).toHaveLength(2))
+  expect(reads).toHaveBeenCalled(); expect(host.querySelector('.log-turn__citation-from')?.textContent).toBe('User')
+  expect(f.controls.map(control => control.mock.calls.length)).toEqual(f.controls.map(() => 0))
+  expect((await f.bytes()).native).toEqual(f.before.native)
+  expect(await f.store.readMetadata('reader')).toMatchObject(f.session)
+})
+
+it('actual Mobile reads the same public Core messages while the recorded native author stays unknown', async () => {
+  const f = await realReader()
+  const client = new Proxy(f.client, { get(target, key) {
+    if (key === 'runtimeOwnerIdentity') return () => null
+    if (key === 'agentSession') return () => f.session
+    if (key === 'agentSessions') return () => [f.session]
+    const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value
+  } }) as unknown as AgentMuxHostedClient
+  const read = vi.spyOn(f.client, 'readAgentConversation')
+  await render(<MobileConversationSurface client={client} agentSessionId="reader" connection={{ state: 'connected', message: 'Private read-only Core' }} platform={createBrowserPlatform()} />)
+  await vi.waitFor(() => expect(host.querySelectorAll('.log-turn__reminder')).toHaveLength(2))
+  expect(read).toHaveBeenCalled(); expect(host.querySelector('.log-turn__citation-from')?.textContent).toBe('User')
+  const page = await f.client.sessionHistoryPage('reader')
+  expect(page.items[0]!.contentParts).toMatchObject([{ kind: 'text', text: complete }])
+  expect(f.controls.map(control => control.mock.calls.length)).toEqual(f.controls.map(() => 0))
 })
