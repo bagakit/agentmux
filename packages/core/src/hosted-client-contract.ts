@@ -27,6 +27,7 @@ export const AGENTMUX_HOSTED_METHODS = [
 export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
   'connectRuntime', 'observeRunStorage', 'listRuns', 'runtimeProjection', 'runtimeSubject',
   'createAgent', 'createAgentWithDelivery', 'createHostAgentWithDelivery',
+  'ensureAgentContinuity', 'resumeAgent', 'statusAgent',
   'reattachAgent', 'writeAgent', 'pasteAgent', 'resizeAgent', 'signalAgent',
   'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal'

@@ -2082,7 +2082,7 @@ export class RuntimeController {
     agentMuxNote?: string
   ): Promise<SessionSnapshot> {
     return await this.trackHostLifecycleOperation(control.hostId, async () => {
-      const client = await this.connectedClient(control.hostId)
+      const client = await this.connectedClient(control.hostId, 'runtime')
       const status = await client.statusAgent(control.agentSessionId)
       if (status.run.runId !== control.run.runId) {
         throw new AgentMuxError('Agent Session changed before explicit resume.', 'STALE_AGENT_SESSION')
@@ -2194,7 +2194,7 @@ export class RuntimeController {
     operationId: string,
     request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
   ): Promise<SessionRecoveryResult> {
-    const client = await this.connectedClient(control.hostId)
+    const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'terminal') {
       const cwd = workspacePath ?? (await this.sessionByTarget(
         client,
@@ -2229,7 +2229,13 @@ export class RuntimeController {
         operationId, ...request, ...(config.continuity ? { policy: config.continuity } : {})
       })
       if (result.kind === 'reattachable' || result.kind === 'resumed') {
-        throw new Error('Core returned live continuity without a current Agent Session.')
+        const session = await this.sessionByTarget(client,
+          { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
+        if (session.kind !== 'agent' || session.control.hostId !== control.hostId ||
+          session.control.agentSessionId !== control.agentSessionId || session.control.run.runId !== result.run.runId) {
+          throw new AgentMuxError('The original Core recovery Run changed before its result was projected.', 'STALE_AGENT_SESSION')
+        }
+        return { kind: result.kind, session }
       }
       return result
     }
