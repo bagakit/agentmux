@@ -35,6 +35,8 @@ it.each([
   ['unknown-step', 'another-step', 1, null],
   ['unknown-status', 'qr_login_polling', 3, null],
   ['init-status-on-poll', 'qr_login_polling', 0, null],
+  ['string-status', 'qr_login_polling', '1', null],
+  ['missing-status', 'qr_login_polling', undefined, null],
   ['unconfirmed-expiry-marker', 'qr_login_polling', 5, null],
   ['original-waiting', null, 1, 'waiting'],
   ['original-scanned', null, 2, 'scanned'],
@@ -47,6 +49,26 @@ it.each([
   const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
   const result = await adapter.advance({ ...original, privateState: initial.privateState })
   expect(result).toMatchObject(stage ? { kind: 'authentication', stage, challenge: stage === 'expired' ? null : { qrPayload: initial.challenge!.qrPayload }, account: null } : { kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed' } })
+  expect(network.calls).toHaveLength(2)
+})
+it.each([{}, { status: null }, { status: 0 }, { status: 2 }])('uses enter_app handoff fields independently of polling status: %j', async fields => {
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { ...fields, cross_login_uri: 'https://accounts.feishu.cn/cross' } } })
+  )
+  const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
+  const result = authentication(await adapter.advance({ ...original, privateState: initial.privateState }))
+  expect(result).toMatchObject({ stage: 'handoff', challenge: null, account: null })
+  expect(JSON.parse(result.privateState).authentication.phase).toBe('cross-login')
+  expect(network.calls).toHaveLength(2)
+})
+it.each([undefined, 'http://accounts.feishu.cn/cross', 'https://foreign.example/cross', 'https://user@accounts.feishu.cn/cross', 'https://accounts.feishu.cn/cross#fragment'])('keeps an unqualified handoff unknown without following its URL: %s', async crossLoginUri => {
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: crossLoginUri } } })
+  )
+  const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
+  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toMatchObject({ kind: 'unknown', diagnostic: { stage: 'authentication', step: 'poll', httpStatus: 200 } })
   expect(network.calls).toHaveLength(2)
 })
 function uploaded(receipt: EnrollmentUploadReceipt) {
@@ -76,7 +98,7 @@ async function signedIn(origin = 'https://open.feishu.cn') {
   consoleHeaders.append('set-cookie', 'console=private-console; Path=/developers/v1; Secure')
   const responses: Remote[] = [
     Response.json({ code: 0, data: { step_info: { token: 'private-qr-token' } } }, { headers: initialHeaders }),
-    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } } }),
+    Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross' } } }),
     new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } }),
     new Response('landing', { headers: { 'content-type': 'text/html' } }),
     ...(origin === 'https://open.feishu.cn' ? [] : [new Response(null, { status: 302, headers: { location: origin + '/app' } })]),

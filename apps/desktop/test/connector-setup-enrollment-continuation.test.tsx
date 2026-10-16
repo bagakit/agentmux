@@ -41,14 +41,14 @@ beforeEach(async () => {
       if (previous?.challenge) expect(Date.now()).toBeGreaterThanOrEqual(previous.challenge.nextPollAt)
       const status = pendingPolls.shift()
       return Response.json({ code: 0, data: status === undefined
-        ? { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' } }
+        ? { next_step: 'enter_app', step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross' } }
         : { next_step: 'qr_login_polling', step_info: { status } } })
     }
     if (target.href === 'https://accounts.feishu.cn/cross') return new Response(null, { status: 302, headers: { location: 'https://ask.feishu.cn/' } })
     if (target.href === 'https://ask.feishu.cn/') return new Response('Landing is not account identity')
     if (target.href === 'https://open.feishu.cn/app') return new Response(`<script>window.user=${JSON.stringify({ id: USER, tenantId: TENANT })};window.csrfToken="settings-continuation-private-csrf";</script>`, { headers: { 'content-type': 'text/html' } })
     if (target.pathname === '/developers/v1/app/upload/image') return Response.json({ code: 0, data: { url: 'https://images.example.test/original.png' } })
-    if (target.pathname === '/developers/v1/app/create') return Response.json({ code: 0, data: { ClientID: APP } })
+    if (target.pathname === '/developers/v1/manifest/upsert_by_template') return Response.json({ code: 0, data: { ClientID: APP } })
     if (target.pathname === '/developers/v1/secret/' + APP) return Response.json({ code: 0, data: { secret: 'settings-continuation-private-secret' } })
     if (target.pathname === '/developers/v1/robot/' + APP) {
       expect(new Headers(options?.headers).get('x-csrf-token')).toBe('settings-continuation-private-csrf')
@@ -95,6 +95,8 @@ async function savedCreation() {
   await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('[data-enrollment-continue]')).not.toBeNull() }, { timeout: 6000 })
   const original = (await services.connections.enrollment!.list({})).operations[0]!
   expect(original.configuration).toBe('configured'); expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull()
+  expect(native.filter(path => path === '/developers/v1/manifest/upsert_by_template')).toHaveLength(1)
+  expect(native).not.toContain('/developers/v1/app/create')
   const pane = dom.container.querySelector('[data-bot-enrollment]')!
   expect(pane.textContent).toContain('Continue with your saved sign-in')
   expect(pane.textContent).toContain('Next, review this bot’s setup')

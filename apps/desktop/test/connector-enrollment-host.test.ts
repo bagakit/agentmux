@@ -106,7 +106,7 @@ beforeEach(async () => {
           data: authorize
             ? {
                 next_step: 'enter_app',
-                step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross' }
+                step_info: { cross_login_uri: 'https://accounts.feishu.cn/cross' }
               }
             : { next_step: null, step_info: { status: 1 } }
         })
@@ -194,10 +194,11 @@ async function cli(args: string[], value?: unknown): Promise<ConnectionEnrollmen
   expect(result.code, result.stdout + result.stderr).toBe(0)
   return JSON.parse(result.stdout).result
 }
-async function account(view: ConnectionEnrollmentView) {
+async function account(view: ConnectionEnrollmentView, throughCli = false) {
   for (let count = 0; count < 7 && view.operation?.authentication?.stage !== 'account'; count++) {
     clock = Math.max(clock, view.challenge?.nextPollAt ?? clock) + 1
-    view = await client.call('connection.enrollment.advance', decision(view, 'continue-authentication'))
+    const advance = decision(view, 'continue-authentication')
+    view = throughCli ? await cli(['advance', '--input', '-'], advance) : await client.call('connection.enrollment.advance', advance)
   }
   expect(view.operation?.authentication?.stage).toBe('account')
   return view
@@ -235,7 +236,7 @@ it('default Host creates through compiled CLI and the original SDK receiver with
       Buffer.from(privateToken)
     )
   ).toBe(false)
-  const signedIn = await account(pending),
+  const signedIn = await account(pending, true),
     beforeConfirm = calls.length
   const confirmed = await cli(['advance', '--input', '-'], decision(signedIn, 'confirm-account'))
   expect(calls).toHaveLength(beforeConfirm)
