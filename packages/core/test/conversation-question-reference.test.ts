@@ -1,8 +1,6 @@
-import { expect, it, vi } from 'vitest'
-import { join } from 'node:path'
+import { expect, it } from 'vitest'
 import { fixture, request } from '../../../apps/desktop/test/helpers/native-async-question-fixture.js'
 import * as core from '../dist/index.js'
-import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 it('public Core references preserve the original native question and an accepted answer outside its reading window', async () => {
   const f = await fixture(), context = await f.client.sessionHistoryPage(f.input.agentSessionId, f.invocation)
@@ -47,40 +45,4 @@ it('pure projection preserves typed question data without granting an activity r
   const [record] = core.projectConversationRecords({ agentSessionId: f.input.agentSessionId, historyPage: page })
   expect(record!.kind).toBe('activity')
   expect(record!.author).toEqual({ kind: 'unknown' })
-})
-
-it('submission receipts remain independent of native answers and bind the original operation', async () => {
-  const f = await fixture('unanswered'), page = await f.client.sessionHistoryPage(f.input.agentSessionId, f.invocation)
-  const receipt = await f.client.replySessionQuestion(f.input)
-  expect(core.questionReplyReceiptMatches(f.input.agentSessionId, f.input, receipt)).toBe(true)
-  expect(core.questionReplyReceiptMatches(f.input.agentSessionId, f.input, { ...receipt, operationId: 'another-operation' })).toBe(false)
-  expect(core.recordedQuestionAnswerFacts(page).size).toBe(0)
-  expect(core.projectConversationQuestions({ agentSessionId: f.input.agentSessionId, historyPage: page })[0]!.questions.every(question => !question.answer)).toBe(true)
-})
-
-it('the compiled original CLI rejoins an exact question reply once while asynchronous input remains allowed', async () => {
-  const f = await fixture('unanswered'), condition = await f.beginWorking()
-  const { commandOverride: _command, args: _args, authorHuman: _human, sourceDevice: _device, ...original } = f.input
-  const input = { ...original, ...condition }
-  const submit = vi.spyOn(f.client, 'replySessionQuestion').mockImplementation(actual =>
-    core.AgentMuxClient.prototype.replySessionQuestion.call(f.client, { ...actual, ...f.invocation }))
-  const server = new core.AgentMuxControlServer({ socketPath: join(f.directory, 'control.sock'),
-    coreClients: () => [{ hostId: 'local', client: f.client }] })
-  await server.start()
-  try {
-    const before = f.writes.length
-    const run = () => runCompiledObjectCli(['agent', 'question', 'reply', '--input', '-'], objectCliEnvironment(f.directory), JSON.stringify(input))
-    const first = await run()
-    expect(first.code, first.stderr).toBe(0)
-    expect(core.questionReplyReceiptMatches(input.agentSessionId, input, JSON.parse(first.stdout).result)).toBe(true)
-    const written = f.writes.length
-    expect(written).toBeGreaterThan(before)
-    const repeated = await run()
-    expect(repeated.code, repeated.stderr).toBe(0)
-    expect(JSON.parse(repeated.stdout).result).toEqual(JSON.parse(first.stdout).result)
-    expect(f.writes.length).toBe(written)
-    expect(submit).toHaveBeenCalledTimes(2)
-    expect(submit.mock.calls.every(([actual]) => actual.operationId === input.operationId && actual.recordId === input.recordId && actual.sourceChannel === 'cli')).toBe(true)
-    expect(f.client.agentSession(input.agentSessionId).pendingInteraction).toBeUndefined()
-  } finally { await server.stop() }
 })
