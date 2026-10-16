@@ -80,6 +80,23 @@ async function cli(args, caller = null, expectSuccess = true) {
   }
   return receipt
 }
+async function focusReadingTarget(place, session) {
+  const result = (await cli(['space', 'focus', '--region', place.to.regionId, '--input', 'target', '--expect-session', session.agentSessionId])).result
+  assert.equal(result.operation, 'focus'); assert.equal(result.partial, false)
+  assert.ok(['applied', 'unchanged'].includes(result.navigation.state))
+  assert.equal(result.navigation.expectedAgentSessionId, session.agentSessionId)
+  assert.equal(result.navigation.selection.space.regionId, place.to.regionId)
+  assert.equal(result.navigation.selection.space.tabId, place.to.tabId)
+  assert.equal(result.presentation.provenance, 'observed')
+  assert.ok(['main-visible', 'window', 'floating'].includes(result.presentation.state))
+  assert.equal(result.presentation.regionId, place.to.regionId); assert.equal(result.presentation.tabId, place.to.tabId)
+  assert.equal(result.input.policy, 'target'); assert.equal(result.input.outcome, 'transferred')
+  assert.equal(result.input.after.provenance, 'observed')
+  assert.equal(result.input.after.regionId, place.to.regionId); assert.equal(result.input.after.tabId, place.to.tabId)
+  assert.equal(result.input.after.sessionId, session.agentSessionId)
+  assert.equal(result.input.after.connected, true); assert.equal(result.input.after.visible, true); assert.equal(result.input.after.inert, false)
+  assert.equal(result.save.diskDurability, 'confirmed')
+}
 async function cdpConnect(url) {
   const ws = new WebSocket(url), pending = new Map(), pauses = []; let serial = 0
   await new Promise((done, fail) => { ws.addEventListener('open', done, { once: true }); ws.addEventListener('error', fail, { once: true }) })
@@ -267,7 +284,7 @@ try {
   assert.ok(!recipientUserPage.text.includes('A2A original review'), 'The receiving Agent User Messages must exclude its accepted A2A original')
   assert.ok(!recipientUserPage.keys.some(key => key.includes(normalId)))
   await screenshot(first, 'recipient-user-messages-no-a2a')
-  await cli(['space', 'focus', '--region', authorPlace.to.regionId])
+  await focusReadingTarget(authorPlace, author)
   await openMailbox(first.cdp, authorPlace.to.regionId, 'outbox'); await screenshot(first, 'outbox-list')
   await activate(first.cdp, `${region(authorPlace.to.regionId)}.querySelector('[data-record-key="a2a:${normalId}"]')`)
   await waitFor('original Outbox body', () => first.cdp.evaluate(`${region(authorPlace.to.regionId)}.querySelector('.composer-mailbox__detail .log-turn__body')?.textContent.includes('the exact original')`))
@@ -336,8 +353,8 @@ try {
       assert.equal(committed.appAppearance, appearance)
       const rendered = await waitFor('production theme committed to the original document', () => first.cdp.evaluate(`(()=>{const root=document.documentElement;return root.dataset.appearance===${JSON.stringify(appearance)}&&!('themeChanging'in root.dataset)?{appearance:root.dataset.appearance,theme:root.dataset.theme,background:getComputedStyle(root).getPropertyValue('--bg').trim()}:null})()`))
       facts.mailbox.themeMatrix.transitions.push({ requested: appearance, committed, rendered })
-      for (const [folder, place] of [['inbox', recipientPlace], ['outbox', authorPlace], ['user', authorPlace]]) {
-        await cli(['space', 'focus', '--region', place.to.regionId]); await openMailbox(first.cdp, place.to.regionId, folder)
+      for (const [folder, place, session] of [['inbox', recipientPlace, recipient], ['outbox', authorPlace, author], ['user', authorPlace, author]]) {
+        await focusReadingTarget(place, session); await openMailbox(first.cdp, place.to.regionId, folder)
         await screenshot(first, `mailbox-${folder}-${appearance}-wide`, 1440, 980)
         await screenshot(first, `mailbox-${folder}-${appearance}-narrow`, 750, 900)
       }
@@ -365,10 +382,10 @@ try {
   const routeEffectsAfter = await inputEffects(); assert.deepEqual(routeEffectsAfter, routeEffectsBefore, 'A presentation split, same-MID replay and rejected ack must produce no native input effect')
   facts.restart.routeEffects = { before: routeEffectsBefore, after: routeEffectsAfter }
   const workfaceEffectsBefore = await inputEffects()
-  await cli(['space', 'focus', '--region', recipientPlace.to.regionId]); await openMailbox(first.cdp, recipientPlace.to.regionId, 'inbox')
+  await focusReadingTarget(recipientPlace, recipient); await openMailbox(first.cdp, recipientPlace.to.regionId, 'inbox')
   await screenshot(first, 'inbox-states'); await screenshot(first, 'inbox-states-narrow', 750, 900)
   await activate(first.cdp, `${region(recipientPlace.to.regionId)}.querySelector('.composer__mailbox')`)
-  await cli(['space', 'focus', '--region', authorPlace.to.regionId])
+  await focusReadingTarget(authorPlace, author)
   const queueEditor = `${region(authorPlace.to.regionId)}.querySelector('.composer [role="textbox"]')`
   await activate(first.cdp, queueEditor); await first.cdp.call('Input.insertText', { text: 'Original queue-only intent retained without execution' })
   await first.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
@@ -377,7 +394,7 @@ try {
   assert.equal(queued.execution, undefined); assert.equal(queued.promptCondition, null)
   await openMailbox(first.cdp, authorPlace.to.regionId, 'user'); await screenshot(first, 'user-original-and-pending')
   await activate(first.cdp, `${region(authorPlace.to.regionId)}.querySelector('.composer__mailbox')`)
-  await cli(['space', 'focus', '--region', recipientPlace.to.regionId])
+  await focusReadingTarget(recipientPlace, recipient)
   const editor = `${region(recipientPlace.to.regionId)}.querySelector('.composer [role="textbox"]')`
   await activate(first.cdp, editor); await first.cdp.call('Input.insertText', { text: 'Original unsent draft retained across actual Electron restart 中🙂' })
   await waitFor('original edited draft persisted by product', () => first.cdp.evaluate(`JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.agentComposerDrafts[${JSON.stringify(recipient.agentSessionId)}]?.includes('Original unsent draft')`))
