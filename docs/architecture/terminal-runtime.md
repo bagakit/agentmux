@@ -69,6 +69,27 @@ Desktop Main 组合跨进程控制，通过公开 Core API 执行 Agent lifecycl
 
 布局变更由既有 viewport synchronizer 将稳定后的 cols/rows 提交给 ctxmux。ctxmux 不接收 Tab、Region 或 split direction；PTY 的实际尺寸与客户端测量值分别表达。
 
+### 1.1 原终端附着与 Hosted 准入
+
+原 Run 的物理通路与全局语义恢复使用不同前提，行为要求归 [Durable Runtime 健康](../design/behavior/session-recovery.md#durable-runtime-健康)。当前 Hosted 调用由 [shared contract](../../packages/core/src/hosted-client-contract.ts) 和 [Host service](../../packages/core/src/hosted-runtime-service.ts) 的既有分类执行：
+
+| 分类／分派 | 源码 owner | 当前机制 |
+| --- | --- | --- |
+| 需要原 Native 的物理事实或操作 | `AGENTMUX_HOSTED_RUNTIME_METHODS` → `RUNTIME_METHODS` | 调用 `connectRuntime()`；包括原终端附着及 `runtimeProjection`、`runtimeSubject` 等物理事实投影 |
+| 不以 Native 或全局恢复完成为通用前置 | `OFFLINE_METHODS` | 例如 `sessionTimeline` 从原持久来源读取；每个方法仍守自身目标、权限和存储合同，offline 不表示缓存成功或事实已知 |
+| 其余方法的默认分派 | Host service 的调用分支与各操作 owner | 当前默认调用 `connect()`，受控输入保留既有例外；默认分派不证明每项都确需全局恢复，必要前提仍沿准确操作的真实依赖判定。权限、意图和回执继续由原 owner 核对 |
+
+这张表解释前提，完整方法与例外以源码为准；它不建立第二份方法白名单。默认 Desktop connector 使用 [Hosted client](../../packages/core/src/hosted-client.ts)，不在 Desktop 内另建语义 Core。
+
+一次 GUI 原终端附着的实际链路是：
+
+1. `TerminalView` 经 [preload](../../apps/desktop/src/preload/index.ts) 的 `api.sessions.attach` 或 `refreshAttachment`，进入 [Main IPC](../../apps/desktop/src/main/ipc.ts) 与 `RuntimeController.attachSession`。
+2. Main 通过默认 [Desktop Host connector](../../apps/desktop/src/main/desktop-host.ts) 确认原 Host 与 Runtime；首次附着由 Hosted `runtime.attachment-watch` 取得准确 Agent／raw Terminal 的初始切面和输出 reader，Core 消费 ctxmux 的原 Run、terminal continuation、Replay 与 Gap。已有共享 Attachment 时，Main 读取原 Run Replay；刷新沿原 Attachment 续接，不为每个 View 重建 Run。
+3. Main 核对请求与实际 Attachment 的 Run，再由 `sessionByTarget` 调用 `runtimeSubject(target, attached.run)` 生成同一次回执的 Session 投影。已知 Run 来自该 Attachment，不为这个单目标投影枚举全部 Run；`runtimeSubject` 使用 shared Runtime 准入，不再次等待全局语义恢复。
+4. Main 返回原 `attachmentId`、Session、terminal continuation 与 Replay；Renderer 应用初始切面，再接续原 reader 的有序输出。显示、解析完成和输入资格各沿原事实确认。
+
+冷 Host 的准确 Agent 附着先沿 Core `resolveRawAgentSession`／原 metadata owner 解析该 Session，再取得原 Run。独立调用 `runtimeSubject` 时，若活动 registry 尚无该 Agent 的绑定，仍可能得到 `UNKNOWN_AGENT_SESSION`；Runtime 准入不自动加载所有元数据，也不猜造 Session。owner fence、Session／Run 匹配与 reader lease 继续由各原 owner 核对；释放 reader 不停止原 Run。
+
 ## 2. 所有权矩阵
 
 ctxmux 在这个架构中仍是完整、独立的 Runtime 产品。它的 daemon、CLI、协议和 SDK 不依赖
@@ -312,6 +333,7 @@ PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间
 | 静止态 WebGL/DOM cell-metric 抖动使一列网格反复 reflow 画花 Codex（wobble） | `apps/desktop/test/terminal-viewport-sync.test.ts`（"skips a one-column grid wobble…"、"fits and resizes when container pixels actually change"） | 容器 CSS 像素未变时跳过 fit+resize；像素真变化才 fit（`measureViewport`/`samePixels`） |
 | 首帧 render 监听未注销导致 TUI 自发 resize | `TerminalView.tsx` 的 one-shot `terminal.onRender` | 首个 render 先 dispose；后续输出不再触发 viewport 同步 |
 | Attach 逐条写入数千个 replay event，历史 TUI 帧看起来像持续 resize | `apps/desktop/test/terminal-replay.test.ts` | replay 合并为一次 parser write；恢复完成前隐藏画布 |
+| 原 Attachment 已取得，回执投影却等待无关 Session 恢复 | [真实 cold Host/Main 附着测试](../../apps/desktop/test/runtime-membership-cold-host.integration.test.ts) | 恢复 pending／确认失败两阶段，原 Agent 与 raw Terminal 均返回准确 Run／PID、已知初始内容和连续 live byte range；无输入重放或新 Run，reader 清理及错误 owner／换 Run 拒绝仍成立 |
 
 [测试策略](../testing/strategy.md) 记录整体 oracle 与证据范围；本表列回归意图，测试存在不代表本轮候选已通过。
 
