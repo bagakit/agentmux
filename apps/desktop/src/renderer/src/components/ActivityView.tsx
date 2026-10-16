@@ -44,6 +44,8 @@ import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { ReadPastedImage } from '@agentmux/client-ui/components/ConversationImage'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { useWorkbenchDocument } from '../lib/workbench-document'
+import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { Ruler } from './ConversationRuler'
 export { Ruler } from './ConversationRuler'
 import { ConversationRulerControls } from './ConversationRulerControls'
@@ -459,6 +461,7 @@ export function ActivityView({
   const boundaryTime = lastEarlierRecord?.completedAt ?? lastEarlierRecord?.startedAt
   const items = readingWindow.captured ?? []
   const readingEnabled = conversationReading?.enabled !== false
+  const documentVisible = useWorkbenchDocumentVisibility(useWorkbenchDocument())
   const consumerId = useId()
   const inspectConsumer = useRef<((query: ConversationConsumerQuery) => ConversationConsumerSample | null) | null>(null)
   useLayoutEffect(() => {
@@ -952,7 +955,8 @@ export function ActivityView({
     <FullPageLoadingSurface className="activity-feed__empty-reading" scope="region"
       phase={emptyReadFailed ? 'failed' : 'loading'} eyebrow="Conversation reading"
       title={emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'} detail="">
-      {!emptyReadFailed ? <div className="full-page-loading__light activity-feed__reading-light" aria-hidden="true" /> : null}
+      {!emptyReadFailed ? <div className="full-page-loading__light activity-feed__reading-light" aria-hidden="true"
+        style={{ animationPlayState: documentVisible ? undefined : 'paused' }} /> : null}
       <div className="activity-feed__reading-caption">
         <strong>{emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'}</strong>
         {emptyReadFailed ? <span>Retry the source above to continue reading.</span> : null}
