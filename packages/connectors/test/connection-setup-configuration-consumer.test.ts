@@ -415,7 +415,7 @@ it('SDK and compiled CLI reject unsafe configuration relations on the actual for
     value => { const { applicationConfiguration: _missing, ...rest } = value; return rest },
     value => ({ ...value, applicationConfiguration: { ...value.applicationConfiguration!, capability: true } }),
     value => ({ ...value, applicationConfiguration: { ...value.applicationConfiguration!, source: { ...value.applicationConfiguration!.source!, subject: 'callback-settings' } } }),
-    value => ({ ...value, applicationConfiguration: { ...value.applicationConfiguration!, effects: [], selected: { ...effect(value), request: 'unknown', secureStorage: 'stored' } } }),
+    value => ({ ...value, applicationConfiguration: { ...value.applicationConfiguration!, effects: [], selected: { ...effect(value), request: 'dispatching', secureStorage: 'stored' } } }),
     value => ({ ...value, applicationConfiguration: { ...value.applicationConfiguration!, effects: [], selected: { ...effect(value), input: { ...input, decision: { ...input.decision, value: 'continue' } } } } }),
     value => ({ ...value, applicationConfiguration: { ...value.applicationConfiguration!, capability: 'enabled', actions: [{ actionId: input.decision.actionId, expectedRevision: value.operation!.revision, kind: 'enable-messaging' }] } }),
     value => ({ ...value, applicationConfiguration: { ...value.applicationConfiguration!, actions: [{ actionId: 'fixture-wrong-recover', expectedRevision: input.expectedRevision, kind: 'recover-configuration-effect' }] } }),
@@ -547,3 +547,29 @@ it('a later bot observation through a known saved application alias supersedes t
   }
   expect(fetch.mock.calls.filter(([url]) => String(url).includes('/robot/switch/'))).toEqual([])
 }, 60_000)
+
+it.each(['accepted', 'unknown'] as const)('persists Cookie continuation from an %s configuration reply without changing its business result', async outcome => {
+  const f = await fixture(), rotated = 'fixture-configuration-rotated-cookie'
+  let writes = 0
+  vi.stubGlobal('fetch', vi.fn(nativeRoute(async (subject, _target, init) => {
+    if (writes) {
+      expect(new Headers(init.headers).get('cookie')).toContain('session=' + rotated)
+      expect(new Headers(init.headers).get('cookie')).not.toContain('session=' + SESSION)
+    }
+    return Response.json({ code: 0, data: raw[subject] })
+  }, async () => {
+    writes++
+    return Response.json(outcome === 'accepted' ? { code: 0, data: { privateReceipt: PRIVATE + '-effect' } } : { code: 1 }, { headers: { 'set-cookie': `session=${rotated}; Domain=.feishu.cn; Path=/; Secure; HttpOnly` } })
+  }).route))
+  await confirmed(f); await botRead(f)
+  const input = action(await inspect(f), 'enable-messaging')
+  const observed = result(await f.cli(['setup', 'advance', '--input', '-'], input))
+  expect(effect(observed)).toMatchObject({ request: outcome === 'accepted' ? 'confirmed' : 'unknown', secureStorage: 'stored' })
+  expect(observed.applicationConfiguration?.capability).toBe('unknown')
+  expect(offeredEnable(observed)).toEqual([])
+  assertPrivateFree(observed.applicationConfiguration); expect(JSON.stringify(observed)).not.toContain(rotated)
+  await f.close(); await f.reopen()
+  expect(selected(await botRead(f)).request).toBe('confirmed')
+  expect(effect(await f.sdk.call('connection.setup.advance', input))).toEqual(effect(observed))
+  expect(writes).toBe(1)
+})

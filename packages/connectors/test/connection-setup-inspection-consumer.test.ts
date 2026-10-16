@@ -1,4 +1,5 @@
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { CookieJar } from 'tough-cookie'
 import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import { CONNECTION_SETUP_READ_ACTIONS } from '@agentmux/core/connections'
@@ -511,3 +512,123 @@ it.each(['inflight', 'vault-committed'] as const)('a real process restart preser
   expect(result<{ operation: unknown }>(await cli(['inspect', '--operation-id', 'inspection-child-save'])).operation).toEqual(saved)
   expect(result<{ connection: unknown }>(await cli(['inspect', '--connection', config.connectionId])).connection).toMatchObject({ config, revision: 1 })
 }, 60_000)
+
+it.each(['observed', 'unknown'] as const)('retains a rotated native session across owner reopen with an %s business receipt', async outcome => {
+  const f = await fixture(), rotated = 'fixture-rotated-inspection-session'
+  let count = 0
+  const fetch = vi.fn(nativeRoute(async (_target, init) => {
+    if (count++ > 0) {
+      expect(new Headers(init.headers).get('cookie')).toContain('session=' + rotated)
+      expect(new Headers(init.headers).get('cookie')).not.toContain('session=' + SESSION)
+      return permission()
+    }
+    const response = outcome === 'observed' ? permission() : Response.json({ code: 0, data: {} })
+    response.headers.append('set-cookie', `session=${rotated}; Domain=.feishu.cn; Path=/; Secure; HttpOnly`)
+    return response
+  }).route); vi.stubGlobal('fetch', fetch)
+  await confirmed(f)
+  const observed = result(await f.cli(['setup', 'advance', '--input', '-'], inputFor(await inspect(f), 'inspect-application')))
+  expect(selected(observed)).toMatchObject({ request: outcome === 'observed' ? 'confirmed' : 'unknown', secureStorage: 'stored' })
+  expect(observed.applicationInspection?.applicationInfoReadPermission).toBe(outcome === 'observed' ? 'confirmed' : 'unknown')
+  expect(observed.applicationInspection?.readResult).toBeUndefined()
+  expect(JSON.stringify(observed)).not.toContain(rotated)
+  await f.close(); await f.reopen()
+  const continued = await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
+  expect(continued.applicationInspection?.applicationInfoReadPermission).toBe('confirmed')
+  expect(count).toBe(2)
+})
+
+it.each(['observed', 'unknown'] as const)('locally recovers one encrypted Cookie continuation after a lost ACK with an %s original result', async outcome => {
+  const f = await fixture(), rotated = 'fixture-ack-rotated-session'
+  let count = 0
+  vi.stubGlobal('fetch', vi.fn(nativeRoute(async (_target, init) => {
+    if (count++ > 0) { expect(new Headers(init.headers).get('cookie')).toContain('session=' + rotated); return permission() }
+    const response = outcome === 'observed' ? permission() : Response.json({ code: 0, data: {} })
+    response.headers.append('set-cookie', `session=${rotated}; Domain=.feishu.cn; Path=/; Secure`)
+    return response
+  }).route))
+  await confirmed(f)
+  const store = DesktopConnectorSecrets.prototype.store
+  const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementationOnce(async function(this: DesktopConnectorSecrets, input) {
+    await store.call(this, input); throw new Error('fixture-cookie-evidence-ack-lost')
+  })
+  const originalInput = inputFor(await inspect(f), 'inspect-application')
+  const original = await f.sdk.call('connection.setup.advance', originalInput)
+  expect(selected(original)).toMatchObject({ request: outcome === 'observed' ? 'confirmed' : 'unknown', secureStorage: 'unknown' })
+  expect(fault).toHaveBeenCalledTimes(1); fault.mockRestore()
+  await f.close(); await f.reopen()
+  const local = await inspect(f), recovery = inputFor(local, 'recover-application-inspection')
+  const recovered = result(await f.cli(['setup', 'advance', '--input', '-'], recovery))
+  expect(selected(recovered)).toEqual({ ...selected(original), secureStorage: 'stored' })
+  expect(recovered.applicationInspection?.applicationInfoReadPermission).toBe(outcome === 'observed' ? 'confirmed' : 'unknown')
+  expect(count).toBe(1)
+  expect(selected(await f.sdk.call('connection.setup.advance', originalInput))).toEqual(selected(recovered))
+  expect(count).toBe(1)
+  expect(selected(await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))).request).toBe('confirmed')
+  expect(count).toBe(2)
+})
+
+it('a late response from the same authentication source preserves its receipt without replacing a newer Cookie continuation', async () => {
+  const f = await fixture(), started = deferred<void>(), delayed = deferred<Response>()
+  let count = 0
+  vi.stubGlobal('fetch', vi.fn(nativeRoute(async (_target, init) => {
+    count++
+    if (count === 1) { started.resolve(); return delayed.promise }
+    if (count > 2) { expect(new Headers(init.headers).get('cookie')).toContain('session=fixture-newer-cookie'); return permission() }
+    const response = permission(); response.headers.append('set-cookie', 'session=fixture-newer-cookie; Domain=.feishu.cn; Path=/; Secure'); return response
+  }).route))
+  await confirmed(f)
+  const older = f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
+  await started.promise
+  const newer = await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
+  expect(selected(newer).request).toBe('confirmed')
+  const oldResponse = permission(); oldResponse.headers.append('set-cookie', 'session=fixture-older-cookie; Domain=.feishu.cn; Path=/; Secure')
+  delayed.resolve(oldResponse)
+  expect(selected(await older)).toMatchObject({ request: 'confirmed', secureStorage: 'stored' })
+  await f.close(); await f.reopen()
+  expect(selected(await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))).request).toBe('confirmed')
+  expect(count).toBe(3)
+})
+
+it('recovers the original child ACK after its Cookie continuation was already adopted', async () => {
+  const f = await fixture(), fetch = vi.fn(nativeRoute(async () => {
+    const response = permission(); response.headers.append('set-cookie', 'continued=fixture-already-adopted; Path=/; Secure'); return response
+  }).route); vi.stubGlobal('fetch', fetch)
+  await confirmed(f)
+  const prepare = f.services.database!.prepare.bind(f.services.database!)
+  let interrupted = false
+  const fault = vi.spyOn(f.services.database!, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql)
+    if (sql.startsWith('UPDATE connection_setup_inspection SET record_json=')) {
+      const run = statement.run.bind(statement)
+      vi.spyOn(statement, 'run').mockImplementation((...args) => {
+        if (!interrupted && String(args[0]).includes('"secureStorage":"stored"')) { interrupted = true; throw new Error('fixture-child-ack-after-adoption') }
+        return run(...args)
+      })
+    }
+    return statement
+  })
+  const observed = await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
+  expect(interrupted).toBe(true); expect(selected(observed)).toMatchObject({ request: 'confirmed', secureStorage: 'unknown' })
+  const calls = fetch.mock.calls.length; fault.mockRestore()
+  await f.close(); await f.reopen()
+  const recovered = await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'recover-application-inspection'))
+  expect(selected(recovered)).toEqual({ ...selected(observed), secureStorage: 'stored' })
+  expect(recovered.applicationInspection?.applicationInfoReadPermission).toBe('confirmed')
+  expect(fetch).toHaveBeenCalledTimes(calls)
+})
+
+
+it('a local Cookie serialization fault cannot erase the already received application observation', async () => {
+  const f = await fixture()
+  vi.stubGlobal('fetch', vi.fn(nativeRoute(async () => {
+    const response = permission(); response.headers.append('set-cookie', 'continued=fixture-unconfirmed-cookie-save; Path=/; Secure')
+    vi.spyOn(CookieJar.prototype, 'serializeSync').mockImplementationOnce(() => { throw new Error('fixture-cookie-snapshot-fault') })
+    return response
+  }).route))
+  await confirmed(f)
+  const observed = await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))
+  expect(selected(observed)).toMatchObject({ request: 'confirmed', secureStorage: 'stored' })
+  expect(observed.applicationInspection?.applicationInfoReadPermission).toBe('confirmed')
+  expect(observed.continuation?.stage).toBe('confirmed')
+})
