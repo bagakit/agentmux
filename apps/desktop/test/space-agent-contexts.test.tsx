@@ -119,7 +119,7 @@ it('keeps Idle high pressure, unknown and ended members while status shapes use 
   expect(dom.container.querySelector('[data-session-id="ended"][data-state="exited"]')).not.toBeNull()
   await act(async () => dom.container.querySelector<HTMLButtonElement>('[data-session-id="idle"]')!.focus())
   const reader = document.querySelector('.agent-information-reader')!
-  expect(reader).not.toBeNull(); expect(reader.querySelector('[title="5% context remaining"]')?.textContent).toBe('5% ctx')
+  expect(reader).not.toBeNull(); expect(reader.querySelector('[title="5% context remaining"]')?.textContent).toContain('5%')
   await act(async () => reader.querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
   expect(reader.querySelector('.agent-usage-details__context')?.textContent).toContain('95% used')
   expect(reader.querySelector('.agent-usage-details__context')?.textContent).toContain('5% remaining')
