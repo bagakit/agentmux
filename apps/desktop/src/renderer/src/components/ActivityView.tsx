@@ -1236,6 +1236,7 @@ export function ActivityView({
       <div ref={logRef}>
       <ConversationView
         page={nativeHistoryPage}
+        readActivity={readingWindow.readActivity}
         expandSubmissions={Boolean(readingWindow.error || readingWindow.automaticReadError)}
         records={conversationRecords}
         originalRecords={originalConversationRecords}

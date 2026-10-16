@@ -10,7 +10,7 @@ import { SemanticIcon } from '../theme/icons.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 import { ConversationSubmissionFacts, ConversationSubmissionSummary } from './ConversationSubmissionMetadata.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
-export type SubmissionDisclosure = { compact: boolean; open?: boolean; onOpenChange(open: boolean): void }
+export type SubmissionDisclosure = { compact: boolean; reading?: boolean; open?: boolean; onOpenChange(open: boolean): void }
 /** Exact captured record metadata. A failed native reader cannot hide a confirmed Hook reply. */
 export function CapturedConversationMessage({ item, record, replyObservation, submissionDisclosure, ...props }: Omit<ConversationMessageProps, 'content' | 'messageId' | 'createdAt' | 'status'> & {
   item: AgentTimelineItem
@@ -46,7 +46,8 @@ export function CapturedConversationMessage({ item, record, replyObservation, su
         expanded={!submissionDisclosure.compact || item.status !== 'complete'} {...(submissionDisclosure.open === undefined ? {} : { open: submissionDisclosure.open })}
         onOpenChange={submissionDisclosure.onOpenChange}
         summary={<><span className="conversation-submission-record__author">发送记录 · {senderName}{record.speaker?.role === 'agent' && senderName !== record.speaker.id ? <code>{record.speaker.id}</code> : null}</span>
-          {originalSubmission ? <ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} /> : null}</>}>
+          {originalSubmission ? <ConversationSubmissionSummary record={originalSubmission} renderClock={props.timeFormatter ?? formatClock} /> : null}
+          {submissionDisclosure.reading ? <span className="conversation-submission-record__reading" role="status" aria-label="正在读取对应来源"><SemanticIcon name="status.loading" animation="spin" size={12} aria-hidden="true" /></span> : null}</>}>
         {message}
       </ConversationMessageDisclosure>
     </div>

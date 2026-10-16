@@ -1,5 +1,5 @@
 import type { AgentMuxEvidenceSource } from '@agentmux/core'
-import { conversationInvocationId, conversationRecordId, type ConversationContentRef, type ConversationEvent, type ConversationSelector, type ConversationSourceRecord, type ConversationTimeline } from '@agentmux/core/conversation'
+import { conversationInvocationId, conversationRecordId, type ConversationContentRef, type ConversationEvent, type ConversationSelector, type ConversationSourceRecord, type ConversationTimeline, type ConversationItemRef } from '@agentmux/core/conversation'
 
 export const NATIVE_CONVERSATION_SOURCE = '原生对话'
 export const COLLECTED_REPLY_TITLE = '回复快照'
@@ -18,7 +18,7 @@ export function describeCapturedConversationSource(source: AgentMuxEvidenceSourc
   return capturedSources[source]
 }
 export type ConversationSourceDisplay = { labels: readonly { id: string; label: string; title: string }[]; unread?: boolean }
-export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; collectedReply?: string; submissions?: readonly ConversationSourceRecord[] }
+export type ConversationSources = { main: ConversationSourceDisplay; parts: readonly ConversationSourceDisplay[]; fields: Partial<Record<'content' | 'toolInput' | 'toolOutput', ConversationSourceDisplay>>; collectedReply?: string; submissions?: readonly ConversationSourceRecord[]; unreadSubmissionTarget?: ConversationItemRef }
 type Slot = ConversationEvent['content'][number]
 const selectorKey = (selector: ConversationSelector) => selector.kind === 'native-part' ? ['native-part', selector.partIndex] : ['captured-field', selector.field]
 const contentKey = (ref: ConversationContentRef) => JSON.stringify([conversationRecordId(ref.record), ref.recordRevision, selectorKey(ref.selector)])
@@ -106,9 +106,14 @@ export function conversationSourcePresenter(timeline: ConversationTimeline) {
       return codes?.has('CONVERSATION_ANCHOR_UNREAD') || codes?.has('CONVERSATION_OBSERVED_TARGET_UNREAD')
     }))
     const relationConflict = originals.some(original => gapCodes.get(original.id)?.has('CONVERSATION_RELATION_CYCLE'))
+    const unreadSubmissionTarget = primary?.original.kind === 'captured' && primary.original.item.kind === 'user_message' && primary.original.item.source === 'user'
+      && record.event?.reference?.source.kind === 'native' && !inventory.has(record.event.anchorId)
+      && record.event.coalesces?.some(edge => edge.fromEventIds.includes(primary.id)) && unreadTarget && !relationConflict
+      ? record.event.reference : undefined
     const collectedReply = record.role === 'observation' ? `事件回报附带的回复文本快照；不单独代表一次新发言。${unreadTarget ? '对应的原始记录尚未读到。' : relationConflict ? '记录的对应关系存在冲突。' : ''}` : undefined
     return { main, parts: slots.map(slotDisplay), fields,
       ...(collectedReply ? { collectedReply } : {}),
-      ...(submissions.length ? { submissions } : {}) }
+      ...(submissions.length ? { submissions } : {}),
+      ...(unreadSubmissionTarget ? { unreadSubmissionTarget } : {}) }
   }
 }

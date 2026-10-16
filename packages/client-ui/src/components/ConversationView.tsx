@@ -16,13 +16,21 @@ import { conversationMessageSourceKey } from '../lib/conversation-message-locati
 import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
 import type { ConversationQuestionInput, ConversationQuestionTarget, QuestionReplyState } from '../lib/conversation-question-reply.js'
 import { projectConversationQuestions } from '@agentmux/core/conversation'
+import type { ConversationSourceRead } from '../lib/use-conversation-view.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
 import { conversationItemRef, conversationRecordId, type ConversationItemRef } from '@agentmux/core/conversation'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'active' | 'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'readHistoryResource' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace' | 'traceDisclosure'>
 
+/** Existing Reader facts only. Unknown/newly selected source scopes stay static. */
+export type ConversationReadActivity = {
+  loading: boolean
+  sourceRead: ConversationSourceRead | null
+}
+
 type Props = ReadingProps & {
+  readActivity?: ConversationReadActivity
   questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
   questionTerminalTarget?: { source: AgentSessionHistorySource; run: AgentMuxRunRef } | undefined
   /** Changes reset only transient card actions; drafts remain in the host's original owner. */
@@ -60,7 +68,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
+  page, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions, questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, renderQuestionNotice, ...reading
 }: Props) {
   const projection = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
     coverage: coverage ?? acceptedRecords[0]?.coverage ?? [] }), [acceptedRecords, acceptedOriginals, coverage])
@@ -109,7 +117,20 @@ export const ConversationView = memo(function ConversationView({
     const keys = new Set([record.event?.anchorId, ...(record.records?.map(source => source.id) ?? [])])
     const unread = [...keys].some(key => key !== undefined && unreadRecords.has(key))
     const choiceKey = record.records?.find(source => source.original.item === record.original.item)?.id ?? record.id
+    const target = record.sources?.unreadSubmissionTarget
+    const request = readActivity?.sourceRead
+    const targetUnavailable = (record.coverage ?? projection.coverage).some(row => row.source.kind === 'native'
+      && target?.source.kind === 'native' && row.source.providerId === target.source.providerId && row.source.nativeSessionId === target.source.nativeSessionId
+      && (row.current === 'unavailable' || row.current === 'unsupported'))
+    // A native-looking canonical ID may still render its captured contribution.
+    // Only a known exact target and an in-flight read of its original scope move.
+    const readingSubmission = Boolean(target && target.source.kind === 'native' && request && readActivity?.loading && reading.active !== false
+      && record.original.kind === 'captured' && record.original.item.status !== 'failed' && !targetUnavailable
+      && target.hostId === record.sourceHostId && target.agentSessionId === request.reference.agentSessionId
+      && request.reference.hostId === (record.executionHostId ?? record.sourceHostId)
+      && request.nativeSource.providerId === target.source.providerId && request.nativeSource.nativeSessionId === target.source.nativeSessionId)
     const submissionDisclosure: SubmissionDisclosure | undefined = feed ? {
+      reading: readingSubmission,
       compact: Boolean(page?.items.length) && !expandSubmissions && !unavailable && !unread,
       ...(choices.has(choiceKey) ? { open: choices.get(choiceKey)! } : {}),
       onOpenChange: open => setSubmissionChoices(previous => {
