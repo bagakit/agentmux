@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupConfigurationSelector, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
-import { connectionSetupDecisionForAction, connectionSetupPublicationSubjects } from '@agentmux/core/connections'
+import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { connectionManagementTask } from './connection-management-task'
 import { api } from '../../lib/api'
 
@@ -164,8 +164,13 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     let result = await accepted(() => source('connection.setup.inspect', { operationId: id, applicationInspection: selector.effect === 'submit-application-version' && selector.draft ? { versionId: selector.draft.versionId } : {}, applicationConfiguration: selector }))
     if (!result || result.applicationConfiguration?.effect !== effect) return
     const reread = !!result.applicationConfiguration.review || !!result.applicationConfiguration.selected
-    const subjects = effect === 'add-application-permissions' ? ['permission-catalog', 'application-permissions'] as const : effect === 'add-message-reception' ? ['event-settings', 'event-catalog'] as const : connectionSetupPublicationSubjects(effect)
-    for (const subject of subjects) {
+    const checked = new Set<string>()
+    for (;;) {
+      const current = result.applicationConfiguration
+      const subjects = current && 'requiredSubjects' in current ? current.requiredSubjects : effect === 'add-application-permissions' ? ['permission-catalog', 'application-permissions'] as const : ['event-settings', 'event-catalog'] as const
+      const subject = subjects.find(subject => !checked.has(subject))
+      if (!subject) break
+      checked.add(subject)
       if (subject === 'publication-version' && selector.effect === 'submit-application-version' && !selector.draft) continue
       const configuration = result.applicationConfiguration
       if (!configuration || configuration.effect !== effect || !('sources' in configuration) || selector.effect === 'add-application-permissions' && (configuration.effect !== selector.effect || configuration.purpose !== selector.purpose)) return

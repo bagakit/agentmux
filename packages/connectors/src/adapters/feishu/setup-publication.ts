@@ -1,5 +1,6 @@
+import { connectionSetupPublicationSubjects } from '@agentmux/core/connections'
 import type { ConnectionSetupAccount, ConnectionSetupPublicationAudience, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupPublicationReview, ConnectionSetupSubmissionResponse, ConnectionSetupVersionStatus } from '@agentmux/core/connections'
-import type { SetupPublicationPlan } from '../../connection-setup-adapter.js'
+import type { SetupInitialPublication, SetupPublicationPlan } from '../../connection-setup-adapter.js'
 
 const record = (v: unknown): Record<string, unknown> | null => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null
 const nativeId = (v: unknown): v is string | number => typeof v === 'string' && !!v.trim() || typeof v === 'number' && Number.isSafeInteger(v)
@@ -74,9 +75,41 @@ const validVersion = (v: string) => v.length <= 64 && /^(0|[1-9][0-9]*)\.(0|[1-9
 const compare = (a: string, b: string) => { const aa = a.split('.').map(BigInt), bb = b.split('.').map(BigInt); for (let i = 0; i < 3; i++) if (aa[i] !== bb[i]) return aa[i]! > bb[i]! ? 1 : -1; return 0 }
 
 /** The finite sourced form is interpreted here; the Host never fills native defaults. */
-export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null): SetupPublicationPlan {
+export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: { creatorIsCurrent: boolean; initialVersion: SetupInitialPublication | null } = { creatorIsCurrent: false, initialVersion: null }): SetupPublicationPlan {
   const pending = read(states.pending), detail = read(states.version), features = read(states.features), versions = versionList(read(states.versions)), issues: string[] = []
   const review: ConnectionSetupPublicationReview = { versions: versions ?? [], selectedVersion: null, changes: [], audience: null, proposedAudience: null, entries: null, sharing: null, reasonRequired: null, creatorAudienceAvailable: creator !== null, issues }
+  const { initialVersion, creatorIsCurrent } = provenance
+  const requiredSubjects = [...connectionSetupPublicationSubjects(effect)]
+  const initialDraft = (value: ConnectionSetupPublicationDraft | null) => value?.kind === 'create-version' && value.visibility === 'creator-only' && value.desktopEntry === 'bot' && value.mobileEntry === 'bot'
+  // Only the original creator and a reliable empty list offer this finite first-version form.
+  if (effect === 'create-application-version' && creator && creatorIsCurrent && (!states.versions || versions?.length === 0)) {
+    if (!versions) { issues.push('The exact version list is unconfirmed'); return { review, privateIntent: null, requiredSubjects: ['publication-versions'] } }
+    const empty = { all: false, departments: [], people: [], groups: [] }
+    if (!draft || draft.kind === 'create-version' && draft.visibility === 'creator-only') {
+      review.entries = { desktop: { current: null, choices: ['bot'] }, mobile: { current: null, choices: ['bot'] } }
+      review.proposedAudience = { include: { ...empty, people: [creator.userId] }, exclude: empty }
+      if (!initialDraft(draft)) issues.push('Explicitly choose creator-only visibility and bot entries for both platforms')
+      if (draft?.kind === 'create-version') {
+        if (!validVersion(draft.version)) issues.push('Use a new three-part version')
+        if (!draft.notes.trim() || draft.notes.length > 500) issues.push('Release notes must contain between 1 and 500 characters')
+        if (draft.reason !== undefined && (!draft.reason.trim() || draft.reason.length > 1000)) issues.push('Provide a valid application review reason')
+      }
+      return { review, requiredSubjects: ['publication-versions'], privateIntent: draft?.kind === 'create-version' && !issues.length ? JSON.stringify({ kind: 'create-version', body: { autoPublish: false, appVersion: draft.version, changeLog: draft.notes, pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { departments: [], members: [creator.userId], groups: [], isAll: 0 }, blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 }, ...(draft.reason === undefined ? {} : { remark: draft.reason }) } }) : null }
+    }
+  }
+  // The Host supplies only its own confirmed, securely stored first-create receipt.
+  if (effect === 'submit-application-version' && creator && creatorIsCurrent && initialVersion && initialDraft(initialVersion.draft) && draft?.kind === 'submit-version' && draft.versionId === initialVersion.versionId) {
+    if (!detail || detail.versionId !== undefined && detail.versionId !== draft.versionId || !label(detail.appVersion)) issues.push('The exact selected version is unconfirmed')
+    else {
+      review.selectedVersion = { versionId: draft.versionId, version: detail.appVersion, status: feishuVersionStatus(detail.versionStatus), notes: typeof detail.changeLog === 'string' ? detail.changeLog : null }
+      review.changes = changes(detail, 'changeScope')
+      const visible = record(detail.visibleRange), include = range(visible?.whiteList), exclude = range(visible?.blackList)
+      if (include && exclude) review.audience = review.proposedAudience = { include: include.public, exclude: exclude.public }
+      if (![0, 3, 4].includes(detail.versionStatus as number)) issues.push('The selected version is not in a supported submittable state')
+    }
+    review.versions = []
+    return { review, requiredSubjects: ['publication-version'], privateIntent: !issues.length ? JSON.stringify({ kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: draft.fullRelease } }) : null }
+  }
   if (!versions) issues.push('The exact version list is unconfirmed')
   const featureReady = Array.isArray(features?.hitFeatureKeyList) && features.hitFeatureKeyList.every(label)
   const split = featureReady && (features!.hitFeatureKeyList as string[]).includes('openplatform.b2c.bot_b2c_share_switch_split')
@@ -87,7 +120,7 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
   }
   if (!featureReady) issues.push('Application feature configuration is unconfirmed')
   if (effect === 'submit-application-version') {
-    if (draft?.kind !== 'submit-version') { issues.push('Choose an exact version to review'); return { review, privateIntent: null } }
+    if (draft?.kind !== 'submit-version') { issues.push('Choose an exact version to review'); return { review, requiredSubjects, privateIntent: null } }
     if (!detail || detail.versionId !== undefined && detail.versionId !== draft.versionId || !label(detail.appVersion)) issues.push('The exact selected version is unconfirmed')
     else {
       review.selectedVersion = { versionId: draft.versionId, version: detail.appVersion, status: feishuVersionStatus(detail.versionStatus), notes: typeof detail.changeLog === 'string' ? detail.changeLog : null }
@@ -101,7 +134,7 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
       else review.audience = review.proposedAudience = { include: include.public, exclude: exclude.public }
       if (![0, 3, 4].includes(detail.versionStatus as number)) issues.push('The selected version is not in a supported submittable state')
     }
-    return { review, privateIntent: !issues.length ? JSON.stringify({ kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: draft.fullRelease } }) : null }
+    return { review, requiredSubjects, privateIntent: !issues.length ? JSON.stringify({ kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: draft.fullRelease } }) : null }
   }
   if (!pending) issues.push('Pending application changes are unconfirmed')
   else review.changes = changes(pending, 'ChangeScope')
@@ -113,7 +146,7 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
     if (!creator) issues.push('The original application creator is unconfirmed')
     else {
       const empty = { all: false, departments: [], people: [], groups: [] }
-      review.proposedAudience = { include: { ...empty, people: [creator.userId] }, exclude: empty }
+      if (include && exclude) review.proposedAudience = { include: { ...empty, people: [creator.userId] }, exclude: empty }
       body.visibleSuggest = { departments: [], members: [creator.userId], groups: [], isAll: 0 }
       body.blackVisibleSuggest = { departments: [], members: [], groups: [], isAll: 0 }
     }
@@ -161,7 +194,7 @@ export function reviewFeishuPublication(effect: ConnectionSetupPublicationEffect
     body.appVersion = draft.version; body.changeLog = draft.notes
     if (draft.reason !== undefined) body.remark = draft.reason
   }
-  return { review, privateIntent: draft && !issues.length ? JSON.stringify({ kind: 'create-version', body }) : null }
+  return { review, requiredSubjects, privateIntent: draft && !issues.length ? JSON.stringify({ kind: 'create-version', body }) : null }
 }
 
 /** The original caller-dependent isOk branch is not a universal success/failure oracle. */

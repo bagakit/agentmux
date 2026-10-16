@@ -7,7 +7,8 @@ export type SetupReadReceipt = ({ kind: 'observed'; readResult: ConnectionSetupR
 export type SetupPermissionPlan = { review: ConnectionSetupPermissionReview; appScopeIDs: Array<string | number> }
 /** Native intent stays opaque to the generic Host; the adapter alone owns its schema. */
 export type SetupMessageReceptionPlan = { review: ConnectionSetupMessageReceptionReview; privateIntent: string | null }
-export type SetupPublicationPlan = { review: ConnectionSetupPublicationReview; privateIntent: string | null }
+export type SetupPublicationPlan = { review: ConnectionSetupPublicationReview; privateIntent: string | null; requiredSubjects: ConnectionSetupReadSubject[] }
+export type SetupInitialPublication = { versionId: string; draft: Extract<ConnectionSetupPublicationDraft, { kind: 'create-version' }> }
 export type SetupPublicationReceipt = ({ kind: 'accepted'; privateState: string; versionId: string; submission: ConnectionSetupSubmissionResponse | null } | { kind: 'unknown' }) & { authentication?: string }
 export type SetupConfigurationReceipt = ({ kind: 'accepted'; privateState: string; requiresDataRangeConfiguration?: boolean | null } | { kind: 'unknown' }) & { authentication?: string }
 export type SetupInspectionReceipt = ({ kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }) & { authentication?: string }
@@ -26,7 +27,7 @@ export interface ConnectionSetupAdapter {
   /** Separate local implementation declaration; only an admitted current-auth action calls it. */
   readonly applicationConfiguration?: {
     readonly domains: readonly string[]
-    publicationPlan(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null): Promise<SetupPublicationPlan>
+    publicationPlan(effect: ConnectionSetupPublicationEffect, states: Record<string, string>, draft: ConnectionSetupPublicationDraft | null, creator: ConnectionSetupAccount | null, provenance: { creatorIsCurrent: boolean; initialVersion: SetupInitialPublication | null }): Promise<SetupPublicationPlan>
     createVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>
     submitVersion(input: SetupAdapterInput & { privateState: string; privateIntent: string; assertCurrent: () => void }, signal?: AbortSignal): Promise<SetupPublicationReceipt>
     /** Local interpretation of the exact already-bound raw bot read, with zero network effects. */

@@ -164,7 +164,7 @@ export type ConnectionSetupView = {
     | { effect: ConnectionSetupScalarEffect; subject: 'bot-settings' | 'event-settings' | 'callback-settings'; source: ConnectionSetupInspectionReceipt | null }
     | { effect: 'add-application-permissions'; subject: 'application-permissions'; purpose: ConnectionSetupPermissionPurpose; sources: { catalog: ConnectionSetupInspectionReceipt | null; applied: ConnectionSetupInspectionReceipt | null }; review: ConnectionSetupPermissionReview | null }
     | { effect: 'add-message-reception'; subject: 'event-settings'; sources: { catalog: ConnectionSetupInspectionReceipt | null; settings: ConnectionSetupInspectionReceipt | null }; review: ConnectionSetupMessageReceptionReview | null }
-    | { effect: ConnectionSetupPublicationEffect; subject: 'publication-pending' | 'publication-version'; sources: Partial<Record<keyof ConnectionSetupPublicationSources, ConnectionSetupInspectionReceipt>>; draft: ConnectionSetupPublicationDraft | null; review: ConnectionSetupPublicationReview | null }
+    | { effect: ConnectionSetupPublicationEffect; subject: 'publication-pending' | 'publication-version'; sources: Partial<Record<keyof ConnectionSetupPublicationSources, ConnectionSetupInspectionReceipt>>; requiredSubjects: ConnectionSetupReadSubject[]; draft: ConnectionSetupPublicationDraft | null; review: ConnectionSetupPublicationReview | null }
   )
   /** Exact admitted advance result, distinct from today's current continuation. */
   receipt?: ConnectionSetupStepReceipt

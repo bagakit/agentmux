@@ -126,10 +126,12 @@ export function parseConnectionSetupPublicationDraft(value: unknown): Connection
   const p = object(value, ['kind', 'version', 'notes', 'visibility', 'desktopEntry', 'mobileEntry', 'reason'])
   return { kind, version: text(p.version), notes: prose(p.notes), visibility: choice(p.visibility, ['current', 'creator-only']), ...(p.desktopEntry === undefined ? {} : { desktopEntry: text(p.desktopEntry) }), ...(p.mobileEntry === undefined ? {} : { mobileEntry: text(p.mobileEntry) }), ...(p.reason === undefined ? {} : { reason: prose(p.reason) }) }
 }
-function parsePublicationSourceIds(value: unknown, effect: ConnectionSetupPublicationEffect) {
+function parsePublicationSourceIds(value: unknown, effect: ConnectionSetupPublicationEffect, draft: ConnectionSetupPublicationDraft | undefined) {
   const keys = connectionSetupPublicationSubjects(effect).map(subject => subject.slice(12)), p = object(value, keys)
-  const result = Object.fromEntries(keys.map(key => [key, id(p[key])]))
-  if (new Set(Object.values(result)).size !== keys.length) fail()
+  const present = keys.filter(key => p[key] !== undefined)
+  if (present.length !== keys.length && !(effect === 'create-application-version' ? present.length === 1 && present[0] === 'versions' && draft?.kind === 'create-version' && draft.visibility === 'creator-only' && draft.desktopEntry && draft.mobileEntry : present.length === 1 && present[0] === 'version')) fail()
+  const result = Object.fromEntries(present.map(key => [key, id(p[key])]))
+  if (new Set(Object.values(result)).size !== present.length) fail()
   return result
 }
 function parseSubmission(value: unknown) {
@@ -184,7 +186,7 @@ export function parseConnectionSetupConfigurationReceipt(value: unknown): Connec
   const input = parseConnectionSetupParams('connection.setup.advance', p.input), request = requestState(p.request), secureStorage = choice(p.secureStorage, ['not-started', 'storing', 'stored', 'unknown'] as const), stepId = id(p.stepId)
   if (input.decision.value !== 'confirm' || secureStorage === 'stored' && !['confirmed', 'unknown'].includes(request)) fail()
   if (effect === 'create-application-version' || effect === 'submit-application-version') {
-    const sourceStepIds = parsePublicationSourceIds(p.sourceStepIds, effect), versionId = p.versionId === null ? null : id(p.versionId)
+    const sourceStepIds = parsePublicationSourceIds(p.sourceStepIds, effect, input.publicationDraft), versionId = p.versionId === null ? null : id(p.versionId)
     const draft = input.publicationDraft
     if (!draft || (effect === 'create-application-version' ? draft.kind !== 'create-version' || !input.decision.actionId.startsWith('setup-publish-create:') : draft.kind !== 'submit-version' || !input.decision.actionId.startsWith('setup-publish-submit:') || versionId !== draft.versionId) || request === 'confirmed' && versionId === null || input.versionId !== undefined) fail()
     if (Object.values(sourceStepIds).includes(stepId)) fail()
@@ -298,7 +300,7 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
   if (p.applicationConfiguration !== undefined) {
     if (!operation || method === 'connection.setup.begin' || method === 'connection.setup.inspect' && !(input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration) fail()
     const raw = rpcRecord(p.applicationConfiguration), effect = configurationEffect(raw.effect)
-    const c = object(raw, ['effect', 'subject', 'effects', 'next', 'selected', 'capability', 'actions', 'reason', 'unresolved', ...(effect === 'add-application-permissions' ? ['purpose', 'sources', 'review'] : effect === 'add-message-reception' ? ['sources', 'review'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sources', 'draft', 'review'] : ['source'])])
+    const c = object(raw, ['effect', 'subject', 'effects', 'next', 'selected', 'capability', 'actions', 'reason', 'unresolved', ...(effect === 'add-application-permissions' ? ['purpose', 'sources', 'review'] : effect === 'add-message-reception' ? ['sources', 'review'] : effect === 'create-application-version' || effect === 'submit-application-version' ? ['sources', 'requiredSubjects', 'draft', 'review'] : ['source'])])
     const selector = method === 'connection.setup.inspect' ? (input as ConnectionSetupParamsMap['connection.setup.inspect']).applicationConfiguration : undefined
     if (!Array.isArray(c.effects) || c.effects.length > (selector?.limit ?? 25) || !Array.isArray(c.actions) || c.actions.length > 2 || selector && selector.effect !== effect) fail()
     const effects = (c.effects as unknown[]).map(parseConnectionSetupConfigurationReceipt), selected = c.selected === null ? null : parseConnectionSetupConfigurationReceipt(c.selected)
@@ -340,16 +342,24 @@ export function parseConnectionSetupResult<M extends ConnectionSetupMethod>(meth
       const rawSources = object(c.sources, connectionSetupPublicationSubjects(effect).map(subject => subject.slice(12))), sources: Record<string, ConnectionSetupInspectionReceipt> = {}
       for (const subject of connectionSetupPublicationSubjects(effect)) { const key = subject.slice(12); if (rawSources[key] !== undefined) { const source = sourceReceipt(rawSources[key], subject); if (!source) fail(); sources[key] = source! } }
       const draft = c.draft === null ? null : parseConnectionSetupPublicationDraft(c.draft), review = c.review === null ? null : parseConnectionSetupPublicationReview(c.review)
+      const allowed = connectionSetupPublicationSubjects(effect) as readonly ConnectionSetupReadSubject[]
+      const requiredSubjects = names(c.requiredSubjects).map(subject => choice(subject, allowed))
+      const reduced = requiredSubjects.length === 1 && requiredSubjects[0] === (effect === 'create-application-version' ? 'publication-versions' : 'publication-version')
+      if (!requiredSubjects.length || requiredSubjects.length !== allowed.length && !reduced || reduced && !operation!.source) fail()
+      if (requiredSubjects.length === allowed.length && allowed.some(subject => !requiredSubjects.includes(subject))) fail()
+      if (!operation!.source && [...effects, ...(selected ? [selected] : [])].some(receipt => (receipt.effect === 'create-application-version' || receipt.effect === 'submit-application-version') && Object.keys(receipt.sourceStepIds).length !== allowed.length)) fail()
+      const initialReview = effect === 'create-application-version' && !!operation!.source && !!sources.versions && review?.versions.length === 0 && review.creatorAudienceAvailable
+
       if (method === 'connection.setup.advance') {
         const original = (input as ConnectionSetupParamsMap['connection.setup.advance']).publicationDraft
         if (!original || JSON.stringify(selected?.input.publicationDraft) !== JSON.stringify(original) || JSON.stringify(draft) !== JSON.stringify(original)) fail()
       }
       if (draft && (effect === 'create-application-version' ? draft.kind !== 'create-version' : draft.kind !== 'submit-version')) fail()
       if (selector && 'draft' in selector && JSON.stringify(selector.draft ?? null) !== JSON.stringify(draft)) fail()
-      if (c.subject !== (effect === 'create-application-version' ? 'publication-pending' : 'publication-version') || review && !qualified || capability !== 'unknown' && (!draft || !review || review.issues.length || !qualified || Object.keys(sources).length !== connectionSetupPublicationSubjects(effect).length)) fail()
+      if (c.subject !== (effect === 'create-application-version' ? 'publication-pending' : 'publication-version') || review && !qualified || capability !== 'unknown' && (!draft || !review || review.issues.length || !qualified || requiredSubjects.some(subject => !sources[subject.slice(12)]) || reduced && effect === 'create-application-version' && (!initialReview || draft.kind !== 'create-version' || draft.visibility !== 'creator-only' || !draft.desktopEntry || !draft.mobileEntry))) fail()
       if (sources.version && (draft?.kind !== 'submit-version' || sources.version.versionId !== draft.versionId)) fail()
-      if (review && (review.versions.length > 0 && !sources.versions || review.selectedVersion && (!sources.version || draft?.kind !== 'submit-version' || review.selectedVersion.versionId !== draft.versionId) || review.changes.length > 0 && !(effect === 'create-application-version' ? sources.pending : sources.version) || review.audience && !(effect === 'create-application-version' ? sources.visibility : sources.version) || review.proposedAudience && !(effect === 'create-application-version' ? sources.visibility : sources.version) || review.entries && !(effect === 'create-application-version' ? sources.pending : sources.version) || review.sharing && (!(effect === 'create-application-version' ? sources.sharing : sources.version) || !sources.features) || review.reasonRequired !== null && !sources.pending || review.creatorAudienceAvailable && !operation!.source)) fail()
-      result.applicationConfiguration = { ...common, effect, subject: effect === 'create-application-version' ? 'publication-pending' : 'publication-version', sources, draft, review }
+      if (review && (review.versions.length > 0 && !sources.versions || review.selectedVersion && (!sources.version || draft?.kind !== 'submit-version' || review.selectedVersion.versionId !== draft.versionId) || review.changes.length > 0 && !(effect === 'create-application-version' ? sources.pending : sources.version) || review.audience && !(effect === 'create-application-version' ? sources.visibility : sources.version) || review.proposedAudience && !(effect === 'create-application-version' ? sources.visibility || initialReview : sources.version) || review.entries && !(effect === 'create-application-version' ? sources.pending || initialReview : sources.version) || review.sharing && (!(effect === 'create-application-version' ? sources.sharing : sources.version) || !sources.features) || review.reasonRequired !== null && !sources.pending || review.creatorAudienceAvailable && !operation!.source)) fail()
+      result.applicationConfiguration = { ...common, effect, subject: effect === 'create-application-version' ? 'publication-pending' : 'publication-version', sources, requiredSubjects, draft, review }
     } else {
       const subject = connectionSetupConfigurationSubject(effect), source = sourceReceipt(c.source, subject)
       if (c.subject !== subject || capability !== 'unknown' && (!source || !qualified)) fail()
