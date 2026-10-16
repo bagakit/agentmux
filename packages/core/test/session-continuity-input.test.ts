@@ -1,23 +1,29 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxClient as SourceClient } from '../src/client.js'
+import { AgentMuxFileAgentSessionStore as SourceStore } from '../src/agent-session-store.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
-import { AgentMuxError } from '../src/errors.js'
+import { AgentMuxError as SourceError } from '../src/errors.js'
 import { composeAgentPrompt } from '../src/agent-outbound-message.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { createHash } from 'node:crypto'
 import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityOperation } from '../src/agent-session-continuity.js'
 
+const owner = process.env.AGENTMUX_TEST_GUIDANCE_CORE ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_GUIDANCE_CORE)
+  : { AgentMuxClient: SourceClient, AgentMuxFileAgentSessionStore: SourceStore, AgentMuxError: SourceError }
+const { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxError } = owner as {
+  AgentMuxClient: typeof SourceClient; AgentMuxFileAgentSessionStore: typeof SourceStore; AgentMuxError: typeof SourceError }
+type AgentMuxClient = SourceClient
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; nativeObservation?: 'changed' | 'unknown' | 'ambiguous'; loseInputAck?: boolean; newUserBeforeAutomatic?: boolean; renderObservationUnavailable?: boolean; trigger?: 'startup' | 'mote-startup' | 'input'; reminder?: boolean; continuation?: boolean; handshake?: boolean; ready?: boolean } = {}) {
   const providerId = options.providerId ?? 'codex'
-  const h = await rpcOwnerFixture(['recipient'], undefined, () => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'native-original' } }))
-  const inner = h.client as any, provider = h.client.providers.get(providerId)
+  const h = await rpcOwnerFixture(['recipient'], { AgentMuxClient, AgentMuxFileAgentSessionStore }, () => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'native-original' } }))
+  const inner = h.client as any, originalProvider = h.client.providers.get(providerId)
   // This suite exercises the retained post-launch terminal owner. Native argv
   // carriers are separately verified before any terminal side effect.
-  ;(provider as any).catalog = { ...provider.catalog, promptDelivery: 'post-launch-only' }
+  const provider = { ...originalProvider, catalog: { ...originalProvider.catalog, promptDelivery: 'post-launch-only' as const }, prepareManagedLaunch: async (plan: any) => ({ plan }) }
+  h.client.providers.replace(provider)
   const status = inner.kernel.status.bind(inner.kernel), input = inner.kernel.input
   let ready = options.ready !== false, handshakeBytes = 0, loseInputAck = options.loseInputAck === true
   inner.kernel.status = vi.fn(async (id: string) => ({ ...await status(id),
@@ -50,8 +56,8 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; na
   }
   if (providerId === 'codex') {
     vi.spyOn(provider, 'planPromptInput').mockImplementation(prompt => ({ kind: 'single-phase', data: prompt + '\r' }))
-    vi.spyOn(provider, 'readPromptExecutionEvidence').mockImplementation(async () => ready ? { state: 'idle', id: 'native-idle', sourceId: 'native-file-original' } : null)
-    vi.spyOn(provider, 'verifyPromptExecutionTransport').mockResolvedValue(true)
+    vi.spyOn(provider as any, 'readPromptExecutionEvidence').mockImplementation(async () => ready ? { state: 'idle', id: 'native-idle', sourceId: 'native-file-original' } : null)
+    vi.spyOn(provider as any, 'verifyPromptExecutionTransport').mockResolvedValue(true)
   }
   const screen = vi.spyOn(inner.screenEvidence, 'wait')
   if (options.renderObservationUnavailable) screen.mockRejectedValue(new AgentMuxError('Private screen observation unavailable', 'AGENT_PROMPT_RENDER_TIMEOUT'))
@@ -102,8 +108,8 @@ async function anotherOwner(h: Awaited<ReturnType<typeof fixture>>) {
   inner.kernel.isConnected = () => true; inner.kernel.status = h.inner.kernel.status; inner.kernel.input = h.inner.kernel.input; inner.kernel.identity = h.inner.kernel.identity
   const provider = client.providers.get('codex')
   vi.spyOn(provider, 'planPromptInput').mockImplementation(prompt => ({ kind: 'single-phase', data: prompt + '\r' }))
-  vi.spyOn(provider, 'readPromptExecutionEvidence').mockResolvedValue({ state: 'idle', id: 'original-idle', sourceId: 'original-source' })
-  vi.spyOn(provider, 'verifyPromptExecutionTransport').mockResolvedValue(true)
+  vi.spyOn(provider as any, 'readPromptExecutionEvidence').mockResolvedValue({ state: 'idle', id: 'original-idle', sourceId: 'original-source' })
+  vi.spyOn(provider as any, 'verifyPromptExecutionTransport').mockResolvedValue(true)
   vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(1)
   return { client, inner, provider }
 }
@@ -279,14 +285,20 @@ describe('retained historical continuity combined input consumer', () => {
       h.inner.kernel.input = vi.fn(async (...args: any[]) => { await input(...args); throw new Error('lost original ACK') })
       h.setReady(true); await h.wake()
       await expect.poll(() => h.delivery().phase).toBe('unknown')
-      const frozen = h.delivery(), key = frozen.key
-      await h.client.ensureAgentContinuity({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, operationId: 'new-healthy-observation', trigger: 'startup' })
-      expect(h.client.agentSession('recipient').continuity!.operationId).toBe('new-healthy-observation')
+      const frozen = structuredClone(h.delivery()), key = frozen.key
+      const observed = await h.client.ensureAgentContinuity({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, operationId: 'new-healthy-observation', trigger: 'startup' })
+      expect(observed).toMatchObject({ kind: 'reattachable', evidence: { kind: 'run-running' }, continuity: { operationId: 'original-continuity' } })
+      expect(h.client.agentSession('recipient').continuity!.operationId).toBe('original-continuity')
+      expect(h.client.agentSession('recipient').continuityOperations!['new-healthy-observation']).toBeUndefined()
       await h.wake(); await h.wake()
       expect(h.inner.kernel.input).toHaveBeenCalledTimes(1)
       expect(submitted).toHaveBeenCalledTimes(1)
       expect(h.delivery().key).toEqual(key); expect(h.delivery().phase).toBe('unknown')
-      expect((await h.client.inspectAgentPromptSubmission(key))?.admission?.acknowledged).not.toBe(true)
+      const record = await h.client.inspectAgentPromptSubmission(key)
+      expect(record?.admission?.acknowledged).not.toBe(true)
+      expect(record?.admission?.intent?.prompt).toBe(composeAgentPrompt(frozen.continuation.text, frozen.reminder.text).text)
+      expect(h.delivery().reminder.text).toBe(frozen.reminder.text); expect(h.delivery().continuation.text).toBe(frozen.continuation.text)
+      expect((await h.client.readAgentSessions())[0]).toMatchObject({ run: key.expectedRun, continuity: { operationId: 'original-continuity' } })
     } finally { await h.close() }
   })
 
@@ -295,7 +307,8 @@ describe('retained historical continuity combined input consumer', () => {
     let next: AgentMuxClient | undefined
     try {
       const frozen = structuredClone(h.delivery())
-      await h.client.ensureAgentContinuity({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, operationId: 'healthy-shadow', trigger: 'startup' })
+      const observed = await h.client.ensureAgentContinuity({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, operationId: 'healthy-shadow', trigger: 'startup' })
+      expect(observed).toMatchObject({ kind: 'reattachable', evidence: { kind: 'run-running' }, continuity: { operationId: 'original-continuity' } })
       await h.client.dispose()
       const store = new AgentMuxFileAgentSessionStore(h.store.path)
       next = new AgentMuxClient({ store })
@@ -304,17 +317,21 @@ describe('retained historical continuity combined input consumer', () => {
       inner.kernel.isConnected = () => true; inner.kernel.status = h.inner.kernel.status; inner.kernel.input = h.inner.kernel.input; inner.kernel.identity = h.inner.kernel.identity
       const provider = next.providers.get('codex')
       vi.spyOn(provider, 'planPromptInput').mockImplementation(prompt => ({ kind: 'single-phase', data: prompt + '\r' }))
-      vi.spyOn(provider, 'readPromptExecutionEvidence').mockResolvedValue({ state: 'idle', id: 'original-idle', sourceId: 'original-source' })
-      vi.spyOn(provider, 'verifyPromptExecutionTransport').mockResolvedValue(true)
+      vi.spyOn(provider as any, 'readPromptExecutionEvidence').mockResolvedValue({ state: 'idle', id: 'original-idle', sourceId: 'original-source' })
+      vi.spyOn(provider as any, 'verifyPromptExecutionTransport').mockResolvedValue(true)
       vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(1)
       // Same production restore entry invoked after Runtime/Store observation on connect.
       inner.continuityInputs.restore(inner.registry.list())
       await expect.poll(() => next!.agentSession('recipient').continuityOperations!['original-continuity']!.recoveryDelivery?.phase).toBe('accepted')
       expect(h.input).toHaveBeenCalledTimes(1)
       const recovered = next.agentSession('recipient').continuityOperations!['original-continuity']!.recoveryDelivery!
-      expect(recovered.key).toEqual(frozen.key); expect(recovered.reminder.text).toBe(frozen.reminder.text)
-      expect(next.agentSession('recipient').continuity!.operationId).toBe('healthy-shadow')
-      expect((await next.inspectAgentPromptSubmission(frozen.key))?.admission?.acknowledged).toBe(true)
+      expect(recovered.key).toEqual(frozen.key); expect(recovered.reminder.text).toBe(frozen.reminder.text); expect(recovered.continuation.text).toBe(frozen.continuation.text)
+      expect(next.agentSession('recipient').continuity!.operationId).toBe('original-continuity')
+      expect(next.agentSession('recipient').continuityOperations!['healthy-shadow']).toBeUndefined()
+      const record = await next.inspectAgentPromptSubmission(frozen.key)
+      expect(record?.admission?.acknowledged).toBe(true)
+      expect(record?.admission?.intent?.prompt).toBe(composeAgentPrompt(frozen.continuation.text, frozen.reminder.text).text)
+      expect((await next.readAgentSessions())[0]).toMatchObject({ run: frozen.key.expectedRun, continuity: { operationId: 'original-continuity' } })
     } finally { await next?.dispose(); await h.close() }
   })
 

@@ -29,7 +29,7 @@ async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'posit
   let daemonError = ''; daemon.stderr!.on('data', bytes => { daemonError += String(bytes) })
   cleanups.push(async () => {
     if (daemon.exitCode === null && daemon.signalCode === null) { const exited = once(daemon, 'exit'); daemon.kill('SIGTERM'); await exited }
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 })
   })
   await Promise.race([once(daemon.stdio[3]!, 'data'), once(daemon, 'exit').then(() => { throw new Error(daemonError) })])
   const provider = core.defineAgentProvider({ catalog: { id: 'resume-process', label: 'Controlled resume process', executable: process.execPath,
@@ -51,6 +51,9 @@ async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'posit
     for (const value of clients.slice().reverse()) {
       if (value.inner.kernel.isConnected()) for (const run of await value.nativeList()) if (run.state.type === 'running') await value.inner.kernel.stop(await value.inner.kernel.prepareStop(run.runId))
       await value.client.dispose()
+      // Runtime exit callbacks can already be queued for this private Session.
+      // Drain that original metadata owner before deleting its fixture files.
+      await value.inner.registry.enqueue('original-session', async () => {})
     }
   })
   const ended = await original.nativeStart({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
@@ -87,7 +90,7 @@ it('freezes direct native resume input and exact plan before Start with no autom
     expect(op).toMatchObject({ trigger: 'input', requestDigest: expect.stringMatching(/^[a-f0-9]{64}$/u), recoveryInputs: { reminder: '', continuation: '' },
       previousRun: f.previous.run, nativeTarget: f.previous.nativeHandle, launchInput: { state: 'prepared', input: { prompt: f.request.prompt, agentMuxNote: f.request.agentMuxNote,
         submissionId: `launch-prompt:${input.operationKey}` }, launchPlan: { program: '/usr/bin/env' } } })
-    expect(op.launchInput.prompt).toBe(input.args.at(-1)); expect(input.args.at(-2)).toBe('original-native')
+    expect(op!.launchInput!.prompt).toBe(input.args.at(-1)); expect(input.args.at(-2)).toBe('original-native')
     return await start(input)
   })
   const resumed = await f.resume()
@@ -139,7 +142,7 @@ it('does not claim a foreign lifecycle or repeat an unknown Start without a matc
   const f = await fixture()
   f.start.mockRejectedValueOnce(new core.AgentMuxError('Original Start unknown', 'CONTROL_UNAVAILABLE'))
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
-  const originalStart = f.start.mock.calls[0]![0]
+  const originalStart: any = f.start.mock.calls[0]![0]
   const foreign = await f.nativeStart({ ...originalStart, operationKey: 'foreign-operation', env: { ...originalStart.env, AGENTMUX_LIFECYCLE_OPERATION_ID: 'foreign-operation' } })
   expect(foreign.lifecycleOperationId).toBe('foreign-operation')
   await expect(f.resume()).rejects.toMatchObject({ code: 'AGENT_RESUME_UNCONFIRMED' })
@@ -178,7 +181,9 @@ it('delivers post-launch-only direct input once through the original frozen subm
   const f = await fixture('post-launch-only'), resumed = await f.resume()
   const original = resumed.continuity!.launchInput!
   expect(original).toMatchObject({ delivery: 'post-launch', state: 'terminal-confirmed', input: { submissionId: expect.stringMatching(/^launch-prompt:/u) } })
-  await vi.waitFor(async () => expect((await f.replay(resumed)).replaceAll('\r\n', '\n')).toContain('INPUT:' + original.prompt))
+  // PTY reads can split a long payload anywhere. The controlled process marks
+  // each received chunk, so remove those marks before checking the exact wire.
+  await vi.waitFor(async () => expect((await f.replay(resumed)).replaceAll('\r\n', '\n').replaceAll('INPUT:', '')).toContain(original.prompt))
   expect((await f.resume()).run).toEqual(resumed.run)
   expect((await f.client.inspectAgentPromptSubmission(original.key!))?.admission).toMatchObject({ acknowledged: true })
   f.noReplacement(1)

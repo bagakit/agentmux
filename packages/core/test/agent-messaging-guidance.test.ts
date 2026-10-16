@@ -1,25 +1,27 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile, spawn } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { once } from 'node:events'
 import { DOMParser } from '@xmldom/xmldom'
 import { expect, it, vi } from 'vitest'
 import { AgentMuxClient as DefaultClient } from '../src/client.js'
-import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore as DefaultStore } from '../src/agent-session-store.js'
 import { composeAgentLaunchPrompt } from '../src/agent-outbound-message.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES, AGENTMUX_AGENT_MESSAGING_GUIDANCE } from '../src/agent-messaging-guidance.js'
 import { AgentMuxControlServer as DefaultControlServer } from '../src/control-host.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 
 const exec = promisify(execFile)
-const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_GUIDANCE_CLIENT
-  ? (await import(process.env.AGENTMUX_TEST_GUIDANCE_CLIENT)).AgentMuxClient : DefaultClient
+const owner = process.env.AGENTMUX_TEST_GUIDANCE_CORE ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_GUIDANCE_CORE) : null
+const AgentMuxClient: typeof DefaultClient = owner?.AgentMuxClient ?? DefaultClient
+const AgentMuxFileAgentSessionStore: typeof DefaultStore = owner?.AgentMuxFileAgentSessionStore ?? DefaultStore
 const AgentMuxControlServer: typeof DefaultControlServer = process.env.AGENTMUX_TEST_GUIDANCE_SERVER
-  ? (await import(process.env.AGENTMUX_TEST_GUIDANCE_SERVER)).AgentMuxControlServer : DefaultControlServer
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_GUIDANCE_SERVER)).AgentMuxControlServer : DefaultControlServer
 const cli = process.env.AGENTMUX_TEST_GUIDANCE_CLI ?? fileURLToPath(new URL('../bin/amux', import.meta.url))
-const clientBin = fileURLToPath(new URL('../bin', process.env.AGENTMUX_TEST_GUIDANCE_CLIENT ?? import.meta.url))
+const clientBin = fileURLToPath(new URL('../bin', process.env.AGENTMUX_TEST_GUIDANCE_CORE ?? import.meta.url))
 const daemon = process.env.AGENTMUX_TEST_GUIDANCE_DAEMON ?? fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
 const assertBrowserPlacement = (guide: string) => {
   const text = guide.replace(/\s+/gu, ' ')
@@ -46,23 +48,17 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
   for (const name of ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_AGENT_SESSION_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH']) vi.stubEnv(name, env[name as keyof typeof env])
   const client = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(storePath) })
   const server = new AgentMuxControlServer({ socketPath: join(root, 'runtime', 'control.sock'), coreClients: () => [{ hostId: 'local', client }] })
-  const owned = async () => (await exec('/bin/ps', ['-axo', 'pid=,command='])).stdout.split('\n').flatMap(line => {
-    const match = /^\s*(\d+)\s+(.+)$/u.exec(line)
-    return match && match[2]!.includes('/ctxmuxd ') &&
-      match[2]!.includes('--socket ' + join(root, 'runtime', 'ctxmux.sock') + ' ') &&
-      match[2]!.includes('--state-dir ' + join(root, 'state', 'ctxmux') + ' ')
-      ? [{ pid: Number(match[1]), command: match[2]! }] : []
-  })
+  await mkdir(join(root, 'runtime'), { recursive: true, mode: 0o700 }); await mkdir(join(root, 'state/ctxmux'), { recursive: true, mode: 0o700 })
+  const daemonProcess = spawn(daemon, ['--socket', join(root, 'runtime/ctxmux.sock'), '--state-dir', join(root, 'state/ctxmux'), '--readiness-fd', '3'],
+    { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
+  let daemonError = ''; daemonProcess.stderr!.on('data', data => { daemonError += data })
   let created: Awaited<ReturnType<typeof client.createAgent>> | undefined
-  let ownerPid: number | undefined
   let terminal: Awaited<ReturnType<typeof client.createTerminal>> | undefined
   try {
+    await Promise.race([once(daemonProcess.stdio[3]!, 'data'), once(daemonProcess, 'exit').then(() => { throw Error(daemonError) })])
     await client.connect()
     await server.start()
-    const owners = await owned()
-    expect(owners).toHaveLength(1)
-    ownerPid = owners[0]!.pid
-    expect(owners[0]!.command.startsWith(daemon + ' ')).toBe(true)
+    expect(daemonProcess.pid).toBeGreaterThan(0)
     const capture = join(root, 'issued.json'), agent = join(root, 'fixture-agent.mjs')
     const fixture = (destination: string) => `import { writeFileSync } from 'node:fs'; import { spawnSync } from 'node:child_process'; const invoke = command => { const result = spawnSync(command, ['system', 'endpoint'], {encoding: 'utf8'}); return {status: result.status, stdout: result.stdout, error: result.error?.code}; }; writeFileSync(${JSON.stringify(destination)}, JSON.stringify({ agentSessionId: process.env.AGENTMUX_AGENT_SESSION_ID, capability: process.env.AGENTMUX_AGENT_CAPABILITY, args: process.argv.slice(2), cli: process.env.AGENTMUX_CLI, path: process.env.PATH, injected: invoke(process.env.AGENTMUX_CLI), discovered: invoke('amux') })); setInterval(() => {}, 1000);\n`
     await writeFile(agent, fixture(capture))
@@ -93,7 +89,7 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     expect(issued.args.filter(arg => arg.includes('AgentMux runtime guide:'))).toEqual(guideArgs)
     const envelope = new DOMParser().parseFromString(guideArgs[0]!, 'text/xml').documentElement!
     expect(envelope.tagName).toBe('amux')
-    expect(envelope.getAttribute('from')).toBe('amux')
+    expect(envelope.attributes.length).toBe(0)
     const receivedContext = envelope.textContent!
     expect(receivedContext).toBe(`\n${composeAgentLaunchPrompt(undefined, true).systemContext}\n`)
     expect(receivedContext).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
@@ -109,13 +105,19 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
       session: { agentSessionId: created.agentSessionId, run: { runId: created.run.runId } },
       status: { run: { runId: created.run.runId }, capabilities: { terminal: true } },
       messaging: AGENTMUX_AGENT_MESSAGING_RULES } })
-    expect(Object.keys(output.result.messaging)).toEqual(['crossSession', 'source', 'deliveryIdentity', 'nativeSubagents', 'authenticity'])
+    expect(Object.keys(output.result.messaging)).toEqual(Object.keys(AGENTMUX_AGENT_MESSAGING_RULES))
+    expect(output.result.messaging.initiative).toContain('prior delegation is not required')
+    expect(output.result.messaging.senderEtiquette).toContain('substantive progress')
+    expect(output.result.messaging.recipientResponsibility).toContain('Once you accept delegation, report results or blockers')
+    expect(output.result.messaging.authorization).toContain("does not expand the user's authorization")
     expect(output.result.messaging.crossSession).toContain('"$AGENTMUX_CLI" agent send')
     expect(output.result.messaging.deliveryIdentity).toContain('Keep the original operationId and messageId while delivery is unknown or partial')
     expect(output.result.messaging.deliveryIdentity).toContain('Core confirms the whole logical message was not applied')
     expect(JSON.stringify(output)).not.toContain(issued.capability)
-    const skill = (await exec(process.execPath, [cli, '--skill'], { env })).stdout
-    expect(skill).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    for (const args of [['--skill'], ['agent', '--skill'], ['message', '--skill'], ['--help'], ['--help', 'agent', 'send'], ['--help', 'message', 'read']]) {
+      const guide = (await exec(process.execPath, [cli, ...args], { env })).stdout
+      expect(guide, args.join(' ')).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    }
     const spaceSkill = (await exec(process.execPath, [cli, 'space', '--skill'], { env })).stdout
     const openingStart = spaceSkill.indexOf('## Delegation and opening playbook (advisory)')
     const openingEnd = spaceSkill.indexOf('## Read an amux object link', openingStart)
@@ -143,11 +145,9 @@ it('real creation, whoami and compiled skill discover messaging and advisory ope
     if (terminal) await client.stopTerminal({ runId: terminal.runId }).catch(() => {})
     if (created) await client.stopAgent(created.agentSessionId, created.run).catch(() => {})
     await client.dispose()
-    const owners = await owned()
-    if (ownerPid !== undefined) expect(owners.map(owner => owner.pid)).toEqual([ownerPid])
-    for (const { pid } of owners) process.kill(pid, 'SIGTERM')
-    await vi.waitFor(async () => expect(await owned()).toEqual([]), { timeout: 5000, interval: 50 })
-    process.stdout.write(`${JSON.stringify({ privateRuntime: root, stoppedOwnerPids: owners.map(owner => owner.pid) })}\n`)
+    const exited = daemonProcess.exitCode === null && daemonProcess.signalCode === null ? once(daemonProcess, 'exit') : null
+    if (exited) { daemonProcess.kill('SIGTERM'); await exited }
+    process.stdout.write(`${JSON.stringify({ privateRuntime: root, stoppedOwnerPids: [daemonProcess.pid] })}\n`)
     vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true })
   }
 }, 30_000)

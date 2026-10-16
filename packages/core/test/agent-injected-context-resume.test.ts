@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -5,7 +6,7 @@ import { join } from 'node:path'
 import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { composeAgentPrompt } from '../src/agent-outbound-message.js'
+import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../src/types.js'
 const Client: typeof DefaultClient = process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT)).AgentMuxClient : DefaultClient
@@ -16,7 +17,7 @@ it('public native resume preserves the original request and separates host conte
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const previous: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-agent', providerId: 'claude', executorId: 'claude',
-    hostId: 'local', workspacePath: root, run: { runId: 'old-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1,
+    hostId: 'local', workspacePath: root, run: { runId: 'old-run' }, retiredRuns: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     hookBindingId: 'private-binding', hookToken: 'private-token', nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'original-native' } }
   await store.compareAndSwap(null, previous)
   const core = new Client({ store })
@@ -26,7 +27,7 @@ it('public native resume preserves the original request and separates host conte
   const run = (id: string) => ({ runId: id, lifecycleOperationId: null, program: 'claude', args: [], workspacePath: root,
     pid: id === 'old-run' ? null : 321, state: id === 'old-run' ? { type: 'exited', code: 0, signal: null } : { type: 'running' },
     cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 })
-  const start = vi.fn(async () => run('new-run')), stop = vi.fn(), input = vi.fn()
+  const start = vi.fn(async (_spec: { args: string[] }) => run('new-run')), stop = vi.fn(), input = vi.fn()
   Object.assign(inner.kernel, { isConnected: () => true, identity: () => ({ daemonInstanceId: 'private-daemon', protocolVersion: 18, buildIdentity: 'private-io' }),
     status: async (id: string) => run(id), start, stop, input })
   inner.hookServer.isRunning = () => true
@@ -39,9 +40,9 @@ it('public native resume preserves the original request and separates host conte
     const resumed = await core.resumeAgent({ agentSessionId: previous.agentSessionId, operationId: 'original-resume', prompt, agentMuxNote })
     expect(resumed.run).toEqual({ runId: 'new-run' }); expect(resumed.nativeHandle).toEqual(previous.nativeHandle)
     expect(start).toHaveBeenCalledTimes(1)
-    expect(start.mock.calls[0]![0].args).toContain(composeAgentPrompt(prompt, agentMuxNote).text)
+    expect(start.mock.calls[0]![0].args).toContain(composeAgentResumePrompt(prompt, agentMuxNote).text)
     expect((await new AgentMuxFileAgentSessionStore(store.path).loadTimeline(previous.agentSessionId)).items.map(item => [item.kind, item.source, item.content])).toEqual([
-      ['system_message', 'agentmux', agentMuxNote], ['user_message', 'user', prompt]
+      ['system_message', 'agentmux', composeAgentResumePrompt(prompt, agentMuxNote).systemContext], ['user_message', 'user', prompt]
     ])
     expect(stop.mock.calls).toEqual([]); expect(input.mock.calls).toEqual([])
   } finally { await core.dispose(); vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) }
