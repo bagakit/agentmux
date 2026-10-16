@@ -65,6 +65,8 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       await cp(join(root, 'apps/desktop/src'), join(copy, 'apps/desktop/src'), { recursive: true })
       await cp(join(root, 'apps/desktop/browser-extension'), join(copy, 'apps/desktop/browser-extension'), { recursive: true })
       await cp(join(root, 'apps/desktop/test/helpers'), join(copy, 'apps/desktop/test/helpers'), { recursive: true })
+      await mkdir(join(copy, 'apps/desktop/scripts/lib'), { recursive: true })
+      await cp(join(root, 'apps/desktop/scripts/lib/fixture-values.mjs'), join(copy, 'apps/desktop/scripts/lib/fixture-values.mjs'))
       await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
       await symlink(join(root, 'apps/desktop/node_modules'), join(copy, 'apps/desktop/node_modules'))
       await writeFile(join(copy, 'package.json'), '{"type":"module"}\n')
