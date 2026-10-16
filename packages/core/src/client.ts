@@ -2073,7 +2073,7 @@ export class AgentMuxClient {
       if (existing) return existing
       throw new AgentMuxError('The original creation has no confirmed Session or prepared start. Inspect the same operation without replaying.', 'AGENT_CREATION_UNKNOWN')
     }
-    this.requireConnected()
+    await this.connectRuntime()
     const pending = await this.registry.claimCreate(agentSessionId, correlation.operationId, correlation.preparedCreation.creation.intentDigest)
     if (!pending) throw new AgentMuxError('The original creation changed while inspecting. Read the same operation again without replaying.', 'AGENT_CREATION_UNCONFIRMED')
     return this.projectSession(await this.completePreparedCreate(pending, await this.kernel.list()))
@@ -4173,7 +4173,12 @@ export class AgentMuxClient {
       const session = await this.completePreparedCreate(pending, await this.kernel.list())
       return { session: this.projectSession(session), creation: session.creation!, promptConfirmed: false }
     }
-    if (forkSource) assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
+    if (forkSource) {
+      // A new fork needs only its exact source adopted. Original receipts and prepared
+      // operations above remain readable even after that source later changes.
+      await this.resolveRawAgentSession(forkSource.agentSessionId)
+      assertAgentForkSource(forkSource, await this.currentStoredAgentSession(forkSource.agentSessionId), input)
+    }
     if (nativeResumeSource) {
       const managed = await this.managedNativeSessions(nativeResumeSource)
       if (managed.length) throw new AgentMuxError('This native conversation already has Core ownership. Continue its original Session; no Run was started.',
