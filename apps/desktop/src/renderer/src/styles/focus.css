@@ -57,7 +57,8 @@
 .focus-project-lanes__row[data-recovery='removed'] { border-top-style: dashed; }
 .focus-project-lanes__axis:hover { color: var(--text); }
 .focus-project-lanes__track { min-width: 0; overflow: hidden; }
-.focus-project-lanes__groups { min-width: 0; display: flex; flex-wrap: wrap; align-items: flex-start; padding: var(--sp-1); gap: var(--sp-1); }
+.focus-project-lanes__groups { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; padding: var(--sp-1); gap: var(--sp-1); }
+.focus-project-lanes__groups > .focus-context-group { grid-column: 1; margin-inline-start: var(--focus-group-offset, 0px); }
 .focus-project-lanes__groups .focus-context-card { content-visibility: auto; contain-intrinsic-block-size: auto 52px; }
 .focus-context-group { min-width: min(100%, 180px); flex: 0 0 auto; width: min(100%, var(--focus-group-width, 180px)); }
 .focus-context-group__cards { display: grid; align-content: start; gap: var(--sp-1); }
