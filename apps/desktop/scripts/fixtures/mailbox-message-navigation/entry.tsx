@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { flushSync } from 'react-dom'
 import type { AgentSessionHistoryPage, AgentSessionHistoryObservation } from '@agentmux/core'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -14,7 +15,7 @@ let pending: { resolve(page: AgentSessionHistoryPage): void; reject(error: Error
 let delayNext = false
 function page(): AgentSessionHistoryPage {
   return { agentSessionId: base.sessionId, source, items: [
-    { id: 'same', kind: 'user-message', contentParts: [{ kind: 'text', text: body }], recordedAt: 1 },
+    { id: 'same', kind: 'user-message', contentParts: [{ kind: 'text', text: body }], recordedAt: _tailFixtureEpoch(0, 0, 1) },
     ...Array.from({ length: 20 }, (_, i) => ({ id: 'native-response-' + i, kind: 'assistant-message' as const,
       contentParts: [{ kind: 'text' as const, text: 'A later recorded response ' + (i + 1) + '.\nA second readable line in this response.' }], recordedAt: i + 2 }))
   ] }
@@ -30,7 +31,6 @@ api.sessions.observeHistory = async (_control, listener) => {
   return { source, dispose() { if (!disposed) { disposed = true; ++disposals; observations.delete(listener) } } }
 }
 api.sessions.submitPrompt = async (...args) => { dispatches.push(args); throw new Error('Private navigation must not submit prompts') }
-api.sessions.submitMessage = async (...args) => { dispatches.push(args); throw new Error('Private navigation must not submit messages') }
 const probe = {
   sessionId: base.sessionId, body,
   seed(appearance: 'dark' | 'light', draft: string) {
@@ -38,7 +38,7 @@ const probe = {
     observations = new Set(); readCalls = []; acquisitions = 0; disposals = 0; dispatches = []; pending = null; delayNext = false
     flushSync(() => useAppStore.setState({ timelines: { [base.sessionId]: { agentSessionId: base.sessionId, revision: 2, items: [
       { id: 'same', agentSessionId: base.sessionId, kind: 'user_message', status: 'complete', source: 'user',
-        authorAgentSessionId: 'private-peer', title: 'Recorded input', content: body, createdAt: 100, updatedAt: 100 },
+        authorAgentSessionId: 'private-peer', title: 'Recorded input', content: body, createdAt: _tailFixtureEpoch(0, 0, 100), updatedAt: _tailFixtureEpoch(0, 0, 100) },
       ...Array.from({ length: 32 }, (_, i) => ({ id: 'later-response-' + i, agentSessionId: base.sessionId,
         kind: 'assistant_message' as const, status: 'complete' as const, source: 'native-hook' as const,
         content: 'Later captured response ' + (i + 1) + '.\nThe conversation retains its original recorded ordering.', createdAt: 101 + i, updatedAt: 101 + i }))

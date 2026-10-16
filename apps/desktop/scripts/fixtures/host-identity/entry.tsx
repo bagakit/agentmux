@@ -21,7 +21,7 @@ api.workspaces.listBranches = async id=>{(window as any).hostIdentityBranchReads
 api.scratch.listTopics = async()=>[]
 const base=(await api.sessions.snapshot()).sessions[0]!
 const sessions=config.workspaces.map((w,i)=>({...base,id:`preview-session-${i}`,hostId:w.hostId,workspacePath:w.path,label:'Review host identity',processState:'running' as const,status:{state:'working' as const,source:'native-hook' as const,observedAt:Date.now(),detail:'Reading project files'},control:{kind:'agent' as const,hostId:w.hostId,agentSessionId:`preview-session-${i}`,run:{runId:`preview-run-${i}`}}}))
-for(const method of ['launchAgent','launchTerminal','write','paste','stop','submitPrompt','submitMessage']) (api.sessions as any)[method]=async()=>{(window as any).hostIdentityRuntimeAttempts++;throw new Error('Capture preview forbids Runtime operations')}
+for(const method of ['launchAgent','launchTerminal','write','paste','stop','submitPrompt']) (api.sessions as any)[method]=async()=>{(window as any).hostIdentityRuntimeAttempts++;throw new Error('Capture preview forbids Runtime operations')}
 const projects=projectWorkspaces(config.workspaces)
 useAppStore.setState({config,sessions,loading:false,mainSurface:'agents',activeWorkspaceId:'preview-0',localHome:_hygiene_fixturePath("preview"),projectGroups:[{groupId:'preview-group',name:'Release devices',projectIds:projects.map(p=>p.id)}],collapsedProjectGroups:{}})
 const root=createRoot(document.getElementById('root')!)

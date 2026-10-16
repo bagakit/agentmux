@@ -1,3 +1,4 @@
+import { renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
 import assert from 'node:assert/strict'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
@@ -82,7 +83,6 @@ ipcMain.handle('space-proof:request', async (_event, operation, ...args) => {
     case 'paste': return runtime.paste(args[0], args[1], args[2])
     case 'respond': return runtime.respondInteraction(args[0], args[1])
     case 'submit': return runtime.submitPrompt(args[0], args[1], args[2], args[3], undefined, args[4], args[5])
-    case 'submit-message': return runtime.submitMessage(args[0], args[1])
     case 'resolve': return runtime.resolveSession(args[0], config)
     case 'refresh': return runtime.refresh(args[0], config)
     case 'stop': throw new Error('No product path in this proof is authorized to stop a healthy Agent')
@@ -334,7 +334,9 @@ app.whenReady().then(async () => {
       const send = await cli(['agent', 'send', '--to-session', opened.agent.agentSessionId, '--text', 'Private follow-up task', '--message-id', 'private-followup'])
       assert.equal(send.agentSessionId, opened.agent.agentSessionId)
       assert.equal(send.delivery.state, 'delivered')
-      const expectedPrompt = '[Message from unverified local process]\nPrivate follow-up task'
+      const original = await client().readMessage({ messageId: 'private-followup' })
+      assert.ok(original)
+      const expectedPrompt = renderAgentMuxMessageEnvelope(original.envelope)
       const expectedFrame = `codex-submit:${expectedPrompt}:accepted\n`
       const followupDeadline = Date.now() + 15000
       let followup: any
@@ -345,18 +347,13 @@ app.whenReady().then(async () => {
       const output = followup.replay.map((chunk: any) => Buffer.from(chunk.dataBytes).toString('utf8')).join('').replaceAll('\r\n', '\n')
       assert.equal(output.split(expectedFrame).length - 1, 1, 'Exactly one fresh accepted task frame')
       assert.equal(followup.run.runId, opened.agent.runId)
-      const submitted = calls.slice(beforeFollowupCalls).filter(one => one.operation === 'submit-message')
-      assert.equal(submitted.length, 1)
-      assert.deepEqual(submitted[0]!.args[0], { kind: 'agent', hostId: 'local', agentSessionId: opened.agent.agentSessionId, run: { runId: opened.agent.runId } })
-      const submittedMessage = submitted[0]!.args[1] as any
-      assert.equal(submittedMessage.envelope.messageId, 'private-followup')
-      assert.equal(submittedMessage.envelope.body, 'Private follow-up task')
-      assert.equal(submittedMessage.envelope.recipientSessionId, opened.agent.agentSessionId)
-      assert.equal(submittedMessage.envelope.recipientRunId, opened.agent.runId)
-      assert.deepEqual(submittedMessage.condition.expectedRun, { runId: opened.agent.runId })
-      assert.equal(calls.slice(beforeFollowupCalls).filter(one => one.operation === 'submit').length, 0, 'Public messaging must use the authenticated Runtime entry')
+      const originalMessage = await client().readMessage({ messageId: 'private-followup' })
+      assert.equal(originalMessage?.envelope.body, 'Private follow-up task')
+      assert.equal(originalMessage?.envelope.recipientSessionId, opened.agent.agentSessionId)
+      assert.equal(originalMessage?.envelope.recipientRunId, opened.agent.runId)
+      assert.equal(calls.slice(beforeFollowupCalls).filter(one => one.operation === 'submit').length, 0, 'Public messaging must reach its original Core owner')
       result.publicSend = { agentSessionId: opened.agent.agentSessionId, runId: opened.agent.runId, send,
-        beforeOutput: beforeFollowup.latestOutputBytes, rawNewOutput: output, exactSubmit: submitted[0],
+        beforeOutput: beforeFollowup.latestOutputBytes, rawNewOutput: output, originalMessage,
         acceptedInputBytes: followup.run.acceptedInputBytes, observedExactBodyInRawReplay: true }
       registrationFault = true
       const retained = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--project', project.projectId, '--new-zone', '--worktree',

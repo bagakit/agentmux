@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -26,7 +27,7 @@ import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWork
 import { gitDiffIdentity, initialWorkbenchRegionId, fileTabId, createWorkbenchTab, addWorkbenchRegion, type GitDiffWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
 import { regionDiffRequestIds } from '../src/renderer/src/lib/file-document-bookkeeping'
-import { inspectWorkbenchControlTab, messageTargetCandidates } from '../src/renderer/src/lib/control'
+import { inspectWorkbenchControlTab } from '../src/renderer/src/lib/control'
 import { collectSurfaceMemoryCandidates } from '../src/renderer/src/lib/surface-memory-budget-candidates'
 
 const workspace: WorkspaceRecord = { id: 'compare-workspace', name: 'Private comparison', hostId: 'local', path: _hygiene_fixturePath("private/compare"), kind: 'folder' }
@@ -337,14 +338,14 @@ it('does not accept an old file diff after close and the same deterministic file
   expect(regionDiffRequestIds.has(regionId)).toBe(false)
 })
 
-it('projects a mixed comparison and healthy Agent Tab while keeping the real Agent as its sole message candidate', () => {
+it('projects a mixed comparison and healthy Agent Tab with their original identities', () => {
   const comparison = descriptor()
   useAppStore.getState().openBranchDiff(workspace.id, comparison)
   const { id, regionId } = owner(comparison)
   const session: SessionSnapshot = {
     id: 'known-agent', kind: 'agent', providerId: 'codex', executorId: 'private', hostId: 'local', workspacePath: workspace.path,
-    label: 'Known healthy Agent', createdAt: 1, updatedAt: 1, processState: 'running', latestOutputBytes: 0,
-    status: { state: 'working', source: 'native-hook', observedAt: 1 },
+    label: 'Known healthy Agent', createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), processState: 'running', latestOutputBytes: 0,
+    status: { state: 'working', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 1) },
     capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: 'known-agent', run: { runId: 'known-run' } }
   }
@@ -354,6 +355,5 @@ it('projects a mixed comparison and healthy Agent Tab while keeping the real Age
   useAppStore.setState({ tabs: { [id]: tab }, sessions: [session] })
   const state = useAppStore.getState(), inspected = inspectWorkbenchControlTab(state, tab)
   expect(inspected.regions.map(region => [region.kind, region.regionId])).toEqual([['view', regionId], ['agent', 'known-agent-region']])
-  expect(messageTargetCandidates(state, id)).toEqual([{ agentSessionId: session.id, regionIds: ['known-agent-region'] }])
   expect(state.sessions).toEqual([session])
 })

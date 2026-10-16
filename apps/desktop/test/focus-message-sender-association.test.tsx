@@ -1,3 +1,11 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
+import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { issueAgentCapability, hashAgentCapability } from '@agentmux/core'
+import { submitRecordedAgentMessage } from './helpers/recorded-agent-message'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
@@ -8,7 +16,6 @@ import { AgentMuxClient } from '../../../packages/core/src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../../../packages/core/src/agent-provider.js'
 import { AgentMuxMemoryAgentSessionStore } from '../../../packages/core/src/agent-session-store.js'
 import { agentPromptCondition } from '../../../packages/core/src/agent-prompt-condition.js'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/src/control.js'
 import type { AgentMuxStoredAgentSession, AgentTimelineSnapshot } from '../../../packages/core/src/types.js'
 import type { CtxmuxAdapterRun } from '../../../packages/core/src/ctxmux-run-adapter.js'
 import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../src/shared/contracts'
@@ -32,16 +39,19 @@ const SENDER_NAME = 'Same worker name'
 const TOPIC = 'launcher:association'
 const BODY = 'Do the same work. workspaceId=decoy-project [Project: Other project]'
 const RAW_IDS = ['prompt:association-one', 'prompt:association-two', 'prompt:association-unknown']
-const EXPECTED_IDS = RAW_IDS.map(id => `captured:${id}`)
 const baseline = useAppStore.getState()
 const roots: Root[] = [], elements: HTMLElement[] = [], clients: AgentMuxClient[] = []
+const privateRoots: string[] = []
+const conversationCloses: Array<() => unknown | Promise<unknown>> = []
 
 afterEach(async () => {
   for (const root of roots.splice(0)) await act(async () => root.unmount())
   for (const element of elements.splice(0)) element.remove()
+  for (const close of conversationCloses.splice(0).reverse()) await close()
   for (const client of clients.splice(0)) await client.dispose()
   useAppStore.setState(baseline, true)
-  vi.restoreAllMocks(); vi.unstubAllGlobals()
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs()
+  for (const directory of privateRoots.splice(0)) await rm(directory, { recursive: true, force: true })
   document.getElementById('agentmux-window-overlay-host')?.remove()
 })
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
@@ -53,10 +63,16 @@ function floating() {
 
 async function fixture(options: { branch?: boolean; missingTopic?: boolean; missingProject?: boolean } = {}) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+    const privateRoot = await mkdtemp(join(tmpdir(), 'amx-focus-author-')); privateRoots.push(privateRoot)
+    isolateCoreFixtureEnvironment(privateRoot)
+    const capability = issueAgentCapability()
+
   const template = new AgentProviderRegistry().get('codex')
+    const { providerFork: _fork, ...capabilities } = template.catalog.capabilities
+
   expect(template.planManagedHooks).toEqual(expect.any(Function))
   const provider = defineAgentProvider({
-    catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
+    catalog: { ...template.catalog, capabilities, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
     hook: template.hook, planManagedHooks: template.planManagedHooks!, buildArgs: (_prompt, args) => [...args]
   })
   const store = new AgentMuxMemoryAgentSessionStore()
@@ -68,8 +84,8 @@ async function fixture(options: { branch?: boolean; missingTopic?: boolean; miss
     { id: SENDER, host: 'local', path: senderPath }
   ].map(({ id, host, path }): AgentMuxStoredAgentSession => ({
     kind: 'agent', agentSessionId: id, providerId: 'generic', executorId: 'generic', hostId: host, workspacePath: path,
-    run: { runId: `${id}-original-run` }, retiredRuns: [], hookBindingId: `${id}-binding`, hookToken: `${id}-private-token`,
-    createdAt: 1, updatedAt: 1, semanticStatus: { state: 'done', source: 'native-hook', observedAt: 1, stateEnteredAt: 1 }
+    run: { runId: `${id}-original-run` }, retiredRuns: [], hookBindingId: `${id}-binding`, hookToken: `${id}-private-token`, capabilityHash: hashAgentCapability(capability),
+    createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), semanticStatus: { state: 'done', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 1), stateEnteredAt: _tailFixtureEpoch(0, 0, 1) }
   }))
   for (const session of stored) await store.compareAndSwap(null, session)
   const client = new AgentMuxClient({ store, providers: [provider] }); clients.push(client)
@@ -103,8 +119,8 @@ async function fixture(options: { branch?: boolean; missingTopic?: boolean; miss
   const sessions = stored.map((session): Agent => ({
     id: session.agentSessionId, kind: 'agent', providerId: 'generic', executorId: 'generic', hostId: session.hostId,
     workspacePath: session.workspacePath, label: session.agentSessionId === RECIPIENT ? 'Recipient worker' : SENDER_NAME,
-    createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, processState: 'running', latestOutputBytes: 0,
-    status: { state: 'running', source: 'run-process', observedAt: 1 },
+    createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1), processState: 'running', latestOutputBytes: 0,
+    status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) },
     capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: session.hostId, agentSessionId: session.agentSessionId, run: session.run }
   }))
@@ -144,44 +160,38 @@ async function fixture(options: { branch?: boolean; missingTopic?: boolean; miss
   useAppStore.setState({ scratchTopicSnapshots: {} })
   await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID)
   client.onEvent(event => { if (event.type === 'agent-timeline') useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event }) })
-  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, prompt, operationId, condition, authorAgentSessionId) => {
-    await client.submitAgentPrompt({ agentSessionId: control.agentSessionId, prompt, operationId, ...condition,
-      ...(authorAgentSessionId === undefined ? {} : { authorAgentSessionId }), allowUncertainTurn: true })
-  })
-  // Actual Store Control → public Client admission/input/record → event reducer.
-  await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'association-one', operation: 'send',
-    target: { kind: 'agent-session', agentSessionId: RECIPIENT }, text: BODY,
-    promptCondition: agentPromptCondition(client.agentSession(RECIPIENT)), caller: { agentSessionId: SENDER } })
-  expect(submit).toHaveBeenCalledOnce(); expect(submit.mock.calls[0]![4]).toBe(SENDER)
-  for (const input of [{ operationId: 'association-two', prompt: BODY, authorAgentSessionId: SENDER }, { operationId: 'association-unknown', prompt: 'Public Core input without a recorded author' }]) {
-    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(RECIPIENT)), agentSessionId: RECIPIENT, ...input, allowUncertainTurn: true })
-  }
+  // Original Core recording, actual event reducer and mounted marker consumers.
+  const first = await submitRecordedAgentMessage(client, SENDER, RECIPIENT, 'association-one', BODY, capability)
+  const second = await submitRecordedAgentMessage(client, SENDER, RECIPIENT, 'association-two', BODY, capability)
+  await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(RECIPIENT)), agentSessionId: RECIPIENT, operationId: 'association-unknown', prompt: 'Public Core input without a recorded author', allowUncertainTurn: true })
   const captured = await client.sessionTimeline(RECIPIENT)
   expect(captured.items.map(item => [item.id, item.agentSessionId, item.kind, item.source, item.content, item.authorAgentSessionId])).toEqual([
-    [RAW_IDS[0], RECIPIENT, 'user_message', 'user', BODY, SENDER],
-    [RAW_IDS[1], RECIPIENT, 'user_message', 'user', BODY, SENDER],
+    [RAW_IDS[0], RECIPIENT, 'user_message', 'user', first.wire, SENDER],
+    [RAW_IDS[1], RECIPIENT, 'user_message', 'user', second.wire, SENDER],
     [RAW_IDS[2], RECIPIENT, 'user_message', 'user', 'Public Core input without a recorded author', undefined]
   ])
-  expect(writes).toEqual([{ runId: `${RECIPIENT}-original-run`, data: BODY + '\r' }, { runId: `${RECIPIENT}-original-run`, data: BODY + '\r' },
-    { runId: `${RECIPIENT}-original-run`, data: 'Public Core input without a recorded author\r' }])
+  expect(writes.every(write => write.runId === `${RECIPIENT}-original-run`)).toBe(true)
+  expect(writes.map(write => write.data).join('')).toBe(first.wire + '\r' + second.wire + '\rPublic Core input without a recorded author\r')
   expect(useAppStore.getState().timelines[RECIPIENT]!.items).toEqual(captured.items)
+  await desktopConversationReadBridge({ root: privateRoot, client }, conversationCloses)
   const element = document.createElement('div'); document.body.append(element); elements.push(element)
   const root = createRoot(element); roots.push(root)
   await act(async () => root.render(createElement(GlobalFocusSurface))); await settle()
+  await vi.waitFor(() => expect(element.querySelectorAll('.recent-focus__message').length).toBeGreaterThan(0))
   expect([...element.querySelectorAll<HTMLElement>('[data-session-id]')].map(node => node.dataset.sessionId).sort()).toEqual([RECIPIENT, DECOY, SENDER].sort())
   return { element, client, captured, writes, sessions, config, topicReads, branchReads, iconReads, historyReads, timelineReads, lifecycle,
     setTopics(next: ScratchTopicSnapshot[]) { topics = next } }
 }
 type Harness = Awaited<ReturnType<typeof fixture>>
-function marker(h: Harness, id = EXPECTED_IDS[0]!) {
-  const node = h.element.querySelector<HTMLButtonElement>(`.recent-focus__message[data-message-id="${id}"]`)
+function marker(h: Harness, id = RAW_IDS[0]!) {
+  const node = [...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__message')].find(node => node.dataset.messageRawId === id)
   expect(node, `Actual marker ${id}`).toBeTruthy(); return node!
 }
 function preview(h: Harness, role: 'dialog' | 'tooltip' = 'dialog') {
   const node = floating().querySelector<HTMLElement>(`.recent-focus__message-preview[role="${role}"][aria-label="Message"]`)
   expect(node, `Actual ${role} preview`).toBeTruthy(); return node!
 }
-async function inspect(h: Harness, id = EXPECTED_IDS[0]!) { await act(async () => marker(h, id).click()); return preview(h) }
+async function inspect(h: Harness, id = RAW_IDS[0]!) { await act(async () => marker(h, id).click()); return preview(h) }
 function field(node: HTMLElement, label: string) {
   const dt = [...node.querySelectorAll('dt')].find(element => element.textContent === label)
   expect(dt, `Current fact ${label}`).toBeTruthy(); expect(dt!.nextElementSibling?.tagName).toBe('DD')
@@ -192,6 +202,11 @@ function button(node: HTMLElement, label: string) {
   expect(found, label).toBeTruthy(); return found!
 }
 function reads(h: Harness) { return [h.topicReads.mock.calls.length, h.branchReads.mock.calls.length, h.iconReads.mock.calls.length, h.historyReads.mock.calls.length, h.timelineReads.mock.calls.length] }
+function authoredBody(node: HTMLElement) {
+  const body = node.querySelector('.recent-focus__message-body .log-turn__body')!.cloneNode(true) as HTMLElement
+  body.querySelectorAll('.log-turn__reminder').forEach(reminder => reminder.remove())
+  return body.textContent
+}
 function senderRunUnknown(node: HTMLElement) {
   expect(node.querySelector('.recent-focus__sender-run')?.textContent).toBe('Sender Run not recorded · Execution relationship unknown')
 }
@@ -199,20 +214,20 @@ function senderRunUnknown(node: HTMLElement) {
 it('keeps two identical public captured Agent inputs and an unknown input on the exact recipient track', async () => {
   const h = await fixture()
   const markers = [...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__message')]
-  expect(markers.map(node => node.dataset.messageId)).toEqual(EXPECTED_IDS)
+  expect(markers.map(node => node.dataset.messageRawId)).toEqual(RAW_IDS)
   expect(markers.map(node => node.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId)).toEqual([RECIPIENT, RECIPIENT, RECIPIENT])
   expect(markers.map(node => node.dataset.messageAuthor)).toEqual(['agent', 'agent', 'unknown'])
-  expect(markers.map(node => node.querySelector('.lucide-bot') !== null)).toEqual([true, true, false])
-  expect(markers.map(node => node.querySelector('.lucide-circle-dot') !== null)).toEqual([false, false, true])
+  expect(markers.every(node => node.querySelector('.conversation-avatar') !== null)).toBe(true)
+  expect(markers.map(node => node.querySelector('.conversation-avatar--unknown') !== null)).toEqual([false, false, true])
   expect(markers[2]!.querySelector('.conversation-avatar.conversation-avatar--unknown')).not.toBeNull()
   expect(markers.map(node => Number(node.dataset.messageAt))).toEqual(h.captured.items.map(item => item.createdAt))
   expect(markers.map(node => node.getAttribute('aria-label'))).toEqual([
-    expect.stringMatching(/^Agent message in Recipient worker .+, sender association-sender$/),
-    expect.stringMatching(/^Agent message in Recipient worker .+, sender association-sender$/),
+    expect.stringMatching(/^Agent input in Recipient worker .+, sender association-sender$/),
+    expect.stringMatching(/^Agent input in Recipient worker .+, sender association-sender$/),
     expect.stringMatching(/^Prompt in Recipient worker .+, sender not recorded$/)
   ])
-  expect(markers.map(node => node.title)).toEqual([expect.stringContaining(`Agent message · Sender ${SENDER}`), expect.stringContaining(`Agent message · Sender ${SENDER}`), expect.stringContaining('Prompt · Sender not recorded')])
-  const unknown = await inspect(h, EXPECTED_IDS[2])
+  expect(markers.map(node => node.title)).toEqual(['', '', ''])
+  const unknown = await inspect(h, RAW_IDS[2])
   expect(unknown.textContent).toContain('Prompt · Sender not recorded')
   expect(unknown.querySelector('dl')).toBeNull(); expect(unknown.textContent).not.toContain('Human')
 })
@@ -231,7 +246,7 @@ it('uses the exact author ID and current Topic/project, not the earlier same-nam
   expect(field(node, 'Current project')).toBe('Sender topics')
   expect(field(node, 'Current topic')).toBe('Current sender topic')
   expect(field(node, 'Current branch')).toBe('Not recorded')
-  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
+  expect(authoredBody(node)).toBe(BODY)
   senderRunUnknown(node)
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(RECIPIENT)
 })
@@ -316,7 +331,7 @@ it.each(['removed', 'pmo'] as const)('a %s sender Context retains original autho
   await act(async () => useAppStore.setState(state => ({ sessions: kind === 'removed' ? state.sessions.filter(session => session.id !== SENDER)
     : state.sessions.map(session => session.id === SENDER ? { ...session, workspacePath: _hygiene_fixturePath("sender-topics/topic--launcher--leader") } : session) })))
   const node = preview(h)
-  expect(node.textContent).toContain(SENDER); expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
+  expect(node.textContent).toContain(SENDER); expect(authoredBody(node)).toBe(BODY)
   expect(button(node, 'View sender').disabled).toBe(true)
   const origin = useAppStore.getState().agentFocus
   await act(async () => button(node, 'View sender').click())
@@ -330,7 +345,7 @@ it('a missing recipient retains the pinned original record and disables Return i
   const h = await fixture(); await inspect(h)
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== RECIPIENT) })))
   const node = preview(h), origin = useAppStore.getState().agentFocus
-  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
+  expect(authoredBody(node)).toBe(BODY)
   expect(button(node, 'Return to Context').disabled).toBe(true)
   await act(async () => button(node, 'Return to Context').click())
   expect(useAppStore.getState().agentFocus).toBe(origin)
@@ -343,7 +358,7 @@ it.each(['project', 'topic'] as const)('a missing sender %s remains explicitly u
   expect(field(node, 'Sender')).toContain(SENDER)
   expect(field(node, 'Current project')).toBe(missing === 'project' ? 'Not recorded' : 'Sender topics')
   expect(field(node, 'Current topic')).toBe('Not recorded')
-  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY); senderRunUnknown(node)
+  expect(authoredBody(node)).toBe(BODY); senderRunUnknown(node)
 })
 
 it('sender old-to-current Run replacement and unknown working start never become this message execution', async () => {
@@ -375,7 +390,7 @@ it('unchanged messages and unrelated bytes/observedAt incur no new sender, Topic
     return Reflect.get(target, key, receiver)
   } })
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, [RECIPIENT]: measured } })))
-  expect([...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__message')].map(node => node.dataset.messageId)).toEqual(EXPECTED_IDS)
+  expect([...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__message')].map(node => node.dataset.messageRawId)).toEqual(RAW_IDS)
   expect(itemReads).toBeGreaterThan(0)
   const updateUnrelated = async () => {
     for (let i = 1; i <= 10; i++) await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === DECOY
@@ -401,6 +416,6 @@ it('late current Topic facts and source changes cannot rewrite a pinned original
   const node = preview(h)
   expect(field(node, 'Sender')).toContain(SENDER)
   expect(field(node, 'Current project')).toBe('Sender topics')
-  expect(node.querySelector('.recent-focus__message-body .log-turn__body')!.textContent).toBe(BODY)
+  expect(authoredBody(node)).toBe(BODY)
   expect((await h.client.sessionTimeline(RECIPIENT)).items).toEqual(h.captured.items)
 })

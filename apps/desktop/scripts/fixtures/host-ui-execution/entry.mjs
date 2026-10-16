@@ -46,7 +46,6 @@ api.sessions.resolve = control => request('resolve', control)
 api.sessions.refresh = control => request('refresh', control)
 api.sessions.stop = control => request('stop', control)
 api.sessions.submitPrompt = (...args) => request('submit-prompt', ...args)
-api.sessions.submitMessage = (...args) => request('submit-message', ...args)
 api.sessions.onEvent = createRendererSessionEvents(listener => window.hostUiBoundary.onEvent(listener))
 api.ui.requestStorageFlush = () => request('flush')
 

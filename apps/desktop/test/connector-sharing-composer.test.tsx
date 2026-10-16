@@ -26,7 +26,7 @@ async function bindExisting() {
 }
 
 it('original Composer reflects the exact Binding while its input, draft, selection, focus and IME remain owned by the existing editor', async () => {
-  const submit = vi.spyOn(api.sessions, 'submitMessage')
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
   await f.mount(); const editor = input(); expect(editor).not.toBeNull(); const rich = editor.editor
   const binding = await bindExisting()
   await act(async () => { editor.focus(); rich.commands.setTextSelection({ from: 6, to: 14 }); editor.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '中' })) })

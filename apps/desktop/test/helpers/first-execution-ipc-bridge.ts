@@ -1,9 +1,10 @@
+import { isolateCoreFixtureEnvironment } from './isolate-core-environment'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../../scripts/lib/fixture-values.mjs"))
 import { localRuntimeConnector } from './local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { expect, vi } from 'vitest'
 import { AgentMuxError, AgentMuxMemoryAgentSessionStore, type AgentMuxClient, type AgentMuxAgentSessionStore } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
@@ -58,6 +59,8 @@ export const control: AgentSessionControl = { kind: 'agent', hostId: 'local', ag
 
 export async function owningBridge(actual?: { client: AgentMuxClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics }) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-first-execution-ipc-"))
+  isolateCoreFixtureEnvironment(actual ? dirname(actual.client.agentMessageQueuePath()) : root)
+  if (actual) vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', actual.client.agentMessageQueuePath())
   bridge.directory = root
   await mkdir(join(root, 'Local Storage', 'leveldb'), { recursive: true })
   const runtime = new RuntimeController(actual?.store ?? new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, actual?.scratchTopics)

@@ -1,3 +1,4 @@
+import { isolateCoreFixtureEnvironment } from './isolate-core-environment'
 import { join } from 'node:path'
 import { readFile, writeFile } from 'node:fs/promises'
 import { expect, vi } from 'vitest'
@@ -5,9 +6,7 @@ import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, n
 
 /** Real Core/FileStore; only private Native I/O, probes and hooks are controlled. */
 export async function injectedContextCore(root: string, initial?: AgentMuxStoredAgentSession) {
-  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
-  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
-  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+  isolateCoreFixtureEnvironment(root)
   const path = join(root, 'sessions.json')
   const store = new AgentMuxFileAgentSessionStore(path)
   const sessions = (await store.load()).map(value => normalizeAgentSession(value))

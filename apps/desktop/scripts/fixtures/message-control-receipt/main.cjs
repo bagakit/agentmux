@@ -123,7 +123,7 @@ app.whenReady().then(async () => {
         proof.cases.push({ mode, consumer, upstream, observed, original: proof.calls.at(-1) })
       }
     }
-    const ambiguous = { schemaVersion: 5, requestId: 'original-address-control', operation: 'send', ok: false,
+    const ambiguous = { schemaVersion: 5, requestId: 'original-address-control', operation: 'resume', ok: false,
       error: { code: 'MESSAGE_TARGET_NOT_UNIQUE', message: 'Original ambiguous target', candidates: [{ agentSessionId: sid, regionIds: ['original-region'] }] } }
     assert.deepEqual(product.parseAgentMuxControlReceipt(ambiguous), ambiguous, 'Original finite addressing/candidate receipt remains valid')
     const cause = { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', message: 'Original unknown.',

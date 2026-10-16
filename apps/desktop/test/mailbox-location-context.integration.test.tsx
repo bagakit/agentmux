@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { win32 as _hygiene_win32 } from "node:path"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -55,7 +56,7 @@ beforeEach(() => {
       {id:'sender',name:'Sender project',kind:'folder',hostId:'local',path:_hygiene_fixturePath("sender/project")}]},
     tabs:{'target-tab':{...target,name:'Clicked target Tab'}},layouts:{display:createWorkspaceLayout('group',['target-tab'])},
     sessions:[{...composerSession(),workspacePath:cwd},composerSession('other'),{...composerSession('declared-peer'),workspacePath:_hygiene_fixturePath("sender/project")}],
-    viewModes:{'agent-1':'terminal',other:'terminal'},timelines:{'agent-1':{agentSessionId:'agent-1',revision:1,items:[{id:'captured-record',agentSessionId:'agent-1',kind:'user_message',status:'complete',source:'user',content:body,authorAgentSessionId:'declared-peer',createdAt:1,updatedAt:1}]}},noticeReadReceipts:{},agentSteerQueues:{},agentSteerInFlight:{}})
+    viewModes:{'agent-1':'terminal',other:'terminal'},timelines:{'agent-1':{agentSessionId:'agent-1',revision:1,items:[{id:'captured-record',agentSessionId:'agent-1',kind:'user_message',status:'complete',source:'user',content:body,authorAgentSessionId:'declared-peer',createdAt:_tailFixtureEpoch(0, 0, 1),updatedAt:_tailFixtureEpoch(0, 0, 1)}]}},noticeReadReceipts:{},agentSteerQueues:{},agentSteerInFlight:{}})
 })
 it('real primary detail distinguishes target, sender, first Region, active Workspace, two Hosts and three directories; Copy/navigation retain original message',async()=>{
   await dom.render(pane());await detail();expect(panel().querySelector('[data-mailbox-location="summary"]')!.textContent).toContain('Resource project · Clicked target Tab');await info()
@@ -81,8 +82,8 @@ it.each(['missing-group','first-region'])('unconfirmed reference %s never borrow
   await dom.render(pane({...origin,...(broken==='missing-group'?{tabGroupId:'missing'}:{regionId:'first-region'})}));await detail();await info();expect(panel().textContent).toContain('未确认的显示引用');expect(field('项目根目录')).toBe('未确认');expect(field('分支')).toBe('未确认');expect(field('当前执行 cwd')).toBe(cwd);expect(panel().querySelector<HTMLButtonElement>('.composer-mailbox__reveal')!.disabled).toBe(false);await dom.click('[aria-label="Copy message"]');expect(api.ui.writeClipboardText).toHaveBeenCalledWith(body)
 })
 it('Pending only discloses its owning Session execution facts and does not dispatch or claim a message target',async()=>{
-  useAppStore.setState({agentSteerQueues:{'agent-1':[{operationId:'pending',text:'Original queued instruction',status:'queued',runId:'run-agent-1'}]}});const prompt=vi.spyOn(api.sessions,'submitPrompt'),message=vi.spyOn(api.sessions,'submitMessage')
-  await dom.render(pane());await open('outbox');await dom.click('[data-record-key="queue:pending"].composer-mailbox__row');await info();expect(panel().querySelector('[data-mailbox-location="summary"]')).toBeNull();expect(panel().querySelector('[data-mailbox-location="target"]')).toBeNull();expect(field('当前执行 cwd')).toBe(cwd);expect(panel().textContent).toContain('尚未发送，暂无对话位置');expect(panel().querySelector<HTMLButtonElement>('.composer-mailbox__reveal')!.disabled).toBe(true);expect(prompt).not.toHaveBeenCalled();expect(message).not.toHaveBeenCalled()
+  useAppStore.setState({agentSteerQueues:{'agent-1':[{operationId:'pending',text:'Original queued instruction',status:'queued',runId:'run-agent-1'}]}});const prompt=vi.spyOn(api.sessions,'submitPrompt')
+  await dom.render(pane());await open('outbox');await dom.click('[data-record-key="queue:pending"].composer-mailbox__row');await info();expect(panel().querySelector('[data-mailbox-location="summary"]')).toBeNull();expect(panel().querySelector('[data-mailbox-location="target"]')).toBeNull();expect(field('当前执行 cwd')).toBe(cwd);expect(panel().textContent).toContain('尚未发送，暂无对话位置');expect(panel().querySelector<HTMLButtonElement>('.composer-mailbox__reveal')!.disabled).toBe(true);expect(prompt).not.toHaveBeenCalled();
 })
 it('closed and unselected Mailbox reads zero location metadata; unrelated Session changes do not redo target lookup',async()=>{
   await dom.render(pane());const owner=vi.mocked(MailboxLocationContext);owner.mockClear()
@@ -95,7 +96,7 @@ it('closed and unselected Mailbox reads zero location metadata; unrelated Sessio
   })
   await act(async()=>useAppStore.setState({agentNames:{unrelated:'Updated'}}));expect(owner).not.toHaveBeenCalled();expect(locationReads).toBe(0)
   await open();expect(owner).not.toHaveBeenCalled();await dom.click('.composer-mailbox__row');expect(owner).toHaveBeenCalled();expect(locationReads).toBeGreaterThan(0);locationReads=0
-  await act(async()=>useAppStore.setState(s=>({sessions:s.sessions.map(a=>a.id==='declared-peer'?{...a,status:{state:'idle',source:'native-hook',observedAt:2}}:a),timelines:{...s.timelines,unrelated:{agentSessionId:'unrelated',revision:2,items:[]}}})));expect(locationReads).toBe(0)
+  await act(async()=>useAppStore.setState(s=>({sessions:s.sessions.map(a=>a.id==='declared-peer'?{...a,status:{state:'idle',source:'native-hook',observedAt:_tailFixtureEpoch(0, 0, 2)}}:a),timelines:{...s.timelines,unrelated:{agentSessionId:'unrelated',revision:2,items:[]}}})));expect(locationReads).toBe(0)
   await act(async()=>useAppStore.setState(s=>({config:{...s.config!,workspaces:s.config!.workspaces.map(w=>w.id==='resource-root'?{...w,name:'Related Project rename'}:w)}})));expect(locationReads).toBeGreaterThan(0);expect(panel().textContent).toContain('Related Project rename')
   await act(async()=>panel().dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));expect(panel().dataset.state).toBe('closed');owner.mockClear();locationReads=0;await act(async()=>useAppStore.setState({agentNames:{unrelated:'Again'}}));expect(owner).not.toHaveBeenCalled();expect(locationReads).toBe(0)
 })

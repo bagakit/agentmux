@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { bridge, control, owningBridge } from './helpers/first-execution-ipc-bridge'
@@ -5,7 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '@agentmux/core'
-import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
+import type { AppConfig } from '../src/shared/contracts'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { injectedContextCore } from './helpers/injected-context-core'
@@ -25,38 +26,6 @@ beforeAll(async () => { disposePreview = await useAppStore.getState().initialize
 afterAll(() => disposePreview?.())
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); bridge.invoke.mockReset(); useAppStore.setState(initialRendererState, true); useLauncherState.setState(initialLauncherState, true) })
-
-const message: Parameters<AgentMuxPreloadApi['sessions']['submitMessage']>[1] = {
-  envelope: { schema: 'agentmux.a2a.v1', messageId: 'private-agent-message', operationId: 'private-message-operation', createdAt: 1,
-    sender: { kind: 'agent-session', agentSessionId: 'private-sender' }, recipient: { kind: 'agent-session', agentSessionId: control.agentSessionId },
-    senderSessionId: 'private-sender', senderRunId: 'private-sender-run', recipientSessionId: control.agentSessionId,
-    recipientRunId: control.run.runId, body: 'original body', threadId: 'private-thread', correlationId: 'private-correlation', replyTo: null, workspaceId: null },
-  condition: { expectedRun: control.run, afterSubmissionId: null }, caller: { agentSessionId: 'private-sender', capability: 'private-capability' }
-}
-
-it.each(['AGENT_CAPABILITY_INVALID', 'AGENT_CAPABILITY_STALE_RUN', 'AGENT_PROMPT_INPUT_UNCONFIRMED'])(
-  'actual message IPC does not pause a healthy recipient when Core rejects %s', async code => {
-    const { client, pauseTarget, dispose } = await owningBridge()
-    client.submitAgentMessage.mockRejectedValue(new AgentMuxError('private rejected message', code))
-    try {
-      await expect(bridge.api!.sessions.submitMessage(control, message)).rejects.toMatchObject({ code })
-      expect(client.submitAgentMessage).toHaveBeenCalledExactlyOnceWith({ ...message, agentSessionId: control.agentSessionId })
-      expect(pauseTarget).not.toHaveBeenCalled()
-    } finally { await dispose() }
-  })
-
-it('actual message IPC pauses progress only after the authorized delivery completes', async () => {
-  const { client, pauseTarget, dispose } = await owningBridge()
-  let complete!: () => void
-  client.submitAgentMessage.mockImplementationOnce(() => new Promise<void>(resolve => { complete = resolve }))
-  try {
-    const pending = bridge.api!.sessions.submitMessage(control, message)
-    await vi.waitFor(() => expect(client.submitAgentMessage).toHaveBeenCalledTimes(1))
-    expect(pauseTarget).not.toHaveBeenCalled()
-    complete(); await pending
-    expect(pauseTarget).toHaveBeenCalledExactlyOnceWith(control, 'Paused for your message.')
-  } finally { await dispose() }
-})
 
 it('actual preload/registered IPC/Main pass one stable intent to Core continuity without a prompt', async () => {
   const { client, dispose } = await owningBridge()
@@ -122,7 +91,7 @@ function pmoConfig(root: string): AppConfig {
     { id: 'private-project', name: 'Original Project', hostId: 'local', path: ("" + (root) + _hygiene_fixturePath("project")), kind: 'folder' }] }
 }
 const originalGoal = { id: 'private-goal', title: 'Keep original Goal', description: 'Original <Goal> & context', status: 'backlog' as const,
-  priority: 'normal' as const, projectId: null, projectName: null, sessionIds: [], createdAt: 1, updatedAt: 1, source: 'default-topic' as const }
+  priority: 'normal' as const, projectId: null, projectName: null, sessionIds: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), source: 'default-topic' as const }
 function bindRendererBridge() {
   vi.spyOn(api.sessions, 'submitPrompt').mockImplementation((...args) => bridge.api!.sessions.submitPrompt(...args))
   vi.spyOn(api.sessions, 'refresh').mockImplementation((...args) => bridge.api!.sessions.refresh(...args))
@@ -134,7 +103,7 @@ function bindRendererBridge() {
 it('PMO mapped Store requests reach registered IPC and real Core as independent platform/user records on the original healthy Run', async () => {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-pmo-mapped-"))
   const f = await injectedContextCore(root, { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'traex', executorId: 'private',
-    hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: 1, updatedAt: 1,
+    hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     hookBindingId: 'private-binding', hookToken: 'private-token' })
   const config = pmoConfig(root)
   config.executors.private!.providerId = 'traex'
@@ -201,7 +170,7 @@ it('PMO queued recovery hydrates its original work surface and retries the froze
   const sharedRoot = process.env.AGENTMUX_TEST_PMO_RESTART_ROOT
   const root = sharedRoot ?? await mkdtemp(_hygiene_fixturePath("tmp/amux-pmo-cold-"))
   const f = await injectedContextCore(root, { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'traex', executorId: 'private',
-    hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: 1, updatedAt: 1,
+    hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     hookBindingId: 'private-binding', hookToken: 'private-token' })
   const config = pmoConfig(root); config.executors.private!.providerId = 'traex'
   const b = await owningBridge({ client: f.core, store: f.store, config })
@@ -300,7 +269,7 @@ it('PMO retained launcher carries the original producer note after editing raw u
 it('PMO shared queue transports standalone platform context and untouched raw body through actual Core', async () => {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-pmo-queue-"))
   const f = await injectedContextCore(root, { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'traex', executorId: 'private',
-    hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: 1, updatedAt: 1,
+    hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     hookBindingId: 'private-binding', hookToken: 'private-token' })
   const config = pmoConfig(root); config.executors.private!.providerId = 'traex'
   const b = await owningBridge({ client: f.core, store: f.store, config })

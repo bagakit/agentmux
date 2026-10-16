@@ -35,7 +35,7 @@ async function source(){
  assert.ok(roots.length>1&&program.getSourceFiles().length>100)
  await writeFile(join(evidence,'source.json'),JSON.stringify(receipt.source,null,2))
  assert.deepEqual(diagnostics,[],'Complete production TypeScript program must compile')
- for(const [path,needle] of [[composer,'agentSteerExecution'],[store,'agentSteerExecution'],[store,'api.sessions.submitPrompt'],[store,'api.sessions.submitMessage'],[main,'client.submitAgentPrompt'],[service,'recipientOwner.client.submitAgentMessage']]){
+ for(const [path,needle] of [[composer,'agentSteerExecution'],[store,'agentSteerExecution'],[store,'api.sessions.submitPrompt'],[main,'client.submitAgentPrompt'],[service,'recipientOwner.client.submitAgentMessage']]){
   const file=program.getSourceFile(join(root,path));assert.ok(file)
   const calls=[]
   function visit(n){if(ts.isCallExpression(n)&&n.expression.getText(file)===needle)calls.push({line:file.getLineAndCharacterOfPosition(n.pos).line+1,text:n.getText(file)});ts.forEachChild(n,visit)}
