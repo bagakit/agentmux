@@ -4,7 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
-import { parseDesktopClientObservation, type DesktopClientObservation } from '../src/shared/client-observation'
+import { parseDesktopClientObservation, parseDesktopClientObservationForInstall, type DesktopClientObservation } from '../src/shared/client-observation'
 
 // Only external OS/RPC inputs are controlled. Real installer qualification,
 // polling, directory cutover, transaction receipt and process-ownership checks run.
@@ -47,10 +47,10 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async original => ({
   prepareUiRuntime: async () => null, closeRuntimeUpgrade: async () => {},
   observeUiClient: async (app: string) => {
     expect(app).toBe(io.app)
-    if (io.pid === 201) return parseDesktopClientObservation(structuredClone(io.before))
+    if (io.pid === 201) return parseDesktopClientObservationForInstall(structuredClone(io.before))
     io.reads++
     if (io.failEveryRead || io.failAfterRead && io.reads > 1) throw new Error('PRIVATE_RPC_UNAVAILABLE')
-    return parseDesktopClientObservation(structuredClone(io.after))
+    return parseDesktopClientObservationForInstall(structuredClone(io.after))
   }
 }))
 
@@ -122,6 +122,23 @@ async function install(f: Awaited<ReturnType<typeof fixture>>) {
 const after = () => io.after!.workbench
 const agent = () => after().tabs[0]!.regions[0]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'agent' }>
 const browser = () => after().tabs[1]!.regions[0]! as Extract<DesktopClientObservation['workbench']['tabs'][number]['regions'][number], { kind: 'browser' }>
+
+it.each([
+  { hostId: 'local', current: 0, total: 2, pending: true, waiting: true },
+  { phase: 'unconfirmed', detail: { unavailable: ['executor-observation'] } }
+])('actual installation retains auxiliary startup detail without making it admission authority: %j', async detail => {
+  const f = await fixture()
+  Object.assign(io.before!.workbench, { startupAgentAvailability: detail })
+  Object.assign(after(), { startupAgentAvailability: detail })
+  const original = structuredClone(io.before)
+  const outcome = await install(f).then(result => ({ result, error: null }), error => ({ result: null, error: String(error) }))
+  expect(outcome.error, 'Auxiliary startup detail must not reject an otherwise qualified original workbench').toBeNull()
+  expect(outcome.result?.ui.status).toBe('committed')
+  expect(outcome.result?.ui.observation.workbench.startupAgentAvailability).toEqual(detail)
+  expect(io.before).toEqual(original)
+  expect(io.cutovers).toBe(1)
+  expect(() => parseDesktopClientObservation(original), 'The current public producer stays strict').toThrow()
+})
 
 it('actual installation admits registry insertion changes and object keys without reordering presentation', async () => {
   const f = await fixture(), original = structuredClone(io.before)

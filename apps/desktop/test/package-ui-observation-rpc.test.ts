@@ -47,7 +47,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation') {
+async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', startupDetail?: unknown) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-ui-reader-")); roots.push(root)
   const endpoint = join(root, 'rpc.sock'), disposed = join(root, 'disposed.txt')
   const core = join(root, 'current.app/Contents/Resources/app/node_modules/@agentmux/core')
@@ -76,8 +76,10 @@ export async function connectAgentMuxRpc(...args) {
       if (end < 0) return
       const request = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1)
       requests.push(request)
+      const current = structuredClone(observation)
+      if (startupDetail !== undefined) Object.assign(current.workbench, { startupAgentAvailability: startupDetail })
       const body = mode === 'rpc-error' ? { error: { code: -32000, message: 'Private observation unavailable' } }
-        : { result: { observation: mode === 'invalid-observation' ? { ...observation, main: { ...observation.main, pid: 0 } } : observation } }
+        : { result: { observation: mode === 'invalid-observation' ? { ...current, main: { ...current.main, pid: 0 } } : current } }
       // Keep the server side open: the bounded reader must close its own connection.
       socket.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...body }) + '\n')
     })
@@ -93,6 +95,28 @@ it('reads the current loaded identity and nonempty workbench through the actual 
   const read = await installer.observeUiClient(f.app).then((value: unknown) => ({ ok: true, value }), (error: Error) => ({ ok: false, error: error.message }))
   expect(read).toEqual({ ok: true, value: observation })
   expect(f.requests).toEqual([{ jsonrpc: '2.0', id: expect.any(String), method: 'app.inspect', params: {} }])
+  expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
+  expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
+})
+
+it.each([
+  { hostId: 'local', current: 0, total: null, pending: true, waiting: true },
+  { phase: 'unconfirmed', detail: { unavailable: ['executor-observation'] } }
+])('the actual inspector child preserves auxiliary startup detail without refusing required facts: %j', async detail => {
+  const f = await fixture('success', detail)
+  const read = await installer.observeUiClient(f.app).then((value: unknown) => ({ ok: true, value }), (error: Error) => ({ ok: false, error: error.message }))
+  expect(read.ok, 'Auxiliary startup detail must not block the actual inspector child').toBe(true)
+  expect(read).toEqual({ ok: true, value: { ...observation, workbench: { ...observation.workbench, startupAgentAvailability: detail } } })
+  expect(f.requests).toEqual([{ jsonrpc: '2.0', id: expect.any(String), method: 'app.inspect', params: {} }])
+  expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
+  expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
+})
+
+it('the actual inspector child still refuses invalid required identity beside unknown auxiliary detail', async () => {
+  const f = await fixture('invalid-observation', { phase: 'unconfirmed' })
+  const read = await installer.observeUiClient(f.app).then(() => ({ ok: true }), (error: Error) => ({ ok: false, error: error.message }))
+  expect(read).toMatchObject({ ok: false, error: expect.stringContaining('pid') })
+  expect(f.requests).toHaveLength(1)
   expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
   expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
 })
