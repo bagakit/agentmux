@@ -1,3 +1,5 @@
+import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
+import { formatSessionAddress } from '../lib/agent-address'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { useAgentBookmarkWindow } from '../lib/use-agent-bookmark-window'
@@ -6,7 +8,7 @@ import { agentBookmarks, type AgentBookmarkBounds } from '../lib/agent-bookmarks
 import { WorkbenchDocumentContext } from '../lib/workbench-document'
 import { observeWorkbenchDocumentReturn, workbenchDocumentIdentity, useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { DesktopClientUiProvider } from './DesktopClientUiProvider'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
@@ -75,14 +77,22 @@ function FocusContextStateSummary({ context }: { context: FocusContext }) {
 }
 
 
+function ReadingCopy({ text, label, identity }: { text: string; label: string; identity: unknown }) {
+  return <span className="agent-reading-copy" title={label} onPointerDown={event => { if (event.button === 0) event.preventDefault() }}>
+    <ContentCopyButton text={text} label={label} identity={identity} onCopyError={error => useAppStore.getState().reportError(error)} />
+  </span>
+}
+
 const HeldReading = memo(function HeldReading({ request, enabled, available, follow = false }: { request: PreviewRequest; enabled: boolean; available: boolean; follow?: boolean }) {
   const context = request.context
+  const reply = context.recap, copyReply = request.pinned && reply && reply.source !== 'Last prompt'
   return <>
     {!context.recap && request.contentChanged ? <small className="agent-information-reader__change">Card content changed · Reading kept</small> : null}
     {context.recap ? <section className="focus-context-hover__recap">
       <small title={`${context.recap.source} · ${context.recap.origin}`}>
-        {context.recap.source === 'Last reply observation' ? COLLECTED_REPLY_TITLE : context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}
+        {context.recap.source === 'Last reply observation' ? COLLECTED_REPLY_TITLE : context.recap.source === 'Last assistant message' ? 'Latest reply' : context.recap.source === 'Saved conversation excerpt' ? 'Saved excerpt' : 'Latest input'}
         {request.contentChanged ? <span>Card content changed · Reading kept</span> : (context.recap.reading?.truncated ?? true) ? <span>Excerpt</span> : null}
+        {copyReply ? <ReadingCopy text={reply.reading?.text ?? reply.text} label={reply.source === 'Saved conversation excerpt' ? 'Copy saved excerpt' : reply.reading?.truncated === false ? 'Copy current reply' : 'Copy reply excerpt'} identity={JSON.stringify([context.runId, request.sourceKey])} /> : null}
       </small>
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} active={enabled} />
     </section> : !context.detailIsRecap && context.detailKind !== 'service' ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
@@ -108,6 +118,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   if (request.pinned || request.bookmark) detachedFromModal.current = true
   const attachedToModal = visible && !detachedFromModal.current && opening.anchor.ownerDocument === document && getModalOverlayContainer(opening.anchor) !== null
   const context = request.context
+  const informationSummaryId = useId()
   const panel = useRef<HTMLDivElement>(null), reading = useRef<HTMLDivElement>(null)
   const canDrag = Boolean(request.bookmark || request.session?.kind === 'agent')
   const bookmarkWindow = useAgentBookmarkWindow(request.bookmark, panel, reading, document, canDrag ? pinFromDrag : undefined)
@@ -398,7 +409,7 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       {canDrag ? <button type="button" data-bookmark-move className="agent-bookmark__move" aria-label={request.pinned ? "Move Agent bookmark" : "Drag to pin Agent bookmark"} title={request.pinned ? "Drag title to move · Arrow keys move · Shift+Arrow keys resize" : "Drag title to pin and move"} onKeyDown={bookmarkWindow.moveKey}><DragIcon size={14} aria-hidden="true" /></button> : null}
       <span className="agent-information-reader__identity">{visible ? <ConversationMessageAvatar speaker={{ role: 'agent', id: context.id }} name={context.name}
         executorId={context.executorId} providerId={context.providerId ?? undefined} project={affiliation?.project} mote={affiliation?.mote} size={32} /> : null}</span>
-      <div className="agent-information-reader__heading"><small title={context.originAddress ?? path}>{context.workspaceName}</small><strong title={context.name}>{context.name}</strong></div>
+      <div className="agent-information-reader__heading"><small title={context.originAddress ?? path}>{context.workspaceName}</small><div className="agent-information-reader__name"><strong title={context.name}>{context.name}</strong>{request.pinned ? <ReadingCopy text={context.name} label="Copy Agent title" identity={request.bookmark?.key ?? request.token} /> : null}</div></div>
       <button type="button" className="agent-information-reader__status" title={currentContext.detail} aria-label={`${sameSource ? currentContext.stateLabel : 'Reading snapshot'} · Status and source`}
         onPointerDown={event => { if (event.button === 0) event.preventDefault() }} onClick={() => showMetadata('source')}>
         {sameSource && visible ? <FocusContextStateSummary context={currentContext} /> : <span className="focus-context-hover__state">Reading snapshot</span>}
@@ -423,9 +434,10 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
     </div>
     <footer className="agent-information-reader__footer" onPointerDown={event => { if (event.button === 0) event.preventDefault() }}>
       <button type="button" className="agent-information-reader__facts" onClick={() => tab ? showReading() : showMetadata('usage')}
-        title="Usage, Goals, messages and source" aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null}>
-        <AgentInformationSummary usage={usage} goalLinks={request.goalLinks} /><DetailsIcon size={13} aria-hidden="true" />
+        title="Usage, Goals, messages and source" aria-label="Agent information: usage, Goals, message relationships and source" aria-expanded={tab !== null} aria-describedby={informationSummaryId}>
+        <AgentInformationSummary descriptionId={informationSummaryId} usage={usage} goalLinks={request.goalLinks} /><DetailsIcon size={13} aria-hidden="true" />
       </button>
+      {request.bookmark ? <ReadingCopy text={formatSessionAddress(request.bookmark.agentSessionId)} label="Copy Agent link" identity={request.bookmark.key} /> : null}
       {request.bookmark ? <button type="button" className="agent-bookmark__reset" onClick={bookmarkWindow.reset} title="Reset bookmark position and size" aria-label="Reset bookmark position and size"><ResetIcon size={13} aria-hidden="true" /></button> : null}
 
       <button type="button" className="agent-information-reader__open" aria-label="Open Agent" title="Open Agent" onClick={() => {

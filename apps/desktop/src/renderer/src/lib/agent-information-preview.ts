@@ -31,7 +31,7 @@ function restoredContext(bookmark: AgentBookmark): FocusContext {
   return { id: bookmark.presentationId, hostId: bookmark.hostId, name: bookmark.label, workspaceName: bookmark.workspaceName, workspaceId: '', workspacePath: '', workspace: undefined,
     kind: 'agent', providerId: null, topicId: null, state: 'disconnected', stateLabel: 'Reading snapshot', processState: 'interrupted', bucket: 'idle', runId: '',
     liveAgent: false, actionable: false, lastActivityAt: null, workingEnteredAt: null, detail: 'Saved bookmark · Original Agent observation pending', detailIsRecap: false, detailKind: 'service',
-    recap: bookmark.excerpt ? { text: bookmark.excerpt, reading: { text: bookmark.excerpt, truncated: true }, source: 'Last assistant message', origin: 'timeline' } : null }
+    recap: bookmark.excerpt ? { text: bookmark.excerpt, reading: { text: bookmark.excerpt, truncated: true }, source: 'Saved conversation excerpt', origin: 'timeline' } : null }
 }
 
 /** Idempotent promotion shared by explicit Pin and the first deliberate drag. */
