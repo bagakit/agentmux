@@ -2,10 +2,18 @@ import type { AgentDisplayState } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
-export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'unknown'; title: string; detail: string } | null {
+export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'unknown'; phase?: 'failed'; title: string; detail: string } | null {
   if (session?.kind !== 'agent' || session.processState !== 'running') return null
   const frontend = session.terminalFrontend
   if (!frontend || frontend.run.runId !== session.control.run.runId) return null
+  if (frontend.state === 'detached' && typeof frontend.exitCode === 'number' && frontend.exitCode !== 0) return {
+    kind: 'detached', phase: 'failed', title: 'Terminal process exited',
+    detail: `The terminal process exited with code ${frontend.exitCode}. ${frontend.backendState === 'running'
+      ? 'The backend is still running.' : frontend.backendState === 'stopping'
+        ? 'The backend is finishing its shutdown.' : frontend.backendState === 'exited'
+          ? 'The backend is also reported exited.' : 'The backend state is unconfirmed.'}${session.nativeHandle?.kind === 'provider'
+      ? '' : ' The native conversation identity is not yet confirmed.'} The original Session, draft and available input are kept. Resume attempts recovery of this original Session.`
+  }
   if (frontend.state === 'detached') return {
     kind: 'detached',
     title: 'Terminal disconnected',
