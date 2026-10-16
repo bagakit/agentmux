@@ -1,10 +1,8 @@
 import {
-  agentMuxMessageTargetCandidates,
   type AgentMuxArrangeMode,
   type AgentMuxControlCaller,
   type AgentMuxInspectedRegion,
   type AgentMuxInspectedTab,
-  type AgentMuxMessageTargetCandidate,
   type AgentMuxOpenDestination,
   type AgentMuxRegion,
   type AgentMuxRegionAnchor,
@@ -225,16 +223,6 @@ export function inspectWorkbenchControlRegion(
   const bounds = tab && workbenchRegionBounds(tab.layout.root).find((item) => item.regionId === region.regionId)?.bounds
   if (!bounds) throw error('REGION_NOT_OPEN', 'Region target is not currently open.')
   return { ...region, bounds, neighbors: regionNeighbors(input, tab, region.regionId) }
-}
-
-export function messageTargetCandidates(
-  input: WorkbenchControlState,
-  tabId: string
-): AgentMuxMessageTargetCandidate[] {
-  const tab = input.tabs[tabId]
-  if (!tab) throw error('TAB_NOT_OPEN', 'Tab target is not currently open.')
-  const sessions = new Map(input.sessions.map((session) => [session.id, session]))
-  return agentMuxMessageTargetCandidates(projectTabRegions(tab, sessions))
 }
 
 export function planControlOpen(

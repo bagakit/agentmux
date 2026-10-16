@@ -9,9 +9,8 @@ export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { AgentMuxError, type AgentMuxControlFailure, type AgentMuxErrorData } from './errors.js'
 export { AgentMuxError, parseAgentMuxErrorData, type AgentMuxErrorData } from './errors.js'
-import type { AgentExecutorId, AgentProviderId, AgentPromptExecution, AgentMessageChannel, AgentExecutableObservation } from './types.js'
+import type { AgentExecutorId, AgentProviderId, AgentExecutableObservation } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
-import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 import type { AgentMuxBrowserMode, AgentMuxBrowserTarget } from './browser-targets.js'
@@ -273,10 +272,6 @@ export type AgentMuxMessageTarget =
   | { kind: 'agent-session'; agentSessionId: string }
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
-export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; execution?: AgentPromptExecution; sourceChannel?: AgentMessageChannel; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
-} & ({ promptCondition: AgentPromptCondition; admissionIntent?: never } |
-  { promptCondition?: never; admissionIntent: { kind: 'manual-actor'; expectedRun: import('./types.js').AgentMuxRunRef }; execution: 'immediate' })
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy
   /** Checked against the exact Region occupant before applying navigation. */
@@ -651,7 +646,6 @@ export type AgentMuxControlRequest =
   | AgentMuxControlOpenTerminalRequest
   | AgentMuxControlOpenBrowserRequest
   | (RequestBase & GitOpenParams & { operation: 'open.git' })
-  | AgentMuxControlSendRequest
   | AgentMuxControlFocusRequest
   | AgentMuxControlArrangeRequest
   | AgentMuxControlPromoteRegionRequest
@@ -765,7 +759,6 @@ export type AgentMuxControlResult =
   | { operation: 'open.terminal'; region: AgentMuxTerminalRegion }
   | { operation: 'open.browser'; region: AgentMuxBrowserRegion }
   | ({ operation: 'open.git' } & GitOpenResult)
-  | { operation: 'send'; agentSessionId: string; inputReceipt?: import('./agent-input-wait.js').AgentInputSubmissionReceipt }
   | AgentMuxDesktopFocusResult
   | { operation: 'arrange'; tab: AgentMuxInspectedTab }
   // Where the promoted Region now lives: a brand-new Tab, same regionId (kept, not minted) and workspace.
@@ -989,7 +982,7 @@ export { AGENTMUX_RPC_MAX_MESSAGE_BYTES as AGENTMUX_CONTROL_MAX_MESSAGE_BYTES } 
  * 每个操作的等待预算档位——逐个写死，不许按前缀或形状推断。
  *
  * 为什么是一张穷尽表而不是一个谓词：谓词只能表达「符合这个形状的算慢」，而**新加的操作不符合任何形状
- * 时会静默落进快的那档**。此前的写法是 `startsWith('open.') || === 'send' || === 'resume' || === 'stop'`，
+ * 时会静默落进快的那档**。此前的写法是 `startsWith('open.') || === 'resume' || === 'stop'`，
  * 于是 `interrupt` 加进联合类型时没有任何东西提醒过要给它定档——它只是不匹配，就拿到了 2 秒。
  * （`interrupt` 拿短预算其实是对的：它只是往 daemon 发一次信号，不像 `stop` 要等 attachRecoverableStop
  * 真的收尾。但那应该是有人**判过**的结果，不是漏判的结果。）
@@ -1047,7 +1040,6 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'space.unbind': 'long',
   'open.terminal': 'long',
   'open.browser': 'long',
-  send: 'long',
   focus: 'short',
   arrange: 'short',
   // 促升只动本地布局状态（摘一格、新建一张 Tab），不等本进程之外的任何东西——和 arrange 同档。

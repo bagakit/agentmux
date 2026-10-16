@@ -1770,11 +1770,6 @@ export async function registerIpc(args: {
     assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.replyQuestion(session, input, config)
   })
-  handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => sessionInputWriteResult(async () => {
-    const receipt = await args.runtime.submitMessage(session, message)
-    pauseUserProgress(session, 'Paused for your message.')
-    return receipt
-  }))
   handleWithEvent('sessions:inputMailbox', async (event, session: import('../shared/contracts.js').SessionHistoryReference,
     options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>) => {
     requireTrustedSender('sessions:inputMailbox', event)

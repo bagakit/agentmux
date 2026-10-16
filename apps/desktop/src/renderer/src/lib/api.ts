@@ -1152,7 +1152,6 @@ const mockApi: AgentMuxDesktopApi = {
       await mockApi.sessions.write(control, `${prompt.trim()}\r`, 'user')
     },
     replyQuestion: async () => { throw new Error('Native question replies require the original Desktop Core.') },
-    submitMessage: async () => { throw new Error('Authenticated Agent messaging requires the Desktop Runtime.') },
     inputMailbox: async () => { throw new Error('Original input mailbox reading requires the Desktop Runtime.') },
     inspectInput: async () => { throw new Error('Original durable input inspection requires the Desktop Runtime.') },
     stopInputWaiting: async () => { throw new Error('Original durable waiting control requires the Desktop Runtime.') },
@@ -1545,7 +1544,6 @@ function requireDesktopApi(): AgentMuxDesktopApi {
       write: (...args) => preload.sessions.write(...args).then(result => { unwrapSessionInputWriteResult(result) }),
       paste: (...args) => preload.sessions.paste(...args).then(result => { unwrapSessionInputWriteResult(result) }),
       submitPrompt: (...args) => preload.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult),
-      submitMessage: (...args) => preload.sessions.submitMessage(...args).then(unwrapSessionInputWriteResult),
       inspectInput: (...args) => preload.sessions.inspectInput(...args).then(unwrapSessionInputOperationResult),
       stopInputWaiting: (...args) => preload.sessions.stopInputWaiting(...args).then(unwrapSessionInputOperationResult),
       rejoinInputWaiting: (...args) => preload.sessions.rejoinInputWaiting(...args).then(unwrapSessionInputOperationResult),

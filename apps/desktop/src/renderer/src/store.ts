@@ -213,7 +213,6 @@ import {
   arrangeWorkbenchControlTab,
   inspectWorkbenchControlRegion,
   inspectWorkbenchControlTab,
-  messageTargetCandidates,
   planControlOpen,
   resolveWorkbenchControlRegion,
   resolveWorkbenchControlTab,
@@ -5917,42 +5916,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         regionId: result.target.regionId,
         workspaceId: result.target.workspaceId
       }
-    }
-    if (request.operation === 'send') {
-      let session: Extract<SessionSnapshot, { kind: 'agent' }>
-      if (request.target.kind === 'self' || request.target.kind === 'agent-session') {
-        session = agentSession(request.target, request.caller)
-      } else if (request.target.kind === 'region') {
-        const region = resolveWorkbenchControlRegion(input(), request.target)
-        if (region.kind !== 'agent') throw controlFailure('MESSAGE_TARGET_NOT_AGENT', 'Target Region is not an Agent.')
-        session = agentSession({ kind: 'agent-session', agentSessionId: region.agentSessionId })
-      } else {
-        const tab = resolveWorkbenchControlTab(input(), { kind: 'tab', tabId: request.target.tabId })
-        const candidates = messageTargetCandidates(input(), tab.id)
-        if (candidates.length !== 1) {
-          throw controlFailure('MESSAGE_TARGET_NOT_UNIQUE', 'Target Tab does not contain exactly one Agent Session.', { candidates })
-        }
-        session = agentSession({ kind: 'agent-session', agentSessionId: candidates[0]!.agentSessionId })
-      }
-      requireActive()
-      if (!request.message) throw controlFailure('MESSAGE_ENVELOPE_INVALID', 'Control send requires a message envelope.')
-      if (request.message.body !== request.text) throw controlFailure('MESSAGE_ENVELOPE_INVALID', 'Message body does not match Control text.')
-      if (request.message.recipient.kind !== 'agent-session' || request.message.recipient.agentSessionId !== session.id ||
-        request.message.recipientSessionId !== session.id ||
-        request.message.recipientRunId !== null && request.message.recipientRunId !== session.control.run.runId) {
-        throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient is not the resolved Agent Session/Run.')
-      }
-      const condition = request.admissionIntent === undefined ? validateAgentPromptCondition(request.promptCondition) : undefined
-      const expectedRun = request.admissionIntent?.expectedRun ?? condition!.expectedRun
-      if (expectedRun.runId !== session.control.run.runId) throw controlFailure(
-        'STALE_AGENT_SESSION', 'Message intent targets another Run.')
-      const message = { envelope: request.message,
-        ...(request.sourceChannel === undefined ? {} : { sourceChannel: request.sourceChannel }),
-        ...(request.caller ? { caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) }
-      const inputReceipt = await api.sessions.submitMessage(session.control, request.admissionIntent
-        ? { ...message, admissionIntent: request.admissionIntent, execution: 'immediate' }
-        : { ...message, condition: condition!, ...(request.execution === undefined ? {} : { execution: request.execution }) })
-      return { operation: request.operation, agentSessionId: session.id, ...(inputReceipt ? { inputReceipt } : {}) }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {
       const session = agentSession(request.target, request.caller)
