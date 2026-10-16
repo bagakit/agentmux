@@ -4,6 +4,7 @@ import { expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { StableWorkbenchView } from '../src/renderer/src/components/StableWorkbenchView'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
+import { placeWorkbenchWindow, registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-window-registry'
 
 it('keeps the actual placed host while a later destination is unavailable', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -16,8 +17,9 @@ it('keeps the actual placed host while a later destination is unavailable', asyn
   const tree = (targetId: string | null, destinationReady = false) => createElement(Fragment, null,
     createElement('div', { id: 'pending-home' }), createElement('div', { id: 'pending-first' }),
     destinationReady ? createElement('div', { id: 'pending-later' }) : null,
-    createElement(StableWorkbenchView, { homeId: 'pending-home', targetId, active: true, visible: true, retainedRegionId: null },
-      createElement(OriginalInput)))
+    <StableWorkbenchView homeId="pending-home" targetId={targetId} active visible retainedRegionId={null}>
+      <OriginalInput />
+    </StableWorkbenchView>)
   try {
     await act(async () => root.render(tree('pending-first')))
     const input = container.querySelector<HTMLInputElement>('input')!
@@ -45,8 +47,9 @@ it.each(['none', 'keydown', 'pointerdown', 'beforeinput', 'other-control', 'sele
   const tree = (targetId: string | null) => createElement(Fragment, null,
     createElement('div', { id: 'reading-home' }), createElement('div', { id: 'reading-next' }),
     createElement('button', { id: 'later-control' }, 'Later control'),
-    createElement(StableWorkbenchView, { homeId: 'reading-home', targetId, active: true, visible: true, retainedRegionId: null },
-      createElement('p', { contentEditable: true }, 'Original unsent reading')))
+    <StableWorkbenchView homeId="reading-home" targetId={targetId} active visible retainedRegionId={null}>
+      <p contentEditable>Original unsent reading</p>
+    </StableWorkbenchView>)
   let move: ReturnType<typeof vi.spyOn> | undefined
   try {
     await act(async () => root.render(tree(null)))
@@ -85,8 +88,9 @@ it.each(['update', 'move'] as const)('keeps a scroll-only reader without restori
   const root = createClientUiRoot(container)
   const tree = (targetId: string | null, revision: number) => createElement(Fragment, null,
     createElement('div', { id: 'scroll-home' }), createElement('div', { id: 'scroll-next' }),
-    createElement(StableWorkbenchView, { homeId: 'scroll-home', targetId, active: true, visible: true, retainedRegionId: null },
-      createElement('div', { 'data-workbench-reading-scroll': true }, createElement('p', null, `Reading revision ${revision}`))))
+    <StableWorkbenchView homeId="scroll-home" targetId={targetId} active visible retainedRegionId={null}>
+      <div data-workbench-reading-scroll><p>Reading revision {revision}</p></div>
+    </StableWorkbenchView>)
   let read: ReturnType<typeof vi.spyOn> | undefined
   try {
     document.getSelection()!.removeAllRanges()
@@ -98,11 +102,87 @@ it.each(['update', 'move'] as const)('keeps a scroll-only reader without restori
     expect(container.querySelector('[data-workbench-reading-scroll]')).toBe(reader)
     expect(reader.scrollTop).toBe(120)
     expect(reader.textContent).toBe('Reading revision 1')
-    // The outgoing snapshot still captures current reading. Moving also
-    // captures at placement and at the resulting host-identity commit.
-    // None of those snapshots needs to restore an absent range.
-    expect(read).toHaveBeenCalledTimes(change === 'move' ? 3 : 1)
+    // The outgoing snapshot and resulting host-identity commit still protect
+    // current reading; same-document attach adds no unused late snapshot.
+    expect(read).toHaveBeenCalledTimes(change === 'move' ? 2 : 1)
   } finally { read?.mockRestore(); await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() }
+})
+
+it('attaches a late same-document destination without reading unused selection or scroll state', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createClientUiRoot(container)
+  const spies: Array<{ mockRestore(): void }> = []
+  try {
+    await act(async () => root.render(<StableWorkbenchView homeId="late-reading-home" targetId="late-reading-destination"
+      active={false} visible={false} retainedRegionId={null}>
+      <div data-workbench-reading-scroll><p contentEditable>Original unsent reading</p></div>
+    </StableWorkbenchView>))
+    const editor = container.querySelector('p')!, reader = editor.parentElement!, host = reader.parentElement!, text = editor.firstChild!
+    reader.scrollTop = 120; reader.scrollLeft = 9
+    const range = document.createRange(); range.setStart(text, 2); range.setEnd(text, 8)
+    document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
+    const selection = vi.spyOn(document, 'getSelection'), top = vi.spyOn(reader, 'scrollTop', 'get'), left = vi.spyOn(reader, 'scrollLeft', 'get')
+    spies.push(selection, top, left)
+    const destination = document.createElement('div'); destination.id = 'late-reading-destination'
+    await act(async () => { container.append(destination); for (let i = 0; i < 6; i++) await Promise.resolve() })
+    expect(destination.querySelector('.retained-workbench-view')).toBe(host)
+    expect(destination.querySelector('p')).toBe(editor)
+    expect(selection, 'actual same-document attach does not capture another Range').not.toHaveBeenCalled()
+    expect(top, 'actual same-document attach does not read an unused scroll snapshot').not.toHaveBeenCalled()
+    expect(left).not.toHaveBeenCalled()
+    expect(reader.scrollTop).toBe(120); expect(reader.scrollLeft).toBe(9)
+    expect(editor.textContent).toBe('Original unsent reading')
+    const retained = document.getSelection()!.getRangeAt(0)
+    expect(retained.startContainer).toBe(text); expect(retained.startOffset).toBe(2)
+    expect(retained.endContainer).toBe(text); expect(retained.endOffset).toBe(8)
+  } finally { for (const spy of spies) spy.mockRestore(); await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals() }
+})
+
+it('still captures and restores parked original reading when adoption crosses documents', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'), frame = document.createElement('iframe'); document.body.append(container, frame)
+  const child = frame.contentDocument!, destination = child.createElement('div'); child.body.append(destination)
+  const reference = { displayWorkspaceId: 'adoption-workspace', groupId: 'adoption-group', tabId: 'adoption-tab', regionId: 'adoption-region' }
+  const scope = { windowId: 'adoption-window', documentGeneration: 'adoption-document' }
+  const releaseChild = registerWorkbenchDocument(child, scope), root = createClientUiRoot(container)
+  const spies: Array<{ mockRestore(): void }> = []
+  try {
+    await act(async () => root.render(createElement(Fragment, null, createElement('div', { id: 'adoption-home' }),
+      <StableWorkbenchView homeId="adoption-home" targetId={null} primaryTabId={reference.tabId}
+        reference={reference} active visible={false} retainedRegionId={reference.regionId}>
+        <div data-workbench-reading-scroll><p contentEditable>Original unsent adoption draft</p></div>
+      </StableWorkbenchView>)))
+    const editor = container.querySelector('p')!, reader = editor.parentElement!, host = reader.parentElement!, text = editor.firstChild!
+    editor.focus(); reader.scrollTop = 120; reader.scrollLeft = 9
+    const sourceSelection = document.getSelection()!, range = document.createRange()
+    range.setStart(text, 2); range.setEnd(text, 8); sourceSelection.removeAllRanges(); sourceSelection.addRange(range)
+    const focus = vi.spyOn(document, 'hasFocus').mockReturnValue(true), read = vi.spyOn(document, 'getSelection')
+    const top = vi.spyOn(reader, 'scrollTop', 'get'), left = vi.spyOn(reader, 'scrollLeft', 'get')
+    const adopt = child.adoptNode.bind(child)
+    const adopting = vi.spyOn(child, 'adoptNode').mockImplementation(<T extends Node>(node: T): T => {
+      const original = adopt(node)
+      // Controlled native-adoption reset: the production owner must restore
+      // both original endpoint nodes and these readers in the new document.
+      reader.scrollTop = 0; reader.scrollLeft = 0; sourceSelection.removeAllRanges()
+      return original
+    })
+    spies.push(focus, read, top, left, adopting)
+    let moving!: Promise<void>
+    await act(() => { moving = placeWorkbenchWindow({ kind: 'tab', displayWorkspaceId: reference.displayWorkspaceId,
+      groupId: reference.groupId, tabId: reference.tabId }, { destination, window: scope }) })
+    await act(async () => {}); await moving
+    expect(adopting).toHaveBeenCalledWith(host)
+    expect(read).toHaveBeenCalled(); expect(top).toHaveBeenCalled(); expect(left).toHaveBeenCalled()
+    expect(destination.querySelector('.retained-workbench-view')).toBe(host)
+    expect(destination.querySelector('p')).toBe(editor); expect(editor.ownerDocument).toBe(child)
+    expect(editor.textContent).toBe('Original unsent adoption draft')
+    expect(reader.scrollTop).toBe(120); expect(reader.scrollLeft).toBe(9)
+    const restored = child.getSelection()!.getRangeAt(0)
+    expect(restored.startContainer).toBe(text); expect(restored.startOffset).toBe(2)
+    expect(restored.endContainer).toBe(text); expect(restored.endOffset).toBe(8)
+    expect(child.activeElement).toBe(editor)
+  } finally { for (const spy of spies) spy.mockRestore(); await act(async () => root.unmount()); releaseChild(); container.remove(); frame.remove(); vi.unstubAllGlobals() }
 })
 
 it.each([false, true])('repairs an original input with no local range while respecting a foreign selection: %s', async foreignSelection => {
@@ -112,8 +192,9 @@ it.each([false, true])('repairs an original input with no local range while resp
   const tree = (targetId: string | null) => createElement(Fragment, null,
     createElement('p', { id: 'foreign-reading' }, 'Other reading remains selected'),
     createElement('div', { id: 'input-home' }), createElement('div', { id: 'input-next' }),
-    createElement(StableWorkbenchView, { homeId: 'input-home', targetId, active: true, visible: true, retainedRegionId: null },
-      createElement('div', { 'data-workbench-reading-scroll': true }, createElement('input', { defaultValue: 'Original unsent input' }))))
+    <StableWorkbenchView homeId="input-home" targetId={targetId} active visible retainedRegionId={null}>
+      <div data-workbench-reading-scroll><input defaultValue="Original unsent input" /></div>
+    </StableWorkbenchView>)
   let move: ReturnType<typeof vi.spyOn> | undefined
   try {
     await act(async () => root.render(tree(null)))
