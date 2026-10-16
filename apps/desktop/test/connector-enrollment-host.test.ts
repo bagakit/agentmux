@@ -489,3 +489,73 @@ it.each([
   expect(JSON.stringify(observed)).not.toContain('private-token')
   expect(observed.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
 })
+
+it('continues native zero waiting through Host, SDK and compiled CLI to the original account', async () => {
+  const replies = [
+    () => Response.json({ code: 0, data: { next_step: 'qr_login_polling', step_info: { status: 0 } } }, {
+      headers: { 'set-cookie': 'continued-zero=original-observation; Domain=.feishu.cn; Path=/; Secure; HttpOnly' }
+    }),
+    () => Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: '' } } })
+  ]
+  pollReply = () => {
+    const reply = replies.shift()
+    expect(reply).toBeDefined()
+    return reply!()
+  }
+  const pending = await client.call('connection.enrollment.begin', input)
+  const originalAttempt = pending.operation!.authentication!.attemptId
+  clock = pending.challenge!.nextPollAt + 1
+  const zeroInput = decision(pending, 'continue-authentication')
+  const waiting = await cli(['advance', '--input', '-'], zeroInput)
+  expect(waiting.operation!.operationId).toBe(input.operationId)
+  expect(waiting.operation!.authentication).toEqual({ attemptId: originalAttempt, stage: 'waiting' })
+  expect(waiting.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  expect(waiting.account).toBeNull()
+  expect(waiting.challenge).toEqual({ ...pending.challenge, nextPollAt: clock + 1500 })
+  expect(waiting.receipt!.state).toBe('confirmed')
+  expect(waiting.actions.map(action => action.kind)).toEqual(['recover-local', 'continue-authentication'])
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
+  const repeated = await client.call('connection.enrollment.advance', zeroInput)
+  expect(repeated.receipt).toEqual(waiting.receipt)
+  expect(repeated.challenge).toEqual(waiting.challenge)
+  expect(calls).toHaveLength(2)
+
+  clock = waiting.challenge!.nextPollAt - 1
+  const earlyInput = decision(waiting, 'continue-authentication')
+  expect(earlyInput.decision.actionId).not.toBe(zeroInput.decision.actionId)
+  const early = await client.call('connection.enrollment.advance', earlyInput)
+  expect(early.operation!.authentication).toEqual({ attemptId: originalAttempt, stage: 'waiting' })
+  expect(early.account).toBeNull()
+  expect(early.challenge).toEqual(waiting.challenge)
+  expect(early.receipt!.state).toBe('confirmed')
+  expect(calls).toHaveLength(2)
+
+  clock = waiting.challenge!.nextPollAt
+  const nextInput = decision(early, 'continue-authentication')
+  expect(nextInput.decision.actionId).not.toBe(earlyInput.decision.actionId)
+  const handoff = await cli(['advance', '--input', '-'], nextInput)
+  expect(handoff.operation!.authentication).toEqual({ attemptId: originalAttempt, stage: 'handoff' })
+  expect(handoff.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  expect(handoff.challenge).toBeNull()
+  expect(handoff.account).toBeNull()
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling'])
+  expect(sentCookies.filter(call => call.path === '/accounts/qrlogin/polling')[1]!.cookie).toContain('continued-zero=original-observation')
+  let signedIn = handoff
+  for (const path of ['/', '/app']) {
+    const before = calls.length
+    signedIn = await cli(['advance', '--input', '-'], decision(signedIn, 'continue-authentication'))
+    expect(calls).toHaveLength(before + 1)
+    expect(calls.at(-1)!.path).toBe(path)
+    expect(signedIn.operation!.authentication!.stage).toBe(path === '/app' ? 'account' : 'handoff')
+    if (path !== '/app') expect(signedIn.account).toBeNull()
+    expect(signedIn.operation!.creation).toEqual({ upload: 'not-started', create: 'not-started' })
+  }
+  expect(signedIn.account).toMatchObject({ userId: 'original-user', tenantId: 'original-tenant' })
+  expect(signedIn.actions.map(action => action.kind)).toContain('confirm-account')
+  expect(calls.map(call => call.path)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling', '/accounts/qrlogin/polling', '/', '/app'])
+  expect(calls.every(call => call.preclaimed)).toBe(true)
+  expect(replies).toHaveLength(0)
+  expect((await client.call('connection.enrollment.inspect', { operationId: input.operationId })).operation).toEqual(signedIn.operation)
+  expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(signedIn.operation)
+  expect(calls).toHaveLength(5)
+})
