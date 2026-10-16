@@ -33,7 +33,7 @@ export function ConversationMessageAvatar({ speaker, name, providerId, executorI
   if (!mote && !project) return agentFace(size)
   return <span className={`conversation-message-avatar${mote ? ' conversation-message-avatar--mote' : ''}`}
     data-mote-author={mote?.topicId} data-project-workspace-id={mote ? undefined : project?.workspaceId}
-    title={mote ? mote.name : `${name} · ${project!.name} · Current project`} style={{ width: size, height: size }}>
+    title={mote ? mote.name : `${name} · ${project!.name} · Current project`} style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size / 2)) }}>
     {mote ? <ConversationSpeakerAvatar speaker={speaker} name={name} mote={mote} size={size} />
       : <ProjectIcon workspaceId={project!.workspaceId} name={project!.name} />}
     <span className="conversation-message-avatar__badge">{agentFace(Math.max(8, Math.round(size / 2)))}</span>
