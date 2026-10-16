@@ -114,6 +114,10 @@ env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_RUNTIME_DIRECTORY -u AGENTMUX_ST
 
 P00 可靠性原则已原位写入[低资源原则](../design/behavior/shared-rules.md#低资源下的正确性与可恢复性)、恢复合同、[拦截判定](../../RED-LINES.md)和[故障验证策略](../testing/strategy.md#隔离资源故障与恢复验证)。已确认持久的原身份、请求和进度是跨极端事件的恢复起点；未知副作用不自动重放。SIGKILL 验证进程崩溃，受控断电验证存储耐久性，两项分别留证。
 
+`415fdbb503` 随后闭合准确恢复的完整消费者：Core 的 continuity／resume／status 只采用本次准确 Session 与严格退休事实，全组辅助观察失败逐 Session 保留。实际 Main 链又暴露两处前置等待，以及一处后置拒绝：Core 已返回可接回的原 Run，Main 却因事件缓存缺少 Session 再次抛错。修正复用原 Runtime 准入及准确回执投影，并核对返回 Run，保留原 operation、expectedRun、Provider、权限和 Level B 条件。机制见[Terminal Runtime 架构](../architecture/terminal-runtime.md#11-原终端附着与-hosted-准入)。
+
+该恢复切片的十三条实际编译 Core 变异与四条实际加载 Main 变异分别产生业务失败，恢复后八十三项相关 Core 测试、八项真实 Main 消费者与拒绝对照通过。真实隔离 Native 和新语义进程使用同一原文件、Run 与 PID；准确 ended Session 的合成 Provider 恢复保原 native target 和操作，但不代签真实 Provider 上下文。宽回归仍有经准确基线复现的旧失败，不宣称全量通过。managed Hook 配置 helper 原有的无 Session 事件诊断尚未补成准确 late-subscriber 回执，本轮没有借用另一类 Hook 观察替它签字。
+
 ## 遗留
 
 - **性能归因仍未完成。** Host 高 CPU、Renderer 高内存与交互成本仍需分开归因，已有观察尚不能完成全部因果归因。终端恢复可读不代签整体资源优化、长期稳定性或活跃长历史连续阅读。

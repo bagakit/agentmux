@@ -94,6 +94,10 @@ Main 新建 Agent 经 `launchAdmittedAgent` → Hosted `createAgentWithDelivery`
 
 `inspectAgentCreation` 和 `attestAgentCreation` 使用现有 offline 分派，分别消费原创建记录和来源授权事实。inspect 读到原 durable 回执可直接返回；原已确认／待确认结果如实保留，没有原结果与 prepared 关联时明确未知。只有需要 reconcile 原 prepared 创建时才 `connectRuntime()` 并核对原 Native 列表，不执行新启动或输入。attest 沿原 Store、来源能力和签名 owner，不由 Runtime 连通性授予权限。offline 是连接前提分类，不是业务授权或成功结果。
 
+准确恢复消费者 `ensureAgentContinuity`、`resumeAgent` 和 `statusAgent` 也使用原 Runtime 准入，各自在 Core 采用准确 Session 元数据与退休事实；`readRetiredAgentSession(id)` 由原 Memory/File Store 按原严格 codec 读取，避免为一个目标扫描所有退休记录。活动／退休冲突、错误 Host 与读取失败不能冒充不存在，退休记录也不授予恢复执行。原 Run 存活时可先返回 reattachable；新 Run 的 Level B 恢复仍沿原 Provider-native 目标、权限与 lifecycle prepare/commit。
+
+Desktop `RuntimeController.resumeSession` 和 `performRecovery` 在这两条实际链路上选择 Runtime 连接。Main 的事件缓存缺项时，准确 Core continuity 回执可经既有 `sessionByTarget` 交付真实 Session 投影，并核对 Core 确认的 Run；缓存缺口不重新要求完整 `connect()`。全组 open 的辅助观察逐 Session 保留失败，物理状态读取不等待该 Session 的语义观察完成；当前上下文未知仍如实呈现。managed Hook 配置 helper 的既有无 Session 事件诊断仍有范围限制，不能把 listener／binding 的 `hookIngressObservation` 当成配置修复回执。
+
 ## 2. 所有权矩阵
 
 ctxmux 在这个架构中仍是完整、独立的 Runtime 产品。它的 daemon、CLI、协议和 SDK 不依赖
