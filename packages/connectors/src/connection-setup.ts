@@ -455,10 +455,16 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     if (row && input.applicationInspection) view = await this.inspection.attach(view, row, context, input.applicationInspection)
     return row && input.applicationConfiguration ? this.configuration.attach(view, row, context, input.applicationConfiguration) : view
   }
-  /** Original successful creation provenance, independent of later management-account renewal. */
-  private async creator(row: Row): Promise<ReturnType<typeof parseConnectionSetupAccount> | null> {
+  /** Historical creation provenance and current authentication identity remain separate facts. */
+  private async creator(row: Row): Promise<{ account: ReturnType<typeof parseConnectionSetupAccount>; isCurrent: boolean } | null> {
     if (!row.operation.source || !row.privateRef) return null
-    try { return this.envelope(await this.secrets?.resolve(row.privateRef) ?? null, row)?.localAccount ?? null } catch { return null }
+    try {
+      const account = this.envelope(await this.secrets?.resolve(row.privateRef) ?? null, row)?.localAccount
+      if (!account) return null
+      let current: AuthEnvelope | null = null
+      try { current = await this.authenticationSnapshot(row) } catch { /* A current observation gap does not erase historical creation provenance. */ }
+      return { account, isCurrent: current?.stage === 'confirmed' && current.account?.userId === account.userId && current.account.tenantId === account.tenantId }
+    } catch { return null }
   }
   async list(value: { connectionId: string; cursor?: string; limit?: number }, context?: ConnectionEnrollmentCallContext): Promise<ConnectionSetupListing> {
     const input = parseConnectionSetupParams('connection.setup.ls', value), limit = input.limit ?? 25
