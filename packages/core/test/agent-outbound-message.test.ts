@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -14,7 +15,7 @@ import { planDiscussion } from '../src/agent-discussion.js'
 
 // AgentMux 出站文本此前散在四处各拼各的（启动提示、discuss 首条、send、resume）；这里锁定
 // 它们收敛到同一个出口 composeOutboundMessage，且 AgentMux 自己的话进 <amux> 信封署名、
-// 用户原文逐字节透传。信封只署名不认证——from 是声明而非凭证。
+// 用户原文逐字节透传。平台声明和 A2A 作者都不是认证凭证。
 
 // 会诱发转义的用户原文：引号、尖括号、换行，甚至一个假的闭合信封标签。用户敲什么，Agent 就该
 // 收到什么——一个字节都不许被改写。放进 </amux> 正是为了证明我们不把用户文本当线协议去转义。
@@ -31,9 +32,9 @@ function clientSlice(fromNeedle: string, toNeedle: string): string {
 }
 
 describe('唯一出站出口 composeOutboundMessage', () => {
-  it('AgentMux 自己的话进 <amux from="amux"> 信封署名', () => {
+  it('AgentMux 自己的话进 <amux> 信封署名', () => {
     const out = composeOutboundMessage({ amux: 'runtime note' })
-    expect(out).toBe('<amux from="amux">\nruntime note\n</amux>')
+    expect(out).toBe('<amux>\nruntime note\n</amux>')
   })
 
   it('用户原文逐字节透传：不进属性、不被转义成另一种形状', () => {
@@ -46,7 +47,7 @@ describe('唯一出站出口 composeOutboundMessage', () => {
 
   it('amux 与 user 同在时：信封在前、用户原文在后，用户段完整未被信封吞掉', () => {
     const out = composeOutboundMessage({ amux: 'guide', user: NASTY_USER })
-    expect(out).toBe(`<amux from="amux">\nguide\n</amux>\n\n${NASTY_USER}`)
+    expect(out).toBe(`<amux>\nguide\n</amux>\n\n${NASTY_USER}`)
     // 用户原文原封不动地作为独立一段存在。
     expect(out.endsWith(NASTY_USER)).toBe(true)
   })
@@ -69,7 +70,7 @@ describe('启动提示路径经同一出口', () => {
   it('运行时引导进信封，用户请求原样透传且逐字节一致', () => {
     const out = composeAgentLaunchPrompt(NASTY_USER, true).text
     // AgentMux 的引导语被署名。
-    expect(out.startsWith('<amux from="amux">\n')).toBe(true)
+    expect(out.startsWith('<amux>\n')).toBe(true)
     expect(out).toContain('AgentMux runtime guide:')
     expect(out).toContain('into a split')
     expect(out).toContain('"$AGENTMUX_CLI" --skill')
@@ -108,7 +109,7 @@ describe('启动提示路径经同一出口', () => {
 
   it('还没有用户请求时给出等待指示，且它属于 AgentMux 的话（进信封）', () => {
     const idle = composeAgentLaunchPrompt(undefined, true).text
-    expect(idle).toContain('<amux from="amux">')
+    expect(idle).toContain('<amux>')
     expect(idle).toContain('No request yet. Wait for the user.')
     // 没有用户段时，信封是唯一内容，末尾就是闭合标签。
     expect(idle.endsWith('</amux>')).toBe(true)
@@ -167,7 +168,7 @@ describe('agentMuxNote 是 AgentMux 的话：署名进信封，与用户段分�
 
   it('note 与运行时引导同在一个信封里，用户请求逐字节留在信封外', () => {
     const out = composeAgentLaunchPrompt(NASTY_USER, true, NOTE).text
-    expect(out.startsWith('<amux from="amux">\n')).toBe(true)
+    expect(out.startsWith('<amux>\n')).toBe(true)
     expect(out).toContain('AgentMux runtime guide:')
     expect(out).toContain('Scratch Topic context:')
     expect(out).toContain('inspect .agents/')
@@ -181,7 +182,7 @@ describe('agentMuxNote 是 AgentMux 的话：署名进信封，与用户段分�
 
   it('note 是 AgentMux 的话：引导关闭时它仍署名进信封，不落进用户段', () => {
     const out = composeAgentLaunchPrompt(NASTY_USER, false, NOTE).text
-    expect(out.startsWith('<amux from="amux">\n')).toBe(true)
+    expect(out.startsWith('<amux>\n')).toBe(true)
     expect(out).toContain('Scratch Topic context:')
     expect(out).not.toContain('AgentMux runtime guide:')
     expect(out.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
@@ -215,10 +216,10 @@ describe('discuss 首条消息路径经同一出口', () => {
       targetWorkspacePath: fixturePath("repo"),
       body: NASTY_USER,
       operationId: 'op-1',
-      now: 1000
+      now: _tailFixtureEpoch(0, 0, 1000)
     })
     const out = composeAgentLaunchPrompt(plan.launchPrompt, true).text
-    expect(out.startsWith('<amux from="amux">\n')).toBe(true)
+    expect(out.startsWith('<amux>\n')).toBe(true)
     expect(out.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
   })
 })
@@ -244,7 +245,7 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
     expect(submission).toContain('await this.performPromptSubmission(')
     const submit = clientSlice('private async performPromptSubmission(', 'private async recordInitialMessageDelivery(')
     expect(submit).toContain('composeAgentPrompt(content, input.agentMuxNote)')
-    expect(submit).toContain('const outbound = composed.text')
+    expect(submit).toContain('const outbound = retainWire ? frozen.prompt : composed.text')
     // 出口的产物 outbound 才是喂给 provider/记录的东西——不是原始 content。
     expect(submit).toContain('const ordinaryPlan = provider.planPromptInput(outbound,')
     expect(submit).toMatch(/this\.promptSubmission\.submitInputPlan\(current,\s*run,\s*operationId,\s*outbound,\s*ordinaryPlan(?:,|\))/)

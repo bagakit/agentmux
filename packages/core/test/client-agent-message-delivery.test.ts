@@ -1,13 +1,17 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { renderAgentMuxMessageEnvelope, parseAgentMuxMessagePrefix } from '../src/agent-message-render.js'
 import { DOMParser } from '@xmldom/xmldom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient as DefaultClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { DurableAgentMuxMessageQueue, type AgentMuxMessageEnvelope } from '../src/agent-global-message-queue.js'
 import { agentPromptCondition, agentPromptNotApplied } from '../src/agent-prompt-condition.js'
-import { AgentMuxError } from '../src/errors.js'
+import { AgentMuxError as SourceError } from '../src/errors.js'
 import { hashAgentCapability, issueAgentCapability } from '../src/agent-capability.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from '../src/agent-messaging-guidance.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -16,6 +20,8 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 
 const Client: typeof DefaultClient = process.env.AGENTMUX_TEST_A2A_CLIENT
   ? (await import(process.env.AGENTMUX_TEST_A2A_CLIENT)).AgentMuxClient : DefaultClient
+const AgentMuxError: typeof SourceError = process.env.AGENTMUX_TEST_A2A_CLIENT
+  ? (await import(new URL('./errors.js', process.env.AGENTMUX_TEST_A2A_CLIENT).href)).AgentMuxError : SourceError
 const disposals: (() => Promise<void>)[] = []
 const roots: string[] = []
 afterEach(async () => { for (const dispose of disposals.splice(0)) await dispose(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -27,7 +33,7 @@ type Internals = {
 const body = '  unchanged <body> & "quotes"\nSecond line.  '
 function agentMuxContext(outbound: unknown): string {
   if (typeof outbound !== 'string') throw new Error('Expected the original outbound text')
-  expect(outbound.startsWith('<amux from="amux">')).toBe(true)
+  expect(outbound.startsWith('<amux>')).toBe(true)
   const end = outbound.indexOf('</amux>')
   expect(end).toBeGreaterThan(0)
   // Only the platform context is XML; the following authored body remains literal text.
@@ -45,7 +51,7 @@ async function fixture() {
   for (const id of ['sender', 'recipient']) await store.compareAndSwap(null, {
     kind: 'agent', agentSessionId: id, providerId: 'traex', executorId: 'traex', hostId: 'local', workspacePath: root,
     run: { runId: `${id}-run` }, retiredRuns: [], hookBindingId: `hook-${id}`, hookToken: `token-${id}`,
-    ...(id === 'sender' ? { capabilityHash: hashAgentCapability(capability) } : {}), createdAt: 1, updatedAt: 1
+    ...(id === 'sender' ? { capabilityHash: hashAgentCapability(capability) } : {}), createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1)
   })
   const client = new Client({ store }), inner = client as unknown as Internals
   const accepted = new Map<string, { run: CtxmuxAdapterRun; appliedByteRange: { startByte: number; endByte: number } }>()
@@ -82,17 +88,42 @@ async function fixture() {
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
   client.onEvent(event => events.push(structuredClone(event)))
   const queue = new DurableAgentMuxMessageQueue(join(root, 'messages.ndjson'))
-  const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: 'message-one', operationId: 'operation-one', createdAt: 100,
+  const envelope: AgentMuxMessageEnvelope = { schema: 'agentmux.a2a.v1', messageId: 'message-one', operationId: 'operation-one', createdAt: _tailFixtureEpoch(0, 0, 100),
     sender: { kind: 'agent-session', agentSessionId: 'sender' }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
     senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run',
     threadId: 'thread-one', correlationId: 'correlation-one', replyTo: null, workspaceId: null, body }
-  const input = () => ({ agentSessionId: 'recipient', envelope, condition: agentPromptCondition(client.agentSession('recipient')),
+  const originalCondition = agentPromptCondition(client.agentSession('recipient'))
+  const input = () => ({ agentSessionId: 'recipient', envelope, condition: originalCondition,
     caller: { agentSessionId: 'sender', capability } })
   const reopen = async () => { const owner = new Client({ store: new AgentMuxFileAgentSessionStore(store.path) }); await configure(owner); return owner }
   return { root, client, store, inner, queue, writes, start, stop, events, envelope, input, capability, reopen }
 }
 
 describe('Core owns authenticated durable Agent delivery', () => {
+  it('carries actual CLI input through public RPC, Core journal and Provider Input with the same MID', async () => {
+    const f = await fixture()
+    const server = new AgentMuxControlServer({ socketPath: join(f.root, 'control.sock'), coreClients: async () => [{ hostId: 'local', client: f.client }] })
+    await server.start()
+    try {
+      const result = await runCompiledObjectCli(['agent', 'send', '--to-session', 'recipient', '--text', body], objectCliEnvironment(f.root, {
+        AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: f.capability
+      }))
+      expect(result.stderr).not.toContain('Error')
+      expect(result.code, result.stdout + result.stderr).toBe(0)
+      const receipt = JSON.parse(result.stdout).result
+      const records = await f.queue.listAfter()
+      expect(records).toHaveLength(1)
+      expect(receipt).toMatchObject({ messageId: records[0]!.envelope.messageId, delivery: { state: 'delivered' } })
+      const wire = renderAgentMuxMessageEnvelope(records[0]!.envelope)
+      expect(f.writes).toEqual([wire + '\r'])
+      expect(parseAgentMuxMessagePrefix(wire)).toMatchObject({ declaredAgentSessionId: 'sender', declaredMessageId: receipt.messageId, body })
+      expect((await f.store.loadTimeline('recipient')).items).toEqual([
+        expect.objectContaining({ content: wire, authorAgentSessionId: 'sender', inputRef: { kind: 'message', messageId: receipt.messageId,
+          agentSessionId: 'recipient', expectedRun: { runId: 'recipient-run' } } })
+      ])
+    } finally { await server.stop() }
+  }, 20_000)
+
   it('persists identity before actual Input, adds source to unchanged bytes and reopens without replay', async () => {
     const f = await fixture()
     const originalCondition = f.input().condition
@@ -104,14 +135,14 @@ describe('Core owns authenticated durable Agent delivery', () => {
       return await input(id, operation)
     }
     await f.client.submitAgentMessage(f.input())
-    expect(f.writes).toEqual([`[Message from Agent sender]\n${body}\r`])
+    expect(f.writes).toEqual([renderAgentMuxMessageEnvelope(f.envelope) + '\r'])
     const records = await new DurableAgentMuxMessageQueue(f.queue.path).listAfter()
     expect(records).toEqual([expect.objectContaining({ envelope: f.envelope, delivery: { state: 'delivered', at: expect.any(Number) }, promptCondition: { expectedRun: { runId: 'recipient-run' }, afterSubmissionId: null } })])
     expect((await new AgentMuxFileAgentSessionStore(f.store.path).loadTimeline('recipient')).items).toEqual([
-      expect.objectContaining({ id: 'prompt:message-one', content: `[Message from Agent sender]\n${body}`, authorAgentSessionId: 'sender' })
+      expect.objectContaining({ id: 'prompt:message-one', content: renderAgentMuxMessageEnvelope(f.envelope), authorAgentSessionId: 'sender' })
     ])
     const reopened = await f.reopen()
-    await reopened.submitAgentMessage(f.input())
+    await expect(reopened.submitAgentMessage(f.input())).resolves.toBeUndefined()
     expect(f.writes).toHaveLength(1)
     await expect(reopened.submitAgentMessage({ ...f.input(), envelope: { ...f.envelope, body: 'another body' } }))
       .rejects.toMatchObject({ code: 'MESSAGE_ID_CONFLICT' })
@@ -122,15 +153,35 @@ describe('Core owns authenticated durable Agent delivery', () => {
     f.inner.kernel.input = async (...args: unknown[]) => { await originalInput(...args); throw new Error('private Input ACK lost') }
     const originalCondition = f.input().condition
     await expect(f.client.submitAgentMessage(f.input())).rejects.toThrow('private Input ACK lost')
-    expect(f.writes).toEqual([`[Message from Agent sender]\n${body}\r`])
+    expect(f.writes).toEqual([renderAgentMuxMessageEnvelope(f.envelope) + '\r'])
     const unknown = await f.queue.listAfter(); expect(unknown).toHaveLength(1)
     expect(unknown[0]).toMatchObject({ delivery: { state: 'queued' }, promptCondition: originalCondition })
     const reopened = await f.reopen()
-    await reopened.submitAgentMessage({ ...f.input(), condition: agentPromptCondition(reopened.agentSession('recipient')) })
-    expect(f.writes).toEqual([`[Message from Agent sender]\n${body}\r`])
+    await reopened.submitAgentMessage({ ...f.input(), condition: originalCondition })
+    expect(f.writes).toEqual([renderAgentMuxMessageEnvelope(f.envelope) + '\r'])
     const recovered = await f.queue.listAfter(); expect(recovered).toHaveLength(1)
     expect(recovered[0]).toMatchObject({ envelope: f.envelope, promptCondition: originalCondition, delivery: { state: 'delivered' } })
     expect(f.stop).not.toHaveBeenCalled()
+  })
+
+  it('reconciles the original frozen wire after the Core reminder changes', async () => {
+    const f = await fixture()
+    const previousWire = renderAgentMuxMessageEnvelope(f.envelope).replace(/<reminder>[^<]*<\/reminder>/u, '<reminder>Previous Core guidance.</reminder>')
+    const internal = f.client as unknown as { submitPromptInternal(input: { prompt: string }, ...rest: unknown[]): Promise<void> }
+    const send = internal.submitPromptInternal.bind(internal)
+    // This first producer represents the previous formatter version. Everything
+    // below it is the actual admission, journal, claim and Input path.
+    const olderProducer = vi.spyOn(internal, 'submitPromptInternal').mockImplementationOnce((input, ...rest) => send({ ...input, prompt: previousWire }, ...rest))
+    const originalInput = f.inner.kernel.input as (...args: unknown[]) => Promise<unknown>
+    f.inner.kernel.input = async (...args: unknown[]) => { await originalInput(...args); throw new Error('private Input ACK lost') }
+    await expect(f.client.submitAgentMessage(f.input())).rejects.toThrow('private Input ACK lost')
+    olderProducer.mockRestore()
+    expect(f.writes).toEqual([previousWire + '\r'])
+    const reopened = await f.reopen()
+    await expect(reopened.submitAgentMessage(f.input())).resolves.toBeUndefined()
+    expect(f.writes).toEqual([previousWire + '\r'])
+    expect((await f.queue.listAfter())[0]!.delivery.state).toBe('delivered')
+    expect((await f.store.loadTimeline('recipient')).items[0]!.content).toBe(previousWire)
   })
 
   it('keeps the original unknown message after a later real prompt admission instead of rebinding or replaying it', async () => {
@@ -144,8 +195,8 @@ describe('Core owns authenticated durable Agent delivery', () => {
     const currentCondition = agentPromptCondition(reopened.agentSession('recipient'))
     expect(currentCondition).toEqual({ expectedRun: { runId: 'recipient-run' }, afterSubmissionId: 'later-human-intent' })
     await expect(reopened.submitAgentMessage({ ...f.input(), condition: currentCondition }))
-      .rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
-    expect(f.writes).toEqual([`[Message from Agent sender]\n${body}\r`, 'later human text\r'])
+      .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+    expect(f.writes).toEqual([renderAgentMuxMessageEnvelope(f.envelope) + '\r', 'later human text\r'])
     const retained = await f.queue.listAfter(); expect(retained).toHaveLength(1)
     expect(retained[0]).toMatchObject({ envelope: f.envelope, promptCondition: originalCondition, delivery: { state: 'queued' } })
     expect(reopened.agentSession('recipient').run).toEqual({ runId: 'recipient-run' }); expect(f.stop).not.toHaveBeenCalled()
@@ -186,8 +237,8 @@ describe('Core owns authenticated durable Agent delivery', () => {
     await expect(f.client.submitAgentMessage(f.input())).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     expect(await f.queue.listAfter()).toEqual([]); expect(f.writes).toEqual([])
     expect((await f.client.authorizeAgentCaller('new-capability', 'sender')).run).toEqual({ runId: 'sender-resumed' })
-    await f.client.submitAgentMessage({ ...f.input(), caller: { agentSessionId: 'sender', capability: 'new-capability' }, envelope: { ...f.envelope, senderRunId: 'sender-resumed' } })
-    expect(f.writes).toEqual([`[Message from Agent sender]\n${body}\r`])
+    await expect(f.client.submitAgentMessage({ ...f.input(), caller: { agentSessionId: 'sender', capability: 'new-capability' }, envelope: { ...f.envelope, senderRunId: 'sender-resumed' } })).resolves.toBeUndefined()
+    expect(f.writes).toEqual([renderAgentMuxMessageEnvelope(f.envelope) + '\r'])
   })
 
   it('fails this durable intent before Input while preserving the healthy recipient', async () => {
@@ -207,7 +258,7 @@ describe('initial Agent messages retain the single creation transport', () => {
     const input = { callerAgentSessionId: 'sender', capability: f.capability, executorId: providerId, providerId,
       workspacePath: f.root, body, operationId: 'discussion-once' }
     const first = await f.client.startDiscussion(input)
-    const wrapped = `[Message from Agent sender]\n${body}`
+    const wrapped = renderAgentMuxMessageEnvelope((await f.queue.listAfter())[0]!.envelope)
     expect(f.start).toHaveBeenCalledTimes(1)
     if (providerId === 'claude') {
       expect(f.start.mock.calls[0]![0].args.filter((arg: string) => arg.includes(wrapped))).toHaveLength(1)
@@ -221,7 +272,7 @@ describe('initial Agent messages retain the single creation transport', () => {
     expect(records).toHaveLength(1)
     expect(records[0]).toMatchObject({ envelope: { messageId: `${first.thread.threadId}:0`, recipientRunId: null, senderRunId: 'sender-run',
       recipientSessionId: first.session.agentSessionId, body }, promptCondition: { expectedRun: { runId: 'initial-run' } }, delivery: { state: 'delivered' } })
-    expect(first.session.creation).toEqual({ createOperationId: input.operationId, initialPrompt: 'confirmed' })
+    expect(first.session.creation).toMatchObject({ createOperationId: input.operationId, initialPrompt: 'confirmed', agentMuxContext: 'confirmed', intentDigest: expect.any(String) })
     expect(first.thread.messages[0]!.body).toBe(body)
     const reopened = await f.reopen()
     const retry = await reopened.startDiscussion(input)
@@ -239,7 +290,7 @@ describe('initial Agent messages retain the single creation transport', () => {
     const f = await fixture()
     await f.client.createAgentWithDelivery({ agentSessionId: 'opened-session', createOperationId: 'open-once', providerId: 'claude', executorId: 'claude',
       workspacePath: f.root, injectAgentMuxGuide: false, prompt: body, initialMessage: { callerAgentSessionId: 'sender', capability: f.capability } })
-    expect(f.start.mock.calls[0]![0].args).toContain(`[Message from Agent sender]\n${body}`)
+    expect(f.start.mock.calls[0]![0].args).toContain(renderAgentMuxMessageEnvelope((await f.queue.listAfter())[0]!.envelope))
     expect(await f.queue.listAfter()).toEqual([expect.objectContaining({ envelope: expect.objectContaining({ body, senderSessionId: 'sender', recipientSessionId: 'opened-session', recipientRunId: null }),
       promptCondition: expect.objectContaining({ expectedRun: { runId: 'initial-run' } }) })])
   })
@@ -283,7 +334,7 @@ describe('initial Agent messages retain the single creation transport', () => {
       promptCondition: { expectedRun: { runId: 'initial-run' }, afterSubmissionId: originalAdmission!.submissionId }, delivery: { state: 'queued' } })
     const originalTimeline = await f.store.loadTimeline(sessionId)
     expect(originalTimeline.items).toContainEqual(expect.objectContaining({ kind: 'user_message', status: 'failed',
-      content: `[Message from Agent sender]\n${body}` }))
+      content: renderAgentMuxMessageEnvelope(original!.envelope) }))
     expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', agentSessionId: sessionId, code: 'CTXMUX_input_cursor_mismatch' }))
     expect(nativeInput).toHaveBeenCalledTimes(1); expect(f.writes).toEqual([])
 

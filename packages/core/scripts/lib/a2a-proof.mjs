@@ -16,7 +16,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
   const evidence = join(root, '.tmp', `${name}-${Date.now()}`)
   const copy = await realpath(await mkdtemp(fixtureRootPath("tmp/amx-a2a-proof-")))
   const core = join(copy, 'core'), dist = join(core, 'dist')
-  const inputs = [...new Set([...sourceInputs, ...tests, ...regressionTests, ...callers.map(item => item.path)])]
+  const inputs = [...new Set([...sourceInputs, ...tests, ...regressionTests, ...mutations.flatMap(mutation => mutation.tests ?? []), ...callers.map(item => item.path)])]
   const sourceHashes = async () => Object.fromEntries(await Promise.all(inputs.map(async path => [path, hash(await readFile(join(root, path)))])))
   const receipt = { schema: 'agentmux.a2a-protocol-proof.v1', name, privateCopyRoot: copy, passed: false, sharedTreeMutations: 0, cases: [] }
   const originals = new Map()
@@ -47,6 +47,14 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
   try {
     await mkdir(evidence, { recursive: true })
     receipt.sourceBefore = await sourceHashes()
+    // Every definition-excluded path below is a product caller, not a test inventory.
+    receipt.callers = await Promise.all(callers.map(async ({ symbol, path }) => {
+      const source = await readFile(join(root, path), 'utf8')
+      const lines = source.split('\n').flatMap((line, index) => line.includes(symbol) ? [{ line: index + 1, text: line.trim() }] : [])
+      assert.ok(lines.length > 0, `${symbol}: no production caller in ${path}`)
+      return { symbol, path, lines }
+    }))
+    assert.ok(receipt.callers.length > 0)
     await mkdir(core, { recursive: true })
     await cp(join(root, 'packages/core/dist'), dist, { recursive: true })
     await cp(join(root, 'packages/core/package.json'), join(core, 'package.json'))
@@ -70,6 +78,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       if (!originals.has(mutation.file)) originals.set(mutation.file, await readFile(join(dist, mutation.file), 'utf8'))
     }
     receipt.executionInputs = Object.fromEntries([...originals].map(([file, bytes]) => [file, hash(bytes)]))
+    for (const mutation of mutations) assert.equal(originals.get(mutation.file).split(mutation.before).length - 1, 1, `Unique mutation anchor: ${mutation.label}`)
     receipt.baseline = await run('baseline-green')
     assert.equal(receipt.baseline.exit, 0, `Baseline failed: ${receipt.baseline.log}`)
     if (regressionTests.length) {
@@ -86,23 +95,15 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
       let red
       try {
         await writeFile(join(dist, mutation.file), original.replace(mutation.before, mutation.after))
-        red = await run(`${mutation.label}-red`, mutation.projectTests ?? tests, mutation.projectTests ? copy : root)
+        red = await run(`${mutation.label}-red`, mutation.projectTests ?? mutation.tests ?? tests, mutation.projectTests ? copy : root)
         assert.ok(red.exit > 0 && red.failed > 0 && red.assertionFailures > 0,
           `Mutation must fail a behavior assertion: ${mutation.label} (${red.log})`)
       } finally { await writeFile(join(dist, mutation.file), original) }
-      const restored = await run(`${mutation.label}-restore-green`, mutation.projectTests ?? tests, mutation.projectTests ? copy : root)
+      const restored = await run(`${mutation.label}-restore-green`, mutation.projectTests ?? mutation.tests ?? tests, mutation.projectTests ? copy : root)
       assert.equal(restored.exit, 0, `Restore failed: ${restored.log}`)
       receipt.cases.push({ label: mutation.label, file: mutation.file, red, restored })
       process.stdout.write(`${mutation.label}: RED -> GREEN\n`)
     }
-    // Every definition-excluded path below is a product caller, not a test inventory.
-    receipt.callers = await Promise.all(callers.map(async ({ symbol, path }) => {
-      const source = await readFile(join(root, path), 'utf8')
-      const lines = source.split('\n').flatMap((line, index) => line.includes(symbol) ? [{ line: index + 1, text: line.trim() }] : [])
-      assert.ok(lines.length > 0, `${symbol}: no production caller in ${path}`)
-      return { symbol, path, lines }
-    }))
-    assert.ok(receipt.callers.length > 0)
     receipt.sourceAfter = await sourceHashes()
     assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore)
     for (const [file, bytes] of originals) assert.equal(await readFile(join(dist, file), 'utf8'), bytes)
