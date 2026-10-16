@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act, useMemo } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -22,12 +23,12 @@ function Scene() {
   const { contexts } = useAppStore(project)
   const selected = contexts.find(item => item.id === target.id)
   return <>{contexts.map(context => <FocusContextRow key={context.id} context={context} selected={false} onSelect={select} />)}
-    <FocusToolbar selectedId={target.id} selected={selected} tab={tab} onReview={() => {}} onCloseWorkspace={collapse}>Filters</FocusToolbar></>
+    <FocusToolbar selectedId={target.id} selected={selected} tab={tab} reference={{ displayWorkspaceId: 'workspace', groupId: 'stop-group', tabId: tab.id, regionId: 'stop-region' }} onReview={() => {}} onCloseWorkspace={collapse}>Filters</FocusToolbar></>
 }
 const card = () => container.querySelector<HTMLButtonElement>(`button[data-session-id="${target.id}"]`)!
 const confirm = () => document.querySelector<HTMLButtonElement>('[role="dialog"] [data-confirm-label="Stop Agent"]')!
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
-async function open(entry: 'card' | 'toolbar' | 'title' = 'card') {
+async function open(entry: 'card' | 'toolbar' | 'title' = 'card', action: 'Stop Agent' | 'Restart Session…' = 'Stop Agent') {
   const origin = entry === 'card' ? card() : container.querySelector<HTMLButtonElement>(entry === 'title' ? '.focus-toolbar__identity' : '[aria-label="Focus context actions"]')!
   expect(origin).toBeTruthy()
   await act(async () => {
@@ -36,10 +37,10 @@ async function open(entry: 'card' | 'toolbar' | 'title' = 'card') {
     else origin.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 40, clientY: 40 }))
   })
   await settle()
-  const stop = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Stop Agent')
+  const stop = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === action)
   expect(stop).toBeTruthy()
   await act(async () => stop!.click()); await settle()
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Stop Agent?')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain(action === 'Stop Agent' ? 'Stop Agent?' : 'Restart Session?')
   expect(document.querySelector('.confirmation-dialog__subject')?.textContent).toBe('Same Agent')
   expect(api.sessions.stop).not.toHaveBeenCalled()
   return origin
@@ -123,7 +124,7 @@ it('a rejected or timed-out stop preserves state, reports its exact subject and 
 })
 
 it('unknown observation still allows explicit Stop; disappearing identity never borrows another Agent', async () => {
-  await act(async () => useAppStore.setState({ sessions: [first, { ...target, processState: 'running', status: { state: 'disconnected', source: 'native-hook', observedAt: 2, detail: 'Connection observation unavailable; current Run is unconfirmed' } }] }))
+  await act(async () => useAppStore.setState({ sessions: [first, { ...target, processState: 'running', status: { state: 'disconnected', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 2), detail: 'Connection observation unavailable; current Run is unconfirmed' } }] }))
   await open(); await act(async () => confirm().click()); await settle()
   expect(api.sessions.stop).toHaveBeenCalledExactlyOnceWith(target.control)
   vi.mocked(api.sessions.stop).mockClear()
@@ -141,4 +142,15 @@ it('leaving a pending confirmation does not refocus or mutate a later work surfa
   await act(async () => release()); await settle()
   expect(document.activeElement).toBe(later); retained(before)
   expect(useAppStore.getState().sessions).toBe(before.sessions)
+})
+
+
+it.each(['card', 'toolbar', 'title'] as const)('offers explicit Restart from the original %s menu without executing before confirmation', async entry => {
+  const restart = vi.spyOn(api.sessions, 'restart')
+  const before = useAppStore.getState()
+  await open(entry, 'Restart Session…')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Running work will be interrupted')
+  expect(restart).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled()
+  await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click()); await settle()
+  retained(before)
 })
