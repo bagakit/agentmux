@@ -141,6 +141,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'goal.activity.inspect': ['--goal', ids.goal, '--operation-id', 'ACTIVITY'],
     'message.inbox.check': ['--limit', '5'], 'message.inbox.ack': ['--generation', '3', '--reader-run', 'RUN'],
     'message.read': ['--operation-id', 'ORIGINAL', '--host', 'local'],
+    'message.ls': ['--direction', 'incoming', '--host', 'local', '--participant', 'SESSION'],
     'message.dispatch.open': ['--source-message', 'M'], 'message.dispatch.inspect': ['--source-message', 'M'],
     'message.dispatch.report': ['--source-message', 'M', '--reply-message', 'REPLY', '--kind', 'worker_done'],
     'app.search': ['--mode', 'metadata', '--query', 'search'], 'app.inspect': [], 'app.snapshot': [], 'app.focus': ['--surface', 'space'], 'mote.playbook.pmo': [],
