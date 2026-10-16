@@ -16,13 +16,14 @@ export default defineConfig({
     const effective = code, mutant = process.env.AGENTMUX_LANE_MEASUREMENT_MUTANT
     const replace = (from: string, to: string) => { assert.equal(code.split(from).length - 1, 1, 'Unique actual lane measurement inverse'); code = code.replace(from, to) }
     if (mutant) {
-      if (mutant === 'sync-geometry') {
-        replace('const width = entries.find(entry => entry.target === rows)?.contentRect.width ?? 0', "const width = rows.clientWidth > 0 ? rows.querySelector<HTMLElement>('.focus-project-lanes__groups')?.getBoundingClientRect().width ?? 0 : 0")
-        replace('    const observer = new ResizeObserver(measure)', '    measure([], {} as ResizeObserver)\n    const observer = new ResizeObserver(measure)')
+      if (mutant === 'no-initial-measure') {
+        replace('    measure([], observer)', '')
+      } else if (mutant === 'ignore-ro-content') {
+        replace('entries.find(entry => entry.target === rows)?.contentRect.width ?? rows.clientWidth', 'rows.clientWidth')
       } else if (mutant === 'queued-hidden') {
         replace('return () => { active = false; observer.disconnect() }', 'return () => observer.disconnect()')
       } else if (mutant === 'zero-overwrite') {
-        replace('      if (width <= 0) return', '')
+        replace('      if (width <= 0) { setLaneMetrics(current => current.measured ? current : { ...current, measured: true }); return }', '')
       } else if (mutant === 'inactive-observer') {
         replace("if (!visible || !documentActive || !hasBoardCards || !rows || typeof ResizeObserver === 'undefined') return", "if (!documentActive || !hasBoardCards || !rows || typeof ResizeObserver === 'undefined') return")
       } else throw Error('Unknown lane measurement mutation: ' + mutant)
