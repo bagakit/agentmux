@@ -107,6 +107,7 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
     void load(source, valid ? state.query : '', page.error ? page.retry?.cursor : page.cursor ?? undefined)
   }
   return { scope, draftQuery, setDraftQuery, query: valid ? state.query : '', search, messages, pages, loadMore,
-    loading: pages.some(page => page.loading), complete: pages.every(page => page.complete && !page.error),
+    loading: pages.some(page => page.loading) || enabled && pages.some(page => !page.complete && page.cursor === null && page.examined === 0 && page.error === null),
+    complete: pages.every(page => page.complete && !page.error),
     examined: pages.reduce((total, page) => total + page.examined, 0) }
 }
