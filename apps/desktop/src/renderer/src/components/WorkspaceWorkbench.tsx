@@ -1616,6 +1616,80 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
   </>
 }
 
+type WorkbenchContentHostProps = {
+  workspaceId: string
+  tab: WorkbenchTab
+  targets: readonly WorkbenchViewTarget[]
+  homeId: string
+  targetId: string | null
+  tabProjection: WorkbenchViewTarget | undefined
+  regionTarget: WorkbenchViewTarget | undefined
+  nativeRegionHostId: string | undefined
+  reference: WorkbenchViewTarget['reference']
+  retainedRegionId: string | null
+  groupId: string | undefined
+  tabVisible: boolean
+  nativeSurfacesVisible: boolean
+  interactiveResize: boolean
+  showBorrowedNotice: boolean
+  missingPlacement: boolean
+  onBrowserControlConfirmation: BrowserControlConfirmation | undefined
+}
+
+/** One retained Tab owns its content and context values; unrelated Tabs keep the same tree. */
+const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, tab, targets, homeId, targetId,
+  tabProjection, regionTarget, nativeRegionHostId, reference, retainedRegionId, groupId, tabVisible,
+  nativeSurfacesVisible, interactiveResize, showBorrowedNotice, missingPlacement, onBrowserControlConfirmation
+}: WorkbenchContentHostProps) {
+  const primaryHostId = targetId ?? homeId
+  return <WorkbenchBrowserTargetsContext.Provider value={targets}>
+        {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionHostId && target.reference).map(target =>
+          <StableWorkbenchView key={target.hostId} homeId={`${target.hostId}:parked`} targetId={target.hostId}
+            active={target.active} visible={target.visible !== false} surface={target.surface} retainedRegionId={target.reference!.regionId} reference={target.reference}>
+            <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
+          </StableWorkbenchView>)}
+        <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
+          active={tabProjection?.active ?? true}
+          visible={tabVisible}
+          surface={tabProjection?.surface}
+          survey={tabProjection?.surface === 'survey'} controlsOpen={tabProjection?.controlsOpen ?? false}
+          onBrowserControlConfirmation={onBrowserControlConfirmation}
+          homeNotice={tabProjection && showBorrowedNotice ? <div data-workbench-borrowed-view-notice>
+            <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+              step: tabProjection.surface === 'focus' ? 'Selected View is in Focus' : tabProjection.surface === 'survey' ? 'Selected View is in Survey' : 'Selected View is in Mote',
+              mode: tabProjection.surface === 'focus' || tabProjection.surface === 'survey'
+                ? 'This Tab is selected here. Its original View remains in the named presentation.'
+                : 'This Tab is selected here. Its original View remains in the floating window.',
+              restore: tabProjection.surface === 'focus' ? 'Close Focus workspace to return this View to Space.'
+                : tabProjection.surface === 'survey' ? 'Return to Space to see the original View.' : 'Close Mote to return this View to Space.'
+            } }} />
+          </div> : undefined}
+          onSelectRegion={tabProjection?.onSelectRegion}
+          projection={tabProjection?.projection}
+          reference={reference}
+          retainedRegionId={retainedRegionId}>
+          {missingPlacement ? <ServiceWindowNotice
+            disclosure={{ scope: JSON.stringify(['local:retained-tab-placement', workspaceId, tab.id]), id: 'tab-placement',
+              occurrence: tab.id, cause: 'placement-unconfirmed', visible: tabVisible }}
+            notice={{ kind: 'indeterminate', notice: { step: 'Original display location unconfirmed',
+              mode: 'The original Tab and Regions remain available. Group placement is not confirmed.',
+              restore: 'Choose its original location in Space to restore placement-dependent actions.' } }} /> : null}
+          <WorkbenchRegionTree
+            tab={tab} groupId={groupId} regionTarget={regionTarget}
+            headerPortalTargetId={null}
+            surfaceVisible={tabVisible}
+            nativeSurfacesVisible={nativeSurfacesVisible}
+            interactiveResize={interactiveResize}
+          />
+        </StableWorkbenchView>
+        </WorkbenchBrowserTargetsContext.Provider>
+}, (previous, next) => {
+  const keys = Object.keys(next) as (keyof WorkbenchContentHostProps)[]
+  return keys.length === Object.keys(previous).length && keys.every(key => Object.hasOwn(previous, key) &&
+    (key === 'reference' && previous.reference && next.reference
+      ? sameWorkbenchProjectionSelection(previous.reference, next.reference) : Object.is(previous[key], next[key])))
+})
+
 export function WorkspaceWorkbench({
   workspaceId,
   interactiveResize = false,
@@ -2094,51 +2168,18 @@ export function WorkspaceWorkbench({
         const primaryReference = targetId === null ? homeReferences.get(tab.id) : tabProjection?.reference
         const retainedHere = primaryReference && retainedSpatialFocus?.tabId === tab.id &&
           primaryReference.displayWorkspaceId === retainedSpatialFocus.displayWorkspaceId && primaryReference.groupId === retainedSpatialFocus.groupId
-        const primaryHostId = targetId ?? homeId
         const detached = primaryReference && workbenchWindowPlacement({ kind: 'tab', displayWorkspaceId: primaryReference.displayWorkspaceId, groupId: primaryReference.groupId, tabId: tab.id })
         const tabVisible = Boolean(detached) || (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
-        return <WorkbenchBrowserTargetsContext.Provider key={tab.id} value={targets}>
-        {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionTarget?.hostId && target.reference).map(target =>
-          <StableWorkbenchView key={target.hostId} homeId={`${target.hostId}:parked`} targetId={target.hostId}
-            active={target.active} visible={target.visible !== false} surface={target.surface} retainedRegionId={target.reference!.regionId} reference={target.reference}>
-            <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
-          </StableWorkbenchView>)}
-        <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
-          active={tabProjection?.active ?? true}
-          visible={tabVisible}
-          surface={tabProjection?.surface}
-          survey={tabProjection?.surface === 'survey'} controlsOpen={tabProjection?.controlsOpen ?? false}
-          onBrowserControlConfirmation={onBrowserControlConfirmation}
-          homeNotice={tabProjection && tabProjection.surface !== 'space' && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
-            <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-              step: tabProjection.surface === 'focus' ? 'Selected View is in Focus' : tabProjection.surface === 'survey' ? 'Selected View is in Survey' : 'Selected View is in Mote',
-              mode: tabProjection.surface === 'focus' || tabProjection.surface === 'survey'
-                ? 'This Tab is selected here. Its original View remains in the named presentation.'
-                : 'This Tab is selected here. Its original View remains in the floating window.',
-              restore: tabProjection.surface === 'focus' ? 'Close Focus workspace to return this View to Space.'
-                : tabProjection.surface === 'survey' ? 'Return to Space to see the original View.' : 'Close Mote to return this View to Space.'
-            } }} />
-          </div> : undefined}
-          onSelectRegion={tabProjection?.onSelectRegion}
-          projection={tabProjection?.projection}
-          reference={targetId === null ? homeReferences.get(tab.id) ?? undefined : projection?.reference}
+        return <WorkbenchContentHost key={tab.id} workspaceId={workspaceId} tab={tab} targets={targets}
+          homeId={homeId} targetId={targetId} tabProjection={tabProjection} regionTarget={regionTarget}
+          nativeRegionHostId={nativeRegionTarget?.hostId} reference={primaryReference ?? undefined}
           retainedRegionId={retainedHere && (targetId === null || tabProjection?.surface === 'space')
-            ? retainedSpatialFocus.regionId : tabProjection?.retainedRegionId ?? null}>
-          {originalOwnerId && !confirmedDisplayGroup && !homeReferences.get(tab.id) && !tabProjection ? <ServiceWindowNotice
-            disclosure={{ scope: JSON.stringify(['local:retained-tab-placement', workspaceId, tab.id]), id: 'tab-placement',
-              occurrence: tab.id, cause: 'placement-unconfirmed', visible: tabVisible }}
-            notice={{ kind: 'indeterminate', notice: { step: 'Original display location unconfirmed',
-              mode: 'The original Tab and Regions remain available. Group placement is not confirmed.',
-              restore: 'Choose its original location in Space to restore placement-dependent actions.' } }} /> : null}
-          <WorkbenchRegionTree
-            tab={tab} groupId={confirmedDisplayGroup ?? homeReferences.get(tab.id)?.groupId} regionTarget={regionTarget}
-            headerPortalTargetId={null}
-            surfaceVisible={tabVisible}
-            nativeSurfacesVisible={tabVisible && activeDrag === null}
-            interactiveResize={interactiveResize}
-          />
-        </StableWorkbenchView>
-        </WorkbenchBrowserTargetsContext.Provider>
+            ? retainedSpatialFocus.regionId : tabProjection?.retainedRegionId ?? null}
+          groupId={confirmedDisplayGroup ?? homeReference?.groupId} tabVisible={tabVisible}
+          nativeSurfacesVisible={tabVisible && activeDrag === null} interactiveResize={interactiveResize}
+          showBorrowedNotice={Boolean(tabProjection && tabProjection.surface !== 'space' && visible && projectedGroup?.activeTabId === tab.id)}
+          missingPlacement={Boolean(originalOwnerId && !confirmedDisplayGroup && !homeReference && !tabProjection)}
+          onBrowserControlConfirmation={onBrowserControlConfirmation} />
       })}
       <DragOverlay dropAnimation={null}>
         {activeTab ? <DragPreview tab={activeTab} /> : null}

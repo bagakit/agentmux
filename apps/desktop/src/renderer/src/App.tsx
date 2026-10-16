@@ -71,6 +71,27 @@ import { isSessionSurface } from './lib/workbench-surface-kinds'
 
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
+/** Retain equal presentation addresses; the original callbacks and projection stay authoritative. */
+function useStableWorkbenchViewTargets(current: WorkbenchViewTargets): WorkbenchViewTargets {
+  const previous = useRef<WorkbenchViewTargets>({})
+  const next: Record<string, readonly WorkbenchViewTarget[]> = {}
+  for (const [tabId, targets] of Object.entries(current)) {
+    const held = previous.current[tabId]
+    const equal = held?.length === targets.length && targets.every((target, index) => {
+      const old = held[index]!
+      const keys = Object.keys(target) as (keyof WorkbenchViewTarget)[]
+      return keys.length === Object.keys(old).length && keys.every(key => Object.hasOwn(old, key) &&
+        (key === 'reference' && target.reference && old.reference
+          ? sameWorkbenchProjectionSelection(target.reference, old.reference) : Object.is(target[key], old[key])))
+    })
+    next[tabId] = equal ? held! : targets
+  }
+  if (Object.keys(previous.current).length === Object.keys(next).length &&
+    Object.keys(next).every(tabId => previous.current[tabId] === next[tabId])) return previous.current
+  previous.current = next
+  return next
+}
+
 export function App() {
   useEffect(() => observeNotebookLibrary(), [])
   const workflowComponentGallery = typeof window !== 'undefined' &&
@@ -302,7 +323,7 @@ function DesktopApp() {
   if (currentOrdinaryLayout && activeWorkspaceId) retainedOrdinaryLayout.current = { workspaceId: activeWorkspaceId, layout: currentOrdinaryLayout }
   const ordinaryLayout = currentOrdinaryLayout ?? (retainedOrdinaryLayout.current?.workspaceId === activeWorkspaceId ? retainedOrdinaryLayout.current.layout : undefined)
   const ordinaryObject = useWorkbenchObjectLayout(activeWorkspaceId ?? '', ordinaryLayout)
-  const ordinaryTargets = useMemo(() => {
+  const ordinaryTargets = useStableWorkbenchViewTargets(useMemo(() => {
     const layout = ordinaryObject.layout
     if (!layout || !activeWorkspaceId) return {}
     const reference = mainRegionReference(workbenchSpaceSelection)
@@ -310,12 +331,13 @@ function DesktopApp() {
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
     return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection])
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection]))
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
-    const targets: Record<string, WorkbenchViewTarget[]> = {}
-    const append = (tabId: string, target: WorkbenchViewTarget) => (targets[tabId] ??= []).push(target)
-    for (const [tabId, occurrences] of Object.entries(ordinaryTargets)) for (const target of occurrences) append(tabId, target)
-    for (const [tabId, occurrences] of Object.entries(moteViewTargets ?? {})) for (const target of occurrences) append(tabId, target)
+    const targets: Record<string, readonly WorkbenchViewTarget[]> = { ...ordinaryTargets }
+    const append = (tabId: string, target: WorkbenchViewTarget) => { targets[tabId] = [...targets[tabId] ?? [], target] }
+    for (const [tabId, occurrences] of Object.entries(moteViewTargets ?? {})) {
+      targets[tabId] = targets[tabId] ? [...targets[tabId]!, ...occurrences] : occurrences
+    }
     if (surveyVisible && surveyProjection) {
       const projection = surveyProjection
       const projected = projectWorkbenchProjection(layouts[projection.displayWorkspaceId], tabs, projection)
