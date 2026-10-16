@@ -512,6 +512,8 @@ const api: AgentMuxPreloadApi = {
     timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
     dispatches: (session, options) => ipcRenderer.invoke('sessions:dispatches', session, options),
     dispatch: (session, sourceMessageId) => ipcRenderer.invoke('sessions:dispatch', session, sourceMessageId),
+    listMessages: (session, options) => ipcRenderer.invoke('sessions:messages', session, options),
+    readMessage: (session, messageId) => ipcRenderer.invoke('sessions:message', session, messageId),
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
     readHistory: async (reference, options, context) => {
