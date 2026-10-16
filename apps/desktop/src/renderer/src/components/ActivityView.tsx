@@ -330,7 +330,7 @@ export function ActivityView({
   onSelectAnnotation,
   describeSpeaker,
   moteConversation = false,
-  questionReplyRoute, questionTerminalTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange,
+  questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply,
   renderMessageActions, renderRecordActions, renderReadingTools
 }: {
   sessionId: string
@@ -374,12 +374,13 @@ export function ActivityView({
   renderReadingTools?: (active: boolean, revealLoaded: RevealConversationItem) => ReactNode
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   questionReplyRoute?: ComponentProps<typeof ConversationView>['questionReplyRoute']
-  questionTerminalTarget?: ComponentProps<typeof ConversationView>['questionTerminalTarget']
+  questionReplyTarget?: ComponentProps<typeof ConversationView>['questionReplyTarget']
   questionDraftNotice?: string | undefined
   questionReplyContext?: string
   onOpenQuestionTerminal?: () => void
   questionReplyDraft?: ComponentProps<typeof ConversationView>['questionReplyDraft']
   onQuestionDraftChange?: ComponentProps<typeof ConversationView>['onQuestionDraftChange']
+  onQuestionReply?: ComponentProps<typeof ConversationView>['onQuestionReply']
   questionReplyState?: ComponentProps<typeof ConversationView>['questionReplyState']
 }) {
   const logRef = useRef<HTMLDivElement>(null)
@@ -1257,11 +1258,12 @@ export function ActivityView({
         renderQuestionNotice={renderConversationQuestionNotice}
         {...(questionDraftNotice ? { questionDraftNotice } : {})}
         {...(questionReplyRoute ? { questionReplyRoute } : {})}
-        {...(questionTerminalTarget ? { questionTerminalTarget } : {})}
+        {...(questionReplyTarget ? { questionReplyTarget } : {})}
         {...(questionReplyContext ? { questionReplyContext } : {})}
         {...(onOpenQuestionTerminal ? { onOpenQuestionTerminal } : {})}
         {...(questionReplyState ? { questionReplyState } : {})}
         {...(questionReplyDraft ? { questionReplyDraft } : {})}
+        {...(onQuestionReply ? { onQuestionReply } : {})}
         {...(onQuestionDraftChange ? { onQuestionDraftChange } : {})}
         active={readingEnabled}
         {...(renderRecordActions ? { renderRecordActions } : {})}

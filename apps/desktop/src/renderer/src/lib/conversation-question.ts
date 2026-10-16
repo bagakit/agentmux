@@ -1,6 +1,7 @@
 import { type AgentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { parseQuestionReplyAttempt, questionReplyKey,
-  questionReplyState, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyState } from '@agentmux/client-ui/conversation-question-reply'
+  questionReplyState, submitQuestionReply, type ConversationQuestionInput, type ConversationQuestionTarget, type QuestionReplyState } from '@agentmux/client-ui/conversation-question-reply'
+import { api } from './api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import type { DesktopQuestionReplies } from './conversation-question-intent'
@@ -24,7 +25,7 @@ export function reconcileConversationQuestionReplies(control: AgentSessionContro
         notApplied?.submissionId === attempt.input.operationId && notApplied.run.runId === attempt.input.expectedRun.runId &&
         control.run.runId === attempt.input.expectedRun.runId) {
         void retainConversationQuestionReply(control.agentSessionId, key, { ...attempt, phase: 'rejected', diagnostic: {
-          code: 'QUESTION_REPLY_NOT_APPLIED', message: 'Core confirmed the original reply was not applied. Your edited answer is kept; copy it and answer in the original terminal.'
+          code: 'QUESTION_REPLY_NOT_APPLIED', message: 'Core confirmed the original reply was not applied. Your edited answer is kept and can be sent as a new explicit reply.'
         } }, attempt).catch(() => {})
       }
     } catch { /* Unreadable original intent remains held; observing another source cannot replace it. */ }
@@ -33,4 +34,29 @@ export function reconcileConversationQuestionReplies(control: AgentSessionContro
 
 export function editConversationQuestionDraft(control: AgentSessionControl, target: ConversationQuestionTarget, answers: ConversationQuestionInput['answers']): void {
   retainConversationQuestionDraft(control.agentSessionId, questionReplyKey(control.agentSessionId, target), answers)
+}
+
+/** The workbench owns persistence; shared reply transitions own the original frozen operation. */
+export async function sendConversationQuestionReply(control: AgentSessionControl, input: ConversationQuestionInput): Promise<void> {
+  const key = questionReplyKey(control.agentSessionId, input)
+  const get = () => useAppStore.getState().questionReplies?.[control.agentSessionId]?.[key]
+  const assertOwner = () => {
+    const current = useAppStore.getState().sessions.find(session => session.id === control.agentSessionId)
+    if (current?.kind !== 'agent' || current.control.hostId !== control.hostId || current.control.run.runId !== control.run.runId ||
+        current.nativeSourceObservation || current.nativeHandle?.kind !== 'provider' ||
+        current.nativeHandle.providerId !== input.source.providerId || current.nativeHandle.sessionId !== input.source.nativeSessionId) {
+      throw new Error('The original question source or Run changed. Your draft and original operation are preserved.')
+    }
+    return current
+  }
+  const session = assertOwner(), previous = get()
+  if (previous && (previous.hostId !== control.hostId || previous.input.expectedRun.runId !== control.run.runId)) {
+    throw new Error('The preserved reply belongs to another Host or Run. It has not been replaced.')
+  }
+  await submitQuestionReply({ sessionId: control.agentSessionId, get,
+    create: () => ({ hostId: control.hostId, phase: 'sending', input: { ...structuredClone(input),
+      expectedRun: { ...control.run }, afterSubmissionId: session.promptSubmissionPredecessor ?? null, operationId: crypto.randomUUID() } }),
+    retain: (next, expected) => retainConversationQuestionReply(control.agentSessionId, key, next, expected),
+    submit: original => { assertOwner(); return api.sessions.replyQuestion(control, original) }
+  })
 }
