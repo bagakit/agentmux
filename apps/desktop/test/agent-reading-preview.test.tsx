@@ -10,7 +10,7 @@ import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgent
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 
 const dom = composerDOM({ agentInformation: true }), agent = composerSession('reading-agent'), other = composerSession('other-agent')
 const workspace = composerConfig.workspaces[0]!, onOpen = vi.fn()

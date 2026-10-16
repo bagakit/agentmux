@@ -11,7 +11,7 @@ import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 const dom = composerDOM({ agentInformation: true }), agent = composerSession('recall-agent'), neighbor = composerSession('other-recall-agent')
 const originalText = 'Keep the original task and its complete details.\n\n'.repeat(250) + 'COMPLETE ORIGINAL INPUT TAIL'
 const page: AgentSessionHistoryPage = { agentSessionId: agent.id, source: { providerId: 'codex', nativeSessionId: 'recall-source' }, nextCursor: 'older-records',

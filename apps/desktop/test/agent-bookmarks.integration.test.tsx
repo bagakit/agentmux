@@ -13,7 +13,7 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 import * as Modal from '@agentmux/client-ui/components/Modal'
 import { DocumentOverlayPortal } from '../src/renderer/src/components/WindowOverlayHost'
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 const dom = composerDOM({ agentInformation: true }), a = composerSession('bookmark-a'), b = composerSession('bookmark-b'), neighbor = { ...composerSession('neighbor-display'), hostId: 'neighbor-host', control: { ...a.control, hostId: 'neighbor-host' } }
 const timeline = (id: string, text: string) => ({ agentSessionId: id, revision: text.length, items: [{ id: id + '-reply', agentSessionId: id, kind: 'assistant_message' as const, source: 'native-hook' as const, status: 'complete' as const, title: 'Reply', content: text, createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1) }] })
 const context = (agent = a) => agentContextForSession(agent, useAppStore.getState().timelines[agent.id], 'Same display name', composerConfig.workspaces[0]!, null)

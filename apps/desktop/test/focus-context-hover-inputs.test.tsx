@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
@@ -7,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentSessionHistoryObservation, AgentTimelineItem } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
@@ -24,7 +25,7 @@ const native=(id:string,text:string,at?:number):AgentSessionHistoryPage['items']
 async function pointer(node:Element,type:'pointerover'|'pointerout',relatedTarget:Element|null=null){await act(async()=>node.dispatchEvent(new PointerEvent(type,{bubbles:true,pointerType:'mouse',relatedTarget})))}
 async function open(id=A){await pointer(card(id),'pointerover');await act(async()=>new Promise<void>(resolve=>setTimeout(resolve,200)));await act(async()=>vi.waitFor(()=>expect(panel()).not.toBeNull()))}
 async function close(){await act(async()=>input.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));expect(panel()).toBeNull()}
-async function setInputs(items:AgentTimelineItem[]){await act(async()=>useAppStore.setState({timelines:{[A]:{agentSessionId:A,revision:items.length+1,items:[...items,{id:'reply',agentSessionId:A,kind:'assistant_message',title:'Reply',source:'native-hook',status:'complete',content:response,createdAt:50,updatedAt:50}]}}}))}
+async function setInputs(items:AgentTimelineItem[]){await act(async()=>useAppStore.setState({timelines:{[A]:{agentSessionId:A,revision:items.length+1,items:[...items,{id:'reply',agentSessionId:A,kind:'assistant_message',title:'Reply',source:'native-hook',status:'complete',content:response,createdAt:_tailFixtureEpoch(0, 0, 50),updatedAt:_tailFixtureEpoch(0, 0, 50)}]}}}))}
 beforeEach(async()=>{
  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
  const config=await api.config.get(),snapshot=await api.sessions.snapshot(),base=snapshot.sessions.find(s=>s.kind==='agent')!
@@ -37,8 +38,8 @@ beforeEach(async()=>{
 })
 afterEach(async()=>{await act(async()=>root.unmount());await act(async()=>new Promise(resolve=>setTimeout(resolve,0)));container.remove();input.remove();document.getElementById('agentmux-window-overlay-host')?.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()})
 it('reads only after intent and shows the available native/captured inputs beside the original reply',async()=>{
- await setInputs([captured('old','Older request',5),captured('human','Manual user request',30,{authorHuman:true}),captured('peer','Agent incoming request',40,{authorAgentSessionId:C})])
- vi.mocked(api.sessions.historyPage).mockImplementation(async control=>page(control.agentSessionId,[native('old-native','Old terminal request',10),native('latest-native','Terminal user request',20)]))
+ await setInputs([captured('old','Older request',_tailFixtureEpoch(0, 0, 5)),captured('human','Manual user request',_tailFixtureEpoch(0, 0, 30),{authorHuman:true}),captured('peer','Agent incoming request',_tailFixtureEpoch(0, 0, 40),{authorAgentSessionId:C})])
+ vi.mocked(api.sessions.historyPage).mockImplementation(async control=>page(control.agentSessionId,[native('old-native','Old terminal request',_tailFixtureEpoch(0, 0, 10)),native('latest-native','Terminal user request',_tailFixtureEpoch(0, 0, 20))]))
  const original=useAppStore.getState();await pointer(card(),'pointerover');await act(async()=>new Promise(resolve=>setTimeout(resolve,150)));expect(panel()).toBeNull();expect(api.sessions.historyPage).not.toHaveBeenCalled()
  await act(async()=>new Promise(resolve=>setTimeout(resolve,60)));await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(5)))
  expect(inputs().map(n=>n.dataset.hoverInputId)).toEqual(['captured:old','native:claude:hover-hover-a:old-native','native:claude:hover-hover-a:latest-native','captured:human','captured:peer'])
@@ -52,15 +53,15 @@ it('reads only after intent and shows the available native/captured inputs besid
  const closedCount=vi.mocked(api.sessions.historyPage).mock.calls.length;await act(async()=>new Promise(resolve=>setTimeout(resolve,200)));expect(api.sessions.historyPage).toHaveBeenCalledTimes(closedCount)
 })
 it('preserves different IDs with identical text and marks missing record time without guessing global order',async()=>{
- await setInputs([captured('same','Same input',90,{authorHuman:true})]);vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A,[native('a','Same input'),native('b','Same input',10)]));await open()
+ await setInputs([captured('same','Same input',_tailFixtureEpoch(0, 0, 90),{authorHuman:true})]);vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A,[native('a','Same input'),native('b','Same input',_tailFixtureEpoch(0, 0, 10))]));await open()
  await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(3)))
  expect(new Set(inputs().map(n=>n.dataset.hoverInputId)).size).toBe(3);expect(inputs().every(n=>n.querySelector('p')!.textContent==='Same input')).toBe(true);expect(inputs()[0]!.dataset.inputAuthor).toBe('unknown');expect(panel()!.textContent).toContain('Order unavailable');expect(panel()!.textContent).toContain('Time unknown');expect(panel()!.textContent).toContain('Current reading window')
 })
 it('drops a closed reader and isolates a late response from a same-name neighbor and a new Run',async()=>{
  let resolveOld!:(value:AgentSessionHistoryPage)=>void
- vi.mocked(api.sessions.historyPage).mockImplementationOnce(()=>new Promise(resolve=>{resolveOld=resolve})).mockImplementation(async control=>page(control.agentSessionId,[native('current','Current '+control.agentSessionId,100)]))
+ vi.mocked(api.sessions.historyPage).mockImplementationOnce(()=>new Promise(resolve=>{resolveOld=resolve})).mockImplementation(async control=>page(control.agentSessionId,[native('current','Current '+control.agentSessionId,_tailFixtureEpoch(0, 0, 100))]))
  await open(A);expect(api.sessions.historyPage).toHaveBeenCalledTimes(1);await open(B);await act(async()=>vi.waitFor(()=>expect(panel()!.textContent).toContain('Current '+B)))
- await act(async()=>resolveOld(page(A,[native('late','Old late body',100)])));expect(panel()!.textContent).not.toContain('Old late body');expect(panel()!.textContent).not.toContain('Current '+A);expect(api.sessions.historyPage).not.toHaveBeenCalledWith(expect.objectContaining({agentSessionId:C}),expect.anything())
+ await act(async()=>resolveOld(page(A,[native('late','Old late body',_tailFixtureEpoch(0, 0, 100))])));expect(panel()!.textContent).not.toContain('Old late body');expect(panel()!.textContent).not.toContain('Current '+A);expect(api.sessions.historyPage).not.toHaveBeenCalledWith(expect.objectContaining({agentSessionId:C}),expect.anything())
  await close();await act(async()=>useAppStore.setState(state=>({sessions:state.sessions.map(session=>session.id===A&&session.kind==='agent'?{...session,control:{...session.control,run:{runId:'new-run'}}}:session)})));await open(A)
  await act(async()=>vi.waitFor(()=>expect(api.sessions.historyPage).toHaveBeenLastCalledWith(expect.objectContaining({agentSessionId:A,hostId:'local',run:{runId:'new-run'}}),{limit:30})));expect(panel()!.textContent).not.toContain('Old late body')
  const count=vi.mocked(api.sessions.historyPage).mock.calls.length;await close()
@@ -70,17 +71,17 @@ it('drops a closed reader and isolates a late response from a same-name neighbor
  }
 })
 it('keeps captured requests and the Agent reply readable when native observation and reading fail',async()=>{
- await setInputs([captured('held','Held user request',30,{authorHuman:true})]);vi.mocked(api.sessions.observeHistory).mockRejectedValue(new Error('Observation denied'));vi.mocked(api.sessions.historyPage).mockRejectedValue(new Error('History denied'))
+ await setInputs([captured('held','Held user request',_tailFixtureEpoch(0, 0, 30),{authorHuman:true})]);vi.mocked(api.sessions.observeHistory).mockRejectedValue(new Error('Observation denied'));vi.mocked(api.sessions.historyPage).mockRejectedValue(new Error('History denied'))
  const stop=vi.spyOn(api.sessions,'stop'),select=useAppStore.getState().agentFocus;await open();await act(async()=>vi.waitFor(()=>expect(panel()!.textContent).toContain('Recent message reading unavailable')))
  expect(panel()!.textContent).toContain('Held user request');expect(panel()!.textContent).toContain(response);expect(panel()!.textContent).toContain('Open the Agent to read History');expect(stop).not.toHaveBeenCalled();expect(useAppStore.getState().agentFocus).toBe(select);expect(card().disabled).toBe(false)
 })
 it('keeps reply DOM and Range through input arrival and unrelated output without extra reads or focus changes',async()=>{
- vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A,[native('held-native','Original terminal input',10)]))
+ vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A,[native('held-native','Original terminal input',_tailFixtureEpoch(0, 0, 10))]))
  const before=useAppStore.getState(),row=card();await open();await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(1)));const reply=panel()!.querySelector('.focus-context-hover__recap p')!,range=document.createRange();range.selectNodeContents(reply);window.getSelection()!.removeAllRanges();window.getSelection()!.addRange(range)
  const count=vi.mocked(api.sessions.historyPage).mock.calls.length
  for(let i=0;i<50;i++)await act(async()=>useAppStore.setState(state=>({sessions:state.sessions.map(s=>s.id===C?{...s,latestOutputBytes:s.latestOutputBytes+1}:s)})))
  expect(card()).toBe(row);expect(panel()!.querySelector('.focus-context-hover__recap p')).toBe(reply);expect(window.getSelection()!.toString()).toBe(response);expect(api.sessions.historyPage).toHaveBeenCalledTimes(count);expect(document.activeElement).toBe(input);expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
- vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A,[native('new-native','New terminal input',20)]))
+ vi.mocked(api.sessions.historyPage).mockResolvedValue(page(A,[native('new-native','New terminal input',_tailFixtureEpoch(0, 0, 20))]))
  await act(async()=>notify({kind:'invalidated',agentSessionId:A,source:{providerId:'claude',nativeSessionId:'hover-'+A}}))
  await act(async()=>vi.waitFor(()=>expect(panel()!.textContent).toContain('New terminal input')))
  expect(panel()!.textContent).toContain('Reading window incomplete');expect(inputs()).toHaveLength(2)
@@ -89,6 +90,6 @@ it('keeps reply DOM and Range through input arrival and unrelated output without
  await act(async()=>panel()!.dispatchEvent(new Event('scroll')));expect(panel()).not.toBeNull()
 })
 it('preserves complete long and non-text inputs without reading older pages to fill six',async()=>{
- vi.mocked(api.sessions.historyPage).mockResolvedValue({...page(A,[native('long','🙂'.repeat(800),20),{id:'resource',kind:'user-message',contentParts:[{kind:'resource',resourceType:'image',reference:_hygiene_fixturePath("recorded/image.png")}],startedAt:30}]),nextCursor:'earlier-real-cursor'})
+ vi.mocked(api.sessions.historyPage).mockResolvedValue({...page(A,[native('long','🙂'.repeat(800),_tailFixtureEpoch(0, 0, 20)),{id:'resource',kind:'user-message',contentParts:[{kind:'resource',resourceType:'image',reference:_hygiene_fixturePath("recorded/image.png")}],startedAt:_tailFixtureEpoch(0, 0, 30)}]),nextCursor:'earlier-real-cursor'})
  await open();await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(2)));expect(inputs()[0]!.querySelector('p')!.textContent).toBe('🙂'.repeat(800));expect(inputs()[1]!.textContent).toContain('Non-text input');expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
 })

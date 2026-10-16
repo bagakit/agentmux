@@ -11,7 +11,7 @@ import { useAppStore } from '../src/renderer/src/store'
 
 // Paint outside this reading surface is isolated. Global, Store, Row, Hover,
 // the shared reader, Markdown renderer and Core prefix parser remain real.
-vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
+vi.mock('../src/renderer/src/components/AgentAvatar', async importOriginal => ({ ...await importOriginal<typeof import('../src/renderer/src/components/AgentAvatar')>(), AgentAvatar: () => createElement('span') }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/RecentFocusTimeline', () => ({ RecentFocusTimeline: () => null }))
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
@@ -58,7 +58,7 @@ function captured(id: string, content: string, time: number, author: Partial<Age
 }
 function reply(content: string): AgentTimelineItem {
   return { id: 'original-reply', agentSessionId: recipient, kind: 'assistant_message', title: 'Reply', source: 'native-hook',
-    status: 'complete', content, createdAt: 50, updatedAt: 50 }
+    status: 'complete', content, createdAt: _historyFixtureEpoch(0, 0, 50), updatedAt: _historyFixtureEpoch(0, 0, 50) }
 }
 async function setTimeline(content: string, inputs: AgentTimelineItem[] = [], tail: AgentTimelineItem[] = []): Promise<void> {
   await act(async () => useAppStore.setState({ timelines: {
@@ -124,9 +124,9 @@ afterEach(async () => {
 
 it('reads the original selected reply as strong/code, separate paragraphs and a list without selecting a later prompt or tool', async () => {
   const text = '第一段 **关键结论** 和 `src/scroll-anchor.ts`。\n\n第二段保留分段。\n\n- 保留草稿\n- 保留原工作面'
-  const later = captured('later-prompt', '下一步检查输入', 60, { authorHuman: true })
+  const later = captured('later-prompt', '下一步检查输入', _historyFixtureEpoch(0, 0, 60), { authorHuman: true })
   const tool: AgentTimelineItem = { id: 'later-tool', agentSessionId: recipient, kind: 'tool_call', title: 'Bash', source: 'native-hook',
-    status: 'complete', content: 'pnpm test', createdAt: 70, updatedAt: 70 }
+    status: 'complete', content: 'pnpm test', createdAt: _historyFixtureEpoch(0, 0, 70), updatedAt: _historyFixtureEpoch(0, 0, 70) }
   await setTimeline(text, [], [later, tool])
   const before = useAppStore.getState()
   expect(api.sessions.historyPage).not.toHaveBeenCalled()
@@ -194,7 +194,7 @@ it('reads complete Agent wrappers as body while declarations cannot authenticate
   expect(verified.querySelector('time')?.getAttribute('title')).toContain('Submission record · Current reading window')
   expect(panel().querySelector('.focus-context-hover__source')).toBeNull()
   expect(panel().querySelector('.focus-context-hover__inputs > .focus-context-hover__coverage')).toBeNull()
-  expect(unknown.querySelector('time')?.textContent).not.toContain('2060')
+  expect(unknown.querySelector('time')?.textContent).not.toContain(String(new Date(_hygiene_fixtureIso(1097125800000, "zone-second", 480)).getUTCFullYear()))
   expect(invalid.textContent).toContain(malformed)
   expect(originalContent()).toBe(wrapped)
   expect(useAppStore.getState().timelines[recipient]!.items[0]).toBe(known)
@@ -212,7 +212,7 @@ it('disambiguates records on different dates and preserves source order when a r
   expect(times.every(Boolean)).toBe(true)
   expect(times[0]!.getAttribute('datetime')).toBe(new Date(later).toISOString())
   expect(times[2]!.getAttribute('datetime')).toBe(new Date(earlier).toISOString())
-  expect(times[0]!.textContent).toContain('2026'); expect(times[2]!.textContent).toContain('2026')
+  expect(times[0]!.textContent).toContain(String(new Date(later).getUTCFullYear())); expect(times[2]!.textContent).toContain(String(new Date(earlier).getUTCFullYear()))
   expect(times[0]!.textContent).not.toBe(times[2]!.textContent)
   expect(times[1]!.textContent).toBe('Time unknown'); expect(times[1]!.hasAttribute('datetime')).toBe(false)
   expect(panel().textContent).toContain('Order unavailable')
@@ -225,7 +225,7 @@ it('keeps complete observed reply and input tails without reading an earlier pag
   const inputBody = '**literal input**\n\n' + 'i'.repeat(400) + 'UNSEEN-INPUT-TAIL'
   const longInput = ("[Message from Agent " + (declared) + ("]\n<bagakit-msg type=\"result\" name=\"Declared long\" time=\"" + _hygiene_fixtureIso(1097125800000, "zone-second", 480) + "\">") + (inputBody) + "</bagakit-msg>")
   await setTimeline(longReply)
-  const nativePage = { ...page([native('long-input', longInput, 20)]), nextCursor: 'opaque-real-earlier-cursor' }
+  const nativePage = { ...page([native('long-input', longInput, _historyFixtureEpoch(0, 0, 20))]), nextCursor: 'opaque-real-earlier-cursor' }
   vi.mocked(api.sessions.historyPage).mockResolvedValue(nativePage)
   await open(); await act(async () => vi.waitFor(() => expect(inputRows()).toHaveLength(1)))
   const replyBody = recap().querySelector('[data-reading-format]')!, inputBodyNode = inputRows()[0]!.querySelector('[data-reading-format]')!
@@ -258,7 +258,7 @@ it('keeps complete observed reply and input tails without reading an earlier pag
 it('keeps HTTP, file, image, code, anchor and footnote references selectable with no resource reads or focusable no-op controls', async () => {
   const text = ("[网页](https://example.invalid/docs) 与 [文件](src/original.ts)。\n\n![图像](https://example.invalid/image.png)\n\n`@" + _hygiene_fixturePath("private/.agentmux/pasted/original.png") + "`\n\n```sh\ncurl https://example.invalid/private\n```\n\n[段落](#section) 与注释[^one]。\n\n[^one]: 原注释内容")
   await setTimeline(text)
-  vi.mocked(api.sessions.historyPage).mockResolvedValue(page([native('references', text, 20)]))
+  vi.mocked(api.sessions.historyPage).mockResolvedValue(page([native('references', text, _historyFixtureEpoch(0, 0, 20))]))
   const openExternal = vi.spyOn(api.ui, 'openExternal'), readImage = vi.spyOn(api.ui, 'readPastedImage')
   const readFile = vi.spyOn(api.files, 'read'), readPreview = vi.spyOn(api.files, 'readPreview')
   const openFile = vi.fn(), createBrowser = vi.fn(), stop = vi.spyOn(api.sessions, 'stop')
@@ -324,7 +324,7 @@ it('keeps HTTP, file, image, code, anchor and footnote references selectable wit
 })
 
 it('retains rich reply nodes and the original Range, input selection and draft through actual reader invalidation and unrelated output', async () => {
-  vi.mocked(api.sessions.historyPage).mockResolvedValue(page([native('held-native', 'Original terminal input', 10)]))
+  vi.mocked(api.sessions.historyPage).mockResolvedValue(page([native('held-native', 'Original terminal input', _historyFixtureEpoch(0, 0, 10))]))
   const before = useAppStore.getState(), row = card()
   await open(); await act(async () => vi.waitFor(() => expect(inputRows()).toHaveLength(1)))
   const replyRoot = recap().querySelector('.md')!, paragraph = replyRoot.querySelector('.md-paragraph')!
@@ -341,7 +341,7 @@ it('retains rich reply nodes and the original Range, input selection and draft t
   })))
   expect(api.sessions.historyPage).toHaveBeenCalledTimes(readCount)
   expect(api.sessions.observeHistory).toHaveBeenCalledTimes(1)
-  vi.mocked(api.sessions.historyPage).mockResolvedValue(page([native('held-native', 'Original terminal input', 10), native('new-native', 'New terminal input', 20)]))
+  vi.mocked(api.sessions.historyPage).mockResolvedValue(page([native('held-native', 'Original terminal input', _historyFixtureEpoch(0, 0, 10)), native('new-native', 'New terminal input', _historyFixtureEpoch(0, 0, 20))]))
   expect(notify).toBeTypeOf('function')
   await act(async () => notify!({ kind: 'invalidated', agentSessionId: recipient, source: { providerId: 'claude', nativeSessionId: `reading-${recipient}` } }))
   await act(async () => vi.waitFor(() => expect(inputRows()).toHaveLength(2)))
