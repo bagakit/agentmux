@@ -92,7 +92,16 @@ export type DesktopWorkbenchObservation = z.infer<typeof desktopWorkbenchObserva
 export type DesktopWorkbenchStorageObservation = z.infer<typeof desktopWorkbenchStorageObservationSchema>
 export type DesktopClientObservation = z.infer<typeof desktopClientObservationSchema>
 
-/** Shared by the production Control owner and the installer; never fills missing facts. */
+/** The current Control owner's strict public observation; never fills missing facts. */
 export function parseDesktopClientObservation(value: unknown): DesktopClientObservation {
   return desktopClientObservationSchema.parse(value)
+}
+
+// Check-detail payloads are observations, not installation or Run-preservation authority.
+// Retain them verbatim; all facts used by the installer keep their original strict schema.
+const desktopInstallObservationSchema = desktopClientObservationSchema.extend({
+  workbench: desktopWorkbenchObservationSchema.extend({ startupAgentAvailability: z.unknown().optional() })
+})
+export function parseDesktopClientObservationForInstall(value: unknown) {
+  return desktopInstallObservationSchema.parse(value)
 }
