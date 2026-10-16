@@ -3,7 +3,7 @@ import { parseAgentMuxControlReceipt } from '../src/control-host.js'
 
 const cause = { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', message: 'Original input outcome.', detail: '{"ready":true,"retry":true}',
   controlFailure: { disposition: 'unknown' as const, confirmedInputBytes: null }, logId: 'delivery-11111111-1111-4111-8111-111111111111' }
-const receipt = (error: unknown) => ({ schemaVersion: 5, requestId: 'original-operation', operation: 'send', ok: false, error })
+const receipt = (error: unknown) => ({ schemaVersion: 5, requestId: 'original-operation', operation: 'resume', ok: false, error })
 
 describe('Original Control failure data', () => {
   it('preserves unknown, a confirmed prefix and opaque diagnostics in the finite outer error union', () => {

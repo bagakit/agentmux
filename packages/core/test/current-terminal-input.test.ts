@@ -9,7 +9,7 @@ import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { AgentInputSubmissionReceipt } from '../src/agent-input-wait.js'
-import { parseAgentMuxControlReceipt } from '../src/control-codec.js'
+import { parseAgentInputSubmissionReceipt } from '../src/agent-input-receipt-codec.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -130,8 +130,7 @@ it('rejects mixed original identities and byte ranges on both public receipt bou
     await h.client.submitAgentPrompt(h.input('receipt-boundary'))
     const original = await h.settled('receipt-boundary')
     const readBoth = (input: AgentInputSubmissionReceipt) => [
-      () => parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: 'receipt-review', ok: true, operation: 'send',
-        result: { agentSessionId: input.key.agentSessionId, inputReceipt: input } }),
+      () => parseAgentInputSubmissionReceipt(input),
       () => parseRpcNativeResult('agent.input.inspect', { record: input.admission, input }, { key: original.key })
     ]
     for (const read of readBoth(original)) expect(read).not.toThrow()

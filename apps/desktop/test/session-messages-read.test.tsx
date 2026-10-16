@@ -76,7 +76,7 @@ it('retains original metadata when a returned owner or immutable MID content con
 })
 
 it('keeps observation unknown separate from a successful explicit read and never invokes input or ack', async () => {
-  const submit = vi.spyOn(api.sessions, 'submitMessage'), rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting'), input = vi.spyOn(api.sessions, 'write')
+  const submit = vi.spyOn(api.sessions, 'submitPrompt'), rejoin = vi.spyOn(api.sessions, 'rejoinInputWaiting'), input = vi.spyOn(api.sessions, 'write')
   await render()
   await emit({ hostId: 'original-host', event: { type: 'agent-message-observation', state: 'unavailable', message: 'Private watch gap' } })
   await act(async () => reading.refresh())

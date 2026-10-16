@@ -2,6 +2,7 @@ import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { parseRpcParams } from '../src/public-rpc.js'
 import { focusFacts } from './fixtures/desktop-focus-facts.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import {
@@ -39,7 +40,6 @@ describe('public Control views through the real owner endpoint', () => {
           processState: 'running', status: 'active', updatedAt: session.updatedAt }] }
       }
       if (request.operation === 'focus') return focusFacts(request)
-      if (request.operation === 'send') return { operation: request.operation, agentSessionId: agent.agentSessionId }
       throw new Error('Unexpected private operation')
     } }, path)
     await server.start()
@@ -55,7 +55,7 @@ describe('public Control views through the real owner endpoint', () => {
         .resolves.toMatchObject({ navigation: { selection: { space: { tabId: view.tabId, regionId: view.regionId } } } })
       await expect(client.call('agent.send', { operationId: 'send-adjacent-agent', target: { kind: 'agent-session', agentSessionId: agent.agentSessionId }, text: 'Continue' }))
         .resolves.toMatchObject({ agentSessionId: agent.agentSessionId, delivery: { state: 'delivered' } })
-      expect(seen).toEqual(['inspect.tab', 'space.inspect', 'inspect.region', 'space.inspect', 'focus', 'list.active-agents', 'send'])
+      expect(seen).toEqual(['inspect.tab', 'space.inspect', 'inspect.region', 'space.inspect', 'focus', 'list.active-agents'])
       expect(core.inner.kernel.stop).not.toHaveBeenCalled()
       expect(resolveAgentMuxRegion([view, agent], { kind: 'region', regionId: view.regionId })).toEqual(view)
       expect(resolveAgentMuxRegion([view, agent], { kind: 'agent-session', agentSessionId: agent.agentSessionId })).toEqual(agent)
@@ -99,7 +99,7 @@ describe('public Control views through the real owner endpoint', () => {
     const receipt = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'generic-view', ok: true, operation: 'inspect.region', result: { region: { ...inspectedView, path: fixturePath("domain-owned-path"), comparison: { domain: 'private-host-data' }, runId: 'not-a-runtime-view' } } })
     expect(receipt).toEqual({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'generic-view', ok: true, operation: 'inspect.region', result: { region: inspectedView } })
     expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'no-open-view', operation: 'open.view', destination: { kind: 'tab', workspaceId: 'workspace' } })).toThrow()
-    expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'no-view-target', operation: 'send', target: { kind: 'view', regionId: view.regionId }, text: 'Unsupported target' })).toThrow()
+    expect(() => parseRpcParams('agent.send', { operationId: 'no-view-target', target: { kind: 'view', regionId: view.regionId }, text: 'Unsupported target' })).toThrow()
     const address = { spaceId: 'space', zoneId: 'zone', workspaceId: view.workspaceId, displayWorkspaceId: view.workspaceId,
       groupId: 'group', tabId: view.tabId, regionId: agent.regionId }
     const opened = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'no-agent-view', ok: true, operation: 'agent.open', result: {
