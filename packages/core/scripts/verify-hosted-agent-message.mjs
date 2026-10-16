@@ -10,7 +10,7 @@ await mkdir(evidence, { recursive: true })
 const files = ['packages/core/src/client.ts', 'packages/core/src/hosted-client-contract.ts',
   'packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-value.ts',
   'packages/core/test/hosted-agent-message.test.ts', 'packages/core/scripts/verify-hosted-agent-message.mjs',
-  'apps/desktop/src/main/runtime-controller.ts', 'apps/host/src/host.ts']
+  'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/desktop-host.ts', 'packages/core/src/public-rpc-service.ts', 'apps/host/src/host.ts']
 const hashes = async () => Object.fromEntries(await Promise.all(files.map(async file =>
   [file, createHash('sha256').update(await readFile(join(repository, file))).digest('hex')])))
 const source = await hashes(), originalConfig = join(repository, 'vitest.config.ts')
@@ -43,13 +43,15 @@ await writeFile(join(evidence, 'restored-green.log'), restored.output)
 assert.equal(restored.code, 0, restored.output); assert.match(restored.output, /2 passed/u)
 assert.deepEqual(await hashes(), source, 'Source stayed unchanged throughout the isolated proof')
 const controller = await readFile(join(repository, 'apps/desktop/src/main/runtime-controller.ts'), 'utf8')
-assert.ok(controller.includes('await client.submitAgentMessage({'), 'Actual Desktop message caller consumes the original public method')
+assert.ok(controller.includes('await callOriginalDesktopHost(client, method, originalParams, context)'), 'Actual Desktop forwards to its original Host owner')
+const service = await readFile(join(repository, 'packages/core/src/public-rpc-service.ts'), 'utf8')
+assert.ok(service.includes('recipientOwner.client.submitAgentMessage('), 'Public service consumes the original Core message owner')
 const sdk = await readFile(join(repository, 'packages/core/src/hosted-client.ts'), 'utf8')
 assert.ok(sdk.includes('for (const method of AGENTMUX_HOSTED_METHODS)'), 'SDK consumes the same finite table')
 await writeFile(join(evidence, 'receipt.json'), JSON.stringify({ schema: 'agentmux.hosted-agent-message.v1',
   source, behaviorCases: 2, mutation: { id: 'owner-omitted', applied: true, assertionRed: true, exit: red.code },
   restoredGreen: { exit: restored.code, behaviorCases: 2 },
-  callers: ['RuntimeController.submitMessage → SDK.submitAgentMessage → original Core.submitAgentMessage',
+  callers: ['RuntimeController.callOriginalCore → original public RPC service → SDK.submitAgentMessage → original Core.submitAgentMessage',
     'Host → original HostedRuntimeService'],
   limitations: ['Original Core authorization, durable queue, prompt admission and receipts stay real; only private ctxmux Input receipts are controlled. This is not actual public transport or device verification.']
 }, null, 2) + '\n')
