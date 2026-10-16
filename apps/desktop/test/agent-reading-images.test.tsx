@@ -7,6 +7,7 @@ import { composerConfig, composerDOM, composerSession } from './helpers/composer
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -27,13 +28,14 @@ const panel = () => document.querySelector<HTMLElement>('.agent-information-read
 const observers = new Set<{ targets: Set<Element>; callback: IntersectionObserverCallback }>()
 async function intersect() { await act(async () => { for (const observer of observers) observer.callback([...observer.targets].map(target => ({ target, isIntersecting: true }) as IntersectionObserverEntry), {} as IntersectionObserver); for (let n = 0; n < 10; n++) await Promise.resolve() }) }
 async function open(surface: 'workspace' | 'focus' = 'workspace') {
-  await dom.render(surface === 'focus' ? <FocusContextRow context={context()} selected={false} onSelect={() => {}} /> : <WorkspaceAgentRow context={context()} percent={null} onOpen={() => {}} />)
+  await dom.render(surface === 'focus' ? <FocusContextRow context={context()} selected={false} onSelect={() => {}} /> : <WorkspaceAgentRow context={context()} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => {}} />)
   expect(api.ui.readPastedImage).not.toHaveBeenCalled(); expect(api.sessions.historyResource).not.toHaveBeenCalled()
-  await act(async () => dom.container.querySelector<HTMLButtonElement>('.workspace-agent-row, .focus-context')!.focus())
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.focus-context')!.focus())
   await act(async () => { for (let n = 0; n < 10; n++) await Promise.resolve() })
   expect(panel()).not.toBeNull()
+  await waitForAgentCardReading(() => expect(panel().querySelectorAll('[data-hover-input-id]')).toHaveLength(1))
 }
-beforeEach(() => {
+beforeEach(async () => {
   observers.clear()
   vi.stubGlobal('IntersectionObserver', class {
     targets = new Set<Element>()
@@ -46,7 +48,8 @@ beforeEach(() => {
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
   vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: page.source, dispose() {} }))
   vi.spyOn(api.ui, 'readPastedImage').mockResolvedValue({ dataUrl: 'data:image/png;base64,' + png })
-  vi.spyOn(api.sessions, 'historyResource').mockImplementation(async (_subject, request) => ({ agentSessionId: agent.control.agentSessionId, ...request, reference: request.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: png, byteLength: 68 } }))
+  vi.spyOn(api.sessions, 'historyResource').mockImplementation(async (_subject, request) => ({ agentSessionId: agent.control.agentSessionId, ...request, reference: request.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: png, byteLength: 68, width: 1, height: 1 } }))
+  await agentCardConversationFixture(() => page.source)
 })
 
 afterEach(() => vi.unstubAllGlobals())
@@ -57,7 +60,7 @@ it.each(['workspace', 'focus'] as const)('loads visible original pasted and nati
   await intersect()
   expect(api.ui.readPastedImage).toHaveBeenCalledWith(pasted)
   expect(api.sessions.historyResource).toHaveBeenCalledExactlyOnceWith({ hostId: agent.control.hostId, agentSessionId: agent.control.agentSessionId }, {
-    source: page.source, recordId: 'original-record', turnId: 'original-turn', partIndex: 1, expectedReference: 'original-native-image'
+    source: page.source, recordId: 'original-record', turnId: 'original-turn', partIndex: 1, expectedReference: 'original-native-image', representation: 'image'
   })
   expect(panel().querySelectorAll('img.md-conversation-image__thumb')).toHaveLength(2)
   expect(panel().querySelectorAll('.focus-context-hover__prose button')).toHaveLength(0)
@@ -78,7 +81,7 @@ it('keeps structured original images when the full input uses the literal long-t
 })
 
 it('rejects another original resource receipt and preserves its text and honest failure', async () => {
-  vi.mocked(api.sessions.historyResource).mockImplementation(async (_subject, request) => ({ agentSessionId: agent.control.agentSessionId, ...request, recordId: 'neighbor-record', reference: request.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: png, byteLength: 68 } }))
+  vi.mocked(api.sessions.historyResource).mockImplementation(async (_subject, request) => ({ agentSessionId: agent.control.agentSessionId, ...request, recordId: 'neighbor-record', reference: request.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: png, byteLength: 68, width: 1, height: 1 } }))
   await open(); await intersect()
   const input = panel().querySelector('[data-hover-input-id]')!
   expect(input.querySelector('img')).toBeNull(); expect(input.textContent).toContain('Original image request')
