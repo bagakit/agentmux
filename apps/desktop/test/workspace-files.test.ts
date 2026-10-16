@@ -112,6 +112,49 @@ afterEach(async () => {
   await Promise.all(temporaryRoots.splice(0).map(async (path) => await rm(path, { recursive: true, force: true })))
 })
 
+describe('WorkspaceFiles original worker input failures', () => {
+  const brokenPipe = () => Object.assign(new Error('write EPIPE on the original worker input'), { code: 'EPIPE' })
+  it('reports a real worker stdin error instead of accepting its zero-exit read and keeps the same file readable', async () => {
+    const { root, workspace, host } = await localFixture('input-pipe-read'), files = new WorkspaceFiles(() => host)
+    await writeFile(join(root, 'document.txt'), 'Original file stays available')
+    // The native worker really runs. Break only its parent-owned input stream at READY.
+    localWorkerRace.beforeInput = async () => { throw brokenPipe() }
+    expect(await files.read(workspace, 'document.txt')).toMatchObject({ status: 'error', code: 'EPIPE' })
+    expect(await files.read(workspace, 'document.txt')).toMatchObject({ status: 'read', document: { content: 'Original file stays available' } })
+    await files.dispose()
+  })
+
+  it('keeps the original structured worker outcome ahead of a secondary broken input pipe', async () => {
+    const { root, workspace, host } = await localFixture('input-pipe-original-error'), files = new WorkspaceFiles(() => host), path = join(root, 'document.txt')
+    await writeFile(path, 'An existing original file')
+    localWorkerRace.beforeInput = async () => { await rm(path); throw brokenPipe() }
+    expect(await files.read(workspace, 'document.txt')).toEqual({ status: 'deleted' })
+    await files.dispose()
+  })
+
+  it('retains the original reader cancellation when its worker input also closes, without an unhandled stream error', async () => {
+    const { root, workspace, host } = await localFixture('input-pipe-abort'), files = new WorkspaceFiles(() => host), controller = new AbortController()
+    await writeFile(join(root, 'document.txt'), 'Keep the original readable bytes')
+    localWorkerRace.beforeInput = async () => { controller.abort(new Error('Original reader cancelled')); throw brokenPipe() }
+    await expect(files.read(workspace, 'document.txt', { maxFileBytes: 1024, signal: controller.signal })).rejects.toThrow('Original reader cancelled')
+    expect(await files.read(workspace, 'document.txt')).toMatchObject({ status: 'read', document: { content: 'Keep the original readable bytes' } })
+    await files.dispose()
+  })
+
+  it('retains an unknown original write after its input fails and allows an explicit save from the observed revision', async () => {
+    const { root, workspace, host } = await localFixture('input-pipe-write'), files = new WorkspaceFiles(() => host)
+    await writeFile(join(root, 'document.txt'), 'Original saved bytes')
+    localWorkerRace.beforeInput = async () => { throw brokenPipe() }
+    const proposed = 'The retained proposed body'
+    expect(await files.write(workspace, { path: 'document.txt', content: proposed, expectedRevision: revision('Original saved bytes') })).toMatchObject({ status: 'unknown', code: 'WORKSPACE_FILE_RESULT_UNKNOWN' })
+    const current = await files.read(workspace, 'document.txt')
+    expect(current.status).toBe('read'); if (current.status !== 'read') throw Error('The same original file must remain readable')
+    expect(await files.write(workspace, { path: 'document.txt', content: proposed, expectedRevision: current.document.revision })).toMatchObject({ status: 'written' })
+    expect(await readFile(join(root, 'document.txt'), 'utf8')).toBe(proposed)
+    await files.dispose()
+  })
+})
+
 describe('WorkspaceFiles root confinement', () => {
   // Every local operation must pin the directory it already checked before the worker acts on it, so a
   // directory swapped for an escaping symlink inside that window cannot redirect the operation outside
