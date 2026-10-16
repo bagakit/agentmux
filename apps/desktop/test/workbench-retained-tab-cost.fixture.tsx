@@ -7,12 +7,14 @@ import { createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
 import { conversationRevision } from '@agentmux/core/conversation'
 import { normalizeAgentTimelineItem } from '@agentmux/core/timeline'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { App } from '../src/renderer/src/App'
 import { addWorkbenchRegion, createWorkbenchTab, focusWorkbenchTabRegion } from '../src/renderer/src/lib/workbench-tabs'
 import type { RegionSwapMenuEntry } from '../src/renderer/src/lib/workbench-tab-actions'
 import type { WorkbenchViewTargets } from '../src/renderer/src/lib/workbench-presentation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -22,6 +24,7 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 
 type Counts = {
   workspace: number
+  hosts: Record<string, number>
   trees: Record<string, number>
   paneRender: Record<string, number>
   composerRender: Record<string, number>
@@ -34,10 +37,11 @@ type Counts = {
 const globals = globalThis as typeof globalThis & { __retainedTabCounts: Counts }
 const counts = () => globals.__retainedTabCounts
 function reset() {
-  globals.__retainedTabCounts = { workspace: 0, trees: {}, paneRender: {}, composerRender: {},
+  globals.__retainedTabCounts = { workspace: 0, hosts: {}, trees: {}, paneRender: {}, composerRender: {},
     paneCommit: {}, composerCommit: {}, browser: {}, paneProps: {}, menus: {} }
 }
 const dom = composerDOM()
+let syncConversation: (sessionId: string) => Promise<void>
 const a = 'retained-agent-a', b = 'retained-agent-b'
 const browser = { id: 'retained-browser', mode: 'normal' as const, navigationId: 'original-navigation',
   profileId: 'original-profile', url: 'https://example.test/original', title: 'Original page', loading: false,
@@ -47,7 +51,7 @@ const settle = async () => act(async () => { for (let i = 0; i < 6; i++) await P
 const noNative = () => [api.browser.create, api.browser.restore, api.browser.armPresentationCapture,
   api.browser.captureScreenshot, api.browser.openDevTools]
 
-beforeEach(() => {
+beforeEach(async () => {
   expect(homedir()).toBe(process.env.AGENTMUX_RETAINED_TAB_PRIVATE_HOME)
   for (const name of ['HOME', 'CODEX_HOME', 'AGENTMUX_RUNTIME_DIR', 'AGENTMUX_STATE_DIR']) {
     expect(process.env[name]).toContain(process.env.AGENTMUX_RETAINED_TAB_PRIVATE_ROOT)
@@ -59,9 +63,9 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn()
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
-  const source = { providerId: 'codex', nativeSessionId: 'original-source' }
-  vi.spyOn(api.sessions, 'observeHistory').mockResolvedValue({ source, dispose() {} })
-  vi.spyOn(api.sessions, 'historyPage').mockImplementation(async reference => ({ agentSessionId: reference.agentSessionId, source, items: [], nextCursor: null }))
+  const sourceFor = (reference: { agentSessionId: string }) => ({ providerId: 'codex', nativeSessionId: `original-source-${reference.agentSessionId}` })
+  vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async reference => ({ source: sourceFor(reference), dispose() {} }))
+  vi.spyOn(api.sessions, 'historyPage').mockImplementation(async reference => ({ agentSessionId: reference.agentSessionId, source: sourceFor(reference), items: [], nextCursor: null }))
   vi.spyOn(api.sessions, 'readHistory').mockImplementation(async (reference, input) => ({ ...reference, source: input.source,
     kind: 'user-message', revision: 'a'.repeat(64), availability: 'empty', order: 'newest-first', items: [], userMessages: [],
     budgetBytes: 128 * 1024, scan: { examined: 0, complete: true }, nextCursor: null }))
@@ -70,6 +74,8 @@ beforeEach(() => {
   vi.spyOn(api.browser, 'removePresentation').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'create'); vi.spyOn(api.browser, 'restore'); vi.spyOn(api.browser, 'armPresentationCapture')
   vi.spyOn(api.browser, 'captureScreenshot'); vi.spyOn(api.browser, 'openDevTools')
+  const conversation = await agentCardConversationFixture(sourceFor)
+  syncConversation = sessionId => conversation.sync({ hostId: 'local', agentSessionId: sessionId })
 })
 afterEach(() => vi.unstubAllGlobals())
 
@@ -128,6 +134,7 @@ function unchangedB(original: ReturnType<typeof preserveB>) {
 function zeroB(phase: string) {
   const current = structuredClone(counts())
   if (process.env.AGENTMUX_RETAINED_TAB_SAMPLES) appendFileSync(process.env.AGENTMUX_RETAINED_TAB_SAMPLES, JSON.stringify({ phase, counts: current }) + '\n')
+  expect.soft(current.hosts['tab-b'] ?? 0, 'Unchanged B content owner renders').toBe(0)
   expect.soft(current.paneRender[b] ?? 0, 'Unchanged B Pane renders').toBe(0)
   expect.soft(current.composerRender[b] ?? 0, 'Unchanged B Composer renders').toBe(0)
   expect.soft(current.paneCommit[b] ?? 0, 'Unchanged B Pane commits').toBe(0)
@@ -138,7 +145,7 @@ async function prepare(kind: 'browser' | 'agent') {
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" visible />); await settle()
   expect(dom.container.querySelectorAll('.retained-workbench-region')).toHaveLength(2)
   expect(region('region-b').querySelector('.ProseMirror')!.textContent).toBe('Original B draft')
-  expect(region('region-b').querySelector('.activity-feed')!.textContent).toContain('Original B reading')
+  await waitForAgentCardReading(() => expect(region('region-b').querySelector('.activity-feed')!.textContent).toContain('Original B reading'))
   for (const field of ['paneRender', 'paneCommit', 'composerRender', 'composerCommit'] as const) expect(counts()[field][b]).toBeGreaterThan(0)
   await act(async () => useAppStore.setState({ mainSurface: 'agents' }))
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" visible={false} />); await settle()
@@ -146,6 +153,45 @@ async function prepare(kind: 'browser' | 'agent') {
   reset()
   return { ...original, preserved }
 }
+
+it.each([0, 24])('switches actual App surfaces without rendering unchanged retained Tab consumers with %i additional Tabs', async extraCount => {
+  fixture('agent')
+  const extraIds = Array.from({ length: extraCount }, (_, index) => `unrelated-${index}`)
+  const extraTabs = extraIds.map(id => createWorkbenchTab(id, { kind: 'agent', phase: 'attached', workspaceId: 'workspace', regionId: `region-${id}`, sessionId: id }))
+  useAppStore.setState(state => ({ initialize: vi.fn(async () => () => {}), projectRailOpen: false, toolsOpen: false,
+    sessions: [...state.sessions, ...extraIds.map(id => composerSession(id))],
+    tabs: { ...state.tabs, ...Object.fromEntries(extraTabs.map(tab => [tab.id, tab])) },
+    layouts: { workspace: createWorkspaceLayout('group', ['tab-b', 'tab-a', ...extraIds]) },
+    viewModes: { ...state.viewModes, ...Object.fromEntries(extraIds.map(id => [id, 'terminal' as const])) } }))
+  await dom.render(<App />); await settle()
+  await waitForAgentCardReading(() => expect(region('region-b').querySelector('.activity-feed')!.textContent).toContain('Original B reading'))
+  await dom.click('button[data-workbench-tab-id="tab-a"]'); await settle()
+  expect(useAppStore.getState().workbenchSpaceSelection?.tabId).toBe('tab-a')
+  const original = preserveB()
+  reset()
+  await dom.click('button[aria-label^="Focus: show execution contexts"]'); await settle()
+  expect(useAppStore.getState().mainSurface).toBe('agents')
+  expect(dom.container.querySelector('.global-focus-surface')?.hasAttribute('hidden')).toBe(false)
+  zeroB('app-space-to-focus'); unchangedB(original)
+  for (const id of extraIds) {
+    expect(counts().hosts[id] ?? 0, id).toBe(0)
+    expect(counts().paneRender[id] ?? 0, id).toBe(0)
+    expect(counts().paneCommit[id] ?? 0, id).toBe(0)
+    expect(counts().composerRender[id] ?? 0, id).toBe(0)
+    expect(counts().composerCommit[id] ?? 0, id).toBe(0)
+  }
+  reset()
+  await dom.click('button[aria-label="Space: show terminal and file workbench"]'); await settle()
+  expect(useAppStore.getState().mainSurface).toBe('workbench')
+  zeroB('app-focus-to-space'); unchangedB(original)
+  for (const id of extraIds) {
+    expect(counts().hosts[id] ?? 0, id).toBe(0)
+    expect(counts().paneRender[id] ?? 0, id).toBe(0)
+    expect(counts().paneCommit[id] ?? 0, id).toBe(0)
+    expect(counts().composerRender[id] ?? 0, id).toBe(0)
+    expect(counts().composerCommit[id] ?? 0, id).toBe(0)
+  }
+})
 
 it('updates the original hidden Browser without rendering or committing an unchanged retained Agent Tab', async () => {
   const original = await prepare('browser'), before = useAppStore.getState().tabs['tab-a']
@@ -161,7 +207,7 @@ it('updates the original hidden Browser without rendering or committing an uncha
 
 it('admits exact Agent events without waking another hidden Tab and shows its own new message and status on reveal', async () => {
   const original = await prepare('agent')
-  await act(async () => append(a, 'Fresh A output')); await settle()
+  await act(async () => { append(a, 'Fresh A output'); await syncConversation(a) }); await settle()
   expect(counts().paneCommit[a]).toBeGreaterThan(0); expect(counts().composerCommit[a]).toBeGreaterThan(0)
   zeroB('agent-timeline'); unchangedB(original.preserved); reset()
   await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
@@ -175,17 +221,18 @@ it('admits exact Agent events without waking another hidden Tab and shows its ow
   await act(async () => useAppStore.setState(state => ({ mainSurface: 'workbench', layouts: { ...state.layouts,
     workspace: { ...state.layouts.workspace!, groups: state.layouts.workspace!.groups.map(group => ({ ...group, activeTabId: 'tab-a' })) } } })))
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" visible />); await settle()
-  expect(region('region-a').textContent).toContain('Fresh A output')
+  await waitForAgentCardReading(() => expect(region('region-a').textContent).toContain('Fresh A output'))
   expect(region('region-a').querySelector('[aria-label="Interrupt the current turn"]')).not.toBeNull()
   await act(async () => useAppStore.setState(state => ({ layouts: { ...state.layouts,
     workspace: { ...state.layouts.workspace!, groups: state.layouts.workspace!.groups.map(group => ({ ...group, activeTabId: 'tab-b' })) } } })))
   reset()
   await act(async () => {
     append(b, 'Fresh B output')
+    await syncConversation(b)
     useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'agent-status', agentSessionId: b,
       state: 'working', evidence: { source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 111), run: { runId: `run-${b}` } } } })
   }); await settle()
-  expect(region('region-b').textContent).toContain('Fresh B output')
+  await waitForAgentCardReading(() => expect(region('region-b').textContent).toContain('Fresh B output'))
   expect(region('region-b').querySelector('[aria-label="Interrupt the current turn"]')).not.toBeNull()
   expect(counts().paneCommit[b]).toBeGreaterThan(0); expect(counts().composerCommit[b]).toBeGreaterThan(0)
   expect(region('region-b').querySelector('.ProseMirror')).toBe(original.preserved.editor)
@@ -226,11 +273,16 @@ it('keeps original names, Region layout, visibility, resize and explicit target 
 
   const destination = document.createElement('div'); destination.id = 'retained-exact-target'; dom.container.append(destination)
   const reference = { displayWorkspaceId: 'workspace', groupId: 'group-b', tabId: 'tab-b', regionId: 'region-c' }
-  const targets: WorkbenchViewTargets = { 'tab-b': [{ hostId: destination.id, active: true, visible: true, surface: 'space', reference }] }
+  const oldSelect = vi.fn(), currentSelect = vi.fn()
+  const targets: WorkbenchViewTargets = { 'tab-b': [{ hostId: destination.id, active: true, visible: true, surface: 'space', reference, onSelectRegion: oldSelect }] }
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" visible viewTargets={targets} />); await settle()
   expect(destination.querySelector('[data-workbench-primary-tab-id="tab-b"]')).toBe(primary)
   expect(destination.querySelector('[data-workbench-region-id="region-b"] .ProseMirror')).toBe(original.editor)
   expect(primary.dataset.workbenchPrimaryReference).toContain('region-c')
+  const updatedTargets: WorkbenchViewTargets = { 'tab-b': [{ ...targets['tab-b']![0]!, onSelectRegion: currentSelect }] }
+  await dom.render(<WorkspaceWorkbench workspaceId="workspace" visible viewTargets={updatedTargets} />); await settle()
+  await act(async () => region('region-b').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  expect(currentSelect).toHaveBeenCalledWith('region-b'); expect(oldSelect).not.toHaveBeenCalled()
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" visible />); await settle()
   expect(dom.container.querySelector('[data-workbench-primary-tab-id="tab-b"]')).toBe(primary)
   expect(destination.querySelector('[data-workbench-primary-tab-id]')).toBeNull()
