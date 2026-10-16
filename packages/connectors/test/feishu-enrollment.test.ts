@@ -65,22 +65,44 @@ it.each([{}, { status: null }, { status: 0 }, { status: 2 }])('uses enter_app ha
   expect(JSON.parse(result.privateState).authentication.phase).toBe('cross-login')
   expect(network.calls).toHaveLength(2)
 })
-it.each(['', 7, 'http://accounts.feishu.cn/cross', 'https://foreign.example/cross', 'https://user@accounts.feishu.cn/cross', 'https://accounts.feishu.cn:8443/cross', 'https://accounts.feishu.cn/cross#fragment'])('keeps an unqualified handoff unknown without following its URL: %s', async crossLoginUri => {
+it.each([7, ' ', 'http://accounts.feishu.cn/cross', 'https://foreign.example/cross', 'https://user@accounts.feishu.cn/cross', 'https://accounts.feishu.cn:8443/cross', 'https://accounts.feishu.cn/cross#fragment'])('keeps an unqualified handoff unknown without following its URL: %s', async crossLoginUri => {
   const network = remote(
     Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
     Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { cross_login_uri: crossLoginUri } } })
   )
   const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
-  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: crossLoginUri === '' || typeof crossLoginUri !== 'string' ? 'invalid-response' : 'redirect-unconfirmed', httpStatus: 200, boundary: 'handoff' } })
+  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: typeof crossLoginUri !== 'string' ? 'invalid-response' : 'redirect-unconfirmed', httpStatus: 200, boundary: 'handoff' } })
   expect(network.calls).toHaveLength(2)
 })
-it.each([{ stepInfo: [] }, { stepInfo: 7 }, { stepInfo: 'not-an-object' }])('does not treat malformed handoff info as an absent optional cross: %j', async ({ stepInfo }) => {
+it.each([
+  ['missing-info', undefined], ['null-info', null], ['array-info', []], ['number-info', 7], ['text-info', 'metadata'], ['bool-info', false],
+  ['missing-cross', {}], ['null-cross', { cross_login_uri: null }],
+  ['empty-local-only', { mode: 'dual_domain_sync', cross_login_uri: '', local_login_uri: 'https://unqualified.invalid/private-local' }],
+  ['bool-cross', { cross_login_uri: false }], ['object-cross', { cross_login_uri: {} }], ['array-cross', { cross_login_uri: [] }]
+] as const)('keeps optional handoff metadata on the original fixed landing: %s', async (_name, stepInfo) => {
   const network = remote(
     Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
     Response.json({ code: 0, data: { next_step: 'enter_app', step_info: stepInfo } })
   )
   const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
-  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: 'invalid-response', httpStatus: 200, boundary: 'envelope' } })
+  const handoff = authentication(await adapter.advance({ ...original, privateState: initial.privateState }))
+  expect(handoff.stage).toBe('handoff'); expect(handoff.account).toBeNull(); expect(handoff.challenge).toBeNull()
+  expect(JSON.parse(handoff.privateState).authentication).toMatchObject({ phase: 'landing', url: 'https://ask.feishu.cn/' })
+  expect(network.calls.map(call => new URL(call.url).pathname)).toEqual(['/accounts/qrlogin/init', '/accounts/qrlogin/polling'])
+})
+it.each([
+  ['code', { code: '0', data: { next_step: 'enter_app', step_info: false } }, 'envelope'],
+  ['data', { code: 0, data: [] }, 'envelope'],
+  ['step', { code: 0, data: { next_step: 'unknown-step', step_info: false } }, 'transition'],
+  ['polling-info', { code: 0, data: { next_step: 'qr_login_polling', step_info: [] } }, 'transition'],
+  ['polling-number-info', { code: 0, data: { next_step: null, step_info: 7 } }, 'transition']
+] as const)('optional handoff metadata does not loosen the original %s predicate', async (_name, body, boundary) => {
+  const network = remote(
+    Response.json({ code: 0, data: { step_info: { token: 'private-handoff-qr' } } }, { headers: { 'x-flow-key': 'private-handoff-flow' } }),
+    Response.json(body)
+  )
+  const original = input(), adapter = createFeishuEnrollment(), initial = authentication(await adapter.begin(original))
+  expect(await adapter.advance({ ...original, privateState: initial.privateState })).toEqual({ kind: 'unknown', diagnostic: { stage: 'authentication', code: 'native-unconfirmed', step: 'poll', failure: 'invalid-response', httpStatus: 200, boundary } })
   expect(network.calls).toHaveLength(2)
 })
 it.each(['https://foreign.example/private-target', 'http://ask.feishu.cn/private-target'])('does not follow an unqualified redirect from an accepted cross target: %s', async location => {
