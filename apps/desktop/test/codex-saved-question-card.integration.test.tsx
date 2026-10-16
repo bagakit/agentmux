@@ -21,7 +21,7 @@ it.each([['answered options', true], ['unanswered free text', false]] as const)(
   close.push(async () => { await act(async () => root.unmount()); container.remove() })
   const openTerminal = vi.fn(), changeDraft = vi.fn()
   await act(async () => root.render(<ActivityView sessionId={page.agentSessionId} executionHostId="local" capability="complete-events"
-    items={[]} nativeHistoryPage={page} questionReplyRoute="terminal" questionTerminalTarget={{ source, run: f.session.run }}
+    items={[]} nativeHistoryPage={page} questionReplyTarget={{ source, run: f.session.run }}
     onOpenQuestionTerminal={openTerminal} onQuestionDraftChange={changeDraft} />))
   const card = container.querySelector<HTMLElement>('[aria-label="Native asynchronous question"]')!
   expect(card).not.toBeNull(); expect(card.querySelector('legend')?.textContent).toBe(prompt)

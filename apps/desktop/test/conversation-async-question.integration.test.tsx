@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react';
@@ -68,15 +69,15 @@ function seed(): void {
     label: 'Original agent',
     providerId: 'codex',
     executorId: 'codex',
-    agentSessionUpdatedAt: 1,
+    agentSessionUpdatedAt: _tailFixtureEpoch(0, 0, 1),
     promptSubmissionPredecessor: null,
-    createdAt: 1,
-    updatedAt: 1,
+    createdAt: _tailFixtureEpoch(0, 0, 1),
+    updatedAt: _tailFixtureEpoch(0, 0, 1),
     processState: 'running',
     status: {
       state: 'done',
       source: 'native-hook',
-      observedAt: 1
+      observedAt: _tailFixtureEpoch(0, 0, 1)
     },
     latestOutputBytes: 0,
     capabilities: {
@@ -135,8 +136,8 @@ async function text(value: string) {
 function Thread({ page, terminal = () => {} }: { page: AgentSessionHistoryPage; terminal?: () => void }) {
   const replies = useAppStore(state => state.questionReplies?.['question-session'])
   const drafts = useAppStore(state => state.questionReplyDrafts?.['question-session'])
-  return <ConversationView page={page} sessionId="question-session" questionReplyRoute="terminal"
-    questionTerminalTarget={{ source: page.source, run: control.run }} onOpenQuestionTerminal={terminal}
+  return <ConversationView page={page} sessionId="question-session"
+    questionReplyTarget={{ source: page.source, run: control.run }} onOpenQuestionTerminal={terminal}
     questionReplyState={target => desktopQuestionReplyState(replies, 'question-session', target)}
     questionReplyDraft={target => drafts?.[questionReplyKey('question-session', target)]}
     onQuestionDraftChange={(target, answers) => editConversationQuestionDraft(control, target, answers)}
