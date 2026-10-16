@@ -72,6 +72,11 @@ if (prepare) {
     receipt.sourceBefore = await sourceHashes()
     for (const item of mailboxMutations) assert.equal((await readFile(join(root, item.file), 'utf8')).split(item.before).length, 2, 'Unique production mutation anchor: ' + item.label)
     const runTests = (label, selected, env = {}, expectedRed = false, config) => execute(testArgs(selected, join(evidence, label), config), { label, evidence, env, report: true, expectedRed })
+    // The bounded full product path is the least-proven dependency; falsify it before repeating the stable mutation matrix.
+    const actual = await product.runA2aInboxProductProof({ root, evidence })
+    assert.equal(typeof actual.path, 'string'); assert.equal(typeof actual.sha256, 'string')
+    assert.equal(hash(await readFile(actual.path)), actual.sha256)
+    receipt.productArtifact = { path: actual.path, sha256: actual.sha256 }
     receipt.baseline = await runTests('baseline', tests)
     for (const item of mailboxMutations) {
       const red = await runTests(item.label + '-red', item.tests, { AGENTMUX_TEST_MAILBOX_MUTATION: item.label }, true)
@@ -86,10 +91,6 @@ if (prepare) {
       receipt.mutations.push({ label: 'bridge-' + mutation, red, restored })
     }
     receipt.types = await execute([join(root, 'node_modules/typescript/bin/tsc'), '--noEmit', '-p', 'apps/desktop/tsconfig.json'], { label: 'desktop-types', evidence })
-    const actual = await product.runA2aInboxProductProof({ root, evidence })
-    assert.equal(typeof actual.path, 'string'); assert.equal(typeof actual.sha256, 'string')
-    assert.equal(hash(await readFile(actual.path)), actual.sha256)
-    receipt.productArtifact = { path: actual.path, sha256: actual.sha256 }
     receipt.sourceAfter = await sourceHashes()
     assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore, 'The actual source candidate stays unchanged during preparation')
     receipt.prepared = true
