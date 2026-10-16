@@ -229,10 +229,19 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     const original = configuration?.unresolved, stepId = original?.stepId ?? configuration?.selected?.stepId
     inspectOriginal({ applicationInspection: {}, applicationConfiguration: { ...configurationSelector, ...(stepId ? { selectedStepId: stepId } : {}) } }, original?.operationId)
   }
-  function checkPublicationStatus() {
-    const selected = configuration?.selected
-    if (selected?.effect === 'submit-application-version' && selected.input.publicationDraft?.kind === 'submit-version') void reviewPublication({ effect: 'submit-application-version', draft: selected.input.publicationDraft })
+  async function checkPublicationStatus() {
+    const selected = configuration?.selected, draft = selected?.input.publicationDraft
+    if (!operation || selected?.effect !== 'submit-application-version' || draft?.kind !== 'submit-version' || selected.versionId !== draft.versionId || busy) return
+    const id = operation.operationId, selector = { effect: 'submit-application-version' as const, draft, selectedStepId: selected.stepId }
+    const expected = occurrence.current + 1
+    const offered = await perform(id, () => source('connection.setup.inspect', { operationId: id, applicationInspection: { versionId: draft.versionId }, applicationConfiguration: selector }), false, undefined, selector)
+    if (!offered || !currentSource() || !context.current.opened || selection.current !== id || occurrence.current !== expected) return
+    const action = offered.applicationInspection?.actions.find(action => action.kind === 'read-publication-version' && action.versionId === draft.versionId)
+    if (!action) return
+    const input: ConnectionSetupAdvance = { operationId: id, expectedRevision: action.expectedRevision, decision: { actionId: action.actionId, value: 'continue' }, versionId: draft.versionId }
+    await perform(id, () => source('connection.setup.advance', input), false, action.kind, selector)
   }
+
   function returnToGuided() { inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect: 'enable-messaging' } }) }
   function continueOriginal() {
     const action = view?.continuation?.actions.find(action => action.kind === 'continue')
