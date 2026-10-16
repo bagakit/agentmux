@@ -6,9 +6,11 @@ import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { useShallow } from 'zustand/react/shallow'
-import { createWorkspaceAgentContextsSelector, FOCUS_BUCKETS, groupFocusContexts, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
+import { createWorkspaceAgentContextsSelector, FOCUS_BUCKETS, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useContext, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { gitWorkspaceKey } from '../features/git/history/GitHistoryContext'
 import type {
   SessionSnapshot,
@@ -21,7 +23,10 @@ import {
   workspaceAgentSessions,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { contextUsedPercent } from '../lib/agent-usage'
+import { orderedWorkspaceAgents, workspaceAgentOrderKey } from '../lib/workspace-agent-order'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { formatSessionAddress } from '../lib/agent-address'
+import { useWorkspaceAgentClose } from './WorkspaceAgentSelection'
 import { agentRegionExecution, useAppStore } from '../store'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { WorkspaceFilesTool } from './WorkspaceFilesTool'
@@ -29,6 +34,7 @@ import { WorkspaceGitTool } from './WorkspaceGitTool'
 import { useWorkspaceZoneContext } from '../lib/workspace-zone-context'
 import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
+import { SemanticIcon } from './semantic-icons'
 
 const ThemeObjectRepositoryIcon = semanticIconComponent('object.repository')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
@@ -52,6 +58,7 @@ const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTo
 }
 
 const AGENT_GROUP_LABELS: Record<FocusBucket, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown' }
+const NO_AGENT_ORDER: readonly string[] = []
 
 export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
   workspace,
@@ -66,21 +73,65 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
   const scoped = useMemo(() => workspaceAgentSessions(sessions, workspace, topics), [sessions, workspace, topics])
   const timelines = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.timelines[session.id]]))))
   const names = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.agentNames[session.id]]))))
-  const percentById = useMemo(() => Object.fromEntries(scoped.map(session => [session.id, contextUsedPercent(session.turnUsage?.context)])), [scoped])
+  const manualOrder = useAppStore(state => Object.hasOwn(state.workspaceAgentOrder, workspace.id) ? state.workspaceAgentOrder[workspace.id]! : NO_AGENT_ORDER)
+  const setOrder = useAppStore(state => state.setWorkspaceAgentOrder)
+  const orderedSessions = useMemo(() => orderedWorkspaceAgents(scoped, manualOrder), [scoped, manualOrder])
   const contextSelector = useMemo(createWorkspaceAgentContextsSelector, [])
   const projected = useMemo(() => contextSelector(scoped, timelines, names, workspace, topics), [contextSelector, scoped, timelines, names, workspace, topics])
-  const groups = useMemo(() => groupFocusContexts([...projected].sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))), [projected])
+  const contexts = useMemo(() => {
+    const byKey = new Map(projected.map(context => [focusContextIdentityKey(context.hostId, context.id), context]))
+    return orderedSessions.flatMap(session => { const context = byKey.get(focusContextIdentityKey(session.hostId, session.id)); return context ? [context] : [] })
+  }, [projected, orderedSessions])
   const active = useWorkbenchPresentationActive()
   const goalSelector = useMemo(createFocusGoalLinksSelector, [])
   const goalLinks = useAppStore(state => goalSelector(state, active))
   const config = useAppStore(state => state.config), tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts)
   const catalog = useAppStore(workbenchSelectionCatalog), identitySelector = useMemo(createFocusContextIdentitySelector, [])
-  const contexts = useMemo(() => FOCUS_BUCKETS.flatMap(bucket => groups[bucket]), [groups])
   const identityTabs = workbenchNavigationTabs(tabs)
   const identities = useMemo(() => identitySelector(catalog, identityTabs, contexts, config, layouts, agentRegionExecution),
     [identitySelector, catalog, identityTabs, contexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts])
   const openFocus = useAppStore(state => state.setMainSurface)
-  const count = scoped.length
+  const count = contexts.length
+  const [filter, setFilter] = useState<'all' | FocusBucket>('all')
+  const [selecting, setSelecting] = useState(false)
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set())
+  const [notice, setNotice] = useState('')
+  const [saving, setSaving] = useState(false)
+  const close = useWorkspaceAgentClose()
+  useEffect(() => {
+    if (!close.results.length) return
+    const completed = new Set(close.results.filter(result => result.completed).map(result => JSON.stringify([result.target.control.hostId, result.target.control.agentSessionId])))
+    setSelected(previous => new Set([...previous].filter(key => !completed.has(key))))
+  }, [close.results])
+  const visible = contexts.filter(context => filter === 'all' || context.bucket === filter)
+  const chosen = contexts.filter(context => selected.has(workspaceAgentOrderKey(context)))
+  const unavailableSelected = selected.size - chosen.length
+  const hiddenSelected = chosen.filter(context => filter !== 'all' && context.bucket !== filter).length
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
+  const toggle = useCallback((key: string) => setSelected(previous => {
+    const next = new Set(previous)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    return next
+  }), [])
+  useEffect(() => { setSelected(new Set()); setSelecting(false); setFilter('all'); setNotice('') }, [workspace.id])
+  async function reorder(event: DragEndEvent) {
+    if (!event.over || event.active.id === event.over.id) return
+    const keys = contexts.map(workspaceAgentOrderKey)
+    const from = keys.indexOf(String(event.active.id)), to = keys.indexOf(String(event.over.id))
+    if (from < 0 || to < 0) return
+    setSaving(true)
+    try {
+      const result = await setOrder(workspace.id, arrayMove(keys, from, to))
+      setNotice(result.issues.map(issue => issue.message).join(' · '))
+    } catch (error) { setNotice(`Order save unconfirmed. ${error instanceof Error ? error.message : String(error)}`) }
+    finally { setSaving(false) }
+  }
+  async function copySelected() {
+    if (chosen.some(context => !context.control)) { setNotice('Original Agent identity is unobserved. Selection is kept; refresh the list before copying Agent links.'); return }
+    const text = chosen.map(context => `${context.name}\n${formatSessionAddress(context.control!.agentSessionId)}`).join('\n\n')
+    const copied = await copyTextToClipboard(text, error => setNotice(`Copy failed. ${error instanceof Error ? error.message : String(error)}`))
+    if (copied) setNotice(`Copied ${chosen.length} titles + Agent links.`)
+  }
 
   return (
     <section className="workspace-agents-tool">
@@ -91,6 +142,28 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
         <em>{count}</em>
         <button type="button" className="workspace-agents-tool__focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={12} aria-hidden="true" />去 Focus 中查看</button>
       </div>
+      <div className="workspace-agents-tool__management">
+        <div className="workspace-agents-tool__list-actions">
+          <small>{manualOrder.length ? 'Manual order' : 'Startup order'}</small>
+          <button type="button" className="small-button" aria-pressed={selecting} disabled={close.busy} onClick={() => { setSelecting(value => !value); setSelected(new Set()) }}>{selecting ? 'Done selecting' : 'Select Agents'}</button>
+        </div>
+        <div className="workspace-agents-tool__filters" role="group" aria-label="Filter Agents by state">
+          <button type="button" data-agent-filter="all" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>All <b>{count}</b></button>
+          {FOCUS_BUCKETS.map(bucket => <button key={bucket} type="button" data-agent-filter={bucket} aria-pressed={filter === bucket} onClick={() => setFilter(bucket)}>
+            <SemanticIcon name={bucket === 'attention' ? 'status.needs-input' : bucket === 'working' ? 'status.working' : bucket === 'results' ? 'status.completed' : 'status.idle'} size={12} />
+            {bucket === 'idle' ? focusNeutralGroupSummary(contexts.filter(context => context.bucket === bucket)).label : AGENT_GROUP_LABELS[bucket]}
+            <b>{contexts.filter(context => context.bucket === bucket).length}</b>
+          </button>)}
+        </div>
+        {selecting ? <div className="workspace-agents-tool__selection">
+          <span>{chosen.length} selected{hiddenSelected ? ` · ${hiddenSelected} hidden by filter` : ''}{unavailableSelected ? ` · ${unavailableSelected} original selection unavailable` : ''}</span>
+          <div><button type="button" disabled={close.busy} onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}>Select visible Agents</button>
+            <button type="button" disabled={close.busy} onClick={() => setSelected(new Set())}>Clear selection</button></div>
+          <div><button type="button" className="small-button" disabled={!chosen.length || close.busy} onClick={() => { void copySelected() }}>Copy titles + Agent links</button>
+            <button type="button" className="small-button workspace-agents-tool__close" disabled={!chosen.length || close.busy} onClick={() => close.requestClose(chosen)}>Close Agents</button></div>
+        </div> : null}
+        {notice ? <p className="workspace-agents-tool__notice" role="status">{notice}</p> : null}
+      </div>
       <div className="workspace-agents-tool__scroll">
         {count === 0 ? (
           <div className="workspace-agents-tool__empty">
@@ -98,25 +171,23 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
             <strong>No Agents in this workspace</strong>
             <span>Use + to start an Agent. Choose “Keep Session” on close to leave it running here.</span>
           </div>
-        ) : FOCUS_BUCKETS.map((column) => {
-          const contexts = groups[column]
-          if (contexts.length === 0) return null
-          const label = column === 'idle' ? focusNeutralGroupSummary(contexts).label : AGENT_GROUP_LABELS[column]
-          return (
-            <section className="workspace-agent-group" key={column}>
-              <header>
-                <strong>{label}</strong><em>{contexts.length}</em>
-              </header>
-              <div>
-                {contexts.map(context => <WorkspaceAgentRow key={context.id} context={context} onOpen={onOpen}
-                  percent={percentById[context.id] ?? null} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
-                  identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} />)}
-              </div>
-            </section>
-          )
-        })}
-        <button type="button" className="workspace-agents-tool__focus workspace-agents-tool__focus--footer" onClick={() => openFocus('agents')}>去 Focus 关注 <ThemeActionOpenExternalIcon size={12} aria-hidden="true" /></button>
+        ) : <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={event => { void reorder(event) }}>
+          <SortableContext items={visible.map(workspaceAgentOrderKey)} strategy={verticalListSortingStrategy}>
+            <div className="workspace-agent-list" aria-label="Space Agents">
+              {visible.map(context => <WorkspaceAgentRow key={workspaceAgentOrderKey(context)} context={context} onOpen={onOpen}
+                selected={selected.has(workspaceAgentOrderKey(context))} selecting={selecting} disabled={saving || close.busy} onToggle={toggle}
+                goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))} identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} />)}
+            </div>
+          </SortableContext>
+        </DndContext>}
+        {count > 0 && visible.length === 0 ? <p className="workspace-agents-tool__empty">No Agents in this state.</p> : null}
+        {close.results.length ? <section className="workspace-agents-tool__results" aria-label="Agent close results" role="status">
+          <header><strong>Close results</strong><button type="button" onClick={close.clearResults}>Dismiss</button></header>
+          {close.results.map(result => <p key={JSON.stringify([result.target.control.hostId, result.target.control.agentSessionId])} data-completed={result.completed}><strong>{result.target.name}</strong>
+            <small>{result.target.control.hostId} · {result.target.control.agentSessionId} · Run {result.target.control.run.runId}</small><span>{result.message}</span></p>)}
+        </section> : null}
       </div>
+      {close.dialog}
     </section>
   )
 })
@@ -240,6 +311,7 @@ export function SurfaceToolDock({
         ) : null}
         {visible && effectiveWorkspaceTool === 'agents' && workspace ? (
           <ConnectedWorkspaceAgentsTool
+            key={workspace.id}
             workspace={workspace}
             onOpen={(sessionId) => selectSession(sessionId, activePaneId)}
           />
