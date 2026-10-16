@@ -98,6 +98,22 @@ env -u AGENTMUX_AGENT_SESSION_STORE -u AGENTMUX_RUNTIME_DIRECTORY -u AGENTMUX_ST
 
 相关 Core 套件合计五十一项通过、五项失败；五项失败已用精确基线 `ceddee1ef6` 的原源码和测试实际对照，分别是四项旧 Provider fork 夹具与一项旧消息展示断言。新增冷 fork 用明确 Provider collaborator 保留真实原来源 witness 校验，不代签当前全部 Provider 原生 fork 集成；不能把这批结果描述为 Core 全量测试通过。
 
+## 后续恢复：过期辅助握手扩大为全局失败
+
+用户继续反馈原 Session 无法恢复，提示当前输入游标已前进，而原操作期望从零开始。准确 Native Run 仍为 running，输入开放，已接收字节均已完成；原 Provider-native conversation 身份与来源文件也仍可读。现场没有该新 Run 已观察到原上下文的确认回执，语义恢复完成状态须保持未知。
+
+**零是原输入事务的坐标。** Core 发终端键盘能力握手时，从准确 Run 读取当时的累计输入游标，将原 operation 与字节区间持久保存。重启后这笔事务尚未确认，Run 却已接收后来的输入；Native 在物理写入前拒绝旧坐标，正确保护了后续输入。本次拒绝不能追认旧事务从未写过。终端协议回复也计入物理游标，现场没有完整输入回执可解释每个累计字节，不能将它们全部说成 Prompt 或颜色查询回复。
+
+**失败扩散发生在 Core。** 旧 `ensureTerminalHandshake` 复用未确认 claim 自动重投；非 timeout 错误被完整 `open` 收集并抛为全局连接失败。后续的原生状态与上下文恢复观察尚未完成，另一个 Session 的消费者又等待同一完整 `connect()`。这形成了“观察失败阻断后续恢复观察”的闭环。
+
+`e10cd3cad4` 在原 owner 修正这条边界：过期 claim 不自动重投，原 operation、range 与未确认状态保留；准确失败沿既有 capability 服务窗呈现。新人工输入取得当前 Native 游标，继续经过原授权和输入 fence。新握手的 claim/write 进入已有 Session 输入串行边界，查询观察留在队列之外；辅助 marker 保存失败保留健康 Run 的既有能力及持久性未知。
+
+语义恢复的结果是：同一 durable Session 沿准确 Provider-native conversation 继续原上下文。原进程仍在时，接回同 Run／PTY 可以先完成；原 Run 确认结束或丢失后，请求 Level B 则仍须核对原 native target、Provider、Executor、权限、原操作与持久 prepare/commit。全局依赖判据唯一见[按操作判断强弱依赖](../design/behavior/shared-rules.md#按操作判断强弱依赖)，恢复结果边界归[Durable Runtime 健康](../design/behavior/session-recovery.md#durable-runtime-健康)。
+
+这项修复的证据包括：同 Native／Run／PID 跨真实语义进程重启保留；原输出及新有序输出可读；新输入取得准确 ACK；原 claim 未改写、旧输入未重放；实际输入竞争及目录 sync 返回 ENOSPC 时仍保留健康能力。五条实际编译 Core 变异和三条实际 Renderer 消费变异产生对应业务失败，恢复候选后相关 Core/Main 六十项、UI 三十三项通过。这里的 ENOSPC 是 FileStore 同步调用边界的受控 syscall 错误，真实满卷、OOM 或物理掉电仍需各自的隔离证据；测试 Provider 的 native target 保全也不代签真实 Provider 上下文恢复。
+
+P00 可靠性原则已原位写入[低资源原则](../design/behavior/shared-rules.md#低资源下的正确性与可恢复性)、恢复合同、[拦截判定](../../RED-LINES.md)和[故障验证策略](../testing/strategy.md#隔离资源故障与恢复验证)。已确认持久的原身份、请求和进度是跨极端事件的恢复起点；未知副作用不自动重放。SIGKILL 验证进程崩溃，受控断电验证存储耐久性，两项分别留证。
+
 ## 遗留
 
 - **性能归因仍未完成。** Host 高 CPU、Renderer 高内存与交互成本仍需分开归因，已有观察尚不能完成全部因果归因。终端恢复可读不代签整体资源优化、长期稳定性或活跃长历史连续阅读。
