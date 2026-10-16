@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { tabSwitchObservation } from '../src/renderer/src/lib/tab-switch-observation'
@@ -143,8 +144,8 @@ vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
 
 const session: SessionSnapshot = {
   id: 'session-retained', hostId: 'local', workspacePath: _hygiene_fixturePath("fixture"), label: 'Retained',
-  createdAt: 1, updatedAt: 1, processState: 'running',
-  status: { state: 'running', source: 'run-process', observedAt: 1 }, latestOutputBytes: 0,
+  createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), processState: 'running',
+  status: { state: 'running', source: 'run-process', observedAt: _tailFixtureEpoch(0, 0, 1) }, latestOutputBytes: 0,
   kind: 'terminal', providerId: null,
   control: { kind: 'terminal', hostId: 'local', runId: 'run-retained', run: { runId: 'run-retained' } }
 }
@@ -202,6 +203,25 @@ async function hiddenOutput(data: string, startByte: number) {
     await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain(data))
   })
 }
+
+it('startup loading consumes the actual TerminalView visible fact before CSS observation', async () => {
+  fixture.attach.mockImplementation(() => new Promise(() => {}))
+  const styles = vi.spyOn(window, 'getComputedStyle')
+  const loadingReads = () => styles.mock.calls.filter(([node]) => node.matches('.full-page-loading, .full-page-loading__activity'))
+  const terminal = (index: number, visible: boolean) => <TerminalView key={index} session={session} themeId="graphite"
+    interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={{ ...linkOrigin, regionId: `loading-region-${index}` }} />
+  try {
+    await act(async () => root!.render(<>{Array.from({ length: 25 }, (_, index) => terminal(index, false))}</>))
+    expect(rootContainer.querySelectorAll('.full-page-loading')).toHaveLength(25)
+    await act(async () => { rootContainer.className = 'retained-terminal-owner-changed' })
+    expect(loadingReads(), 'Hidden Terminal loading CSS reads').toHaveLength(0)
+    expect(rootContainer.querySelectorAll('[data-icon-animation="wait"]')).toHaveLength(0)
+    await act(async () => root!.render(<>{terminal(0, true)}</>))
+    expect(rootContainer.querySelectorAll('.full-page-loading')).toHaveLength(1)
+    expect(loadingReads().length).toBeGreaterThan(0)
+    expect(rootContainer.querySelector('[data-icon-animation="wait"]')).not.toBeNull()
+  } finally { styles.mockRestore() }
+})
 
 it('reports a warm Terminal switch through its actual visibility hook without attaching again', async () => {
   await render(true); await render(false)
