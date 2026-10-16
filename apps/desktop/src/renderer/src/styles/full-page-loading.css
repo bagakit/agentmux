@@ -25,6 +25,9 @@
 .full-page-loading__waiting > svg { flex: none; color: var(--green-text); }
 .full-page-loading__elapsed { padding-inline-start: var(--sp-4); border-inline-start: 1px solid var(--line-soft); font-variant-numeric: tabular-nums; }
 .full-page-loading__mark { display: inline-flex; flex: none; align-items: center; justify-content: center; height: 24px; color: var(--text-3); }
+.full-page-loading--region .full-page-loading__heading:has(> .full-page-loading__mark) { flex-wrap: nowrap; align-items: flex-start; }
+.full-page-loading--region .full-page-loading__heading:has(> .full-page-loading__mark) h1 { flex: 1; min-width: 0; }
+.full-page-loading--region .full-page-loading__mark { order: -1; margin-top: var(--sp-2); }
 .full-page-loading__activity { color: var(--green-text); }
 .full-page-loading h1 { margin: 0; font-size: var(--fs-display); font-weight: 600; line-height: 1.16; letter-spacing: -.035em; overflow-wrap: anywhere; }
 .full-page-loading__detail { max-width: 52ch; margin: var(--sp-5) 0 0; color: var(--text-2); font-size: var(--fs-prose); line-height: 1.65; overflow-wrap: anywhere; }

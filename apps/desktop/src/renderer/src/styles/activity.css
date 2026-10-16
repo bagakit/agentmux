@@ -301,15 +301,22 @@
 
 /* The original read owns the shared Region surface. Its caption is stationary;
    a single soft light gathers, travels and rests without implying progress. */
-.activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading[data-loading-phase='loading']) { display: flex; flex-direction: column; }
-.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-loading-phase='loading']) { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-items: stretch; }
-.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-loading-phase='loading']) > .reading-find__floating-trigger { grid-row: 1; }
-.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-loading-phase='loading']) > .activity-feed__reading { grid-row: 1; }
+.activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) { display: flex; flex-direction: column; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-items: stretch; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) > .reading-find__floating-trigger { grid-row: 1; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface)) > .activity-feed__reading { grid-row: 1; }
 .activity-feed__empty-reading.full-page-loading--region { color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-sans); }
-.activity-feed__empty-reading.full-page-loading--region .full-page-loading__stage { display: contents; }
-.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading[data-loading-phase='loading'] { grid-column: 1 / -1; grid-row: 2; min-height: 0; padding: 0; }
-.activity-feed__empty-reading[data-loading-phase='failed'] { height: auto; background: none; justify-items: start; }
-.activity-feed__empty-reading[data-loading-phase='failed']::before { content: none; }
+.activity-feed__empty-reading.full-page-loading--region:not(.activity-feed__reading-failure-surface) .full-page-loading__stage { display: contents; }
+.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading:is([data-loading-phase='loading'], .activity-feed__reading-failure-surface) { grid-column: 1 / -1; grid-row: 2; min-height: 0; padding: 0; }
+.activity-feed__empty-reading[data-loading-phase='failed']:not(.activity-feed__reading-failure-surface) { height: auto; background: none; justify-items: start; }
+.activity-feed__empty-reading[data-loading-phase='failed']:not(.activity-feed__reading-failure-surface)::before { content: none; }
+.activity-feed__reading-service { padding: var(--sp-2) var(--sp-4); }
+.conversation-read-issues { display: grid; gap: var(--sp-4); min-width: 0; }
+.conversation-read-issues__source { display: grid; justify-items: start; gap: var(--sp-2); min-width: 0; padding-top: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.conversation-read-issues__source > strong { color: var(--text-2); font-weight: 500; }
+.conversation-read-issues__source > p, .conversation-read-issues__kept { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
+.conversation-read-issues__kept { padding-block: var(--sp-3); }
+.conversation-read-issues__source .small-button { min-height: 28px; max-width: 100%; white-space: normal; text-align: left; }
 .activity-feed__reading-caption { position: relative; z-index: 1; display: grid; gap: var(--sp-1); min-width: 0; }
 .activity-feed__reading-caption strong { color: var(--text-2); font-weight: 560; }
 .activity-feed__reading-caption > span { color: var(--text-3); overflow-wrap: anywhere; }

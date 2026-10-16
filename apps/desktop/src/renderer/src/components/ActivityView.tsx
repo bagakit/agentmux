@@ -44,6 +44,7 @@ import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { ReadPastedImage } from '@agentmux/client-ui/components/ConversationImage'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { ConversationReadFailure, type ConversationReadIssue } from './ConversationReadFailure'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { Ruler } from './ConversationRuler'
@@ -950,9 +951,26 @@ export function ActivityView({
   const hasItems = unifiedItems.length > 0
   const readPending = readingEnabled && Boolean(readingWindow.loading || userMessageRead?.loading)
   const earlierReadPending = readingWindow.loadingEarlier || readingWindow.coverageLoading
+  const hasReadContent = hasUserMessages || hasNativeRecords || hasItems || ruler.items.length > 0
+  const readingIssues: ConversationReadIssue[] = []
+  if (readingWindow.error || !hasReadContent && readingWindow.automaticReadError) readingIssues.push({
+    id: 'conversation-records', label: 'Conversation records',
+    reasons: [readingWindow.error ?? readingWindow.automaticReadError!.message], loading: readingWindow.loading,
+    retryLabel: readingWindow.retryLabel === 'Retry' ? 'Retry conversation records' : readingWindow.retryLabel, retry: readingWindow.retry
+  })
+  if (!readingWindow.historical && userMessageRead) {
+    const reasons = [userMessageRead.error ? `Native input read failed: ${userMessageRead.error.message}` : null,
+      userMessageRead.observationError ? `Automatic native updates are unavailable: ${userMessageRead.observationError.message}` : null,
+      userMessageRead.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.' : null]
+      .filter((reason): reason is string => reason !== null)
+    if (reasons.length) readingIssues.push({ id: 'native-input-records', label: 'Native input records', reasons,
+      loading: userMessageRead.loading, retryLabel: userMessageRead.windowFrozen ? 'Read latest records' : 'Retry native input records', retry: userMessageRead.onRetry })
+  }
   const emptyReadFailed = Boolean(readingWindow.error || readingWindow.automaticReadError || !readingWindow.historical && userMessageRead?.error)
-  const emptyReadStatus = !hasUserMessages && !hasNativeRecords && !hasItems && ruler.items.length === 0 &&
-    !earlierReadPending && (readPending || emptyReadFailed) ? (
+  const readingServiceScope = JSON.stringify(['conversation-reading', executionHostId, sessionId, conversationReading?.identity])
+  const fullReadFailure = Boolean(conversationReading && !hasReadContent && readingIssues.length)
+  const emptyReadStatus = fullReadFailure ? <ConversationReadFailure scope={readingServiceScope} issues={readingIssues}
+    full visible={readingEnabled} /> : !hasReadContent && !earlierReadPending && (readPending || emptyReadFailed) ? (
     <FullPageLoadingSurface className="activity-feed__empty-reading" scope="region"
       phase={emptyReadFailed ? 'failed' : 'loading'} eyebrow="Conversation reading"
       title={emptyReadFailed ? 'Reading interrupted' : 'Reading conversation…'} detail="">
@@ -1001,10 +1019,10 @@ export function ActivityView({
   ) : null
   const readNotice = <>
     {readingNotice}
-    {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
+    {conversationReading ? !fullReadFailure && readingIssues.length > 0 ? <ConversationReadFailure
+      scope={readingServiceScope} issues={readingIssues} visible={readingEnabled} /> : null : readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>{readingWindow.retryLabel}</button></div> : null}
-    {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading} read={userMessageRead ? { ...userMessageRead,
-      onReadEarlier: conversationReading ? readEarlierRecords : userMessageRead.onReadEarlier } : undefined} /> : null}
+    {!conversationReading && !readingWindow.historical ? <UserMessageReadNotice read={userMessageRead} /> : null}
   </>
   const collapseTraces = nativeHistoryPage?.items.some(item => item.contentParts.some(part =>
     part.kind === 'reasoning' || part.kind === 'tool-call' || part.kind === 'tool-result')) ? <button type="button"
@@ -1068,9 +1086,9 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        <div className="activity-feed__empty">
+        {!emptyReadStatus ? <div className="activity-feed__empty">
           This executor does not provide structured activity. Terminal remains available.
-        </div>
+        </div> : null}
       </div>
     ))
   }
@@ -1082,7 +1100,7 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        {!readPending && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
+        {!emptyReadStatus && !readPending && !readingWindow.error && !userMessageRead?.error ? <div className="activity-feed__empty">
           {userMessageRead?.hasMore ? 'No inputs in the recent conversation window.' : 'No structured activity yet. Terminal remains available.'}
         </div> : null}
       </div>
@@ -1098,7 +1116,7 @@ export function ActivityView({
         <ConversationCoverage coverage={conversationCoverage} onLocate={revealLoadedRecord} />
         {fileReferenceNotice}
         {renderReadingHeader(findTrigger)}
-        <WorkingIndicator active={activitySemantic === 'active'} />
+        {!emptyReadStatus ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}
       </div>
     ))
   }
