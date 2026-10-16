@@ -200,6 +200,13 @@ try {
   const open = async session => (await cli(['agent', 'open', '--session', session.agentSessionId, '--zone', zone.zoneId, '--new-tab', '--focus'])).result
   const authorPlace = await open(author), recipientPlace = await open(recipient)
   assert.ok(authorPlace.to?.regionId && recipientPlace.to?.regionId)
+  // Choose the existing Composer explicitly; it remains eligible across the view change.
+  await activate(first.cdp, `${region(recipientPlace.to.regionId)}.querySelector('.composer [role="textbox"]')`)
+  facts.chain.viewInput = await waitFor('original Recipient Composer owns the view-change input', async () => {
+    const owner = await first.cdp.evaluate(`(()=>{const input=${region(recipientPlace.to.regionId)}.querySelector('.composer [role="textbox"]');return{active:document.activeElement===input,regionId:input.closest('[data-workbench-region-id]').dataset.workbenchRegionId,ownerKind:input.closest('.composer__editor')?'composer':'other'}})()`)
+    return owner.active ? owner : null
+  })
+  assert.equal(facts.chain.viewInput.regionId, recipientPlace.to.regionId); assert.equal(facts.chain.viewInput.ownerKind, 'composer')
   await cli(['agent', 'view', '--session', recipient.agentSessionId, '--mode', 'activity'])
   const normalBody = 'A2A original review\n\nPlease inspect **the exact original**.\n\n```ts\nconst retained = "中🙂  exact";\n```\n\nNo expanded user permission.'
   const normalId = 'a2a-normal-' + randomUUID(), normalOperation = randomUUID()
