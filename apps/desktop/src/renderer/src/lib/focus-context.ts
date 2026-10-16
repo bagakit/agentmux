@@ -36,7 +36,8 @@ export type FocusContext = {
   retainedRunIds?: readonly string[]
   nativeSessionId?: string
   originAddress?: string
-  recap: LauncherRecap | null
+  /** undefined is a deferred retained-card read, never evidence of no history. */
+  recap: LauncherRecap | null | undefined
   detailIsRecap: boolean
   detailKind?: 'activity' | 'message' | 'service'
   activitySemantic?: AgentObservation['semantic']
@@ -132,9 +133,21 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
     : unknown ? 'Idle / Unknown' : 'Idle / Recovery'
   return { label, detail: `Idle ${idle} · Activity unknown ${unknown} · Recovery ${recovery}` }
 }
-type FocusConversationFacts = {
+type FocusTimelineStamp = {
   revision: number | undefined; sourceHostId: string | undefined; agentSessionId: string | undefined; streamEpoch: string | undefined
   items: AgentTimelineSnapshot['items'] | undefined; stream: AgentTimelineSnapshot['stream']
+}
+/** Scalar copies also detect accepted in-place Timeline/source updates. */
+export function focusTimelineStamp(timeline: AgentTimelineSnapshot | undefined): FocusTimelineStamp {
+  return { items: timeline?.items, stream: timeline?.stream,
+    revision: timeline?.revision, sourceHostId: timeline?.sourceHostId,
+    agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch }
+}
+function sameTimelineStamp(before: FocusTimelineStamp | undefined, timeline: AgentTimelineSnapshot | undefined): boolean {
+  const current = focusTimelineStamp(timeline)
+  return Boolean(before && Object.keys(current).every(key => before[key as keyof FocusTimelineStamp] === current[key as keyof FocusTimelineStamp]))
+}
+type FocusConversationFacts = FocusTimelineStamp & {
   recap: LauncherRecap | null
   latest: { detail: string; text: string; currentResult: boolean; matchesRecap: boolean } | null
 }
@@ -169,8 +182,8 @@ function focusConversationFacts(timeline: AgentTimelineSnapshot | undefined, pre
 export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
   return agentContextWithConversation(session, timeline, userName, workspace, topicId, focusConversationFacts(timeline))
 }
-function agentContextWithConversation(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null, conversation: FocusConversationFacts): FocusContext {
-  const state = session.status.state, items = timeline?.items ?? [], { recap, latest } = conversation
+function agentContextWithConversation(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null, conversation: FocusConversationFacts | undefined): FocusContext {
+  const state = session.status.state, items = timeline?.items ?? [], recap = conversation?.recap, latest = conversation?.latest
   const result = latest?.currentResult
   const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
   const now = Date.now()
@@ -283,12 +296,14 @@ function sameLaneFacts(a: FocusContext, b: FocusContext): boolean {
 /** One existing per-surface cache owns execution rows and the separate PMO attention projection. */
 function createFocusProjectionCache() {
   let groupSequence = 0
-  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
+  const cache = new Map<string, { group: { key: string; enteredAt: number | null; sequence: number } | null; session: SessionSnapshot; activitySemantic: AgentObservation['semantic']; timeline: AgentTimelineSnapshot | undefined; stamp: FocusTimelineStamp | undefined; deferred: boolean; conversation: FocusConversationFacts | undefined; name: string | undefined; config: AppConfig | null; workspace: WorkspaceRecord | undefined; topicId: string | null; lane: AgentFocusLane | null; model: FocusContext | null; laneModel: FocusContext | null }>()
   let previous: Inputs | undefined
+  let previousMode: 'full' | 'metadata' | undefined
   let result: FocusProjection = {contexts: [], laneContexts: [], pmoAttention: []}
-  const select = (input: Inputs, active = true): FocusProjection => {
+  const select = (input: Inputs, active = true, mode?: 'full' | 'metadata'): FocusProjection => {
     if (!active) return result
-    if (sameFocusInputs(previous, input)) return result
+    if (sameFocusInputs(previous, input) && previousMode === mode && (mode === undefined
+      || [...cache].every(([id, row]) => row.timeline === input.timelines[id] && sameTimelineStamp(row.stamp, input.timelines[id])))) return result
     const rows: FocusContext[] = []
     const laneRows: FocusContext[] = []
     const pmoAttention: string[] = []
@@ -300,7 +315,11 @@ function createFocusProjectionCache() {
       retained.add(session.id)
       const activitySemantic = observeAgentSession(session, now).semantic
       const timeline = input.timelines[session.id], name = input.agentNames[session.id], old = cache.get(session.id)
-      if (old && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (!old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
+      // These exact subjects always take the original idle/service branch;
+      // their result classification and detail never consume conversation text.
+      const deferred = mode === 'metadata' && (session.processState === 'interrupted' || session.runUnobserved === true)
+        && !session.pendingInteraction && !isNeedsYouState(session.status.state) && session.status.state !== 'error'
+      if (old && old.deferred === deferred && old.activitySemantic === activitySemantic && sameSessionPresentation(old.session, session, now) && old.timeline === timeline && (mode !== undefined ? sameTimelineStamp(old.stamp, timeline) : !old.conversation || sameConversationFacts(old.conversation, timeline)) && old.name === name && old.config === input.config && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots) {
         if (old.model) { rows.push(old.model); laneRows.push(old.laneModel!) }
         else if (old.lane === 'pmo' && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
         continue
@@ -315,7 +334,7 @@ function createFocusProjectionCache() {
       if (lane === 'pmo') {
         if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
       } else {
-        conversation = focusConversationFacts(timeline, old)
+        conversation = deferred ? undefined : focusConversationFacts(timeline, old)
         const next = agentContextWithConversation(session, timeline, name, workspace, topicId, conversation)
         if (lane === null) {
           next.detail = 'Mote identity is not confirmed · ' + next.detail
@@ -335,7 +354,7 @@ function createFocusProjectionCache() {
         laneModel = old?.laneModel && sameLaneFacts(old.laneModel, model) ? old.laneModel : model
         laneRows.push(laneModel)
       }
-      cache.set(session.id, { group, session, activitySemantic, timeline, conversation, name, config: input.config, workspace, topicId, lane, model, laneModel })
+      cache.set(session.id, { group, session, activitySemantic, timeline, stamp: conversation ?? (mode !== undefined ? focusTimelineStamp(timeline) : undefined), deferred, conversation, name, config: input.config, workspace, topicId, lane, model, laneModel })
     }
     for (const id of cache.keys()) if (!retained.has(id)) cache.delete(id)
     // Only Focus card order changes. Lane facts keep their original input order and priorities.
@@ -345,6 +364,7 @@ function createFocusProjectionCache() {
     })
     result = {contexts: sameItems(result.contexts, rows) ? result.contexts : rows, laneContexts: sameItems(result.laneContexts, laneRows) ? result.laneContexts : laneRows, pmoAttention: sameItems(result.pmoAttention, pmoAttention) ? result.pmoAttention : pmoAttention}
     previous = focusInputs(input)
+    previousMode = mode
     return result
   }
   return select

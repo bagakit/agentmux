@@ -5,7 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { agentRegionExecution, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_BUCKETS, groupFocusContexts, type FocusBucket } from '../lib/focus-context'
-import { FocusContextRow } from './FocusContextRow'
+import { FocusContextCards } from './FocusContextCards'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey } from '../lib/focus-project-lanes'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
@@ -22,7 +22,7 @@ import type { FocusLaneCounts, FocusLaneMetrics } from '../lib/focus-lane-layout
 import { FocusToolbar } from './FocusToolbar'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
-import { createFocusGoalLinksSelector, focusGoalCardKey } from '../lib/focus-goal-links'
+import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
 import { FocusSearchLocations } from './FocusSearchLocations'
 import { focusSearchCatalog, focusSearchContextKey, searchFocus } from '../lib/focus-search'
 import { FocusSourceStatus } from './FocusSourceStatus'
@@ -46,7 +46,7 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
-import { createFocusContextIdentitySelector, focusContextIdentityKey } from '../lib/focus-context-identity'
+import { createFocusContextIdentitySelector } from '../lib/focus-context-identity'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 
 const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external')
@@ -96,8 +96,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
 } = {}) {
   const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
   const visible = hostVisible && surfaceVisible
+  const [query, setQuery] = useState('')
   const contextSelector = useMemo(createFocusProjectionSelector, [])
-  const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(state => contextSelector(state, visible)))
+  const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(state => contextSelector(state, visible, query.trim() ? 'full' : 'metadata')))
   const goalLinksSelector = useMemo(createFocusGoalLinksSelector, [])
   const goalLinks = useAppStore(state => goalLinksSelector(state, visible))
   const moteIdentity = useAppStore(useShallow(state => {
@@ -150,7 +151,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     if (!visible) useAppStore.getState().conversationRevealIntent?.complete({ kind: 'cancelled' })
   }, [visible])
   useEffect(() => () => { useAppStore.getState().conversationRevealIntent?.complete({ kind: 'cancelled' }) }, [])
-  const [query, setQuery] = useState('')
   const historySearch = useFocusHistorySearch(query, visible)
   const [project, setProject] = useState('all')
   const [bucketFilter, setBucketFilter] = useState<FocusBucket | 'all'>('all')
@@ -238,7 +238,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const at = Math.max(item.lastFocusedAt ?? 0, item.lastActivityAt ?? 0)
     if (at > 0) setHistoryWindowRequest(current => ({ at, sequence: (current?.sequence ?? 0) + 1 }))
   }
-  const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
+  const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics & { measured: boolean }>({ width: 0, padding: 4, gap: 2, cardGap: 2, measured: false })
   const [documentActive, setDocumentActive] = useState(document.visibilityState !== 'hidden')
   useEffect(() => {
     const observe = () => setDocumentActive(document.visibilityState !== 'hidden')
@@ -254,19 +254,21 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     const measure: ResizeObserverCallback = entries => {
       if (!active || document.visibilityState === 'hidden') return
       // Rows stretch each lane's grid across this content box. Its RO width
-      // already excludes the scroll bar and preserves fractional CSS pixels;
-      // mount/reveal must not force the parked workbench through layout.
-      const width = entries.find(entry => entry.target === rows)?.contentRect.width ?? 0
-      if (width <= 0) return
+      // already excludes the scroll bar and preserves fractional CSS pixels.
+      // One visible initial read establishes actual columns before paint;
+      // subsequent deliveries use the observer's content box directly.
+      const width = entries.find(entry => entry.target === rows)?.contentRect.width ?? rows.clientWidth
+      if (width <= 0) { setLaneMetrics(current => current.measured ? current : { ...current, measured: true }); return }
       const groups = rows.querySelector<HTMLElement>('.focus-project-lanes__groups')
       if (!groups) return
       const style = getComputedStyle(groups), cards = groups.querySelector<HTMLElement>('.focus-context-group__cards')
       const gap = parseFloat(style.columnGap) || 0
-      const next = { width, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
-      setLaneMetrics(current => current.width === next.width && current.padding === next.padding && current.gap === next.gap && current.cardGap === next.cardGap ? current : next)
+      const next = { width, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap, measured: true }
+      setLaneMetrics(current => current.measured && current.width === next.width && current.padding === next.padding && current.gap === next.gap && current.cardGap === next.cardGap ? current : next)
     }
     const observer = new ResizeObserver(measure)
     observer.observe(rows)
+    measure([], observer)
     return () => { active = false; observer.disconnect() }
   }, [visible, documentActive, hasBoardCards])
   const matchingGroups = groupFocusContexts(matching)
@@ -310,7 +312,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         const label = neutral?.label ?? meta.label
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
           {!sparse ? groupHeader(bucket) : null}
-            <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))} identity={contextIdentities.get(focusContextIdentityKey(context.hostId, context.id))} selected={shownSessionId === context.id} onSelect={focusExecutionSession} />)}</div>
+            <FocusContextCards contexts={grouped} columns={layout.columns[index]!} layoutReady={laneMetrics.measured} scrollRef={boardRowsRef} visible={visible && documentActive} selectedId={shownSessionId} goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession} />
         </section>
       })
     }</FocusLaneGroups> : null}</>
