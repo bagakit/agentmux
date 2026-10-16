@@ -11,7 +11,7 @@ type State = ReturnType<typeof useAppStore.getState>
 // A new fact read must join its notification owner here; actions are imperative.
 const sharedFacts = {
   composer: ['config', 'scratchTopicSnapshots', 'providerCatalog', 'errorNoticeContext', 'error', 'lastError', 'lastActiveFileByWorkspace'],
-  sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'sessionNameMetadata', 'runtimeEndpointWarnings',
+  sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'runtimeEndpointWarnings',
     'localHome', 'demandPmoTabIds', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups'],
   reactions: ['config'],
   workbenchTab: ['layouts', 'config', 'scratchTopicSnapshots']
@@ -26,7 +26,7 @@ const sessionFactsByKind = {
   reactions: ['agentSteerQueues'],
   workbenchTab: ['agentNames', 'pendingAgentLaunches', 'timelines', 'viewModes']
 } as const satisfies Record<ConsumerKind, readonly (typeof sessionFacts[number])[]>
-type ConsumerFacts<K extends ConsumerKind> = Pick<State, typeof sharedFacts[K][number] | typeof sessionFactsByKind[K][number] | 'sessions' | 'recoveryCandidates' | (K extends 'sessionPane' ? 'tabs' | typeof navigationFacts[number] : K extends 'workbenchTab' ? 'sessionNameMetadata' : never)>
+type ConsumerFacts<K extends ConsumerKind> = Pick<State, typeof sharedFacts[K][number] | typeof sessionFactsByKind[K][number] | 'sessions' | 'recoveryCandidates' | (K extends 'sessionPane' ? 'tabs' | 'sessionNameMetadata' | typeof navigationFacts[number] : K extends 'workbenchTab' ? 'sessionNameMetadata' : never)>
 export type RetainedConsumerScope = { readonly sessionIds: readonly string[]; readonly navigation: boolean }
 type Listener = () => void
 const listenersByScope = new Map<RetainedConsumerScope, { kind: ConsumerKind; listeners: Set<Listener> }>()
