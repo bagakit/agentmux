@@ -135,18 +135,27 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
 
   return (
     <section className="workspace-agents-tool">
-      <div className="workspace-tool-context">
-        <span>
-          <strong>{workspace.name}</strong>
-        </span>
-        <em>{count}</em>
-        <button type="button" className="workspace-agents-tool__focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={12} aria-hidden="true" />去 Focus 中查看</button>
-      </div>
-      <div className="workspace-agents-tool__management">
-        <div className="workspace-agents-tool__list-actions">
-          <small>{manualOrder.length ? 'Manual order' : 'Startup order'}</small>
-          <button type="button" className="small-button" aria-pressed={selecting} disabled={close.busy} onClick={() => { setSelecting(value => !value); setSelected(new Set()) }}>{selecting ? 'Done selecting' : 'Select Agents'}</button>
-        </div>
+      <div className="workspace-agents-tool__top">
+        <header className="workspace-agents-tool__header" data-selecting={selecting}>
+          {selecting ? <span className="workspace-agents-tool__selection" role="status">
+            <strong>{chosen.length} selected</strong>
+            {hiddenSelected || unavailableSelected ? <small>{hiddenSelected ? `${hiddenSelected} hidden by filter` : ''}{hiddenSelected && unavailableSelected ? ' · ' : ''}{unavailableSelected ? `${unavailableSelected} original selection unavailable` : ''}</small> : null}
+          </span> : <div className="workspace-agents-tool__identity">
+            <strong title={workspace.name}>{workspace.name}</strong>
+            <span title={`${count} Agents · ${manualOrder.length ? 'Manual order' : 'Startup order'} · Drag or use the move handle keyboard controls to reorder`} aria-label={`${count} Agents · ${manualOrder.length ? 'Manual order' : 'Startup order'}`}>{count}</span>
+          </div>}
+          <div className="workspace-agents-tool__actions" role="group" aria-label={selecting ? 'Selected Agent actions' : 'Agent list actions'}>
+            {!selecting ? <button type="button" className="workspace-agents-tool__focus" aria-label="去 Focus 中查看" title="View in Focus" onClick={() => openFocus('agents')}><ThemeActionOpenExternalIcon size={15} aria-hidden="true" /></button> : null}
+            {selecting ? <>
+              <button type="button" aria-label="Select visible Agents" title="Select visible Agents" disabled={close.busy} onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}><SemanticIcon name="object.criteria" size={15} /></button>
+              <button type="button" aria-label="Clear selection" title="Clear selection" disabled={close.busy} onClick={() => setSelected(new Set())}><SemanticIcon name="action.clear-list" size={15} /></button>
+              <span className="workspace-agents-tool__action-divider" aria-hidden="true" />
+              <button type="button" aria-label="Copy titles + Agent links" title="Copy titles + Agent links" disabled={!chosen.length || close.busy} onClick={() => { void copySelected() }}><SemanticIcon name="action.copy" size={15} /></button>
+              <button type="button" className="workspace-agents-tool__close" aria-label="Close Agents" title="Close Agents · Review current Runs before stopping" disabled={!chosen.length || close.busy} onClick={() => close.requestClose(chosen)}><SemanticIcon name="action.stop" size={15} /></button>
+            </> : null}
+            <button type="button" aria-label={selecting ? 'Done selecting' : 'Select Agents'} title={selecting ? 'Done selecting' : 'Select Agents'} aria-pressed={selecting} disabled={close.busy} onClick={() => { setSelecting(value => !value); setSelected(new Set()) }}><SemanticIcon name={selecting ? 'action.close' : 'object.criteria'} size={15} /></button>
+          </div>
+        </header>
         <div className="workspace-agents-tool__filters" role="group" aria-label="Filter Agents by state">
           <button type="button" data-agent-filter="all" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>All <b>{count}</b></button>
           {FOCUS_BUCKETS.map(bucket => <button key={bucket} type="button" data-agent-filter={bucket} aria-pressed={filter === bucket} onClick={() => setFilter(bucket)}>
@@ -155,13 +164,6 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
             <b>{contexts.filter(context => context.bucket === bucket).length}</b>
           </button>)}
         </div>
-        {selecting ? <div className="workspace-agents-tool__selection">
-          <span>{chosen.length} selected{hiddenSelected ? ` · ${hiddenSelected} hidden by filter` : ''}{unavailableSelected ? ` · ${unavailableSelected} original selection unavailable` : ''}</span>
-          <div><button type="button" disabled={close.busy} onClick={() => setSelected(previous => new Set([...previous, ...visible.map(workspaceAgentOrderKey)]))}>Select visible Agents</button>
-            <button type="button" disabled={close.busy} onClick={() => setSelected(new Set())}>Clear selection</button></div>
-          <div><button type="button" className="small-button" disabled={!chosen.length || close.busy} onClick={() => { void copySelected() }}>Copy titles + Agent links</button>
-            <button type="button" className="small-button workspace-agents-tool__close" disabled={!chosen.length || close.busy} onClick={() => close.requestClose(chosen)}>Close Agents</button></div>
-        </div> : null}
         {notice ? <p className="workspace-agents-tool__notice" role="status">{notice}</p> : null}
       </div>
       <div className="workspace-agents-tool__scroll">
