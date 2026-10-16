@@ -14,6 +14,7 @@ await runA2aProof({
     'packages/core/src/client.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/types.ts',
     'apps/desktop/src/main/continuous-progress-loop-manager.ts', 'apps/desktop/src/main/continuous-progress-delivery.ts',
     'apps/desktop/src/main/continuous-progress-loop-store.ts', 'apps/desktop/src/main/runtime-controller.ts',
+    'apps/desktop/test/helpers/isolate-core-environment.ts',
     'apps/desktop/test/helpers/continuous-progress-tracker.ts',
     'apps/desktop/scripts/verify-injected-context-progress.mjs', 'packages/core/scripts/lib/a2a-proof.mjs'],
   environment: ({ url }) => ({ AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT: url('client.js'),
@@ -23,7 +24,7 @@ await runA2aProof({
     { symbol: 'this.onTick(', path: 'apps/desktop/src/main/continuous-progress-loop-manager.ts' },
     { symbol: 'runtime.submitPrompt(', path: 'apps/desktop/src/main/continuous-progress-delivery.ts' },
     { symbol: 'client.submitAgentPrompt({', path: 'apps/desktop/src/main/runtime-controller.ts' },
-    { symbol: 'AGENTMUX_AGENT_MESSAGING_GUIDANCE', path: 'apps/desktop/src/main/continuous-progress-loop-manager.ts' }
+    { symbol: 'AGENTMUX_AGENT_MESSAGING_ENTRY', path: 'apps/desktop/src/main/continuous-progress-loop-manager.ts' }
   ],
   mutations: [
     { label: 'progress-shared-context-disconnected', file: '../../apps/desktop/src/main/continuous-progress-delivery.ts',
@@ -32,8 +33,14 @@ await runA2aProof({
       projectTests: tests, before: 'condition.expectedRun }, pending.prompt, operationId, condition,',
       after: 'condition.expectedRun }, loop.prompt, operationId, condition,' },
     { label: 'progress-user-body-trimmed', file: '../../apps/desktop/src/main/continuous-progress-loop-manager.ts',
-      projectTests: tests, before: 'prompt: claim.loop.prompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE',
-      after: 'prompt: claim.loop.prompt.trim(), agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE' },
+      projectTests: tests, before: 'let prompt = claim.loop.prompt',
+      after: 'let prompt = claim.loop.prompt.trim()' },
+    { label: 'future-state-replaces-original-platform-context', file: '../../apps/desktop/src/main/runtime-controller.ts',
+      projectTests: tests, before: 'const agentMuxNote = original ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY',
+      after: 'const agentMuxNote = false ? original.message.systemContext : AGENTMUX_AGENT_MESSAGING_ENTRY' },
+    { label: 'future-occurrence-replaces-original-platform-context', file: '../../apps/desktop/src/main/continuous-progress-loop-manager.ts',
+      projectTests: tests, before: 'agentMuxNote = original.message.systemContext',
+      after: 'agentMuxNote = AGENTMUX_AGENT_MESSAGING_ENTRY' },
     { label: 'progress-input-fence-bypassed', file: 'prompt-submission.js',
       before: 'if (run.acceptedInputBytes !== expectedInputByte)', after: 'if (false)' }
   ]

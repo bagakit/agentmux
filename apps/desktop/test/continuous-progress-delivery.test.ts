@@ -1,17 +1,18 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { expect, it, vi } from 'vitest'
-import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, observeAgent, AgentMuxError, type ContinuousProgressLoop } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_ENTRY, observeAgent, AgentMuxError, type ContinuousProgressLoop } from '@agentmux/core'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
 const signal = new AbortController().signal
 const loop: ContinuousProgressLoop = { loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), intervalMs: 10, prompt: 'next',
-  nextCheckAt: 0, status: 'active', pendingCompletion: { prompt: 'next', agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE,
+  nextCheckAt: _tailFixtureEpoch(0, 0, 0), status: 'active', pendingCompletion: { prompt: 'next', agentMuxNote: AGENTMUX_AGENT_MESSAGING_ENTRY,
     inputByte: 0, id: '["r",1]', operationId: 'same-operation', condition: { expectedRun: { runId: 'r' }, afterSubmissionId: null } } }
-function fixture(state: 'done' | 'working' = 'done', runId = 'r', observedAt = 1) {
+function fixture(state: 'done' | 'working' = 'done', runId = 'r', observedAt = _tailFixtureEpoch(0, 0, 1)) {
   return { observeContinuousProgress: vi.fn(async () => ({ session: {
-    kind: 'agent' as const, executorId: 'codex', retiredRuns: [],  createdAt: 1, updatedAt: 1,
+    kind: 'agent' as const, executorId: 'codex', retiredRuns: [],  createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     agentSessionId: 'a', hostId: 'local', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), run: { runId },
     semanticStatus: { state, source: 'native-hook' as const, observedAt }
-  }, inputByte: 0, inputOccupied: false, observation: observeAgent({ process: 'running', status: { state, source: 'native-hook', observedAt }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, 1), tickId: 't', now: 1 })), submitPrompt: vi.fn(async () => {}) }
+  }, inputByte: 0, inputOccupied: false, observation: observeAgent({ process: 'running', status: { state, source: 'native-hook', observedAt }, timelineCapability: 'complete-events', awaitingRequest: false, terminalCapabilityUnverified: false }, _tailFixtureEpoch(0, 0, 1)), tickId: 't', now: _tailFixtureEpoch(0, 0, 1) })), submitPrompt: vi.fn(async () => {}) }
 }
 it.each(['working', 'new-run', 'new-completion', 'paused'] as const)('abandons an old claim after %s', async (changed) => {
   const runtime = fixture(changed === 'working' ? 'working' : 'done', changed === 'new-run' ? 'r2' : 'r', changed === 'new-completion' ? 2 : 1)
@@ -23,7 +24,7 @@ it('passes the original operation and completion condition across the actual inp
   expect(await deliverContinuousProgress(runtime, loop, 'same-operation', active, signal)).toBe('sent')
   expect(runtime.submitPrompt).toHaveBeenCalledWith({ kind: 'agent', agentSessionId: 'a', hostId: 'local', run: { runId: 'r' } },
     'next', 'same-operation', loop.pendingCompletion!.condition, { completionId: '["r",1]', inputByte: 0, isCurrent: active, signal },
-    undefined, undefined, AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    undefined, undefined, AGENTMUX_AGENT_MESSAGING_ENTRY)
   runtime.submitPrompt.mockRejectedValueOnce(new AgentMuxError('changed', 'AGENT_COMPLETION_CHANGED'))
   expect(await deliverContinuousProgress(runtime, loop, 'same-operation', active, signal)).toBe('skipped')
 })

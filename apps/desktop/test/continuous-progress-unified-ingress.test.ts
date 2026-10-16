@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -5,7 +6,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxFileAgentSessionStore, agentPromptCondition,
+  AGENTMUX_AGENT_MESSAGING_ENTRY, AgentMuxClient, AgentMuxFileAgentSessionStore, ContinuousProgressScheduler, agentPromptCondition,
   decideContinuousProgress, type AgentMuxStoredAgentSession,
   type ContinuousProgressLoop, type ContinuousProgressObservation
 } from '@agentmux/core'
@@ -14,7 +15,9 @@ import type { CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-ada
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { nextCalendarOccurrence } from '../src/main/agent-schedule-calendar.js'
 import { privateTracker } from './helpers/continuous-progress-tracker'
+import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("private/unused-electron-storage") } }))
@@ -48,9 +51,10 @@ afterEach(async () => {
  */
 async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
   const path = await mkdtemp(join(tmpdir(), 'agentmux-progress-input-')); directories.push(path)
-  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(path, 'runtime'))
-  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(path, 'state'))
-  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(path, 'messages.ndjson'))
+  const proofEnvironment = { AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT: process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT,
+    AGENTMUX_TEST_FEATURE_TRACKER_SCRIPT: process.env.AGENTMUX_TEST_FEATURE_TRACKER_SCRIPT }
+  isolateCoreFixtureEnvironment(path)
+  for (const [key, value] of Object.entries(proofEnvironment)) if (value !== undefined) vi.stubEnv(key, value)
   const sessionPath = join(path, 'sessions.json')
   const store = new AgentMuxFileAgentSessionStore(sessionPath)
   const now = Date.now()
@@ -107,12 +111,12 @@ async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
 }
 
 const continuationPrompt = 'continue the assigned task'
-const continuationWire = () => composeAgentPrompt(continuationPrompt, AGENTMUX_AGENT_MESSAGING_GUIDANCE).text
+const continuationWire = () => composeAgentPrompt(continuationPrompt, AGENTMUX_AGENT_MESSAGING_ENTRY).text
 const payload = (wire: string) => `\u001b[200~${wire}\u001b[201~`
 async function loopOwner(f: Awaited<ReturnType<typeof fixture>>, observe?: (loop: ContinuousProgressLoop, tickId: string, now: number) => Promise<ContinuousProgressObservation>, prompt = continuationPrompt) {
   const path = await mkdtemp(join(tmpdir(), 'agentmux-unified-loop-')); directories.push(path)
   const store = new ContinuousProgressLoopStore(join(path, 'loops.json'))
-  let now = 0
+  let now = _tailFixtureEpoch(0, 0, 0)
   const make = (Manager = ContinuousProgressLoopManager) => {
     const manager = new Manager(store,
       (loop, operationId, isCurrent, signal) => deliverContinuousProgress(f.runtime, loop, operationId, isCurrent, signal),
@@ -120,9 +124,109 @@ async function loopOwner(f: Awaited<ReturnType<typeof fixture>>, observe?: (loop
     managers.push(manager); return manager
   }
   await store.save([{ loopId: 'private-loop', hostId: 'local', agentSessionId: f.session.agentSessionId, providerId: f.session.providerId, workspacePath: f.session.workspacePath,
-    intervalMs: 10, prompt, nextCheckAt: 0, status: 'active' }])
+    intervalMs: 10, prompt, nextCheckAt: _tailFixtureEpoch(0, 0, 0), status: 'active' }])
   return { store, make, at: (value: number) => { now = value } }
 }
+
+const calendar = { kind: 'daily', timezone: 'UTC', time: new Date(_tailFixtureEpoch(0, (9 * 60 + 30) * 60)).toISOString().slice(11, 16), policies: { gap: 'skip', fold: 'earlier', monthEnd: 'clamp', overdue: 'latest' } } as const
+async function calendarOwner(f: Awaited<ReturnType<typeof fixture>>) {
+  const path = await mkdtemp(join(tmpdir(), 'agentmux-frozen-future-')); directories.push(path)
+  const store = new ContinuousProgressLoopStore(join(path, 'loops.json'))
+  const target = { hostId: f.session.hostId, agentSessionId: f.session.agentSessionId, providerId: f.session.providerId, workspacePath: f.session.workspacePath }
+  let now = f.session.createdAt
+  const manager = new ContinuousProgressLoopManager(store,
+    (loop, operationId, isCurrent, signal) => deliverContinuousProgress(f.runtime, loop, operationId, isCurrent, signal),
+    () => now, (loop, tickId, time) => f.runtime.observeContinuousProgress(loop, tickId, time),
+    { saveFutureIntent: (loop, active, context) => f.runtime.saveFutureIntent(loop, active, context) })
+  managers.push(manager)
+  const seed = async (prompt: string, agentMuxNote: string) => {
+    const clock = new ContinuousProgressScheduler({ now: () => now, id: () => 'original-calendar' })
+    const loop = clock.createCalendar({ ...target, calendar, prompt, nextDue: nextCalendarOccurrence(calendar, now)!, operationId: 'original-creation' })
+    await f.client.saveAgentFuturePromptIntent({ agentSessionId: target.agentSessionId, intentId: loop.futureIntentId!, operationId: loop.creationOperationId!, prompt, agentMuxNote, active: true })
+    await store.save([loop])
+    return loop
+  }
+  return { manager, store, target, seed, at: (value: number) => { now = value } }
+}
+
+describe('calendar occurrences preserve the original Core future message', () => {
+  const body = '  Original task <amux>authored example</amux>\r\nSecond line.  \n'
+  const originalNote = 'Arbitrary earlier platform rules.\r\nKeep <amux> & &amp; exactly.  '
+  it('pauses, resumes and cancels an existing arrangement without adopting current guidance', async () => {
+    const f = await fixture(), owner = await calendarOwner(f), loop = await owner.seed(body, originalNote)
+    const read = () => f.client.readAgentFuturePromptIntent(f.session.agentSessionId, loop.futureIntentId!)
+    const original = await read()
+    const paused = await owner.manager.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: 1, operationId: 'original-pause' })
+    expect(paused.schedule).toMatchObject({ status: 'paused', revision: 2 })
+    expect(await read()).toEqual({ ...original, active: false })
+    const duplicate = await owner.manager.call('schedule.create', { target: owner.target, calendar, prompt: body, operationId: loop.creationOperationId! })
+    expect(duplicate.schedule.status).toBe('paused')
+    expect(await read()).toEqual({ ...original, active: false })
+    const resumed = await owner.manager.call('schedule.resume', { scheduleId: loop.loopId, expectedRevision: 2, operationId: 'original-resume' })
+    expect(resumed.schedule).toMatchObject({ status: 'active', revision: 3 })
+    expect(await read()).toEqual(original)
+    const cancelled = await owner.manager.call('schedule.cancel', { scheduleId: loop.loopId, expectedRevision: 3, operationId: 'original-cancel' })
+    expect(cancelled.schedule).toMatchObject({ status: 'stopped', revision: 4 })
+    expect(await read()).toEqual({ ...original, active: false })
+    expect(f.requests).toEqual([])
+  })
+
+  it('uses the original typed body and note for the next occurrence through actual Core admission', async () => {
+    const f = await fixture(), owner = await calendarOwner(f), loop = await owner.seed(body, originalNote)
+    await owner.manager.start(); owner.at(loop.nextCheckAt); await owner.manager.check()
+    expect(owner.manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastOccurrenceAt: loop.nextCheckAt })
+    expect(f.writes).toEqual([payload(composeAgentPrompt(body, originalNote).text), '\r'])
+    const admitted = (await f.store.load())[0]!.promptCompletionAdmission!
+    expect(admitted).toMatchObject({ acknowledged: true, intent: { message: { userContent: body, systemContext: originalNote } } })
+    const saved = await f.client.readAgentFuturePromptIntent(f.session.agentSessionId, loop.futureIntentId!)
+    // Future occurrences retain the semantic submission, not its Native payload-phase operation.
+    expect(saved).toMatchObject({ operationId: loop.creationOperationId, message: { userContent: body, systemContext: originalNote }, lastOccurrenceAt: loop.nextCheckAt, lastOperationId: admitted.submissionId })
+    expect(admitted.submissionId).toBe(owner.manager.list()[0]!.lastTickId)
+    expect((await f.store.loadTimeline(f.session.agentSessionId)).items.map(item => [item.kind, item.source, item.content]))
+      .toEqual([['system_message', 'agentmux', originalNote], ['user_message', 'user', body]])
+  })
+
+  it('joins an unknown calendar Input with its frozen content and original operation on resume', async () => {
+    const f = await fixture(), owner = await calendarOwner(f), loop = await owner.seed(body, originalNote)
+    f.loseNextAck(); await owner.manager.start(); owner.at(loop.nextCheckAt); await owner.manager.check()
+    const original = owner.manager.list()[0]!.pendingCompletion!
+    expect(owner.manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
+    expect(original).toMatchObject({ prompt: body, agentMuxNote: originalNote, futureIntent: { intentId: loop.futureIntentId, occurrenceAt: loop.nextCheckAt } })
+    await owner.manager.call('schedule.resume', { scheduleId: loop.loopId, expectedRevision: 1, operationId: 'resume-original-input' })
+    await owner.manager.check()
+    expect(f.requests[1]).toEqual(f.requests[0])
+    expect(f.writes).toEqual([payload(composeAgentPrompt(body, originalNote).text), '\r'])
+    expect(owner.manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastCompletionId: original.id })
+    expect(owner.manager.list()[0]!.pendingCompletion).toBeUndefined()
+  })
+
+  it('uses current entry guidance only for a newly saved arrangement', async () => {
+    const f = await fixture(), owner = await calendarOwner(f)
+    const created = await owner.manager.call('schedule.create', { target: owner.target, calendar, prompt: body, operationId: 'new-arrangement' })
+    expect(await f.client.readAgentFuturePromptIntent(f.session.agentSessionId, created.schedule.futureIntentId!))
+      .toMatchObject({ operationId: 'new-arrangement', prompt: composeAgentPrompt(body, AGENTMUX_AGENT_MESSAGING_ENTRY).text,
+        message: { userContent: body, systemContext: AGENTMUX_AGENT_MESSAGING_ENTRY } })
+    owner.at(created.schedule.nextCheckAt); await owner.manager.check()
+    expect(owner.manager.list()[0]).toMatchObject({ lastOutcome: 'sent' })
+    expect(f.writes).toEqual([payload(composeAgentPrompt(body, AGENTMUX_AGENT_MESSAGING_ENTRY).text), '\r'])
+  })
+
+  it.each(['body', 'operation'] as const)('does not adopt a changed %s from the loop projection or block healthy manual input', async changed => {
+    const f = await fixture(), owner = await calendarOwner(f), loop = await owner.seed(body, originalNote)
+    const mismatched = { ...loop, ...(changed === 'body' ? { prompt: 'different current body' } : { creationOperationId: 'different-creation' }) }
+    const original = await f.client.readAgentFuturePromptIntent(f.session.agentSessionId, loop.futureIntentId!)
+    await expect(f.runtime.saveFutureIntent(mismatched, false)).rejects.toMatchObject({ code: 'AGENT_FUTURE_INTENT_CHANGED' })
+    expect(await f.client.readAgentFuturePromptIntent(f.session.agentSessionId, loop.futureIntentId!)).toEqual(original)
+    await owner.store.save([mismatched]); await owner.manager.start(); owner.at(loop.nextCheckAt); await owner.manager.check()
+    expect(owner.manager.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
+    expect(owner.manager.list()[0]!.lastDecision).toContain('Inspect the saved arrangement')
+    expect(owner.manager.list()[0]!.pendingCompletion).toBeUndefined()
+    expect(f.requests).toEqual([])
+    await f.runtime.write({ kind: 'agent', hostId: f.session.hostId, agentSessionId: f.session.agentSessionId, run: f.session.run }, 'healthy manual', 'user')
+    expect(f.writes).toEqual(['healthy manual'])
+    expect(f.client.agentSession(f.session.agentSessionId).run).toEqual(f.session.run)
+  })
+})
 
 describe('continuous progress uses the public ingress and shared observation', () => {
   it('does not turn an ended Run and retained done Session into an automatic delivery candidate', async () => {
@@ -140,19 +244,19 @@ describe('continuous progress uses the public ingress and shared observation', (
   })
 
   it('uses the shared stale-working fact without treating decay as completion', async () => {
-    const f = await fixture({ semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 } })
+    const f = await fixture({ semanticStatus: { state: 'working', source: 'native-hook', observedAt: _tailFixtureEpoch(0, 0, 1) } })
     const observed = await f.observe()
-    expect(observed.observation).toMatchObject({ process: 'running', semantic: 'idle', readiness: 'ready', stale: true })
+    expect(observed.observation).toMatchObject({ process: 'running', semantic: 'unknown', readiness: 'ready', stale: true })
     expect(decideContinuousProgress(observed)).toEqual({ kind: 'skip', reason: 'stale-working' })
     const owner = await loopOwner(f), manager = owner.make()
     await manager.start(); await manager.check(); owner.at(1000); await manager.check()
     expect(f.requests).toEqual([])
-    expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'skipped', nextCheckAt: 1010 })
+    expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'skipped', nextCheckAt: _tailFixtureEpoch(0, 0, 1010) })
   })
 
   it('skips an unconfirmed terminal capability while preserving healthy manual raw input', async () => {
     const f = await fixture({ terminalCapability: { state: 'unknown', mode: 'degraded', reason: 'handshake-timeout',
-      run: { runId: 'loop-run' }, observedAt: 1 } })
+      run: { runId: 'loop-run' }, observedAt: _tailFixtureEpoch(0, 0, 1) } })
     const observed = await f.observe()
     expect(observed.observation).toMatchObject({ process: 'running', semantic: 'idle', readiness: 'pending' })
     expect(decideContinuousProgress(observed)).toEqual({ kind: 'skip', reason: 'readiness-unconfirmed' })
@@ -166,7 +270,7 @@ describe('continuous progress uses the public ingress and shared observation', (
   it('keeps a typed question pending and never encodes an automatic answer', async () => {
     const f = await fixture({ pendingInteraction: { request: { id: 'question', kind: 'question', agentSessionId: 'loop-agent',
       questions: [{ id: 'choose', prompt: 'choose', options: [{ id: 'a', label: 'A' }] }],
-      evidence: { source: 'native-hook', run: { runId: 'loop-run' }, observedAt: 1, hookReceiptId: 'question' } } } })
+      evidence: { source: 'native-hook', run: { runId: 'loop-run' }, observedAt: _tailFixtureEpoch(0, 0, 1), hookReceiptId: 'question' } } } })
     const observed = await f.observe()
     expect(decideContinuousProgress(observed)).toEqual({ kind: 'skip', reason: 'interaction-pending' })
     const owner = await loopOwner(f), manager = owner.make()
@@ -181,13 +285,13 @@ describe('continuous progress uses the public ingress and shared observation', (
     expect(f.writes).toEqual([payload(continuationWire()), '\r'])
     const admitted = f.client.agentSession(f.session.agentSessionId).promptCompletionAdmission!
     expect(admitted).toMatchObject({ acknowledged: true, intent: { run: f.session.run, prompt: continuationWire(),
-      message: { userContent: continuationPrompt, systemContext: AGENTMUX_AGENT_MESSAGING_GUIDANCE } } })
+      message: { userContent: continuationPrompt, systemContext: AGENTMUX_AGENT_MESSAGING_ENTRY } } })
     expect((await f.store.loadTimeline(f.session.agentSessionId)).items.map(item => [item.kind, item.source, item.content]))
-      .toEqual([['system_message', 'agentmux', AGENTMUX_AGENT_MESSAGING_GUIDANCE], ['user_message', 'user', continuationPrompt]])
+      .toEqual([['system_message', 'agentmux', AGENTMUX_AGENT_MESSAGING_ENTRY], ['user_message', 'user', continuationPrompt]])
     expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastCompletionId: admitted.completionId })
     owner.at(1000); await manager.check()
     expect(f.writes).toHaveLength(2)
-    expect(manager.list()[0]).toMatchObject({ lastOutcome: 'skipped', nextCheckAt: 1010 })
+    expect(manager.list()[0]).toMatchObject({ lastOutcome: 'skipped', nextCheckAt: _tailFixtureEpoch(0, 0, 1010) })
   })
 
   it('the Main future scheduler reads only its exact saved body from the Core public capability', async () => {
@@ -216,7 +320,7 @@ describe('continuous progress uses the public ingress and shared observation', (
       return original
     })
     const manager = owner.make(); await manager.start(); await manager.check()
-    expect(f.writes).toEqual(['manual message', '\r'])
+    expect(f.writes).toEqual([payload('manual message'), '\r'])
     expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'skipped' })
     expect(manager.list()[0]?.pendingCompletion).toBeUndefined()
   })
@@ -228,7 +332,7 @@ describe('continuous progress uses the public ingress and shared observation', (
     const pending = first.list()[0]?.pendingCompletion
     expect(pending?.condition).toEqual({ expectedRun: f.session.run, afterSubmissionId: null })
     expect(first.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
-    expect(pending).toMatchObject({ prompt: continuationPrompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE })
+    expect(pending).toMatchObject({ prompt: continuationPrompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_ENTRY })
     expect(f.writes).toEqual([payload(continuationWire())])
     await first.stop()
     const restarted = owner.make(); await restarted.start(); owner.at(1000); await restarted.check()
@@ -246,8 +350,8 @@ describe('continuous progress uses the public ingress and shared observation', (
     const f = await fixture(), owner = await loopOwner(f, undefined, body), first = owner.make()
     f.loseNextAck(); await first.start(); await first.check()
     const original = first.list()[0]!.pendingCompletion!
-    const wire = composeAgentPrompt(body, AGENTMUX_AGENT_MESSAGING_GUIDANCE).text
-    expect(original).toMatchObject({ prompt: body, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE })
+    const wire = composeAgentPrompt(body, AGENTMUX_AGENT_MESSAGING_ENTRY).text
+    expect(original).toMatchObject({ prompt: body, agentMuxNote: AGENTMUX_AGENT_MESSAGING_ENTRY })
     expect(f.writes).toEqual([payload(wire)]); expect(f.requests).toHaveLength(1)
     await first.stop(); await f.client.dispose()
     Object.assign(f, await f.make())
@@ -255,7 +359,7 @@ describe('continuous progress uses the public ingress and shared observation', (
     // Reload the actual producer with a later public rule revision, as after an upgrade.
     vi.resetModules()
     vi.doMock('@agentmux/core', async originalModule => ({ ...await originalModule<typeof import('@agentmux/core')>(),
-      AGENTMUX_AGENT_MESSAGING_GUIDANCE: 'Rules for a future claim; never replace the pending message.' }))
+      AGENTMUX_AGENT_MESSAGING_ENTRY: 'Rules for a future claim; never replace the pending message.' }))
     const { ContinuousProgressLoopManager: CurrentManager } = await import('../src/main/continuous-progress-loop-manager.js')
     const cold = owner.make(CurrentManager); await cold.start(); owner.at(1000); await cold.check()
     expect(cold.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', pendingCompletion: original })
@@ -264,9 +368,9 @@ describe('continuous progress uses the public ingress and shared observation', (
     expect(f.requests[1]).toEqual(f.requests[0]); expect(f.writes).toEqual([payload(wire), '\r'])
     expect(cold.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastCompletionId: original.id })
     expect((await f.store.load())[0]!.promptCompletionAdmission!.intent!.message)
-      .toEqual({ userContent: body, systemContext: AGENTMUX_AGENT_MESSAGING_GUIDANCE })
+      .toEqual({ userContent: body, systemContext: AGENTMUX_AGENT_MESSAGING_ENTRY, sourceChannel: 'message-tool' })
     expect((await f.store.loadTimeline(f.session.agentSessionId)).items.map(item => [item.kind, item.source, item.content]))
-      .toEqual([['system_message', 'agentmux', AGENTMUX_AGENT_MESSAGING_GUIDANCE], ['user_message', 'user', body]])
+      .toEqual([['system_message', 'agentmux', AGENTMUX_AGENT_MESSAGING_ENTRY], ['user_message', 'user', body]])
   })
 
   it('keeps incomplete content facts unknown without replacing the operation or blocking healthy manual input', async () => {
