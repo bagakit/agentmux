@@ -3799,6 +3799,18 @@ export class AgentMuxClient {
       runId: sender.run.runId, capabilityHash: sender.capabilityHash ?? '' })
   }
 
+  /** The same exact author fence is used for first dispatch and waiting-input rejoin. */
+  private async messageInputAuthority(input: Parameters<AgentMuxClient['authorizeAgentMessage']>[0]): Promise<import('./prompt-submission.js').AgentPromptInputAuthority> {
+    const binding = await this.messageAuthorBinding(input)
+    return { binding, assertCurrent: async () => {
+      await this.messageAuthorBinding(input)
+      const sender = await this.currentStoredAgentSession(binding.agentSessionId)
+      await this.registry.refresh(sender.agentSessionId, sender.run)
+      const run = await this.requireCurrentAgentRun(sender)
+      if (run.state.type !== 'running') throw new AgentMuxError('The original message author Run is not running.', 'AGENT_CAPABILITY_STALE_RUN')
+    } }
+  }
+
   /** Explicit consumption is durable and recipient-scoped, independent of input or human reading. */
   async checkDeliveries(input: {
     capability: string
@@ -6135,12 +6147,7 @@ export class AgentMuxClient {
       if (!caller) throw new AgentMuxError('The original Agent author needs its current capability.', 'AGENT_CAPABILITY_INVALID')
       const author = { capability: caller.capability, callerAgentSessionId: caller.agentSessionId, senderAgentSessionId: envelope.sender.agentSessionId,
         senderSessionId: envelope.senderSessionId, senderRunId: envelope.senderRunId, recipientSessionId: envelope.recipientSessionId, recipientRunId: envelope.recipientRunId }
-      const binding = await this.messageAuthorBinding(author)
-      authority = { binding, assertCurrent: async () => {
-        await this.messageAuthorBinding(author)
-        const sender = await this.currentStoredAgentSession(binding.agentSessionId), run = await this.requireCurrentAgentRun(sender)
-        if (run.state.type !== 'running') throw new AgentMuxError('The original author Run is not running.', 'AGENT_CAPABILITY_STALE_RUN')
-      } }
+      authority = await this.messageInputAuthority(author)
     }
     if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context, intent.admissionIntent)
     return { input: { agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun, operationId: agentPromptInputId(intent.key),
@@ -6490,15 +6497,26 @@ export class AgentMuxClient {
     if (!content.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
     // Producer facts come from explicit input, never by parsing the user's string.
     const composed = composeAgentPrompt(content, input.agentMuxNote)
-    const outbound = composed.text
-    assertAgentPromptSize(outbound)
-    const message: AgentPromptMessageContent = {
+    // A message's authored envelope was already checked against the immutable
+    // journal. Resume its original Input recipe; a newer formatter or reminder
+    // cannot change bytes or producer facts after a possibly applied claim.
+    const frozen = producer === 'message' || input.agentMuxNote ? (await this.inspectAgentPromptSubmission({
+      agentSessionId: input.agentSessionId, expectedRun: input.expectedRun,
+      ...(producer === 'message' ? { kind: 'message', messageId: input.operationId } : { kind: 'prompt', submissionId: input.operationId })
+    }))?.admission?.intent : undefined
+    const authored: AgentPromptMessageContent = {
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
       ...(authorAgentSessionId ? { authorAgentSessionId } : authority?.externalAuthor ? { authorExternal: structuredClone(authority.externalAuthor) } : input.authorHuman === true ? { authorHuman: true } : {}),
       ...(input.sourceDevice ? { sourceDevice: normalizeOperationDevice(input.sourceDevice) } : {}),
       sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api')
     }
+    // Ordinary prompt retries must still submit the same explicit body, note
+    // and provenance. A text envelope never supplies those producer facts.
+    const retainWire = frozen && (producer === 'message' || isDeepStrictEqual(frozen.message, authored))
+    const outbound = retainWire ? frozen.prompt : composed.text
+    const message = producer === 'message' && frozen?.message ? frozen.message : authored
+    assertAgentPromptSize(outbound)
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
     // 而 `[?u` 是 codex 一次性的启动输出，对一个几分钟前启动的 run 早已不可达，于是一旦拦在
@@ -6653,13 +6671,7 @@ export class AgentMuxClient {
       const authorInput = { capability: input.caller.capability, callerAgentSessionId: input.caller.agentSessionId,
         senderAgentSessionId: envelope.sender.agentSessionId, senderSessionId: envelope.senderSessionId,
         senderRunId: envelope.senderRunId, recipientSessionId: envelope.recipientSessionId, recipientRunId: envelope.recipientRunId }
-      const binding = await this.messageAuthorBinding(authorInput)
-      authority = { binding, assertCurrent: async () => {
-        await this.messageAuthorBinding(authorInput)
-        const sender = await this.currentStoredAgentSession(binding.agentSessionId)
-        const run = await this.requireCurrentAgentRun(sender)
-        if (run.state.type !== 'running') throw new AgentMuxError('The original message author Run is not running.', 'AGENT_CAPABILITY_STALE_RUN')
-      } }
+      authority = await this.messageInputAuthority(authorInput)
       authorAgentSessionId = envelope.senderSessionId!
     } else if (input.caller || envelope.senderSessionId !== null || envelope.senderRunId !== null) {
       throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')

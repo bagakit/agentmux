@@ -1,5 +1,7 @@
 import { DOMParser, onWarningStopParsing, type Element } from '@xmldom/xmldom'
-import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
+import type { AgentMuxMessageEnvelope } from './agent-message-envelope.js'
+import { composeOutboundMessage } from './agent-outbound-message.js'
+import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 
 /**
  * Source plus unchanged authored body. Core authorizes identity before delivery;
@@ -13,13 +15,25 @@ import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
  * Keeping this pure-string render in its own module lets renderer code depend on the wrapper
  * shape via a specific import path without dragging node:* into its bundle.
  */
-export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'sender' | 'senderSessionId' | 'body'>): string {
-  const source = envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null
-    ? `Agent ${envelope.senderSessionId}`
-    : envelope.sender.kind === 'external'
-      ? `External ${[envelope.sender.actor.application.domain, envelope.sender.actor.application.appId, envelope.sender.actor.idType, envelope.sender.actor.userId, envelope.sender.externalConversationId].map(encodeURIComponent).join('/')}`
-      : 'unverified local process'
-  return `[Message from ${source}]\n${envelope.body}`
+function attributeText(value: string): string {
+  return value.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/"/gu, '&quot;')
+    .replace(/\t/gu, '&#9;').replace(/\r/gu, '&#13;').replace(/\n/gu, '&#10;')
+}
+
+export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body'>): string {
+  if (envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null) {
+    // The authored body is opaque. Only the fixed final reminder is escaped, so
+    // tags, code and even complete example envelopes inside the body stay exact.
+    const reminder = AGENTMUX_A2A_REMINDER.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/\r/gu, '&#13;')
+    return `<amux:a2a from="${attributeText(envelope.senderSessionId)}" msg-id="${attributeText(envelope.messageId)}">\n${envelope.body}\n<reminder>${reminder}</reminder>\n</amux:a2a>`
+  }
+  if (envelope.sender.kind === 'external') {
+    const source = [envelope.sender.actor.application.domain, envelope.sender.actor.application.appId, envelope.sender.actor.idType,
+      envelope.sender.actor.userId, envelope.sender.externalConversationId].map(encodeURIComponent).join('/')
+    return composeOutboundMessage({ amux: `External message from ${source}.`, user: envelope.body })
+  }
+  // Human input and unverified text cannot acquire an Agent sender by formatting.
+  return envelope.body
 }
 
 export type AgentMuxMessagePrefix = {
@@ -27,6 +41,8 @@ export type AgentMuxMessagePrefix = {
   sourceLabel: string
   declaredAgentSessionId: string | null
   body: string
+  declaredMessageId?: string
+  reminder?: { raw: string; text: string }
   packet?: AgentMuxMessagePacket
   /** Complete input-leading declarations, preserved as original source spans. */
   declaredContexts?: readonly { raw: string }[]
@@ -82,7 +98,7 @@ function parsePacket(text: string): AgentMuxMessagePacket | null {
 
 /** A reading projection only; authored declarations never become System facts. */
 function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
-  const opening = '<amux from="amux">'
+  const opening = '<amux>'
   if (!text.startsWith(opening)) return null
   const declaredContexts: { raw: string }[] = []
   let start = 0
@@ -95,7 +111,7 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
     try {
       const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
       const root = document.documentElement
-      if (!root || root.tagName !== 'amux' || !attributes(root, ['from']) || root.getAttribute('from') !== 'amux' ||
+      if (!root || root.tagName !== 'amux' || root.attributes.length !== 0 ||
         Array.from(document.childNodes).some(node => node !== root) ||
         Array.from(root.childNodes).some(node => node.nodeType !== 3)) return null
     } catch {
@@ -117,7 +133,7 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
 
 /** Native inputs and captured deliveries share this reading grammar; copying keeps original bytes. */
 export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix | null {
-  if (!text.startsWith('<amux')) return parseSenderPrefix(text)
+  if (!text.startsWith('<amux>')) return parseSenderPrefix(text)
   const contexts = parseDeclaredContexts(text)
   if (!contexts) return null
   // Only newline separators join a following declaration; indentation remains authored text.
@@ -125,18 +141,37 @@ export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix 
   return sender ? { ...contexts, ...sender } : contexts
 }
 
+function parseA2a(text: string): AgentMuxMessagePrefix | null {
+  const header = /^<amux:a2a from="([^"\r\n]+)" msg-id="([^"\r\n]+)">\n/u.exec(text)
+  const closing = '\n</amux:a2a>'
+  if (!header || !text.endsWith(closing)) return null
+  const boundary = text.lastIndexOf('\n<reminder>')
+  if (boundary < header[0].length) return null
+  const raw = text.slice(boundary + 1, -closing.length)
+  if (!raw.endsWith('</reminder>') || raw.slice('<reminder>'.length, -'</reminder>'.length).includes('<')) return null
+  try {
+    const metadata = new DOMParser({ onError: onWarningStopParsing }).parseFromString(`<a2a from="${header[1]}" msg-id="${header[2]}"/>`, 'text/xml').documentElement
+    if (!metadata || !attributes(metadata, ['from', 'msg-id']) || metadata.childNodes.length) return null
+    const sender = metadata.getAttribute('from')!, messageId = metadata.getAttribute('msg-id')!
+    if (attributeText(sender) !== header[1] || attributeText(messageId) !== header[2]) return null
+    const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
+    const root = document.documentElement
+    if (!root || root.tagName !== 'reminder' || root.attributes.length !== 0 ||
+      Array.from(document.childNodes).some(node => node !== root) ||
+      Array.from(root.childNodes).some(node => node.nodeType !== 3)) return null
+    const body = text.slice(header[0].length, boundary)
+    const packet = parsePacket(body)
+    return { sourceLabel: `Agent ${sender}`, declaredAgentSessionId: sender, declaredMessageId: messageId,
+      body: packet ? packet.parts.map(part => part.text).join('') : body,
+      reminder: { raw, text: root.textContent ?? '' }, ...(packet ? { packet } : {}) }
+  } catch {
+    return null
+  }
+}
+
 function parseSenderPrefix(text: string): AgentMuxMessagePrefix | null {
-  const header = /^\[Message from ([^\]\r\n]+)\]\r?\n([\s\S]+)$/iu.exec(text)
-  const authoredBody = header?.[2] ?? text
-  const packet = parsePacket(authoredBody)
-  if (!header && !packet) return null
-  // An incomplete/unknown packet is not a partial reading wrapper.
-  if (!packet && /^<bagakit-msg(?:\s|>)/u.test(authoredBody)) return null
-  if (!authoredBody.trim()) return null
-  const sourceLabel = header ? header[1]!.trim() : packet!.name
-  if (!sourceLabel) return null
-  const declaredAgent = header ? /^Agent ([^\s\[\]]+)$/iu.exec(sourceLabel) : null
-  return { sourceLabel, declaredAgentSessionId: declaredAgent?.[1] ?? null,
-    body: packet ? packet.parts.map(part => part.text).join('') : authoredBody,
-    ...(packet ? { packet } : {}) }
+  if (text.startsWith('<amux:a2a')) return parseA2a(text)
+  const packet = parsePacket(text)
+  return packet ? { sourceLabel: packet.name, declaredAgentSessionId: null,
+    body: packet.parts.map(part => part.text).join(''), packet } : null
 }
