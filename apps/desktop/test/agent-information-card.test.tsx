@@ -7,6 +7,7 @@ import { composerDOM, composerConfig, composerSession } from './helpers/composer
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
+import { agentCardConversationFixture, waitForAgentCardReading } from './helpers/agent-card-conversation-fixture'
 import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => createElement('span') }))
@@ -32,8 +33,8 @@ const page = (hostId = 'local', participantSessionId = sid, to = 'original-worke
   { sourceMessageId: 'original-inbound', ownerAgentSessionId: 'original-owner', workerAgentSessionId: participantSessionId, threadId: 'original-other-thread', openedAt: fixtureEpoch(1), originAwaits: false, events: [] }
 ] })
 const panel = () => document.querySelector<HTMLElement>('.focus-context-hover')!
-const card = (surface: 'focus' | 'workspace') => dom.container.querySelector<HTMLButtonElement>(surface === 'focus' ? '.global-focus-surface .focus-context[data-session-id]' : '.workspace-agents-tool .workspace-agent-row')!
-async function open(surface: 'focus' | 'workspace') { await act(async () => card(surface).focus()); await act(async () => vi.waitFor(() => expect(panel()).not.toBeNull())) }
+const card = (surface: 'focus' | 'workspace') => dom.container.querySelector<HTMLButtonElement>(surface === 'focus' ? '.global-focus-surface .focus-context[data-session-id]' : '.workspace-agents-tool .focus-context')!
+async function open(surface: 'focus' | 'workspace') { await act(async () => card(surface).focus()); await waitForAgentCardReading(() => { expect(panel()).not.toBeNull(); expect(panel().querySelector('[data-hover-input-id]')).not.toBeNull() }) }
 async function disclose(label: string) {
   if (!panel().querySelector('.agent-information-reader__metadata')) await act(async () => panel().querySelector<HTMLButtonElement>('.agent-information-reader__facts')!.click())
   const button = [...panel().querySelectorAll<HTMLButtonElement>('.agent-information-details__tabs button')].find(node => node.textContent === label)!
@@ -45,7 +46,7 @@ async function close() {
   expect(panel()).toBeNull()
 }
 async function mount() { await dom.render(<><GlobalFocusSurface workspaceOpen={false} /><WorkspaceAgentsTool workspace={workspace} sessions={[agent]} onOpen={() => { throw Error('Reading must not navigate') }} /></>) }
-beforeEach(() => {
+beforeEach(async () => {
   useAppStore.setState({ loading: false, config: composerConfig, sessions: [agent], mainSurface: 'agents', agentNames: { [sid]: 'Original task' }, tabs: {}, layouts: {}, scratchTopicSnapshots: {}, demands: { [goal.id]: goal },
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { [sid]: 'Original draft' },
     timelines: { [sid]: { agentSessionId: sid, revision: 1, items: [{ id: 'original-reply', agentSessionId: sid, kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Reply', content: 'Original **reply** and complete source.', createdAt: fixtureEpoch(1), updatedAt: fixtureEpoch(1) }] } } })
@@ -53,6 +54,7 @@ beforeEach(() => {
   vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async control => ({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'native-' + control.agentSessionId }, dispose() {} }))
   vi.spyOn(api.sessions, 'dispatches').mockResolvedValue(page())
   vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined)
+  await agentCardConversationFixture(control => native(control.agentSessionId).source)
 })
 
 it.each(['focus', 'workspace'] as const)('%s consumes shared usage, exact Goal and original message relationships only on disclosure', async surface => {
@@ -110,9 +112,9 @@ it('keeps canonical same-SID usage isolated by exact Host and Run in the reusabl
   const remote = { ...agent, hostId: 'remote', control: { ...agent.control, hostId: 'remote', run: { runId: 'remote-run' } }, turnUsage: { ...usage, cumulative: { ...usage.cumulative, totalTokens: 90000 } } }
   useAppStore.setState({ sessions: [agent, remote] })
   const context = agentContextForSession(remote, undefined, 'Remote task', { ...workspace, hostId: 'remote' }, null)
-  await dom.render(<WorkspaceAgentRow context={context} percent={null} onOpen={() => { throw Error('Reading must not navigate') }} />)
-  await act(async () => dom.container.querySelector<HTMLButtonElement>('.workspace-agent-row')!.focus())
-  await act(async () => vi.waitFor(() => expect(panel()).not.toBeNull()))
+  await dom.render(<WorkspaceAgentRow context={context} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => { throw Error('Reading must not navigate') }} />)
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.focus-context')!.focus())
+  await waitForAgentCardReading(() => { expect(panel()).not.toBeNull(); expect(panel().querySelector('[data-hover-input-id]')).not.toBeNull() })
   expect(panel().textContent).toContain('90k tokens'); expect(panel().textContent).not.toContain('540k')
 })
 
@@ -132,8 +134,8 @@ it('reads a presentation alias through its original canonical control without op
   const alias = { ...agent, id: 'presentation-alias' }
   useAppStore.setState({ sessions: [alias], timelines: {}, agentNames: {} })
   const context = agentContextForSession(alias, undefined, 'Alias task', workspace, null)
-  await dom.render(<WorkspaceAgentRow context={context} percent={null} onOpen={() => { throw Error('Reading must not navigate') }} />)
-  await act(async () => dom.container.querySelector<HTMLButtonElement>('.workspace-agent-row')!.focus())
-  await act(async () => vi.waitFor(() => expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(alias.control, { limit: 30 })))
+  await dom.render(<WorkspaceAgentRow context={context} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => { throw Error('Reading must not navigate') }} />)
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('.focus-context')!.focus())
+  await waitForAgentCardReading(() => expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(alias.control, expect.objectContaining({ limit: 100 })))
   expect(panel().querySelector('[data-hover-input-id]')).not.toBeNull(); expect(api.ui.openObjectLink).not.toHaveBeenCalled()
 })
