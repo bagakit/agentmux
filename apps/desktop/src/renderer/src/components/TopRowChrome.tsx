@@ -1,6 +1,6 @@
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
@@ -166,27 +166,35 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
   const mainSurface = useAppStore((state) => state.mainSurface)
   const setMainSurface = useAppStore((state) => state.setMainSurface)
   const [tooltip, setTooltip] = useState<{ id: string; left: number; top: number } | null>(null)
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pointerFocus = useRef<HTMLElement | null>(null)
+  const cancelHover = () => {
+    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current)
+    hoverTimer.current = null
+  }
+  useEffect(() => cancelHover, [])
   // Window-level host [data-overlay-host] adapter (WindowOverlayPortal wraps createPortal into host):
   const showTooltip = (id: string, target: HTMLElement) => {
     const rect = target.getBoundingClientRect()
     setTooltip({ id, left: rect.left, top: rect.top - 8 })
   }
   const hideTooltip = (id: string) => {
+    cancelHover()
     setTooltip((current) => current?.id === id ? null : current)
   }
   useEffect(() => {
-    if (!tooltip) return
+    const dismiss = () => { cancelHover(); pointerFocus.current = null; setTooltip(null) }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setTooltip(null)
+      if (event.key === 'Escape') dismiss()
     }
-    const onBlur = () => setTooltip(null)
+    const onBlur = dismiss
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('blur', onBlur)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('blur', onBlur)
     }
-  }, [tooltip])
+  }, [])
   const activePlugin = tooltip
     ? SURFACE_NAVIGATION_PLUGINS.find((plugin) => plugin.id === tooltip.id)
     : null
@@ -232,11 +240,20 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
         aria-current={selected ? 'page' : undefined}
         aria-describedby={tooltip?.id === plugin.id ? `surface-navigation-tooltip-${plugin.id}` : undefined}
         title={plugin.title}
-        onMouseEnter={(event) => showTooltip(plugin.id, event.currentTarget)}
-        onMouseLeave={() => hideTooltip(plugin.id)}
-        onFocus={(event) => showTooltip(plugin.id, event.currentTarget)}
-        onBlur={() => hideTooltip(plugin.id)}
-        onClick={() => { onCloseSettings?.(); setMainSurface(plugin.surface) }}
+        onMouseEnter={(event) => {
+          cancelHover()
+          const target = event.currentTarget
+          hoverTimer.current = setTimeout(() => { hoverTimer.current = null; showTooltip(plugin.id, target) }, 150)
+        }}
+        onMouseLeave={(event) => { if (pointerFocus.current === event.currentTarget) pointerFocus.current = null; hideTooltip(plugin.id) }}
+        onPointerDown={(event) => { pointerFocus.current = event.currentTarget; cancelHover() }}
+        onPointerCancel={() => { pointerFocus.current = null; cancelHover() }}
+        onFocus={(event) => {
+          if (pointerFocus.current === event.currentTarget) { pointerFocus.current = null; return }
+          cancelHover(); showTooltip(plugin.id, event.currentTarget)
+        }}
+        onBlur={(event) => { if (pointerFocus.current === event.currentTarget) pointerFocus.current = null; hideTooltip(plugin.id) }}
+        onClick={() => { pointerFocus.current = null; cancelHover(); setTooltip(null); onCloseSettings?.(); setMainSurface(plugin.surface) }}
       >
         <Icon className="surface-navigation__icon" size={14} aria-hidden="true" />
       </NavigationButton>
