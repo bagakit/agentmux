@@ -79,7 +79,7 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 | Core 的普通提交、恢复与 Host 通路 | [Core `composeAgentPrompt`](../../../packages/core/src/agent-outbound-message.ts) 统一组合显式平台内容与原用户正文，启动引导委托同一组合 owner；独立热上下文不附加启动等待语。公开 SDK、Hosted RPC、Main 和 Preload 显式传递 `agentMuxNote`，Core 分别记录平台与原正文来源。首次 Input 的完整 wire、原来源分界与作者冻结在既有持久意图中；同一 operation 的相同 wire 不允许变更来源，缺原来源事实明确未知，保留原 Input 与健康 Run。原生 resume 保留用户空白与换行。 |
 | Mailbox Progress | [Desktop Loop Manager](../../../apps/desktop/src/main/continuous-progress-loop-manager.ts) 在原符合资格的发送首次 claim 时保存原 `loop.prompt` 与 Core 同源共享消息规则；[Desktop `deliverContinuousProgress`](../../../apps/desktop/src/main/continuous-progress-delivery.ts) 将冻结的原正文与显式平台说明分开提交。同一次重试或冷恢复沿原 operation、condition 与内容；缺原内容事实明确未知，保留健康 Run 与手动输入。规则只伴随既有自动发送，无新增 Reminder 周期、任务或配置，用户 continuation prompt 不升级为平台自产内容。 |
 | System Reminder | 目前为 proposal-only，尚无 AgentMux 主动持续注入；默认与单次覆盖关系已确认，正文、触发与兑现范围未定。状态与未决范围见上述 Reminder owner。 |
-| 平台包装的生成与读取 | 当前 [Core `composeOutboundMessage`](../../../packages/core/src/agent-outbound-message.ts) 将平台内容序列化为 XML 文本节点；[共享 reader `parseAgentMuxMessagePrefix`](../../../packages/core/src/agent-message-render.ts) 仍读取带 `from="amux"` 的旧包装，并识别旧方括号 A2A 来源头。上文的新包装和 A2A 受限文本语法尚未据此完成；实现须保平台 note 的尖括号与实体语义、独立原正文、声明 span／真实尾文及完整 Copy。 |
+| 平台包装的生成与读取 | [Core `composeOutboundMessage`](../../../packages/core/src/agent-outbound-message.ts) 将平台内容序列化为 `<amux>` 文本节点；[共享 reader `parseAgentMuxMessagePrefix`](../../../packages/core/src/agent-message-render.ts) 读取该包装及 `<amux:a2a from="…" msg-id="…">` 受限文本语法，普通阅读与完整资源阅读复用同一解释。原 A2A 正文与尾部 Core reminder 分开，已解码正文不再次按 wire 解析；平台 note 的尖括号与实体语义、独立原正文、声明 span／真实尾文及完整 Copy 均须保留。旧包装不再识别，原历史记录仍保持全文可读。 |
 
 ## 启动握手与自命名
 
