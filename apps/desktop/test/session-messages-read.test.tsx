@@ -85,3 +85,34 @@ it('keeps observation unknown separate from a successful explicit read and never
   expect(reading.observationError).toBeNull()
   expect(submit).not.toHaveBeenCalled(); expect(rejoin).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled()
 })
+
+
+it('refreshes only the requested page budget into one contiguous latest window after a burst', async () => {
+  vi.mocked(api.sessions.listMessages).mockResolvedValueOnce(page([item('original-top', 50)], 50))
+  await render()
+  vi.mocked(api.sessions.listMessages).mockResolvedValueOnce(page([item('original-older', 40)], null))
+  await act(async () => reading.loadEarlier())
+  expect(reading.items.map(value => value.sequence)).toEqual([50, 40])
+  vi.mocked(api.sessions.listMessages).mockResolvedValueOnce(page([item('burst-top', 100)], 100))
+    .mockResolvedValueOnce(page([item('burst-next', 90)], 90))
+  await act(async () => reading.refresh())
+  expect(api.sessions.listMessages).toHaveBeenLastCalledWith({ hostId: 'original-host', agentSessionId: 'reader' }, { direction: 'incoming', beforeSequence: 100, limit: 25 })
+  expect(reading.items.map(value => value.sequence)).toEqual([100, 90])
+  expect(reading.nextCursor).toBe(90)
+  vi.mocked(api.sessions.listMessages).mockResolvedValueOnce(page([item('gap-middle', 80)], 80))
+  await act(async () => reading.loadEarlier())
+  expect(reading.items.map(value => value.sequence)).toEqual([100, 90, 80])
+})
+
+it('retains the complete prior window when a later page of its refresh fails', async () => {
+  vi.mocked(api.sessions.listMessages).mockResolvedValueOnce(page([item('one', 50)], 50))
+  await render()
+  vi.mocked(api.sessions.listMessages).mockResolvedValueOnce(page([item('two', 40)], 40))
+  await act(async () => reading.loadEarlier())
+  const original = reading.items
+  vi.mocked(api.sessions.listMessages).mockResolvedValueOnce(page([item('new', 60)], 60))
+    .mockRejectedValueOnce(new Error('Private second page unavailable'))
+  await act(async () => reading.refresh())
+  expect(reading.items).toEqual(original); expect(reading.nextCursor).toBe(40)
+  expect(reading.error).toContain('second page unavailable')
+})
