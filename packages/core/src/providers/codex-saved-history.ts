@@ -289,6 +289,15 @@ export async function readCodexSavedSessionHistoryPage(context: AgentProviderSes
 export async function readCodexSavedSessionHistoryRecord(context: AgentProviderSessionHistoryRecordContext): Promise<AgentSessionHistoryItem> {
   const { reader, paginated } = await open({ ...context, limit: 1 })
   try {
+    const byteIdentity = /^codex-record:(0|[1-9]\d*)$/u.exec(context.recordId)
+    if (byteIdentity) {
+      const entry = await reader.readAt(Number(byteIdentity[1]))
+      const converted = entry && item(entry.value, entry.start, context.source.nativeSessionId, paginated)
+      if (!entry || !converted || converted.id !== context.recordId || context.turnId !== undefined && converted.turnId !== context.turnId) throw new AgentMuxError(
+        'The original saved Codex record is unavailable.', 'UNKNOWN_AGENT_SESSION_HISTORY_RECORD')
+      await reader.verifyUnchanged()
+      return fitQuestionAnswerProjection({ ...context, limit: 1 }, [await materializeSavedItem(reader, { ...context, limit: 1 }, entry.value, entry.start, converted, paginated)], null)[0]!
+    }
     for (let entry = await reader.readPrevious(); entry; entry = await reader.readPrevious()) {
       const converted = item(entry.value, entry.start, context.source.nativeSessionId, paginated)
       if (converted?.id === context.recordId && (context.turnId === undefined || converted.turnId === context.turnId)) {
