@@ -16,6 +16,7 @@ await runA2aProof({
     'apps/desktop/src/main/continuous-progress-loop-store.ts', 'apps/desktop/src/main/runtime-controller.ts',
     'apps/desktop/test/helpers/isolate-core-environment.ts',
     'apps/desktop/test/helpers/continuous-progress-tracker.ts',
+    'apps/desktop/scripts/lib/fixture-values.mjs',
     'apps/desktop/scripts/verify-injected-context-progress.mjs', 'packages/core/scripts/lib/a2a-proof.mjs'],
   environment: ({ url }) => ({ AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT: url('client.js'),
     AGENTMUX_TEST_FEATURE_TRACKER_SCRIPT: trackerScript }),
