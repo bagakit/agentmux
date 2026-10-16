@@ -5,6 +5,7 @@ import type { WebContentsDidStartNavigationEventParams } from 'electron'
 import { parseNotebookGraphSnapshot, type NotebookGraphSnapshot } from '../shared/notebook-observation.js'
 import { NotebookObservationOwner } from './notebook-observation-owner.js'
 import { parseNotebookResolveParams, parseNotebookResolveResult, type NotebookResolveResult } from '@agentmux/core/note-links'
+import { noteContentInCatalogScope } from '@agentmux/core/notebook-observation'
 
 export type NotebookObservationSender = {
   isDestroyed(): boolean
@@ -59,7 +60,7 @@ export class NotebookObservationRequests {
       const catalog = await this.store.read()
       signal.throwIfAborted()
       const result = parseNoteContentObservation(await this.owner.content(catalog, params.noteId!, { signal, ...(params.maxBytes === undefined ? {} : { maxBytes: params.maxBytes }) }))
-      if (result.noteId !== params.noteId || !catalog.pages[params.noteId!] || notebookFingerprint(result.resource) !== notebookFingerprint(catalog.pages[params.noteId!]!.resource)) throw new AgentMuxError('The original reader returned another Note or resource.', 'CONTROL_PROTOCOL_ERROR')
+      if (result.noteId !== params.noteId || !noteContentInCatalogScope(catalog, result)) throw new AgentMuxError('The original reader returned another Note or resource.', 'CONTROL_PROTOCOL_ERROR')
       return result
     })
   }

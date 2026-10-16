@@ -6,12 +6,17 @@ import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { WorkspaceFiles } from './workspace-files.js'
 import { WORKSPACE_FILE_MAX_BYTES } from '../shared/workspace-file-bytes.js'
 
+export type NoteCorpusSource = { resource: NoteResource; document: NoteFileDocument }
 type CorpusPorts = {
   workspace(id: string): WorkspaceRecord | undefined
   files: Pick<WorkspaceFiles, 'read'> & Partial<Pick<WorkspaceFiles, 'readDirectory'>>
 }
 /** No writable store is borrowed here. All identity, text and revisions come from original Files. */
 export async function readNoteCorpus(ports: CorpusPorts, params: NoteCorpusParams, options?: { signal?: AbortSignal }): Promise<NoteCorpusResult> {
+  return (await readNoteCorpusSources(ports, params, options)).result
+}
+/** Same bounded file observation, with its original bytes for an in-call graph consumer. No second scan. */
+export async function readNoteCorpusSources(ports: CorpusPorts, params: NoteCorpusParams, options?: { signal?: AbortSignal }): Promise<{ result: NoteCorpusResult; documents: NoteCorpusSource[] }> {
   const input = parseNoteCorpusParams(params), signal = options?.signal
   const workspace = ports.workspace(input.workspaceId)
   const maxFiles = input.maxFiles ?? 200, maxDirectories = input.maxDirectories ?? 200, maxBytes = input.maxBytes ?? 4 * 1024 * 1024
@@ -24,9 +29,9 @@ export async function readNoteCorpus(ports: CorpusPorts, params: NoteCorpusParam
   signal?.throwIfAborted()
   if (!workspace || !ports.files.readDirectory) {
     issue(input.path, 'mapping', 'The exact original Workspace directory reader is unavailable. Its catalog, files and Agents are unchanged.')
-    return parseNoteCorpusResult(result, input)
+    return { result: parseNoteCorpusResult(result, input), documents: [] }
   }
-  const original = { ...workspace }, pending = [input.path], documents: { resource: NoteResource; document: NoteFileDocument }[] = []
+  const original = { ...workspace }, pending = [input.path], documents: NoteCorpusSource[] = []
   const current = () => { const w = ports.workspace(input.workspaceId); return w?.hostId === original.hostId && w.path === original.path }
   outer: while (pending.length) {
     signal?.throwIfAborted()
@@ -88,5 +93,5 @@ export async function readNoteCorpus(ports: CorpusPorts, params: NoteCorpusParam
   result.search = derived.search
   result.scope.completeness = result.coverage.issues.length === 0 && !result.coverage.limited && !result.duplicateNoteIds.length && result.pages.every(p => p.title !== null && p.unanchoredBlockCount === 0)
     ? 'complete' : result.pages.length ? 'partial' : 'unknown'
-  return parseNoteCorpusResult(result, input)
+  return { result: parseNoteCorpusResult(result, input), documents }
 }

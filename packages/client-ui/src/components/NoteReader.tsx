@@ -2,22 +2,23 @@ import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef,
 import { EditorContent, NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps, useEditorState } from '@tiptap/react'
 import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
 import type { FileWriteReceipt, FileReadResult } from '@agentmux/core/files'
+import type { NotebookGraph } from '@agentmux/core/notebook-observation'
 import { Node as TiptapNode, type JSONContent } from '@tiptap/core'
-import { noteContentExtensions, NoteBlockReferenceNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
+import { noteContentExtensions, NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, noteIdentityExtensions } from '../note/note-content-schema.js'
 import { NoteInlineLinkView, type NoteLinkOpenRequest } from './NoteInlineLink.js'
 import { noteWikiLiteralExtension } from '../note/note-wiki-view.js'
 import { noteReadingSelectionExtension } from '../note/note-reading-selection.js'
 import { noteWikiInputExtension } from '../note/note-wiki-input.js'
 import { NoteSnapshotSync } from '../note/note-snapshot-sync.js'
-import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
-import { noteKnowledge, parseNoteFile, projectNoteBlocks, resolveNoteBlock, type NoteKnowledge, type NoteFileDocument } from '../note/note-knowledge.js'
+import { readNoteDocument, serializeNoteDocument, type NoteBlockReference, type NoteInclude, type NoteBlockTarget, type NoteDocument } from '../note/note-document.js'
+import { noteKnowledge, parseNoteFile, projectNoteBlocks, resolveNoteBlock, resolveNoteInclude, type NoteKnowledge, type NoteFileDocument } from '../note/note-knowledge.js'
 import { acknowledgeNoteWrite, acknowledgeNoteCanonicalRead, noteWriteCanonicalContent, type NoteEditState } from '../note/note-edit-state.js'
 import { mergeLiveNote } from '../note/note-live-merge.js'
 import { noteProvenanceAttributes } from '../note/note-provenance.js'
 export type { NoteEditState } from '../note/note-edit-state.js'
 export type { NoteLinkOpenRequest } from './NoteInlineLink.js'
 
-const Scope = createContext<{ knowledge: NoteKnowledge; trail: string[]; readReference?: ((target: NoteBlockTarget) => void) | undefined; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined } | null>(null)
+const Scope = createContext<{ knowledge: NoteKnowledge; workspaceId: string; graph?: NotebookGraph | undefined; trail: string[]; readInclude?: ((target: Pick<NoteInclude, 'noteId' | 'path' | 'workspaceId'>) => void) | undefined; readReference?: ((target: NoteBlockTarget) => void) | undefined; onOpenLink?: ((link: NoteLinkOpenRequest) => void) | undefined } | null>(null)
 function InlineLink({ node, editor }: NodeViewProps) {
   const scope = useContext(Scope)
   return <NoteInlineLinkView node={node} editor={editor} onOpen={scope?.onOpenLink} />
@@ -31,9 +32,28 @@ function Reference({ node }: NodeViewProps) {
   return <NodeViewWrapper className="mobile-note-reference" data-block-id={node.attrs.blockId} {...noteProvenanceAttributes(node.attrs.provenance)}>
     <strong>{reference.mode === 'embed' ? '引用原块' : '块引用'}</strong>
     {scope.trail.includes(key) ? <p role="status">循环引用，原引用保留。</p>
-      : result.status === 'resolved' ? <Scope.Provider value={{ ...scope, trail: [...scope.trail, key] }}><RichContent content={projectNoteBlocks(result.source, [result.block.blockId]).content} /></Scope.Provider>
+      : result.status === 'resolved' ? <Scope.Provider value={{ ...scope, workspaceId: result.source.location.workspaceId, trail: [...scope.trail, key] }}><RichContent content={projectNoteBlocks(result.source, [result.block.blockId]).content} /></Scope.Provider>
         : <><p role="status">引用正文尚未读取，原引用保留。</p>{scope.readReference && <button type="button" onClick={() => scope.readReference!(reference.target)}>读取引用原文</button>}</>}
     <details><summary>引用来源</summary><code>{reference.target.noteId} / {reference.target.blockId}</code></details>
+  </NodeViewWrapper>
+}
+
+/** Pure reading of already observed original bytes; the host owns every File read. */
+function Include({ node }: NodeViewProps) {
+  const scope = useContext(Scope), include = node.attrs as NoteInclude
+  if (!scope) return <NodeViewWrapper className="mobile-note-reference" role="status">共享内容的原文件范围尚未确认。</NodeViewWrapper>
+  const candidates = scope.graph?.observations.filter(item => item.noteId === include.noteId) ?? []
+  const observed = candidates.length === 1 && !scope.graph?.duplicateNoteIds.includes(include.noteId) ? candidates[0] : undefined
+  const confirmed = observed?.status === 'read' && observed.kind === 'shared-block' && observed.fileIdentity === 'confirmed'
+    ? { workspaceId: observed.resource.workspaceId, path: observed.resource.path, revision: observed.revision } : undefined
+  const resolved = resolveNoteInclude(scope.knowledge, include, scope.workspaceId, confirmed)
+  const key = JSON.stringify(['file', include.noteId]), cycle = scope.trail.includes(key)
+  return <NodeViewWrapper className="mobile-note-reference note-include" contentEditable={false} data-block-id={node.attrs.blockId} data-shared-note-id={include.noteId}>
+    <strong>{resolved.status === 'resolved' ? resolved.source.note.title ?? '共享内容' : '共享内容'}</strong>
+    {cycle ? <p role="status">循环引用，原共享内容与引用保留。</p> : resolved.status === 'resolved'
+      ? <Scope.Provider value={{ ...scope, workspaceId: resolved.source.location.workspaceId, trail: [...scope.trail, key] }}><RichContent content={resolved.source.note.content} /></Scope.Provider>
+      : <><p role="status">共享原文尚未确认，原引用保留。{resolved.message}</p>{scope.readInclude && <button type="button" onClick={() => scope.readInclude!({ noteId: include.noteId, path: include.path, ...(typeof include.workspaceId === 'string' ? { workspaceId: include.workspaceId } : {}) })}>读取共享原文</button>}</>}
+    <details><summary>共享来源</summary><code>{include.noteId} · {resolved.status === 'resolved' ? resolved.source.location.path : include.path}</code></details>
   </NodeViewWrapper>
 }
 
@@ -87,7 +107,8 @@ function RichContent({ content, onChange, onCompositionChange, onSnapshotIssue, 
   const scope = useContext(Scope), open = useRef(scope?.onOpenLink); open.current = scope?.onOpenLink
   const extensions = useMemo(() => noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name
     ? NoteBlockReferenceNode.extend({ addNodeView() { return ReactNodeViewRenderer(Reference) } }) : extension.name === NoteInlineLinkNode.name
-    ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link)), ...onChange ? [] : [ExcerptNode, noteReadingSelectionExtension(() => selected.current)]]), [Boolean(onChange)])
+    ? NoteInlineLinkNode.extend({ addNodeView() { return ReactNodeViewRenderer(InlineLink) } }) : extension.name === NoteIncludeNode.name
+    ? NoteIncludeNode.extend({ addNodeView() { return ReactNodeViewRenderer(Include) } }) : extension).concat(onChange ? [...noteIdentityExtensions(), noteWikiInputExtension()] : []).concat([noteWikiLiteralExtension(link => open.current?.(link)), ...onChange ? [] : [ExcerptNode, noteReadingSelectionExtension(() => selected.current)]]), [Boolean(onChange)])
   const update = useRef({ content, onChange, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }); update.current = { content, onChange, onCompositionChange, onSnapshotIssue, onKeepDisplayedDraft }
   const compositionBefore = useRef<JSONContent | null>(null)
   const composing = useRef(false), snapshot = useRef<NoteSnapshotSync | null>(null), [issue, setIssue] = useState<string | null>(null)
@@ -164,6 +185,8 @@ export type NoteEditing = {
 }
 export type NoteReaderProps = { noteProvenance?: NoteProvenanceSnapshot | undefined; content: string; path: string; workspaceId: string; revision: string | null;
   documents?: Parameters<typeof noteKnowledge>[0] | undefined
+  graph?: NotebookGraph | undefined
+  readInclude?: ((target: Pick<NoteInclude, 'noteId' | 'path' | 'workspaceId'>) => void) | undefined
   readReference?: ((target: NoteBlockTarget) => void) | undefined
   /** Only the reading projection changes; content remains the complete original Note. */
   blockIds?: readonly string[] | undefined
@@ -175,7 +198,7 @@ export type NoteReaderProps = { noteProvenance?: NoteProvenanceSnapshot | undefi
 }
 const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+export function NoteReader({ content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, readInclude, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, readReference, editing, target, onOpenLink }: NoteReaderProps) {
   const observed = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
   const [written, setWritten] = useState<{ source: NoteFileDocument; document: NoteFileDocument } | null>(null)
   // Consume this original write receipt while its input observation is still current.
@@ -186,7 +209,7 @@ export function NoteReader({ content, path, workspaceId, revision, noteProvenanc
   const [working, setWorking] = useState<{ noteId: string; content: string } | null>(null)
   const workingContent = parsed.status === 'valid' && working?.noteId === parsed.note.noteId ? working.content
     : parsed.status === 'valid' && editing?.initial?.noteId === parsed.note.noteId ? editing.initial.draft : original.content
-  const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { ...original, content: workingContent } }, ...documents]), [workingContent, path, workspaceId, original, documents])
+  const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { ...original, content: workingContent } }, ...documents], 'partial', graph?.observations.flatMap(item => item.status === 'read' && item.kind === 'shared-block' && item.fileIdentity === 'confirmed' && !graph.duplicateNoteIds.includes(item.noteId) ? [{ noteId: item.noteId, workspaceId: item.resource.workspaceId, path: item.resource.path, revision: item.revision }] : []) ?? []), [workingContent, path, workspaceId, original, documents, graph])
   const excerpt = useMemo(() => {
     const source = knowledge.sources.find(source => source.location.workspaceId === workspaceId && source.location.path === path)
     return blockIds && source ? projectNoteBlocks(source, blockIds, highlightBlockIds) : null
@@ -200,7 +223,7 @@ export function NoteReader({ content, path, workspaceId, revision, noteProvenanc
     const element = [...body.current?.querySelectorAll<HTMLElement>('[data-block-id]') ?? []].find(element => element.dataset.blockId === target.blockId)
     element?.scrollIntoView?.({ block: 'center' })
   }, [target?.noteId, target?.blockId, block?.status])
-  return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, trail: [], readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
+  return parsed.status === 'valid' ? <Scope.Provider value={{ knowledge, workspaceId, graph, trail: [], readInclude, readReference, onOpenLink }}><div ref={body} data-note-id={parsed.note.noteId} data-target-block={block?.status === 'resolved' ? target?.blockId : undefined}>
     {original.noteProvenance?.status === 'unconfirmed' && <p role="status">块作者未确认：{original.noteProvenance.reason} 正文仍可阅读和编辑；重新读取同一原文件可核对元数据。</p>}
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}

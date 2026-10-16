@@ -1,11 +1,11 @@
 import { AgentMuxError } from './errors.js'
 import type { NoteResource } from './notebook-catalog.js'
-import type { NoteGraphOccurrence, NoteGraphTarget } from './notebook-observation.js'
+import { resolveObservedNoteBlock, type NoteBlockForwarding, type NoteGraphOccurrence, type NoteGraphTarget } from './notebook-observation.js'
 
 /** A bounded, read-only projection of original files, independent of the durable App catalog. */
 export type NoteCorpusParams = { workspaceId: string; path: string; maxFiles?: number; maxDirectories?: number; maxBytes?: number; query?: string; limit?: number }
 export type NoteCorpusBlock = { blockId: string; type: string; text: string; headingLevel?: number }
-export type NoteCorpusPage = { resource: NoteResource; noteId: string; title: string | null; revision: string; blocks: NoteCorpusBlock[]; unanchoredBlockCount: number }
+export type NoteCorpusPage = { resource: NoteResource; noteId: string; title: string | null; kind?: 'shared-block'; revision: string; blocks: NoteCorpusBlock[]; blockForwardings?: NoteBlockForwarding[]; unanchoredBlockCount: number }
 export type NoteCorpusReference = { source: { noteId: string; blockId: string }; sourceResource: NoteResource; revision: string; target: NoteGraphTarget; occurrence: NoteGraphOccurrence; mode: 'reference' | 'embed' | 'link'; resolution: 'resolved' | 'ambiguous' | 'missing' | 'unknown'; query?: string }
 export type NoteCorpusHit = { resource: NoteResource; noteId: string; title: string | null; blockId: string | null; revision: string; excerpt: string; match: { from: number; to: number } }
 export type NoteCorpusResult = {
@@ -46,9 +46,10 @@ export function parseNoteCorpusResult(value: unknown, input: NoteCorpusParams): 
     if (typeof c.limited !== 'boolean') bad('Corpus coverage is unconfirmed.')
     for (const issue of array(c.issues)) { const i = object(issue,['path','kind','message']); relative(i.path); text(i.message); if (!member(i.kind, ['unreadable','invalid','symlink','budget','mapping'])) bad('Unknown corpus issue.') }
     const pages = array(p.pages).map(v => {
-      const page = object(v,['resource','noteId','title','revision','blocks','unanchoredBlockCount']); within(resource(page.resource)); text(page.noteId); revision(page.revision); if (page.title !== null) text(page.title); count(page.unanchoredBlockCount)
+      const page = object(v,['resource','noteId','title','kind','revision','blocks','blockForwardings','unanchoredBlockCount']); within(resource(page.resource)); text(page.noteId); revision(page.revision); if (page.title !== null) text(page.title); count(page.unanchoredBlockCount); if (page.kind !== undefined && page.kind !== 'shared-block') bad('Invalid shared file kind.')
       const ids = new Set<string>()
       for (const v of array(page.blocks)) { const b = object(v,['blockId','type','text','headingLevel']); text(b.blockId); text(b.type); if (typeof b.text !== 'string' || ids.has(String(b.blockId))) bad('Invalid corpus block.'); ids.add(String(b.blockId)); if (b.headingLevel !== undefined && (b.type !== 'heading' || count(b.headingLevel,6) < 1)) bad('Invalid corpus heading.') }
+      if (page.blockForwardings !== undefined) for (const item of array(page.blockForwardings)) { const forward = object(item,['blockId','includeBlockId','noteId']); text(forward.blockId); text(forward.includeBlockId); text(forward.noteId); if (!ids.has(String(forward.includeBlockId)) || forward.blockId === forward.includeBlockId) bad('A forwarded address has no original include owner.') }
       return page as NoteCorpusPage
     })
     if (new Set(pages.map(page => key(page.resource))).size !== pages.length || pages.length > Number(c.files)) bad('Duplicated or unobserved corpus resources.')
@@ -59,16 +60,17 @@ export function parseNoteCorpusResult(value: unknown, input: NoteCorpusParams): 
     const byResource = new Map(pages.map(page => [key(page.resource), page]))
     const blockIds = new Map(pages.map(page => [key(page.resource), new Set(page.blocks.map(block => block.blockId))]))
     const sourceComplete = !c.limited && array(c.issues).length === 0 && pages.length === c.files
+    const addresses = pages.map(page => ({ noteId: page.noteId, status: 'read', blockIds: page.blocks.map(block => block.blockId), ...(page.blockForwardings ? { blockForwardings: page.blockForwardings } : {}), ...(page.kind ? { kind: page.kind, fileIdentity: sourceComplete ? 'confirmed' as const : 'unknown' as const } : {}) }))
     const titlesKnown = pages.every(page => page.title !== null)
     const source = (r: NoteResource, id: unknown, revision: unknown, block: unknown, allowUnanchored = false): NoteCorpusPage => { const page = byResource.get(key(r)); if (!page) return bad('A corpus result does not name an observed exact source.'); if (page.noteId !== id || page.revision !== revision || (allowUnanchored && block === null ? page.unanchoredBlockCount === 0 : !blockIds.get(key(r))!.has(block as string))) bad('A corpus result does not name an observed exact block and revision.'); return page }
     for (const v of array(p.references)) {
       const ref = object(v,['source','sourceResource','revision','target','occurrence','mode','resolution','query']), origin = object(ref.source,['noteId','blockId']), r = within(resource(ref.sourceResource)); source(r,origin.noteId,ref.revision,origin.blockId)
       if (!member(ref.mode, ['reference','embed','link']) || !member(ref.resolution, ['resolved','ambiguous','missing','unknown'])) bad('Invalid corpus relationship.')
-      const t = object(ref.target,['kind','noteId','blockId','text']); if (t.kind === 'unbound') { text(t.text); if (t.noteId !== undefined || t.blockId !== undefined || ref.mode !== 'link') bad('An unbound query cannot carry another target.'); } else { text(t.noteId); if (t.kind === 'block') text(t.blockId); else if (t.kind !== 'page' || t.blockId !== undefined || ref.mode !== 'link') bad('Invalid corpus target.'); if (t.text !== undefined) bad('A bound target cannot contain an unbound query.'); }
+      const t = object(ref.target,['kind','noteId','blockId','text']); if (t.kind === 'unbound') { text(t.text); if (t.noteId !== undefined || t.blockId !== undefined || ref.mode !== 'link') bad('An unbound query cannot carry another target.'); } else { text(t.noteId); if (t.kind === 'block') text(t.blockId); else if (t.kind !== 'page' || t.blockId !== undefined || !['link','embed'].includes(String(ref.mode))) bad('Invalid corpus target.'); if (t.text !== undefined) bad('A bound target cannot contain an unbound query.'); }
       const o = object(ref.occurrence,['kind','referenceId','revision','from','to']); if (o.kind === 'stored') { text(o.referenceId); if (o.revision !== undefined || o.from !== undefined || o.to !== undefined) bad('A stored occurrence cannot carry derived positions.'); } else if (o.kind !== 'text' || o.referenceId !== undefined || ref.mode !== 'link' || ref.query === undefined || o.revision !== ref.revision || count(o.to) <= count(o.from)) bad('Invalid corpus occurrence.')
       if (ref.query !== undefined) text(ref.query)
       const targets = groups.get(String(t.noteId)) ?? []
-      if (ref.resolution === 'resolved' && (!sourceComplete || ref.query !== undefined && !titlesKnown || t.kind === 'unbound' || targets.length !== 1 || t.kind === 'block' && !blockIds.get(key(targets[0]!.resource))!.has(t.blockId as string))) bad('The corpus relationship target is not confirmed.')
+      if (ref.resolution === 'resolved' && (!sourceComplete || ref.query !== undefined && !titlesKnown || t.kind === 'unbound' || targets.length !== 1 || t.kind === 'block' && resolveObservedNoteBlock(addresses, { noteId: String(t.noteId), blockId: String(t.blockId) }).status !== 'resolved' || t.kind === 'page' && ref.mode === 'embed' && targets[0]?.kind !== 'shared-block')) bad('The corpus relationship target is not confirmed.')
     }
     const q = object(p.search,['query','hits','total','truncated']); if (q.query !== (input.query ?? null) || typeof q.truncated !== 'boolean') bad('This corpus search belongs to another query.')
     const hits = array(q.hits); count(q.total); if (hits.length > (input.limit ?? 30) || Number(q.total) < hits.length || q.truncated !== (Number(q.total)>hits.length)) bad('Invalid corpus result coverage.')

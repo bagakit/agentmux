@@ -1,4 +1,5 @@
 import { parseTerminalFrontend } from './agent-terminal-frontend.js'
+import { noteContentInCatalogScope } from './notebook-observation.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult } from './application-access.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
@@ -678,7 +679,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         const { storageOperation, resourceChanges, conversionIssues, content, titleOperation, ...knowledge } = p
         const observationInput = parseNotebookObservationParams(input, true)
         if (titleOperation !== undefined) { if (!observationInput.operationId) fail(); try { parseNoteTitleInspection(titleOperation, observationInput.operationId!) } catch { fail() } }
-        if (observationInput.content === true) { const body = parseNoteContentObservation(content); const page = state.pages[observationInput.noteId!]; if (!page || body.noteId !== page.noteId || notebookFingerprint(body.resource) !== notebookFingerprint(page.resource)) fail() }
+        if (observationInput.content === true) { const body = parseNoteContentObservation(content); if (body.noteId !== observationInput.noteId || !noteContentInCatalogScope(state, body)) fail() }
         else if (content !== undefined) fail()
         if (notebookFingerprint(knowledge) !== notebookFingerprint(inspectNotebook(state, input))) fail()
         if (storageOperation !== undefined && storageOperation !== null) { const original = parseNotesStorageOperation(storageOperation); if (input.operationId !== undefined && original.operationId !== input.operationId) fail() }

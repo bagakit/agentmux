@@ -5,10 +5,11 @@ import type { NotebookResolveParams, NotebookResolveResult } from './note-links.
 import { parseNoteWikiQuery } from './note-links.js'
 import { parseNoteProvenanceSnapshot, noteProvenanceResourceKey, type NoteProvenanceSnapshot } from './note-provenance.js'
 import { fileUploadRevision } from './public-rpc-files.js'
+export type NoteBlockForwarding = { blockId: string; includeBlockId: string; noteId: string }
 
 /** Original file observations, never another Note body or relationship store. */
-export type NoteContentObservation = { noteId: string; resource: NoteResource } & (
-  | { status: 'read'; revision: string; content: string; actualNoteId: string; blockIds: string[]; unanchoredBlockCount?: number; noteProvenance?: NoteProvenanceSnapshot }
+export type NoteContentObservation = { noteId: string; resource: NoteResource; kind?: 'shared-block'; fileIdentity?: 'confirmed' | 'unknown' | 'ambiguous' } & (
+  | { status: 'read'; revision: string; content: string; actualNoteId: string; blockIds: string[]; blockForwardings?: NoteBlockForwarding[]; unanchoredBlockCount?: number; noteProvenance?: NoteProvenanceSnapshot }
   | { status: 'missing' | 'unknown' | 'invalid' | 'identity-mismatch'; message: string; revision?: string; actualNoteId?: string })
 export type NoteContentMetadata = NoteContentObservation extends infer O ? O extends NoteContentObservation ? Omit<O, 'content' | 'noteProvenance'> : never : never
 export type NotebookGraphParams = { notebookId?: string; noteId?: string; maxBytes?: number }
@@ -36,6 +37,36 @@ export type NotebookObservationPort = {
   resolve(state: NotebookState, params: NotebookResolveParams, options?: { signal?: AbortSignal }): Promise<NotebookResolveResult>
   content(state: NotebookState, noteId: string, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<NoteContentObservation>
   graph(state: NotebookState, params: NotebookGraphParams, options?: { signal?: AbortSignal }): Promise<NotebookGraph>
+}
+/** Explicit saved forwarding declarations never create virtual host content nodes. */
+export function resolveObservedNoteBlock(sources: readonly { noteId: string; actualNoteId?: string; status: string; blockIds?: readonly string[]; blockForwardings?: readonly NoteBlockForwarding[]; kind?: 'shared-block'; fileIdentity?: 'confirmed' | 'unknown' | 'ambiguous' }[], target: NoteGraphEndpoint): { status: 'resolved'; target: NoteGraphEndpoint } | { status: 'ambiguous' | 'missing' | 'unknown' } {
+  const trail = new Set<string>()
+  let current = target
+  while (true) {
+    const key = JSON.stringify(current)
+    if (trail.has(key)) return { status: 'unknown' }
+    trail.add(key)
+    const candidates = sources.filter(source => source.noteId === current.noteId || source.actualNoteId === current.noteId)
+    if (candidates.length > 1) return { status: 'ambiguous' }
+    const source = candidates[0]
+    if (!source || source.status !== 'read') return { status: source?.status === 'missing' ? 'missing' : 'unknown' }
+    const present = source.blockIds?.includes(current.blockId) ?? false
+    const forwards = source.blockForwardings?.filter(item => item.blockId === current.blockId) ?? []
+    if (forwards.length > 1 || present && forwards.length) return { status: 'ambiguous' }
+    if (present) return { status: 'resolved', target: current }
+    if (!forwards.length) return { status: trail.size > 1 ? 'unknown' : 'missing' }
+    const forward = forwards[0]!, destinations = sources.filter(item => item.noteId === forward.noteId || item.actualNoteId === forward.noteId)
+    if (destinations.length > 1 || destinations[0]?.fileIdentity === 'ambiguous') return { status: 'ambiguous' }
+    const destination = destinations[0]
+    if (destination?.status !== 'read' || destination.kind !== 'shared-block' || destination.fileIdentity !== 'confirmed') return { status: 'unknown' }
+    current = { noteId: forward.noteId, blockId: current.blockId }
+  }
+}
+/** Catalog entries pin exact resources. Unregistered shared bytes come from the original Files discovery owner; unknown observations contain no body. */
+export function noteContentInCatalogScope(state: NotebookState, observation: NoteContentObservation): boolean {
+  const page = state.pages[observation.noteId]
+  if (page) return noteProvenanceResourceKey(page.resource) === noteProvenanceResourceKey(observation.resource)
+  return observation.status === 'read' ? observation.kind === 'shared-block' : true
 }
 const bad = (message: string): never => { throw new AgentMuxError(message, 'INVALID_CONTROL_REQUEST') }
 const object = (value: unknown, fields: readonly string[]): Record<string, unknown> => {
@@ -70,13 +101,18 @@ export function parseNoteContentObservation(value: unknown, includeContent = tru
   return protocolResult(() => validateNoteContentObservation(value, includeContent))
 }
 function validateNoteContentObservation(value: unknown, includeContent: boolean): NoteContentObservation | NoteContentMetadata {
-  const p = object(value, ['noteId', 'resource', 'status', 'revision', 'content', 'actualNoteId', 'blockIds', 'unanchoredBlockCount', 'noteProvenance', 'message'])
-  id(p.noteId); resource(p.resource)
+  const p = object(value, ['noteId', 'resource', 'kind', 'fileIdentity', 'status', 'revision', 'content', 'actualNoteId', 'blockIds', 'blockForwardings', 'unanchoredBlockCount', 'noteProvenance', 'message'])
+  id(p.noteId); resource(p.resource); if (p.kind !== undefined && p.kind !== 'shared-block') bad('The original Note content kind is invalid.')
+  if (p.fileIdentity !== undefined && (p.kind !== 'shared-block' || p.status !== 'read' || typeof p.fileIdentity !== 'string' || !['confirmed','unknown','ambiguous'].includes(p.fileIdentity))) bad('The shared file identity observation is invalid.')
   if (p.status === 'read') {
     if (p.unanchoredBlockCount !== undefined) count(p.unanchoredBlockCount)
     id(p.revision); id(p.actualNoteId); if (p.noteId !== p.actualNoteId) bad('A confirmed Note body belongs to another identity.')
     if (includeContent ? typeof p.content !== 'string' : p.content !== undefined) bad('Invalid Note content payload.')
     list(p.blockIds).forEach(id); if (new Set(p.blockIds as string[]).size !== (p.blockIds as string[]).length) bad('Duplicated observed block identities.'); if (p.message !== undefined) bad('Unexpected read issue.')
+    if (p.blockForwardings !== undefined) for (const declared of list(p.blockForwardings)) {
+      const forward = object(declared, ['blockId','includeBlockId','noteId']); id(forward.blockId); id(forward.includeBlockId); id(forward.noteId)
+      if (!(p.blockIds as string[]).includes(String(forward.includeBlockId)) || forward.blockId === forward.includeBlockId) bad('A forwarded address has no original include owner.')
+    }
     if (p.noteProvenance !== undefined) {
       if (!includeContent) bad('A graph metadata observation cannot include per-block authorship.')
       let metadata: NoteProvenanceSnapshot
@@ -88,7 +124,7 @@ function validateNoteContentObservation(value: unknown, includeContent: boolean)
   } else {
     member(p.status, ['missing', 'unknown', 'invalid', 'identity-mismatch']); id(p.message)
     if (p.revision !== undefined) id(p.revision); if (p.actualNoteId !== undefined) id(p.actualNoteId)
-    if (p.content !== undefined || p.blockIds !== undefined || p.unanchoredBlockCount !== undefined || p.noteProvenance !== undefined) bad('Unconfirmed Note body cannot report parsed content.')
+    if (p.content !== undefined || p.blockIds !== undefined || p.blockForwardings !== undefined || p.unanchoredBlockCount !== undefined || p.noteProvenance !== undefined) bad('Unconfirmed Note body cannot report parsed content.')
   }
   return value as NoteContentObservation | NoteContentMetadata
 }
@@ -105,10 +141,13 @@ function validateNotebookGraph(value: unknown, params: NotebookGraphParams): Not
   member(p.completeness, ['complete', 'partial', 'unknown'])
   const observations = list(p.observations).map(v => parseNoteContentObservation(v, false))
   list(p.duplicateNoteIds).forEach(id)
-  if (new Set(observations.map(o => o.noteId)).size !== observations.length) bad('Duplicated catalog observations.')
-  const byNoteId = new Map(observations.map(o => [o.noteId, o]))
-  const observedBlocks = new Map(observations.filter(o => o.status === 'read').map(o => [o.noteId, new Set(o.blockIds)]))
   const resourceKey = (r: NoteResource) => JSON.stringify([r.hostId, r.workspaceId, r.workspacePath, r.path])
+  if (new Set(observations.map(o => resourceKey(o.resource))).size !== observations.length) bad('Duplicated original resource observations.')
+  const grouped = new Map<string, typeof observations>()
+  for (const o of observations) { const list = grouped.get(o.noteId) ?? []; list.push(o); grouped.set(o.noteId, list) }
+  const byNoteId = new Map([...grouped].filter(([,list]) => list.length === 1).map(([id,list]) => [id,list[0]!]))
+  const byResource = new Map(observations.map(o => [resourceKey(o.resource), o]))
+  const observedBlocks = new Map(observations.filter(o => o.status === 'read').map(o => [resourceKey(o.resource), new Set(o.blockIds)]))
   const identities = new Map<string, Set<string>>()
   for (const observed of observations) if (observed.actualNoteId) {
     const locations = identities.get(observed.actualNoteId) ?? new Set<string>()
@@ -116,15 +155,18 @@ function validateNotebookGraph(value: unknown, params: NotebookGraphParams): Not
   }
   const duplicates = [...identities].filter(([, locations]) => locations.size > 1).map(([noteId]) => noteId)
   if (new Set(p.duplicateNoteIds as string[]).size !== duplicates.length || duplicates.some(noteId => !(p.duplicateNoteIds as string[]).includes(noteId))) bad('The duplicated Note identities do not match their original resources.')
-  if (params.noteId && !byNoteId.has(params.noteId)) bad('The requested Note observation is missing.')
+  for (const observed of observations) {
+    if (observed.fileIdentity === 'confirmed' && duplicates.includes(observed.noteId) || observed.fileIdentity === 'ambiguous' && !duplicates.includes(observed.noteId) || observed.kind === 'shared-block' && duplicates.includes(observed.noteId) && observed.fileIdentity !== 'ambiguous') bad('The shared file identity contradicts its observed duplicate resources.')
+  }
+  if (params.noteId && !grouped.has(params.noteId)) bad('The requested Note observation is missing.')
   if (p.completeness === 'complete' && (observations.some(o => o.status !== 'read' || (o.unanchoredBlockCount ?? 0) > 0) || (p.duplicateNoteIds as unknown[]).length > 0)) bad('Incomplete file observations cannot confirm the whole graph.')
-  list(p.hierarchy).forEach(v => { const e = object(v, ['parentNoteId', 'noteId']); id(e.parentNoteId); id(e.noteId); if (![e.parentNoteId, e.noteId].every(noteId => byNoteId.has(noteId as string))) bad('An original hierarchy endpoint is outside the observed catalog.') })
+  list(p.hierarchy).forEach(v => { const e = object(v, ['parentNoteId', 'noteId']); id(e.parentNoteId); id(e.noteId); if (![e.parentNoteId, e.noteId].every(noteId => grouped.has(noteId as string))) bad('An original hierarchy endpoint is outside the observed catalog.') })
   const endpoint = (v: unknown) => { const e = object(v, ['noteId', 'blockId']); id(e.noteId); id(e.blockId) }
   list(p.references).forEach(v => {
     const e = object(v, ['source', 'sourceResource', 'target', 'occurrence', 'mode', 'resolution', 'query']); endpoint(e.source); resource(e.sourceResource); member(e.mode, ['reference', 'embed', 'link']); member(e.resolution, ['resolved', 'missing', 'unknown', 'ambiguous', 'unbound'])
     const source = e.source as NoteGraphEndpoint, target = object(e.target, ['kind', 'noteId', 'blockId', 'text'])
-    const original = byNoteId.get(source.noteId)
-    if (!original || original.status !== 'read' || resourceKey(original.resource) !== resourceKey(e.sourceResource as NoteResource) || !observedBlocks.get(source.noteId)?.has(source.blockId)) bad('The reference source is not an accurately observed original block.')
+    const original = byResource.get(resourceKey(e.sourceResource as NoteResource))
+    if (!original || original.noteId !== source.noteId || original.status !== 'read' || !observedBlocks.get(resourceKey(original.resource))?.has(source.blockId)) bad('The reference source is not an accurately observed original block.')
     const occurrence = object(e.occurrence, ['kind', 'referenceId', 'revision', 'from', 'to'])
     if (occurrence.kind === 'stored') { id(occurrence.referenceId); if (occurrence.revision !== undefined || occurrence.from !== undefined || occurrence.to !== undefined) bad('A stored occurrence cannot report derived positions.') }
     else if (occurrence.kind === 'text') {
@@ -140,17 +182,18 @@ function validateNotebookGraph(value: unknown, params: NotebookGraphParams): Not
     if (e.resolution === 'unbound' || occurrence.kind === 'text' && !query) bad('A text target requires its original observed query.')
     id(target.noteId)
     if (target.kind === 'block') id(target.blockId)
-    else if (target.kind !== 'page' || target.blockId !== undefined || e.mode !== 'link') bad('Invalid page or block reference target.')
-    if (target.text !== undefined || e.mode !== 'link' && target.kind !== 'block') bad('The original target kind is invalid.')
+    else if (target.kind !== 'page' || target.blockId !== undefined || !['link','embed'].includes(String(e.mode))) bad('Invalid page or block reference target.')
+    if (target.text !== undefined || e.mode === 'reference' && target.kind !== 'block') bad('The original target kind is invalid.')
     if (query && (e.resolution !== 'resolved' || query.status !== 'valid' || Boolean(query.query.fragment) !== (target.kind === 'block'))) bad('The observed query does not confirm this target kind.')
     if (params.noteId && source.noteId !== params.noteId && target.noteId !== params.noteId) bad('The returned edge does not touch the requested Note.')
     if (e.resolution === 'resolved') {
       const destination = byNoteId.get(target.noteId as string)
-      if (!destination || destination.status !== 'read' || duplicates.includes(target.noteId as string) || target.kind === 'block' && !observedBlocks.get(target.noteId as string)?.has(target.blockId as string)) bad('The reference target is not an accurately observed original target.')
+      if (!destination || destination.status !== 'read' || duplicates.includes(target.noteId as string) || target.kind === 'block' && resolveObservedNoteBlock(observations, { noteId: String(target.noteId), blockId: String(target.blockId) }).status !== 'resolved') bad('The reference target is not an accurately observed original target.')
+      if (target.kind === 'page' && e.mode === 'embed' && (destination?.kind !== 'shared-block' || destination.fileIdentity !== 'confirmed')) bad('A whole-file include must name shared Markdown content.')
     }
-    if (p.completeness === 'complete' && !byNoteId.has(target.noteId as string)) bad('The graph contains an unobserved external target.')
-    if (e.resolution === 'missing') { const destination = byNoteId.get(target.noteId as string); if (!destination || destination.status !== 'missing' && !(target.kind === 'block' && destination.status === 'read' && !observedBlocks.get(target.noteId as string)?.has(target.blockId as string))) bad('The original target is unknown, not confirmed missing.') }
-    if (e.resolution === 'ambiguous' && !duplicates.includes(target.noteId as string)) bad('The ambiguous target has no observed duplicate identity.')
+    if (p.completeness === 'complete' && !grouped.has(target.noteId as string)) bad('The graph contains an unobserved external target.')
+    if (e.resolution === 'missing') { const destination = byNoteId.get(target.noteId as string); if (!destination || destination.status !== 'missing' && !(target.kind === 'block' && resolveObservedNoteBlock(observations, { noteId: String(target.noteId), blockId: String(target.blockId) }).status === 'missing')) bad('The original target is unknown, not confirmed missing.') }
+    if (e.resolution === 'ambiguous' && !duplicates.includes(target.noteId as string) && !(target.kind === 'block' && resolveObservedNoteBlock(observations, { noteId: String(target.noteId), blockId: String(target.blockId) }).status === 'ambiguous')) bad('The ambiguous target has no observed duplicate identity.')
   })
   return value as NotebookGraph
 }

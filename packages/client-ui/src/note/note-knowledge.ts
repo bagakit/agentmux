@@ -2,7 +2,7 @@ import type { JSONContent } from '@tiptap/core'
 import { NOTE_FILE_EXTENSION, readNoteDocument, type NoteBlockTarget, type NoteDocument, type NoteDocumentRead } from './note-document.js'
 import { noteContentSchema } from './note-content-schema.js'
 import { indexNoteReferences, noteSemanticText } from './note-wikilinks.js'
-import type { NoteGraphOccurrence, NoteGraphTarget } from '@agentmux/core/notebook-observation'
+import { resolveObservedNoteBlock, type NoteBlockForwarding, type NoteGraphOccurrence, type NoteGraphTarget } from '@agentmux/core/notebook-observation'
 import type { NoteLinkTarget } from '@agentmux/core/note-links'
 import type { NoteProvenanceSnapshot } from '@agentmux/core/note-provenance'
 import { fileUploadRevision } from '@agentmux/core/files'
@@ -10,10 +10,13 @@ import { hydrateNoteProvenance } from './note-metadata.js'
 export type NoteFileDocument = { path: string; content: string; revision: string; noteProvenance?: NoteProvenanceSnapshot }
 export type NoteLocation = { workspaceId: string; path: string }
 export type NoteBlock = { blockId: string; content: JSONContent; text: string; list?: { type: string; attrs: Record<string, unknown>; index: number; item?: boolean } }
-export type NoteSource = { location: NoteLocation; note: NoteDocument; revision: string; blocks: ReadonlyMap<string, NoteBlock> }
+export type NoteSource = { location: NoteLocation; note: NoteDocument; revision: string; blocks: ReadonlyMap<string, NoteBlock>; blockForwardings: readonly NoteBlockForwarding[] }
 export type NoteBacklink = { source: NoteSource; blockId: string; occurrence: NoteGraphOccurrence; mode: 'reference' | 'embed' | 'link'; target: NoteGraphTarget }
 export type NoteKnowledge = {
   scope: 'partial' | 'complete' | 'unknown'
+  /** File identity coverage is independent of optional paragraph anchors. */
+  fileScope?: 'partial' | 'complete' | 'unknown'
+  confirmedIncludes?: readonly (NoteLocation & { noteId: string; revision: string })[]
   sources: readonly NoteSource[]
   invalid: readonly { location: NoteLocation; message: string }[]
   references: readonly NoteBacklink[]
@@ -25,7 +28,7 @@ export type NoteBlockResolution =
 // A cache of the original immutable document, never another content or identity registry.
 // Two displays of the same document share parsing; a content/revision change replaces that document.
 const parsedDocuments = new WeakMap<NoteFileDocument, NoteDocumentRead>()
-const indexedDocuments = new WeakMap<NoteDocument, { blocks: ReadonlyMap<string, NoteBlock>; references: Omit<NoteBacklink, 'source'>[] }>()
+const indexedDocuments = new WeakMap<NoteDocument, { blocks: ReadonlyMap<string, NoteBlock>; blockForwardings: readonly NoteBlockForwarding[]; references: Omit<NoteBacklink, 'source'>[] }>()
 export function parseNoteFile(document: NoteFileDocument): NoteDocumentRead {
   const cached = parsedDocuments.get(document)
   if (cached) return cached
@@ -38,7 +41,7 @@ export function parseNoteFile(document: NoteFileDocument): NoteDocumentRead {
 }
 
 /** Derive only from files the original owner has actually read. No discovery or IO at render time. */
-export function noteKnowledge(documents: readonly { location: NoteLocation; document: NoteFileDocument }[], scope: NoteKnowledge['scope'] = 'partial'): NoteKnowledge {
+export function noteKnowledge(documents: readonly { location: NoteLocation; document: NoteFileDocument }[], scope: NoteKnowledge['scope'] = 'partial', confirmedIncludes: NonNullable<NoteKnowledge['confirmedIncludes']> = []): NoteKnowledge {
   const sources: NoteSource[] = [], invalid: NoteKnowledge['invalid'][number][] = [], references: NoteBacklink[] = []
   const seen = new Set<string>(); let unanchored = false
   for (const { location, document } of documents) {
@@ -51,7 +54,7 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
     unanchored ||= read.unanchoredBlockCount > 0
     let indexed = indexedDocuments.get(read.note)
     if (!indexed) {
-      const blocks = new Map<string, NoteBlock>(), forward: Omit<NoteBacklink, 'source'>[] = []
+      const blockForwardings: NoteBlockForwarding[] = [], blocks = new Map<string, NoteBlock>(), forward: Omit<NoteBacklink, 'source'>[] = []
       const tree = noteContentSchema.nodeFromJSON(read.note.content)
       tree.descendants((node, _position, parent, index) => {
         const blockId: unknown = node.attrs.blockId
@@ -63,17 +66,18 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
           const originalList = position.node(position.depth - 1)
           list = { type: originalList.type.name, attrs: { ...originalList.attrs }, index: position.index(position.depth - 1) }
         }
+        if (node.type.name === 'noteInclude' && Array.isArray(node.attrs.forwardedBlockIds)) blockForwardings.push(...node.attrs.forwardedBlockIds.map((id: string) => ({ blockId: id, includeBlockId: blockId, noteId: String(node.attrs.noteId) })))
         blocks.set(blockId, { blockId, content: node.toJSON(), text: noteSemanticText(node), ...list ? { list } : {} })
       })
       forward.push(...indexNoteReferences(tree).map(reference => ({ ...reference, occurrence: reference.occurrence.kind === 'text' ? { ...reference.occurrence, revision: document.revision } : reference.occurrence })))
-      indexed = { blocks, references: forward }
+      indexed = { blocks, blockForwardings, references: forward }
       indexedDocuments.set(read.note, indexed)
     }
-    const source: NoteSource = { location, note: read.note, revision: document.revision, blocks: indexed.blocks }
+    const source: NoteSource = { location, note: read.note, revision: document.revision, blocks: indexed.blocks, blockForwardings: indexed.blockForwardings }
     sources.push(source)
     references.push(...indexed.references.map(reference => ({ ...reference, source })))
   }
-  return { scope: unanchored && scope === 'complete' ? 'partial' : scope, sources, invalid, references }
+  return { scope: unanchored && scope === 'complete' ? 'partial' : scope, fileScope: invalid.length && scope === 'complete' ? 'partial' : scope, sources, invalid, references, ...(confirmedIncludes.length ? { confirmedIncludes } : {}) }
 }
 
 export function resolveNoteBlock(knowledge: NoteKnowledge, target: NoteBlockTarget): NoteBlockResolution {
@@ -83,9 +87,30 @@ export function resolveNoteBlock(knowledge: NoteKnowledge, target: NoteBlockTarg
   if (!source) return knowledge.scope === 'complete' && knowledge.invalid.length === 0
     ? { status: 'missing', message: 'The referenced Note is missing from the confirmed scope. Its reference is preserved.' }
     : { status: 'unknown', message: 'The referenced Note has not been confirmed in the current scope. Its reference is preserved.' }
-  const block = source.blocks.get(target.blockId)
-  return block ? { status: 'resolved', source, block }
-    : { status: 'missing', message: 'The original Note no longer contains this block. Its reference is preserved.' }
+  const own = source.blocks.get(target.blockId), declared = source.blockForwardings.some(item => item.blockId === target.blockId)
+  if (own && !declared) return { status: 'resolved', source, block: own }
+  if (!own && !declared) return { status: 'missing', message: 'The original Note no longer contains this block. Its reference is preserved.' }
+  const result = resolveObservedNoteBlock(knowledge.sources.map(item => ({ noteId: item.note.noteId, status: 'read', get blockIds() { return [...item.blocks.keys()] }, blockForwardings: item.blockForwardings,
+    ...(item.note.kind ? { kind: item.note.kind, fileIdentity: (knowledge.fileScope ?? knowledge.scope) === 'complete' && knowledge.invalid.length === 0 || knowledge.confirmedIncludes?.some(confirmed => confirmed.noteId === item.note.noteId && confirmed.workspaceId === item.location.workspaceId && confirmed.path === item.location.path && confirmed.revision === item.revision) ? 'confirmed' as const : 'unknown' as const } : {}) })), target)
+  if (result.status === 'resolved') {
+    const actual = knowledge.sources.find(item => item.note.noteId === result.target.noteId)!, block = actual.blocks.get(result.target.blockId)!
+    return { status: 'resolved', source: actual, block }
+  }
+  return { status: result.status, message: result.status === 'ambiguous' ? 'This original address has multiple saved forwarding declarations or duplicate file identities. Preserve it and inspect the original files.' : result.status === 'unknown' ? 'The original forwarded shared content is not confirmed. Read its original files; the address is preserved.' : 'The original Note no longer contains this block. Its reference is preserved.' }
+}
+
+/** The path hint cannot prove uniqueness. The observed scope and stable file identity do. */
+export function resolveNoteInclude(knowledge: NoteKnowledge, target: { noteId: string }, _workspaceId?: string, confirmed?: NoteLocation & { revision: string }): { status: 'resolved'; source: NoteSource } | { status: 'ambiguous' | 'missing' | 'unknown'; message: string } {
+  const sources = knowledge.sources.filter(source => source.note.noteId === target.noteId)
+  if (sources.length > 1) return { status: 'ambiguous', message: 'This shared file identity exists in multiple original files. Preserve the include and choose the original source.' }
+  const source = sources[0]
+  // A bounded reader may consume one identity already confirmed by the original graph.
+  // Its exact resource/revision must still match the actually loaded Markdown.
+  if (source?.note.kind === 'shared-block' && confirmed?.workspaceId === source.location.workspaceId && confirmed.path === source.location.path && confirmed.revision === source.revision) return { status: 'resolved', source }
+  if ((knowledge.fileScope ?? knowledge.scope) !== 'complete' || knowledge.invalid.length) return { status: 'unknown', message: 'The original shared file identity is not uniquely confirmed in this scope. Refresh its original files.' }
+  if (!source) return { status: 'missing', message: 'The shared file is missing from the confirmed scope. Its include is preserved.' }
+  if (source.note.kind !== 'shared-block') return { status: 'unknown', message: 'The exact file is not confirmed as shared content. Preserve the include and inspect its original header.' }
+  return { status: 'resolved', source }
 }
 
 /** Exact forward occurrences, not transitive embed expansion or the number of visible surfaces. */
