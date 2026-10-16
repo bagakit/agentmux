@@ -20,10 +20,7 @@
 .agent-information-reader[data-bookmark-key] .agent-information-reader__metadata { padding: 0 10px 9px; }
 .agent-information-reader[data-bookmark-key] .agent-information-reader__service { gap: 5px; padding: 0 10px 6px; font-size: var(--fs-micro); }
 .agent-information-reader[data-bookmark-key] .agent-information-reader__update { padding: 4px 10px; font-size: var(--fs-micro); }
-.agent-information-reader[data-bookmark-key] .agent-information-reader__footer { gap: 3px 5px; padding: 4px 20px 4px 7px; }
-.agent-information-reader[data-bookmark-key] .agent-information-reader__footer > button { gap: 4px; min-height: 24px; padding: 2px 4px; }
-.agent-information-reader[data-bookmark-key] .agent-information-reader__facts { min-width: 90px; gap: 2px 4px; }
-.agent-information-reader[data-bookmark-key] .agent-information-reader__end { margin-top: 10px; }
+.agent-information-reader[data-bookmark-key] .agent-information-reader__footer { padding-right: 24px; }
 .agent-information-reader[data-bookmark-key] .agent-input-recall { margin-top: 7px; padding-top: 6px; }
 .agent-information-reader[data-bookmark-key] .agent-input-recall__entry { height: 44px; gap: 6px; padding-block: 3px; }
 .agent-information-reader[data-bookmark-key] .agent-input-recall__excerpt { max-height: 26px; line-height: 13px; }
@@ -32,6 +29,6 @@
 .agent-information-reader[data-bookmark-key] .agent-input-recall__thumbnail { flex-basis: 30px; }
 .agent-information-reader[data-bookmark-key] .agent-input-recall__original > header { gap: 6px; padding: 5px 10px; }
 .agent-information-reader[data-bookmark-key] .agent-input-recall__original-body { padding: 8px 10px; font-size: var(--fs-meta); line-height: 1.5; }
-@container agent-bookmark (max-width: 380px) {
+@container agent-bookmark (max-width: 280px) {
   .agent-information-reader[data-bookmark-key] .agent-information-reader__footer > .agent-information-reader__facts { flex: 1 0 100%; min-width: 0; }
 }

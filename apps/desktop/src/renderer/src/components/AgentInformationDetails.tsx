@@ -14,7 +14,7 @@ const tabs = [['usage', 'Usage'], ['goals', 'Goals'], ['messages', 'Messages'], 
 /** A quiet, held-fact entry; unknown metrics do not become a first-screen form. */
 export function AgentInformationSummary({ usage, goalLinks }: { usage?: AgentTurnUsage | undefined; goalLinks?: FocusGoalLinks | undefined }) {
   const used = contextUsedPercent(usage?.context)
-  return <><span>{used === null ? 'Usage' : `${100 - used}% context left`}</span>
+  return <><span title={used === null ? 'Agent usage' : `${100 - used}% context remaining`}>{used === null ? 'Details' : `${100 - used}% ctx`}</span>
     {usage?.cumulative ? <small>{formatTokenCount(usage.cumulative.totalTokens)} tokens</small> : null}
     {goalLinks?.confirmedCount ? <small>{goalLinks.confirmedCount} {goalLinks.confirmedCount === 1 ? 'Goal' : 'Goals'}</small> : null}</>
 }
