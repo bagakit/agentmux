@@ -1453,6 +1453,8 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
 }
 
 export type AgentPrivateNativeActor = Readonly<{ protocolId: string; actorId: string; lifecycleOperationId: string; token: string;
+  /** Frozen launch capability; native input alone does not imply a frontend control channel. */
+  frontendControl?: true;
   /** Original Provider invocation, distinct from Runtime's bootstrap plan. No bootstrap JSON decoding. */
   launch: { command: string; args: string[] } }>
 
