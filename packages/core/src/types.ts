@@ -1308,13 +1308,14 @@ export type AgentTerminalHandshakeState = {
  *
  * `unknown` is intentional: a missing capability receipt is not evidence that the Agent itself is
  * broken. `mode: 'degraded'` tells clients that Core continues to accept input using CtxMux's
- * authoritative cursor, while the optional handshake receipt remains absent. The record is cleared
+ * authoritative cursor, while the optional handshake receipt remains absent or unacknowledged. The record is cleared
  * when a later handshake is acknowledged or when the Run is replaced.
  */
 export type AgentTerminalCapabilityState = {
   state: 'unknown'
   mode: 'degraded'
-  reason: 'handshake-timeout'
+  reason: 'handshake-timeout' | 'handshake-unconfirmed'
+  diagnostic?: { code: string; message: string }
   run: AgentMuxRunRef
   observedAt: number
 }
