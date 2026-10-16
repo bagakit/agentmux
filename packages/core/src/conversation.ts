@@ -96,7 +96,7 @@ function adaptConversationTimeline(input: ConversationProjectionInput & { routeH
       content: user?.content ?? contentParts.flatMap(part => part.kind === 'text' ? [part.text] : []).join('\n'), contentParts,
       ...recordedTime(original.kind === 'native' ? original.item.startedAt : original.item.createdAt),
       author: event?.author ?? user?.author ?? conversationRecordAuthor(record, input.agentSessionId),
-      ...(user ? { input: user } : {}), original, role: event?.role ?? conversationRecordRole(record),
+      ...(user ? { input: { ...user, ...(record.reference ? { sourceRecord: { record: record.reference, revision: record.revision } } : {}) } } : {}), original, role: event?.role ?? conversationRecordRole(record),
       ...(event ? { event } : {}), records: event ? event.recordIds.map(id => records.get(id)!) : [record] }
   }
   function parts(slots: ConversationEvent['content']): readonly AgentSessionHistoryContentPart[] {
