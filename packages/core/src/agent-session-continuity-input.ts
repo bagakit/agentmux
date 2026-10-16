@@ -12,7 +12,7 @@ import type { AgentProviderRegistry } from './agent-provider.js'
 import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { composeAgentPrompt } from './agent-outbound-message.js'
+import { composeAgentPrompt, composeAgentResumePrompt } from './agent-outbound-message.js'
 import { observePromptInput } from './prompt-submission.js'
 
 const digest = (text: string) => createHash('sha256').update(text).digest('base64url')
@@ -33,7 +33,7 @@ export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperat
   // Automatic continuation is admitted after the original resume commits, never as launch argv.
   const input = fresh
   if (!input) return
-  const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
+  const composed = composeAgentResumePrompt(input.prompt, input.agentMuxNote)
   if (!composed.text.trim()) return
   return { input: structuredClone(input), prompt: composed.text, digest: digest(composed.text),
     message: { ...(input.prompt.trim() ? { userContent: input.prompt } : {}), ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
@@ -60,6 +60,7 @@ export function createContinuityInputDelivery(operation: AgentMuxContinuityOpera
   if (!inputs?.reminder.trim() && !inputs?.continuation.trim()) return
   const previousInput = operation.previousInput ?? { scope: 'typed-prompt' as const, outcome: 'unknown' as const }
   const reminder = operation.launchInput?.input.agentMuxNote ?? recoveryReminder(operation)
+  const systemContext = composeAgentResumePrompt(inputs.continuation, reminder).systemContext
   const part = (text: string) => ({ selected: Boolean(text.trim()), status: text.trim() ? 'waiting' as const : 'not-selected' as const, text, digest: digest(text) })
   return {
     context: { agentSessionId: operation.agentSessionId, previousRun: { ...operation.previousRun }, newRun: { ...operation.newRun },
@@ -68,12 +69,18 @@ export function createContinuityInputDelivery(operation: AgentMuxContinuityOpera
       submissionId: 'continuity-' + digest(JSON.stringify([operation.agentSessionId, operation.operationId, operation.newRun])) },
     ...(initialInputByte === undefined ? {} : { initialInputByte }),
     phase: operation.launchInput?.state === 'launch-carried' ? 'accepted' : 'waiting', reason: operation.launchInput?.state === 'launch-carried' ? 'original-input-launch-carried' : 'original-input-admission-pending', observedAt: Date.now(),
-    reminder: part(reminder), continuation: part(inputs.continuation),
+    reminder: part(reminder), continuation: part(inputs.continuation), ...(systemContext ? { systemContext } : {}),
     ...(operation.launchInput?.state === 'launch-carried' && operation.launchInput.key ? {
       receipt: { key: structuredClone(operation.launchInput.key), status: 'launch-carried' as const, observedAt: Date.now() },
       reminder: { ...part(reminder), ...(reminder.trim() ? { status: 'accepted' as const, receiptRef: structuredClone(operation.launchInput.key) } : {}) },
       continuation: { ...part(inputs.continuation), ...(inputs.continuation.trim() ? { status: 'accepted' as const, receiptRef: structuredClone(operation.launchInput.key) } : {}) } } : {})
   }
+}
+
+/** Read the original packet, including an older packet's original recipe.
+ * Neither dispatch nor reconciliation recomposes rules from today's guide. */
+function recoverySystemContext(delivery: AgentMuxContinuityInputDelivery): string | undefined {
+  return delivery.systemContext ?? (delivery.reminder.selected ? delivery.reminder.text : undefined)
 }
 
 type Dependencies = {
@@ -213,7 +220,7 @@ export class AgentSessionContinuityInputs {
     if (this.controller.signal.aborted) return true
     if (!record) return false
     const claim = record.admission
-    const composed = composeAgentPrompt(delivery.continuation.text, delivery.reminder.selected ? delivery.reminder.text : undefined)
+    const composed = composeAgentPrompt(delivery.continuation.text, recoverySystemContext(delivery))
     if (!claim?.intent || !isDeepStrictEqual(claim.inputKey, delivery.key) || record.run.runId !== delivery.key.expectedRun.runId ||
       claim.intent.prompt !== composed.text || claim.intent.message?.userContent !== (delivery.continuation.text.trim() ? delivery.continuation.text : undefined) ||
       claim.intent.message?.systemContext !== composed.systemContext) {
@@ -285,7 +292,7 @@ export class AgentSessionContinuityInputs {
       await this.phase(id, operationId, 'dispatching', 'original-input-dispatching')
       await this.deps.submit({ agentSessionId: id, expectedRun: delivery.key.expectedRun, afterSubmissionId: null,
         operationId: delivery.key.submissionId, prompt: delivery.continuation.text, signal: this.controller.signal,
-        ...(delivery.reminder.selected ? { agentMuxNote: delivery.reminder.text } : {}) }, {
+        ...(recoverySystemContext(delivery) === undefined ? {} : { agentMuxNote: recoverySystemContext(delivery)! }) }, {
         requestSignal: this.controller.signal, assertCurrent: () => this.qualify(id, operationId, delivery, true)
       })
       if (!await this.receipt(id, operationId, delivery)) await this.phase(id, operationId, 'unknown', 'original-input-receipt-unconfirmed')

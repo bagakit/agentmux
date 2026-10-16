@@ -63,7 +63,7 @@ import { runBoundedReconnect } from './ctxmux-reconnect.js'
 import { judgeReconnectFlap, shouldClearFlapLedger } from './ctxmux-reconnect-budget.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { composeAgentLaunchPrompt, composeAgentPrompt } from './agent-outbound-message.js'
+import { composeAgentLaunchPrompt, composeAgentPrompt, composeAgentResumePrompt } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor, type AgentCapabilityBinding } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import {
@@ -4140,6 +4140,7 @@ export class AgentMuxClient {
       this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, initialAuthor)
     }
     const intentDigest = admitted?.intentDigest ?? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor)
+    const contextRequested = Boolean(forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim())
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
     const existing = await this.readCreationSession(agentSessionId)
@@ -4149,7 +4150,7 @@ export class AgentMuxClient {
         JSON.stringify(existing.forkedFrom) !== JSON.stringify(forkSource) || existing.creation.intentDigest !== intentDigest) {
         throw new AgentMuxError('This creation operation is bound to another source or created Session.', 'AGENT_FORK_OPERATION_CONFLICT')
       }
-      return { session: structuredClone(existing), promptConfirmed: existing.creation.agentMuxContext === 'confirmed' &&
+      return { session: structuredClone(existing), promptConfirmed: (!contextRequested || existing.creation.agentMuxContext === 'confirmed') &&
         (existing.creation.initialPrompt === 'not-requested' || existing.creation.initialPrompt === 'confirmed'), creation: existing.creation }
     }
     const pending = await this.registry.claimCreate(agentSessionId, lifecycleOperationId, intentDigest)
@@ -4431,13 +4432,16 @@ export class AgentMuxClient {
       this.publisher.publishRunState(this.projectRun(run, readySession), agentSessionId)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
-      const promptConfirmed = await this.deliverPostLaunchPrompt(
+      const inputConfirmed = deferredPrompt.trim() ? await this.deliverPostLaunchPrompt(
         provider, readySession, run, lifecycleOperationId, deferredPrompt, {
           ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
           ...(originalPrompt?.trim() ? { userContent: originalPrompt } : {}),
           ...(initialEnvelope?.senderSessionId ? { authorAgentSessionId: initialEnvelope.senderSessionId } : {})
         }
-      )
+      ) : Boolean(launchPrompt.trim())
+      // Empty deferred text says nothing about context delivery. Native takeover
+      // has no separate platform-context carrier; retain its no-input restoration.
+      const promptConfirmed = inputConfirmed || !composed.text.trim() && !contextRequested && !input.prompt?.trim()
       if (composed.systemContext) {
         await this.recordMessageAfterSideEffect(
           readySession,
@@ -4467,7 +4471,7 @@ export class AgentMuxClient {
         intentDigest,
         ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}),
         initialPrompt: input.prompt?.trim() ? (promptConfirmed ? 'confirmed' : 'unconfirmed') : 'not-requested',
-        agentMuxContext: promptConfirmed ? 'confirmed' : 'unconfirmed'
+        ...(contextRequested || composed.systemContext ? { agentMuxContext: composed.systemContext && inputConfirmed ? 'confirmed' as const : 'unconfirmed' as const } : {})
       }
       // Input has already happened. A save observation failure cannot revoke a healthy Run or
       // authorize sending again. Return the actual receipt; a later read keeps the durable unknown.
@@ -5074,10 +5078,12 @@ export class AgentMuxClient {
     if (expectedRun && previous && !sameRun(previous.run, expectedRun)) {
       throw new AgentMuxError('Agent Session changed before native resume.', 'STALE_AGENT_SESSION')
     }
-    const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
+    const frozenInput = continuity?.launchInput
+    const composed = frozenInput ? { text: frozenInput.prompt, systemContext: frozenInput.message.systemContext }
+      : composeAgentResumePrompt(input.prompt, input.agentMuxNote)
     assertAgentPromptSize(composed.text)
     const prompt = composed.text || undefined
-    const message: AgentPromptMessageContent = {
+    const message: AgentPromptMessageContent = frozenInput?.message ?? {
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
       ...(input.prompt?.trim() ? { userContent: input.prompt } : {})
     }
@@ -5354,7 +5360,8 @@ export class AgentMuxClient {
       try {
         try {
           persisted = await this.registry.commitLifecycle(reservation, next)
-          if (persisted?.continuity?.launchInput?.key) await this.recordAcceptedInput(persisted.continuity.launchInput.key, persisted.updatedAt)
+          const carried = persisted?.continuity?.launchInput
+          if (persisted && carried?.delivery === 'launch' && carried.state === 'launch-carried' && carried.key) await this.recordAcceptedInput(carried.key, persisted.updatedAt)
         } catch (error) { persisted = this.retainUnconfirmedLifecycle(error, next); readySession = persisted }
         // The Store atomically preserves a cancellation accepted after prepare. Refresh that exact
         // commit before publishing or observing the new binding; a stale prepared image cannot revive it.
@@ -5838,7 +5845,7 @@ export class AgentMuxClient {
         const launchInput = prior?.launchInput ?? prepareContinuityLaunchInput(receipt, catalog!,
           agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId), input.input)
         if (launchInput) receipt.launchInput = launchInput
-        const originalPrompt = composeAgentPrompt(receipt.launchInput?.input.prompt, receipt.launchInput?.input.agentMuxNote).text
+        const originalPrompt = receipt.launchInput?.prompt ?? ''
         const { plan } = this.buildResumePlan(current, input, originalPrompt || undefined)
         launchExecutable = plan.command
         capability = await this.probeAgent(current.providerId, plan.command, { workspacePath: current.workspacePath, env: terminalEnvironment(plan.env) })
