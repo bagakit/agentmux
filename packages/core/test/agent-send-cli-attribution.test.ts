@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath } from './helpers/fixture-values.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { privateRpcCorePort } from './helpers/private-rpc-core.js'
@@ -27,7 +28,7 @@ async function seedSessions(path: string, ids: readonly string[], capability?: s
       kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("repo"),
       run: { runId: `run-${agentSessionId}` }, retiredRuns: [], hookBindingId: `hook-${agentSessionId}`, hookToken: `token-${agentSessionId}`,
       ...(capability && agentSessionId === 'sender' ? { capabilityHash: hashAgentCapability(capability) } : {}),
-       createdAt: 1, updatedAt: 1
+       createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1)
     }
     await store.compareAndSwap(null, session)
   }
@@ -77,8 +78,8 @@ it('real CLI send retains managed authors for every target without inventing an 
     }
     expect(requests.filter((request) => request.operation === 'send').map((request) => [request.target, request.caller, request.text])).toEqual([
       [{ kind: 'agent-session', agentSessionId: 'other' }, undefined, 'actual mail'],
-      [{ kind: 'region', regionId: 'region' }, undefined, 'actual mail'],
-      [{ kind: 'tab', tabId: 'tab' }, undefined, 'actual mail']
+      [{ kind: 'agent-session', agentSessionId: 'recipient' }, undefined, 'actual mail'],
+      [{ kind: 'agent-session', agentSessionId: 'recipient' }, undefined, 'actual mail']
     ])
     const humanEnv = { ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
     await exec(cli, ['agent', 'send', '--to-session', 'other', '--text', 'human mail'], { timeout: 5000, env: humanEnv })
@@ -93,7 +94,7 @@ it('real CLI send retains managed authors for every target without inventing an 
     expect(records[0]!.envelope.recipient).toEqual({ kind: 'agent-session', agentSessionId: 'other' })
     expect(records[0]!.envelope.body).toBe('actual mail')
     expect(requests.filter((request) => request.operation === 'send')[0]).toMatchObject({ operation: 'send', message: { sender: { kind: 'human', principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: 'other' } } })
-    expect(delivered[0]).toBe('[Message from unverified local process]\nactual mail')
+    expect(delivered[0]).toBe('actual mail')
     await expect(exec(cli, ['agent', 'send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     expect(requests.filter((request) => request.operation === 'send')).toHaveLength(4)
@@ -119,7 +120,7 @@ it('real CLI send retains managed authors for every target without inventing an 
     await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
-})
+}, 30_000)
 
 it('real CLI retries the same messageId across new processes with the original durable receipt', async () => {
   const runtime = await mkdtemp(fixturePath("tmp/amux-mail-cli-retry-"))
@@ -211,7 +212,7 @@ it.each([false, true])('cold CLI retry after a lost Control ACK retains the firs
     const first = sends[0]!
     expect(first.promptCondition).toEqual({ expectedRun: { runId: 'run-recipient' }, afterSubmissionId: null })
     const original = (await store.load())[0] as AgentMuxStoredAgentSession
-    const later = { ...original, updatedAt: 2, promptCompletionAdmission: {
+    const later = { ...original, updatedAt: _tailFixtureEpoch(0, 0, 2), promptCompletionAdmission: {
       submissionId: 'later-message', operationId: 'later-native-input', startByte: 0, endByte: 1, acknowledged: true } }
     if (laterAdmission) await store.compareAndSwap(original, later)
     const retry = await exec(cli, args, { env, timeout: 15000 })

@@ -1,40 +1,52 @@
 import { runA2aProof } from './lib/a2a-proof.mjs'
 
+const delivery = ['packages/core/test/client-agent-message-delivery.test.ts']
+const codec = ['packages/core/test/agent-message-render.test.ts']
+const upgrade = ['packages/core/test/original-input-wire-upgrade.test.ts']
+
+// Wire cutover and original Input reconciliation share the actual public send
+// consumer. Conversation presentation and product restart own separate gates.
 await runA2aProof({
   name: 'a2a-message-delivery-proof',
-  tests: ['packages/core/test/client-agent-message-delivery.test.ts', 'packages/core/test/ctxmux-run-adapter-decoder-seam.test.ts'],
-  regressionTests: ['apps/desktop/test/task-region-restart.test.ts', 'apps/desktop/test/first-execution-agent-restore.test.ts', 'apps/desktop/test/first-execution-ipc.test.ts'],
-  sourceInputs: ['packages/core/src/client.ts', 'packages/core/src/agent-provider.ts', 'packages/core/src/agent-global-message-queue.ts',
-    'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/agent-message-render.ts', 'packages/core/src/agent-session-id.ts',
+  tests: [...delivery, ...codec, ...upgrade, 'packages/core/test/agent-message-leading-context.test.ts',
+    'packages/core/test/agent-outbound-message.test.ts', 'packages/core/test/agent-send-cli-attribution.test.ts'],
+  sourceInputs: ['packages/core/src/client.ts', 'packages/core/src/agent-capability.ts',
+    'packages/core/src/agent-global-message-queue.ts', 'packages/core/src/agent-message-render.ts',
+    'packages/core/src/agent-outbound-message.ts', 'packages/core/src/agent-messaging-guidance.ts',
+    'packages/core/src/public-rpc-server.ts', 'packages/core/src/public-rpc-service.ts',
+    'packages/core/test/helpers/previous-core-wire.ts', 'packages/core/test/helpers/public-rpc-owner.ts',
+    'packages/core/test/helpers/object-cli-rpc.ts',
     'packages/core/scripts/verify-a2a-message-delivery.mjs', 'packages/core/scripts/lib/a2a-proof.mjs'],
-  environment: ({ url }) => ({ AGENTMUX_TEST_A2A_CLIENT: url('client.js'), AGENTMUX_TEST_A2A_ADAPTER: url('ctxmux-run-adapter.js') }),
+  environment: ({ url }) => ({ AGENTMUX_TEST_A2A_CLIENT: url('client.js'), AGENTMUX_TEST_A2A_RENDER: url('agent-message-render.js') }),
   callers: [
-    { symbol: 'submitAgentMessage', path: 'apps/desktop/src/main/runtime-controller.ts' },
-    { symbol: 'runtime.submitMessage', path: 'apps/desktop/src/main/ipc.ts' },
-    { symbol: 'api.sessions.submitMessage', path: 'apps/desktop/src/renderer/src/store.ts' },
-    { symbol: 'sessions:submitMessage', path: 'apps/desktop/src/preload/index.ts' },
-    { symbol: 'initialMessage', path: 'apps/desktop/src/renderer/src/lib/space-agent-control.ts' },
-    { symbol: 'authorizeAgentCaller', path: 'packages/core/src/agentmux.ts' }
+    { symbol: 'submitAgentMessage', path: 'packages/core/src/public-rpc-service.ts' },
+    { symbol: 'startDiscussion', path: 'packages/core/src/public-rpc-service.ts' },
+    { symbol: 'client.call(method, invocation.params', path: 'packages/core/src/agentmux.ts' },
+    { symbol: 'initialMessage', path: 'apps/desktop/src/renderer/src/lib/space-agent-control.ts' }
   ],
   mutations: [
-    { label: 'sender-authority-disconnected', file: 'client.js', before: 'await this.authorizeAgentMessage({ capability:', after: 'if (false) await this.authorizeAgentMessage({ capability:' },
-    { label: 'actual-send-source-disconnected', file: 'client.js', before: 'prompt: renderAgentMuxMessageEnvelope(envelope)', after: 'prompt: envelope.body' },
-    { label: 'actual-initial-source-disconnected', file: 'client.js', before: 'const originalPrompt = initialEnvelope ? renderAgentMuxMessageEnvelope(initialEnvelope) : input.prompt;', after: 'const originalPrompt = input.prompt;' },
-    { label: 'durable-intent-before-input-disconnected', file: 'client.js',
-      before: "const queued = await this.messageQueue.append(envelope);\n        if (['delivered', 'accepted', 'replied'].includes(queued.delivery.state))\n            return;\n        if (queued.delivery.state !== 'queued')\n            throw new AgentMuxError('This message has a final delivery outcome.', 'AGENT_DELIVERY_STATE_INVALID');\n        const originalCondition = await this.messageQueue.preparePrompt(envelope.messageId, async () => condition);",
-      after: 'const originalCondition = condition;' },
-    { label: 'current-authority-replaced-by-cache', file: 'client.js',
-      before: "const session = (await loadAgentSessions(this.store)).find((candidate) => candidate.agentSessionId === agentSessionId && candidate.hostId === 'local');",
-      after: 'const session = this.registry.get(agentSessionId);' },
-    { label: 'uncertain-first-input-falsely-confirmed', file: 'client.js', before: "const promptConfirmed = existing.creation.initialPrompt === 'confirmed';", after: 'const promptConfirmed = true;' },
-    { label: 'original-first-run-backfilled-after-resume', file: 'client.js', before: 'if (!originalCreation)', after: 'if (false)' },
-    { label: 'human-launch-bytes-trimmed', file: 'agent-provider.js', before: "const prompt = context.prompt.trim() ? context.prompt : '';", after: 'const prompt = context.prompt.trim();' },
-    { label: 'first-dispatch-run-condition-disconnected', file: 'agent-global-message-queue.js',
-      before: 'message.envelope.recipientRunId === null && message.promptCondition', after: 'false' },
-    { label: 'unsupported-event-fabricates-exit', file: 'ctxmux-run-adapter.js', before: 'if (event.type !== "exited" && event.type !== "interrupted")', after: 'if (false)' },
-    { label: 'unauthorized-message-pauses-healthy-progress', file: '../../apps/desktop/src/main/ipc.ts',
-      projectTests: ['apps/desktop/test/first-execution-ipc.test.ts'],
-      before: "    await args.runtime.submitMessage(session, message)\n    pauseUserProgress(session, 'Paused for your message.')",
-      after: "    pauseUserProgress(session, 'Paused for your message.')\n    await args.runtime.submitMessage(session, message)" }
+    { label: 'sender-capability-disconnected', file: 'agent-capability.js', tests: delivery,
+      before: 'if (!sameHash(hashAgentCapability(raw), binding.capabilityHash))', after: 'if (false)' },
+    { label: 'actual-send-source-disconnected', file: 'client.js', tests: delivery,
+      before: 'operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope),',
+      after: 'operationId: envelope.messageId, prompt: envelope.body,' },
+    { label: 'actual-initial-source-disconnected', file: 'client.js', tests: delivery,
+      before: 'const originalPrompt = initialEnvelope ? renderAgentMuxMessageEnvelope(initialEnvelope) : input.prompt;',
+      after: 'const originalPrompt = input.prompt;' },
+    { label: 'authored-body-trimmed', file: 'agent-message-render.js', tests: codec,
+      before: '${envelope.body}\\n<reminder>', after: '${envelope.body.trim()}\\n<reminder>' },
+    { label: 'authored-example-mistaken-for-reminder', file: 'agent-message-render.js', tests: codec,
+      before: "text.lastIndexOf('\\n<reminder>')", after: "text.indexOf('\\n<reminder>')" },
+    { label: 'original-wire-recomposed', file: 'client.js', tests: upgrade,
+      before: 'const retainWire = frozen &&', after: 'const retainWire = false &&' },
+    { label: 'current-authority-replaced-by-cache', file: 'client.js', tests: delivery,
+      before: 'await this.registry.refresh(sender.agentSessionId, sender.run);', after: '/* stale registry */' },
+    { label: 'durable-intent-before-input-disconnected', file: 'client.js', tests: delivery,
+      before: `const queued = await this.messageQueue.append({ ...envelope,
+            sourceChannel, ...(sourceDevice ? { sourceDevice } : {}),
+            ...(admissionIntent.kind !== 'exact-condition' ? { admissionIntent } : {}),
+            ...(input.execution === undefined ? {} : { execution: input.execution }) }, admissionIntent.kind !== 'exact-condition' && !originalAdmission ? { inputEnvironment: this.inputSavedEnvironment(recipient),
+            originalClaimAbsent: async () => !await this.inspectAgentPromptSubmission(key) } : undefined);`,
+      after: "const queued = { envelope, delivery: { state: 'queued' } };" }
   ]
 })
