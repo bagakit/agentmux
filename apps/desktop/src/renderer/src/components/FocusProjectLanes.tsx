@@ -1,7 +1,8 @@
 import { HostBadge } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useMemo, useState, type ReactNode, type Ref } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode, type Ref, type ComponentProps, type SyntheticEvent } from 'react'
+import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import { focusProjectKey, type FocusProjectLane, type FocusRetainedProject } from '../lib/focus-project-lanes'
 import { createFocusTimeFormatters } from '../lib/focus-timeline-ruler'
 import { ProjectIcon } from './ProjectIcon'
@@ -29,6 +30,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
   const hosts = useAppStore(state => state.config?.hosts)
+  const descriptionId = useId()
   const [now, setNow] = useState(Date.now)
   useEffect(() => {
     if (!visible) return
@@ -38,29 +40,46 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, on
   }, [visible])
   return <section className="focus-project-lanes" aria-label="Project contexts">
     <div className="focus-project-lanes__rows" ref={rowsRef}>
-      {lanes.map(lane => <article className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-source={origins?.get(lane.id)?.kind} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
+      {lanes.map(lane => <FocusLaneArticle name={lane.name} summary={lane.summary} visible={visible} className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-source={origins?.get(lane.id)?.kind} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
           <FocusProjectOrigin origin={origins?.get(lane.id)} />
-          <button type="button" className="focus-project-lanes__axis" aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={[`${lane.name} · ${lane.activeAgentIds.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId), lane.summary].filter(Boolean).join('\n')} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
+          <button type="button" className="focus-project-lanes__axis" aria-describedby={lane.summary ? descriptionId + lane.id : undefined} aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={[`${lane.name} · ${lane.activeAgentIds.length} live`, hosts?.find(host => host.id === lane.hostId)?.label ?? lane.hostId, displayPath(lane.path, lane.hostId)].filter(Boolean).join('\n')} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{lane.projectWorkspaceId ? <ProjectIcon workspaceId={lane.projectWorkspaceId} name={lane.labels[0]!} /> : null}
                 {lane.labels.map((label, index) => <span className="focus-project-lanes__label" key={index}>{index ? <ThemeNavigationDisclosureIcon size={10} /> : null}{index && lane.topicId && index === lane.labels.length - 1 ? <ThemeObjectIdentifierIcon size={11} /> : index ? <ThemeObjectBranchIcon size={11} /> : null}<strong>{label}</strong></span>)}</>}
-            <HostBadge context="Host" host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
+            <HostBadge context="Host" compact host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
           </button>
-          {lane.summary ? <span className="focus-project-lanes__summary" title={lane.summary}>{lane.summary}</span> : null}
+          {lane.summary ? <span id={descriptionId + lane.id} className="focus-project-lanes__summary">{lane.summary}</span> : null}
           <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} />
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
         </span>
         )}</div>
-      </article>)}
+      </FocusLaneArticle>)}
       {recentProjects.map(project => <article className="focus-project-lanes__row" data-project-id={project.projectId} data-project-key={project.key} data-observed-project="true" key={`observed:${project.key}`}>
         <FocusProjectObservation project={project} recent onRead={item => onRead?.(item)} />
       </article>)}
     </div>
     {lanes.length === 0 && recentProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
   </section>
+}
+
+/** Inspect held Topic text without growing or repacking the original lane. */
+function FocusLaneArticle({ name, summary, visible, children, ...props }: ComponentProps<'article'> & { name: string; summary: string | null; visible: boolean }) {
+  const tooltip = useWorkbenchNameTooltip(name, summary ?? '', !visible || !summary)
+  const inspect = (event: SyntheticEvent<HTMLElement>) => {
+    const heading = event.currentTarget.querySelector<HTMLElement>('.focus-project-lanes__heading')
+    const target = event.target as Node
+    if (!event.currentTarget.contains(target)) return
+    // The Agent's own preview takes priority over its lane's background text.
+    if (target !== event.currentTarget && !heading?.contains(target)) { tooltip.hide(); return }
+    tooltip.showFor(heading ?? event.currentTarget)
+  }
+  return <article {...props} onMouseOver={inspect} onMouseLeave={tooltip.hide}
+    onFocus={inspect} onBlur={event => {
+      if (!event.currentTarget.contains(event.relatedTarget)) tooltip.hide()
+    }}>{children}{tooltip.content}</article>
 }
 
 function FocusProjectOrigin({ origin }: { origin: FocusLaneOrigin | undefined }) {
