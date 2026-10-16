@@ -168,7 +168,7 @@ it.each(['headers', 'body'] as const)('ends only the original QR init observatio
   })
   const original = lastBegin!.operation
   assert.ok(original)
-  expect(original.diagnostic).toEqual({ stage: 'authentication', code: 'native-unconfirmed', step: 'initialize', failure: phase === 'headers' ? 'transport-unconfirmed' : 'invalid-response', ...(phase === 'body' ? { httpStatus: 200 } : {}) })
+  expect(original.diagnostic).toEqual({ stage: 'authentication', code: 'native-unconfirmed', step: 'initialize', failure: phase === 'headers' ? 'transport-unconfirmed' : 'invalid-response', ...(phase === 'body' ? { httpStatus: 200, boundary: 'json' } : {}) })
   expect(initSignals[0]?.aborted).toBe(true)
   expect(platform.map(call => call.path)).toEqual(['/accounts/qrlogin/init'])
   expect(dom.container.querySelector('[data-enrollment-code]')).toBeNull()
