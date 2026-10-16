@@ -147,6 +147,30 @@ it.each(['', 'Updated by the original page'])('actual installation preserves rec
   expect(browser().title).toBe(title)
 })
 
+it('actual installation preserves an original unconfirmed Browser without requiring it to open', async () => {
+  const f = await fixture()
+  const originalBrowser = io.before!.workbench.tabs[1]!.regions[0]!
+  Object.assign(originalBrowser, { navigationId: null, nativeOwner: 'unconfirmed' })
+  Object.assign(browser(), { navigationId: null, nativeOwner: 'unconfirmed' })
+  const original = structuredClone(io.before)
+  const result = await install(f)
+  expect(result.ui.status).toBe('committed')
+  expect(io.cutovers).toBe(1)
+  expect(io.before).toEqual(original)
+  expect(browser().navigationId).toBeNull()
+  expect(browser().nativeOwner).toBe('unconfirmed')
+})
+
+it('actual installation still rejects replacing an original unconfirmed Browser identity', async () => {
+  const f = await fixture()
+  Object.assign(io.before!.workbench.tabs[1]!.regions[0]!, { navigationId: null, nativeOwner: 'unconfirmed' })
+  Object.assign(browser(), { navigationId: null, nativeOwner: 'unconfirmed', browserId: 'replacement' })
+  const error = await install(f).catch(error => error)
+  expect(error.message).toBe('The original workbench, Region descriptors or focus have not been restored.')
+  expect(error.transaction.ui.status).toBe('unknown')
+  expect(error.transaction.ui.continuity.before).toEqual(io.before)
+})
+
 const changes: [string, () => void][] = [
   ['tab order', () => after().layouts.workspace!.groups[0]!.tabOrder.reverse()],
   ['recent order', () => after().layouts.workspace!.groups[0]!.recentTabIds.reverse()],
@@ -189,7 +213,7 @@ it.each([
   expect(error.transaction.ui.status).toBe('unknown'); expect(error.transaction.ui.continuity.after).toEqual(io.after)
 })
 it.each([
-  ['missing navigation', () => { browser().navigationId = '' }],
+  ['missing navigation', () => { Object.assign(browser(), { navigationId: null, nativeOwner: 'unconfirmed' }) }],
   ['page error', () => { browser().error = 'PRIVATE_NAVIGATION_FAILED' }]
 ] as const)('actual installation keeps Browser qualification for %s', async (_name, change) => {
   const f = await fixture(); change()
