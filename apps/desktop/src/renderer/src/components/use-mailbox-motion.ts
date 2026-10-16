@@ -112,7 +112,6 @@ export function useMailboxMotion(panel: RefObject<HTMLDivElement | null>, dock: 
   }, [open, retaining, revision])
   useLayoutEffect(() => {
     cancel(); opening.current = null; origin.current = null
-    if (!visible && panel.current?.matches(':popover-open')) panel.current.hidePopover()
   }, [scope, visible])
   return { retaining, beforeToggle, captureSource, afterToggle(next: string) { if (next === 'open') nativeOpened() } }
 }

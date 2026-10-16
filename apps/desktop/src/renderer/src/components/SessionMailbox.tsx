@@ -165,7 +165,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const document = useWorkbenchDocument()
   const window = document.defaultView!
   const id = useId()
+  // Reading intent survives a hidden workface; the native popover may leave top layer meanwhile.
   const [open, setOpen] = useState(false)
+  const suspension = useRef<{ scope: string; phase: 'hidden' | 'restoring' } | null>(null)
   const [viewed, setViewed] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLDivElement>(null)
@@ -177,7 +179,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   useEffect(() => () => cancelClose(), [])
   function pin() { cancelClose(); preview.current = false; setViewed(true) }
   function enter(event: PointerEvent) {
-    if (event.pointerType !== 'mouse' || event.buttons !== 0) return
+    if (!visible || event.pointerType !== 'mouse' || event.buttons !== 0) return
     cancelClose()
     if (open) return
     preview.current = true
@@ -188,12 +190,12 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       .call(popover.current, { source: trigger.current! })
   }
   function leave(event: PointerEvent) {
-    if (event.pointerType !== 'mouse' || !preview.current) return
+    if (!visible || event.pointerType !== 'mouse' || !preview.current) return
     cancelClose()
     closeTimer.current = setTimeout(() => popover.current?.hidePopover(), 180)
   }
   useEffect(() => {
-    if (!open) return
+    if (!open || !visible) return
     // The current editor may consume Escape before native light-dismiss. Only a hover preview
     // handles it here; no focus moves and composing Escape remains owned by the editor/IME.
     const dismissPreview = (event: KeyboardEvent) => {
@@ -202,7 +204,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     }
     document.addEventListener('keydown', dismissPreview, true)
     return () => document.removeEventListener('keydown', dismissPreview, true)
-  }, [open, document])
+  }, [open, visible, document])
   const [folder, setFolder] = useState<Folder>('inbox')
   useEffect(() => { onHistoryVisible?.(open && visible && folder === 'user'); return () => onHistoryVisible?.(false) },
     [open, visible, folder, onHistoryVisible])
@@ -335,6 +337,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const localOnly = queued.filter(item => !item.inputOrigin || !journalKeys.has(inputMailboxKey(item.inputOrigin.hostId,item.inputOrigin.key)))
   const pendingIntents = queued.filter((item) => !item.archived && (item.inputControlled || !deliveredIds.has(item.id) && !deliveredIds.has(`prompt:${item.id}`)))
   const pending = pendingIntents.filter(item => !item.inputOrigin || !journalKeys.has(inputMailboxKey(item.inputOrigin.hostId,item.inputOrigin.key)))
+  const pendingCount = pendingIntents.length
   const archived = localOnly.filter(item => item.archived).map(item => ({...item,confirmed: item.confirmed || !item.inputControlled && deliveredIds.has(`prompt:${item.id}`)}))
   const hasUserInputs = pending.length + archived.length + userInputMailbox.items.length > 0
   // Re-evaluate priority only on opening. A new arrival never moves the reader's selected folder.
@@ -342,10 +345,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return receipts.unread.length ? 'inbox' : system.unread.length ? 'system' : hasUserInputs || sent.length ? 'user' : 'inbox'
   }
   useEffect(() => {
-    if (!open || !viewed) return
+    if (!open || !visible || !viewed) return
     if (folder === 'inbox' && !(selection?.scope === scope && selection.folder === 'inbox') && receipts.unread.length) receipts.acknowledge(receipts.unread)
     if (folder === 'system' && system.unread.length) system.acknowledge(system.unread)
-  }, [open, viewed, folder, receipts, system, selection, scope])
+  }, [open, visible, viewed, folder, receipts, system, selection, scope])
   const wanted = selection?.scope === scope && selection.folder === folder ? selection.key : null
   const selectedNotice = wanted && folder === 'system' ? notices.find(item => `notice:${item.id}:${serviceNoticeFingerprint(item)}` === wanted) : undefined
   const selectedQueue = wanted && folder === 'user' ? [...pending,...archived].find(item => `queue:${item.id}` === wanted) : undefined
@@ -404,7 +407,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     }
   }, [open, detail, selectedQueue, selection, scope, folder, id])
   useLayoutEffect(() => {
-    if (!open) return
+    if (!open || !visible) return
     const panel = popover.current!, editor = trigger.current!.closest<HTMLElement>('.composer')
     if (!editor) return
     const region = editor.closest<HTMLElement>('[data-workbench-region-id]') ?? editor
@@ -419,7 +422,31 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     const observer = new window.ResizeObserver(measure); observer.observe(editor); observer.observe(region)
     window.addEventListener('resize', measure)
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
-  }, [open, document])
+  }, [open, visible, document])
+  useLayoutEffect(() => {
+    const panel = popover.current!
+    if (suspension.current && suspension.current.scope !== scope) {
+      suspension.current = null
+      if (!panel.matches(':popover-open')) { setOpen(false); return }
+    }
+    if (!visible) {
+      cancelClose()
+      if (panel.matches(':popover-open')) {
+        suspension.current = { scope, phase: 'hidden' }
+        // Native presentation can open before its asynchronous toggle reaches React.
+        if (!open) {
+          setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null
+          if (!preview.current) setViewed(true)
+          setOpen(true)
+        }
+        panel.hidePopover()
+      }
+    } else if (open && suspension.current?.scope === scope && !panel.matches(':popover-open')) {
+      suspension.current = { scope, phase: 'restoring' }
+      ;(panel.showPopover as (options: { source: HTMLButtonElement }) => void)
+        .call(panel, { source: trigger.current! })
+    }
+  }, [open, visible, scope])
   const motion = useMailboxMotion(popover, dock, open, visible, scope)
   const readingMounted = open || motion.retaining
   // Retain the original reading DOM through exit paint so its native anchor baseline
@@ -435,7 +462,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       .find(node => node.dataset.recordKey === `queue:${intent.operationId}`)
     row?.closest<HTMLElement>('li[data-operation-id]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
   }, [open, folder, scope, selection])
-  const mailboxLabel = `Mailbox: A2A Inbox ${unread} unread in loaded messages, User Messages ${pending.length} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
+  const mailboxLabel = `Mailbox: A2A Inbox ${unread} unread in loaded messages, User Messages ${pendingCount} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
   function showUserMessages(operationId: string) {
     motion.captureSource(Array.from(dock.current?.querySelectorAll<HTMLElement>('[data-operation-id]') ?? []).find(node => node.dataset.operationId === operationId))
     explicitUserReveal.current = { scope, operationId }
@@ -460,7 +487,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </span> : null}
     </button>
     <div ref={popover} id={id} popover="auto" className="composer-mailbox" aria-label="Mailbox"
-      data-state={open ? 'open' : 'closed'} inert={!open}
+      data-state={open && visible ? 'open' : 'closed'} inert={!open || !visible}
       onBeforeToggle={event => {
         if (event.target !== event.currentTarget) return
         event.currentTarget.inert = event.newState !== 'open'
@@ -476,8 +503,17 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       onToggle={(event) => {
         if (event.target !== event.currentTarget) return
         const opening = event.newState === 'open'
-        if (opening) { setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null; if (!preview.current) setViewed(true) }
-        else { cancelClose(); preview.current = false; setViewed(false); focusAfter.current = null }
+        if (opening) {
+          const restoring = suspension.current?.scope === scope
+          suspension.current = null
+          if (!restoring) { setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null; if (!preview.current) setViewed(true) }
+        } else {
+          if (suspension.current?.scope === scope && suspension.current.phase === 'hidden') return
+          // A queued native close may have been superseded by the same surface reopening.
+          if (event.currentTarget.matches(':popover-open')) return
+          suspension.current = null
+          cancelClose(); preview.current = false; setViewed(false); focusAfter.current = null
+        }
         setOpen(opening)
         motion.afterToggle(event.newState)
       }}>
@@ -485,7 +521,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
         <button type="button" className="composer-tool" aria-label="Close mailbox" popoverTarget={id} popoverTargetAction="hide"
           onClick={() => trigger.current!.focus({ preventScroll: true })}><ThemeActionCloseIcon size={14} /></button></div>
       <div className="composer-mailbox__folders" role="tablist" aria-label="Mailbox folders">
-        {folders.map((name, index) => { const Icon = name === 'progress' ? ProgressIcon : folderIcons[name], count = name === 'inbox' ? receipts.unread.length : name === 'system' ? system.unread.length : name === 'user' ? pending.length : 0
+        {folders.map((name, index) => { const Icon = name === 'progress' ? ProgressIcon : folderIcons[name], count = name === 'inbox' ? receipts.unread.length : name === 'system' ? system.unread.length : name === 'user' ? pendingCount : 0
           const label = name === 'collaboration' ? 'Supervised collaboration' : name === 'progress' ? progressLabel : name === 'outbox' ? folderLabels[name] : `${folderLabels[name]}: ${count} ${name === 'user' ? 'pending' : name === 'inbox' ? 'unread in loaded messages' : name === 'system' ? 'unread' : 'loaded'}`
           return <button key={name} type="button" className={name === 'progress' || name === 'collaboration' ? 'composer-mailbox__utility-tab' : undefined} title={label} aria-label={label}
           id={`${id}-${name}-tab`} role="tab" aria-controls={`${id}-${name}`} aria-selected={folder === name}
@@ -567,7 +603,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div> : null}
       </div>
     </div>
-    <ModalAttachmentDismissal active={Boolean(open && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}
+    <ModalAttachmentDismissal active={Boolean(open && visible && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}
       onOwnerRemoved={() => popover.current?.hidePopover()}
       onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); popover.current?.hidePopover(); trigger.current?.focus({ preventScroll: true }) }} />
   </>
