@@ -1,3 +1,4 @@
+import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { spawn } from 'node:child_process'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
@@ -167,7 +168,7 @@ vi.mock('../src/main/browser-page-dispatch.js', () => ({
 
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
-import { BrowserOperationFileStore, BrowserOperationJournal, type BrowserOperationJournalDocument } from '../src/main/browser-operation-journal.js'
+import { BrowserOperationFileStore, BrowserOperationJournal, browserOperationAlreadyExistsError, type BrowserOperationJournalDocument } from '../src/main/browser-operation-journal.js'
 import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence.js'
 import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact.js'
 import type { BrowserResultArtifactReference, BrowserResultArtifactChunk } from '../src/shared/browser-result-artifact.js'
@@ -484,8 +485,8 @@ describe('human demonstration via the actual Manager → capture → recorder ch
 
   it('a recovered recording draft is interrupted and has no capture listener beyond its ordinary window pointer owner', async () => {
     const draft: BrowserDemonstrationDraft = { id: 'prior-draft', browserId: 'b1', navigationId: 'prior-nav',
-      url: 'https://example.invalid/', revision: 2, status: 'recording', startedAt: 1, updatedAt: 2,
-      steps: [{ id: 'prior-step', sequence: 1, recordedAt: 2, navigationId: 'prior-nav', source: 'native-human',
+      url: 'https://example.invalid/', revision: 2, status: 'recording', startedAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 2),
+      steps: [{ id: 'prior-step', sequence: 1, recordedAt: _tailFixtureEpoch(0, 0, 2), navigationId: 'prior-nav', source: 'native-human',
         method: 'fillInput', url: 'https://example.invalid/', args: [], inputKey: 'input-1', blockedReason: 'Supply a fresh parameter.' }] }
     const persisted: BrowserDemonstrationDocument = { version: 1, drafts: [draft] }
     const recorder = new BrowserDemonstrationRecorder({ load: async () => structuredClone(persisted), save: async () => {} })
@@ -532,7 +533,7 @@ describe('runScript waiting follows the Core capability effects', () => {
       // Existing operation feedback uses its own isolated world; waiting must not
       // execute a second business script through this native boundary.
       expect(contents.executeJavaScriptInIsolatedWorld.mock.calls
-        .filter(([worldId]) => worldId !== BROWSER_OPERATION_FEEDBACK_WORLD_ID)).toEqual([])
+        .filter(([worldId]: [number]) => worldId !== BROWSER_OPERATION_FEEDBACK_WORLD_ID)).toEqual([])
     } finally { release(); manager.dispose() }
   }, 30_000)
 
@@ -829,6 +830,46 @@ describe('runScript：驱动状态推到渲染进程', () => {
       true,
       false
     ])
+  }, 30_000)
+})
+
+describe('Browser operation identity cleanup', () => {
+  async function originalJournal() {
+    const directory = mkdtempSync(join(tmpdir(), 'browser-operation-start-'))
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(join(directory, 'operations.sqlite')))
+    await journal.start({ id: 'retained', browserId: 'b1', operator: { id: 'operator', name: 'Operator' }, summary: 'Original', url: 'https://fixture.invalid/' })
+    await journal.finish('retained', 'completed')
+    return { directory, journal }
+  }
+
+  it('detaches the just-acquired CDP session after duplicate start and keeps a fresh operation runnable', async () => {
+    const { directory, journal } = await originalJournal(), original = await journal.get('retained'), events = await journal.events()
+    const { manager, contents } = await managerWithBrowser(journal), close = vi.spyOn(contents, 'close')
+    try {
+      await expect(manager.runScript('b1', 'return await snapshot()', undefined, undefined, 'retained')).rejects.toMatchObject({ code: 'BROWSER_OPERATION_ALREADY_EXISTS' })
+      expect(contents.debugger.isAttached()).toBe(false); expect(createDispatch).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
+      expect(await journal.get('retained')).toEqual(original); expect(await journal.events()).toEqual(events)
+      await expect(manager.runScript('b1', 'return await snapshot()', undefined, undefined, 'fresh')).resolves.toMatchObject({ outcome: { kind: 'completed' }, runOperation: { id: 'fresh' } })
+      expect(dispatchCalls).toEqual([{ name: 'snapshot', args: [] }]); expect(contents.debugger.isAttached()).toBe(false)
+      expect(await journal.get('retained')).toEqual(original); expect(close).not.toHaveBeenCalled()
+    } finally { close.mockRestore(); manager.dispose(); await rm(directory, { recursive: true, force: true }) }
+  }, 30_000)
+
+  it('retains the exact typed start refusal and exposes cleanup warnings to the page and public caller', async () => {
+    const { directory, journal } = await originalJournal(), original = await journal.get('retained')
+    const { manager, contents, sentEvents } = await managerWithBrowser(journal)
+    const failure = Object.assign(browserOperationAlreadyExistsError(), { detail: 'Original refusal detail' })
+    const start = vi.spyOn(journal, 'start').mockRejectedValueOnce(failure), off = vi.spyOn(contents.debugger, 'off').mockImplementation(() => { throw new Error('Original listener cleanup unavailable') })
+    try {
+      const caught = await manager.runScript('b1', 'return await snapshot()', undefined, undefined, 'retained').catch(error => error)
+      expect(caught).toBe(failure); expect(caught).toMatchObject({ code: 'BROWSER_OPERATION_ALREADY_EXISTS', detail: 'Original refusal detail' })
+      expect(caught.message).toContain('Original listener cleanup unavailable')
+      expect(sentEvents().at(-1)?.browser.activity.warning).toContain('Original listener cleanup unavailable')
+      expect(contents.debugger.isAttached()).toBe(false); expect(createDispatch).not.toHaveBeenCalled()
+      expect(await journal.get('retained')).toEqual(original)
+      off.mockRestore()
+      await expect(manager.runScript('b1', 'return 7', undefined, undefined, 'fresh-after-cleanup')).resolves.toMatchObject({ result: 7, outcome: { kind: 'completed' } })
+    } finally { off.mockRestore(); start.mockRestore(); manager.dispose(); await rm(directory, { recursive: true, force: true }) }
   }, 30_000)
 })
 
@@ -1387,7 +1428,7 @@ describe('Browser RSI：operation 凭 id 可查可停，与发起它的那条连
     // 必须真的经过 journal 重载，不是手造一条 indeterminate 记录来自证。
     await new BrowserOperationFileStore(path).save({ writer: 'crash-fixture', revision: 1, operations: [{ metadata: {
       id: 'op:was-running', browserId: 'b1', operator: { id: 'agent:x', name: 'Agent' },
-      startedAt: 1, phase: 'running', summary: 'Agent is operating the Browser', url: 'https://example.invalid/'
+      startedAt: _tailFixtureEpoch(0, 0, 1), phase: 'running', summary: 'Agent is operating the Browser', url: 'https://example.invalid/'
     }, steps: [] }], events: [], maxEvents: 512 })
     const { manager: afterCrash } = await managerWithBrowser(
       new BrowserOperationJournal(new BrowserOperationFileStore(path))
@@ -2169,7 +2210,7 @@ describe('versioned task assets via the actual Browser Manager', () => {
       const saved = await version(f)
       const document = JSON.parse(await readFile(join(f.directory, 'assets.json'), 'utf8'))
       document.runs = [{ id: 'uncertain-run', assetId: saved.id, version: 1, browserId: 'b1', nextStep: 0,
-        status: 'running', operationIds: [], startedAt: 1, updatedAt: 2 }]
+        status: 'running', operationIds: [], startedAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 2) }]
       await writeFile(join(f.directory, 'assets.json'), JSON.stringify(document))
       f.manager.dispose()
       const restored = await managerWithBrowser(undefined, undefined, undefined, 'workspace-1', undefined,
