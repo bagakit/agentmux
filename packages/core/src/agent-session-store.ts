@@ -1216,6 +1216,8 @@ function terminalHandshake(
   return {
     run,
     operationId: string(source.operationId, 'terminalHandshake.operationId'),
+    ...(source.frontendId === undefined ? {} : { frontendId: string(source.frontendId, 'terminalHandshake.frontendId') }),
+    ...(source.outputAfterByte === undefined ? {} : { outputAfterByte: timestamp(source.outputAfterByte, 'terminalHandshake.outputAfterByte') }),
     inputByteRange: { startByte, endByte },
     acknowledged: source.acknowledged
   }

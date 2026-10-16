@@ -1,3 +1,4 @@
+import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
 import { listCodexNativeSessions, assertCodexNativeResumeSource } from './codex-native-catalog.js'
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
@@ -180,6 +181,8 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
   return defineAgentProvider({
     prepareManagedLaunch: prepareCodexManagedLaunch,
     prepareNativeInput: prepareCodexNativeInput,
+    observeTerminalFrontend: observeCodexTerminalFrontend,
+    reconnectTerminalFrontend: reconnectCodexTerminalFrontend,
     planManagedHooks: ({ workspacePath }) => createCodexManagedHookPlan(workspacePath),
     catalog: catalog({
       composer: {"skillRoots": [".agents/skills", ".codex/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/status", "description": "Session and usage"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/diff", "description": "Review changes"}]},

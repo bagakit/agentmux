@@ -3,7 +3,7 @@ import { JSONRPCClient } from 'json-rpc-2.0'
 
 /** A connection to the already authenticated actor, not another native server or thread owner. */
 export async function connectCodexNativeActor(endpoint: string, token: string, signal: AbortSignal,
-  name: 'agentmux_native_input' | 'agentmux_managed_resume') {
+  name: 'agentmux_native_input' | 'agentmux_managed_resume' | 'agentmux_frontend_reconnect') {
   signal.throwIfAborted()
   const ws = new WebSocket(endpoint, { headers: { Authorization: `Bearer ${token}` }, maxPayload: 4 * 1024 * 1024, handshakeTimeout: 2_000 })
   const client = new JSONRPCClient(request => new Promise<void>((resolve, reject) => {

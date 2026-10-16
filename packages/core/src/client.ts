@@ -1,3 +1,4 @@
+import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './agent-terminal-frontend.js'
 import { AgentSessionContinuitySupervisor } from './agent-session-continuity-supervisor.js'
 import { inspectAgentSessionInterruption } from './agent-session-interruption.js'
 import { confirmNativeInputAdoption, confirmNativeInputAdoptions } from './native-input-adoption.js'
@@ -537,7 +538,8 @@ function hookBindingIdentity(operationId: string): string {
 function terminalHandshakeOperationIdentity(
   providerId: AgentProviderId,
   runId: string,
-  handshake: AgentTerminalHandshake
+  handshake: AgentTerminalHandshake,
+  frontendId?: string
 ): string {
   return createHash('sha256')
     .update(JSON.stringify([
@@ -545,7 +547,8 @@ function terminalHandshakeOperationIdentity(
       providerId,
       runId,
       handshake.query,
-      handshake.response
+      handshake.response,
+      ...(frontendId ? [frontendId] : [])
     ]))
     .digest('base64url')
 }
@@ -933,6 +936,9 @@ export class AgentMuxClient {
   private readonly nativeStatusWatches = new Map<string, {
     key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<void>
     recordId?: string; sequence?: number
+  }>()
+  private readonly terminalFrontendWatches = new Map<string, {
+    key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<boolean>; frontend?: AgentTerminalFrontend
   }>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
@@ -1859,6 +1865,8 @@ export class AgentMuxClient {
     const nativeStatusWatches = [...this.nativeStatusWatches.values()]
     for (const watch of nativeStatusWatches) { watch.controller.abort(); watch.observer?.dispose() }
     this.nativeStatusWatches.clear()
+    for (const watch of this.terminalFrontendWatches.values()) { watch.controller.abort(); watch.observer?.dispose() }
+    this.terminalFrontendWatches.clear()
     this.agentInputCursors.clear()
     for (const lane of this.agentInputTails.values()) {
       for (const observation of lane.renderObservations) {
@@ -3596,6 +3604,7 @@ export class AgentMuxClient {
     if (run.state.type === 'running') {
       // Exact physical facts are already confirmed. The existing native observer owns
       // its cancellation, transcript receipts and scoped unavailable diagnostic.
+      await this.ensureTerminalFrontendObservation(session)
       void this.ensureNativeStatusObservation(session).catch(error => this.publishNativeStatusFailure(session, error))
       session = this.projectSession(this.requireAgentSession(agentSessionId))
     }
@@ -3616,7 +3625,7 @@ export class AgentMuxClient {
       currentActivity: session.currentActivity,
       timelineCapability: capabilities.timeline,
       awaitingRequest: agentInteractionActiveRequest(session.pendingInteraction) !== undefined,
-      terminalCapabilityUnverified: session.terminalCapability !== undefined
+      terminalCapabilityUnverified: session.terminalCapability !== undefined || session.terminalFrontend !== undefined && session.terminalFrontend.state !== 'attached'
     }, Date.now())
     const interactionResponseUnavailableReason = session.pendingInteraction && agentInteractionResponseUnavailableReason(session.pendingInteraction)
     return {
@@ -5822,8 +5831,11 @@ export class AgentMuxClient {
     const catalog = current ? this.providers.get(current.providerId).catalog : null
     let admission: ReturnType<typeof agentContinuityAdmission> | undefined
     if (current && run?.state !== 'running') {
+      if (prior?.kind === 'reattachable' && prior.frontendReconnect?.frontendId) throw new AgentMuxError(
+        'The original frontend reconnection completed. This ended Run needs a new explicit recovery operation.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
+        { disposition: 'not_applied', confirmedInputBytes: null })
       // A prior start with no receipt is observation-only. Never dispatch another start or old input.
-      if (prior?.kind === 'starting' || prior?.reason === 'operation-unconfirmed') {
+      if (!prior?.frontendReconnect && (prior?.kind === 'starting' || prior?.reason === 'operation-unconfirmed')) {
         const lifecycleId = agentLifecycleOperationIdentity('resume', input.agentSessionId, input.operationId)
         try {
           const reservation = await this.store.loadResumeCorrelation(input.agentSessionId, lifecycleId)
@@ -5909,6 +5921,48 @@ export class AgentMuxClient {
       hostId: 'local', expectedRun: input.expectedRun, observedAt: now,
       session: current ? this.projectSession(current) : null, retirement: retirement ? structuredClone(retirement) : null,
       run, catalog, capability, ...(launchExecutable === undefined ? {} : { launchExecutable }) })
+    if (decision.kind === 'reattachable' && current && (receipt.trigger === 'manual' || receipt.frontendReconnect)) {
+      const provider = this.providers.get(current.providerId)
+      await this.ensureTerminalFrontendObservation(current)
+      const frontend = this.terminalFrontendWatches.get(current.agentSessionId)?.frontend
+      if (current.nativeActor && provider.reconnectTerminalFrontend && !receipt.frontendReconnect && (!frontend || frontend.state === 'unknown')) return pending('provider-unverified', evidence)
+      if (current.nativeActor && provider.reconnectTerminalFrontend && (frontend?.state === 'detached' || receipt.frontendReconnect)) {
+        try {
+          const target = current.nativeHandle
+          if (target?.kind !== 'provider' || target.providerId !== current.providerId || !run?.pid) throw new AgentMuxError(
+            'The exact original native thread is not confirmed. The backend and retained Session remain available.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
+          if (!receipt.frontendReconnect) receipt.nativeTarget = structuredClone(target)
+          else if (!matchesProviderNativeSessionTarget(receipt.nativeTarget, target)) throw new AgentMuxError(
+            'The original frontend recovery native target changed. Its original operation and input are retained.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
+          receipt.frontendReconnect ??= { previousFrontendId: frontend!.frontendId, outputAfterByte: run.latestOutputBytes }
+          // Persist original operation/target/boundary before the frontend side effect.
+          await pending('operation-unconfirmed', evidence)
+          const observed = await provider.reconnectTerminalFrontend({ processId: run.pid, nativeActor: current.nativeActor,
+            workspacePath: current.workspacePath, signal: new AbortController().signal }, { operationId: input.operationId,
+            expectedFrontendId: receipt.frontendReconnect.previousFrontendId, nativeSessionId: target.sessionId })
+          const next = parseTerminalFrontendObservation(observed)
+          receipt.frontendReconnect.frontendId = next.frontendId
+          await pending('operation-unconfirmed', evidence)
+          current = await this.updateExactAgentSession(current.agentSessionId, current.run, value => {
+            if (value.terminalHandshake?.frontendId === next.frontendId) return value
+            const updated = { ...value }; delete updated.terminalHandshake; delete updated.terminalCapability; delete updated.terminalPromptReadiness
+            if (provider.terminalHandshake && provider.terminalPromptRender) updated.terminalPromptReadiness = {
+              source: 'initial-composer', run: { ...value.run }, outputCursorBytes: receipt.frontendReconnect!.outputAfterByte,
+              id: terminalInitialPromptReadinessIdentity(value, terminalHandshakeOperationIdentity(value.providerId, value.run.runId, provider.terminalHandshake, next.frontendId))
+            }
+            return updated
+          })
+          this.screenEvidence.discard(current.agentSessionId)
+          await this.ensureTerminalHandshakeOrDegrade(current, await this.requireCurrentAgentRun(current))
+          current = this.registry.get(current.agentSessionId)
+          return record({ ...decision, session: this.projectSession(current) }, 'frontend-reconnected')
+        } catch (error) {
+          receipt.error = error instanceof Error ? error.message : String(error)
+          receipt.errorCode = error instanceof AgentMuxError ? error.code : 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED'
+          return pending('operation-unconfirmed', evidence)
+        }
+      }
+    }
     if (decision.kind === 'reattachable' && current && input.env !== undefined) {
       void this.ensureManagedHooks(this.providers.get(current.providerId), current.workspacePath, current.agentSessionId,
         input.env, this.hookBindings.get(current.run.runId)?.endpoint).catch(error => {
@@ -7372,6 +7426,8 @@ export class AgentMuxClient {
     if (currentActivity) projected.currentActivity = currentActivity
     if (session.nativeHandle) projected.nativeHandlePersistence = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
       ? 'unconfirmed' : 'confirmed'
+    const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+    if (frontend && sameRun(frontend.run, session.run)) projected.terminalFrontend = structuredClone(frontend)
     const pending = projected.pendingInteraction
     if (pending) {
       const requests = [pending.request, ...(pending.additionalRequests ?? [])]
@@ -7794,10 +7850,14 @@ export class AgentMuxClient {
       if (cursor !== undefined) this.agentInputCursors.set(session.agentSessionId, cursor)
       return session
     }
+    const frontendReconnect = session.continuity?.frontendReconnect
+    const frontendId = frontendReconnect?.frontendId ?? session.terminalHandshake?.frontendId
+    const outputAfterByte = frontendReconnect?.frontendId ? frontendReconnect.outputAfterByte : session.terminalHandshake?.outputAfterByte ?? 0
     const operationId = terminalHandshakeOperationIdentity(
       session.providerId,
       session.run.runId,
-      handshake
+      handshake,
+      frontendId
     )
     const initialReadinessId = terminalInitialPromptReadinessIdentity(session, operationId)
     const responseBytes = Buffer.byteLength(handshake.response)
@@ -7885,10 +7945,12 @@ export class AgentMuxClient {
       tail = candidate.slice(-Math.max(0, handshake.query.length - 1))
     }
     const unsubscribe = this.publisher.onEvent((event) => {
+      if (frontendId) return // This generation uses its own scoped ordered observer below.
       if (event.type !== 'terminal-output' && event.type !== 'process-state') return
       if (event.run.runId !== session.run.runId) return
       if (event.type === 'terminal-output') {
-        observe(event.data)
+        const range = event.evidence.outputByteRange
+        if (range.endByte > outputAfterByte) observe(new TextDecoder().decode(event.dataBytes.subarray(Math.max(0, outputAfterByte - range.startByte))))
       } else if (event.state !== 'running') {
         rejectQuery(new AgentMuxError(
           'Agent Run exited before its terminal capability query was observed.',
@@ -7903,9 +7965,19 @@ export class AgentMuxClient {
       ))
     }, TERMINAL_HANDSHAKE_TIMEOUT_MS)
     let attached = false
+    let frontendObservation: Awaited<ReturnType<CtxmuxRunAdapter['observeOutput']>> | undefined
     try {
-      const attachment = await this.kernel.attach(session.run.runId, 0)
-      attached = true
+      // A live terminal already owns the client Attachment. Observe this bounded
+      // handshake independently; never replace or detach that user's output lane.
+      const attachment = frontendId
+        ? frontendObservation = await this.kernel.observeOutput(session.run.runId, outputAfterByte, event => {
+          if (event.type === 'data') observe(event.data)
+          else if (event.type === 'exit') rejectQuery(new AgentMuxError('The original Run ended during frontend handshake.', AGENT_TERMINAL_HANDSHAKE_FAILED))
+          else if (event.type === 'error') rejectQuery(event.error)
+          else if (event.type === 'gap') rejectQuery(new AgentMuxError('The new frontend query observation has an output Gap. The original Run and input are retained.', AGENT_TERMINAL_HANDSHAKE_UNCONFIRMED))
+        })
+        : await this.kernel.attach(session.run.runId, outputAfterByte)
+      attached = !frontendId
       for (const event of attachment.replay) observe(event.data)
       this.assertAgentRun(session, attachment.run)
       if (!queryObserved && attachment.run.state.type !== 'running') {
@@ -7950,6 +8022,7 @@ export class AgentMuxClient {
             terminalHandshake: {
               run: { ...current.run },
               operationId,
+              ...(frontendId ? { frontendId, outputAfterByte } : {}),
               inputByteRange: {
                 startByte,
                 endByte: startByte + responseBytes
@@ -8105,6 +8178,7 @@ export class AgentMuxClient {
     } finally {
       clearTimeout(timer)
       unsubscribe()
+      await frontendObservation?.close().catch(() => {})
       if (attached) {
         try {
           await this.kernel.detach(session.run.runId)
@@ -8334,7 +8408,47 @@ export class AgentMuxClient {
       evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
   }
 
+  private async ensureTerminalFrontendObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<boolean> {
+    if (this.reopensDisposed) return false
+    const current = this.registry.findByRun(session.run), provider = this.providers.get(session.providerId)
+    if (!current?.nativeActor || !provider.observeTerminalFrontend) return true
+    const key = JSON.stringify([session.run.runId, current.nativeActor.actorId])
+    const existing = this.terminalFrontendWatches.get(session.agentSessionId)
+    if (existing?.key === key && existing.frontend?.state !== 'unknown') return await existing.pending
+    existing?.controller.abort(); existing?.observer?.dispose()
+    const watch: { key: string; controller: AbortController; observer?: { dispose(): void }; pending: Promise<boolean>; frontend?: AgentTerminalFrontend } = {
+      key, controller: new AbortController(), pending: Promise.resolve(false)
+    }
+    this.terminalFrontendWatches.set(session.agentSessionId, watch)
+    const live = (): boolean => !watch.controller.signal.aborted && this.terminalFrontendWatches.get(session.agentSessionId) === watch &&
+      this.registry.findByRun(session.run)?.agentSessionId === session.agentSessionId
+    const unavailable = (message: string): void => {
+      if (!live()) return
+      watch.frontend = { run: { ...session.run }, frontendId: watch.frontend?.frontendId ?? current.nativeActor!.actorId,
+        state: 'unknown', backendState: 'unknown', source: 'managed-process', observedAt: Date.now(), message }
+      this.publishSession(current)
+    }
+    watch.pending = (async () => {
+      try {
+        const run = await this.requireCurrentAgentRun(current)
+        if (run.state.type !== 'running' || !run.pid) return false
+        watch.observer = await provider.observeTerminalFrontend!({ processId: run.pid, nativeActor: current.nativeActor!, workspacePath: current.workspacePath,
+          signal: watch.controller.signal, onUnavailable: unavailable, onFrontend: value => {
+            if (!live()) return
+            const observation = parseTerminalFrontendObservation(value)
+            if (watch.frontend && observation.observedAt < watch.frontend.observedAt) return
+            watch.frontend = { ...observation, run: { ...session.run } }
+            if (observation.state === 'detached') this.promptSubmission.cancelReadiness(session.agentSessionId)
+            this.publishSession(current)
+          } })
+        return true
+      } catch (error) { unavailable(error instanceof Error ? error.message : String(error)); return false }
+    })()
+    return await watch.pending
+  }
+
   private async ensureNativeStatusObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<boolean> {
+    await this.ensureTerminalFrontendObservation(session)
     if (this.reopensDisposed) return false
     const provider = this.providers.get(session.providerId)
     if (!provider.observeSessionStatus || !session.nativeHandle) return true
@@ -9769,6 +9883,8 @@ export class AgentMuxClient {
     this.endedRuns.set(event.runId, exitReason)
     this.releaseEndedRunHook(runRef(event.runId), agentSession)
     if (agentSession) {
+      const frontendWatch = this.terminalFrontendWatches.get(agentSession.agentSessionId)
+      if (frontendWatch) { frontendWatch.controller.abort(); frontendWatch.observer?.dispose(); this.terminalFrontendWatches.delete(agentSession.agentSessionId) }
       const watch = this.nativeStatusWatches.get(agentSession.agentSessionId)
       if (watch && JSON.parse(watch.key)[0] === event.runId) {
         this.nativeStatusWatches.delete(agentSession.agentSessionId)

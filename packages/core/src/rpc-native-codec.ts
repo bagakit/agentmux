@@ -1,3 +1,4 @@
+import { parseTerminalFrontend } from './agent-terminal-frontend.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicationAccessResult } from './application-access.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
@@ -110,6 +111,7 @@ export function parseRpcAgentSession(value: unknown): ReturnType<typeof normaliz
   if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor')) fail()
   try {
     const session = normalizeAgentSession(source)
+    if (source.terminalFrontend !== undefined) session.terminalFrontend = parseTerminalFrontend(source.terminalFrontend, session.run)
     if (source.turnUsage !== undefined) {
       const usage = record(source.turnUsage)
       if (usage.cumulative !== undefined && !isDeepStrictEqual(usage.cumulative, session.turnUsage?.cumulative)) fail()

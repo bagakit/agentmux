@@ -1,3 +1,4 @@
+import { parseTerminalFrontend } from './agent-terminal-frontend.js'
 import { parseRuntimeIdentity } from './runtime-observation-codec.js'
 import { hostedCarrierPerformance } from './performance-diagnostics.js'
 import { AgentMuxError } from './errors.js'
@@ -187,6 +188,7 @@ export function parseHostedBootstrap(value: unknown): import('./hosted-client-co
   if (p.storePath !== null) wireString(p.storePath)
   if (!Array.isArray(p.sessions) || !Array.isArray(p.catalog)) throw new AgentMuxError(
     'Runtime bootstrap is malformed.', 'CONTROL_PROTOCOL_ERROR')
+  for (const session of p.sessions) parseHostedAgentSessionRead(session, (session as { agentSessionId: string }).agentSessionId)
   for (const entry of p.catalog) {
     const route = (entry as import('./types.js').AgentCatalogEntry | null)?.capabilities?.asyncQuestionReply
     if (route !== undefined && route !== 'terminal') throw new AgentMuxError(
@@ -210,6 +212,7 @@ export function parseHostedAgentSessionRead(value: unknown, agentSessionId: stri
   for (const run of session.retiredRuns) wireString(wireRecord(run, ['runId']).runId)
   if ([session.createdAt, session.updatedAt].some(value => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new AgentMuxError(
     'Session metadata observation times are malformed.', 'CONTROL_PROTOCOL_ERROR')
+  if (session.terminalFrontend !== undefined) parseTerminalFrontend(session.terminalFrontend, session.run as { runId: string })
   return value as import('./types.js').AgentMuxAgentSession
 }
 /** Only an exact typed Core/Native observation may change the current Native input identity. */

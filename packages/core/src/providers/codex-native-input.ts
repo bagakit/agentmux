@@ -1,3 +1,4 @@
+import { CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from './codex-managed-frontend.js'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { nativeInputSourceId } from '../native-input-correlation.js'
@@ -14,8 +15,8 @@ const BYPASS_PERMISSIONS = '--dangerously-bypass-approvals-and-sandbox'
 const unavailable = () => new AgentMuxError('The exact native actor input service is unconfirmed. The original Agent and ordinary terminal input remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
 
 /** Shared configuration for already qualified create plans. */
-function nativeServerConfig(args: readonly string[]): string[] | null {
-  const result: string[] = []
+function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; frontendArgs: string[] } | null {
+  const result: string[] = [], frontendArgs: string[] = []
   let bypass = false, permission = false, custom = false
   const valueFlags = new Set(['-m', '--model', '-p', '--profile', '-s', '--sandbox', '-a', '--ask-for-approval', '-C', '--cd'])
   const shared = new Set(['-c', '--config', '--enable', '--disable'])
@@ -33,15 +34,16 @@ function nativeServerConfig(args: readonly string[]): string[] | null {
     }
     else if (arg.startsWith('--config=') || arg.startsWith('--enable=') || arg.startsWith('--disable=')) { result.push(arg); custom ||= arg.startsWith('--config=') }
     else if (!switches.has(arg)) return null
+    else frontendArgs.push(arg)
   }
   if (bypass && (permission || custom)) return null
-  return result
+  return { serverConfig: result, frontendArgs }
 }
 
 /** Only explicit Core resume shapes: native policy is prepared before the TUI can carry its prompt. */
-function nativeResumePlan(args: readonly string[], prompt?: string): { args: string[]; serverConfig: string[]; resume: CodexManagedResume } | null {
+function nativeResumePlan(args: readonly string[], prompt?: string): { args: string[]; serverConfig: string[]; frontendArgs: string[]; resume: CodexManagedResume } | null {
   if (args[0] !== 'resume' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(args[1] ?? '')) return null
-  const resume: CodexManagedResume = { threadId: args[1]! }, serverConfig: string[] = [], removed = new Set<number>()
+  const resume: CodexManagedResume = { threadId: args[1]! }, serverConfig: string[] = [], frontendArgs: string[] = [], removed = new Set<number>()
   let promptIndex = -1
   if (prompt?.trim()) {
     promptIndex = args[2] === prompt ? 2 : args[2] === '--dangerously-bypass-hook-trust' && args[3] === prompt ? 3 : -1
@@ -74,8 +76,9 @@ function nativeResumePlan(args: readonly string[], prompt?: string): { args: str
       serverConfig.push(arg, value)
     } else if (arg.startsWith('--enable=') || arg.startsWith('--disable=')) serverConfig.push(arg)
     else if (!['--dangerously-bypass-hook-trust', '--no-alt-screen'].includes(arg)) return null
+    else frontendArgs.push(arg)
   }
-  return { args: args.filter((_, i) => !removed.has(i)), serverConfig, resume }
+  return { args: args.filter((_, i) => !removed.has(i)), serverConfig, frontendArgs, resume }
 }
 
 export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManagedLaunch']> = async (plan, lifecycleOperationId, context) => {
@@ -83,15 +86,16 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
   const prepared = context.kind === 'resume' ? nativeResumePlan(plan.args, context.prompt) : undefined
   if (context.kind === 'resume' && !prepared) return { plan }
   const args = prepared?.args ?? [...plan.args]
-  const serverConfig = prepared?.serverConfig ?? nativeServerConfig(context.prompt && plan.args.at(-1) === context.prompt ? plan.args.slice(0, -1) : plan.args)
-  if (!serverConfig) return { plan }
+  const configuration = prepared ?? nativeServerConfig(context.prompt && plan.args.at(-1) === context.prompt ? plan.args.slice(0, -1) : plan.args)
+  if (!configuration) return { plan }
+  const { serverConfig, frontendArgs } = configuration
   // The version is the native CLI's stable version command, not a terminal screen or readiness guess.
   const version = await runProcess(plan.command, ['--version'], { env: plan.env, timeoutMs: 2_000, maxOutputBytes: 4096 }).catch(() => null)
   if (!version || version.exitCode !== 0 || version.stderr || version.stdout.trim() !== 'codex-cli 0.163.0') return { plan }
   const nativeActor = { protocolId: PROTOCOL_ID, actorId: randomUUID(), lifecycleOperationId, token: randomBytes(32).toString('hex'), launch: { command: plan.command, args } }
   return { nativeActor, plan: { command: process.execPath,
-    args: [fileURLToPath(new URL('./codex-managed-run.js', import.meta.url)), JSON.stringify({ command: plan.command, args, serverConfig, ...(prepared ? { resume: prepared.resume } : {}) })],
-    env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: nativeActor.token } } }
+    args: [fileURLToPath(new URL('./codex-managed-run.js', import.meta.url)), JSON.stringify({ command: plan.command, args, serverConfig, frontendArgs, ...(prepared ? { resume: prepared.resume } : {}) })],
+    env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: nativeActor.token, [CODEX_ACTOR_ID_ENV]: nativeActor.actorId, [CODEX_ACTOR_LIFECYCLE_ENV]: lifecycleOperationId } } }
 }
 
 export const prepareCodexNativeInput: NonNullable<AgentProvider['prepareNativeInput']> = async (context, target) => {

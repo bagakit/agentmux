@@ -97,7 +97,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'readAgentSessionHistory' | 'readAgentConversation' | 'releaseConversationView' | 'observeConversation' | 'conversationCheckpoint' | 'readConversationChanges' | 'observeSessionHistory' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
+  'ensureAgentContinuity' | 'controlAgentContinuity' | 'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'inspectAgentInteractionOperation' | 'respondAgentInteraction' | 'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'inspectAgentPromptSubmission' | 'startDiscussion' | 'checkDeliveries' |
   'readAgentInputMailbox' | 'inspectAgentInput' | 'stopAgentInputWaiting' | 'rejoinAgentInputWaiting' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
@@ -421,7 +421,25 @@ export class AgentMuxRpcService {
     const { assertCurrent: _localRestriction, ...forwarded } = context
     return forwarded
   }
-  private async execute(request: AgentMuxControlRequest, context?: AgentMuxNameContext): Promise<AgentMuxControlResult> {
+  private async execute(request: AgentMuxControlRequest, context?: AgentMuxNameContext, executionContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult> {
+    if (request.operation === 'resume' && !request.text.trim()) {
+      const selected = await this.owner(request.target.kind === 'agent-session' ? request.target.agentSessionId : request.caller!.agentSessionId)
+      executionContext?.signal?.throwIfAborted(); await executionContext?.assertCurrent?.()
+      if (executionContext?.caller) await this.authenticated(executionContext)
+      if (selected.client.forwardRpc) {
+        const forwarded = await selected.client.forwardRpc('agent.resume', { target: { kind: 'agent-session', agentSessionId: selected.agentSessionId }, operationId: request.requestId, text: '' }, executionContext ?? {})
+        return { operation: 'resume', ...forwarded }
+      }
+      const original = selected.session // owner() read the original durable inventory, including its exact Run.
+      const prior = original.continuityOperations?.[request.requestId]
+      if (prior?.action === 'restart' || prior?.launchInput) throw new AgentMuxError('The original operation belongs to another lifecycle or input request.', 'AGENT_CONTINUITY_OPERATION_CONFLICT')
+      const restored = await selected.client.ensureAgentContinuity({ agentSessionId: original.agentSessionId, expectedRun: prior?.previousRun ?? original.run,
+        operationId: request.requestId, trigger: 'manual' })
+      if (restored.kind !== 'resumed' && restored.kind !== 'reattachable') throw new AgentMuxError(
+        restored.continuity?.error ?? `The original Resume is ${restored.kind}. Inspect this Session and retry the same operation.`,
+        restored.continuity?.errorCode ?? 'AGENT_CONTINUITY_PENDING', JSON.stringify(restored))
+      return { operation: 'resume', agentSessionId: original.agentSessionId, runId: restored.session.run.runId }
+    }
     if (!this.ports.execute && ['space.ls','space.inspect','space.bind','space.unbind'].includes(request.operation)) {
       const state = await this.spatial.readForLayout()
       if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
@@ -1146,7 +1164,7 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
-        : await this.execute(request, nameContext)
+        : await this.execute(request, nameContext, context)
       return rpcControlResult(method, result as AgentMuxControlResult) as AgentMuxRpcResult<M>
     }
     const fields = NATIVE_FIELDS[method as keyof typeof NATIVE_FIELDS]

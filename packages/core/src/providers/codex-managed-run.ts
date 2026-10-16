@@ -1,34 +1,71 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, openCodexFrontendControl } from './codex-managed-frontend.js'
+import type { AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import { resolve } from 'node:path'
 import { nativeProcessTcpListeners } from '../agent-native-process.js'
 import { connectCodexNativeActor } from './codex-native-rpc.js'
 
 export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'
 export type CodexManagedResume = { threadId: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; approvalPolicy?: 'on-request' | 'never'; model?: string; cwd?: string }
-export type CodexManagedRunPlan = { command: string; args: string[]; serverConfig: string[]; resume?: CodexManagedResume }
+export type CodexManagedRunPlan = { command: string; args: string[]; serverConfig: string[]; frontendArgs: string[]; resume?: CodexManagedResume }
 class ManagedNativeLaunchError extends Error {}
 
 /** Child lifecycle, exact native resume preparation and TTY inheritance; Core/ctxmux own the Run. */
 export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number> {
   const token = process.env[CODEX_NATIVE_TOKEN_ENV]
-  if (!token) throw new ManagedNativeLaunchError('The original native actor launch credential is missing.')
+  const actorId = process.env[CODEX_ACTOR_ID_ENV], lifecycleOperationId = process.env[CODEX_ACTOR_LIFECYCLE_ENV]
+  if (!token || !actorId || !lifecycleOperationId) throw new ManagedNativeLaunchError('The original native actor launch credential is missing.')
   const server = spawn(plan.command, [...plan.serverConfig, 'app-server', '--listen', 'ws://127.0.0.1:0',
     '--ws-auth', 'capability-token', '--ws-token-sha256', createHash('sha256').update(token).digest('hex')],
   { cwd: process.cwd(), env: process.env, detached: false, stdio: ['ignore', 'ignore', 'pipe'] })
+  // Own the exit listener before the first await; signal exits leave exitCode null.
+  let backendEnded = false
+  const backendExit = new Promise<{ code: number; error?: Error }>(resolve => {
+    server.once('error', error => { backendEnded = true; resolve({ code: 1, error }) })
+    server.once('exit', (code, signal) => { backendEnded = true; resolve({ code: code ?? (signal ? 1 : 0) }) })
+  })
   let tui: ReturnType<typeof spawn> | undefined
   let resumeConnection: Awaited<ReturnType<typeof connectCodexNativeActor>> | undefined
   // Drain native diagnostics without mixing server output into the terminal or public receipts.
   server.stderr?.resume()
   let serverError: Error | undefined
   server.once('error', error => { serverError = error })
-  const stop = (): void => { tui?.kill('SIGTERM'); server.kill('SIGTERM') }
+  let frontend: AgentTerminalFrontendObservation = { frontendId: randomUUID(), state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() }
+  let control: Awaited<ReturnType<typeof openCodexFrontendControl>> | undefined
+  const publish = (value: AgentTerminalFrontendObservation): void => { frontend = value; control?.publish(frontend) }
+  let stopping = false
+  const stop = (): void => {
+    if (stopping) return
+    stopping = true
+    publish({ ...frontend, backendState: 'stopping', observedAt: Date.now() })
+    tui?.kill('SIGTERM'); server.kill('SIGTERM')
+  }
+  const spawnTui = async (endpoint: string, args: string[]): Promise<AgentTerminalFrontendObservation> => {
+    const frontendId = randomUUID()
+    publish({ frontendId, state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() })
+    const child = spawn(plan.command, ['--remote', endpoint, '--remote-auth-token-env', CODEX_NATIVE_TOKEN_ENV, ...args],
+      { cwd: process.cwd(), env: process.env, detached: false, stdio: 'inherit' })
+    tui = child
+    child.once('exit', (code, signal) => {
+      if (tui !== child) return
+      tui = undefined
+      publish({ frontendId, state: 'detached', backendState: stopping ? 'stopping' : 'running', source: 'managed-process', observedAt: Date.now(),
+        ...(code === null ? {} : { exitCode: code }), ...(signal ? { exitSignal: signal } : {}) })
+    })
+    await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', error => {
+      if (tui === child) { tui = undefined; publish({ frontendId, state: 'detached', backendState: 'running', source: 'managed-process', observedAt: Date.now(), message: error.message }) }
+      reject(error)
+    }) })
+    publish({ frontendId, state: 'attached', backendState: 'running', source: 'managed-process', observedAt: Date.now() })
+    return { ...frontend }
+  }
   process.on('SIGTERM', stop); process.on('SIGINT', stop)
   try {
     const deadline = Date.now() + 10_000
     let endpoint: string | undefined
-    while (!endpoint && !serverError && server.exitCode === null && Date.now() < deadline) {
+    while (!endpoint && !serverError && !backendEnded && Date.now() < deadline) {
       const listeners = await nativeProcessTcpListeners(process.pid, new AbortController().signal).catch(() => [])
       if (listeners.length > 1) throw new ManagedNativeLaunchError('The original native actor listener is ambiguous.')
       endpoint = listeners[0]?.endpoint
@@ -59,11 +96,43 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
       }
       // Keep this original subscription alive: TUI resumes the same loaded object, without overrides.
     }
-    tui = spawn(plan.command, ['--remote', endpoint, '--remote-auth-token-env', CODEX_NATIVE_TOKEN_ENV, ...plan.args],
-      { cwd: process.cwd(), env: process.env, detached: false, stdio: 'inherit' })
-    const child = tui
-    return await new Promise<number>((resolve, reject) => { child.once('error', reject); child.once('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0))) })
-  } finally { resumeConnection?.dispose(); stop(); process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop) }
+    const originalEndpoint = endpoint
+    const detached = (expectedId: string): boolean => frontend.frontendId === expectedId && frontend.state === 'detached'
+    const operations = new Map<string, { request: string; result: Promise<AgentTerminalFrontendObservation> }>()
+    control = await openCodexFrontendControl(token, { actorId, lifecycleOperationId, processId: process.pid }, {
+      current: () => ({ ...frontend }),
+      reconnect: request => {
+        const key = JSON.stringify(request), previous = operations.get(request.operationId)
+        if (previous) {
+          if (previous.request !== key) throw new ManagedNativeLaunchError('The original frontend operation has another immutable target.')
+          return previous.result
+        }
+        const result = (async () => {
+          if (stopping || backendEnded || frontend.backendState !== 'running') throw new ManagedNativeLaunchError('The original backend is stopping or ended. Its Session is preserved.')
+          if (!detached(request.expectedFrontendId)) throw new ManagedNativeLaunchError('The original frontend generation changed. Re-read this Session before reconnecting.')
+          const connection = await connectCodexNativeActor(originalEndpoint, token, new AbortController().signal, 'agentmux_frontend_reconnect')
+          try {
+            const value = await connection.request('thread/read', { threadId: request.nativeSessionId, includeTurns: false })
+            if (value?.thread?.id !== request.nativeSessionId || value.thread.canAcceptDirectInput !== true) throw new ManagedNativeLaunchError('The original loaded native thread is unconfirmed. No replacement was started.')
+            if (stopping || backendEnded || !detached(request.expectedFrontendId)) throw new ManagedNativeLaunchError('The original frontend or backend changed before reconnect.')
+            // The original argv can contain an already delivered prompt. Never replay it.
+            const flags = plan.frontendArgs
+            return await spawnTui(originalEndpoint, ['resume', request.nativeSessionId, ...flags])
+          } finally { connection.dispose() }
+        })()
+        operations.set(request.operationId, { request: key, result })
+        return result
+      }
+    })
+    await spawnTui(endpoint, plan.args)
+    // Frontend exit is an attachment fact. Only the backend/explicit Stop ends this Run.
+    const ended = await backendExit
+    if (ended.error) throw ended.error
+    return ended.code
+  } finally {
+    resumeConnection?.dispose(); stop(); await control?.close()
+    process.removeListener('SIGTERM', stop); process.removeListener('SIGINT', stop)
+  }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
