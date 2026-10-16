@@ -319,8 +319,12 @@ export function conversationRecordAnchors(records: readonly ConversationSourceRe
   return { anchors, cyclicRecordIds: [...cyclic] }
 }
 
+type ConversationEventFacts = Omit<ConversationEvent, 'revision'>
+type ProjectedConversationTimeline<Event> = Omit<ConversationTimeline, 'events'> & { events: Event[] }
+
 /** One semantic owner over already accepted facts. No IO, state, control authority or transcript copy. */
-export function projectConversationTimeline(input: ConversationProjectionInput): ConversationTimeline {
+function projectConversationGraph<Event>(input: ConversationProjectionInput,
+  materializeEvent: (event: ConversationEventFacts, records: readonly ConversationSourceRecord[]) => Event): ProjectedConversationTimeline<Event> {
   const { agentSessionId, executionHostId } = input
   const page = input.historyPage?.agentSessionId === agentSessionId ? input.historyPage : undefined
   const timeline = input.timeline?.agentSessionId === agentSessionId ? input.timeline : undefined
@@ -447,7 +451,7 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
     for (const record of group) gap(record, 'CONVERSATION_ORDER_CONFLICT', 'The accepted source sequences conflict after association; original records remain readable and cross-source order is partial.')
     ordered.push(id)
   }
-  const events: ConversationEvent[] = ordered.map(id => {
+  const events = ordered.map(id => {
     const group = groups.get(id)!
 
     const primary = byId.get(id) ?? group.find(record => record.original.kind === 'native') ?? group[0]!
@@ -462,12 +466,22 @@ export function projectConversationTimeline(input: ConversationProjectionInput):
     const attribution = conversationEventAuthor(group, primary, agentSessionId)
     for (const recordId of attribution.conflictingRecordIds) gap(byId.get(recordId)!, 'CONVERSATION_AUTHOR_CONFLICT',
       'The same event has conflicting recorded authors; original attributions remain readable.', byId.get(recordId)!.reference ?? undefined)
-    const event = { id, anchorId: id, reference: byId.get(id)?.reference ?? canonicalReferences.get(id) ?? primary.reference,
+    const event: ConversationEventFacts = { id, anchorId: id, reference: byId.get(id)?.reference ?? canonicalReferences.get(id) ?? primary.reference,
       role: conversationRecordRole(primary), author: attribution.author, recordIds: group.map(record => record.id), content, relations: related,
       ...(inputAdoption ? { inputAdoption } : {}),
       ...(coalesces.length ? { coalesces } : {}) }
-    return { ...event, revision: conversationRevision({ policy: 1, versions: group.map(record => [record.id, record.revision]), event }) }
+    return materializeEvent(event, group)
   })
   return { reference, agentSessionId, scope: { sources }, records, events, coverage,
     order: { basis: 'source-and-relations', crossSource: sources.length > 1 ? 'partial' : 'confirmed' } }
+}
+
+export function projectConversationTimeline(input: ConversationProjectionInput): ConversationTimeline {
+  return projectConversationGraph(input, (event, group) => ({ ...event,
+    revision: conversationRevision({ policy: 1, versions: group.map(record => [record.id, record.revision]), event }) }))
+}
+
+/** Internal graph input for the version-free SDK summary adapter. Source record versions remain exact. */
+export function projectConversationEventFacts(input: ConversationProjectionInput) {
+  return projectConversationGraph(input, event => event)
 }

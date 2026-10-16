@@ -23,7 +23,7 @@ function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displa
 }
 
 /** A recap is a labelled excerpt of observed conversation, never an invented summary. */
-export function launcherTimelineRecap(records: readonly AgentConversationRecord[]): LauncherRecap | null {
+export function launcherTimelineRecap(records: readonly Pick<AgentConversationRecord, 'role' | 'author' | 'content'>[]): LauncherRecap | null {
   const latestFirst = [...records].reverse()
   const replies = latestFirst.filter(record => record.role === 'observation' || record.role === 'message' && record.author?.kind === 'agent')
   for (const record of replies.length ? replies : latestFirst) {

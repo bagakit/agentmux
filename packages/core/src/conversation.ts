@@ -1,6 +1,6 @@
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from './types.js'
 import { projectSessionUserMessages } from './session-user-messages.js'
-import { projectConversationTimeline, conversationRecordRole, conversationRecordAuthor, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationProjectionInput } from './conversation-timeline.js'
+import { projectConversationTimeline, projectConversationEventFacts, conversationRecordRole, conversationRecordAuthor, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationProjectionInput, type ConversationTimeline } from './conversation-timeline.js'
 
 export type AgentConversationRecordSource =
   | (AgentSessionHistorySource & { kind: 'native'; recordId: string })
@@ -25,6 +25,9 @@ export type AgentConversationRecord = {
   input?: AgentSessionUserMessage
   original: { kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'captured'; item: AgentTimelineItem }
 }
+
+/** Read-only content and attribution over the same accepted events, without versioned event/record DTOs. */
+export type AgentConversationSummary = Omit<AgentConversationRecord, 'event' | 'records' | 'input'>
 
 /** One accepted input event, with its original submission/adoption records.
  * The primary source remains the exact original reading/resource target. */
@@ -78,11 +81,16 @@ export function projectConversationWindow(snapshot: import('./conversation-chang
     ...(historyPage ? { historyPage } : {}), timeline: captured }, timeline), historyPage, captured }
 }
 
-function adaptConversationTimeline(input: ConversationProjectionInput & { routeHostId?: string }, timeline: ReturnType<typeof projectConversationTimeline>) {
+type ConversationEventFacts = Omit<ConversationEvent, 'revision'>
+type AdaptedConversationRecord<Event> = Omit<AgentConversationRecord, 'event'> & { event?: Event }
+type AdaptedConversationInput<Event> = Omit<ConversationInputEntity, 'event'> & { event: Event }
+
+function adaptConversationTimeline<Event extends ConversationEventFacts>(input: ConversationProjectionInput & { routeHostId?: string },
+  timeline: Omit<ConversationTimeline, 'events'> & { events: readonly Event[] }) {
   const users = projectSessionUserMessages(input)
   const inputs = new Map(users.map(value => [JSON.stringify([value.source.kind, value.rawId]), value]))
   const records = new Map(timeline.records.map(record => [record.id, record]))
-  function adapt(record: ConversationSourceRecord, contentParts: readonly AgentSessionHistoryContentPart[], event?: ConversationEvent): AgentConversationRecord {
+  function adapt(record: ConversationSourceRecord, contentParts: readonly AgentSessionHistoryContentPart[], event?: Event): AdaptedConversationRecord<Event> {
     const original = record.original, item = original.item
     const source: AgentConversationRecordSource = original.kind === 'native'
       ? { kind: 'native', ...input.historyPage!.source, recordId: item.id } : { kind: 'captured', recordId: item.id }
@@ -122,7 +130,7 @@ function adaptConversationTimeline(input: ConversationProjectionInput & { routeH
       && projectedParts.every((part, index) => part === original.item.contentParts[index]) ? original.item.contentParts : projectedParts
     return adapt(record, contentParts, event)
   })
-  const inputEntities: ConversationInputEntity[] = projected.flatMap(record => {
+  const inputEntities: AdaptedConversationInput<Event>[] = projected.flatMap(record => {
     const primary = record.input, event = record.event
     if (!primary || !event) return []
     return [{ ...primary, id: record.id,
@@ -135,6 +143,12 @@ function adaptConversationTimeline(input: ConversationProjectionInput & { routeH
 
 export function projectConversationRecords(input: ConversationProjectionInput & { routeHostId?: string }): AgentConversationRecord[] {
   return projectConversationReading(input).records
+}
+
+/** Same original content/author adapter as full reading; event versions are not computed or exposed. */
+export function projectConversationSummary(input: ConversationProjectionInput & { routeHostId?: string }): AgentConversationSummary[] {
+  return adaptConversationTimeline(input, projectConversationEventFacts(input)).records
+    .map(({ event: _event, records: _records, input: _input, ...summary }) => summary)
 }
 
 /** A reference to the original Session, never a new conversation lifecycle. */
@@ -159,7 +173,13 @@ export * from './conversation-questions.js'
 
 export * from './conversation-landmarks.js'
 
-export * from './conversation-timeline.js'
+export type * from './conversation-timeline.js'
+export { conversationValuesEqual, conversationRevision, conversationRecordId, conversationInvocationId,
+  conversationRecordRelations, conversationRecordRole, conversationRecordAuthor, conversationEventAuthor,
+  conversationSourceKey, conversationTailComesAfter, conversationInvocationFacts, conversationInvocationMembers,
+  conversationSameEventTarget, conversationEventCoalesces, conversationInputKey, conversationInputWitnessKey,
+  conversationNativeInputWitness, conversationInputAdoptionEdges, conversationRecordAnchors,
+  projectConversationTimeline } from './conversation-timeline.js'
 export * from './conversation-author.js'
 
 /** Only original Provider final/completed facts qualify a completed native reply. */

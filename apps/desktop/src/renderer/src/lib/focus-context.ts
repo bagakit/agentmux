@@ -1,5 +1,5 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
-import { projectConversationRecords } from '@agentmux/core/conversation'
+import { projectConversationSummary } from '@agentmux/core/conversation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
@@ -141,19 +141,29 @@ type FocusConversationFacts = {
 function sameConversationFacts(facts: FocusConversationFacts, timeline: AgentTimelineSnapshot | undefined): boolean {
   return facts.revision === timeline?.revision && facts.sourceHostId === timeline?.sourceHostId && facts.agentSessionId === timeline?.agentSessionId && facts.streamEpoch === timeline?.stream?.epoch
 }
+// Focus, its transient navigation preview and the Space directory read the same
+// accepted Timeline. Share only its small derived text facts, never row order or
+// Session state; weak keys do not retain a retired Timeline or another reader.
+const conversationFactsByTimeline = new WeakMap<AgentTimelineSnapshot, FocusConversationFacts>()
 function focusConversationFacts(timeline: AgentTimelineSnapshot | undefined, previous?: { timeline: AgentTimelineSnapshot | undefined; conversation: FocusConversationFacts | undefined }): FocusConversationFacts {
-  if (previous?.conversation && previous.conversation.items === timeline?.items && previous.conversation.stream === timeline?.stream && sameConversationFacts(previous.conversation, timeline)) return previous.conversation
+  const held = timeline && conversationFactsByTimeline.get(timeline) || previous?.conversation
+  if (held && held.items === timeline?.items && held.stream === timeline?.stream && sameConversationFacts(held, timeline)) {
+    if (timeline) conversationFactsByTimeline.set(timeline, held)
+    return held
+  }
   const items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
-  const records = timeline ? projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline }) : []
+  const records = timeline ? projectConversationSummary({ agentSessionId: timeline.agentSessionId, timeline }) : []
   const latestRecord = records.filter(record => record.role === 'message' || record.role === 'observation').at(-1)
   const recap = items.length ? launcherTimelineRecap(records) : null
   const text = latestRecord?.content ? clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140) : ''
   const label = latestRecord?.role === 'observation' ? COLLECTED_REPLY_TITLE : latestRecord?.author?.kind === 'agent' ? 'Response' : 'Prompt'
-  return { items: timeline?.items, stream: timeline?.stream, revision: timeline?.revision, sourceHostId: timeline?.sourceHostId, agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch, recap,
+  const facts: FocusConversationFacts = { items: timeline?.items, stream: timeline?.stream, revision: timeline?.revision, sourceHostId: timeline?.sourceHostId, agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch, recap,
     latest: latestRecord?.content ? { detail: `${label} · ${text}`, text,
       currentResult: Boolean((latestRecord.role === 'observation' || latestRecord.role === 'message' && latestRecord.author?.kind === 'agent') && latestRecord.rawId === latest?.id && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim()),
       matchesRecap: Boolean(recap && latestRecord.content.trim() && (recap.source === 'Last reply observation' ? latestRecord.role === 'observation' : latestRecord.role === 'message' && (recap.source === 'Last assistant message') === (latestRecord.author?.kind === 'agent'))) } : null }
+  if (timeline) conversationFactsByTimeline.set(timeline, facts)
+  return facts
 }
 /** Read-only Agent facts shared by Focus and the scoped Space directory. No eligibility policy or IO. */
 export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
