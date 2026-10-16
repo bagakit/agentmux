@@ -151,7 +151,7 @@ AgentMux 自身通过 User message 提供内容的范围、包装与组合约束
 
 输入开头完整的 `<amux>…</amux>` 声明上下文可收拢，让随后原请求连续可读。完整且边界明确的前导声明可以折叠、随时展开并选择原文；连续的完整前导声明保持其原次序，同一记录的真实尾文完整可读。没有普通尾文时保留声明和记录，不补写用户请求或捏造一段用户话。第一段普通正文以后不再寻找并隐藏声明；引用、blockquote、fenced／inline／缩进代码、非前导样例、不完整或结构含糊的前导序列保持全文可读。
 
-完整、位于输入起始的连续 `<amux>…</amux>` 上下文之后，紧接的 `<amux:a2a from="SID" msg-id="MID">` 完整信封沿同一 Core 阅读语法组合呈现。协议与正文／reminder 定界只由[A2A 合同](agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)持有。各上下文和信封分段保留原始 source span，来源仍明确为声明，原始 unknown／已知 Agent 作者不变且可信作者优先；正文的开头换行、尾部与完整 Copy 保原始内容。未完成、未知、引用或代码中的声明保原文可读，不按启动用途、发起工具或特定 Provider 分支。
+完整、位于输入起始的连续 `<amux>…</amux>` 上下文之后，紧接的 `<amux:a2a from="SID" msg-id="MID">` 完整信封沿同一 Core 阅读语法组合呈现。协议与正文／reminder 定界只由 [amux 格式合同](../../specs/amux-protocol.md#阅读与原文)持有。各上下文和信封分段保留原始 source span，来源仍明确为声明，原始 unknown／已知 Agent 作者不变且可信作者优先；正文的开头换行、尾部与完整 Copy 保原始内容。未完成、未知、引用或代码中的声明保原文可读，不按启动用途、发起工具或特定 Provider 分支。
 
 Desktop、Mobile、Mailbox 单对象详情及大文本／资源全文展开消费同一 Core parser 与共享 ConversationMessage，不能各写标签正则或只修终端显示。sender 原文与平台 reminder 分层可读，reminder 不抢占正文；有界预览沿原已核正文边界取摘要，不为找信封尾段读取整篇。历史原记录保持原 wire、身份与可读性，不因协议更新被改写、删除或重新投递。
 

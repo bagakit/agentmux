@@ -19,6 +19,7 @@
 | 复用分屏树计算 | [Layout 包说明](../../packages/layout/README.md)，只从 `@agentmux/layout` 入口导入 | [package exports](../../packages/layout/package.json)、[index.ts](../../packages/layout/src/index.ts)；当前源 TS 入口需要支持该源文件及模块解析的宿主 |
 | 使用独立 Goal／Demand Store，或浏览器侧 Goal 规则 | [Demand 包说明](../../packages/demand/README.md)，`openDemandStore` / `@agentmux/demand/goals` | [package exports](../../packages/demand/package.json)、[demand-store.ts](../../packages/demand/src/demand-store.ts)、[goals.ts](../../packages/demand/src/goals.ts) |
 | 用 AgentMux CLI 操作原工作面 | 当前执行版本的 `--help` / `--skill`；[对象操作指南](../guides/agentmux-cli-object-control.md) 给任务入口和失败处理 | [命令注册与 parser](../../packages/core/src/agentmux-cli-commands.ts)、[help / skill 来源](../../packages/core/src/agentmux-cli-help.ts)、[CLI 接线](../../packages/core/src/agentmux.ts) |
+| 生成或读取 amux 可读信封、分享与对象链接 | [amux 可读协议](amux-protocol.md) | Core [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts)、[`agent-message-render`](../../packages/core/src/agent-message-render.ts) 与 [`sharing`](../../packages/core/src/sharing.ts)；业务资格仍由原公共 owner 持有 |
 
 [Core package exports](../../packages/core/package.json) 决定可导入子路径；[index.ts](../../packages/core/src/index.ts) 决定包根重导出。出现在 exports 中只证明当前包入口，不单独证明接口成熟度、稳定性或运行验收。包内实现文件链接用于阅读源码，不授权消费者绕开公共入口深入导入。
 
