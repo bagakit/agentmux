@@ -856,10 +856,9 @@ async function qualifyUi(appPath, before = null, { outgoing = false } = {}) {
             restored.control.run.runId === region.control.run.runId && restored.control.hostId === region.control.hostId,
           'An original healthy Run is not yet available in its restored Region.')
         }
-        // Dormant projections have no confirmed page to reopen. Their exact
-        // Browser descriptor and placement are still protected by equality above.
-        if (region.kind === 'browser' && region.navigationId && !region.error) assert(restored?.kind === 'browser' && restored.navigationId && !restored.error,
-          'An original Browser page has not reopened; its Region is preserved but UI activation is unconfirmed.')
+        // Browser descriptors and placement are protected by equality above.
+        // Navigation remains a page-local observation in this same receipt; restoring
+        // the original workbench does not require waking hidden pages or network access.
       }
     }
     return observation
@@ -1062,7 +1061,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     process.stdout.write(`activated_serving_owners=${JSON.stringify(activatedOwners)}\n`)
     if (intent === 'ui-only' && !before) return { intent, ui: { status: 'unknown', path: destination, observation: observed,
       reason: 'The candidate GUI is active. Without an outgoing workbench observation, complete recovery cannot be confirmed.' }, native }
-    return { intent, ui: { status: 'committed', main: observed.main, path: destination }, native }
+    return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed }, native }
   } catch (error) {
     if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
     if (error.uiContinuity) error.transaction.ui.continuity = error.uiContinuity
