@@ -2,6 +2,12 @@ const { app } = require('electron')
 const { join } = require('node:path')
 const { pathToFileURL } = require('node:url')
 const [entry, privateRoot, ...args] = process.argv.slice(2)
+if (process.env.AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF === '1') {
+  const { mkdirSync } = require('node:fs')
+  for (const [name, child] of [['home', 'home'], ['appData', 'app-data'], ['cache', 'cache']]) {
+    const directory = join(privateRoot, child); mkdirSync(directory, { recursive: true }); app.setPath(name, directory)
+  }
+}
 app.setPath('userData', join(privateRoot, 'user-data'))
 app.setPath('sessionData', join(privateRoot, 'session-data'))
 if (process.platform === 'darwin') app.setActivationPolicy('prohibited')

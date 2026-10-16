@@ -10,6 +10,7 @@ import * as core from '../../../packages/core/dist/index.js'
 import { AgentMuxControlServer } from '../../../packages/core/dist/public-rpc-server.js'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = core
+const managed = process.env.AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF === '1'
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
 const initialWaitSurface = process.env.AGENTMUX_CONTINUITY_INITIAL_WAIT_SURFACE === '1'
 const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
@@ -25,7 +26,7 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
 const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'agentmux-continuity-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
-const receipt = { schema: initialWaitSurface ? 'agentmux.initial-continuity-supervision-surface.v1' : supervisionSurface ? 'agentmux.continuity-supervision-surface.v1' : supervision ? 'agentmux.continuity-supervision-product.v1' : capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
+const receipt = { schema: managed ? 'agentmux.managed-session-recovery.v1' : initialWaitSurface ? 'agentmux.initial-continuity-supervision-surface.v1' : supervisionSurface ? 'agentmux.continuity-supervision-surface.v1' : supervision ? 'agentmux.continuity-supervision-product.v1' : capability ? 'agentmux.session-capability-recovery.v1' : 'agentmux.session-continuity.v1', passed: false, privateRoot, phases: [], inputs: null, inputsAfter: null, cleanup: null,
   limitations: [supervisionSurface ? 'One private Electron generation exercises production App/Store and RuntimeController/Core controls and frames; this surface receipt does not prove process restart.' : 'Actual private Electron Main and Renderer restart exercise production App/Store and RuntimeController/Core, with a nonempty original spatial workface before hydration.',
     'The native CLI is a repository protocol fixture. It validates the exact resume identity against retained native session metadata and appends to the original conversation record; this is not upstream Provider certification.',
     'Only private Runs are deliberately ended between Electron generations; no user profile, user Agent or user configuration is accessed.',
@@ -39,7 +40,7 @@ const sourceFiles = [new URL(import.meta.url).pathname, bootstrap, path.join(des
   ...(supervision && !supervisionSurface ? [path.join(desktop, 'scripts/verify-session-continuity-supervision-product.mjs')] : []),
   path.join(desktop, 'test/helpers/local-runtime-connector.ts'), path.join(desktop, 'test/helpers/client-ui-render.tsx'),
   path.join(root, 'packages/client-ui/package.json'),
-  path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
+  path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture), ...await files(path.join(desktop, 'scripts/fixtures/managed-session-recovery')), ...(managed ? [path.join(desktop, 'scripts/verify-managed-session-recovery.mjs')] : []),
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/src')),
   ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/bin')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
@@ -90,8 +91,35 @@ try {
     return target ? [{ find: new RegExp('^' + ('@agentmux/core' + (key === '.' ? '' : key.slice(1))).replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') + '$'), replacement: path.join(coreSnapshot, target) }] : []
   })
   await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(privateRoot, 'fake-codex-cli.mjs'))
+  if (managed) {
+    const fake = path.join(privateRoot, 'fake-codex-cli.mjs')
+    await fs.writeFile(fake, (await fs.readFile(fake, 'utf8')).replaceAll('`native-${agentSessionId}`', 'process.env.AGENTMUX_FIXTURE_NATIVE_ID'))
+    await fs.copyFile(path.join(desktop, 'scripts/fixtures/managed-session-recovery/native-cli.mjs'), path.join(privateRoot, 'managed-native-cli.mjs'))
+  }
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
-  await fs.writeFile(path.join(privateRoot, 'fake-codex'), '#!/bin/sh\ncase "$1" in --version|-V) printf "codex-fixture 0.0.0\\n"; exit 0;; --help|-h) printf "Private Codex protocol fixture\\n"; exit 0;; esac\nexec ' + quote(process.execPath) + ' ' + quote(path.join(privateRoot, 'fake-codex-cli.mjs')) + ' "$@"\n', { mode: 0o700 })
+  await fs.writeFile(path.join(privateRoot, 'fake-codex'), '#!/bin/sh\ncase "$1" in --version|-V) printf "' + (managed ? 'codex-cli 0.163.0' : 'codex-fixture 0.0.0') + '\\n"; exit 0;; --help|-h) printf "Private Codex protocol fixture\\n"; exit 0;; esac\nexec ' + quote(process.execPath) + ' ' + quote(path.join(privateRoot, managed ? 'managed-native-cli.mjs' : 'fake-codex-cli.mjs')) + ' "$@"\n', { mode: 0o700 })
+  const rendererCache = managed && process.env.AGENTMUX_MANAGED_RENDERER_CACHE
+  if (rendererCache) {
+    const cached = JSON.parse(await fs.readFile(path.join(rendererCache, 'receipt.json'), 'utf8'))
+    const rendererInput = key => key.startsWith('apps/desktop/src/renderer/') || key.startsWith('apps/desktop/src/shared/') ||
+      key.startsWith('packages/core/dist/') || key.startsWith('packages/core/bin/') ||
+      ['apps/desktop/scripts/fixtures/session-continuity/entry.mjs', 'apps/desktop/scripts/fixtures/session-continuity/index.html',
+        'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts', 'apps/desktop/test/helpers/client-ui-render.tsx',
+        'packages/client-ui/package.json', 'packages/core/package.json', 'pnpm-lock.yaml'].includes(key)
+    const pins = Object.fromEntries(Object.entries(cached.inputs).filter(([key]) => rendererInput(key)))
+    assert.ok(Object.keys(pins).length > 0, 'A cache must retain its exact nonempty Renderer source identity')
+    for (const [key, sha256] of Object.entries(pins)) assert.equal(receipt.inputs[key], sha256, 'Renderer cache input changed; rebuild it: ' + key)
+    for (const [key, sha256] of Object.entries(cached.clientUiInputs)) {
+      const file = path.join(root, key); assert.equal(hash(await fs.readFile(file)), sha256, 'Renderer cache client-ui input changed: ' + key)
+      clientUiInputs.set(file, sha256)
+    }
+    await fs.cp(path.join(rendererCache, 'compiled/renderer'), path.join(privateRoot, 'renderer'), { recursive: true })
+    for (const [key, value] of Object.entries(cached.compiled).filter(([key]) => key.startsWith('renderer/'))) {
+      assert.equal(hash(await fs.readFile(path.join(privateRoot, key))), value.sha256, 'Copied Renderer artifact changed: ' + key)
+    }
+    receipt.rendererReuse = { source: path.resolve(rendererCache), receiptSha256: hash(await fs.readFile(path.join(rendererCache, 'receipt.json'))), pins,
+      reason: 'Only Main/scenario changed; original Renderer/Core/client-ui source and generated bytes are unchanged.' }
+  } else {
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error',
     plugins: [{ name: 'typed-native-client-ui-inputs', enforce: 'pre',
       async load(id) { await recordClientUiInput(id) },
@@ -99,6 +127,7 @@ try {
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"', __TERMINAL_WHEEL_UMD_URL__: '"unused"' }, worker: { format: 'es' },
     resolve: { alias: [...coreAliases, { find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
     build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })
+  }
   await build({ configFile: false, root: fixture, logLevel: 'error', ssr: { noExternal: true },
     build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
       rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
@@ -120,6 +149,13 @@ try {
   // The ordinary Core daemon is shared by the three private Electron generations. Each Electron
   // watchdog owns only its own process group and phase directory; parent cleanup owns all Runs.
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  if (managed) {
+    for (const name of Object.keys(env)) if (/^(AGENTMUX_|CTXMUX_|CODEX_)/u.test(name)) delete env[name]
+    Object.assign(env, { AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF: '1', HOME: path.join(privateRoot, 'home'),
+      XDG_CONFIG_HOME: path.join(privateRoot, 'home/.config'), XDG_CACHE_HOME: path.join(privateRoot, 'home/.cache'),
+      XDG_DATA_HOME: path.join(privateRoot, 'home/.local/share'), CODEX_HOME: path.join(privateRoot, 'codex') })
+    await fs.mkdir(env.HOME, { recursive: true })
+  }
   for (const phase of phases) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`)
     await fs.mkdir(phaseRoot)
@@ -138,6 +174,11 @@ try {
     assert.equal(exit.timedOut, false, `${phase} watchdog fired`)
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
+    if (managed) {
+      assert.equal(native.managed.passed, true)
+      for (const frame of native.managed.frames) assert.equal(hash(await fs.readFile(path.join(evidence, frame.file))), frame.sha256)
+      continue
+    }
     if (supervision) {
       assert.equal(native.supervision?.kind, initialWaitSurface ? 'initial-wait' : supervisionSurface ? 'surface' : 'durability')
       assert.ok(native.supervision.healthy?.runId && native.supervision.healthy.pid)

@@ -30,6 +30,7 @@ api.sessions.write = (control, data, source) => request('write', control, data, 
 api.sessions.paste = (control, text, data) => request('paste', control, text, data)
 api.sessions.send = (...args) => request('send', ...args)
 api.sessions.submitPrompt = (...args) => request('submit-prompt', ...args)
+api.sessions.inputMailbox = (...args) => request('input-mailbox', ...args)
 api.sessions.inspectInput = (...args) => request('inspect-input', ...args)
 api.sessions.rejoinInputWaiting = (...args) => request('rejoin-input', ...args)
 window.continuityRecoveryReceipts = []
@@ -38,6 +39,7 @@ api.sessions.recover = async (...args) => {
   window.continuityRecoveryReceipts.push({ args, result })
   return result
 }
+api.sessions.restart = (...args) => request('restart', ...args)
 api.sessions.resolve = control => request('resolve', control)
 api.sessions.refresh = control => request('refresh', control)
 api.sessions.controlContinuity = async (hostId, input) => unwrapSessionObservationResult(await request('control-continuity', hostId, input))
@@ -53,6 +55,7 @@ if (setup.phase === 'seed') {
   const agent = (name) => ({ regionId: `continuity-${name}`, kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: setup.ids[name].sessionId })
   let first = createWorkbenchTab('continuity-work', agent('working'))
   first = addWorkbenchRegion(first, 'continuity-working', 'right', agent('healthy'))
+  if (setup.managed) first = { ...first, layout: { ...first.layout, activeRegionId: 'continuity-working' } }
   const second = createWorkbenchTab('continuity-idle', agent('idle'))
   const tabs = { [first.id]: first, [second.id]: second }
   const layout = createWorkspaceLayout('continuity-group', Object.keys(tabs))
@@ -151,3 +154,13 @@ window.capabilityFocusHealthy = () => {
   if (!terminal) throw new Error('The mounted original healthy Terminal is unavailable')
   terminal.focus()
 }
+
+window.managedSendUnknown = async () => {
+  const session = useAppStore.getState().sessions.find(one => one.id === setup.ids.working.sessionId)
+  const operationId = crypto.randomUUID(), binding = { expectedRun: session.control.run,
+    admissionIntent: { kind: 'native-conversation', source: { providerId: session.providerId, nativeSessionId: setup.ids.working.nativeHandle.sessionId } } }
+  const receipt = await api.sessions.submitPrompt(session.control, 'Managed unknown delivery sentinel', operationId, binding,
+    { execution: 'immediate' }, true)
+  return { control: session.control, body: 'Managed unknown delivery sentinel', operationId, receipt }
+}
+window.managedInspectUnknown = original => api.sessions.inspectInput(original.control, original.receipt.key)

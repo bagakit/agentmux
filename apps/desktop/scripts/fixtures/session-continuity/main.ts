@@ -5,6 +5,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxHostExecutorOwner, AgentProviderRegistry } from '@agentmux/core'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import { RuntimeController } from '../../../src/main/runtime-controller'
+import { verifyManagedSessionRecovery } from '../managed-session-recovery/scenario'
 import { verifyCapabilityRecovery } from './capability-recovery'
 import { verifySupervisionSurface } from './supervision-surface'
 import { verifyInitialWaitSurface } from './initial-wait-surface'
@@ -16,12 +17,13 @@ app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
+const managed = process.env.AGENTMUX_MANAGED_SESSION_RECOVERY_PROOF === '1'
 const capability = process.env.AGENTMUX_RECOVERY_CAPABILITY_PROOF === '1'
 const initialWaitSurface = process.env.AGENTMUX_CONTINUITY_INITIAL_WAIT_SURFACE === '1'
 const supervisionSurface = process.env.AGENTMUX_CONTINUITY_SUPERVISION_SURFACE === '1'
 const supervision = process.env.AGENTMUX_CONTINUITY_SUPERVISION_PROOF === '1' || supervisionSurface
 const executor = (mode: string) => ({ label: 'Private native continuity fixture', providerId: 'codex', command: path.join(privateRoot, 'fake-codex'), args: [],
-  env: { AGENTMUX_FAKE_READY_MODE: mode, AGENTMUX_FAKE_NATIVE_RECORD: '1',
+  env: { AGENTMUX_FAKE_READY_MODE: mode, ...(managed ? { AGENTMUX_FIXTURE_ROOT: privateRoot } : {}), AGENTMUX_FAKE_NATIVE_RECORD: '1',
     AGENTMUX_FAKE_NATIVE_PRESERVE: '1', AGENTMUX_FAKE_NATIVE_LAUNCH_INPUT: '1', AGENTMUX_FAKE_NATIVE_CONTEXT: 'Original continuity task: retain decision sentinel continuity-body-7f41 and the independent unsent draft.',
     CODEX_HOME: path.join(privateRoot, 'codex'), AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY: path.join(privateRoot, 'codex', 'sessions') }, injectAgentMuxGuide: false })
 const supervisedExecutor = (mode: string, failure: string) => { const value = executor(mode); return { ...value, env: { ...value.env,
@@ -29,7 +31,7 @@ const supervisedExecutor = (mode: string, failure: string) => { const value = ex
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private continuity proof' }],
   executors: { healthy: executor('before'), working: capability ? { ...executor('before'), env: { ...executor('before').env, AGENTMUX_FAKE_OMIT_HANDLE: '1' } }
     : supervision ? supervisedExecutor('working-until-resume', 'once') : executor('working-until-resume'), idle: supervision ? supervisedExecutor('before', 'always') : executor('before') },
-  ...(capability ? { continuity: { activeRecovery: 'manual' } } : supervision ? { continuity: { ...(initialWaitSurface ? { activeRecoveryDelayMs: 300000 } : {}), retryMaxAttempts: 0, retryInitialDelayMs: 30000, retryMaxDelayMs: 30000 } } : {}),
+  ...(managed ? { continuity: { activeRecovery: 'manual' } } : capability ? { continuity: { activeRecovery: 'manual' } } : supervision ? { continuity: { ...(initialWaitSurface ? { activeRecoveryDelayMs: 300000 } : {}), retryMaxAttempts: 0, retryInitialDelayMs: 30000, retryMaxDelayMs: 30000 } } : {}),
   workspaces: [{ id: 'continuity-workspace', hostId: 'local', name: 'Private continuity proof', path: path.join(privateRoot, 'workspace'), kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
@@ -60,7 +62,7 @@ ipcMain.handle('native-proof:request', async (_event, operation, ...args) => {
   const call: any = { operation, args }; result.calls.push(call)
   try {
     switch (operation) {
-      case 'setup': return { config, phase, ids, sessions }
+      case 'setup': return { config, phase, ids, sessions, managed }
       case 'snapshot': return runtime.snapshot(config as any)
       case 'providers': return runtime.providerCatalog(args[0])
       case 'history-sources': return runtime.sessionHistorySources(args[0])
@@ -74,12 +76,14 @@ ipcMain.handle('native-proof:request', async (_event, operation, ...args) => {
       case 'write': return runtime.write(args[0], args[1], args[2])
       case 'paste': return runtime.paste(args[0], args[1], args[2])
       case 'submit-prompt': return runtime.submitPrompt(args[0], args[1], args[2], args[3], undefined, args[4], args[5], args[6], args[7])
+      case 'input-mailbox': return runtime.inputMailbox(args[0], args[1])
       case 'inspect-input': return runtime.inspectInput(args[0], args[1])
       case 'rejoin-input': return runtime.rejoinInputWaiting(args[0], args[1])
       case 'recover': {
         const value = await runtime.recoverSession(args[0], config as any, args[1], args[2], args[3])
         call.result = structuredClone(value); return value
       }
+      case 'restart': { const value = await runtime.restartSession(args[0], config as any, args[1], args[2]); call.result = structuredClone(value); return value }
       case 'resolve': return runtime.resolveSession(args[0], config as any)
       case 'refresh': return await runtime.refresh(args[0], config as any)
       case 'control-continuity': return await sessionObservationResult(async () => {
@@ -121,7 +125,7 @@ app.whenReady().then(async () => {
       ...(supervision ? { continuity: one.continuity, continuityOperations: one.continuityOperations } : {}) }))
     result.spatialBefore = await spatial.readForLayout()
     if (phase !== 'seed') {
-      const expectedFile = capability ? 'capability-expected.json' : supervision ? 'supervision-expected.json' : phase === 'restore' ? 'expected.json' : 'expected-restored.json'
+      const expectedFile = managed ? 'managed-expected.json' : capability ? 'capability-expected.json' : supervision ? 'supervision-expected.json' : phase === 'restore' ? 'expected.json' : 'expected-restored.json'
       const expected = JSON.parse(await fs.readFile(path.join(privateRoot, expectedFile), 'utf8'))
       assert.deepEqual(result.spatialBefore, expected.spatial, 'Original spatial document must exist before Renderer hydration')
     }
@@ -132,6 +136,9 @@ app.whenReady().then(async () => {
     releaseSpatial = spatial.subscribe(value => { if (!win.isDestroyed()) win.webContents.send('agentmux:session-event', { kind: 'native-proof-spatial-state', state: value }) })
     await win.loadFile(html); step('renderer-loaded')
     await wait('actual App and nonempty workface', async () => await win.webContents.executeJavaScript(`window.continuityReady && !window.continuityState().loading && Object.keys(window.continuityState().tabs).length ${capability ? '>= 1' : '=== 2'}`))
+    if (managed) {
+      await verifyManagedSessionRecovery({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config }); result.passed = true; return
+    }
     if (capability) {
       await verifyCapabilityRecovery({ runtime, store, spatial, win, client, ids, phase, privateRoot, evidence, result, state, wait, delay, config })
       result.passed = true
@@ -268,6 +275,7 @@ app.whenReady().then(async () => {
     result.passed = true
   } catch (error: any) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
+    if (managed) result.nativeFixtureEvents = await fs.readFile(path.join(privateRoot, 'managed-native.jsonl'), 'utf8').catch(() => '')
     if (win && !win.isDestroyed()) result.observationAtFailure = await state().catch(() => null)
     result.runFailureEvidence = await Promise.all((await client().listRuns().catch(() => [])).map(async (run: any) => {
       const replay = await client().readRunReplay({ runId: run.runId }).catch(() => null)
