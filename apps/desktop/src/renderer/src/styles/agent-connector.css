@@ -69,6 +69,8 @@
 .agent-connector-status > p { flex-basis: 100%; }
 .agent-connector-pairing__group > strong, .agent-connector-room-choice > .selection-field { font-size: var(--fs-title); }
 .connector-sharing__metadata { color: var(--text-3); }
+.connector-sharing__notice { max-width: 100%; padding-inline: 0; }
+.connector-sharing__error { margin: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
 
 .agent-connector-section-title { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); }
 .agent-connector-service { display: grid; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--text-3); background: var(--surface-1); }

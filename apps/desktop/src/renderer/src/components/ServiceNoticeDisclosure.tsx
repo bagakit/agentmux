@@ -61,15 +61,25 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
       button.getBoundingClientRect().bottom + 8)
     let bottom = Math.min(bounds.top + bounds.height * 0.6, composer?.getBoundingClientRect().top ?? bounds.bottom,
       (terminal?.getBoundingClientRect().bottom ?? bounds.bottom) - 32)
+    let bottomAnchor: number | null = null
     // Prefer the reading area above the input. When it cannot hold even a
     // heading and readable content, use the original surface for the details
     // explicitly opened by the user; keep them scrollable and dismissible.
     if (bottom - top < 128) {
-      top = Math.max(8, bounds.top + 8)
-      bottom = Math.min(document.documentElement.clientHeight || window.innerHeight, bounds.bottom) - 8
+      const aboveBottom = Math.min(bounds.bottom - 8, button.getBoundingClientRect().top - 8)
+      const aboveTop = Math.max(8, bounds.top + 8)
+      if (aboveBottom - aboveTop >= 128) {
+        bottom = aboveBottom
+        top = aboveTop
+        bottomAnchor = aboveBottom
+      } else {
+        top = aboveTop
+        bottom = Math.min(document.documentElement.clientHeight || window.innerHeight, bounds.bottom) - 8
+      }
     }
     details.style.left = `${bounds.left + 8}px`
-    details.style.top = `${top}px`
+    details.style.top = bottomAnchor === null ? `${top}px` : 'auto'
+    details.style.bottom = bottomAnchor === null ? 'auto' : `${(document.documentElement.clientHeight || window.innerHeight) - bottomAnchor}px`
     details.style.width = `${Math.max(0, Math.min(440, bounds.width - 16))}px`
     details.style.maxHeight = `${Math.max(0, bottom - top - 8)}px`
   }
