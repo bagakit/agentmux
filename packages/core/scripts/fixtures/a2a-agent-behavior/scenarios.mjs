@@ -23,6 +23,56 @@ export function scenarios(peer, token, minimumOnly) {
   ]
 }
 
+/** Only actions that need communication load its contract; a decline or ACK closure need not. */
+export function assertProgressiveDiscovery({ scenario, commands, messageModule, sendHelp, agentSessionId, runId }) {
+  const firstSendIndex = commands.findIndex(item => /\bagent\s+send\b/u.test(item.command ?? '') && !item.command.includes('--help'))
+  // A command's output can teach the model only after that tool completes. A
+  // handbook printed in the same command as the send is not prior consumption.
+  const priorCommands = firstSendIndex < 0 ? commands : commands.slice(0, firstSendIndex)
+  const reads = (pattern, document) => priorCommands.some(item => item.exit_code === 0 &&
+    pattern.test(item.command ?? '') && item.aggregated_output?.includes(document.trim()))
+  const messageRead = reads(/\bmessage\s+--skill\b/u, messageModule)
+  const sendHelpRead = reads(/(?:--help\s+agent\s+send\b|\bagent\s+send\s+--help\b)/u, sendHelp)
+  const whoamiRead = priorCommands.some(item => item.exit_code === 0 && /\bwhoami\b/u.test(item.command ?? '') &&
+    (item.aggregated_output ?? '').split(/\r?\n/u).some(line => {
+      try {
+        const value = JSON.parse(line)
+        return value.ok === true && value.operation === 'whoami' &&
+          value.result?.session?.agentSessionId === agentSessionId && value.result.session.run?.runId === runId
+      } catch { return false }
+    }))
+  const communicates = firstSendIndex >= 0 || ['native-and-independent-channels', 'short-reminder-accepted-delegation'].includes(scenario.name)
+  if (communicates) {
+    assert.ok(messageRead, 'No actual consumption of this candidate message module before communicating')
+    assert.ok(sendHelpRead, 'No actual consumption of this candidate agent send leaf help')
+    assert.ok(whoamiRead, 'No actual successful whoami for the original model Session/Run before communicating')
+  }
+  return { communicationRequiresDiscovery: communicates, messageRead, sendHelpRead, whoamiRead, firstSendIndex }
+}
+
+export function progressiveDiscoveryEvidenceGuard(facts) {
+  const observed = assertProgressiveDiscovery(facts)
+  if (!observed.communicationRequiresDiscovery) return { kind: 'no communication; no forced handbook read', rejected: [] }
+  const rejects = {
+    'missing-message-module': value => { value.messageModule += '\nmissing candidate rule' },
+    'missing-send-help': value => { value.sendHelp += '\nmissing candidate option' },
+    'foreign-whoami-session': value => { value.agentSessionId += '-foreign' },
+    'foreign-whoami-run': value => { value.runId += '-foreign' },
+    'read-after-send': value => {
+      const index = value.commands.findIndex(item => /\bagent\s+send\b/u.test(item.command ?? '') && !item.command.includes('--help'))
+      assert.ok(index >= 0, 'Original observed send is required for the ordering guard')
+      value.commands.unshift(value.commands.splice(index, 1)[0])
+    }
+  }
+  for (const [name, mutate] of Object.entries(rejects)) {
+    const copy = structuredClone(facts)
+    mutate(copy)
+    assert.throws(() => assertProgressiveDiscovery(copy), undefined, 'Discovery evidence mutant escaped: ' + name)
+    assertProgressiveDiscovery(facts)
+  }
+  return { kind: 'observed-fact oracle sensitivity; not product mutation', rejected: Object.keys(rejects), restored: true }
+}
+
 export function assertBehavior({ scenario, commands, collab, finalText, outgoing, token, originalWork, nativeRecords, events, model, actualPrompt }) {
   const writes = commands.filter(item => /agent\s+send/u.test(item.command) && !item.command.includes('--help'))
   const foreignOperations = commands.filter(item => !item.command.includes('--help') && !item.command.includes('--skill') && /\b(?:agent\s+(?:open|submit|input|stop|resume)|terminal\s+(?:input|submit)|space\s+(?:mv|open))\b/u.test(item.command))

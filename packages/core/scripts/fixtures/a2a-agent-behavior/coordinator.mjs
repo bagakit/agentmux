@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { bounded, terminate } from './process.mjs'
 import { readPrivateNativeRecords, nativeSession, assertNativeCollaboration, nativeEvidenceGuards } from './native-evidence.mjs'
-import { scenarios, assertBehavior, behaviorEvidenceGuard } from './scenarios.mjs'
+import { scenarios, assertBehavior, behaviorEvidenceGuard, assertProgressiveDiscovery, progressiveDiscoveryEvidenceGuard } from './scenarios.mjs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -38,8 +38,16 @@ try {
   const { staleDistComplaint } = await import(pathToFileURL(join(repository, 'vitest.dist-freshness.ts')).href)
   assert.equal(await staleDistComplaint(coreRoot), null, 'Build this candidate Core before running real models')
   const core = await import(pathToFileURL(join(coreRoot, 'dist/index.js')).href)
-  const guide = core.AGENTMUX_AGENT_MESSAGING_GUIDANCE
-  receipt.guidanceSha256 = hash(guide)
+  const { composeAgentLaunchPrompt } = await import(pathToFileURL(join(coreRoot, 'dist/agent-outbound-message.js')).href)
+  const { agentMuxModuleSkill } = await import(pathToFileURL(join(coreRoot, 'dist/agentmux-cli-module-skills.js')).href)
+  const { agentMuxCommandHelp } = await import(pathToFileURL(join(coreRoot, 'dist/agentmux-cli-help.js')).href)
+  const messageContract = core.AGENTMUX_AGENT_MESSAGING_GUIDANCE
+  const messageModule = agentMuxModuleSkill('message'), sendHelp = agentMuxCommandHelp('agent.send')
+  assert.ok(messageModule?.includes(messageContract) && sendHelp, 'Candidate communication contract/help is unavailable')
+  const bootstrap = composeAgentLaunchPrompt('bootstrap-proof-body', true).systemContext
+  assert.ok(bootstrap && !bootstrap.includes(messageContract), 'Bootstrap eagerly contains the complete communication contract')
+  receipt.guidanceSha256 = hash(messageContract)
+  receipt.discoveryInputs = { bootstrapSha256: hash(bootstrap), messageModuleSha256: hash(messageModule), sendHelpSha256: hash(sendHelp) }
   receipt.cliVersion = (await exec(codexExecutable, ['--version'])).stdout.trim()
   const runtime = environment.AGENTMUX_RUNTIME_DIRECTORY, state = environment.AGENTMUX_STATE_DIRECTORY
   await recordOwnership()
@@ -154,16 +162,14 @@ try {
     assert.equal(processReceipt.home, environment.HOME); assert.equal(processReceipt.cli, config.cli)
     assert.equal(processReceipt.authHome, authHome); assert.equal(processReceipt.workspace, workspace)
     assert.ok(processReceipt.args.includes('--no-daemon') && processReceipt.args.includes('--ignore-user-config') && processReceipt.args.includes('--ignore-rules'))
-    if (scenario.guide) assert.ok(processReceipt.originalCorePrompt.includes(guide), 'Actual launch did not contain this candidate guide')
-    else {
-      assert.ok(!processReceipt.originalCorePrompt.includes(guide), 'Short-reminder discovery accidentally received the full startup guide')
-      assert.ok(commands.some(item => item.exit_code === 0 && /(?:agent|message)\s+--skill/u.test(item.command ?? '') && item.aggregated_output?.includes(guide)), 'No actual discovery/consumption of the candidate module from its short reminder')
-    }
-    if (index === 0) {
-      assert.ok(commands.some(item => item.exit_code === 0 && item.command?.includes('whoami')), 'No actual successful startup handshake')
-      assert.ok(commands.some(item => item.exit_code === 0 && /(?:agent|message)\s+--skill/u.test(item.command ?? '') && item.aggregated_output?.includes(guide)), 'No actual same-candidate module consumption')
-    }
     assert.equal(incoming.length, scenario.userContext ? 1 : 0)
+    const originalBody = scenario.userContext ? renderAgentMuxMessageEnvelope(incoming[0].envelope) : scenario.task
+    const expectedInput = composeAgentLaunchPrompt(originalBody, scenario.guide)
+    assert.equal(processReceipt.originalCorePrompt, expectedInput.text, 'Actual model input differs from the original Core message and this candidate bootstrap')
+    assert.equal(Boolean(expectedInput.systemContext), scenario.guide, 'Guide-off discovery acquired platform bootstrap')
+    const discoveryFacts = { scenario, commands, messageModule, sendHelp, agentSessionId: modelSession.agentSessionId, runId: modelSession.run.runId }
+    outcome.discovery = { originalCorePromptSha256: hash(processReceipt.originalCorePrompt),
+      ...(expectedInput.systemContext ? { bootstrapSha256: hash(expectedInput.systemContext) } : {}) }
     for (const original of incoming) {
       assert.equal(original.envelope.senderSessionId, peerSession.agentSessionId)
       assert.equal(original.envelope.senderRunId, peerSession.run.runId)
@@ -185,6 +191,8 @@ try {
     assert.equal((await client.listRuns()).find(run => run.runId === peerSession.run.runId)?.state, 'running', 'The original independent peer was operated or replaced')
     assert.deepEqual((await client.readAgentSessions()).map(session => session.agentSessionId).sort(), [peerSession.agentSessionId, ...models.map(value => value.session.agentSessionId)].sort(), 'Model created or replaced an independent Core Session')
     try {
+      Object.assign(outcome.discovery, assertProgressiveDiscovery(discoveryFacts))
+      outcome.discoveryEvidenceGuard = progressiveDiscoveryEvidenceGuard(discoveryFacts)
       const facts = { scenario, commands, collab, finalText, outgoing, token, originalWork, nativeRecords: outcome.nativeRecords, events, model, actualPrompt: processReceipt.args.at(-1) }
       assertBehavior(facts)
       outcome.oracleSensitivity = behaviorEvidenceGuard(facts)
