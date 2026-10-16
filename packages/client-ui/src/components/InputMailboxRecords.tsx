@@ -1,20 +1,20 @@
 import { useState, type ReactNode } from 'react'
 import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
-import { ConversationMessage, type ConversationReadingProps } from './ConversationMessage.js'
+import { ConversationMessage, type ConversationContentBoundary, type ConversationReadingProps } from './ConversationMessage.js'
 import { MessageDeliveryFailure } from './MessageDeliveryFailure.js'
 import { presentMessageDeliveryFailure } from '../lib/message-delivery-presentation.js'
 import { useClientUiPlatform } from '../platform.js'
 import { inputMailboxItemKey, type useAgentInputMailbox } from '../lib/use-agent-input-mailbox.js'
 import { HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, speakerOfExternalAuthor, externalSpeakerLabel, type ConversationSpeaker } from '../lib/conversation-speaker.js'
 
-export function inputMailboxPresentation(item: AgentInputMailboxItem): { text: string | null; speaker: ConversationSpeaker; source: string; state: string } {
+export function inputMailboxPresentation(item: AgentInputMailboxItem): { text: string | null; contentBoundary: ConversationContentBoundary; speaker: ConversationSpeaker; source: string; state: string } {
   const unknown = { role: 'unknown' as const, id: UNKNOWN_SPEAKER_ID }
   if (item.kind === 'controlled') {
     const original = item.intent.source, sender = item.message?.sender
     const speaker = original.kind === 'prompt' ? original.authorHuman === true ? { role: 'human' as const, id: HUMAN_SPEAKER_ID } : unknown
       : sender?.kind === 'external' ? speakerOfExternalAuthor(sender)
       : sender?.kind === 'agent-session' ? { role: 'agent' as const, id: sender.agentSessionId } : unknown
-    return { text: original.kind === 'prompt' ? original.prompt : item.message?.body ?? null, speaker,
+    return { text: original.kind === 'prompt' ? original.prompt : item.message?.body ?? null, contentBoundary: 'body', speaker,
       source: sender?.kind === 'external' ? sender.actor.application.domain : original.kind === 'prompt' ? original.sourceChannel ?? '原提交' : item.sourceChannel ?? '原消息',
       state: item.receipt ? presentMessageDeliveryFailure({ error: null, inputReceipt: item.receipt }).title : '原输入观察未确认' }
   }
@@ -22,7 +22,9 @@ export function inputMailboxPresentation(item: AgentInputMailboxItem): { text: s
   const speaker = message?.authorExternal ? speakerOfExternalAuthor(message.authorExternal)
     : message?.authorAgentSessionId ? { role: 'agent' as const, id: message.authorAgentSessionId }
     : message?.authorHuman === true ? { role: 'human' as const, id: HUMAN_SPEAKER_ID } : unknown
+  // Core performPromptSubmission records the original prompt body here, but a message-key producer records its rendered wire.
   return { text: message?.userContent ?? item.record?.admission?.intent?.prompt ?? item.record?.launch?.prompt ?? null,
+    contentBoundary: item.key.kind === 'prompt' && message?.userContent !== undefined ? 'body' : 'wire',
     speaker, source: message?.sourceChannel ?? '原提交', state: item.record ? '原提交已登记' : '原提交观察未确认' }
 }
 
@@ -53,7 +55,7 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
         <details open={selected === key} onToggle={event => { if (event.currentTarget.open) setSelected(key); else if (selected === key) setSelected(null) }}><summary>查看原输入</summary>
           {selected === key ? <>
           {view.text !== null ? <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata
-            messageId={key} speaker={view.speaker} content={view.text} createdAt={item.recordedAt} {...(onCopy ? { onCopy } : {})} /> : null}
+            messageId={key} speaker={view.speaker} content={view.text} contentBoundary={view.contentBoundary} createdAt={item.recordedAt} {...(onCopy ? { onCopy } : {})} /> : null}
           {item.kind === 'controlled' ? <MessageDeliveryFailure compact error={item.failure ?? null}
             {...(item.receipt ? { inputReceipt: item.receipt } : {})} copyText={onCopy ?? (text => platform.copyText(text, () => {}))} /> : null}
           {item.kind === 'submission' && item.failure ? <p role="status">{item.failure.message}</p> : null}
