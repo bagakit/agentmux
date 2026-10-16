@@ -264,7 +264,7 @@
 .composer__mailbox[data-progress-state='active'] .composer-mailbox__progress { color: var(--green); }
 .composer__mailbox[data-progress-state='unconfirmed'] .composer-mailbox__progress { color: var(--amber); }
 .composer-mailbox__folders { display: flex; flex-wrap: wrap; gap: var(--sp-1); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line-soft); margin-bottom: var(--sp-2); }
-.composer-mailbox__folders > button { flex: 1 1 calc(33.333% - var(--sp-1)); display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
+.composer-mailbox__folders > button { flex: 1 1 calc(50% - var(--sp-1)); display: inline-flex; justify-content: center; align-items: center; gap: var(--sp-1); min-width: 0; min-height: var(--sp-7); padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-3); background: transparent; cursor: pointer; }
 .composer-mailbox__folders > button[aria-selected='true'] { background: var(--surface-3); color: var(--text); }
 .composer-mailbox__folders > button:focus-visible { outline: 1px solid var(--focus-line); }
 .composer-mailbox > [role='tabpanel'] > p { margin: var(--sp-3); color: var(--text-3); }
@@ -343,7 +343,7 @@
 
 
 .composer-mailbox__folders > .composer-mailbox__utility-tab { flex: 0 1 auto; min-height: 24px; }
-.composer-mailbox__folders > .composer-mailbox__utility-tab:nth-child(4) { margin-inline-start: auto; }
+.composer-mailbox__folders > :not(.composer-mailbox__utility-tab) + .composer-mailbox__utility-tab { margin-inline-start: auto; }
 .composer-mailbox__count { padding-inline: var(--sp-1); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .composer-mailbox__empty { display: grid; justify-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-3); color: var(--text-3); text-align: center; }
 .composer-mailbox__empty strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 500; }
@@ -495,3 +495,6 @@
 /* A transient result must wrap below the actions, never squeeze the recorded author. */
 .composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback) > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; width: 100%; margin-inline-start: 0; }
 .composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback) .conversation-input-details__body { grid-row: 3; }
+
+.composer-mailbox__subject { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-meta); }
+.composer-mailbox__reading-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
