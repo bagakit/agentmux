@@ -1,4 +1,4 @@
-import { parseDesktopClientObservation } from '../src/shared/client-observation.ts'
+import { parseDesktopClientObservationForInstall as parseDesktopClientObservation } from '../src/shared/client-observation.ts'
 import { execFile, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, lstat, mkdir, mkdtemp, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
