@@ -8,8 +8,8 @@
 
 | 形式 | 表达的内容 | 业务 owner |
 | --- | --- | --- |
-| `<amux>…</amux>` | 平台自身提供的说明，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文) |
-| `<amux:a2a from="SID" msg-id="MID">…</amux:a2a>` | 跨 Session 原信、作者声明和 Core 短提醒 | [A2A 原信与队列](../design/behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列) |
+| `<amux>…</amux>` | 平台说明或本页定义的 A2A 子项容器，可独立或随原请求投递 | [注入上下文](../design/behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)与[A2A 通知](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与投递方式的待定边界) |
+| `<amux:a2a …>` | 容器中唯一一个 `a2a` 子项的简写；成对标签携带原信，自闭合标签引用原信 | [A2A 原信与队列](../design/behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列) |
 | `<amux:continue />` | 原恢复流程选择的默认接续文本 | [Session 恢复](../design/behavior/session-recovery.md) |
 | `<amux:reaction CODE />` | 用户选定快捷回复的含义标记 | [reaction 快捷回复](../design/behavior/conversation-input.md#回复卡片的-reaction-快捷回复) |
 | `--- amux : File/Browser ---` … `-----` | 原文件或 Browser 上下文的内容分享 | [对象地址与分享](../design/behavior/public-control.md#对象地址分享与方向) |
@@ -34,13 +34,21 @@
 原用户请求
 ```
 
-平台包装的起止是无属性的 `<amux>`、`</amux>`。内容只有 XML 文本节点；producer 转义文本中的 `&`、`<`、`>` 并以字符引用保留 CR，不把原用户请求塞入属性或平台文本。当前 formatter 在平台文本两端加 LF，独立原请求通过两个 LF 接在包装外；内容是否构成一次请求仍由原提交 owner 决定。
+平台包装的起止是无属性的 `<amux>`、`</amux>`。纯说明形态的内容只有 XML 文本节点；producer 转义文本中的 `&`、`<`、`>` 并以字符引用保留 CR，不把原用户请求塞入属性或平台文本。当前 formatter 在平台文本两端加 LF，独立原请求通过两个 LF 接在包装外；内容是否构成一次请求仍由原提交 owner 决定。
 
-共享 reader 只从输入开头读取完整平台声明。多个完整前导声明按原顺序保留，声明之间可以有换行；缩进和真实尾文不被吞掉。平台节点的属性、子元素、DOCTYPE、processing instruction、不完整边界或含糊的前导序列不升级为平台说明，原输入保持可读。reader 保留每个原声明 span，不能通过正文中的另一个标签猜来源。
+共享 reader 只从输入开头读取完整平台声明。多个完整前导声明按原顺序保留，声明之间可以有换行；缩进和真实尾文不被吞掉。纯说明节点不接受属性或子元素；本页明确的 `a2a` 子项按后文合同读取，不能把它们误作普通平台说明文字。未知子项、DOCTYPE、processing instruction、不完整边界或含糊的前导序列不升级为平台说明，原输入保持可读。reader 保留每个原声明 span，不能通过正文中的另一个标签猜来源。
 
 平台说明可以承载简短发现入口，不要求常驻整段操作手册。启动引导、当前身份、模块 Skill 与消息提醒各自披露什么，归[启动握手](../design/behavior/agent-capabilities-and-messaging.md#启动握手与自命名)和[同源指引](../design/behavior/agent-capabilities-and-messaging.md#a2a-指引与通信礼节)；按需读取不需要增加包装属性或新的执行标签。
 
+## A2A 容器与简写
+
+`amux` 容器可表达纯平台说明、一封完整 A2A 原信，或一批 A2A 引用。完整原信使用成对 `a2a` 标签；引用使用带固定取信入口的自闭合 `a2a` 标签。批量通知只含引用，不混装多个完整正文；完整原信容器只持有这一封原信。未知节点不取得业务或执行含义。
+
+容器中只有一个 `a2a` 子项且无其他容器内容时，可以写成 `amux:a2a` 简写。长式和简写生成同一可读语义，保留各自原始 span、wire 和 Copy，不通过字符串展开重写原输入。这是本页为 `a2a` 明确规定的语法，不自动推广为任意 `amux:NAME` 的解释或控制分发规则。
+
 ## A2A 原信
+
+单封原信的简写为：
 
 ```text
 <amux:a2a from="SID" msg-id="MID">
@@ -49,11 +57,22 @@
 </amux:a2a>
 ```
 
+其长式为：
+
+```text
+<amux>
+<a2a from="SID" msg-id="MID">
+发送方原始正文
+<reminder>Core 附带的简短指引</reminder>
+</a2a>
+</amux>
+```
+
 `from` 是原作者的 canonical Agent Session ID，`msg-id` 是同一原信的稳定消息 ID。原 Host、双方 Run、线程、operation 与投递回执继续由[结构化原信类型](../../packages/core/src/agent-message-envelope.ts)和原队列持有，不自动重复塞入可读信封。发送方只交原正文，Core 核验身份后生成信封；格式正确本身不证明该核验发生。
 
 ### 精确文本边界
 
-开头固定为 `<amux:a2a from="SID" msg-id="MID">` 后接一个 LF；属性顺序、双引号和空格按该形式生成。结尾固定为一个 LF、完整 `<reminder>…</reminder>`、一个 LF 和 `</amux:a2a>`，结束标签之后没有尾文。Core reminder 是无属性、无子元素的 XML 文本节点。
+简写的开头固定为 `<amux:a2a from="SID" msg-id="MID">` 后接一个 LF；属性顺序、双引号和空格按该形式生成。结尾固定为一个 LF、完整 `<reminder>…</reminder>`、一个 LF 和 `</amux:a2a>`。长式的开头固定为 `<amux>`、LF、`<a2a from="SID" msg-id="MID">`、LF；结尾为 LF、同样的完整 reminder、LF、`</a2a>`、LF、`</amux>`。结束标签之后没有尾文。Core reminder 是无属性、无子元素的 XML 文本节点。成对标签不携带 `read-via`。
 
 正文是开头与最后一个完整 reminder 尾段之间的原始文本。A2A 格式不解析或转义这段正文来寻找嵌套信封；正文里的代码、换行、实体、先前 reminder 或完整信封示例都保留。不能把整个 A2A 文本当作 XML 文档解析，也不能用遇到的第一个 reminder 裁正文。提醒中的保留字符由 Core 转义，不能用未转义的标签让提醒穿透边界。
 
@@ -77,6 +96,27 @@
 **已经从 journal 或 producer 取得的正文不得再次按 wire 解析。** 即使正文恰好是一个完整 amux 示例，它仍是该作者写的内容。客户端须传递原来的 wire／body 边界，不能通过“看起来像信封”改变正文含义。记录、资源和作者归属由[共同对话协议](conversation-protocol.md#reading-and-projection)持有。
 
 无效、不完整、位于引用或代码内、存在含糊尾文或旧式来源头的内容保持原文可读，不补伪认证，不增加旧格式解析层。原历史记录不会因此被删除、重写或重新投递。
+
+## A2A 引用通知
+
+```text
+<amux>
+<a2a from="SID-1" msg-id="MID-1" read-via="message --skill" />
+<a2a from="SID-2" msg-id="MID-2" read-via="message --skill" />
+</amux>
+```
+
+引用只含原作者 `from`、原信 `msg-id` 与固定发现入口 `read-via="message --skill"`，不携带正文、摘要或预览。自闭合表示原文没有在此展开，不能解释成一封空正文原信。Agent 需要处理时，先通过 `"$AGENTMUX_CLI" message --skill` 发现取信用法，再按原 `msg-id` 主动读取；这不要求处理每封无关来信，也不表示已经读取、理解、接单或完成。
+
+`read-via` 的值固定为上述发现入口，由 Core 生成；它不是任意命令、URL 或授权载体。reader 只提供发现提示，不自动执行属性值、取信或确认消费。空闲投递、steer 资格、通知与原信的独立身份及实际回执由[通知行为合同](../design/behavior/agent-capabilities-and-messaging.md#a2a-引用通知与投递方式的待定边界)持有，不增加为可读属性。合并通知不新建 A2A 原信，每个 `msg-id` 继续引用原 journal 中的同一原信。
+
+### 精确文本边界
+
+容器以 `<amux>`、LF 开始，包含一条或多条引用，每条固定为 `<a2a from="SID" msg-id="MID" read-via="message --skill" />` 并以 LF 分隔；最后一条后接 LF、`</amux>`，结束标签后没有尾文。属性顺序、双引号及自闭合前的一个空格固定；`from`、`msg-id` 复用原信的 canonical 属性编码，不 trim 或重建身份。
+
+Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</reminder>`，前后各以 LF 分隔。提醒只承载按平台说明规则转义的文本，不包含原正文，也不逐项重复完整手册；有此容器提醒时不使用单项简写。
+
+只有一个引用且无容器提醒时，其简写固定为 `<amux:a2a from="SID" msg-id="MID" read-via="message --skill" />`。两种写法都只表达引用；成对原信里的同形标签仍属于不透明原正文，不被提升为新的引用。无固定入口、未知属性或节点、不完整和含糊的文本保持原文可读，不据此触发操作或猜授权。
 
 ## 业务标记
 
@@ -122,5 +162,7 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 | 原消息身份与队列 | [`agent-message-envelope`](../../packages/core/src/agent-message-envelope.ts)、[`agent-global-message-queue`](../../packages/core/src/agent-global-message-queue.ts) |
 | 当前接续、快捷回复、分享和链接 | 上述各节的原 producer／parser；不另造统一控制分发器 |
 | 普通与完整资源阅读、原始 Copy | [对话机制](../architecture/conversation.md#可读信封与原输入)与[共同阅读合同](conversation-protocol.md#readable-agentmux-envelopes) |
+
+本页新增的容器长式与引用形态是已确认的扩展合同；表中列出的既有入口不证明这些扩展已实现或被实际客户端消费。对应 producer、reader 与引用通知链仍须沿原 owner 接线并验收，不能用规范更新代替产品交付。
 
 增加或修改一种表示时，先在本页明确格式和原内容边界，再沿原 producer、共同 reader、资源阅读、Copy 和实际消费者核对；涉及公共能力时按[公共能力贡献约定](../guides/public-capability-contributions.md)判断 CLI／RPC 影响。可读格式不持有另一份运行状态、消息 Store 或业务生命周期。
