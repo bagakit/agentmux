@@ -67,7 +67,7 @@ it('discovers exact fixed commands offline in the sole help and skill, with no C
     if (args[0] === '--skill') expect(result.stdout).toContain('amux system --skill')
     else if (args[0] !== '--help') {
       expect(result.stdout).toContain('amux system crash-log')
-      expect(result.stdout).toContain('amux system crash-log reveal')
+      if (args[1] === 'crash-log') expect(result.stdout).toContain('amux system crash-log reveal')
     }
   }
   expect(seen).toEqual([])

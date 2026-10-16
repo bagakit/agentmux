@@ -8,6 +8,10 @@ import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-hel
 import { agentMuxCliModuleCatalog, agentMuxModuleSkill, agentMuxModuleSkillEntry } from '../src/agentmux-cli-module-skills.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY, goalRoleGuidance, goalRoleGuidanceContract } from '../src/goal-role-guidance.js'
 import { agentMuxPmoPlaybook } from '../src/agentmux-pmo-playbook.js'
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from '../src/agent-messaging-guidance.js'
+import { AGENT_OPEN_WORKFLOW, DIAGNOSTIC_GUIDE, NATIVE_RESUME_GUIDE, SPATIAL_GUIDE } from '../src/agentmux-cli-shared-guides.js'
+import { AGENTMUX_BROWSER_PROGRAM_GUIDE, AGENTMUX_BROWSER_TARGET_GUIDE, AGENTMUX_BROWSER_TASK_GUIDE } from '../src/agentmux-cli-browser-guide.js'
+import { browserPageCapabilityNames } from '../src/browser-page-capability.js'
 import { ObjectCliProbe, objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 let root: string
@@ -64,6 +68,46 @@ describe('local progressive AgentMux module skills', () => {
     }
   })
 
+  it('routes short domain entries to complete purpose-specific contracts without eager handbooks', () => {
+    const roots = agentMuxCliModuleCatalog().map(module => module.root)
+    expect(roots.length).toBeGreaterThan(1)
+    expect(AGENTMUX_CLI_SKILL).toContain('if you know the domain, skip this directory')
+    for (const full of [AGENTMUX_AGENT_MESSAGING_GUIDANCE, SPATIAL_GUIDE, NATIVE_RESUME_GUIDE, AGENT_OPEN_WORKFLOW])
+      expect(AGENTMUX_CLI_SKILL).not.toContain(full)
+    for (const root of roots) {
+      const document = agentMuxModuleSkill(root)!
+      if (root !== 'message') expect(document, root).not.toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+      if (root !== 'space') expect(document, root).not.toContain(SPATIAL_GUIDE)
+    }
+    expect(agentMuxModuleSkill('message')).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+    expect(agentMuxModuleSkill('space')).toContain(SPATIAL_GUIDE)
+    expect(agentMuxModuleSkill('system')).toContain(DIAGNOSTIC_GUIDE)
+    const agent = agentMuxModuleSkill('agent')!
+    for (const route of ['amux message --skill', 'amux agent native --help', 'amux agent open --help'])
+      expect(agent).toContain(route)
+    expect(agent).not.toContain(NATIVE_RESUME_GUIDE)
+    expect(agent).not.toContain(AGENT_OPEN_WORKFLOW)
+    expect(agentMuxCommandHelp('agent.native')).toContain(NATIVE_RESUME_GUIDE)
+    expect(agentMuxCommandHelp('agent.open')).toContain(AGENT_OPEN_WORKFLOW)
+    const browser = agentMuxModuleSkill('browser')!
+    for (const route of ['amux browser targets --help', 'amux browser run --help', 'amux browser task --help', 'amux space --skill'])
+      expect(browser).toContain(route)
+    for (const guide of [AGENTMUX_BROWSER_PROGRAM_GUIDE, AGENTMUX_BROWSER_TARGET_GUIDE, AGENTMUX_BROWSER_TASK_GUIDE])
+      expect(browser).not.toContain(guide)
+    expect(agentMuxCommandHelp('browser.targets')).toContain(AGENTMUX_BROWSER_TARGET_GUIDE)
+    expect(agentMuxCommandHelp('browser.task')).toContain(AGENTMUX_BROWSER_TASK_GUIDE)
+    const program = agentMuxCommandHelp('browser.run')!
+    expect(program).toContain(AGENTMUX_BROWSER_PROGRAM_GUIDE)
+    for (const effect of ['observe', 'act', 'wait', 'navigate'] as const)
+      for (const name of browserPageCapabilityNames(effect)) expect(program).toContain(name)
+    const file = agentMuxModuleSkill('file')!
+    for (const route of ['amux file write --help', 'amux file restore --help', 'amux file undo --help']) expect(file).toContain(route)
+    expect(file).not.toContain('noteConflictUnavailable')
+    expect(agentMuxCommandHelp('file.write')).toContain('noteConflictUnavailable')
+    expect(agentMuxCommandHelp('file.restore')).toContain('contentUnavailable')
+    expect(agentMuxCommandHelp('file.undo')).toContain('For a confirmed original creation batch')
+  })
+
   it('actual compiled CLI reads every selected module locally without connecting or creating work', async () => {
     const catalog = agentMuxCliModuleCatalog()
     expect(catalog.length).toBeGreaterThan(1)
@@ -103,8 +147,12 @@ describe('local progressive AgentMux module skills', () => {
     expect(goal.code, goal.stderr).toBe(0)
     expect(browser.code, browser.stderr).toBe(0)
     expect(goal.stdout).toContain(goalRoleGuidanceContract())
-    expect(browser.stdout).toContain('readResult')
-    expect(browser.stdout).toContain('browser inspect --operation-id')
+    expect(browser.stdout).toContain('amux browser run --help')
+    const program = await run(['--endpoint', dead, '--help', 'browser', 'run'])
+    expect(program.code, program.stderr).toBe(0)
+    expect(program.stdout.trim()).toBe(agentMuxCommandHelp('browser.run')!.trim())
+    expect(program.stdout).toContain('readResult')
+    expect(program.stdout).toContain('browser inspect --operation-id')
     expect(connections).toBe(0)
     expect((await readdir(root, { recursive: true })).sort()).toEqual(originalFiles)
   })

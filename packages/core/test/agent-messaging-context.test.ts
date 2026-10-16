@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { previousWireCore } from './helpers/previous-core-wire.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
-import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AGENTMUX_A2A_REMINDER } from '../src/agent-messaging-guidance.js'
+import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_A2A_REMINDER } from '../src/agent-messaging-guidance.js'
 import { composeAgentPrompt, composeAgentResumePrompt } from '../src/agent-outbound-message.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
@@ -38,10 +38,10 @@ it('confirms actual at-launch context while keeping an empty original user reque
   const h = await fixture()
   const result = await h.client.createAgentWithDelivery(h.create)
   expect(result.creation).toMatchObject({ initialPrompt: 'not-requested', agentMuxContext: 'confirmed' })
-  expect(h.started[0].args.some((arg: string) => arg.includes(AGENTMUX_AGENT_MESSAGING_GUIDANCE))).toBe(true)
+  expect(h.started[0].args.some((arg: string) => arg.includes(AGENTMUX_AGENT_MESSAGING_ENTRY))).toBe(true)
   const history = (await h.store.loadTimeline(result.session.agentSessionId)).items
   expect(history.filter(item => item.kind === 'user_message')).toEqual([])
-  expect(history).toContainEqual(expect.objectContaining({ kind: 'system_message', content: expect.stringContaining(AGENTMUX_AGENT_MESSAGING_GUIDANCE) }))
+  expect(history).toContainEqual(expect.objectContaining({ kind: 'system_message', content: expect.stringContaining(AGENTMUX_AGENT_MESSAGING_ENTRY) }))
   expect(h.submit).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
@@ -62,7 +62,7 @@ it('keeps native takeover without a task input and reports guidance as unconfirm
   const result = await h.client.createAgentWithDelivery(request)
   expect(result).toMatchObject({ promptConfirmed: false, creation: { initialPrompt: 'not-requested', agentMuxContext: 'unconfirmed' } })
   expect(result.session.nativeHandle).toEqual(request.nativeResumeSource.nativeHandle)
-  expect(h.started[0].args).not.toContain(expect.stringContaining(AGENTMUX_AGENT_MESSAGING_GUIDANCE))
+  expect(h.started[0].args).not.toContain(expect.stringContaining(AGENTMUX_AGENT_MESSAGING_ENTRY))
   expect((await h.store.loadTimeline(result.session.agentSessionId)).items).toEqual([])
   const repeated = await h.client.createAgentWithDelivery(request)
   expect(repeated).toMatchObject({ promptConfirmed: false, session: { agentSessionId: result.session.agentSessionId, run: result.session.run } })
@@ -75,8 +75,8 @@ it.each([false, true])('records post-launch context only after its exact input i
   const result = await h.client.createAgentWithDelivery(h.create)
   expect(result.creation).toMatchObject({ initialPrompt: 'not-requested', agentMuxContext: failure ? 'unconfirmed' : 'confirmed' })
   expect(h.submit).toHaveBeenCalledOnce()
-  expect(h.submit.mock.calls[0]![3]).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
-  expect(h.submit.mock.calls[0]![11]).toMatchObject({ systemContext: expect.stringContaining(AGENTMUX_AGENT_MESSAGING_GUIDANCE) })
+  expect(h.submit.mock.calls[0]![3]).toContain(AGENTMUX_AGENT_MESSAGING_ENTRY)
+  expect(h.submit.mock.calls[0]![11]).toMatchObject({ systemContext: expect.stringContaining(AGENTMUX_AGENT_MESSAGING_ENTRY) })
   expect(h.submit.mock.calls[0]![11]).not.toHaveProperty('userContent')
   expect((await h.store.loadTimeline(result.session.agentSessionId)).items.every(item => item.kind !== 'user_message')).toBe(true)
   expect(result.session.run).toEqual({ runId: 'new-run' }); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -108,7 +108,7 @@ it('does not synthesize input or a task during no-input automatic restoration', 
   expect(result.kind, JSON.stringify(result)).toBe('resumed')
   const op = h.client.agentSession('original-session').continuityOperations!['original-restore']!
   expect(op.launchInput).toBeUndefined(); expect(op.recoveryDelivery).toBeUndefined()
-  expect(h.started[0].args.some((arg: string) => arg.includes(AGENTMUX_AGENT_MESSAGING_GUIDANCE))).toBe(false)
+  expect(h.started[0].args.some((arg: string) => arg.includes(AGENTMUX_AGENT_MESSAGING_ENTRY))).toBe(false)
   expect(h.submit).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
@@ -119,7 +119,7 @@ it('freezes same-source guidance in the original continuity packet before starti
   h.probe.mockRejectedValueOnce(new Error('Private Provider observation unavailable before Start'))
   await expect(h.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'pending' })
   const pending = h.client.agentSession('original-session').continuityOperations!['frozen-resume']!.launchInput!
-  expect(pending.message.systemContext).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+  expect(pending.message.systemContext).toContain(AGENTMUX_AGENT_MESSAGING_ENTRY)
   expect(h.started).toHaveLength(0)
   await expect(h.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'resumed' })
   expect(h.started[0].args).toContain(pending.prompt)
@@ -136,7 +136,7 @@ it('preserves the previous generation frozen resume wire and platform source aft
   await expect(h.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'pending' })
   const original = h.client.agentSession('original-session').continuityOperations!['previous-resume']!.launchInput!
   expect(original.message.systemContext).toBe(request.input.agentMuxNote)
-  expect(original.prompt).not.toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+  expect(original.prompt).not.toContain(AGENTMUX_AGENT_MESSAGING_ENTRY)
   const reader = new core.AgentMuxClient({ store: new core.AgentMuxFileAgentSessionStore(h.store.path), providers: [h.provider] }); cleanups.push(() => reader.dispose())
   const inner = reader as any; inner.connected = true; await inner.registry.load('local')
   for (const key of ['isConnected', 'identity', 'status', 'list', 'start', 'stop', 'input']) inner.kernel[key] = h.inner.kernel[key]
@@ -158,7 +158,7 @@ it('uses the shared receiver and authorization rules for the delivered reminder 
   expect(parsed.reminder?.text).toContain('Assess relevance and existing responsibility')
   expect(parsed.reminder?.text).toContain('no new user authorization')
   expect(parsed.reminder?.text).toContain('avoid acknowledgement loops')
-  expect(parsed.reminder?.text).toContain('agent --skill')
+  expect(parsed.reminder?.text).toContain('message --skill')
   expect(parsed.reminder!.text.length).toBeLessThanOrEqual(400)
 })
 
@@ -206,7 +206,7 @@ it('freezes shared platform context for existing automatic continuation while re
   expect(h.operation().policy.reminderMode).toBe('off')
   expect(packet.reminder).toMatchObject({ selected: false, text: '', status: 'not-selected' })
   expect(packet.continuation).toMatchObject({ selected: true, text: '<amux:continue />', status: 'accepted' })
-  expect(packet.systemContext).toBe(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+  expect(packet.systemContext).toBe(AGENTMUX_AGENT_MESSAGING_ENTRY)
   expect(record?.admission).toMatchObject({ acknowledged: true, inputKey: packet.key, intent: {
     prompt: composeAgentPrompt(packet.continuation.text, packet.systemContext).text,
     message: { systemContext: packet.systemContext, userContent: packet.continuation.text } } })
@@ -237,7 +237,7 @@ it('reconciles a lost automatic input ACK from the same frozen context without d
   await expect.poll(() => h.delivery().phase).toBe('unknown')
   const frozen = structuredClone(h.delivery()), record = await h.client.inspectAgentPromptSubmission(frozen.key)
   expect(record?.admission?.intent?.message?.systemContext).toBe(frozen.systemContext)
-  expect(frozen.systemContext).toContain(AGENTMUX_AGENT_MESSAGING_GUIDANCE)
+  expect(frozen.systemContext).toContain(AGENTMUX_AGENT_MESSAGING_ENTRY)
   await h.wake(); await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
   expect(h.delivery().systemContext).toBe(frozen.systemContext)
   expect(h.delivery().reason).toBe('original-input-delivery-unconfirmed')

@@ -72,7 +72,7 @@ describe('启动提示路径经同一出口', () => {
     // AgentMux 的引导语被署名。
     expect(out.startsWith('<amux>\n')).toBe(true)
     expect(out).toContain('AgentMux runtime guide:')
-    expect(out).toContain('into a split')
+    expect(out).toContain('read space --skill')
     expect(out).toContain('"$AGENTMUX_CLI" --skill')
     // 用户原文作为独立一段、逐字节保留在信封之外。
     expect(out.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
@@ -82,23 +82,21 @@ describe('启动提示路径经同一出口', () => {
     // 守 SSOT「不把完整 CLI 语法抄进提示」——语法的唯一真相在 skill，抄进来会在语法演进时过期。
     // 这条负向断言此前在旧 agent-launch-prompt.test.ts 里，随模块删除一并搬来。
     const guide = composeAgentLaunchPrompt('do the work', true).text
-    for (const direction of ['left', 'right', 'above', 'below']) expect(guide).toContain(direction)
+    expect(guide).toContain('choose a readable placement')
     for (const flag of ['--left-of', '--right-of', '--above', '--below', 'open terminal', 'agent open', 'space mv']) {
       expect(guide).not.toContain(flag)
     }
   })
 
-  it('网页优先准确的内置 Browser 和同 Tab 可读 Region，并保留人工边界', () => {
+  it('网页和开面先发现对应合同，启动不展开整个布局手册', () => {
     const guide = composeAgentLaunchPrompt(NASTY_USER, true).text
-    expect(guide).toContain("prefer AgentMux's embedded Browser and public CLI")
-    expect(guide).toContain('Reuse the exact Browser already confirmed for this task')
-    expect(guide).toContain("inspect your own actual Tab/Region and the whole Tab's visible layout")
-    expect(guide).toContain('prefer a directional Region in that same Tab')
-    expect(guide).toContain('Agent and page stay readable together')
-    expect(guide).toContain('crowded layout, a full workface for reading, an unsuitable capability or a user-specified Browser/tool')
-    expect(guide).toContain('does not authorize replacing existing content, changing focus, taking human control or bypassing refusal')
-    expect(guide).toContain('Keep the original page, user input and unknown operation receipts')
-    expect(guide).toContain('confirm the returned Browser, Tab, Region and navigation receipt')
+    expect(guide).toContain('browser --skill first')
+    expect(guide).toContain("prefer AgentMux's Browser")
+    expect(guide).toContain("reuse the confirmed Browser and honor the user's tool choice")
+    expect(guide).toContain('read space --skill')
+    expect(guide).toContain('Preserve content, input and focus')
+    expect(guide).toContain('confirm returned identities/receipts')
+    expect(guide).not.toContain('crowded layout')
     expect(guide.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
   })
 
@@ -126,7 +124,7 @@ describe('启动定向握手：启动提示携带 whoami 指令并署名进信�
     // 行为断言：握手动词进了启动提示，且用的是 CLI 真正分发的那个动词名（防 guide/dispatch 漂移）。
     expect(out).toContain(`"$AGENTMUX_CLI" ${AGENTMUX_SELF_CONTEXT_VERB}`)
     // 握手的目的：让 Agent 知道自己是谁、在哪、有哪些能力——坐标各项都被点到。
-    for (const coordinate of ['Session', 'View', 'Region', 'Workspace', 'capabilities']) {
+    for (const coordinate of ['exact identity', 'capabilities', 'unavailable facts']) {
       expect(out).toContain(coordinate)
     }
   })
