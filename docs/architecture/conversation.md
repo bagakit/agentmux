@@ -38,7 +38,9 @@ Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-messa
 | Core 的普通提交、恢复与 Host 通路 | [Core `composeAgentPrompt`](../../packages/core/src/agent-outbound-message.ts) 统一组合显式平台内容与原用户正文，启动引导委托同一组合 owner；独立热上下文不附加启动等待语。公开 SDK、Hosted RPC、Main 和 Preload 显式传递 `agentMuxNote`，Core 分别记录平台与原正文来源。首次 Input 的完整 wire、原来源分界与作者冻结在既有持久意图中；同一 operation 的相同 wire 不允许变更来源，缺原来源事实明确未知，保留原 Input 与健康 Run。原生 resume 保留用户空白与换行。 |
 | Mailbox Progress | [Desktop Loop Manager](../../apps/desktop/src/main/continuous-progress-loop-manager.ts) 在原符合资格的发送首次 claim 时保存原 `loop.prompt` 与 Core 同源共享消息规则；[Desktop `deliverContinuousProgress`](../../apps/desktop/src/main/continuous-progress-delivery.ts) 将冻结的原正文与显式平台说明分开提交。同一次重试或冷恢复沿原 operation、condition 与内容；缺原内容事实明确未知，保留健康 Run 与手动输入。规则只伴随既有自动发送，无新增 Reminder 周期、任务或配置，用户 continuation prompt 不升级为平台自产内容。 |
 
-启动引导和非空 resume 由 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 组合；[`agent-messaging-guidance`](../../packages/core/src/agent-messaging-guidance.ts) 提供协作规则及 A2A 短提醒。当前启动、whoami、基础和部分模块 Skill／help 复用完整规则文本。模块目录及本地 Skill 生成来自 [`agentmux-cli-module-skills`](../../packages/core/src/agentmux-cli-module-skills.ts)，确切路由由 [`agentmux-cli-help`](../../packages/core/src/agentmux-cli-help.ts) 和[公共能力来源](../specs/public-capabilities.md)定位。存在本地发现入口不等于已经实现精简披露，也不证明当前模型已经读取或采用。
+启动引导和非空 resume 由 [`agent-outbound-message`](../../packages/core/src/agent-outbound-message.ts) 组合；[`agent-messaging-guidance`](../../packages/core/src/agent-messaging-guidance.ts) 持有完整协作合同、短通信入口与 A2A 接收提醒。启动给出短发现路线，resume 和新的 Progress 输入用短通信入口；完整协作合同只由 `message --skill` 展开。已冻结的输入与安排保留原平台内容，不按新版指南重组。
+
+`whoami` 的[原公共类型、服务和严格 codec](../specs/public-capabilities.md)只返回原 Session、状态、View 与 unavailable，不带静态 Topic 提示或通信指南。模块目录及本地 Skill 生成来自 [`agentmux-cli-module-skills`](../../packages/core/src/agentmux-cli-module-skills.ts)的实际命令根；基础目录不内联模块全文。已知任务域可直接读取其模块，root／object help 由原注册表列下一层，叶子 help 提供该操作的参数、选项与回执说明。Browser program／task、原生恢复、空间 playbook 等分别在相关原入口可达，不在所有相邻模块与叶子重复展开。确切路由由 [`agentmux-cli-help`](../../packages/core/src/agentmux-cli-help.ts)持有，不新增规则或已读状态 Store。实际文本可达和读取不证明当前模型已经采用。
 
 ## 三种来源怎样读取
 

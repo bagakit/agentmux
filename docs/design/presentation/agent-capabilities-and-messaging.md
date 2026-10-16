@@ -94,7 +94,7 @@ Tab、树、Session、Board 与 Browser rail 的普通身份图按提醒价值�
 
 - 非历史 CLI 当前回执与无关原生读取依赖边界归交互合同[《持久消息的显式消费与派发等待》](../behavior/agent-capabilities-and-messaging.md#持久消息的显式消费与派发等待)，不另造提示或输出协议。
 - 显式消费沿现有 CLI 结构化回执与可读信封表达批次、Run、消息身份和真实投递状态，不增加常驻界面入口或第二种已读徽章；通信语义唯一来源见交互合同[《持久消息的显式消费与派发等待》](../behavior/agent-capabilities-and-messaging.md#持久消息的显式消费与派发等待)。
-- 跨 Session 消息来源沿既有一行来源与正文呈现，不新增视觉层或认证徽章；统一来源头、首条及 `whoami`／启动／技能的使用要求只引用交互合同[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。
+- 跨 Session 消息来源沿既有一行来源与正文呈现，不新增视觉层或认证徽章；原信、启动／技能与随信提醒的使用要求只引用交互合同[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)，`whoami` 的身份事实不承载另一份通信指南。
 
 - 发送回执与收件侧信封必须能对应同一条消息：首层明确显示已入队、已投递或失败，详情能核对稳定 `messageId` 和 Core 核验的双方 Session/Run；重试不得像一条新消息，队列暂不可写时不得出现虚假的“已送达”。交互行为以[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)为准。
 - 收件来源显示 Core 已解析的参与者身份；Region、Tab 和其他视觉位置不能冒充发送者或接收者。实际可读来源与机器消息字段的归属只见上述 A2A 交互合同，可读属性只沿新信封合同表达，不替代结构化事实。
