@@ -132,6 +132,7 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
 }
 type FocusConversationFacts = {
   revision: number | undefined; sourceHostId: string | undefined; agentSessionId: string | undefined; streamEpoch: string | undefined
+  items: AgentTimelineSnapshot['items'] | undefined; stream: AgentTimelineSnapshot['stream']
   recap: LauncherRecap | null
   latest: { detail: string; text: string; currentResult: boolean; matchesRecap: boolean } | null
 }
@@ -139,7 +140,7 @@ function sameConversationFacts(facts: FocusConversationFacts, timeline: AgentTim
   return facts.revision === timeline?.revision && facts.sourceHostId === timeline?.sourceHostId && facts.agentSessionId === timeline?.agentSessionId && facts.streamEpoch === timeline?.stream?.epoch
 }
 function focusConversationFacts(timeline: AgentTimelineSnapshot | undefined, previous?: { timeline: AgentTimelineSnapshot | undefined; conversation: FocusConversationFacts | undefined }): FocusConversationFacts {
-  if (previous?.conversation && previous.timeline === timeline && sameConversationFacts(previous.conversation, timeline)) return previous.conversation
+  if (previous?.conversation && previous.conversation.items === timeline?.items && previous.conversation.stream === timeline?.stream && sameConversationFacts(previous.conversation, timeline)) return previous.conversation
   const items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
   const records = timeline ? projectConversationRecords({ agentSessionId: timeline.agentSessionId, timeline }) : []
@@ -147,7 +148,7 @@ function focusConversationFacts(timeline: AgentTimelineSnapshot | undefined, pre
   const recap = items.length ? launcherTimelineRecap(records) : null
   const text = latestRecord?.content ? clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140) : ''
   const label = latestRecord?.role === 'observation' ? COLLECTED_REPLY_TITLE : latestRecord?.author?.kind === 'agent' ? 'Response' : 'Prompt'
-  return { revision: timeline?.revision, sourceHostId: timeline?.sourceHostId, agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch, recap,
+  return { items: timeline?.items, stream: timeline?.stream, revision: timeline?.revision, sourceHostId: timeline?.sourceHostId, agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch, recap,
     latest: latestRecord?.content ? { detail: `${label} · ${text}`, text,
       currentResult: Boolean((latestRecord.role === 'observation' || latestRecord.role === 'message' && latestRecord.author?.kind === 'agent') && latestRecord.rawId === latest?.id && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim()),
       matchesRecap: Boolean(recap && latestRecord.content.trim() && (recap.source === 'Last reply observation' ? latestRecord.role === 'observation' : latestRecord.role === 'message' && (recap.source === 'Last assistant message') === (latestRecord.author?.kind === 'agent'))) } : null }
