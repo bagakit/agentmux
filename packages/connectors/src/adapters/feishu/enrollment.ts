@@ -1,6 +1,7 @@
 import type { ConnectionEnrollmentDiagnostic } from '@agentmux/core/connections'
 import type { ConnectionEnrollmentAdapter, EnrollmentAdapterInput, EnrollmentUnknownReceipt } from '../../connection-enrollment-adapter.js'
-import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState, readNativeAccountResponse, FEISHU_BROWSER_USER_AGENT } from './native-account.js'
+import { beginFeishuNativeAccount, advanceFeishuNativeAccount, readNativeAccountState } from './native-account.js'
+import { requestFeishuConsole } from './console-request.js'
 import { FEISHU_ENROLLMENT_PROTOCOL } from './enrollment-protocol.js'
 export { FEISHU_ENROLLMENT_PROTOCOL } from './enrollment-protocol.js'
 
@@ -53,34 +54,9 @@ function png(value: string): { bytes: Buffer; width: number; height: number } | 
 
 /** One fixed console request. The Host owns consent, durable claims and original result recovery. */
 async function request(input: EnrollmentAdapterInput, saved: Session, path: string, body: Record<string, unknown> | FormData, signal?: AbortSignal): Promise<Reply> {
-  if (signal?.aborted) return unknown({ stage: 'request', code: 'cancelled' })
-  const { native, cookies } = saved, target = new URL(path, ORIGIN)
-  const headers: Record<string, string> = { accept: 'application/json, text/plain, */*', 'user-agent': FEISHU_BROWSER_USER_AGENT, origin: ORIGIN, referer: ORIGIN + '/app', 'x-csrf-token': native.csrf!, 'X-Timezone-Offset': String(new Date().getTimezoneOffset()) }
-  const cookie = cookies.getCookieStringSync(target.href); if (cookie) headers.cookie = cookie
-  const multipart = body instanceof FormData
-  if (!multipart) headers['content-type'] = 'application/json'
-  const bounded = AbortSignal.timeout(20_000)
-  let response: Response
-  // No await between this original Host authority check and the single dispatch.
-  input.assertCurrent()
-  try {
-    response = await fetch(target.href, { method: 'POST', redirect: 'manual', headers, body: multipart ? body : JSON.stringify(body), signal: signal ? AbortSignal.any([signal, bounded]) : bounded })
-  } catch { return unknown({ stage: 'request', code: signal?.aborted ? 'cancelled' : 'transport-unconfirmed' }) }
-  if (!response.ok) return unknown({ stage: 'response', code: 'http-status', httpStatus: response.status })
-  try {
-    if (response.redirected || response.url && new URL(response.url).href !== target.href) return invalidResponse(response.status)
-  } catch { return invalidResponse(response.status) }
-  if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') return invalidResponse(response.status)
-  let payload: Record<string, unknown> | null
-  try { payload = record(JSON.parse(await readNativeAccountResponse(response))) } catch { return unknown({ stage: 'response', code: 'invalid-json', httpStatus: response.status }) }
-  if (!payload || !Number.isSafeInteger(payload.code)) return invalidResponse(response.status)
-  if (payload.code !== 0) return unknown({ stage: 'response', code: 'platform-error', httpStatus: response.status })
-  try {
-    for (const value of response.headers.getSetCookie()) cookies.setCookieSync(value, target.href, { ignoreError: true })
-    const cookieJar = cookies.serializeSync(); if (!cookieJar) return invalidResponse(response.status)
-    saved.value.authentication = { ...native, cookieJar }
-  } catch { return invalidResponse(response.status) }
-  return { kind: 'response', payload, httpStatus: response.status }
+  const { authentication, ...response } = await requestFeishuConsole({ state: saved.native, cookies: saved.cookies, path, referer: ORIGIN + '/app', body, assertCurrent: input.assertCurrent }, signal)
+  if (authentication) saved.value.authentication = authentication
+  return response
 }
 
 /** The current console template route is frozen by the original Host; old intents retain their original route. */

@@ -3,14 +3,14 @@ import type { ConnectionApplication, ConnectionSetupChallenge, ConnectionSetupAc
 export type SetupAdapterInput = Readonly<{ operationId: string; connectionId: string; attemptId: string; application: Readonly<ConnectionApplication> }>
 export type SetupChallengeReceipt = { kind: 'challenge'; challenge: ConnectionSetupChallenge; privateState: string } | { kind: 'unknown' }
 export type SetupAuthenticationReceipt = { kind: 'progress'; stage: ConnectionSetupAuthenticationStage; challenge: ConnectionSetupChallenge | null; account: ConnectionSetupAccount | null; privateState: string } | { kind: 'unknown' }
-export type SetupReadReceipt = { kind: 'observed'; readResult: ConnectionSetupReadSummary; privateState: string } | { kind: 'unknown' }
+export type SetupReadReceipt = ({ kind: 'observed'; readResult: ConnectionSetupReadSummary; privateState: string } | { kind: 'unknown' }) & { authentication?: string }
 export type SetupPermissionPlan = { review: ConnectionSetupPermissionReview; appScopeIDs: Array<string | number> }
 /** Native intent stays opaque to the generic Host; the adapter alone owns its schema. */
 export type SetupMessageReceptionPlan = { review: ConnectionSetupMessageReceptionReview; privateIntent: string | null }
 export type SetupPublicationPlan = { review: ConnectionSetupPublicationReview; privateIntent: string | null }
-export type SetupPublicationReceipt = { kind: 'accepted'; privateState: string; versionId: string; submission: ConnectionSetupSubmissionResponse | null } | { kind: 'unknown' }
-export type SetupConfigurationReceipt = { kind: 'accepted'; privateState: string; requiresDataRangeConfiguration?: boolean | null } | { kind: 'unknown' }
-export type SetupInspectionReceipt = { kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }
+export type SetupPublicationReceipt = ({ kind: 'accepted'; privateState: string; versionId: string; submission: ConnectionSetupSubmissionResponse | null } | { kind: 'unknown' }) & { authentication?: string }
+export type SetupConfigurationReceipt = ({ kind: 'accepted'; privateState: string; requiresDataRangeConfiguration?: boolean | null } | { kind: 'unknown' }) & { authentication?: string }
+export type SetupInspectionReceipt = ({ kind: 'observed'; applicationInfoReadPermission: 'confirmed' | 'unknown'; privateState: string } | { kind: 'unknown' }) & { authentication?: string }
 export interface ConnectionSetupAdapter {
   /** Local implementation availability only, never exact-application management eligibility. */
   readonly domains: readonly string[]
