@@ -299,22 +299,25 @@
 .activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__reading { grid-column: 1; min-width: 0; }
 .activity-feed__reading-header:not([data-has-ruler]) > .reading-find__floating-trigger { position: static; grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: var(--sp-1); }
 
-/* A reading signal, not placeholder messages or an Agent execution indicator.
-   The continuous opacity cadence belongs only to an actual empty pending read. */
+/* The initial read owns the remaining reading area. Controls and source
+   recovery stay in their normal rows; only the decorative field moves. */
+.activity-feed:has(> .activity-feed__reading-header > .activity-feed__empty-reading[data-read-state='pending']) { display: flex; flex-direction: column; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-read-state='pending']) { flex: 1; min-height: 0; grid-template-rows: auto minmax(0, 1fr); align-items: stretch; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-read-state='pending']) > .reading-find__floating-trigger { grid-row: 1; }
+.activity-feed__reading-header:has(> .activity-feed__empty-reading[data-read-state='pending']) > .activity-feed__reading { grid-row: 1; }
 .activity-feed__empty-reading { display: flex; align-items: center; gap: var(--sp-6); padding: var(--sp-7) var(--sp-6); color: var(--text-2); font: var(--fs-meta)/1.5 var(--font-sans); }
-.activity-feed__reading-caption { display: grid; gap: var(--sp-1); min-width: 0; }
+.activity-feed__reading-header:not([data-has-ruler]) > .activity-feed__empty-reading[data-read-state='pending'] { position: relative; isolation: isolate; display: grid; place-items: center; grid-column: 1 / -1; grid-row: 2; min-height: 0; padding: 0; overflow: hidden; }
+.activity-feed__reading-caption { position: relative; z-index: 1; display: grid; gap: var(--sp-1); min-width: 0; }
 .activity-feed__reading-caption strong { color: var(--text-2); font-weight: 560; }
 .activity-feed__reading-caption > span { color: var(--text-3); overflow-wrap: anywhere; }
-.activity-feed__reading-signal { display: grid; align-content: center; gap: var(--sp-2); flex: none; width: calc(var(--sp-7) * 2); height: calc(var(--sp-7) * 2); }
-.activity-feed__reading-signal > span { height: var(--sp-1); border-radius: var(--radius-sm); background: currentColor; opacity: .24; }
-.activity-feed__reading-signal > span:nth-child(2) { width: 76%; }
-.activity-feed__reading-signal > span:nth-child(3) { width: 52%; }
-.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal { color: var(--blue); }
-.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span { animation: activity-read-breath var(--dur-breath) linear infinite; }
-.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span:nth-child(2) { animation-delay: var(--dur-fast); }
-.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span:nth-child(3) { animation-delay: calc(var(--dur-fast) * 2); }
-@keyframes activity-read-breath { 0%, 100% { opacity: .24; } 45% { opacity: .76; } }
-@media (prefers-reduced-motion: reduce) { .activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-signal > span { animation: none; opacity: .5; } }
+.activity-feed__empty-reading[data-read-state='pending'] .activity-feed__reading-caption { justify-items: center; text-align: center; padding: var(--sp-6); font-size: var(--fs-body); }
+.activity-feed__reading-landscape { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: var(--blue); mask-image: radial-gradient(ellipse calc(var(--sp-7) * 6) var(--sp-8) at center, transparent 65%, #000 100%), linear-gradient(transparent, #000 12%, #000 88%, transparent); mask-composite: intersect; }
+.activity-feed__reading-field { position: absolute; inset: -10%; opacity: .56; animation: activity-reading-field calc(var(--dur-sweep) * 2) cubic-bezier(.45, 0, .55, 1) infinite; }
+.activity-feed__reading-field svg { display: block; width: 100%; height: 100%; stroke-width: 1.35; }
+.activity-feed__reading-sweep { position: absolute; inset: 0; background: linear-gradient(105deg, transparent 28%, color-mix(in oklab, var(--blue) 22%, transparent) 50%, transparent 72%); animation: activity-reading-sweep calc(var(--dur-sweep) * 2) linear infinite; }
+@keyframes activity-reading-field { 0%, 100% { transform: translate3d(-5%, -4%, 0); } 50% { transform: translate3d(5%, 4%, 0); } }
+@keyframes activity-reading-sweep { 0% { transform: translate3d(-100%, 0, 0); opacity: 0; } 15%, 85% { opacity: 1; } 100% { transform: translate3d(100%, 0, 0); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .activity-feed__reading-field, .activity-feed__reading-sweep { animation: none; transform: none; } .activity-feed__reading-sweep { opacity: .35; } }
 
 /* Captured edit previews sit inside the same shared process detail inset. */
 .wf-native-process__body > .log-diff { margin-inline: 0; }
