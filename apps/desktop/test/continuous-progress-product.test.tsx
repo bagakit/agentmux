@@ -10,7 +10,7 @@ import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_ENTRY, AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
@@ -195,7 +195,7 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   await click('Resume continuous progress'); expect(manager.list()[0]!.status).toBe('active')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Pause continuous progress"]')).not.toBeNull())
   await click('Check continuous progress now')
-  await vi.waitFor(() => expect(writes).toEqual([`\u001b[200~${composeAgentPrompt('continue the assigned work', AGENTMUX_AGENT_MESSAGING_GUIDANCE).text}\u001b[201~`, '\r']))
+  await vi.waitFor(() => expect(writes).toEqual([`\u001b[200~${composeAgentPrompt('continue the assigned work', AGENTMUX_AGENT_MESSAGING_ENTRY).text}\u001b[201~`, '\r']))
   await vi.waitFor(() => expect(container.textContent).toContain('Host accepted the request'))
   expect(observations.length).toBeGreaterThan(0); expect(new Set(observations)).toEqual(new Set([session.agentSessionId]))
   await click('Stop continuous progress'); expect(manager.list()[0]!.status).toBe('stopped')
