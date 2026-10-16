@@ -1,4 +1,6 @@
 export const mailboxMutations = [
+  { label: 'user-messages-excludes-agent-inputs', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
+    before: '<InputMailboxRecords mailbox={userInputMailbox}', after: '<InputMailboxRecords mailbox={inputMailbox}', tests: ['apps/desktop/test/session-mailbox-author-boundary.test.tsx'] },
   { label: 'journal-is-the-message-source', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: "items={name === 'inbox' ? incoming : outgoing}", after: 'items={[]}', tests: ['apps/desktop/test/session-mailbox-a2a.test.tsx'] },
   { label: 'copy-keeps-the-complete-original', file: 'apps/desktop/src/renderer/src/components/MailboxA2A.tsx',
