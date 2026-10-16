@@ -290,7 +290,9 @@ try {
   assert.equal(copied, 'copied')
   const afterHumanRead = (await cli(['message', 'inbox', 'check', '--limit', '100'], recipient)).result; assert.deepEqual(afterHumanRead, batch)
   await openMailbox(first.cdp, recipientPlace.to.regionId, 'user')
+  await waitFor('original recipient input observations settled', () => first.cdp.evaluate(`${region(recipientPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-user"]')?.getAttribute('aria-busy')==='false'`))
   const recipientUserPage = await first.cdp.evaluate(`(()=>{const page=${region(recipientPlace.to.regionId)}.querySelector('[role="tabpanel"][id$="-user"]');return{agentSessionId:${JSON.stringify(recipient.agentSessionId)},text:page.textContent,keys:[...page.querySelectorAll('[data-record-key]')].map(row=>row.dataset.recordKey)}})()`)
+  facts.mailbox.recipientUserPage = recipientUserPage
   assert.ok(!recipientUserPage.text.includes('A2A original review'), 'The receiving Agent User Messages must exclude its accepted A2A original')
   assert.ok(!recipientUserPage.keys.some(key => key.includes(normalId)))
   await screenshot(first, 'recipient-user-messages-no-a2a')
