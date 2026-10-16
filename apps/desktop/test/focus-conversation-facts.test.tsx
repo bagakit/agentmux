@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
-import { conversationRevision, projectConversationRecords } from '@agentmux/core/conversation'
+import { conversationRevision, projectConversationSummary } from '@agentmux/core/conversation'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { useAppStore } from '../src/renderer/src/store'
 import { createFocusProjectionSelector, createWorkspaceAgentContextsSelector } from '../src/renderer/src/lib/focus-context'
@@ -12,15 +12,16 @@ import type { RendererAgentTimelineSnapshot } from '../src/renderer/src/lib/sess
 
 vi.mock('@agentmux/core/conversation', async original => {
   const actual = await original<typeof import('@agentmux/core/conversation')>()
-  return { ...actual, projectConversationRecords: vi.fn(actual.projectConversationRecords) }
+  return { ...actual, projectConversationSummary: vi.fn(actual.projectConversationSummary) }
 })
 // Keep the original Focus, Store, Core projection and card. Isolate unrelated native paint and IO.
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: () => null }))
 vi.mock('../src/renderer/src/lib/use-focus-hierarchy', () => ({ useFocusHierarchy: () => ({ facts: { topics: {}, worktrees: [] }, errors: [] }) }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
+import { FocusNavigationPreview } from '../src/renderer/src/components/FocusNavigationPreview'
 
-const project = vi.mocked(projectConversationRecords)
+const project = vi.mocked(projectConversationSummary)
 const initial = useAppStore.getState(), session = composerSession('facts-original'), foreign = composerSession('facts-foreign')
 const workspace = composerConfig.workspaces[0]!
 let root: Root, container: HTMLDivElement
@@ -184,7 +185,8 @@ it('retires removed Session facts and preserves empty and process-only observati
   const accepted = timeline(), original = input(accepted), select = createFocusProjectionSelector()
   select(original); project.mockClear()
   expect(select({ ...original, sessions: [] }).contexts).toEqual([])
-  select(original); expect(project).toHaveBeenCalledTimes(1)
+  expect(select(original).contexts[0]!.recap?.reading?.text).toBe('Original observed response')
+  expect(project).not.toHaveBeenCalled()
   const process = { ...accepted, revision: 2, items: [{ ...accepted.items[0]!, kind: 'tool_call' as const, toolName: 'inspect', content: 'Process details' }] }
   const observed = select({ ...original, timelines: { [session.id]: process } }).contexts[0]!
   expect(observed.recap).toBeNull(); project.mockClear()
@@ -192,6 +194,52 @@ it('retires removed Session facts and preserves empty and process-only observati
   expect(renamed.recap).toBeNull(); expect(project).not.toHaveBeenCalled()
   const empty = select({ ...original, timelines: { [session.id]: { ...accepted, revision: 3, items: [] } } }).contexts[0]!
   expect(empty.recap).toBeNull(); expect(project).toHaveBeenCalledTimes(1)
+})
+
+it('shares accepted conversation facts across the actual transient preview, Focus and Space directory', async () => {
+  const accepted = timeline(), original = input(accepted)
+  original.sessions = [{ ...session, status: { ...session.status, state: 'done' } }]
+  useAppStore.setState(original)
+  await act(async () => root.render(<FocusNavigationPreview />))
+  expect(container.querySelector('[data-preview-session]')?.textContent).toContain('Original observed response')
+  expect(project).toHaveBeenCalledTimes(1)
+  project.mockClear()
+  await act(async () => root.render(<><FocusNavigationPreview /><GlobalFocusSurface /></>))
+  expect(container.querySelector('.focus-context')?.getAttribute('aria-label')).toContain('Original observed response')
+  const directory = createWorkspaceAgentContextsSelector()
+  expect(directory([session], original.timelines, {}, workspace, null)[0]!.recap?.reading?.text).toBe('Original observed response')
+  expect(project).not.toHaveBeenCalled()
+  await act(async () => root.render(<GlobalFocusSurface />))
+  await act(async () => root.render(<><FocusNavigationPreview /><GlobalFocusSurface /></>))
+  expect(project).not.toHaveBeenCalled()
+  accepted.revision++
+  accepted.items[0] = { ...accepted.items[0]!, content: 'Current source response' }
+  await act(async () => useAppStore.setState({ timelines: { ...original.timelines } }))
+  expect(project).toHaveBeenCalledTimes(1)
+  expect(container.querySelector('[data-preview-session]')?.textContent).toContain('Current source response')
+  expect(container.querySelector('.focus-context')?.getAttribute('aria-label')).toContain('Current source response')
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the original draft')
+  expect(useAppStore.getState().sessions[0]?.control.run).toEqual(session.control.run)
+})
+
+it('validates shared source facts even for a fresh reader and seeds a reused Timeline wrapper', () => {
+  const accepted = timeline(), original = input(accepted), first = createFocusProjectionSelector()
+  first(original); project.mockClear()
+  const wrapper = { ...accepted }
+  first({ ...original, timelines: { [session.id]: wrapper } })
+  createFocusProjectionSelector()({ ...original, timelines: { [session.id]: wrapper } })
+  expect(project).not.toHaveBeenCalled()
+  for (const change of [
+    () => { wrapper.items = [{ ...wrapper.items[0]!, content: 'New items at the original revision' }] },
+    () => { wrapper.revision++ },
+    () => { wrapper.sourceHostId = 'original-source-moved' },
+    () => { wrapper.stream = { epoch: 'next-epoch', sequence: 1, revision: wrapper.revision, positions: [], gaps: [], origin: 'beginning' } },
+    () => { wrapper.agentSessionId = 'different-source-session' }
+  ]) {
+    change(); project.mockClear()
+    createFocusProjectionSelector()({ ...original, timelines: { [session.id]: wrapper } })
+    expect(project).toHaveBeenCalledTimes(1)
+  }
 })
 
 it('reuses the same small facts in the existing workspace selector and refreshes its actual owner', () => {
