@@ -10,9 +10,13 @@ import type { SessionViewMode } from './session-state'
 const sessionIndexes = new WeakMap<readonly SessionSnapshot[], ReadonlyMap<string, SessionSnapshot>>()
 let indexedAgentSessions: readonly SessionSnapshot[] | undefined
 let agentIndex: ReadonlyMap<string, readonly Extract<SessionSnapshot, { kind: 'agent' }>[]> = new Map()
-let indexedPathSessions: readonly SessionSnapshot[] | undefined
-let paths: ReadonlyMap<string, ReadonlyMap<string, readonly SessionSnapshot[]>> = new Map()
+type SessionPaths = {
+  paths: ReadonlyMap<string, ReadonlyMap<string, readonly SessionSnapshot[]>>
+  children: ReadonlyMap<string, ReadonlyMap<string, ReadonlySet<string>>>
+}
+const pathIndexes = new WeakMap<readonly SessionSnapshot[], SessionPaths>()
 const NO_SESSIONS: readonly SessionSnapshot[] = []
+const NO_PATHS: ReadonlySet<string> = new Set()
 
 /** Shared lookup over the immutable Store projection; references remain owned by the Store. */
 export function sessionPresentationById(sessions: readonly SessionSnapshot[]): ReadonlyMap<string, SessionSnapshot> {
@@ -34,17 +38,32 @@ export function agentSessionPresentationIndex(sessions: readonly SessionSnapshot
 }
 
 /** Directory consumers lazily share one path projection per immutable Session snapshot. */
-export function sessionPresentationsAtPath(sessions: readonly SessionSnapshot[], hostId: string, path: string): readonly SessionSnapshot[] {
-  if (sessions !== indexedPathSessions) {
+function indexSessionPaths(sessions: readonly SessionSnapshot[]): SessionPaths {
+  let indexed = pathIndexes.get(sessions)
+  if (!indexed) {
     const byHost = new Map<string, Map<string, SessionSnapshot[]>>()
+    const childrenByHost = new Map<string, Map<string, Set<string>>>()
     for (const session of sessions) {
       const host = byHost.get(session.hostId) ?? new Map<string, SessionSnapshot[]>()
       const atPath = host.get(session.workspacePath) ?? []
       atPath.push(session); host.set(session.workspacePath, atPath); byHost.set(session.hostId, host)
+      const parent = session.workspacePath.slice(0, Math.max(session.workspacePath.lastIndexOf('/'), session.workspacePath.lastIndexOf('\\')))
+      const children = childrenByHost.get(session.hostId) ?? new Map<string, Set<string>>()
+      const atParent = children.get(parent) ?? new Set<string>()
+      atParent.add(session.workspacePath); children.set(parent, atParent); childrenByHost.set(session.hostId, children)
     }
-    paths = byHost; indexedPathSessions = sessions
+    indexed = { paths: byHost, children: childrenByHost }; pathIndexes.set(sessions, indexed)
   }
-  return paths.get(hostId)?.get(path) ?? NO_SESSIONS
+  return indexed
+}
+
+export function sessionPresentationsAtPath(sessions: readonly SessionSnapshot[], hostId: string, path: string): readonly SessionSnapshot[] {
+  return indexSessionPaths(sessions).paths.get(hostId)?.get(path) ?? NO_SESSIONS
+}
+
+/** Original direct-child directories only; membership remains the resource owner's decision. */
+export function sessionPresentationChildPaths(sessions: readonly SessionSnapshot[], hostId: string, parent: string): ReadonlySet<string> {
+  return indexSessionPaths(sessions).children.get(hostId)?.get(parent) ?? NO_PATHS
 }
 
 /** Only a valid own preference is explicit; opaque Session IDs also name Object properties. */
