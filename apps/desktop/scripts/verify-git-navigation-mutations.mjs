@@ -175,4 +175,3 @@ await verifyRendererSourceMutations({
   "apps/desktop/scripts/verify-git-navigation-mutations.mjs"
 ]
 })
-
