@@ -105,7 +105,7 @@ it('reports write and index failure while original diagnostic admission remains 
   await archive.flush()
   const discovered = await page(archive)
   expect(discovered.coverage.indexFailures).toBeGreaterThan(0)
-  expect(discovered.items[0].persistence).toBe('unconfirmed')
+  expect(discovered.items[0]!.persistence).toBe('unconfirmed')
   expect(JSON.stringify(discovered)).not.toContain('private path')
   const exact = await archive.read({ domain: 'client.incident', hostId: 'local', logId: receipt.logId! }, bounds())
   expect(exact).toMatchObject({ availability: 'found', persistence: 'unconfirmed' })
@@ -214,7 +214,7 @@ it('retains early reports without advertising a provisional ID and deduplicates 
   release(); await restarted.flush()
   const discovered = await page(restarted)
   expect(discovered.items).toHaveLength(1)
-  expect(discovered.items[0].recordRef.logId).toBe(receipt.logId)
+  expect(discovered.items[0]!.recordRef.logId).toBe(receipt.logId)
   expect(discovered.coverage).toMatchObject({ duplicates: 1, invalid: 1 })
 })
 
@@ -234,8 +234,8 @@ it('preserves an unconfirmed reservation when its original publishing process ex
 it('bounds failed candidate cleanup across restart and resumes only after that exact cleanup succeeds', async () => {
   const path = await directory()
   let failCleanup = true
-  const remove = async (file: string) => {
-    if (failCleanup && file.endsWith('.candidate')) throw Object.assign(new Error('private cleanup text'), { code: 'EACCES' })
+  const remove: typeof import('node:fs/promises').unlink = async file => {
+    if (failCleanup && String(file).endsWith('.candidate')) throw Object.assign(new Error('private cleanup text'), { code: 'EACCES' })
     const { unlink } = await import('node:fs/promises'); return unlink(file)
   }
   const archive = new ClientIncidentArchive(path, { remove }); await archive.flush()
