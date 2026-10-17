@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { fixturePath } from './lib/fixture-values.mjs'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const { build } = createRequire(join(root, 'packages/core/package.json'))('esbuild'), { build: viteBuild } = require('vite')
+const { build, transform } = createRequire(join(root, 'packages/core/package.json'))('esbuild'), { build: viteBuild } = require('vite')
 const baselineOnly = process.argv.includes('--baseline')
 const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
@@ -33,7 +33,7 @@ const mutations = [
     expected: 'GUI queue reference must reach the original Host capture reader' },
   { id: 'captured-reader-context', file: 'packages/client-ui/src/components/CapturedConversationMessage.tsx',
     from: '...(input.inputContext ? { inputContext: input.inputContext, inputContextSource: input.inputContextSource } : {})',
-    to: '/* private mutation: lose the structured Browser observation on the shipped Reader */',
+    to: '...{}',
     expected: 'The shared Reader folds the generated Browser context separately from the original opinion' },
   { id: 'native-reader-provenance', file: 'packages/client-ui/src/components/ConversationInputText.tsx',
     from: "source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'}", to: 'source="host-capture"',
@@ -50,7 +50,9 @@ const mutations = [
 ]
 for (const mutation of mutations) {
   const file = join(root, mutation.file); await bind(file)
-  assert.equal((await readFile(file, 'utf8')).split(mutation.from).length, 2, 'Unique owning production mutation: ' + mutation.id)
+  const original = await readFile(file, 'utf8')
+  assert.equal(original.split(mutation.from).length, 2, 'Unique owning production mutation: ' + mutation.id)
+  await transform(original.replace(mutation.from, mutation.to), { loader: file.endsWith('.tsx') ? 'tsx' : 'ts', target: 'esnext', sourcefile: mutation.file })
 }
 const aliases = {}, workspacePackages = new Map()
 for (const name of await readdir(join(root, 'packages'))) {
