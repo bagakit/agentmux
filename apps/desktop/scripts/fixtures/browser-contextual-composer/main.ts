@@ -18,13 +18,15 @@ import { WorkbenchWindows } from '../../../src/main/workbench-windows'
 import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
 import { createDesktopApplicationAccessOwner } from '../../../src/main/application-access-owner'
 import { desktopBusinessSocketPath } from '../../../src/main/desktop-host'
+import { BrowserNativeInputShield } from '../../../src/main/browser-native-input-shield'
 
 const directory = process.env.AGENTMUX_CONTEXTUAL_ROOT!, source = process.env.AGENTMUX_CONTEXTUAL_SOURCE!
 const captureOnly = process.env.AGENTMUX_CONTEXTUAL_CAPTURE_ONLY === '1'
+const presenceOnly = process.env.AGENTMUX_CONTEXTUAL_PRESENCE_ONLY === '1'
 app.on('window-all-closed', () => {})
 const receipt: any = { schema: 'agentmux.browser-contextual-composer.native.v1', passed: false, cases: [], ipc: [],
-  mode: captureOnly ? 'capture-only' : 'opinion-and-trace',
-  boundary: captureOnly ? 'Capture-only uses the original BrowserPane/WindowOverlay/NativeOverlay/Store and production sandbox preload/full Main. It exercises real Browser programs and viewport invariants without sending an opinion or qualifying Host/Provider admission. No user Browser, Agent, clipboard or upstream model is used.' : 'Private actual BrowserPane/WindowOverlay/NativeOverlay/Store → production sandbox preload/registerIpc/RuntimeController → Hosted SDK/Host capture reader/Core → shipped CodexProvider/real ctxmux PTY/repository controlled CLI. Renderer CDP interaction does not attest physical OS input or foreground focus. No user Browser, Agent, clipboard or upstream model is used.',
+  mode: presenceOnly ? 'operator-presence' : captureOnly ? 'capture-only' : 'opinion-and-trace',
+  boundary: presenceOnly ? 'Actual BrowserPane artwork export through Chromium canvas, production sandbox preload and trusted Main avatar setter to the original native target cue. The controlled Agent supplies its real identity; this mode submits no opinion and does not qualify Provider admission, OS composition or aesthetics.' : captureOnly ? 'Capture-only uses the original BrowserPane/WindowOverlay/NativeOverlay/Store and production sandbox preload/full Main. It exercises real Browser programs and viewport invariants without sending an opinion or qualifying Host/Provider admission. No user Browser, Agent, clipboard or upstream model is used.' : 'Private actual BrowserPane/WindowOverlay/NativeOverlay/Store → production sandbox preload/registerIpc/RuntimeController → Hosted SDK/Host capture reader/Core → shipped CodexProvider/real ctxmux PTY/repository controlled CLI. Renderer CDP interaction does not attest physical OS input or foreground focus. No user Browser, Agent, clipboard or upstream model is used.',
   physicalInputQualified: false, independentVisualReview: 'not-performed' }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 async function until<T>(read: () => T | Promise<T>, label: string, attempts = 500): Promise<T> {
@@ -34,6 +36,7 @@ async function until<T>(read: () => T | Promise<T>, label: string, attempts = 50
 let window: BrowserWindow | undefined, core: any, sdk: any, rpc: any, hosted: any, hostServer: any, runtime: RuntimeController | undefined,
   releaseIpc: (() => Promise<void>) | undefined, windows: WorkbenchWindows | undefined, access: any, session: any,
   server: ReturnType<typeof createServer> | undefined
+let restoreShieldObserver: (() => void) | undefined
 const output: string[] = []
 async function run() {
   await app.whenReady()
@@ -59,11 +62,31 @@ async function run() {
   const configStore = new ConfigStore(join(directory, 'config.json'))
   const config = await configStore.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private collaboration' }],
     workspaces: [{ id: 'contextual-workspace', name: 'Private collaboration', kind: 'folder', hostId: 'local', path: directory }],
-    executors: { 'contextual-codex': { providerId: 'codex', label: 'Browser collaborator', command: join(source, 'packages/core/test/fixtures/fake-codex-cli.mjs'), args: [], env: {}, injectAgentMuxGuide: false } },
+    executors: { 'contextual-codex': { providerId: 'codex', label: 'Browser collaborator', command: join(source, 'packages/core/test/fixtures/fake-codex-cli.mjs'), args: [], env: {}, injectAgentMuxGuide: false,
+      ...(presenceOnly ? { avatar: { badge: 'shield' as const, tint: '#469b78' } } : {}) } },
     browser: { ...DEFAULT_CONFIG.browser, agentAutomation: true, agentControl: { ...DEFAULT_CONFIG.browser.agentControl, showDiscussion: false } } })
   window = new BrowserWindow({ width: 1120, height: 760, show: false, title: 'Browser collaboration · private proof',
     webPreferences: { preload: join(directory, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
   const contents = window.webContents
+  if (presenceOnly) {
+    const dispose = BrowserNativeInputShield.prototype.dispose
+    const observed = new WeakSet<BrowserNativeInputShield>()
+    BrowserNativeInputShield.prototype.dispose = function () {
+      const facts: any = { contentsId: this.contents.id, destroyedBefore: this.contents.isDestroyed() }
+      ;(receipt.inputSurfaceDisposals ??= []).push(facts)
+      if (!observed.has(this)) {
+        observed.add(this)
+        this.contents.once('destroyed', () => { facts.destroyedEvent = true })
+      }
+      try { dispose.call(this); facts.returned = true }
+      catch (error) {
+        facts.failure = { name: (error as Error).name, message: (error as Error).message,
+          errors: error instanceof AggregateError ? error.errors.map(item => ({ name: item.name, message: item.message })) : [] }
+        throw error
+      } finally { facts.destroyedAfter = this.contents.isDestroyed() }
+    }
+    restoreShieldObserver = () => { BrowserNativeInputShield.prototype.dispose = dispose }
+  }
   const originalNativeSend = contents.sendInputEvent.bind(contents)
   contents.sendInputEvent = input => {
     ;(receipt.nativeOverlayForwarded ??= []).push({ input, receiverId: contents.id, windowId: window!.id })
@@ -109,7 +132,7 @@ async function run() {
     if (observed.ready !== true) receipt.nativeCaptureAvailability = { status: 'unknown', sourceId, failure: observed.failure,
       next: 'The exact private window capture remains unconfirmed. Preserve Renderer and native document evidence separately.' }
   }
-  if (!captureOnly) {
+  if (!captureOnly && !presenceOnly) {
     void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", 25000); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
     await until(() => evaluate('contextualProof.facts().browser?.activity?.operation?.steps?.length > 0'), 'actual running Browser step')
   }
@@ -138,7 +161,9 @@ async function run() {
       byteLength: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }
   }
   async function capture(name: string) {
-    for (const [surface, picture] of [['renderer', await contents.capturePage()], ['window', await window!.capturePage()], ['page', await page.webContents.capturePage()]] as const) {
+    const frames = presenceOnly ? [['renderer', await contents.capturePage()], ['window', await window!.capturePage()]] as const
+      : [['renderer', await contents.capturePage()], ['window', await window!.capturePage()], ['page', await page.webContents.capturePage()]] as const
+    for (const [surface, picture] of frames) {
       const file = name + '-' + surface + '.png'
       await writeFile(join(directory, file), picture.toPNG())
       ;(receipt.frames ??= []).push({ file, surface, pixels: picture.getSize(), actualWindow: window!.getBounds(),
@@ -214,6 +239,106 @@ async function run() {
           next: 'Capture this same private native window through the existing desktop tool; Renderer images do not replace the composed window.' }
       }
     }
+  }
+  if (presenceOnly) {
+    const operationId = 'original-presence-program'
+    const operator = { id: session.agentSessionId, name: snapshot.label }
+    const program = evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Presence ready",20000);const page=await snapshot();await hover(page.nodes.find(node=>node.role==="button"&&node.name==="Page action").ref);return "finished"', ${JSON.stringify(operator)}, ${JSON.stringify(operationId)})`)
+    await until(() => receipt.ipc.some((call: any) => call.channel === 'browser:setOperatorAvatar' && call.args[0]?.operationId === operationId && call.result === true),
+      'BrowserPane cold export through the original trusted Main avatar setter')
+    const accepted = receipt.ipc.find((call: any) => call.channel === 'browser:setOperatorAvatar' && call.result === true)
+    assert.equal(accepted.exactSender, true); assert.equal(accepted.exactFrame, true)
+    assert.equal(accepted.args[0].operatorId, operator.id); assert.equal(accepted.args[0].browserId, 'contextual-browser')
+    const artwork = nativeImage.createFromDataURL(accepted.args[0].png)
+    assert.equal(artwork.isEmpty(), false); assert.deepEqual(artwork.getSize(), { width: 64, height: 64 })
+    const originalPng = Buffer.from(accepted.args[0].png.slice('data:image/png;base64,'.length), 'base64')
+    await writeFile(join(directory, 'operator-original-avatar.png'), originalPng)
+    const presentations: Array<{ image: Electron.NativeImage; observedAt: number }> = []
+    page.webContents.beginFrameSubscription(false, image => {
+      presentations.push({ image, observedAt: Date.now() })
+      if (presentations.length > 4) presentations.shift()
+    })
+    await page.webContents.executeJavaScript('document.body.insertAdjacentHTML("beforeend","<button>Presence ready</button>")')
+    const report = await program
+    assert.equal(report.report.outcome.kind, 'completed')
+    page.webContents.debugger.attach('1.3')
+    let cue: any
+    try {
+      const tree = await page.webContents.debugger.sendCommand('Page.getFrameTree')
+      const world = await page.webContents.debugger.sendCommand('Page.createIsolatedWorld', { frameId: tree.frameTree.frame.id, worldName: 'agentmux-browser-operation-feedback' })
+      const expression = `(()=>{const s=globalThis.__agentMuxBrowserOperationFeedback,label=s?.shadow?.querySelector('.label'),image=label?.querySelector('img'),pointer=s?.shadow?.querySelector('.pointer');if(!s?.host||!image?.complete||image.naturalWidth!==64||!pointer)return null;return{operationId:s.operationId,navigationId:s.navigationId,token:s.token,phase:s.phase,point:s.point,expiresAt:s.expiresAt,now:Date.now(),label:label.textContent,pointerEvents:getComputedStyle(s.host).pointerEvents,avatar:image.src,avatarWidth:image.naturalWidth,avatarHeight:image.naturalHeight,avatarRect:image.getBoundingClientRect().toJSON()}})()`
+      cue = await until(async () => {
+        const observed = await page.webContents.debugger.sendCommand('Runtime.evaluate', { contextId: world.executionContextId, returnByValue: true,
+          expression })
+        return observed.result?.value
+      }, 'the original native target cue with its actual Renderer-generated face', 30)
+      assert.equal(cue.operationId, operationId); assert.equal(cue.phase, 'completed')
+      assert.equal(cue.avatar, accepted.args[0].png); assert.equal(cue.pointerEvents, 'none')
+      assert.ok(cue.expiresAt > cue.now, 'The original completion cue is still within its normal lifetime')
+      // Observe original compositor frames within the ordinary cue lifetime.
+      // capturePage itself can return after that lifetime on an occluded desktop.
+      const viewport = await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight})')
+      const hoverStarted = report.report.runOperation.steps.find((step: any) => step.method === 'hover').startedAt
+      const hasArrowPaint = (frame: typeof presentations[number]) => {
+        if (frame.observedAt < cue.now || frame.observedAt < hoverStarted || frame.observedAt >= cue.expiresAt) return false
+        const size = frame.image.getSize(), pixels = frame.image.toBitmap()
+        if (pixels.length !== size.width * size.height * 4) return false
+        const sx = size.width / viewport.width, sy = size.height / viewport.height
+        let green = 0
+        for (let y = Math.max(0, Math.floor(cue.point.y * sy)); y < Math.min(size.height, Math.ceil((cue.point.y + 21) * sy)); y++) {
+          for (let x = Math.max(0, Math.floor(cue.point.x * sx)); x < Math.min(size.width, Math.ceil((cue.point.x + 17) * sx)); x++) {
+            const index = (y * size.width + x) * 4, b = pixels[index]!, g = pixels[index + 1]!, r = pixels[index + 2]!
+            if (g - r > 50 && g - b > 30) green++
+          }
+        }
+        let avatarGreen = 0
+        for (let y = Math.max(0, Math.floor(cue.avatarRect.y * sy)); y < Math.min(size.height, Math.ceil(cue.avatarRect.bottom * sy)); y++) {
+          for (let x = Math.max(0, Math.floor(cue.avatarRect.x * sx)); x < Math.min(size.width, Math.ceil(cue.avatarRect.right * sx)); x++) {
+            const index = (y * size.width + x) * 4, b = pixels[index]!, g = pixels[index + 1]!, r = pixels[index + 2]!
+            if (g - r > 25 && g - b > 10) avatarGreen++
+          }
+        }
+        return green >= 8 && avatarGreen >= 4
+      }
+      const presented = await until(() => presentations.findLast(hasArrowPaint) ?? (Date.now() >= cue.expiresAt ? { expired: true as const } : null),
+        'the actual pointer paint during its original normal lifetime', 40)
+      receipt.presencePaintObservation = { cue, hoverStarted, viewport,
+        frames: presentations.map(frame => ({ observedAt: frame.observedAt, size: frame.image.getSize(), arrowPaint: hasArrowPaint(frame) })) }
+      if (!presented || !('image' in presented)) for (const [index, frame] of presentations.entries()) {
+        await writeFile(join(directory, `operator-unqualified-frame-${index}.png`), frame.image.toPNG())
+      }
+      assert.ok(presented && 'image' in presented, 'The original native cue must actually paint before its normal expiry; DOM presence is insufficient')
+      const picture = presented.image
+      const after = (await page.webContents.debugger.sendCommand('Runtime.evaluate', { contextId: world.executionContextId, returnByValue: true, expression })).result?.value
+      const file = 'operator-completed-pointer-page.png'
+      await writeFile(join(directory, file), picture.toPNG())
+      ;(receipt.frames ??= []).push({ file, surface: 'page', pixels: picture.getSize(), before: cue, after, observedAt: presented.observedAt,
+        boundary: 'Original native page beginFrameSubscription image with actual pointer paint inside its original cue lifetime. No hold, composition or re-encoding beyond its original native PNG encoding; identity/label appearance requires independent review.' })
+      await capture('operator-completed-pointer')
+    } finally { page.webContents.endFrameSubscription(); page.webContents.debugger.detach() }
+    const raster = await evaluate('contextualProof.rasterPresenceAsset()')
+    assert.equal(raster.status, 'ready', 'The existing bundled PNG provider artwork must render through Chromium too')
+    const rasterBytes = Buffer.from(raster.avatar.dataUrl.slice('data:image/png;base64,'.length), 'base64')
+    assert.ok(rasterBytes.length <= 64 * 1024)
+    assert.deepEqual(nativeImage.createFromBuffer(rasterBytes).getSize(), { width: 64, height: 64 })
+    await writeFile(join(directory, 'operator-bundled-raster-avatar.png'), rasterBytes)
+    const facts = await until(async () => {
+      const current = await evaluate('contextualProof.facts()')
+      return current.browser?.control?.inputIsolation === 'inactive' ? current : undefined
+    }, 'confirmed cleanup of the original native input surface', 30)
+    assert.deepEqual(facts.errors, [], 'The actual presence consumer must not report a hidden export or bridge failure')
+    assert.ok(receipt.inputSurfaceDisposals.some((item: any) => item.returned === true && item.destroyedAfter === true),
+      'The original native surface must actually finish disposal')
+    assert.equal((facts.browser?.activity?.operation?.warning ?? facts.browser?.activity?.warning ?? '').includes('could not be fully released'), false,
+      'Confirmed original cleanup cannot leave its transient failure notice on the current Browser')
+    assert.equal(receipt.ipc.some((call: any) => call.channel === 'sessions:submitPrompt'), false)
+    receipt.presence = { passed: true, accepted, cue, report, latestControl: facts.browser?.control,
+      latestWarning: facts.browser?.activity?.operation?.warning ?? facts.browser?.activity?.warning,
+      raster: { width: 64, height: 64, bytes: rasterBytes.length },
+      boundary: 'Actual BrowserPane cold SVG export, native Chromium canvas and decode, production sandbox preload and trusted Main setter, original completed target cue. The separate bundled-raster export tests artwork only and does not claim a second live Agent identity. No OS composition or aesthetic acceptance.' }
+    receipt.cases.push({ name: 'actual-renderer-avatar-to-native-owner', passed: true })
+    receipt.passed = true
+    return
   }
   const nativeOpinion = process.env.AGENTMUX_CONTEXTUAL_NATIVE_OPINION === '1'
   async function requestNativeAction(id: string, selector: string, text?: string) {
@@ -421,7 +546,8 @@ void run().catch(async error => {
   const cleanup: string[] = []
   for (const release of [async () => { if (session && core) await core.stopAgent(session.agentSessionId, core.agentSession(session.agentSessionId).run) },
     () => releaseIpc?.(), () => runtime?.dispose(), () => access?.dispose(), () => windows?.dispose(), () => sdk?.dispose(), () => rpc?.dispose(), () => hostServer?.stop(), () => hosted?.dispose(), () => core?.dispose(),
-    () => { if (window && !window.isDestroyed()) window.destroy() }, () => { if (!server) return; server.closeAllConnections(); return new Promise<void>(resolve => server!.close(() => resolve())) }]) {
+    () => { if (window && !window.isDestroyed()) window.destroy() }, () => { if (!server) return; server.closeAllConnections(); return new Promise<void>(resolve => server!.close(() => resolve())) },
+    () => restoreShieldObserver?.()]) {
     try { await release() } catch (error) { cleanup.push(String(error)) }
   }
   receipt.cleanupFailures = cleanup
