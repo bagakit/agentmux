@@ -306,7 +306,12 @@ export class AgentSessionContinuitySupervisor {
             { ...supervision, phase: 'observing', reason: 'frontend-attached', process, observedAt: Date.now() })
           return
         }
-        return await settle('paused', 'provider-unverified', process)
+        // Unknown attachment cannot retire the still-running Run's lifecycle reader.
+        // Its later authoritative exit must advance this same finite recovery intent.
+        if (supervision.phase !== 'observing' || supervision.reason !== 'provider-unverified' ||
+          supervision.process?.state !== 'running' || !sameRun(supervision.process.run, session.run)) await this.save(session, root,
+          { ...supervision, phase: 'observing', reason: 'provider-unverified', process, observedAt: Date.now() })
+        return
       }
       const context = supervision.contextEvidence
       if (context && sameRun(context.run, session.run) && matchesProviderNativeSessionTarget(root.nativeTarget, context.nativeTarget) && matchesProviderNativeSessionTarget(context.nativeTarget, session.nativeHandle)) return await settle('settled', 'context-observed', process)
