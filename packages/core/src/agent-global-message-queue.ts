@@ -28,6 +28,9 @@ import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWa
   type AgentInputWaitStopReceipt, type AgentInputDispatchLink } from './agent-input-wait.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead } from './agent-input-mailbox.js'
+import { renderAgentMuxMessageReferences } from './agent-message-render.js'
+import { MAX_A2A_NOTIFICATION_BYTES, validateMessageNotification, type AgentMuxMessageNotification, type AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
+import { messageNotificationJournalSchema } from './agent-message-journal.js'
 
 export type { AgentMuxMessageIdentity, AgentMuxMessageRecipient, AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 export type AgentMuxMessageDeliveryState = {
@@ -40,6 +43,8 @@ export type DurableAgentMuxMessage = {
   readonly sequence: number
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
+  readonly deliveryMode?: 'reference'
+  readonly notification?: AgentMuxMessageNotificationStatus
   /** null proves this new journal intent has not yet crossed a prompt RPC. Absence is unknown. */
   readonly promptCondition?: AgentPromptCondition | null
   /** This journal admission freezes the requested execution independently of the opaque envelope. */
@@ -76,6 +81,8 @@ export type AgentMuxMessageReceipt = {
   readonly sequence: number
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
+  readonly deliveryMode?: 'reference'
+  readonly notification?: AgentMuxMessageNotificationStatus
   readonly promptCondition?: AgentPromptCondition | null
   readonly admissionIntent?: AgentPromptAdmissionIntent
   readonly sourceChannel?: AgentMessageChannel
@@ -112,7 +119,9 @@ type InputMailboxJournalItem = { sequence: number; recordedAt: number } & (
 export type AgentMuxMessageJournalRecord =
   | AgentInputWaitJournalRecord
   | { readonly kind: 'message-route'; readonly sequence: number; readonly route: AgentMessageRoute }
-  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
+  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly deliveryMode?: 'reference'; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly admissionIntent?: AgentPromptAdmissionIntent; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
+  | { readonly kind: 'a2a-notification'; readonly sequence: number; readonly notification: AgentMuxMessageNotification }
+  | { readonly kind: 'a2a-notification-result'; readonly sequence: number; readonly notificationId: string; readonly state: Exclude<AgentMuxMessageNotification['state'], 'pending'>; readonly reason?: string }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
   | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
@@ -254,6 +263,7 @@ export class DurableAgentMuxMessageQueue {
         // Existing journals are validated before their owner adds internal projections.
         this.db.exec(inputControlJournalSchema)
         this.db.exec(messageRouteJournalSchema)
+        this.db.exec(messageNotificationJournalSchema)
       }
       transaction.signal?.throwIfAborted()
       stage = 'operation'
@@ -313,11 +323,165 @@ export class DurableAgentMuxMessageQueue {
       ? { state: last.state, at: last.at, ...(last.reason === undefined ? {} : { reason: last.reason }) }
       : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
     return { sequence: Number(row.sequence), envelope, delivery,
+      ...(original.deliveryMode === 'reference' ? { deliveryMode: original.deliveryMode, notification: this.messageNotification(envelope.messageId) } : {}),
       ...(condition ? { promptCondition: validateAgentPromptCondition(condition.condition) } : original.promptCondition === null ? { promptCondition: null } : {}),
       ...(original.execution === undefined ? {} : { execution: original.execution }),
       ...(original.admissionIntent === undefined ? {} : { admissionIntent: validateAgentPromptAdmissionIntent(original.admissionIntent) }),
       ...(original.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(original.sourceChannel) }),
       ...(original.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(original.sourceDevice) }) }
+  }
+
+  private notification(notificationId: string): AgentMuxMessageNotification | undefined {
+    const row = this.db.prepare(`SELECT original.json AS original, result.json AS result FROM a2a_notifications n
+      JOIN records original ON original.sequence=n.original_sequence
+      LEFT JOIN records result ON result.sequence=n.result_sequence WHERE n.notification_id=?`).get(notificationId)
+    if (!row) return undefined
+    const original = JSON.parse(String(row.original)) as Extract<JournalRecord, { kind: 'a2a-notification' }>
+    const result = row.result === null ? null : JSON.parse(String(row.result)) as Extract<JournalRecord, { kind: 'a2a-notification-result' }>
+    return validateMessageNotification({ ...original.notification,
+      ...(result ? { state: result.state, ...(result.reason === undefined ? {} : { reason: result.reason }) } : {}) })
+  }
+
+  private messageNotification(messageId: string): AgentMuxMessageNotificationStatus {
+    const row = this.db.prepare('SELECT notification_id FROM a2a_message_notifications WHERE message_id=?').get(messageId)
+    const notice = row?.notification_id ? this.notification(String(row.notification_id)) : undefined
+    return notice ? { state: notice.state === 'submitted' ? 'submitted' : notice.state === 'unconfirmed' ? 'unconfirmed' : 'pending',
+      notificationId: notice.notificationId, key: notice.key, ...(notice.reason === undefined ? {} : { reason: notice.reason }) } : { state: 'pending' }
+  }
+
+  /** The notification path never materializes an original body or preview. */
+  private messageReference(messageId: string) {
+    const row = this.db.prepare(`SELECT json_extract(original.json, '$.envelope.senderSessionId') AS sender_id,
+      json_extract(original.json, '$.envelope.recipientSessionId') AS recipient_id,
+      json_extract(original.json, '$.envelope.recipientRunId') AS run_id,
+      json_extract(original.json, '$.deliveryMode') AS delivery_mode,
+      position.notification_id, position.submitted FROM messages m
+      JOIN records original ON original.sequence=m.message_sequence
+      LEFT JOIN a2a_message_notifications position ON position.message_id=m.message_id WHERE m.message_id=?`).get(messageId)
+    return row
+  }
+
+  private applyNotificationRecord(record: Extract<JournalRecord, { kind: 'a2a-notification' | 'a2a-notification-result' }>): void {
+    if (record.kind === 'a2a-notification') {
+      const notice = validateMessageNotification(record.notification)
+      if (notice.state !== 'pending' || notice.reason !== undefined) throw new AgentMuxError('A new notification must retain an unsubmitted intent.', 'INVALID_A2A_NOTIFICATION')
+      const references = notice.messageIds.map(messageId => {
+        const original = this.messageReference(messageId)
+        if (!original || original.delivery_mode !== 'reference' || original.recipient_id !== notice.key.agentSessionId ||
+            original.run_id !== notice.key.expectedRun.runId || typeof original.sender_id !== 'string' ||
+            notice.mode === 'idle' && (original.notification_id !== null || original.submitted !== 0)) throw new AgentMuxError(
+          'The original Inbox reference is already assigned or belongs to another Run.', 'A2A_NOTIFICATION_CONFLICT')
+        return { senderSessionId: String(original.sender_id), messageId }
+      })
+      if (notice.wire !== renderAgentMuxMessageReferences(references)) throw new AgentMuxError('Notification wire must contain exactly its original references.', 'INVALID_A2A_NOTIFICATION')
+      this.db.prepare('INSERT INTO a2a_notifications (notification_id, recipient_id, run_id, original_sequence, active) VALUES (?, ?, ?, ?, ?)')
+        .run(notice.notificationId, notice.key.agentSessionId, notice.key.expectedRun.runId, record.sequence, notice.mode === 'idle' ? 1 : 0)
+      const assign = this.db.prepare('UPDATE a2a_message_notifications SET notification_id=? WHERE message_id=?')
+      if (notice.mode === 'idle') for (const id of notice.messageIds) assign.run(notice.notificationId, id)
+      return
+    }
+    const current = this.notification(nonEmpty(record.notificationId, 'Notification ID'))
+    if (!current || !['submitted', 'unconfirmed', 'not-applied'].includes(record.state) ||
+        current.state === 'submitted' || current.state === 'not-applied' || record.reason !== undefined && typeof record.reason !== 'string') throw new AgentMuxError(
+      'The original notification outcome cannot be replaced.', 'A2A_NOTIFICATION_CONFLICT')
+    this.db.prepare('UPDATE a2a_notifications SET result_sequence=?, active=? WHERE notification_id=?')
+      .run(record.sequence, current.mode === 'idle' && record.state === 'unconfirmed' ? 1 : 0, record.notificationId)
+    if (record.state === 'submitted') {
+      if (current.mode === 'idle') this.db.prepare('UPDATE a2a_message_notifications SET submitted=1 WHERE notification_id=?').run(record.notificationId)
+      else {
+        const submitted = this.db.prepare('UPDATE a2a_message_notifications SET submitted=1, notification_id=? WHERE message_id=?')
+        for (const id of current.messageIds) submitted.run(record.notificationId, id)
+      }
+    }
+    else if (record.state === 'not-applied') this.db.prepare('UPDATE a2a_message_notifications SET notification_id=NULL WHERE notification_id=?').run(record.notificationId)
+  }
+
+  /** Only unfinished participants, not historical messages or unrelated Sessions. */
+  async pendingNotificationRecipients(): Promise<readonly string[]> {
+    return this.withLock(async () => this.db.prepare(`SELECT recipient_id FROM a2a_message_notifications
+      WHERE submitted=0 AND notification_id IS NULL UNION SELECT recipient_id FROM a2a_notifications WHERE active=1`).all()
+      .map(row => String(row.recipient_id)))
+  }
+
+  async hasPendingNotification(agentSessionId: string): Promise<boolean> {
+    return this.withLock(async () => Boolean(this.db.prepare('SELECT 1 FROM a2a_message_notifications WHERE recipient_id=? AND submitted=0 LIMIT 1').get(agentSessionId)))
+  }
+
+  /** Explicit user notification also resolves IDs without loading opaque original bodies. */
+  async readNotificationMessages(messageIds: readonly string[]) {
+    return this.withLock(async () => messageIds.map(messageId => {
+      const original = this.messageReference(nonEmpty(messageId, 'Original message ID'))
+      return original ? { messageId, senderSessionId: String(original.sender_id), recipientSessionId: String(original.recipient_id),
+        recipientRunId: String(original.run_id), deliveryMode: original.delivery_mode } : null
+    }))
+  }
+
+  async readNotification(notificationId: string): Promise<AgentMuxMessageNotification | null> {
+    return this.withLock(async () => this.notification(nonEmpty(notificationId, 'Notification ID')) ?? null)
+  }
+
+  /** Freeze the bounded original reference set atomically, before entering the Input owner. */
+  async prepareNotification(input: { notificationId: string; agentSessionId: string; condition: AgentPromptCondition;
+    idle?: AgentMuxMessageNotification['idle']; messageIds?: readonly string[] }): Promise<AgentMuxMessageNotification | null> {
+    return this.withLock(async () => {
+      const condition = validateAgentPromptCondition(input.condition)
+      const existing = this.notification(input.notificationId)
+      if (existing) {
+        if (existing.key.agentSessionId !== input.agentSessionId || existing.key.expectedRun.runId !== condition.expectedRun.runId ||
+            input.messageIds && !isDeepStrictEqual(existing.messageIds, input.messageIds)) throw new AgentMuxError('This notification operation already names another target or reference set.', 'A2A_NOTIFICATION_CONFLICT')
+        return existing
+      }
+      const positions = input.messageIds ? input.messageIds.map(id => ({ message_id: id })) : this.db.prepare(`SELECT message_id FROM a2a_message_notifications
+        WHERE recipient_id=? AND run_id=? AND submitted=0 AND notification_id IS NULL ORDER BY message_sequence LIMIT 100`)
+        .all(input.agentSessionId, condition.expectedRun.runId)
+      if (!positions.length) {
+        const active = this.db.prepare('SELECT notification_id FROM a2a_notifications WHERE recipient_id=? AND run_id=? AND active=1 ORDER BY original_sequence LIMIT 1')
+          .get(input.agentSessionId, condition.expectedRun.runId)
+        return active ? this.notification(String(active.notification_id))! : null
+      }
+      const references: { senderSessionId: string; messageId: string }[] = []
+      let wire = ''
+      for (const position of positions) {
+        const original = this.messageReference(String(position.message_id))
+        if (!original || typeof original.sender_id !== 'string') throw new AgentMuxError('An original peer message is required.', 'MESSAGE_NOT_FOUND')
+        const candidate = { senderSessionId: original.sender_id, messageId: String(position.message_id) }
+        const candidateWire = renderAgentMuxMessageReferences([...references, candidate])
+        if (Buffer.byteLength(candidateWire) > MAX_A2A_NOTIFICATION_BYTES) {
+          if (input.messageIds) throw new AgentMuxError('The selected reference set exceeds the notification byte budget. Select fewer original MIDs.', 'INVALID_A2A_NOTIFICATION')
+          break
+        }
+        references.push(candidate); wire = candidateWire
+      }
+      const notice: AgentMuxMessageNotification = { notificationId: input.notificationId,
+        key: { kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: condition.expectedRun, submissionId: input.notificationId },
+        messageIds: references.map(reference => reference.messageId), wire, condition,
+        mode: input.idle ? 'idle' : 'steer', ...(input.idle ? { idle: input.idle } : {}), state: 'pending' }
+      await this.appendRecord({ kind: 'a2a-notification', sequence: this.nextSequence, notification: notice })
+      return this.notification(input.notificationId)!
+    }, true)
+  }
+
+  /** Input owner supplies the precise outcome; reading a body never calls this. */
+  async recordNotificationResult(notificationId: string, state: Exclude<AgentMuxMessageNotification['state'], 'pending'>,
+    reason?: string): Promise<AgentMuxMessageNotification> {
+    return this.withLock(async () => {
+      const current = this.notification(notificationId)
+      if (!current) throw new AgentMuxError('The original notification is not retained.', 'A2A_NOTIFICATION_NOT_FOUND')
+      if (current.state === state && current.reason === reason) return current
+      await this.appendRecord({ kind: 'a2a-notification-result', sequence: this.nextSequence, notificationId, state,
+        ...(reason === undefined ? {} : { reason }) })
+      return this.notification(notificationId)!
+    }, true)
+  }
+
+  /** Serialize whole-input refusal with the same journal gate used by every future claim. */
+  async retireNotificationBeforeInput(notificationId: string, noOriginalClaim: () => Promise<boolean>, reason: string): Promise<boolean> {
+    return this.withLock(async () => {
+      const notice = this.notification(notificationId)
+      if (!notice || notice.state !== 'pending' || !await noOriginalClaim()) return false
+      await this.appendRecord({ kind: 'a2a-notification-result', sequence: this.nextSequence, notificationId, state: 'not-applied', reason })
+      return true
+    }, true)
   }
 
   private input(key: import('./agent-prompt-condition.js').AgentPromptInputKey): AgentInputJournalEntry | undefined {
@@ -473,6 +637,9 @@ export class DurableAgentMuxMessageQueue {
   /** Only the original metadata claim runs here; no Provider or Native awaits. */
   async withUncontrolledInputClaim<T>(key: import('./agent-prompt-condition.js').AgentPromptInputKey, claim: () => Promise<T>, originalClaim?: () => Promise<boolean>): Promise<T> {
     return await this.withLock(async () => {
+      const notice = key.kind === 'prompt' ? this.notification(key.submissionId) : undefined
+      if (notice && (notice.state !== 'pending' || !isDeepStrictEqual(notice.key, key))) throw new AgentMuxError(
+        'This original notification no longer authorizes a new input claim.', 'A2A_NOTIFICATION_CONFLICT')
       if (this.input(key)) throw new AgentMuxError('The original controlled input requires its journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
       if (this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key)) && (!originalClaim || !await originalClaim())) throw new AgentMuxError('This accepted original input has no available admission to rejoin. Its recorded identity is retained.', 'AGENT_INPUT_READ_UNCONFIRMED')
       return await claim()
@@ -599,7 +766,9 @@ export class DurableAgentMuxMessageQueue {
       this.db.prepare('INSERT INTO records VALUES (?, ?)').run(record.sequence, JSON.stringify(record))
       return
     }
-    if (record.kind === 'message-route') {
+    if (record.kind === 'a2a-notification' || record.kind === 'a2a-notification-result') {
+      this.applyNotificationRecord(record)
+    } else if (record.kind === 'message-route') {
       const route = validateAgentMessageRoute(record.route)
       this.db.prepare('INSERT INTO message_routes VALUES (?, ?, ?)').run(route.messageId, route.operationId, record.sequence)
     } else if (record.kind === 'message') {
@@ -618,6 +787,12 @@ export class DurableAgentMuxMessageQueue {
         'SELECT COALESCE(MAX(recipient_ordinal), 0) + 1 AS next FROM messages WHERE recipient_id = ?').get(consumerId)!.next)
       this.db.prepare('INSERT INTO messages VALUES (?, ?, ?, ?, ?, NULL, NULL)').run(
         envelope.messageId, envelope.operationId, record.sequence, consumerId, ordinal)
+      if (record.deliveryMode !== undefined) {
+        if (record.deliveryMode !== 'reference' || envelope.sender.kind !== 'agent-session' || !consumerId || !envelope.recipientRunId ||
+            record.execution !== 'default' || record.admissionIntent !== undefined) throw new AgentMuxError('Reference intake must preserve a default peer Inbox message.', 'INVALID_A2A_NOTIFICATION')
+        this.db.prepare('INSERT INTO a2a_message_notifications (message_id, recipient_id, run_id, message_sequence) VALUES (?, ?, ?, ?)')
+          .run(envelope.messageId, consumerId, envelope.recipientRunId, record.sequence)
+      }
     } else if (record.kind === 'prompt-condition') {
       const current = this.message(record.messageId)
       if (!current || current.promptCondition !== null) throw new AgentMuxError('Message prompt condition is inconsistent.', 'MESSAGE_QUEUE_UNAVAILABLE')
@@ -690,8 +865,9 @@ export class DurableAgentMuxMessageQueue {
     }
   }
 
-  async append(input: AgentMuxMessageAppendInput, newMessage?: { admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean> }): Promise<AgentMuxMessageReceipt> {
+  async append(input: AgentMuxMessageAppendInput, newMessage?: { deliveryMode?: 'reference'; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment']; originalClaimAbsent?: () => Promise<boolean> }): Promise<AgentMuxMessageReceipt> {
     return this.withLock(async () => {
+      await newMessage?.reauthorize?.()
       const messageId = input.messageId ?? mintObjectId()
       if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'INVALID_CONTROL_REQUEST')
       const execution = input.execution ?? 'default'
@@ -720,6 +896,7 @@ export class DurableAgentMuxMessageQueue {
       // returns an old record above; it never manufactures a manual tag for it.
       const frozenIntent = admissionIntent ?? (newMessage?.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(newMessage.admissionIntent))
       const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
+        ...(newMessage?.deliveryMode === undefined ? {} : { deliveryMode: newMessage.deliveryMode }),
         ...(frozenIntent === undefined ? {} : { admissionIntent: frozenIntent }),
         ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
       await this.appendRecord(record)
@@ -853,9 +1030,11 @@ export class DurableAgentMuxMessageQueue {
       if (after && (after.incarnation !== incarnation || maximum < after.throughSequence)) throw new AgentMuxError(
         'The original message journal changed or moved backwards. Keep the existing reading window; explicitly inspect the original Host.', 'AGENT_MESSAGE_SOURCE_CHANGED')
       if (!after) return { cut: { incarnation, throughSequence: maximum }, changes: [], hasMore: false }
-      const rows = db.prepare(messageObservationQuery).all(after.throughSequence, maximum)
+      const positions = db.prepare('SELECT sequence FROM message_observation_records WHERE sequence>? AND sequence<=? ORDER BY sequence LIMIT 100').all(after.throughSequence, maximum)
+      const boundary = positions.length === 100 ? Number(positions.at(-1)!.sequence) : maximum
+      const rows = db.prepare(messageObservationQuery).all(after.throughSequence, boundary)
       // Advance past unrelated journal facts without extracting their bodies.
-      return { cut: { incarnation, throughSequence: rows.length === 100 ? Number(rows.at(-1)!.sequence) : maximum }, hasMore: rows.length === 100,
+      return { cut: { incarnation, throughSequence: boundary }, hasMore: positions.length === 100,
         changes: rows.filter(row => row.sender_kind === 'agent-session' && row.recipient_kind === 'agent-session')
           .map(row => ({ type: 'agent-message-changed' as const, sequence: Number(row.sequence), messageId: String(row.message_id),
           senderSessionId: String(row.sender_id), recipientSessionId: String(row.recipient_id) })) }
@@ -901,7 +1080,8 @@ export class DurableAgentMuxMessageQueue {
           ? { state: last.state, at: last.at, ...(last.reason === undefined ? {} : { reason: last.reason }) }
           : { state: 'queued', at: envelope.createdAt, ...(last ? { reason: last.reason } : {}) }
         return { sequence: Number(row.sequence), envelope, delivery,
-          bodyPreview: String(row.preview).slice(0, 240), bodyBytes: Number(row.body_bytes) } satisfies AgentMuxMessageMetadata
+          bodyPreview: String(row.preview).slice(0, 240), bodyBytes: Number(row.body_bytes),
+          ...((original as JournalMessage).deliveryMode === 'reference' ? { deliveryMode: 'reference' as const, notification: this.messageNotification(envelope.messageId) } : {}) } satisfies AgentMuxMessageMetadata
       })
       return { participantSessionId, direction: input.direction, messages,
         nextBeforeSequence: rows.length > limit ? messages.at(-1)!.sequence : null }
@@ -1142,6 +1322,7 @@ export class DurableAgentMuxMessageQueue {
       sequence: message.sequence,
       envelope: structuredClone(message.envelope),
       delivery: { ...message.delivery },
+      ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode, notification: structuredClone(message.notification!) }),
       ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) }),
       ...(message.admissionIntent === undefined ? {} : { admissionIntent: structuredClone(message.admissionIntent) }),
       ...(message.sourceChannel === undefined ? {} : { sourceChannel: message.sourceChannel }),
@@ -1151,7 +1332,7 @@ export class DurableAgentMuxMessageQueue {
   }
 }
 
-export async function appendGlobalMessage(input: AgentMuxMessageAppendInput, path = defaultAgentMuxMessageQueuePath(), newMessage?: { admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment'] }): Promise<AgentMuxMessageReceipt> {
+export async function appendGlobalMessage(input: AgentMuxMessageAppendInput, path = defaultAgentMuxMessageQueuePath(), newMessage?: { deliveryMode?: 'reference'; reauthorize?: () => Promise<void>; admissionIntent?: AgentPromptAdmissionIntent; inputEnvironment?: AgentInputJournalIntent['environment'] }): Promise<AgentMuxMessageReceipt> {
   return await new DurableAgentMuxMessageQueue(path).append(input, newMessage)
 }
 
