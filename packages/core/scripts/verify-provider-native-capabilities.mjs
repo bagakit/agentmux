@@ -22,6 +22,7 @@ inputs.push(...(scope === 'input' ? ['packages/core/test/fixtures/codex-queue-rp
     'apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs']))
 const snapshot = async () => Object.fromEntries(await Promise.all(inputs.map(async file => [file, hash(await readFile(join(root, file)))])))
 const receipt = { schema: 'agentmux.provider-native-capabilities-proof.v1', scope, sourceOnly: true, passed: false, cases: [] }
+const loadedSourceHashes = {}, dependencySourceHashes = {}
 await mkdir(evidence, { recursive: true })
 
 async function run(label, selected, mutation) {
@@ -50,7 +51,12 @@ async function run(label, selected, mutation) {
   const records = (await readFile(loaded, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
   const transformed = records.filter(record => record.mutation)
   assert.ok(records.length > 0, label + ': actual source was not observed')
-  for (const record of records) assert.equal(hash(await readFile(join(root, record.file))), record.originalSHA256, label + ': source changed ' + record.file)
+  for (const record of records) {
+    if (dependencySourceHashes[record.file]) assert.equal(record.originalSHA256, dependencySourceHashes[record.file], label + ': prerequisite source changed while joining ' + record.file)
+    if (loadedSourceHashes[record.file]) assert.equal(record.originalSHA256, loadedSourceHashes[record.file], label + ': source changed between runs ' + record.file)
+    loadedSourceHashes[record.file] = record.originalSHA256
+    assert.equal(hash(await readFile(join(root, record.file))), record.originalSHA256, label + ': source changed ' + record.file)
+  }
   if (mutation) {
     assert.ok(result.code > 0 && report.numFailedTests > 0 && assertionFailures > 0, label + ': require behavior Assertion RED')
     assert.ok(transformed.length > 0 && transformed.every(record => record.mutation === mutation && record.sha256 !== record.originalSHA256), label + ': mutation was not loaded')
@@ -65,7 +71,6 @@ async function run(label, selected, mutation) {
 
 try {
   receipt.sourceBefore = await snapshot()
-  receipt.baseline = await run('baseline', scopes[scope])
   if (scope === 'join') {
     receipt.dependencies = {}
     for (const dependency of ['input', 'history']) {
@@ -73,11 +78,16 @@ try {
       const value = JSON.parse(proof)
       assert.equal(value.passed, true, 'Missing successful ' + dependency + ' proof')
       assert.equal(value.cases.length, Object.values(mutations).filter(change => change[0] === dependency).length)
-      for (const [file, sha] of Object.entries(value.sourceAfter)) assert.equal(hash(await readFile(join(root, file))), sha,
-        dependency + ': proof no longer binds ' + file)
+      assert.ok(value.loadedSourceHashes && Object.keys(value.loadedSourceHashes).length > 0, dependency + ': missing actual loaded source graph')
+      for (const [file, sha] of Object.entries({ ...value.sourceAfter, ...value.loadedSourceHashes })) {
+        assert.equal(hash(await readFile(join(root, file))), sha, dependency + ': proof no longer binds ' + file)
+        if (dependencySourceHashes[file]) assert.equal(sha, dependencySourceHashes[file], dependency + ': conflicting source proofs ' + file)
+        dependencySourceHashes[file] = sha
+      }
       receipt.dependencies[dependency] = hash(proof)
     }
   }
+  receipt.baseline = await run('baseline', scopes[scope])
   for (const [name, change] of Object.entries(mutations).filter(([, value]) => value[0] === scope)) {
     const selected = scope === 'input' ? [change[1].endsWith('/codex-native-queue.ts') ? scopes.input[2]
       : change[1].endsWith('/agent-native-process.ts') ? scopes.input[3] : scopes.input[0]] : scopes.history
@@ -89,6 +99,9 @@ try {
   }
   receipt.sourceAfter = await snapshot()
   assert.deepEqual(receipt.sourceAfter, receipt.sourceBefore)
+  for (const [file, sha] of Object.entries({ ...dependencySourceHashes, ...loadedSourceHashes })) assert.equal(
+    hash(await readFile(join(root, file))), sha, 'Source changed before proof completion: ' + file)
+  receipt.loadedSourceHashes = loadedSourceHashes
   receipt.passed = true
 } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
 finally { await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n') }
