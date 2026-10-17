@@ -33,7 +33,11 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
       <fieldset className="settings-goals-view"><legend>Default Goals view</legend>
         {GOALS_VIEW_IDS.map(choice => <label key={choice} data-selected={view.value === choice}>
           <input type="radio" name={viewGroup} checked={view.value === choice} onChange={() => view.setValue(choice)} />
-          <span className="settings-goals-view__preview" aria-hidden="true" data-view={choice}>{[0, 1, 2].map(item => <span key={item}><i /><i /><i /></span>)}</span>
+          <span className="settings-goals-view__preview" aria-hidden="true" data-view={choice}>
+            {choice === 'list'
+              ? [0, 1, 2].map(item => <span key={item}><i /><b /></span>)
+              : [2, 1, 2].map((cards, column) => <span key={column}><b />{Array.from({ length: cards }, (_, card) => <i key={card} />)}</span>)}
+          </span>
           <span>{choice === 'list' ? 'List' : 'Board'}</span>
         </label>)}
       </fieldset>
