@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { BrowserRecoveryPreviewReadResult } from '../../../shared/browser-recovery-preview'
 
 const BrowserIcon = semanticIconComponent('object.browser')
 const RefreshIcon = semanticIconComponent('action.refresh')
@@ -11,7 +12,7 @@ const ChevronIcon = semanticIconComponent('navigation.submenu')
 
 /** Presentation only. The caller retains the original page and recovery operation. */
 export function BrowserRecoverySurface({ url, title, faviconDataUrl, heading, description, error, busy, restoring,
-  retryLabel = 'Retry', onRetry, onEditAddress, onCopy }: {
+  preview, retryLabel = 'Retry', onRetry, onEditAddress, onCopy }: {
   url: string
   title: string
   faviconDataUrl?: string | undefined
@@ -20,6 +21,7 @@ export function BrowserRecoverySurface({ url, title, faviconDataUrl, heading, de
   error?: string | null | undefined
   busy: boolean
   restoring?: boolean | undefined
+  preview?: BrowserRecoveryPreviewReadResult | undefined
   retryLabel?: string | undefined
   onRetry?: (() => void) | undefined
   onEditAddress(): void
@@ -27,10 +29,14 @@ export function BrowserRecoverySurface({ url, title, faviconDataUrl, heading, de
 }) {
   const [copyResult, setCopyResult] = useState<{ url: string; successful: boolean } | null>(null)
   const [failedFavicon, setFailedFavicon] = useState<string | null>(null)
+  const [failedPreview, setFailedPreview] = useState<string | null>(null)
+  const previous = preview?.status === 'available' ? preview.preview : null
+  const previousImage = previous?.image.dataUrl
   const currentCopy = copyResult?.url === url ? copyResult : null
   let origin = ''
   try { origin = new URL(url).host } catch { /* The exact address remains readable and copyable. */ }
-  const pageTitle = title.trim() || origin || 'Browser page'
+  const pageTitle = previous && previous.url !== url ? origin || 'Browser page'
+    : previous?.title.trim() || title.trim() || origin || 'Browser page'
 
   async function copyAddress(): Promise<void> {
     const successful = await onCopy(url)
@@ -74,6 +80,16 @@ export function BrowserRecoverySurface({ url, title, faviconDataUrl, heading, de
         </button> : null}
         <button className="small-button" type="button" onClick={onEditAddress}>Edit address</button>
       </div>
+      {previous && previousImage && failedPreview !== previousImage ? <figure className="browser-recovery__preview">
+        <img src={previousImage} alt="Previously viewed page" width={previous.image.width} height={previous.image.height}
+          onError={() => setFailedPreview(previousImage)} />
+        <figcaption><span>Previous preview · not live</span>
+          <strong>{previous.title.trim() || previous.url}</strong>
+          {previous.url !== url ? <code title={previous.url}>{previous.url}</code> : null}
+        </figcaption>
+      </figure> : null}
+      {preview?.warning || (previousImage && failedPreview === previousImage) ?
+        <p className="browser-recovery__preview-notice" role="status">{preview?.warning || 'The previous preview could not be displayed. Retry and address editing remain available.'}</p> : null}
       {error ? <details className="browser-recovery__details">
         <summary><ChevronIcon size={12} />Technical details</summary>
         <pre>{error}</pre>
