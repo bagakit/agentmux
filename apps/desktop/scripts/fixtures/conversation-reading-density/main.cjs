@@ -74,7 +74,7 @@ app.whenReady().then(async () => {
       document.querySelectorAll('.conversation-record-process .wf-head').forEach(button => { if (button.getAttribute('aria-expanded') !== 'true') button.click() })
     }); await settle()
     await until(() => document.querySelector('[data-native-step-id="collaboration-report"]'))
-    assert.equal(await read(() => document.querySelector('[data-native-step-id="collaboration-report"] .log-row__title').textContent.includes('/root/reviewer') && document.querySelector('[data-native-step-id="collaboration-report"] .log-row__title').textContent.includes('/root')), true, 'Collaboration summary retains sender and recipient')
+    assert.equal(await read(() => document.querySelector('[data-native-step-id="collaboration-report"] .log-row__title').textContent.includes('/root/reviewer → /root')), true, 'Collaboration summary retains the complete recorded sender → recipient pair')
     await keyboardActivate('[data-native-step-id="collaboration-report"] > button')
     assert.equal(await read(() => document.querySelector('[data-native-step-id="collaboration-report"]').textContent.includes('独立评审')), true, 'Recorded collaboration body is directly readable')
     await read(() => document.querySelector('[data-native-step-id="collaboration-report"]').scrollIntoView({ block: 'center' }))
