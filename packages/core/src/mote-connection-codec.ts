@@ -10,6 +10,7 @@ import {
 } from './mote-preferences.js'
 import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { parseConnectionProfileOperation } from './connection-profile-codec.js'
+import { parseConnectionSetupInitialPublication } from './connection-setup-codec.js'
 import type {
   MoteConnectionMethod,
   MoteConnectionSource,
@@ -90,7 +91,7 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
   const p = obj(
     v,
     m === 'space.mote.connection.create'
-      ? ['operationId', 'source', 'adapterId', 'domain', 'avatar', 'name']
+      ? ['operationId', 'source', 'adapterId', 'domain', 'avatar', 'name', 'initialPublication']
       : ['operationId', 'source', 'connection', 'expectedConnectionRevision', 'avatar']
   )
   const source = parseMoteConnectionSource(p.source),
@@ -105,7 +106,7 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
     } as MoteConnectionParamsMap[M]
   const domain = text(p.domain)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
-  return { ...base, adapterId: id(p.adapterId), domain, ...(p.name === undefined ? {} : { name: text(p.name) }) } as MoteConnectionParamsMap[M]
+  return { ...base, adapterId: id(p.adapterId), domain, ...(p.name === undefined ? {} : { name: text(p.name) }), ...(p.initialPublication === undefined ? {} : { initialPublication: parseConnectionSetupInitialPublication(p.initialPublication) }) } as MoteConnectionParamsMap[M]
 }
 export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperation {
   const p = obj(v, [
@@ -263,7 +264,8 @@ export function parseMoteConnectionResult<M extends MoteConnectionMethod>(
     if (
       'adapterId' in request &&
       operation.enrollment &&
-      (operation.enrollment.adapterId !== request.adapterId || operation.enrollment.domain !== request.domain)
+      (operation.enrollment.adapterId !== request.adapterId || operation.enrollment.domain !== request.domain ||
+        JSON.stringify(operation.enrollment.initialPublication ?? null) !== JSON.stringify(request.initialPublication ?? null))
     )
       fail()
     if (
