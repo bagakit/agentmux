@@ -58,7 +58,7 @@ it('resolves only the exact original record and accepts truthful memory provenan
 
 it('reads saved provenance before Main and again after its await, without changing original operation identity', async () => {
   const host = reader()
-  expect(await resolveAgentInputContextCapture(intent(), async () => frozen(), { read: async () => { throw new Error('Main is offline') } })).toEqual({ inputContext: context(), inputContextCaptureProof: proof() })
+  await expect(resolveAgentInputContextCapture(intent(), async () => frozen(), { read: async () => { throw new Error('Main is offline') } })).resolves.toEqual({ inputContext: context(), inputContextCaptureProof: proof() })
   const reads = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce(frozen())
   host.read.mockResolvedValue({ reference: reference(), record: null, diskDurability: 'unconfirmed' })
   expect(await resolveAgentInputContextCapture(intent(), reads, host)).toEqual({ inputContext: context(), inputContextCaptureProof: proof() })
