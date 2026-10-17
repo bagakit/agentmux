@@ -144,11 +144,11 @@ const scene = {
     const original = sessions.find(session => session.id === 'gamma')!
     const otherHost = { ...original, hostId: 'other-host', workspacePath: fixturePath('private/other-host'),
       control: { ...original.control, hostId: 'other-host', run: { runId: 'other-host-original-gamma' } } }
-    useAppStore.setState(state => ({ sessions: [otherHost, ...state.sessions] }))
+    useAppStore.setState(state => ({ sessions: [otherHost, ...state.sessions.map(session => session.id === 'gamma' ? { ...session, runUnobserved: true as const } : session)] }))
   },
   clearSingleOperations() {
     clipboard.length = 0; controls.length = 0; restarts.length = 0
-    useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.hostId !== 'other-host') }))
+    useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.hostId !== 'other-host').map(session => { if (session.id !== 'gamma') return session; const { runUnobserved: _observation, ...confirmed } = session; return confirmed }) }))
   },
   retainedReply(exited: boolean) {
     useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'delta'
@@ -161,7 +161,7 @@ const scene = {
     order: [...document.querySelectorAll<HTMLElement>('.workspace-agent-list-item')].map(node => node.dataset.agentKey),
     cards: [...document.querySelectorAll<HTMLElement>('.workspace-agent-list-item button.focus-context')].map(node => ({ id: node.dataset.sessionId, state: node.dataset.state, text: node.textContent })),
     preference: state.workspaceAgentOrder, clipboard: [...clipboard], controls: structuredClone(controls), restarts: structuredClone(restarts),
-    sessions: state.sessions.map(session => ({ id: session.id, control: session.control })),
+    sessions: state.sessions.map(session => ({ id: session.id, control: session.control, runUnobserved: session.runUnobserved === true })),
     tabs: state.tabs, layouts: state.layouts, drafts: state.agentComposerDrafts,
     originalWorkface: state.tabs === original.tabs && state.layouts === original.layouts,
     originalDrafts: state.agentComposerDrafts === original.agentComposerDrafts,
