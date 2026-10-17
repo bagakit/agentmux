@@ -14,14 +14,16 @@ export default defineConfig({
     let code = original
     const mutant = process.env.AGENTMUX_FOCUS_CARDS_MUTANT
     if (path.endsWith('/FocusContextCards.tsx') && mutant) {
-      assert.ok(['eager', 'forget-visited', 'no-initial-scan', 'queued-hidden', 'pointer-focus-replace', 'initial-columns'].includes(mutant))
+      assert.ok(['eager', 'forget-visited', 'no-initial-scan', 'queued-hidden', 'pointer-focus-replace', 'initial-columns', 'live-facts-layout', 'ignore-slot-order'].includes(mutant))
       const inverses: Record<string, [string, string]> = {
         eager: ['const full = visited.current.has(contextKey(context))', 'const full = true'],
         'forget-visited': ['return () => { active = false; observer.disconnect() }', 'return () => { active = false; observer.disconnect(); visited.current.clear() }'],
         'no-initial-scan': ['for (const slot of slots) {', 'for (const slot of [] as HTMLDivElement[]) {'],
         'queued-hidden': ['if (!active) return', 'if (false) return'],
         'pointer-focus-replace': ['onMouseDown={event => { if (event.button === 0) event.preventDefault() }}', ''],
-        'initial-columns': ["if (!layoutReady && rows && rows.clientWidth > 0 && rows.clientHeight > 0\n      && typeof ResizeObserver !== 'undefined' && typeof IntersectionObserver !== 'undefined') return", '']
+        'initial-columns': ["if (!layoutReady && rows && rows.clientWidth > 0 && rows.clientHeight > 0\n      && typeof ResizeObserver !== 'undefined' && typeof IntersectionObserver !== 'undefined') return", ''],
+        'live-facts-layout': ['[visible, layoutReady, columns, cardOrder, scrollRef, viewportMargin]', '[visible, layoutReady, columns, contexts, scrollRef, viewportMargin]'],
+        'ignore-slot-order': ["const cardOrder = contexts.map(contextKey).join('\\n')", "const cardOrder = ''"]
       }
       const [from, to] = inverses[mutant]!
       assert.equal(code.split(from).length - 1, 1, 'Actual unique body/retention owner')
