@@ -36,6 +36,8 @@ async function fixture(
     pending?: boolean
     reviewing?: boolean
     readFailure?: boolean
+    incompleteProfile?: boolean
+    draftUnavailable?: boolean
   } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), 'console-profile-')),
@@ -115,7 +117,7 @@ async function fixture(
     sharing: null,
     reasonRequired: null,
     creatorAudienceAvailable: false,
-    issues: []
+    issues: options.draftUnavailable ? ['Current publication version is unconfirmed'] : []
   })
   const effect = async (kind: string, operationId: string) => {
     const rows = services
@@ -154,7 +156,7 @@ async function fixture(
               'publication-versions',
               'publication-features'
             ],
-      privateIntent: draft ? JSON.stringify({ effect, draft }) : null
+      privateIntent: draft && !options.draftUnavailable ? JSON.stringify({ effect, draft }) : null
     }),
     createVersion: async (input: any) => {
       await effect('create', input.operationId)
@@ -230,7 +232,7 @@ async function fixture(
           : { kind: 'accepted', privateState: 'private-updated-profile' }
       },
       publicationDraft: async (states: any, notes: string) =>
-        states.versions && states.visibility
+        !options.draftUnavailable && states.versions && states.visibility
           ? {
               kind: 'create-version',
               version: JSON.parse(states.versions).versions.length
@@ -332,7 +334,7 @@ async function fixture(
                   : ({ subject: input.subject } as any),
             privateState: JSON.stringify(
               input.subject === 'application-details'
-                ? { ...state, complete: true }
+                ? { ...state, complete: !options.incompleteProfile }
                 : input.subject === 'publication-versions'
                   ? { versions: created ? [{ versionId: 'new-version' }] : [] }
                   : input.subject === 'publication-version'
@@ -518,6 +520,43 @@ it('executes the public existing-profile flow and compiled CLI history without c
   expect(JSON.stringify(trace)).not.toMatch(/private-|pngDataUrl/)
   expect(JSON.stringify(trace.requestTrace)).not.toContain('avatarSha256')
 }, 30000)
+it('updates and reads back the original profile before publication facts can block their own stage', async () => {
+  const f = await fixture({ draftUnavailable: true }), view = await f.begin()
+  expect(view.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'attention' })
+  const firstPublication = f.requests.findIndex(r => r.kind.startsWith('publication-'))
+  expect(firstPublication).toBeGreaterThan(0)
+  expect(f.requests.slice(0, firstPublication).map(r => r.kind).filter(k => !k.startsWith('auth'))).toEqual(['application-details', 'upload', 'write', 'application-details'])
+  expect(f.requests.filter(r => r.preclaimed).map(r => r.kind)).toEqual(['upload', 'write'])
+  const selector = { operationId: f.input.operationId, applicationConfiguration: { effect: 'create-application-version' as const } }
+  const reviewed = await f.sdk.call('connection.setup.inspect', selector), count = f.requests.length
+  expect(reviewed.applicationConfiguration).toMatchObject({ effect: 'create-application-version', draft: null, capability: 'unknown', actions: [], review: { issues: ['Current publication version is unconfirmed'] } })
+  const cli = await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--application-configuration', 'create-application-version'])
+  expect(cli.applicationConfiguration).toEqual(reviewed.applicationConfiguration)
+  expect(f.requests).toHaveLength(count)
+  const profileSelector = { operationId: f.input.operationId, applicationConfiguration: { effect: 'update-application-profile' as const } }
+  const originalEffect = (await f.sdk.call('connection.setup.inspect', profileSelector)).applicationConfiguration!.selected
+  let current = view
+  for (let retry = 0; retry < 2; retry++) {
+    current = await f.advance(current, 'continue-profile-update')
+    expect(current.profileUpdate).toMatchObject({ stage: 'publication-create', state: 'attention' })
+    expect(current.operation?.operationId).toBe(f.input.operationId)
+  }
+  expect(f.requests.filter(r => r.kind === 'application-details')).toHaveLength(2)
+  expect(f.requests.filter(r => r.preclaimed).map(r => r.kind)).toEqual(['upload', 'write'])
+  expect((await f.sdk.call('connection.setup.inspect', profileSelector)).applicationConfiguration!.selected).toEqual(originalEffect)
+  const trace = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, requestTrace: { limit: 100 } })
+  expect(trace.requestTrace!.entries.filter(r => r.kind === 'application-configuration').map(r => r.effect)).toEqual(['upload-profile-avatar', 'update-application-profile'])
+}, 30000)
+
+it('keeps a confirmed but incomplete application baseline in profile preflight without any future publication work', async () => {
+  const f = await fixture({ incompleteProfile: true }), view = await f.begin()
+  expect(view.profileUpdate).toMatchObject({ stage: 'profile-preflight', state: 'attention' })
+  expect(f.requests.filter(r => !r.kind.startsWith('auth'))).toEqual([{ kind: 'application-details' }])
+  const source = await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationConfiguration: { effect: 'upload-profile-avatar' } })
+  expect(source.applicationConfiguration).toMatchObject({ capability: 'unknown', reason: 'source-unconfirmed', actions: [], source: { request: 'confirmed', secureStorage: 'stored' } })
+  expect(f.requests.filter(r => r.preclaimed)).toEqual([])
+}, 30000)
+
 it.each(['upload', 'write'] as const)(
   'retains original unknown %s after owner restart and never effects it again',
   async (unknown) => {
