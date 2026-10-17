@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { chmod, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import contract from '../dist/ctxmux-artifact-contract.json' with { type: 'json' }
+import contract from '../src/ctxmux-artifact-contract.json' with { type: 'json' }
 
 const root = fileURLToPath(new URL('../vendor/ctxmux/', import.meta.url))
 for (const [platform, manifestSha256] of Object.entries(contract.manifests)) {

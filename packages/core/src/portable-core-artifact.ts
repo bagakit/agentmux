@@ -32,6 +32,10 @@ async function materialize(source: string, destination: string, ancestry: readon
     if (entry.name === 'node_modules' || core && !['bin', 'dist', 'vendor', 'examples', 'package.json', 'THIRD_PARTY_NOTICES.md', 'release.json'].includes(entry.name)) continue
     await cp(join(source, entry.name), join(destination, entry.name), { recursive: true, dereference: true })
   }
+  if (core) {
+    await mkdir(join(destination, 'src'), { recursive: true })
+    await cp(join(source, 'src', 'ctxmux-artifact-contract.json'), join(destination, 'src', 'ctxmux-artifact-contract.json'))
+  }
   // An installed Desktop has already materialized dependencies and strips workspace
   // dependency declarations. A source package resolves the same declared closure.
   if (core && Object.keys(manifest.dependencies ?? {}).length === 0) {
