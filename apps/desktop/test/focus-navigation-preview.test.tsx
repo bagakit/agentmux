@@ -127,7 +127,8 @@ it('expires native activity through the original window owner without changing f
   expect(focus().querySelector('[data-focus-count="working"]')).toBeNull()
   expect(preview()?.querySelector('[data-preview-session="native-current"] [data-semantic-icon="status.activity-unknown"]')).not.toBeNull()
   expect(useAppStore.getState().sessions[0]).not.toBe(newer); expect(useAppStore.getState().sessions[0]!.status).toBe(newer.status)
-  expect(useAppStore.getState().sessions[0]!.currentActivity).toBe(newer.currentActivity); expect(useAppStore.getState().sessions[0]!.control).toBe(newer.control)
+  const refreshed = useAppStore.getState().sessions[0]!
+  expect(refreshed.kind === 'agent' && refreshed.currentActivity).toBe(newer.currentActivity); expect(refreshed.control).toBe(newer.control)
   expect(useAppStore.getState().sessions[1]).toBe(neighbor)
   expect(nextAgentStatusDecayDelayMs(useAppStore.getState().sessions, Date.now())).toBeNull()
   const rendered = commits.mock.calls.length; await act(async () => vi.advanceTimersByTime(delay * 2)); expect(commits.mock.calls.length).toBe(rendered)
