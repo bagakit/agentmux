@@ -2,11 +2,13 @@
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { createHash } from 'node:crypto'
+import { appendFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
+import type { WebContents } from 'electron'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import type { AgentMuxPreloadApi } from '../src/shared/contracts'
-import { RENDERER_TRACE_CATEGORIES, type RendererV8Profile, type RendererV8ProfileInput, type RendererV8ProfileResult, type RendererTraceResult } from '@agentmux/core/control'
+import { RENDERER_TRACE_CATEGORIES, type MetricsObservation, type RendererV8Profile, type RendererV8ProfileInput, type RendererV8ProfileResult, type RendererTraceResult } from '@agentmux/core/control'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn() }))
 vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld(_key: string, value: AgentMuxPreloadApi) { bridge.api = value } },
@@ -22,6 +24,9 @@ import { PerformanceOverview } from '../src/renderer/src/components/performance/
 import { currentPerformanceCaptureTarget } from '../src/renderer/src/components/performance/PerformanceCapture'
 import { analyseRendererProfile, profileFlameRows } from '../src/renderer/src/lib/renderer-profile-analysis'
 import { registerPerformanceCaptureIpc } from '../src/main/performance-capture-ipc'
+import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler'
+import { RendererV8Profiler } from '../src/main/renderer-v8-profile'
+import { usePerformanceScene } from '../src/renderer/src/lib/use-performance-scene'
 import { performanceAttributionSnapshots as samples } from '../scripts/fixtures/performance-panel/data'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -60,23 +65,50 @@ function completedTrace(input: RendererV8ProfileInput): RendererTraceResult {
 }
 
 let root: Root, container: HTMLDivElement, initial: ReturnType<typeof useAppStore.getState>
-let profilePort: ReturnType<typeof vi.fn>, tracePort: ReturnType<typeof vi.fn>, animationsPort: ReturnType<typeof vi.fn>
+let profilePort: ReturnType<typeof vi.fn>, tracePort: ReturnType<typeof vi.fn>, animationsPort: ReturnType<typeof vi.fn>, scenePort: ReturnType<typeof vi.fn>
 const handlers = new Map<string, (event: never, input: unknown) => unknown>()
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container); initial = useAppStore.getState()
   profilePort = vi.fn(async (input: RendererV8ProfileInput) => capture(input)); tracePort = vi.fn(); animationsPort = vi.fn()
-  handlers.clear(); registerPerformanceCaptureIpc({ captureProfile: profilePort, captureTrace: tracePort, inspectAnimations: animationsPort, subscribe: vi.fn() }, (channel, handler) => handlers.set(channel, handler))
+  scenePort = vi.fn(async () => { throw new Error('Controlled scene refusal from Main') })
+  handlers.clear(); registerPerformanceCaptureIpc({ captureProfile: profilePort, captureTrace: tracePort, inspectAnimations: animationsPort,
+    captureScene: scenePort, inspectScene: async () => ({ status: 'absent', scene: null, issue: null }), subscribe: vi.fn() }, (channel, handler) => handlers.set(channel, handler))
   bridge.invoke.mockImplementation((channel, input) => handlers.get(channel)!(undefined as never, input))
   vi.spyOn(api.performance, 'captureProfile').mockImplementation(input => bridge.api!.performance.captureProfile(input))
   vi.spyOn(api.performance, 'captureTrace').mockImplementation(input => bridge.api!.performance.captureTrace(input))
   vi.spyOn(api.performance, 'inspectAnimations').mockImplementation(input => bridge.api!.performance.inspectAnimations(input))
+  vi.spyOn(api.performance, 'captureScene').mockImplementation(input => bridge.api!.performance.captureScene(input))
+  vi.spyOn(api.performance, 'inspectScene').mockImplementation(input => bridge.api!.performance.inspectScene(input))
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); bridge.invoke.mockReset() })
 function node<T extends HTMLElement = HTMLElement>(selector: string): T { const n = document.querySelector<T>(selector); expect(n).not.toBeNull(); expect(n!.isConnected).toBe(true); return n! }
 const click = async (selector: string) => act(async () => node<HTMLButtonElement>(selector).click())
 const render = async (snapshot = samples.fresh) => act(async () => root.render(<PerformanceOverview snapshot={snapshot} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
 const sampleButton = '[data-performance-capture] [data-performance-action="profile"]'
+
+function OverviewWithScene({ snapshot }: { snapshot: typeof samples.fresh }) {
+  const scene = usePerformanceScene(true)
+  return <PerformanceOverview snapshot={snapshot} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} scene={scene} />
+}
+async function omittedRendererSnapshot() {
+  const snapshot = structuredClone(samples.fresh), observation = snapshot.observation!, renderer = observation.renderer.data!
+  const metrics = Array.from({ length: 257 }, (_, index) => ({ pid: renderer.process.pid! + index,
+    creationTime: renderer.process.creationTime!, type: 'Tab', cpu: { cumulativeCPUUsage: 0 },
+    memory: { workingSetSize: index === 0 ? 1 : 1000 + index } })) as Electron.ProcessMetric[]
+  const sampler = new ProcessResourceSampler(async () => '', () => observation.observedAt, () => metrics, () => 1000, () => 8)
+  sampler.setObservationSources({ observeRuntime: async () => [], mainOwners: () => ({ sessionAttachmentOwners: 0,
+    sessionAttachmentLeases: 0, fileWatchers: 0, browserViews: 0, releasedBrowserViews: 0 }),
+    processOwners: () => ({ rendererPids: [renderer.process.pid!], browserPids: metrics.slice(1).map(process => process.pid) }) })
+  try {
+    const sample = await new Promise<ResourceSample>(resolve => sampler.subscribe(value => { if (value.app) resolve(value) }))
+    observation.app.data = sample.app
+    expect(sample.app).toMatchObject({ processCount: 257, omittedProcesses: 1, unavailable: null })
+    expect(sample.app!.processes).toHaveLength(256)
+    expect(sample.app!.processes.map(process => process.pid)).not.toContain(renderer.process.pid)
+    return snapshot
+  } finally { sampler.dispose() }
+}
 
 it('actual App popover sends its exact target through product preload and registered metrics delegate, then drills real weighted samples', async () => {
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, callback) => { callback(samples.fresh); return { dispose() {} } })
@@ -108,14 +140,78 @@ it('an unknown animation read retains the completed profile and its selected fla
   expect(profilePort).toHaveBeenCalledOnce(); expect(animationsPort).toHaveBeenCalledOnce(); expect(tracePort).not.toHaveBeenCalled()
 })
 
-it('missing/stale or reused process identity cannot authorise a GUI capture; opening does no sampling', async () => {
-  for (const snapshot of [samples.stale, samples.newInstance]) {
-    await render(snapshot); expect(node<HTMLButtonElement>(sampleButton).disabled).toBe(true)
+it('mounted capture and scene consumers submit the exact Renderer even when the real sampler omits it from 256 hotspots', async () => {
+  const omitted = await omittedRendererSnapshot(), unavailable = structuredClone(omitted)
+  unavailable.observation!.app = { state: 'unavailable', data: null, observedAt: null, lastSuccessAt: null, reason: 'Controlled app observation failure' }
+  const observation = omitted.observation!, renderer = observation.renderer.data!
+  const target = { ...observation.window!, pid: renderer.process.pid!, creationTime: renderer.process.creationTime! }
+  tracePort.mockImplementation(async input => unknownTrace(input))
+  animationsPort.mockImplementation(async ({ target }) => ({ target, schema: 'agentmux.renderer-animations.v1', scope: 'renderer-document', status: 'unknown',
+    timing: { requestedAt: _historyFixtureEpoch(0, 0, 1), sampledAt: null, finishedAt: _historyFixtureEpoch(0, 0, 2) },
+    sourceVerified: { before: true, after: false }, evaluation: { requested: true, settled: false }, snapshot: null, issues: [] }))
+  for (const snapshot of [omitted, unavailable]) {
+    await act(async () => root.render(<OverviewWithScene snapshot={snapshot} />))
+    const actions = [...document.querySelectorAll<HTMLButtonElement>('[data-performance-action], [data-performance-scene-capture]')]
+    expect(actions.map(action => action.disabled)).toEqual([false, false, false, false])
+    expect(profilePort).toHaveBeenCalledTimes(snapshot === omitted ? 0 : 1)
     await click(sampleButton)
+    await click('[data-performance-action="trace"]')
+    await click('[data-performance-action="animations"]')
+    await click('[data-performance-scene-capture]')
+    expect(profilePort).toHaveBeenLastCalledWith({ target, durationMs: 2000 })
+    expect(tracePort).toHaveBeenLastCalledWith({ target, durationMs: 2000 })
+    expect(animationsPort).toHaveBeenLastCalledWith({ target })
+    expect(scenePort).toHaveBeenLastCalledWith({ target })
+    expect(bridge.invoke).toHaveBeenCalledWith('metrics:captureScene', { target })
+    expect(node('[aria-label="Performance scene"]').textContent).toContain('Controlled scene refusal from Main')
+    expect(node('.performance-metrics')).toBeDefined()
   }
-  const wrong = structuredClone(samples.fresh); wrong.observation!.renderer.data!.window.generation++
-  await render(wrong); expect(node<HTMLButtonElement>(sampleButton).disabled).toBe(true)
+  expect(profilePort).toHaveBeenCalledTimes(2); expect(tracePort).toHaveBeenCalledTimes(2)
+  expect(animationsPort).toHaveBeenCalledTimes(2); expect(scenePort).toHaveBeenCalledTimes(2)
+  if (process.env.AGENTMUX_CAPTURE_TARGET_SAMPLES) appendFileSync(process.env.AGENTMUX_CAPTURE_TARGET_SAMPLES, JSON.stringify({
+    phase: 'omitted-renderer-mounted-actions', target, sampler: { processCount: observation.app.data!.processCount,
+      returnedProcesses: observation.app.data!.processes.length, omittedProcesses: observation.app.data!.omittedProcesses },
+    profile: profilePort.mock.calls, trace: tracePort.mock.calls, animations: animationsPort.mock.calls, scene: scenePort.mock.calls
+  }) + '\n')
+})
+
+it('missing, stale or mismatched Renderer source keeps all mounted capture actions unavailable without sampling', async () => {
+  const changes: ((value: MetricsObservation) => void)[] = [
+    value => { value.renderer.state = 'stale' }, value => { value.renderer.state = 'unavailable' },
+    value => { value.renderer.data = null }, value => { value.window = null },
+    value => { value.renderer.data!.process.pid = null }, value => { value.renderer.data!.process.creationTime = null },
+    value => { value.renderer.data!.window.windowId++ }, value => { value.renderer.data!.window.webContentsId++ },
+    value => { value.renderer.data!.window.generation++ }
+  ]
+  for (const change of changes) {
+    const snapshot = structuredClone(samples.fresh); change(snapshot.observation!)
+    await act(async () => root.render(<OverviewWithScene snapshot={snapshot} />))
+    const actions = [...document.querySelectorAll<HTMLButtonElement>('[data-performance-action], [data-performance-scene-capture]')]
+    expect(actions.map(action => action.disabled)).toEqual([true, true, true, true])
+    for (const action of actions) await act(async () => action.click())
+  }
   expect(profilePort).not.toHaveBeenCalled(); expect(tracePort).not.toHaveBeenCalled()
+  expect(animationsPort).not.toHaveBeenCalled(); expect(scenePort).not.toHaveBeenCalled()
+})
+
+it('a reused PID reaches the original Main exact-target fence and is refused before native capture', async () => {
+  const observation = samples.newInstance.observation!, previous = observation.renderer.data!.process
+  const currentProcess = observation.app.data!.processes.find(process => process.pid === previous.pid)!
+  const target = { ...observation.window!, pid: previous.pid!, creationTime: previous.creationTime! }
+  const attach = vi.fn(() => { throw new Error('Wrong target reached native debugger') })
+  const contents = { debugger: { attach, isAttached: () => false }, isDevToolsOpened: () => false,
+    removeListener: vi.fn(), isDestroyed: () => false } as unknown as WebContents
+  const profiler = new RendererV8Profiler(contents, () => ({ ...target, creationTime: currentProcess.creationTime }))
+  profilePort.mockImplementation(input => profiler.capture(input))
+  try {
+    await render(samples.newInstance)
+    expect(node<HTMLButtonElement>(sampleButton).disabled).toBe(false)
+    await click(sampleButton)
+    expect(profilePort).toHaveBeenCalledExactlyOnceWith({ target, durationMs: 2000 })
+    expect(node('[data-performance-capture]').textContent).toContain('The exact Renderer profile target is no longer current')
+    expect(attach).not.toHaveBeenCalled()
+    expect(node('.performance-metrics')).toBeDefined()
+  } finally { profiler.dispose() }
 })
 
 it('an in-flight explicit click is single-use, and a late original result retains its original target after readings change', async () => {
@@ -123,7 +219,9 @@ it('an in-flight explicit click is single-use, and a late original result retain
   profilePort.mockImplementation(() => new Promise(resolve => { complete = resolve }))
   await render(); await click(sampleButton); await click(sampleButton)
   expect(profilePort).toHaveBeenCalledOnce(); expect(node<HTMLButtonElement>(sampleButton).disabled).toBe(true)
-  await render(samples.newInstance)
+  const changed = structuredClone(samples.fresh)
+  changed.observation!.window!.generation++; changed.observation!.renderer.data!.window.generation++
+  await render(changed)
   await act(async () => complete(capture(profilePort.mock.calls[0]![0])))
   expect(node('[data-performance-capture]').textContent).toContain('Showing the original captured process')
   expect(node('[aria-label="Capture result"]').textContent).toContain('PID 2345')

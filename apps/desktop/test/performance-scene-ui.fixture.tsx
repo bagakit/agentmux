@@ -127,9 +127,12 @@ it('opens the actual Panel with inspect only and sends one exact scene click thr
   expect(sceneNode().textContent).toContain('version unknown')
 })
 
-it('missing or reused current identity cannot start capture while existing observations stay readable', async () => {
+it('missing or mismatched Renderer source cannot start capture while existing observations stay readable', async () => {
   await open()
-  for (const snapshot of [snapshots.stale, snapshots.newInstance]) {
+  const missing = structuredClone(snapshots.fresh), mismatch = structuredClone(snapshots.fresh)
+  missing.observation!.renderer.data!.process.pid = null
+  mismatch.observation!.renderer.data!.window.generation++
+  for (const snapshot of [snapshots.stale, missing, mismatch]) {
     await act(async () => observe!(snapshot)); await settle()
     const action = sceneNode().querySelector<HTMLButtonElement>('[data-performance-scene-capture]')!
     expect(action.disabled).toBe(true); await click(action)
