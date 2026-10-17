@@ -139,6 +139,10 @@ export class BrowserUploads {
   }
 
   /** A confirmed original document end, never merely a lost sharing connection. */
+  hasRetained(browserId: string): boolean {
+    return (this.selections.get(browserId)?.size ?? 0) > 0
+  }
+
   async releaseDocument(browserId: string, navigationId: string): Promise<void> {
     await this.ready()
     const selections = [...(this.selections.get(browserId) ?? [])].filter(selection => selection.navigationId === navigationId)

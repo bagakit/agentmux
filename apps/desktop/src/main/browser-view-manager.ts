@@ -9,7 +9,7 @@ import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type
 import { randomUUID } from 'node:crypto'
 import { BaseWindow, session, WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget } from '@agentmux/core'
+import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
@@ -140,6 +140,20 @@ type BrowserEntry = {
   captureId: string | null
   inputLeaseId: string | null
   firstPress: PresentationFirstPress | null
+  // A quiet document is observed from native creation. Usage is sticky for this WC: navigation
+  // IDs and even commits cannot distinguish a new document from a BFCache return.
+  resourceRisk: Set<AgentMuxBrowserRetentionReason>
+  resourceDocumentConfirmed: boolean
+  resourceReads: number
+  publishedRetention: string | null
+  releaseAttempt: {
+    navigationId: string
+    view: WebContentsView
+    pending: boolean
+    receipt: AgentMuxBrowserReleaseReceipt | null
+    promise: Promise<AgentMuxBrowserReleaseReceipt>
+    settle(status: AgentMuxBrowserReleaseReceipt['status'], reasons: readonly AgentMuxBrowserRetentionReason[]): void
+  } | null
 }
 
 type PresentationFirstPress = {
@@ -426,6 +440,7 @@ export class BrowserViewManager {
   updatePresentation(sender: WebContents, frame: WebFrameMain | null,
     leaseId: string, value: BrowserPresentationGeometry): void {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
+    this.assertConsumable(lease.entry)
     lease.geometry = this.presentationGeometry(value)
     if (lease.entry.inputLeaseId === leaseId) {
       if (lease.geometry.visible) this.setBounds(lease.entry.id, lease.geometry.bounds)
@@ -442,6 +457,7 @@ export class BrowserViewManager {
   armPresentationCapture(sender: WebContents, frame: WebFrameMain | null,
     leaseId: string): BrowserPresentationCapture {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
+    this.assertConsumable(lease.entry)
     if (!lease.geometry.visible) throw new Error('Browser presentation is hidden')
     const existing = lease.entry.captureId ? this.presentationCaptures.get(lease.entry.captureId) : undefined
     if (existing && !existing.revoked) {
@@ -523,6 +539,7 @@ export class BrowserViewManager {
   async activatePresentation(sender: WebContents, frame: WebFrameMain | null,
     leaseId: string, activation: BrowserPresentationActivation): Promise<BrowserPresentationActivationReceipt> {
     const lease = this.requirePresentationLease(sender, frame, leaseId)
+    this.assertConsumable(lease.entry)
     const entry = lease.entry
     const unconfirmed = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'],
       message: string): BrowserPresentationActivationReceipt => ({ outcome: 'input-unconfirmed', reason, message })
@@ -837,6 +854,7 @@ export class BrowserViewManager {
     }
     try { this.sendPresentation({ type: 'native-coverage-changed', browserId: entry.id, coverage }) }
     catch (error) { console.warn('Browser native coverage update failed:', error) }
+    this.emitRetentionChange(entry)
   }
 
   /** Native Chrome considers only physically visible Browser frames, never Session/Run projections. */
@@ -909,6 +927,8 @@ export class BrowserViewManager {
     const existing = this.entries.get(id)
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, workspaceId)
+      if (existing.releaseAttempt?.pending) await this.prepareForConsumption(id)
+      if (this.entries.get(id) !== existing) return await this.create(id, rawUrl, workspaceId, rememberedProfileId, mode)
       if (mode !== undefined && existing.storage.mode !== mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
       return this.snapshot(existing)
     }
@@ -931,47 +951,99 @@ export class BrowserViewManager {
     }
   }
 
-  /**
-   * Release only the Main-owned WebContentsView for a hidden Region. The Browser projection and its
-   * URL/Profile/Viewport metadata remain in the Renderer; no `closed` event is emitted, so Region
-   * identity cannot disappear as a side effect of a memory policy decision.
-   */
-  async release(id: string): Promise<void> {
+  /** Request safe native release. A budget request never commits owner destruction. */
+  async release(id: string, navigationId: string): Promise<AgentMuxBrowserReleaseReceipt> {
+    const result = (status: AgentMuxBrowserReleaseReceipt['status'], reasons: readonly AgentMuxBrowserRetentionReason[]): AgentMuxBrowserReleaseReceipt =>
+      ({ browserId: id, navigationId, status, reasons })
     const entry = this.entries.get(id)
-    if (!entry) {
-      const released = this.releasedEntries.get(id)
-      if (released) this.cleanupReleasedOwner(released)
+    if (!entry) return result('unknown', ['owner-unavailable'])
+    if (!navigationId || entry.navigationId !== navigationId) return result('retained', ['source-changed'])
+    // Re-observing an unknown close is safe; issuing another close is not.
+    if (entry.releaseAttempt) return entry.releaseAttempt.receipt ?? entry.releaseAttempt.promise
+    const retention = this.retention(entry)
+    if (retention.status !== 'eligible') return result(retention.status, retention.reasons)
+    const contents = entry.view.webContents
+    let resolve!: (receipt: AgentMuxBrowserReleaseReceipt) => void
+    const promise = new Promise<AgentMuxBrowserReleaseReceipt>(yes => { resolve = yes })
+    let settled = false
+    const veto = () => {
+      entry.releaseAttempt?.settle('retained', ['beforeunload'])
+      this.markResourceRisk(entry, entry.view, 'beforeunload')
+    }
+    // Only the observation ends at this boundary. The physical close remains owned by Main;
+    // late destruction still publishes its exact source and no caller automatically resends it.
+    const timer = setTimeout(() => {
+      entry.releaseAttempt?.settle('unknown', ['close-unconfirmed'])
+      this.emit(entry)
+    }, 1_000)
+    entry.releaseAttempt = {
+      navigationId, view: entry.view, pending: true, receipt: null, promise,
+      settle: (status, reasons) => {
+        const receipt = result(status, reasons)
+        if (entry.releaseAttempt) {
+          entry.releaseAttempt.receipt = receipt
+          if (status !== 'unknown') entry.releaseAttempt.pending = false
+        }
+        if (status !== 'unknown') contents.removeListener('will-prevent-unload', veto)
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        resolve(receipt)
+      }
+    }
+    contents.once('will-prevent-unload', veto)
+    this.emit(entry)
+    try { contents.close({ waitForBeforeUnload: true }) }
+    catch {
+      entry.releaseAttempt.settle('unknown', ['close-unconfirmed'])
+      this.emit(entry)
+    }
+    return promise
+  }
+
+  /** Only this native owner is closing. A new consumer observes that handoff, never its old WC. */
+  async prepareForConsumption(id: string): Promise<void> {
+    const entry = this.entries.get(id), attempt = entry?.releaseAttempt
+    if (!entry || !attempt?.pending) return
+    const receipt = await attempt.promise
+    if (receipt.status === 'retained' && !attempt.pending) return
+    if (this.entries.get(id) !== entry && !this.entries.has(id) && this.releasedEntries.has(id)) {
+      await this.restore(id)
       return
     }
-    this.cancelPendingSwitch(entry, new Error('Browser released during profile switch'))
-    this.revokePresentationCapture(entry, 'source-released')
-    if (entry.captureId) this.presentationCaptures.delete(entry.captureId)
-    entry.captureId = null
-    for (const leaseId of [...entry.presentationLeaseIds]) this.removePresentationLease(this.presentationLeases.get(leaseId)!)
-    this.releaseUploadFiles(entry)
-    void entry.feedback?.clear()
-    void this.releaseDemonstrationCapture(entry)
+    if (this.entries.get(id) !== entry) return
+    this.assertConsumable(entry)
+  }
+
+  private assertConsumable(entry: BrowserEntry): void {
+    if (!entry.releaseAttempt?.pending || entry.releaseAttempt.view !== entry.view) return
+    throw new Error('The original Browser native page is closing; its result is not confirmed yet. The page identity and request are kept. Observe or retry its connection after native close or beforeunload resolves; do not resend the release.')
+  }
+
+  private markResourceRisk(entry: BrowserEntry, view: WebContentsView, reason: AgentMuxBrowserRetentionReason): void {
+    if (!this.owns(entry, view) || entry.resourceRisk.has(reason)) return
+    entry.resourceRisk.add(reason)
+    this.emit(entry)
+  }
+
+  private retention(entry: BrowserEntry): AgentMuxBrowserRetention {
     const contents = entry.view.webContents
-    // `getURL()` is the last committed document. During an in-flight navigation it can still
-    // point at the previous page, which would make a release/restore silently rewind the Browser
-    // Region. `requestedUrl` is updated at the navigation boundary and is the durable projection
-    // fact to retain while the native owner is gone.
-    const requestedUrl = entry.requestedUrl
-    const released: ReleasedBrowser = {
-      id,
-      workspaceId: entry.workspaceId,
-      storage: entry.storage,
-      requestedUrl,
-      viewport: entry.viewport
-    }
-    this.clearFavicon(entry)
-    this.entries.delete(id)
-    this.notifyNativeVisibility(this.windowForView(entry.view))
-    this.releasedEntries.set(id, released)
-    if (!this.window.isDestroyed()) {
-      try { this.detachView(entry.view) } catch { /* already detached */ }
-    }
-    if (!contents.isDestroyed()) contents.close()
+    const reasons = new Set<AgentMuxBrowserRetentionReason>(entry.resourceRisk)
+    if (entry.visible) reasons.add('visible')
+    if ([...entry.presentationLeaseIds].some(id => this.presentationLeases.get(id)?.geometry.visible)) reasons.add('presentation')
+    if (entry.captureId || contents.isBeingCaptured?.()) reasons.add('presentation')
+    if (entry.runInFlight || entry.activeRun || entry.driving || entry.resourceReads || entry.humanControl ||
+      this.taskExecutions.get(entry.id)?.entry === entry || this.taskAssets?.isBrowserExecuting?.(entry.id) ||
+      this.demonstrationCapture?.entry === entry) reasons.add('operation')
+    if (entry.pendingSwitch) reasons.add('profile-switch')
+    if (entry.selectionOperation !== null || entry.firstPress) reasons.add('selection')
+    if (contents.isLoading()) reasons.add('loading')
+    if (contents.isCurrentlyAudible?.()) reasons.add('media')
+    if (this.uploads?.hasRetained(entry.id)) reasons.add('upload')
+    if (contents.debugger?.isAttached?.() || contents.isDevToolsOpened?.()) reasons.add('debugger')
+    if (!entry.resourceDocumentConfirmed || typeof contents.isBeingCaptured !== 'function' || typeof contents.isCurrentlyAudible !== 'function') reasons.add('document-unconfirmed')
+    if (entry.releaseAttempt?.pending) reasons.add('close-unconfirmed')
+    return { status: reasons.has('document-unconfirmed') || reasons.has('close-unconfirmed') ? 'unknown' : reasons.size ? 'retained' : 'eligible', reasons: [...reasons] }
   }
 
   /** Rebuild a previously released Browser native owner from its retained projection metadata. */
@@ -980,6 +1052,8 @@ export class BrowserViewManager {
     const existing = this.entries.get(id)
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, input?.workspaceId ?? null)
+      if (existing.releaseAttempt?.pending) await this.prepareForConsumption(id)
+      if (this.entries.get(id) !== existing) return await this.restore(id, input)
       if (input?.mode !== undefined && input.mode !== existing.storage.mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
       return this.snapshot(existing)
     }
@@ -1043,7 +1117,8 @@ export class BrowserViewManager {
       activeRun: undefined,
       runInFlight: false,
       feedbackRevision: 0,
-      presentationLeaseIds: new Set(), captureId: null, inputLeaseId: null, firstPress: null
+      presentationLeaseIds: new Set(), captureId: null, inputLeaseId: null, firstPress: null,
+      resourceRisk: new Set(), resourceDocumentConfirmed: false, resourceReads: 0, publishedRetention: null, releaseAttempt: null
     }
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
@@ -1094,6 +1169,7 @@ export class BrowserViewManager {
   }
 
   async navigate(id: string, rawUrl: string): Promise<BrowserSnapshot> {
+    if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
     void this.startNavigation(entry, rawUrl).catch(() => {})
     return this.snapshot(entry)
@@ -1262,6 +1338,9 @@ export class BrowserViewManager {
       this.revokePresentationCapture(entry, 'source-replaced')
       this.clearFavicon(entry)
       entry.view = candidate
+      // Candidate preparation predates current-owner input/media observation. Do not inherit
+      // another WC's quiet proof; this page remains usable, but is not an automatic discard target.
+      entry.resourceRisk.add('document-unconfirmed')
       if (entry.initialDocument) entry.initialDocument.superseded.abort()
       entry.initialDocument = null
       entry.storage = { mode: 'normal', profileId, partition }
@@ -1324,9 +1403,12 @@ export class BrowserViewManager {
   }
 
   async captureScreenshot(id: string, transport?: { view: WebContentsView; sendCommand: BrowserCdpSender }): Promise<BrowserScreenshotCapture> {
+    if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
     const view = entry.view
     if (transport && transport.view !== view) throw new Error('Browser page changed before the screenshot was captured')
+    entry.resourceReads += 1
+    try {
     await this.waitForInitialDocument(entry, view)
     const navigationId = entry.navigationId
     const requireCurrent = () => {
@@ -1363,6 +1445,7 @@ export class BrowserViewManager {
       source: screenshotSource(url, title, before, after),
       image
     }
+    } finally { entry.resourceReads -= 1; this.emit(entry) }
   }
 
   /**
@@ -1388,6 +1471,9 @@ export class BrowserViewManager {
    *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
    */
   async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false, taskPage?: BrowserTaskPageExecution): Promise<BrowserScriptRunReport> {
+    const originalView = this.entries.get(id)?.view
+    if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
+    if (originalView && this.entries.get(id)?.view !== originalView) throw new Error('Browser native page changed during release. Refresh this original Browser snapshot before running the program; it has not been dispatched.')
     const entry = this.require(id)
     // Capture releases its native/CDP owner before its first await. Durable draft writes do not gate a healthy run.
     void this.releaseDemonstrationCapture(entry)
@@ -1411,6 +1497,7 @@ export class BrowserViewManager {
     let session: BrowserCdpSession
     try {
       session = BrowserCdpSession.attach(runView.webContents)
+      this.markResourceRisk(entry, runView, 'document-used')
     } catch (error) {
       entry.runInFlight = false
       throw error
@@ -2561,6 +2648,7 @@ export class BrowserViewManager {
   }
 
   async selectElement(id: string, inspectTarget?: (revision: number, inspectionToken: string) => Promise<void>): Promise<BrowserElementSelection | null> {
+    if (this.entries.get(id)?.releaseAttempt?.pending) await this.prepareForConsumption(id)
     const entry = this.require(id)
     const view = entry.view
     const pending = Symbol('initial document selection')
@@ -2703,13 +2791,14 @@ export class BrowserViewManager {
   setBounds(id: string, bounds: BrowserBounds | null): void {
     const entry = this.entries.get(id)
     if (!entry) return
+    if (bounds !== null) this.assertConsumable(entry)
     try {
       if (bounds === null) {
         const wasVisible = entry.visible
         entry.visible = false
         void entry.feedback?.clear()
         entry.view.setVisible(false)
-        if (wasVisible) this.notifyNativeVisibility(this.windowForView(entry.view))
+        if (wasVisible) { this.notifyNativeVisibility(this.windowForView(entry.view)); this.emit(entry) }
         return
       }
       // 归一化与 renderer 侧共用一份判定（shared/browser-bounds.ts）。这一侧拿到 null 抛错而不是静默
@@ -2734,7 +2823,7 @@ export class BrowserViewManager {
       entry.view.setBounds(entry.bounds)
       if (sizeChanged && entry.viewport !== 'responsive') this.applyViewport(entry)
       entry.view.setVisible(true)
-      if (becomingVisible) this.synchronizeVisiblePage(entry, entry.view)
+      if (becomingVisible) { this.synchronizeVisiblePage(entry, entry.view); this.emit(entry) }
       if (hostChanged) this.notifyNativeVisibility(previousWindow)
       if (becomingVisible || boundsChanged || hostChanged) this.notifyNativeVisibility(nativeWindow)
     } finally { this.publishNativeCoverage(entry) }
@@ -2895,12 +2984,14 @@ export class BrowserViewManager {
       origin: () => view.getBounds()
     })
     contents.on('input-event', (_event, input) => {
+      if (['mouseDown', 'keyDown', 'char', 'touchStart', 'touchMove'].includes(input.type)) this.markResourceRisk(entry, view, 'document-used')
       if (this.owns(entry, view) && BROWSER_FEEDBACK_CLEAR_INPUT_TYPES.has(input.type)) void entry.feedback?.clear()
       if (!this.onNativeInput || !this.owns(entry, view) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
       const owner = this.nativeOwner(entry.id)
       if (owner) this.onNativeInput(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
     })
     contents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown') this.markResourceRisk(entry, view, 'document-used')
       // Only this real page's non-IME Escape may be consumed by its open containing float.
       // Electron Input.isComposing is authoritative; input-event keyboard modifiers are not.
       if (!this.onNativeInput || !this.owns(entry, view) || input.type !== 'keyDown' || input.key !== 'Escape' || input.isComposing) return
@@ -2944,6 +3035,9 @@ export class BrowserViewManager {
         void this.handOffAppLink(entry, target, scheme)
       })
     )
+    contents.on('devtools-opened', () => this.emitRetentionChange(entry))
+    contents.on('devtools-closed', () => this.emitRetentionChange(entry))
+    contents.on('media-started-playing', () => this.markResourceRisk(entry, view, 'media'))
     contents.on('did-finish-load', () => {
       if (!this.owns(entry, view)) return
       contents.setZoomFactor(DEFAULT_BROWSER_ZOOM_FACTOR)
@@ -3025,6 +3119,7 @@ export class BrowserViewManager {
       if (!this.owns(entry, view)) return
       const document = entry.initialDocument
       if (document?.view === view && document.navigationId === entry.navigationId) document.committedNavigationId = entry.navigationId
+      entry.resourceDocumentConfirmed = true
       this.releaseUploadFiles(entry)
       entry.requestedUrl = url
       entry.error = null
@@ -3099,6 +3194,11 @@ export class BrowserViewManager {
           cleanupErrors.push(error)
         }
       }
+      if (entry.releaseAttempt) {
+        entry.releaseAttempt.settle('released', [])
+        this.send({ type: 'released', id: entry.id, navigationId: entry.navigationId })
+        return
+      }
       const reason = cleanupErrors.map(error => error instanceof Error ? error.message : String(error)).join('; ')
       this.send({ type: 'unavailable', id: entry.id, error: 'Browser native page was destroyed. Retry to reopen this page.' + (reason ? ` Cleanup failed: ${reason}` : '') })
     })
@@ -3107,6 +3207,7 @@ export class BrowserViewManager {
   private require(id: string): BrowserEntry {
     const entry = this.entries.get(id)
     if (!entry) throw new Error(`Unknown browser: ${id}`)
+    this.assertConsumable(entry)
     return entry
   }
 
@@ -3131,7 +3232,12 @@ export class BrowserViewManager {
       const resolveOwner = (contents: WebContents): BrowserWebAuthnOwner | null => this.webAuthnOwner(contents)
       const releaseAccess = registerBrowserWebAuthnAccess(session, resolveOwner)
       const releaseAccounts = registerBrowserWebAuthnAccounts(session, resolveOwner)
-      this.webAuthnSessions.set(session, () => { releaseAccess(); releaseAccounts() })
+      const downloading = (_event: Electron.Event, _item: Electron.DownloadItem, contents: WebContents): void => {
+        const entry = [...this.entries.values()].find(candidate => candidate.view.webContents === contents)
+        if (entry) this.markResourceRisk(entry, entry.view, 'download')
+      }
+      session.on('will-download', downloading)
+      this.webAuthnSessions.set(session, () => { releaseAccess(); releaseAccounts(); session.removeListener('will-download', downloading) })
     }
     return view
   }
@@ -3327,6 +3433,7 @@ export class BrowserViewManager {
       viewport: entry.viewport,
       error: entry.error,
       driving: entry.driving,
+      retention: this.retention(entry),
       ...(entry.demonstration ? { demonstration: entry.demonstration } : {}),
       ...(entry.taskAssets ? { taskAssets: entry.taskAssets } : {}),
       appLinkPrompt: entry.appLinkPrompt,
@@ -3336,10 +3443,17 @@ export class BrowserViewManager {
     }
   }
 
+  private emitRetentionChange(entry: BrowserEntry): void {
+    if (!this.owns(entry, entry.view) || entry.view.webContents.isDestroyed()) return
+    if (JSON.stringify(this.retention(entry)) !== entry.publishedRetention) this.emit(entry)
+  }
+
   private emit(entry: BrowserEntry): void {
     if (entry.activity.control === 'human' || ['waiting', 'failed', 'stopped', 'indeterminate'].includes(entry.activity.operation?.phase ?? '')) void entry.feedback?.clear()
     if (this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
-    this.send({ type: 'updated', browser: this.snapshot(entry) })
+    const browser = this.snapshot(entry)
+    entry.publishedRetention = JSON.stringify(browser.retention)
+    this.send({ type: 'updated', browser })
   }
 
   private send(event: BrowserEvent): void {

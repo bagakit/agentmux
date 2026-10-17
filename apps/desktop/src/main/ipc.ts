@@ -8,6 +8,7 @@ import { RendererAllocationSampler } from './renderer-allocations.js'
 import type { PerformanceSceneOwner } from './performance-scene.js'
 import { isApplicationAccessMethod, parseApplicationAccessParams, type AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import { registerConversationReadIpc } from './conversation-read-ipc'
+import { registerBrowserResourceIpc } from './browser-resource-ipc.js'
 import { RendererV8Profiler } from './renderer-v8-profile.js'
 import { RendererMemoryInspector } from './renderer-memory.js'
 import { registerPerformanceCaptureIpc } from './performance-capture-ipc.js'
@@ -2147,10 +2148,11 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:setAnnotationMarkers', event)
     await browsers.setAnnotationMarkers(id, navigationId, markers)
   })
-  handleWithEvent('browser:registerPresentation', (event, input: {
+  handleWithEvent('browser:registerPresentation', async (event, input: {
     browserId: string; occurrence: BrowserPresentationOccurrence; geometry: BrowserPresentationGeometry; window?: import('../shared/workbench-windows.js').WorkbenchWindowDocument
   }) => {
     requireTrustedSender('browser:registerPresentation', event)
+    await browsers.prepareForConsumption(input.browserId)
     return browsers.registerPresentation(event.sender, event.senderFrame, input)
   })
   handleWithEvent('browser:updatePresentation', (event, leaseId: string, geometry: BrowserPresentationGeometry) => {
@@ -2186,13 +2188,9 @@ export async function registerIpc(args: {
   handle('browser:setBounds', (id: string, bounds: BrowserBounds | null) => {
     browsers.setBounds(id, bounds)
   })
-  handle('browser:release', async (id: string) => await browsers.release(id))
-  handle('browser:restore', async (
-    id: string,
-    input: { workspaceId: unknown; profileId: string | null; mode?: import('@agentmux/core').AgentMuxBrowserMode; viewport: BrowserViewport }
-  ) => {
-    const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, input.workspaceId)
-    return await ensureBrowser(id, { ...input, workspaceId: verifiedWorkspaceId })
+  registerBrowserResourceIpc({ handle,
+    browsers: { release: browsers.release.bind(browsers), restore: ensureBrowser },
+    workspace: value => verifiedBrowserWorkspace(config.workspaces, value)
   })
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(contents)
