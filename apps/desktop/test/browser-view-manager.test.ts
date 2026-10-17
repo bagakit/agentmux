@@ -1769,6 +1769,38 @@ describe('BrowserViewManager', () => {
     } finally { manager.dispose(); useAppStore.setState(original, true) }
   })
 
+  it('observes an input frame inside the original capture owner without extra captures or layout writes', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    await manager.create('browser-frame', 'https://page.invalid/original')
+    const view = fixture.children[0]!, events: string[] = []
+    const inputContext = manager.inputContext.bind(manager)
+    vi.spyOn(manager, 'inputContext').mockImplementation((id, hostId) => { events.push('observation'); return inputContext(id, hostId) })
+    const originalCapture = view.webContents.capturePageImpl
+    view.webContents.capturePageImpl = async () => { events.push('pixels'); return await originalCapture() }
+    const bounds = [...view.boundsHistory], result = await manager.captureInputFrame('browser-frame', 'local')
+    expect(events).toEqual(['observation', 'pixels', 'observation'])
+    expect(result.before.browser).toEqual({ hostId: 'local', browserId: 'browser-frame', navigationId: result.capture.navigationId })
+    expect(result.after.browser).toEqual(result.before.browser)
+    expect(result.capture.image.width).toBe(2)
+    expect(view.webContents.capturePage).toHaveBeenCalledOnce()
+    expect(view.boundsHistory).toEqual(bounds)
+    vi.restoreAllMocks(); manager.dispose()
+  })
+
+  it('refuses a late input frame after original navigation changes without disabling its new page', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    await manager.create('browser-frame', 'https://page.invalid/original')
+    const view = fixture.children[0]!, originalCapture = view.webContents.capturePageImpl
+    view.webContents.capturePageImpl = async () => {
+      const image = await originalCapture()
+      view.webContents.finishLoad('https://page.invalid/new')
+      return image
+    }
+    await expect(manager.captureInputFrame('browser-frame', 'local')).rejects.toThrow('Browser page changed while the screenshot was being captured')
+    expect(manager.inputContext('browser-frame', 'local')?.page.url).toBe('https://page.invalid/new')
+    manager.dispose()
+  })
+
   it('rejects a screenshot that completes after the page navigation changes', async () => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)
