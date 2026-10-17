@@ -4,16 +4,6 @@ export type BotSetupGuideStage = 'prepare' | 'scan' | 'account' | 'create' | 'co
 const stepForStage: Record<BotSetupGuideStage, 1 | 2 | 3 | 4> = {
   prepare: 1, scan: 2, account: 2, create: 3, connect: 4, bind: 4, ready: 4, attention: 2
 }
-const descriptions: Record<BotSetupGuideStage, string> = {
-  prepare: 'Choose the name and image for this new bot.',
-  scan: 'Scan and confirm on your phone. Your original request stays here.',
-  account: 'Check the account and enterprise before creating or changing this application.',
-  create: 'Create the reviewed identity. Signing in alone does not create it.',
-  connect: 'Continue the same application through settings and publication.',
-  bind: 'The application is saved. Its Mote association and platform setup have separate results.',
-  ready: 'The identity is saved. Configuration, publication and message delivery are confirmed separately.',
-  attention: 'Check the original result at this step. Earlier confirmed results are kept.'
-}
 
 /** Numbered presentation of caller-owned facts. No timer, permission or operation state lives here. */
 export function BotSetupGuide({ stage, title, description, currentStep, currentStatus, confirmedSteps = [], existingApplication = false }: {
@@ -31,6 +21,6 @@ export function BotSetupGuide({ stage, title, description, currentStep, currentS
         <span><strong>{label}</strong><small>{number === current ? currentStatus ?? (stage === 'attention' ? 'Needs attention' : 'Current step') : recordedApplication ? 'Already saved' : confirmedSteps.includes(number) ? 'Confirmed' : current !== null && number > current ? 'Not started' : 'Not confirmed'}</small></span>
       </li>
     })}</ol>
-    <p>{title ? <strong>{title} </strong> : null}{description ?? descriptions[stage]}</p>
+    {title || description ? <p>{title ? <strong>{title} </strong> : null}{description}</p> : null}
   </nav>
 }

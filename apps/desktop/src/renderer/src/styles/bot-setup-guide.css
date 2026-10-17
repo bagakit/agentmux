@@ -1,14 +1,16 @@
-.bot-setup-guide { display: grid; gap: var(--sp-4); min-width: 0; margin: 0; padding-block: var(--sp-4); color: var(--text-2); }
-.bot-setup-guide ol { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); padding: 0; margin: 0; }
-.bot-setup-guide li { display: flex; align-items: flex-start; gap: var(--sp-3); min-width: 0; padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); }
+/* Position and confirmed milestones; the task below owns instructions and actions. */
+.bot-setup-guide { display: grid; gap: var(--sp-3); min-width: 0; margin: 0; padding-block: var(--sp-4); color: var(--text-2); }
+.bot-setup-guide ol { list-style: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); padding: 0; margin: 0; }
+.bot-setup-guide li { position: relative; display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; padding: var(--sp-3) var(--sp-2); border-radius: var(--radius); }
 .bot-setup-guide li > span:last-child { min-width: 0; display: grid; gap: var(--sp-1); }
-.bot-setup-guide__number { display: grid; place-items: center; flex: 0 0 22px; height: 22px; border: 1px solid var(--line); border-radius: 50%; color: var(--text-3); font-size: var(--fs-meta); }
-.bot-setup-guide strong { color: var(--text-2); font-size: var(--fs-body); font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+.bot-setup-guide__number { display: grid; place-items: center; flex: 0 0 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.bot-setup-guide strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; line-height: 1.6; overflow-wrap: break-word; }
 .bot-setup-guide small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.bot-setup-guide li[data-state='current'] { background: var(--green-bg); box-shadow: inset 0 0 0 1px var(--green-line); }
+.bot-setup-guide li[data-state='current'] { background: var(--surface-3); }
+.bot-setup-guide li[data-state='current'] strong { color: var(--text); }
 .bot-setup-guide li[data-state='current'] .bot-setup-guide__number { background: var(--green); border-color: var(--green); color: var(--bg); }
-.bot-setup-guide li[data-state='recorded'] .bot-setup-guide__number { color: var(--green); border-color: var(--green-line); }
-.bot-setup-guide li[data-state='attention'] { background: var(--amber-bg); box-shadow: inset 0 0 0 1px var(--amber-line); }
-.bot-setup-guide li[data-state='attention'] .bot-setup-guide__number { color: var(--amber); border-color: var(--amber-line); }
+.bot-setup-guide li[data-state='recorded'] .bot-setup-guide__number { color: var(--green); border-color: transparent; background: var(--green-bg); }
+.bot-setup-guide li[data-state='attention'] { background: var(--amber-bg); }
+.bot-setup-guide li[data-state='attention'] .bot-setup-guide__number { color: var(--amber-text); border-color: var(--amber-line); }
 .bot-setup-guide > p { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.65; }
-@container (width < 600px) { .bot-setup-guide ol { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (width < 560px) { .bot-setup-guide ol { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
