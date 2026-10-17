@@ -15,7 +15,7 @@ import { agentRegionExecution, useAppStore } from '../store'
 import { workspaceForSession, topicIdForSession } from '../lib/workbench-tabs'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { collaborationAgents, collaborationSubjectKey, projectCollaboration, visibleCollaboration, type CollaborationEvidence, type CollaborationRelation, type CollaborationSubject } from '../lib/agent-collaboration'
+import { collaborationAgents, collaborationSubjectKey, createCollaborationProjector, visibleCollaboration, type CollaborationEvidence, type CollaborationRelation, type CollaborationSubject } from '../lib/agent-collaboration'
 import { useCollaborationReading, type CollaborationSource } from '../lib/use-collaboration-reading'
 import { createFocusContextIdentitySelector } from '../lib/focus-context-identity'
 import { createFocusGoalLinksSelector } from '../lib/focus-goal-links'
@@ -65,17 +65,30 @@ function CollaborationReadingDialog({ request, onClose, onOpen }: { request: Col
   }, [request, broader, areas, facts.sessions])
   const subjects = useMemo(() => available.slice(0, budget), [available, budget])
   const reading = useCollaborationReading(subjects, enabled)
-  const recorded = useMemo(() => projectCollaboration(reading.sources, new Map()), [reading.sources])
+  const project = useMemo(createCollaborationProjector, [])
+  const recorded = useMemo(() => project(reading.facts), [project, reading.facts])
   const wanted = useMemo(() => new Set([...(request.kind === 'focus' && !broader ? [subjectKey!] : areas.flatMap(area => area.members)), ...recorded.agents.keys()]), [request.kind, broader, subjectKey, areas, recorded.agents])
+  const contextCache = useRef(new Map<string, { session: Facts['sessions'][number]; name: string | undefined; workspace: ReturnType<typeof workspaceForSession>; topicId: ReturnType<typeof topicIdForSession>; context: FocusContext }>())
+  const previousContexts = useRef<FocusContext[]>([])
   const contexts = useMemo(() => {
     const topics = scratchTopicsForConfig(facts.config, facts.scratchTopicSnapshots)
-    return facts.sessions.flatMap(session => {
+    const retained = new Set<string>(), rows = facts.sessions.flatMap(session => {
       if (session.kind !== 'agent' || session.hostId !== session.control.hostId || !wanted.has(collaborationSubjectKey(session.control))) return []
-      return [{ ...agentContextForSession(session, undefined, facts.names[session.id], workspaceForSession(facts.config, session, topics), topicIdForSession(facts.config, session, topics)), recap: undefined }]
+      const key = JSON.stringify([session.hostId, session.id]), old = contextCache.current.get(key), name = facts.names[session.id]
+      const workspace = workspaceForSession(facts.config, session, topics), topicId = topicIdForSession(facts.config, session, topics)
+      retained.add(key)
+      if (old && old.session === session && old.name === name && old.workspace === workspace && old.topicId === topicId) return [old.context]
+      const context = { ...agentContextForSession(session, undefined, name, workspace, topicId), recap: undefined }
+      contextCache.current.set(key, { session, name, workspace, topicId, context })
+      return [context]
     })
+    for (const key of contextCache.current.keys()) if (!retained.has(key)) contextCache.current.delete(key)
+    if (previousContexts.current.length !== rows.length || rows.some((row, index) => row !== previousContexts.current[index])) previousContexts.current = rows
+    return previousContexts.current
   }, [facts.sessions, facts.config, facts.scratchTopicSnapshots, facts.names, wanted])
   const originals = useMemo(() => collaborationAgents(contexts), [contexts])
-  const projection = useMemo(() => ({ ...recorded, agents: new Map([...recorded.agents, ...originals]) }), [recorded, originals])
+  const agents = useMemo(() => new Map([...recorded.agents, ...originals]), [recorded.agents, originals])
+  const projection = useMemo(() => ({ ...recorded, agents }), [recorded, agents])
   const members = useMemo(() => new Set(areas.flatMap(area => area.members)), [areas])
   const relations = useMemo(() => visibleCollaboration(projection.relations, members, kinds, broader ? undefined : subjectKey), [projection, members, kinds, broader, subjectKey])
   const visibleAreas = useMemo(() => {
