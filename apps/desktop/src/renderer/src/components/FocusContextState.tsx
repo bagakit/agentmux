@@ -1,5 +1,5 @@
 import { semanticIconComponent, type SemanticIconComponent } from '@agentmux/client-ui/icons'
-import type { FocusContext } from '../lib/focus-context'
+import type { FocusBucket, FocusContext } from '../lib/focus-context'
 
 const ThemeStatusFailedIcon = semanticIconComponent('status.failed')
 const ThemeStatusInputIcon = semanticIconComponent('status.needs-input')
@@ -11,6 +11,14 @@ const ThemeStatusInterruptedIcon = semanticIconComponent('status.interrupted')
 const ThemeStatusDisconnectedIcon = semanticIconComponent('status.disconnected')
 const ThemeStatusIdleIcon = semanticIconComponent('status.idle')
 
+
+/** Group headings describe a Focus scope, never an individual Agent state. */
+export const FOCUS_BUCKET_PRESENTATION: Record<FocusBucket, { label: string; icon: SemanticIconComponent }> = {
+  attention: { label: 'Attention', icon: semanticIconComponent('object.inbox') },
+  working: { label: 'Working', icon: ThemeStatusWorkingIcon },
+  results: { label: 'Results', icon: ThemeStatusCompletedIcon },
+  idle: { label: 'Idle / Recovery', icon: semanticIconComponent('status.neutral') }
+}
 
 /** Shapes express the existing Focus state; they do not classify the Session again. */
 export function FocusContextStateMark({ context }: { context: FocusContext }) {
