@@ -20,12 +20,15 @@ function attributeText(value: string): string {
     .replace(/\t/gu, '&#9;').replace(/\r/gu, '&#13;').replace(/\n/gu, '&#10;')
 }
 
+function reminderText(text: string): string {
+  return `<reminder>${text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/\r/gu, '&#13;')}</reminder>`
+}
+
 export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body'>): string {
   if (envelope.sender.kind === 'agent-session' && envelope.senderSessionId !== null) {
     // The authored body is opaque. Only the fixed final reminder is escaped, so
     // tags, code and even complete example envelopes inside the body stay exact.
-    const reminder = AGENTMUX_A2A_REMINDER.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;').replace(/\r/gu, '&#13;')
-    return `<amux:a2a from="${attributeText(envelope.senderSessionId)}" msg-id="${attributeText(envelope.messageId)}">\n${envelope.body}\n<reminder>${reminder}</reminder>\n</amux:a2a>`
+    return `<amux:a2a from="${attributeText(envelope.senderSessionId)}" msg-id="${attributeText(envelope.messageId)}">\n${envelope.body}\n${reminderText(AGENTMUX_A2A_REMINDER)}\n</amux:a2a>`
   }
   if (envelope.sender.kind === 'external') {
     const source = [envelope.sender.actor.application.domain, envelope.sender.actor.application.appId, envelope.sender.actor.idType,
@@ -36,16 +39,38 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
   return envelope.body
 }
 
-export type AgentMuxMessagePrefix = {
+type AgentMuxMessageReading = {
+  reminder?: { raw: string; text: string }
+  /** Complete input-leading declarations, preserved as original source spans. */
+  declaredContexts?: readonly { raw: string }[]
+}
+
+export type AgentMuxMessagePrefix = AgentMuxMessageReading & ({
+  kind: 'content'
   /** A declaration in the text, never an authenticated sender. */
   sourceLabel: string
   declaredAgentSessionId: string | null
   body: string
   declaredMessageId?: string
-  reminder?: { raw: string; text: string }
   packet?: AgentMuxMessagePacket
-  /** Complete input-leading declarations, preserved as original source spans. */
-  declaredContexts?: readonly { raw: string }[]
+  references?: never
+} | {
+  kind: 'references'
+  /** The referenced authors are not the author of this notification. */
+  sourceLabel: ''
+  declaredAgentSessionId: null
+  body: ''
+  declaredMessageId?: never
+  packet?: never
+  references: readonly AgentMuxMessageReference[]
+})
+
+export type AgentMuxMessageReference = {
+  /** These remain declarations; authorization belongs to the original journal reader. */
+  declaredAgentSessionId: string
+  declaredMessageId: string
+  readVia: 'message --skill'
+  raw: string
 }
 
 export type AgentMuxMessagePacket = {
@@ -57,6 +82,16 @@ export type AgentMuxMessagePacket = {
     | { kind: 'text'; text: string }
     | { kind: 'citation'; from: string; reference?: string; text: string }
   )[]
+}
+
+/** Only a reading wire; the caller owns the original records and notice input identity. */
+export function renderAgentMuxMessageReferences(references: readonly { senderSessionId: string; messageId: string }[], reminder?: string): string {
+  if (references.length === 0) return ''
+  const tag = references.length === 1 && reminder === undefined ? 'amux:a2a' : 'a2a'
+  const items = references.map(reference => `<${tag} from="${attributeText(reference.senderSessionId)}" msg-id="${attributeText(reference.messageId)}" read-via="message --skill" />`)
+  if (tag === 'amux:a2a') return items[0]!
+  if (reminder !== undefined) items.push(reminderText(reminder))
+  return `<amux>\n${items.join('\n')}\n</amux>`
 }
 
 function attributes(element: Element, required: readonly string[], optional: readonly string[] = []): boolean {
@@ -103,6 +138,10 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
   const declaredContexts: { raw: string }[] = []
   let start = 0
   while (text.startsWith(opening, start)) {
+    // An A2A body may itself contain closing amux tags. Recognize its exact
+    // terminal grammar before inspecting a text-only platform declaration.
+    const a2a = parseA2aContainer(text.slice(start))
+    if (a2a) return declaredContexts.length ? { ...a2a, declaredContexts } : a2a
     const closing = text.indexOf('</amux>', start + opening.length)
     if (closing < 0) return null
     const end = closing + '</amux>'.length
@@ -125,7 +164,7 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
       if (!text.startsWith(opening, next)) return null
       start = next
     } else {
-      return { sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
+      return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
     }
   }
   return null
@@ -136,42 +175,89 @@ export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix 
   if (!text.startsWith('<amux>')) return parseSenderPrefix(text)
   const contexts = parseDeclaredContexts(text)
   if (!contexts) return null
+  if (contexts.kind === 'references' || contexts.declaredMessageId !== undefined) return contexts
   // Only newline separators join a following declaration; indentation remains authored text.
   const sender = parseSenderPrefix(contexts.body.replace(/^(?:\r?\n)*/u, ''))
   return sender ? { ...contexts, ...sender } : contexts
 }
 
-function parseA2a(text: string): AgentMuxMessagePrefix | null {
-  const header = /^<amux:a2a from="([^"\r\n]+)" msg-id="([^"\r\n]+)">\n/u.exec(text)
-  const closing = '\n</amux:a2a>'
-  if (!header || !text.endsWith(closing)) return null
-  const boundary = text.lastIndexOf('\n<reminder>')
-  if (boundary < header[0].length) return null
-  const raw = text.slice(boundary + 1, -closing.length)
-  if (!raw.endsWith('</reminder>') || raw.slice('<reminder>'.length, -'</reminder>'.length).includes('<')) return null
+function parseA2aMetadata(sender: string, messageId: string): { sender: string; messageId: string } | null {
   try {
-    const metadata = new DOMParser({ onError: onWarningStopParsing }).parseFromString(`<a2a from="${header[1]}" msg-id="${header[2]}"/>`, 'text/xml').documentElement
+    const metadata = new DOMParser({ onError: onWarningStopParsing }).parseFromString(`<a2a from="${sender}" msg-id="${messageId}"/>`, 'text/xml').documentElement
     if (!metadata || !attributes(metadata, ['from', 'msg-id']) || metadata.childNodes.length) return null
-    const sender = metadata.getAttribute('from')!, messageId = metadata.getAttribute('msg-id')!
-    if (attributeText(sender) !== header[1] || attributeText(messageId) !== header[2]) return null
+    const decodedSender = metadata.getAttribute('from')!, decodedMessageId = metadata.getAttribute('msg-id')!
+    if (attributeText(decodedSender) !== sender || attributeText(decodedMessageId) !== messageId) return null
+    return { sender: decodedSender, messageId: decodedMessageId }
+  } catch { return null }
+}
+
+function parseReminder(raw: string): AgentMuxMessageReading['reminder'] | null {
+  if (!raw.startsWith('<reminder>') || !raw.endsWith('</reminder>') || raw.slice('<reminder>'.length, -'</reminder>'.length).includes('<')) return null
+  try {
     const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
     const root = document.documentElement
     if (!root || root.tagName !== 'reminder' || root.attributes.length !== 0 ||
       Array.from(document.childNodes).some(node => node !== root) ||
       Array.from(root.childNodes).some(node => node.nodeType !== 3)) return null
-    const body = text.slice(header[0].length, boundary)
-    const packet = parsePacket(body)
-    return { sourceLabel: `Agent ${sender}`, declaredAgentSessionId: sender, declaredMessageId: messageId,
-      body: packet ? packet.parts.map(part => part.text).join('') : body,
-      reminder: { raw, text: root.textContent ?? '' }, ...(packet ? { packet } : {}) }
-  } catch {
-    return null
+    return { raw, text: root.textContent ?? '' }
+  } catch { return null }
+}
+
+function parseA2a(text: string, tag: 'amux:a2a' | 'a2a' = 'amux:a2a'): AgentMuxMessagePrefix | null {
+  const header = (tag === 'amux:a2a'
+    ? /^<amux:a2a from="([^"\r\n]+)" msg-id="([^"\r\n]+)">\n/u
+    : /^<a2a from="([^"\r\n]+)" msg-id="([^"\r\n]+)">\n/u).exec(text)
+  const closing = `\n</${tag}>`
+  if (!header || !text.endsWith(closing)) return null
+  const boundary = text.lastIndexOf('\n<reminder>')
+  if (boundary < header[0].length) return null
+  const metadata = parseA2aMetadata(header[1]!, header[2]!)
+  const reminder = parseReminder(text.slice(boundary + 1, -closing.length))
+  if (!metadata || !reminder) return null
+  const body = text.slice(header[0].length, boundary)
+  const packet = parsePacket(body)
+  return { kind: 'content', sourceLabel: `Agent ${metadata.sender}`, declaredAgentSessionId: metadata.sender, declaredMessageId: metadata.messageId,
+    body: packet ? packet.parts.map(part => part.text).join('') : body, reminder, ...(packet ? { packet } : {}) }
+}
+
+function parseReference(text: string, tag: 'a2a' | 'amux:a2a'): AgentMuxMessageReference | null {
+  const match = (tag === 'a2a'
+    ? /^<a2a from="([^"\r\n]+)" msg-id="([^"\r\n]+)" read-via="message --skill" \/>$/u
+    : /^<amux:a2a from="([^"\r\n]+)" msg-id="([^"\r\n]+)" read-via="message --skill" \/>$/u).exec(text)
+  if (!match || match[0] !== text) return null
+  const metadata = parseA2aMetadata(match[1]!, match[2]!)
+  return metadata ? { declaredAgentSessionId: metadata.sender, declaredMessageId: metadata.messageId, readVia: 'message --skill', raw: text } : null
+}
+
+function referenceReading(references: readonly AgentMuxMessageReference[], reminder?: AgentMuxMessageReading['reminder']): AgentMuxMessagePrefix {
+  return { kind: 'references', sourceLabel: '', declaredAgentSessionId: null, body: '', references, ...(reminder ? { reminder } : {}) }
+}
+
+function parseA2aContainer(text: string): AgentMuxMessagePrefix | null {
+  const opening = '<amux>\n', closing = '\n</amux>'
+  if (!text.startsWith(opening) || !text.endsWith(closing)) return null
+  const content = text.slice(opening.length, -closing.length)
+  const full = parseA2a(content, 'a2a')
+  if (full) return full
+  const boundary = content.indexOf('\n<reminder>')
+  const reminder = boundary < 0 ? undefined : parseReminder(content.slice(boundary + 1))
+  if (reminder === null) return null
+  const rows = (boundary < 0 ? content : content.slice(0, boundary)).split('\n')
+  const references: AgentMuxMessageReference[] = []
+  for (const row of rows) {
+    const reference = parseReference(row, 'a2a')
+    if (!reference) return null
+    references.push(reference)
   }
+  return referenceReading(references, reminder)
 }
 
 function parseSenderPrefix(text: string): AgentMuxMessagePrefix | null {
-  if (text.startsWith('<amux:a2a')) return parseA2a(text)
+  if (text.startsWith('<amux:a2a')) {
+    const reference = parseReference(text, 'amux:a2a')
+    return reference ? referenceReading([reference]) : parseA2a(text)
+  }
   const packet = parsePacket(text)
-  return packet ? { sourceLabel: packet.name, declaredAgentSessionId: null,
+  return packet ? { kind: 'content', sourceLabel: packet.name, declaredAgentSessionId: null,
     body: packet.parts.map(part => part.text).join(''), packet } : null
 }
