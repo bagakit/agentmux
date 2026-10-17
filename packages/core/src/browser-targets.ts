@@ -15,6 +15,7 @@ export type AgentMuxBrowserTarget = {
   capabilities: readonly string[]
   /** Present when the target exposes a bounded CDP subset rather than all engine commands. */
   cdpMethods?: readonly string[]
+  resource?: AgentMuxBrowserResource
   warning?: string
 }
 
@@ -35,4 +36,13 @@ export type AgentMuxBrowserReleaseReceipt = {
   navigationId: string
   status: 'released' | 'retained' | 'unknown'
   reasons: readonly AgentMuxBrowserRetentionReason[]
+}
+
+/** Current owner facts joined with durable positions; never another lifecycle registry. */
+export type AgentMuxBrowserResource = {
+  state: 'live' | 'released' | 'cold' | 'unknown'
+  locations: readonly { workspaceId: string | null; tabId: string; regionId: string }[]
+  /** null means native ownership was not completely observed, not an empty process. */
+  processes: readonly { pid: number; creationTime: number }[] | null
+  retention?: AgentMuxBrowserRetention
 }
