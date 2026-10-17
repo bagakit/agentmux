@@ -104,6 +104,24 @@ function TerminalWork({ performance: p }: { performance: RendererPerformanceSnap
     </> : null}
   </details>
 }
+function SessionEventWork({ performance: p }: { performance: RendererPerformanceSnapshot }) {
+  const [expanded, setExpanded] = useState(false)
+  const rows = expanded ? Object.entries(p.sessionEvents.byType).filter(([, cost]) => cost.count > 0)
+    .sort((a, b) => b[1].totalMs - a[1].totalMs) : []
+  return <details className="performance-work" data-performance-session-events onToggle={event => setExpanded(event.currentTarget.open)}>
+    <summary>Session event work <span>{p.sessionEvents.count} calls · lifetime</span><ThemeNavigationDownIcon size={12} /></summary>
+    {expanded ? <>
+      <p className="performance-note">Lifetime since this window’s recorder started. Synchronous applyEvent work includes subscribers and any layout they force. Later scheduled React, layout and paint are excluded. Wall times can overlap; they are not CPU.</p>
+      <div className="performance-work-grid">
+        {rows.map(([kind, cost]) => <section className="performance-work-cell" key={kind} data-session-event-type={kind}>
+          <strong>{kind}</strong><small>{cost.count} calls</small>
+          <span>{cost.totalMs.toFixed(1)} ms<small>Sync wall · max {cost.maxMs.toFixed(1)} ms</small></span>
+        </section>)}
+      </div>
+      {rows.length === 0 ? <p className="performance-note">No applyEvent calls observed.</p> : null}
+    </> : null}
+  </details>
+}
 function CurrentWindow({ observation, paused }: { observation: MetricsObservation; paused: boolean }) {
   const source = observation.renderer, renderer = source.data
   if (!renderer) return <p className="performance-note">Current window diagnostics · {source.reason ?? source.state}</p>
@@ -117,6 +135,7 @@ function CurrentWindow({ observation, paused }: { observation: MetricsObservatio
     {source.state !== 'available' ? <p className="performance-state">Previous window reading · {source.reason ?? source.state}</p> : null}
     <p className="performance-note">Terminal, editor, DOM and native RSS attribution is unknown.</p>
     <WorkAndWait performance={renderer.performance} available={!paused && source.state === 'available'} />
+    <SessionEventWork performance={renderer.performance} />
     <TerminalWork performance={renderer.performance} />
   </section>
 }

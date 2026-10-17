@@ -1,8 +1,19 @@
 import type { InputPerformanceSnapshot } from './performance-diagnostics.js'
 import type { AgentMuxDesktopSurface } from './desktop-focus-control.js'
+import type { AgentMuxClientEvent } from './types.js'
 
 /** Bounded renderer flight recorder. Durations are wall time, never CPU or input ACK. */
 export type RendererWorkTiming = { count: number; totalMs: number; maxMs: number }
+/** Fixed protocol discriminants only: caller text must be aggregated as unknown. */
+export const RENDERER_SESSION_EVENT_TYPES = {
+  'agent-message-changed': true, 'agent-message-observation': true, 'dispatch-changed': true,
+  'agent-input': true, 'agent-input-recorded': true, 'control-endpoint-state': true,
+  'attachment-state': true, 'run-service': true, 'terminal-snapshot': true, 'terminal-resized': true,
+  'terminal-output': true, 'process-state': true, 'agent-status': true, 'agent-timeline': true,
+  interaction: true, 'agent-session': true, 'run-removed': true, 'agent-error': true,
+  'connection-state': true, unknown: true
+} as const satisfies Record<AgentMuxClientEvent['type'] | 'unknown', true>
+export type RendererSessionEventType = keyof typeof RENDERER_SESSION_EVENT_TYPES
 export type RendererOverlayObservation = {
   reason: 'initial' | 'demand' | 'mutation' | 'resize' | 'scroll' | 'toggle' | 'font' | 'collect'
   scheduled: boolean; coalesced: boolean; nativeDemandCount: number | null
@@ -123,7 +134,8 @@ export type RendererPerformanceSnapshot = {
   inputRequests: Record<'user' | 'protocol' | 'paste', RendererInputRequestCost>
   inputRequestDetails: InputPerformanceSnapshot
   overlay: RendererOverlayCost
-  sessionEvents: RendererWorkTiming
+  /** Lifetime inclusive synchronous applyEvent work, including subscribers; excludes later scheduled work. */
+  sessionEvents: RendererWorkTiming & { byType: Record<RendererSessionEventType, RendererWorkTiming> }
   terminalWrites: { visible: RendererWorkTiming; hidden: RendererWorkTiming; stringCodeUnits: number; bytes: number }
   inputDelay: { state: 'observing' | 'unsupported' | 'stopped' | 'unavailable'; reason: string | null; durationThresholdMs: 16; timing: RendererWorkTiming }
   longTasks: { state: 'observing' | 'unsupported' | 'stopped' | 'unavailable'; reason: string | null; timing: RendererWorkTiming }

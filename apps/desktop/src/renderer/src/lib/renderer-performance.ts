@@ -1,5 +1,5 @@
-import { createInputPerformanceRecorder, readInputObservation, RENDERER_TIMING_KINDS } from '@agentmux/core/control'
-import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkTiming } from '@agentmux/core/control'
+import { createInputPerformanceRecorder, readInputObservation, RENDERER_SESSION_EVENT_TYPES, RENDERER_TIMING_KINDS } from '@agentmux/core/control'
+import type { RendererConsumerCost, RendererOverlayObservation, RendererPerformanceSnapshot, RendererSessionEventType, RendererSlowEvent, RendererTerminalCleanupContext, RendererTerminalCost, RendererTerminalWriteContext, RendererWorkTiming } from '@agentmux/core/control'
 import { tabSwitchObservation } from './tab-switch-observation'
 import { surfaceSwitchObservation } from './surface-switch-observation'
 
@@ -41,6 +41,7 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
   const requestCost = () => ({ started: 0, completed: 0, failed: 0, pending: 0, wall: timing() })
   const inputRequests = { user: requestCost(), protocol: requestCost(), paste: requestCost() }
   const sessionEvents = timing()
+  const sessionEventTypes = Object.fromEntries(Object.keys(RENDERER_SESSION_EVENT_TYPES).map(kind => [kind, timing()])) as Record<RendererSessionEventType, RendererWorkTiming>
   const terminalWrites = { visible: timing(), hidden: timing(), stringCodeUnits: 0, bytes: 0 }
   const longTasks: RendererPerformanceSnapshot['longTasks'] = { state: 'stopped', reason: null, timing: timing() }
   const inputDelay: RendererPerformanceSnapshot['inputDelay'] = { state: 'stopped', reason: null, durationThresholdMs: 16, timing: timing() }
@@ -118,8 +119,10 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
       record('terminal-interaction', detail, duration, occurrenceMonoMs, delivered)
     },
     // Event type is not a public free-text channel. No prompt/body supplied by a caller is retained.
-    sessionEvent(_kind: string, start: number) {
+    sessionEvent(kind: string, start: number) {
       const delivered = now(), elapsed = Math.max(0, delivered - start)
+      const type = Object.hasOwn(RENDERER_SESSION_EVENT_TYPES, kind) ? kind as RendererSessionEventType : 'unknown'
+      add(sessionEventTypes[type], elapsed)
       add(sessionEvents, elapsed); record('session-event', 'session-event', elapsed, start, delivered)
     },
     terminalWrite(visible: boolean, data: string | Uint8Array, start: number, context: RendererTerminalWriteContext) {
@@ -224,7 +227,8 @@ export function createRendererPerformance(now = () => performance.now(), wall = 
         inputRequests: { user: { ...inputRequests.user, wall: { ...inputRequests.user.wall } }, protocol: { ...inputRequests.protocol, wall: { ...inputRequests.protocol.wall } }, paste: { ...inputRequests.paste, wall: { ...inputRequests.paste.wall } } },
         inputRequestDetails: inputDetails.snapshot(),
         overlay: { ...overlay, triggers: { ...overlay.triggers }, collect: { ...overlay.collect } },
-        sessionEvents: { ...sessionEvents }, terminalWrites: { ...terminalWrites, visible: { ...terminalWrites.visible }, hidden: { ...terminalWrites.hidden } },
+        sessionEvents: { ...sessionEvents, byType: Object.fromEntries(Object.entries(sessionEventTypes).map(([kind, value]) => [kind, { ...value }])) as Record<RendererSessionEventType, RendererWorkTiming> },
+        terminalWrites: { ...terminalWrites, visible: { ...terminalWrites.visible }, hidden: { ...terminalWrites.hidden } },
         inputDelay: { ...inputDelay, timing: { ...inputDelay.timing } },
         longTasks: { ...longTasks, timing: { ...longTasks.timing } }, terminals: current, omittedTerminals: terminals.size - attempted, unavailableTerminals,
         slowEvents,
