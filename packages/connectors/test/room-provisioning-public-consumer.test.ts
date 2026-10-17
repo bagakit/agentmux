@@ -10,7 +10,7 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 async function fixture() {
   const f = await roomProvisioningFixture({ managedCaller: true }); cleanup.push(() => f.close())
   const services = await createDesktopConnections({ directory: join(f.root, 'desktop-rooms'), adapters: [f.adapter], bindings: { spatial: f.spatial, checkpoint: f.checkpoint },
-    encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() } })
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
   cleanup.push(() => services.close())
   const secret = await services.secrets.store({ operationId: 'public-room-credential', secret: 'private-fixture-credential' })
   await services.connections.configure({ operationId: 'public-room-configure', expectedRevision: null, connection: { ...config, credentialRef: secret.credentialRef } })

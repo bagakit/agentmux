@@ -74,7 +74,7 @@ async function fixture(scope: 'future-shared-conversation' | 'future-native-user
   const original = await ingressFixture(false, feishuConfig, undefined, { publication: 'future-shared-conversation' }); closes.push(original.close)
   const remote = await platform(), port = createPublicationConversationPort(original.coreClients)
   const openServices = () => createDesktopConnections({ directory: join(original.root, 'image-host'),
-    encryption: { isEncryptionAvailable: () => true, encryptString: text => Buffer.from(text), decryptString: bytes => bytes.toString() },
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: (bytes.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
   let services = await openServices()
   closes.push(() => services.close())

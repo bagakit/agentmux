@@ -31,7 +31,7 @@ it('default Desktop receives original SDK actions before ACK and exposes unsuppo
   const sdk = feishuSdkTransport()
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(sdk.http.request)
   const services = await createDesktopConnections({ directory: join(f.root, 'desktop-actions'),
-    encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: f.spatial, checkpoint: async ref => await f.client.conversationCheckpoint(ref) },
     ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
   cleanup.push(() => services.close())

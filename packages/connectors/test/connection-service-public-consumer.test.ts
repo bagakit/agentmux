@@ -56,7 +56,7 @@ async function fixture(options: { feishu?: boolean; publication?: boolean; coreA
   // Only this pointer changes when the actual execution Host takes over the same durable Store.
   let inputCore = (hostId: string): import('../src/durable-ingress.js').DurableIngressCore | undefined => options.coreAvailable === false || hostId !== 'local' ? undefined : original.client
   const services = await createDesktopConnections({ directory: join(original.root, 'service-owner'), ...(options.feishu ? {} : { adapters: [wire.adapter] }),
-    encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() },
+    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ...(options.publication === false ? {} : { publication: createPublicationConversationPort(original.coreClients) }), ingress: { core: hostId => inputCore(hostId) } })
   cleanup.push(() => services.close())
@@ -188,7 +188,7 @@ it('isolates service DDL and read faults inside the original default Host, prese
   const execute = DatabaseSync.prototype.exec, faults: string[] = []
   const ddl = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function (this: DatabaseSync, sql) { if (sql.includes('CREATE TABLE IF NOT EXISTS connection_service_policy')) { faults.push('ddl'); throw new Error('Private service schema failure') }; return execute.call(this, sql) })
   const root = await mkdtemp(join(tmpdir(), 'service-ddl-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
-  const isolated = await createDesktopConnections({ directory: root, adapters: [], encryption: { isEncryptionAvailable: () => true, encryptString: value => Buffer.from(value), decryptString: value => value.toString() } }); cleanup.push(() => isolated.close())
+  const isolated = await createDesktopConnections({ directory: root, adapters: [], encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } }); cleanup.push(() => isolated.close())
   expect(isolated.database, 'Service DDL must not withdraw the original ConnectionHost').not.toBeNull()
   await expect(isolated.connections.service!.get()).rejects.toMatchObject({ code: 'CONNECTION_SERVICE_UNCONFIRMED' })
   expect(faults).toEqual(['ddl'])
