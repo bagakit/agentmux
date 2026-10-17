@@ -25,7 +25,7 @@ const readJson = async path => JSON.parse(await readFile(path, 'utf8'))
 const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'AGENT_INFORMATION_MUTATION'))
 const candidate = new Map(), artifacts = new Map()
 const receipt = { schema: 'agentmux.collaboration-reading-proof.v1', passed: false, sources: {}, runs: [], artifacts: {},
-  boundary: 'Actual source hook and mounted Focus/Dialog/Card/Mailbox consumers. Native pointer behavior, paint and durable restart are separate evidence.' }
+  boundary: 'Actual source hook and mounted Focus/Map/Card/Mailbox consumers. Map tests substitute only Worker transport and call the production dispatcher and WASM engine. Native threads, pointer behavior, paint and durable restart are separate evidence.' }
 
 async function bind(path, expected) {
   const physical = relative(root, await realpath(local(path)))
@@ -41,12 +41,13 @@ async function artifact(path) { const name = relative(root, path); artifacts.set
 const readingConfig = 'apps/desktop/test/vitest.collaboration-reading.config.mts'
 const productConfig = 'apps/desktop/test/vitest.collaboration-product.config.mts'
 const costConfig = 'apps/desktop/test/vitest.collaboration-context-cost.config.mts'
-for (const path of ['apps/desktop/scripts/verify-collaboration-reading.mjs', readingConfig, productConfig, costConfig,
-  'apps/desktop/test/collaboration-reading.test.tsx', 'apps/desktop/test/collaboration-focus-product.test.tsx',
-  'apps/desktop/test/collaboration-product-reading.test.tsx', 'apps/desktop/test/collaboration-context-cost.test.tsx']) await bind(path)
+const publicConfig = 'apps/desktop/test/vitest.collaboration-public-navigation.config.mts'
+const historyConfig = 'apps/desktop/test/vitest.focus-history-lifecycle.config.mts'
 const { collaborationReadingMutations } = await import(new URL('../test/vitest.collaboration-reading.config.mts', import.meta.url))
 const { collaborationProductMutations } = await import(new URL('../test/vitest.collaboration-product.config.mts', import.meta.url))
 const { collaborationContextMutation } = await import(new URL('../test/vitest.collaboration-context-cost.config.mts', import.meta.url))
+const { desktopMapMutations } = await import(new URL('../test/helpers/desktop-map-source-mutations.mjs', import.meta.url))
+const { focusHistoryMutations } = await import(new URL('../test/vitest.focus-history-lifecycle.config.mts', import.meta.url))
 const renderer = 'apps/desktop/src/renderer/src/'
 const allGroups = [
   { name: 'reading', config: readingConfig, tests: ['apps/desktop/test/collaboration-reading.test.tsx'], minimumCases: 22,
@@ -56,19 +57,32 @@ const allGroups = [
     mutations: Object.entries(collaborationReadingMutations).map(([name, value]) => ({ name, path: renderer + 'lib/' + value.file,
       before: value.from, after: value.to, assertion: value.assertion })) },
   { name: 'product', config: productConfig,
-    tests: ['apps/desktop/test/collaboration-focus-product.test.tsx', 'apps/desktop/test/collaboration-product-reading.test.tsx'], minimumCases: 16,
+    tests: ['apps/desktop/test/collaboration-focus-product.test.tsx', 'apps/desktop/test/collaboration-product-reading.test.tsx'], minimumCases: 20,
     loadedKey: 'AGENTMUX_COLLABORATION_PRODUCT_LOADED', mutantKey: 'AGENTMUX_COLLABORATION_PRODUCT_MUTATION',
-    requiredSources: ['components/GlobalFocusSurface.tsx', 'components/FocusToolbar.tsx', 'components/AgentCollaborationDialog.tsx',
+    requiredSources: ['components/GlobalFocusSurface.tsx', 'components/FocusToolbar.tsx', 'components/AgentCollaborationMap.tsx',
       'components/AgentCollaborationGraph.tsx', 'components/FocusContextCardBody.tsx', 'components/FocusContextRow.tsx',
-      'components/MailboxA2A.tsx', 'lib/use-collaboration-reading.ts', 'lib/agent-collaboration.ts', 'lib/collaboration-workface.ts'],
-    requiredPackages: ['packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/components/Modal.tsx', 'packages/core/src/agent-message-render.ts'],
+      'components/MailboxA2A.tsx', 'lib/use-collaboration-reading.ts', 'lib/agent-collaboration.ts', 'lib/collaboration-workface.ts',
+      'lib/use-collaboration-layout.ts', 'lib/collaboration-layout-engine.ts'],
+    requiredPackages: ['packages/client-ui/src/components/ConversationMessage.tsx', 'packages/core/src/agent-message-render.ts'],
     mutations: collaborationProductMutations.map(({ file, ...value }) => ({ ...value, path: renderer + file })) },
   { name: 'cost', config: costConfig, tests: ['apps/desktop/test/collaboration-context-cost.test.tsx'], minimumCases: 1,
     loadedKey: 'AGENTMUX_COLLABORATION_CONTEXT_LOADED', mutantKey: 'AGENTMUX_COLLABORATION_CONTEXT_MUTATION',
-    requiredSources: ['components/AgentCollaborationDialog.tsx', 'components/AgentCollaborationGraph.tsx', 'components/FocusContextCardBody.tsx',
-      'lib/use-collaboration-reading.ts', 'lib/agent-collaboration.ts', 'lib/focus-context.ts'],
+    requiredSources: ['components/AgentCollaborationMap.tsx', 'components/AgentCollaborationGraph.tsx', 'components/FocusContextCardBody.tsx',
+      'lib/use-collaboration-reading.ts', 'lib/agent-collaboration.ts', 'lib/focus-context.ts', 'lib/use-collaboration-layout.ts', 'lib/collaboration-layout-engine.ts'],
     requiredPackages: ['packages/client-ui/src/components/ConversationMessage.tsx'],
-    mutations: [{ ...collaborationContextMutation, path: renderer + collaborationContextMutation.file }] }
+    mutations: [{ ...collaborationContextMutation, path: renderer + collaborationContextMutation.file }] },
+  { name: 'public', config: publicConfig,
+    tests: ['packages/core/test/control-desktop-map.test.ts', 'apps/desktop/test/desktop-map-presentation.test.ts', 'apps/desktop/test/desktop-presentation-primary.test.ts'], minimumCases: 19,
+    loadedKey: 'AGENTMUX_DESKTOP_MAP_LOADED', mutantKey: 'AGENTMUX_DESKTOP_MAP_MUTATION',
+    requiredSources: ['lib/desktop-presentation.ts'],
+    requiredPackages: ['packages/core/src/desktop-focus-parser.ts', 'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-module-skills.ts'],
+    requireSourceCli: true,
+    mutations: desktopMapMutations.map(({ file, ...mutation }) => ({ ...mutation, path: file })) },
+  { name: 'history', config: historyConfig,
+    tests: ['apps/desktop/test/focus-history-catalog.test.tsx', 'apps/desktop/test/focus-history-lifecycle.test.tsx'], minimumCases: 11,
+    loadedKey: 'AGENTMUX_FOCUS_HISTORY_LOADED', mutantKey: 'AGENTMUX_FOCUS_HISTORY_MUTATION',
+    requiredSources: ['lib/focus-history-sources.ts', 'components/GlobalFocusSurface.tsx', 'lib/api.ts'], requiredPackages: [],
+    mutations: focusHistoryMutations.map(value => ({ ...value, path: renderer + 'lib/focus-history-sources.ts' })) }
 ]
 
 
@@ -79,6 +93,14 @@ const groups = allGroups.filter(group => selectedGroups.includes(group.name)).ma
   mutations: selectedMutations ? group.mutations.filter(mutation => selectedMutations.includes(mutation.name)) : group.mutations }))
 if (selectedMutations) assert.ok(selectedMutations.length > 0 && new Set(selectedMutations).size === selectedMutations.length && selectedMutations.every(name => groups.some(group => group.mutations.some(mutation => mutation.name === name))), 'Select nonempty known mutations in the selected groups')
 receipt.selection = { groups: selectedGroups, mutations: groups.flatMap(group => group.mutations.map(mutation => group.name + '/' + mutation.name)) }
+const support = selectedGroups.includes('public') ? ['apps/desktop/test/helpers/desktop-map-source-mutations.mjs',
+  'apps/desktop/scripts/fixtures/desktop-map/source-loader.mjs', 'packages/core/test/helpers/source-object-cli.ts',
+  'packages/core/test/fixtures/desktop-focus-facts.ts', 'packages/core/src/desktop-focus-control.ts'] : []
+if (selectedGroups.some(group => group === 'product' || group === 'cost')) support.push('apps/desktop/test/helpers/collaboration-canvas-dom.ts',
+  'apps/desktop/test/helpers/collaboration-layout-loopback.ts', 'apps/desktop/test/helpers/composer-dom-fixture.tsx')
+if (selectedGroups.includes('history')) support.push('apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/agent-creation-fixture.ts')
+for (const path of new Set(['apps/desktop/scripts/verify-collaboration-reading.mjs',
+  ...groups.flatMap(group => [group.config, ...group.tests]), ...support])) await bind(path)
 
 async function run(group, label, mutation) {
   const name = group.name + '-' + label, reportPath = join(directory, name + '.json'), loadedPath = join(directory, name + '.loaded.jsonl')
@@ -121,6 +143,10 @@ async function run(group, label, mutation) {
   }
   for (const path of group.requiredSources) assert.ok(loaded.has(renderer + path), 'Missing real owning consumer: ' + path)
   for (const path of group.requiredPackages) assert.ok(loaded.has(path), 'Missing shared package source from this checkout: ' + path)
+  if (group.requireSourceCli) {
+    assert.ok(rows.some(input => input.process === 'source-cli' && input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'The real source CLI must load its registered commands')
+    if (mutation?.name === 'cli-map-option') assert.ok(rows.some(input => input.process === 'source-cli' && input.path === mutation.path && input.originalSHA256 !== input.effectiveSHA256), 'The CLI mutation must reach the actual child CLI, not only a parent test import')
+  }
   if (mutation) {
     assert.equal(result.exitCode, 1); assert.equal(report.success, false)
     assert.deepEqual([...changed], [mutation.path], 'Only the exact intended source may be mutated')
@@ -139,13 +165,14 @@ async function run(group, label, mutation) {
 async function pool(jobs) {
   const queue = [...jobs], results = []
   async function worker() { while (queue.length) { const job = queue.shift(); results.push(await job()) } }
-  const settled = await Promise.allSettled(Array.from({ length: Math.min(3, queue.length) }, worker))
+  const settled = await Promise.allSettled(Array.from({ length: Math.min(1, queue.length) }, worker))
   for (const result of settled) if (result.status === 'rejected') throw result.reason
   return results
 }
 
 try {
-  assert.equal(allGroups[0].mutations.length, 16); assert.equal(allGroups[1].mutations.length, 8); assert.equal(allGroups[2].mutations.length, 1)
+  assert.equal(allGroups[0].mutations.length, 16); assert.equal(allGroups[1].mutations.length, 11); assert.equal(allGroups[2].mutations.length, 1); assert.equal(allGroups[3].mutations.length, 8)
+  assert.equal(allGroups[4].mutations.length, 5)
   const baseline = await pool(groups.map(group => async () => run(group, 'baseline')))
   receipt.runs.push(...baseline)
   const mutants = await pool(groups.flatMap(group => group.mutations.map(mutation => async () => {
@@ -169,6 +196,7 @@ receipt.sources = Object.fromEntries([...candidate].sort(([a], [b]) => a.localeC
 receipt.artifacts = Object.fromEntries([...artifacts].sort(([a], [b]) => a.localeCompare(b)))
 const path = join(directory, 'receipt.json'); await writeFile(path, JSON.stringify(receipt, null, 2) + '\n')
 console.log(JSON.stringify({ passed: receipt.passed, readingCases: receipt.runs.find(run => run.name === 'reading-baseline')?.tests,
-  productCases: receipt.runs.find(run => run.name === 'product-baseline')?.tests, costCases: receipt.runs.find(run => run.name === 'cost-baseline')?.tests,
+  productCases: receipt.runs.find(run => run.name === 'product-baseline')?.tests, costCases: receipt.runs.find(run => run.name === 'cost-baseline')?.tests, publicCases: receipt.runs.find(run => run.name === 'public-baseline')?.tests,
+  historyCases: receipt.runs.find(run => run.name === 'history-baseline')?.tests,
   mutations: receipt.runs.filter(run => run.mutation).length, evidence: relative(root, path), ...(receipt.error ? { error: receipt.error.message } : {}) }))
 assert.equal(receipt.passed, true, receipt.error?.message)
