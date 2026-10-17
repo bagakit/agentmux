@@ -68,8 +68,15 @@ app.whenReady().then(async()=>{
     await waitFor('Boolean(window.terminalMenu)')
     for(const appearance of ['dark','light'])for(const width of [640,320]){
       await seed(width,appearance);const before=await evaluate('terminalMenu.facts().terminal')
-      await openBody();await frame(`${width}-${appearance}-body`)
-      assert.deepEqual(await evaluate('terminalMenu.facts().terminal'),before,'Body disclosure preserves the original terminal and geometry')
+      await openBody()
+      assert.equal(await evaluate(`Boolean(${body}.closest('[aria-hidden="true"]'))`),true,'The real modal isolates the original terminal for accessibility')
+      await evaluate('terminalMenu.appendOutput()');await waitFor(`terminalMenu.facts().outputLine==='Fresh output while the menu is open'`);await painted()
+      assert.equal(await evaluate(`Boolean(${menu}.querySelector('[data-terminal-menu-tools]'))`),true,'Normal output keeps the original context tools after modal isolation')
+      for(const label of ['Copy','Paste','Select all','Find'])assert.equal(await evaluate(`${item(label)}.querySelector('span').textContent`),label,'Common terminal action has a visible label')
+      await frame(`${width}-${appearance}-body`)
+      const { cursor: beforeCursor, ...beforeSurface }=before
+      const { cursor: afterCursor, ...afterSurface }=await evaluate('terminalMenu.facts().terminal')
+      assert.deepEqual(afterSurface,beforeSurface,'Body disclosure and normal output preserve the original terminal and geometry')
       await close();await evaluate(`${region}.querySelector('.agent-region-header__more').focus()`);await key('ArrowDown','ArrowDown',40);await opened()
       assert.equal(await evaluate(`Boolean(${menu}.querySelector('[data-terminal-menu-tools]'))`),false,'More has no residual terminal source')
       await frame(`${width}-${appearance}-more`);await close()
@@ -108,6 +115,6 @@ app.whenReady().then(async()=>{
     assert.ok(after.clipboard.at(-1).includes('Original retained terminal output'),'Output copy uses the original actual terminal buffer')
     assert.equal(result.frames.length,12);assert.equal(result.scenarios.length,3);assert.deepEqual(result.consoleErrors,[])
     result.passed=true
-  } catch(error) { result.failure={name:error.name,message:error.message,stack:error.stack} }
+  } catch(error) { result.failure={name:error.name,message:error.message,stack:error.stack};result.failureFacts=await evaluate('window.terminalMenu?.facts()').catch(()=>null) }
   finally { await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(result,null,2));win?.destroy();app.exit(result.passed?0:1) }
 })

@@ -12,7 +12,7 @@ const require = createRequire(import.meta.url), fixture = join(desktop, 'scripts
 const temporaryRoot = await mkdtemp(fixturePath('tmp/amx-terminal-menu-'))
 const evidence = join(repository, '.tmp/terminal-region-menu', 'attempt-' + globalThis.crypto.randomUUID())
 const hash = data => createHash('sha256').update(data).digest('hex')
-const owners = ['RegionContextMenu', 'AgentRegionHeader', 'AgentRegionMenuContent', 'TerminalContextMenu', 'TerminalMenuTools', 'TerminalView']
+const owners = ['RegionContextMenu', 'AgentRegionHeader', 'AgentRegionMenuContent', 'AgentRegionMenuActions', 'TerminalContextMenu', 'TerminalMenuTools', 'TerminalView']
   .map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`).concat('apps/desktop/src/renderer/src/styles/terminal.css')
 const sources = async () => Object.fromEntries(await Promise.all(owners.map(async name => [name, hash(await readFile(join(repository, name)))])))
 const result = { schema: 'agentmux.terminal-region-menu-delivery.v1', passed: false, userRunTouched: false,
@@ -31,9 +31,9 @@ async function renderer(label, mutation = false) {
     plugins: [{ name: 'terminal-menu-consumer-inputs', enforce: 'pre', transform(source, id) {
       if ((id.startsWith(join(desktop, 'src') + '/') || id.startsWith(join(repository, 'packages/client-ui/src') + '/') || id.startsWith(fixture + '/')) && !id.includes('?')) loadedSourceInputs[id.slice(repository.length + 1)] = hash(source)
       if (mutation && id === join(desktop, 'src/renderer/src/components/TerminalContextMenu.tsx')) {
-        const anchor = 'if (setContextSource) return <div'
-        assert.equal(source.split(anchor).length, 2, 'The actual integrated Terminal consumer branch is unique')
-        const altered = source.replace(anchor, 'if (false && setContextSource) return <div')
+        const anchor = "element.current?.closest('[hidden], [inert]')"
+        assert.equal(source.split(anchor).length, 2, 'The actual terminal source visibility check is unique')
+        const altered = source.replace(anchor, "element.current?.closest('[hidden], [inert], [aria-hidden=\"true\"]')")
         sourceMutations.push({ file: id.slice(repository.length + 1), originalSHA256: hash(source), mutatedSHA256: hash(altered), productionWritten: false })
         return altered
       }
@@ -65,12 +65,12 @@ try {
   await mkdir(evidence, { recursive: true })
   result.fixed = await renderer('fixed')
   assert.equal(result.fixed.outcome.exitCode, 0, JSON.stringify(result.fixed.rendered.failure)); assert.equal(result.fixed.rendered.passed, true)
-  const red = await renderer('inner-root-red', true)
+  const red = await renderer('modal-source-red', true)
   assert.equal(red.outcome.exitCode, 1); assert.equal(red.rendered.failure.name, 'AssertionError')
-  assert.match(red.rendered.failure.message, /The actual terminal body reaches the shared Agent menu/)
-  const restored = await renderer('inner-root-restored')
+  assert.match(red.rendered.failure.message, /Normal output keeps the original context tools|The actual source contributes its original terminal tools/)
+  const restored = await renderer('modal-source-restored')
   assert.equal(restored.outcome.exitCode, 0, JSON.stringify(restored.rendered.failure)); assert.equal(restored.rendered.passed, true)
-  result.mutation = { label: 'actual-integrated-terminal-consumer-removed', red, restored, productionWritten: false }
+  result.mutation = { label: 'modal-isolation-invalidates-visible-source', red, restored, productionWritten: false }
   result.sourceAfter = await sources(); assert.deepEqual(result.sourceAfter, result.sourceBefore)
   result.passed = true
 } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack } }
