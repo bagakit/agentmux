@@ -31,7 +31,7 @@ export function useSessionRestart(active = true) {
     try { pending = originalSessionRestart(session) }
     catch (error) { state.reportError(error, { kind: 'indeterminate', subject: session.control }); return }
     if (!pending && !agentMenuRunMatches(session, target.control)) {
-      state.reportError(new Error('The original Agent Run changed or is unobserved. No restart request was sent.'), {
+      state.reportError(new Error('The original Agent Run changed or is unavailable. No restart request was sent.'), {
         kind: 'indeterminate', subject: target.control,
         summary: 'The original work surface and draft are kept. Refresh this Agent’s observation, then review its current Run.'
       })
@@ -50,8 +50,8 @@ export function useSessionRestart(active = true) {
     const control = original.target.control
     const current = agentMenuSession(state.sessions, original.target)
     if (original.failed) {
-      if (!current || current.runUnobserved) {
-        setFeedback('The current Run is unobserved. No new restart was sent. Refresh this Agent, then review its current Run.')
+      if (!current) {
+        setFeedback('The original Agent identity is unavailable. No new restart was sent. Refresh this Agent, then review its current Run.')
         return
       }
       setRequest({ target: retainAgentMenuTarget(current), name: original.name,
