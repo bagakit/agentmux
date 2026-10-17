@@ -80,6 +80,7 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
   const review: ConnectionSetupPublicationReview = { versions: versions ?? [], selectedVersion: null, changes: [], audience: null, proposedAudience: null, entries: null, sharing: null, reasonRequired: null, creatorAudienceAvailable: creator !== null, issues }
   const { initialVersion, creatorIsCurrent, profileUpdate } = provenance
   const profileMode = Boolean(profileUpdate) || profilePlanning
+  const profileVersion = profileMode ? nextProfileVersion(read(states.versions)) : null
   if (profileUpdate && !label(profileUpdate.readbackStepId)) issues.push('The original profile readback is unconfirmed')
   const requiredSubjects = [...connectionSetupPublicationSubjects(effect)]
   const initialDraft = (value: ConnectionSetupPublicationDraft | null) => value?.kind === 'create-version' && value.visibility === 'creator-only' && value.desktopEntry === 'bot' && value.mobileEntry === 'bot'
@@ -112,7 +113,7 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
     review.versions = []
     return { review, requiredSubjects: ['publication-version'], privateIntent: !issues.length ? JSON.stringify(draft.fullRelease ? { kind: 'submit-version', versionId: draft.versionId, body: { is_full_release: true } } : { kind: 'submit-initial-version', versionId: draft.versionId }) : null }
   }
-  if (!versions) issues.push('The exact version list is unconfirmed')
+  if (profileMode ? profileVersion === null : !versions) issues.push('The exact version list is unconfirmed')
   const featureReady = Array.isArray(features?.hitFeatureKeyList) && features.hitFeatureKeyList.every(label)
   const split = featureReady && (features!.hitFeatureKeyList as string[]).includes('openplatform.b2c.bot_b2c_share_switch_split')
   const splitSharing = (value: unknown): Extract<NonNullable<ConnectionSetupPublicationReview['sharing']>, { kind: 'split' }> | null => {
@@ -156,6 +157,12 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
   } else if (include && exclude) { body.visibleSuggest = include.native; body.blackVisibleSuggest = exclude.native }
   const entry = (platform: 'pc' | 'mobile', desired: string | undefined) => {
     const choices = pending?.[platform + 'DefaultAbilityList'], current = pending?.[platform + 'DefaultAbility']
+    if (profileMode) {
+      if (typeof current !== 'string' || current !== '' && !label(current)) { issues.push('Unconfirmed current ' + platform + ' entry'); return null }
+      if (desired !== undefined && desired !== current) issues.push('Retain the current ' + platform + ' entry for this profile update')
+      if (current) body[platform + 'DefaultAbility'] = current
+      return { current: current || null, choices: [] }
+    }
     if (!Array.isArray(choices) || !choices.every(label) || new Set(choices).size !== choices.length) { issues.push('Unconfirmed ' + platform + ' entry choices'); return null }
     const selected = desired ?? (label(current) && choices.includes(current) ? current : undefined)
     if (choices.length && (!selected || !choices.includes(selected))) issues.push('Choose a valid ' + platform + ' entry')
@@ -175,7 +182,13 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
   const policy = record(pending?.applyReasonConfig), scope = record(pending?.ChangeScope), refresh = record(pending?.changeAllowRefreshToken)
   const policyKeys = ['apiPrivilegeNeedReason', 'dataPrivilegeNeedReason', 'contactPrivilegeNeedReason', 'isContactExpand', 'visibleScopeNeedReason']
   const expansion = record(policy?.isDataPrivilegeExpandMap)
-  if (!policy || !policyKeys.every(k => typeof policy[k] === 'boolean') || !expansion || !Object.values(expansion).every(v => typeof v === 'boolean') || typeof pending?.equalToVisible !== 'boolean') issues.push('The original application review policy is incomplete')
+  const policyComplete = policy && policyKeys.every(k => typeof policy[k] === 'boolean') && expansion && Object.values(expansion).every(v => typeof v === 'boolean') && typeof pending?.equalToVisible === 'boolean'
+  if (profileMode) {
+    // The unchanged audience needs no expansion form; known extra-change reasons still apply.
+    const added = scope && ['addScopesV2', 'addTenantTypeScopes', 'addUserTypeScopes'].some(key => Array.isArray(scope[key]) && (scope[key] as unknown[]).length > 0)
+    const required = policy?.apiPrivilegeNeedReason === true && added || policy?.contactPrivilegeNeedReason === true && policy.isContactExpand === true || policy?.dataPrivilegeNeedReason === true && expansion && Object.values(expansion).some(value => value === true)
+    review.reasonRequired = required ? true : policyComplete ? false : null
+  } else if (!policyComplete) issues.push('The original application review policy is incomplete')
   else {
     const before = review.audience?.include, after = review.proposedAudience?.include
     const expanded = !!before && !!after && (after.all && !before.all || !before.all && !after.all && (after.people.some(id => !before.people.includes(id)) || after.departments.some(id => !before.departments.includes(id))))
@@ -192,7 +205,7 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
     if (profileMode && draft.visibility !== 'current') issues.push('Retain the original published application audience')
     const originalVersions = read(states.versions)?.versions
     const reference = Array.isArray(originalVersions) ? originalVersions.map(record).find(version => version && ![0, 3, 10].includes(version.versionStatus as number)) : undefined
-    if (profileMode ? draft.version !== nextProfileVersion(read(states.versions)) : !validVersion(draft.version) || reference && (!label(reference.appVersion) || !validVersion(reference.appVersion) || compare(draft.version, reference.appVersion) <= 0)) issues.push('Use a new three-part version greater than the platform reference version')
+    if (profileMode ? draft.version !== profileVersion : !validVersion(draft.version) || reference && (!label(reference.appVersion) || !validVersion(reference.appVersion) || compare(draft.version, reference.appVersion) <= 0)) issues.push('Use a new three-part version greater than the platform reference version')
     if (!draft.notes.trim() || draft.notes.length > 500) issues.push('Release notes must contain between 1 and 500 characters')
     if (draft.reason !== undefined && (!draft.reason.trim() || draft.reason.length > 1000) || review.reasonRequired && !draft.reason) issues.push('Provide the required application review reason')
     body.appVersion = draft.version; body.changeLog = draft.notes
@@ -205,7 +218,9 @@ function reviewPublication(effect: ConnectionSetupPublicationEffect, states: Rec
 /** The reference derives from parseable three-part versions, not every historical display label. */
 function nextProfileVersion(data: Record<string, unknown> | null): string | null {
   if (!Array.isArray(data?.versions)) return null
-  const versions = data.versions.map(value => record(value)?.appVersion).filter(label)
+  const entries = data.versions.map(record)
+  if (entries.some(entry => !label(entry?.appVersion))) return null
+  const versions = entries.map(entry => entry!.appVersion as string)
   const triples = versions.map(value => value.split('.').map(part => Number.parseInt(part, 10))).filter(parts => parts.length === 3 && parts.every(Number.isFinite))
   const max = triples.length ? triples.reduce((left, right) => { for (let i = 0; i < 3; i++) if (left[i] !== right[i]) return left[i]! > right[i]! ? left : right; return left }) : [0, 0, 0]
   const version = [max[0], max[1], max[2]! + 1].join('.')
