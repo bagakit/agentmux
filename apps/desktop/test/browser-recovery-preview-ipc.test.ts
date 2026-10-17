@@ -61,7 +61,7 @@ import '../src/preload/index.js'
 const roots: string[] = []
 afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllEnvs(); bridge.invoke.mockReset()
-  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+  await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })))
 })
 function savedGraph(id: string, profileId?: string, privateMode = false): AgentMuxSpatialGraph {
   return { spaces: [], zones: [], bindings: [], locations: [], layouts: {}, tabLayouts: {},
@@ -74,6 +74,10 @@ function savedGraph(id: string, profileId?: string, privateMode = false): AgentM
 function preview(scope: BrowserRecoveryPreviewScope): BrowserRecoveryPreview {
   return { scope, url: 'https://preview.invalid/older-view', title: 'Old viewed title', navigationId: 'old-document', capturedAt: 1,
     image: { dataUrl: 'data:image/jpeg;base64,/9j/2Q==', width: 320, height: 200 } }
+}
+function latch() {
+  let release!: () => void
+  return { promise: new Promise<void>(resolve => { release = resolve }), release: () => release() }
 }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-recovery-preview-ipc-'))
@@ -213,6 +217,55 @@ describe('actual preload and registered Main recovery-preview read', () => {
       await f.api.deleteProfile(profile.id, { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id })
       expect((await f.api.listProfiles()).some(value => value.id === profile.id)).toBe(false)
       expect(await f.previews.read(scope)).toEqual({ status: 'missing' })
+    } finally { await f.dispose() }
+  })
+
+  it('closes an unacquired cold Browser through preload and removes only its original Profile preview', async () => {
+    const f = await fixture(), other = { ...f.scope, profileId: 'unaffected-profile' }
+    try {
+      f.setGraph(savedGraph(f.scope.browserId, f.scope.profileId!))
+      await f.previews.record(f.scope, preview(f.scope), () => true)
+      await f.previews.record(other, preview(other), () => true)
+      const before = await readFile(f.path(other)), close = vi.spyOn(f.manager, 'close')
+      const pendingRemovalAck = latch(), releaseRemovalAck = latch(), remove = f.previews.remove.bind(f.previews)
+      vi.spyOn(f.previews, 'remove').mockImplementation(async scope => {
+        const result = await remove(scope)
+        pendingRemovalAck.release()
+        await releaseRemovalAck.promise
+        return result
+      })
+      expect(await f.api.getRecoveryPreview(f.scope.browserId)).toMatchObject({ status: 'available' })
+      const closing = f.api.close(f.scope.browserId)
+      const first = await Promise.race([closing.then(() => 'closed'), pendingRemovalAck.promise.then(() => 'cache-ack-pending')])
+      releaseRemovalAck.release()
+      await closing
+      expect(first).toBe('closed')
+      expect(close).toHaveBeenCalledExactlyOnceWith(f.scope.browserId)
+      expect(await f.api.getRecoveryPreview(f.scope.browserId)).toEqual({ status: 'missing' })
+      expect(await readFile(f.path(other))).toEqual(before)
+      for (const method of f.acquire) expect(method).not.toHaveBeenCalled()
+    } finally { await f.dispose() }
+  })
+
+  it('preserves original Close through unavailable cold metadata and delegates to a native owner appearing during its read', async () => {
+    const f = await fixture()
+    try {
+      const close = vi.spyOn(f.manager, 'close')
+      f.spatialRead.mockRejectedValueOnce(new Error('Private fixture metadata unavailable'))
+      await expect(f.api.close(f.scope.browserId)).resolves.toBeUndefined()
+      expect(close).toHaveBeenCalledExactlyOnceWith(f.scope.browserId)
+      // The native teardown substrate is a port double; the post-await Main dispatch remains real.
+      close.mockImplementation(id => { bridge.owners.delete(id) })
+      f.spatialRead.mockImplementationOnce(async () => {
+        bridge.owners.set(f.scope.browserId, { workspaceId: f.scope.workspaceId,
+          storage: { mode: 'normal', profileId: f.scope.profileId! } })
+        return null
+      })
+      await f.api.close(f.scope.browserId)
+      expect(close).toHaveBeenCalledTimes(2)
+      expect(close.mock.calls[1]).toEqual([f.scope.browserId])
+      expect(bridge.owners.has(f.scope.browserId)).toBe(false)
+      for (const method of f.acquire) expect(method).not.toHaveBeenCalled()
     } finally { await f.dispose() }
   })
 })
