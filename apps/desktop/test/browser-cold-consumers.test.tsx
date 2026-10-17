@@ -11,6 +11,7 @@ import { createWorkbenchTab, type BrowserWorkbenchSurface } from '../src/rendere
 import { hydratePersistedTab, reducePersistedTab, type PersistedWorkbenchTab } from '../src/renderer/src/lib/workbench-persistence'
 import type { AppConfig, BrowserSnapshot } from '../src/shared/contracts'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
+import type { BrowserRecoveryPreview, BrowserRecoveryPreviewReadResult } from '../src/shared/browser-recovery-preview'
 
 const original = useAppStore.getState()
 let root: Root, host: HTMLDivElement, dispose: (() => void) | undefined
@@ -33,6 +34,7 @@ beforeEach(() => {
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined)
   vi.spyOn(api.browser, 'cancelElementSelection').mockResolvedValue(undefined)
+  vi.spyOn(api.browser, 'getRecoveryPreview').mockResolvedValue({ status: 'missing' })
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => {
@@ -270,4 +272,72 @@ it('Retry retains the exact failed Browser and reloads only after the original o
   await act(async () => acquired({ ...page, error: tab.error }))
   expect(reload).toHaveBeenCalledExactlyOnceWith(page.id)
   expect(apply).toHaveBeenCalledWith({ type: 'updated', browser: page })
+})
+
+const historicalPreview = (profileId = page.profileId!): BrowserRecoveryPreview => ({
+  scope: { browserId: page.id, profileId, workspaceId: 'workspace', mode: 'normal' },
+  url: 'https://fixture.invalid/previous', title: 'Previously viewed research', navigationId: 'old-document', capturedAt: 1,
+  image: { dataUrl: 'data:image/jpeg;base64,/9j/2Q==', width: 320, height: 200 }
+})
+
+it('reads historical appearance only for a visible recovery consumer, without acquiring a page', async () => {
+  const surface = savedTab().regions['region-page'] as BrowserWorkbenchSurface
+  const read = vi.mocked(api.browser.getRecoveryPreview), create = vi.spyOn(api.browser, 'create'), reload = vi.spyOn(api.browser, 'reload')
+  await act(async () => root.render(<BrowserPane tab={surface} visible />))
+  expect(read).not.toHaveBeenCalled()
+  const failed = { ...surface, error: 'Unavailable target' }
+  await act(async () => root.render(<BrowserPane tab={failed} visible={false} />))
+  expect(read).not.toHaveBeenCalled()
+  await act(async () => root.render(<BrowserPane tab={failed} visible />))
+  expect(read).toHaveBeenCalledExactlyOnceWith(page.id)
+  expect(create).not.toHaveBeenCalled(); expect(reload).not.toHaveBeenCalled()
+})
+
+it('labels the actual old source separately while Retry and Copy keep the current failed target', async () => {
+  vi.mocked(api.browser.getRecoveryPreview).mockResolvedValue({ status: 'available', preview: historicalPreview() })
+  const surface = { ...savedTab().regions['region-page'] as BrowserWorkbenchSurface, error: 'Current target unavailable' }
+  const create = vi.spyOn(api.browser, 'create').mockResolvedValue({ ...page, error: surface.error })
+  const reload = vi.spyOn(api.browser, 'reload').mockResolvedValue(page)
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await act(async () => root.render(<BrowserPane tab={surface} visible />))
+  const figure = host.querySelector('figure.browser-recovery__preview')!
+  expect(figure.textContent).toContain('Previous preview · not live')
+  expect(figure.textContent).toContain(historicalPreview().title)
+  expect(figure.textContent).toContain(historicalPreview().url)
+  expect(figure.querySelector('img')?.getAttribute('src')).toBe(historicalPreview().image.dataUrl)
+  expect(host.querySelector('.browser-recovery__address code')?.textContent).toBe(page.url)
+  await act(async () => recoveryButton('Copy page address').click())
+  expect(copy).toHaveBeenCalledExactlyOnceWith(page.url)
+  await act(async () => recoveryButton('Retry').click())
+  expect(create).toHaveBeenCalledExactlyOnceWith(page.id, page.url, 'workspace', page.profileId, page.mode)
+  expect(reload).toHaveBeenCalledExactlyOnceWith(page.id)
+})
+
+it('ignores a late old Profile read and keeps an unavailable preview local to recovery', async () => {
+  let oldRead!: (result: BrowserRecoveryPreviewReadResult) => void
+  vi.mocked(api.browser.getRecoveryPreview).mockImplementationOnce(() => new Promise(resolve => { oldRead = resolve }))
+    .mockRejectedValueOnce(new Error('Preview storage unavailable'))
+  const surface = { ...savedTab().regions['region-page'] as BrowserWorkbenchSurface, error: 'Current target unavailable' }
+  await act(async () => root.render(<BrowserPane tab={surface} visible />))
+  await act(async () => root.render(<BrowserPane tab={{ ...surface, profileId: 'other-profile' }} visible />))
+  await act(async () => oldRead({ status: 'available', preview: historicalPreview() }))
+  expect(host.querySelector('.browser-recovery__preview')).toBeNull()
+  expect(host.textContent).toContain('The previous preview could not be read')
+  expect(recoveryButton('Retry').disabled).toBe(false); expect(recoveryButton('Edit address').disabled).toBe(false)
+})
+
+it('does not borrow a different Profile image and does not let damaged pixels disable recovery', async () => {
+  vi.mocked(api.browser.getRecoveryPreview).mockResolvedValueOnce({ status: 'available', preview: historicalPreview('other-profile') })
+    .mockResolvedValueOnce({ status: 'available', preview: historicalPreview() })
+  const surface = { ...savedTab().regions['region-page'] as BrowserWorkbenchSurface, error: 'Current target unavailable' }
+  await act(async () => root.render(<BrowserPane tab={surface} visible />))
+  expect(host.querySelector('.browser-recovery__preview')).toBeNull()
+  expect(host.textContent).toContain('different page context')
+  await act(async () => root.render(<BrowserPane tab={{ ...surface, navigationId: 'later-failure' }} visible />))
+  const image = host.querySelector('.browser-recovery__preview img')!
+  expect(image).not.toBeNull()
+  await act(async () => image.dispatchEvent(new Event('error')))
+  expect(host.querySelector('.browser-recovery__preview')).toBeNull()
+  expect(host.textContent).toContain('previous preview could not be displayed')
+  expect(recoveryButton('Retry').disabled).toBe(false); expect(recoveryButton('Edit address').disabled).toBe(false)
 })
