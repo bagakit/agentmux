@@ -7,6 +7,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { resolve as pathResolve } from 'node:path'
 const root = pathResolve(import.meta.dirname, '../../../../..')
 export async function resolve(specifier, context, next) {
+  if (specifier === '@agentmux/diagnostic-evidence') {
+    return { url: pathToFileURL(pathResolve(root, 'packages/diagnostic-evidence/src/index.ts')).href, shortCircuit: true }
+  }
   if (specifier === '@agentmux/core/control' || specifier === '@agentmux/core/public-rpc-http' || specifier === '@agentmux/core/toolkit-result-channel' || specifier === '@agentmux/core/toolkit-performance-failure' || specifier === '@agentmux/core/toolkit-result-document') {
     return { url: pathToFileURL(pathResolve(root, 'packages/core/src', specifier.split('/').at(-1) + '.ts')).href, shortCircuit: true }
   }
