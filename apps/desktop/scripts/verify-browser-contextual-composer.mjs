@@ -198,7 +198,8 @@ try {
   await native('native-baseline')
   if (!baselineOnly) {
     const queueReceipt = join(output, 'queue.json')
-    const queue = await execute(process.execPath, ['apps/desktop/scripts/verify-browser-contextual-queue.mjs', '--receipt', queueReceipt], process.env)
+    // Vite build sets NODE_ENV=production in this process; mounted React needs its test runtime.
+    const queue = await execute(process.execPath, ['apps/desktop/scripts/verify-browser-contextual-queue.mjs', '--receipt', queueReceipt], { ...process.env, NODE_ENV: 'test' })
     await writeFile(join(output, 'queue.log'), queue.log)
     assert.equal(queue.code, 0, 'Independent queue owner proof must qualify'); assert.equal(queue.signal, null); assert.equal(queue.timedOut, false)
     const qualified = JSON.parse(await readFile(queueReceipt, 'utf8'))
