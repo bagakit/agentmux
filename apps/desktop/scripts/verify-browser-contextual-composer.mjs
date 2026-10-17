@@ -12,9 +12,11 @@ const { build } = createRequire(join(root, 'packages/core/package.json'))('esbui
 const baselineOnly = process.argv.includes('--baseline')
 const foreground = process.argv.includes('--foreground')
 const captureHandoff = process.argv.includes('--capture-handoff')
+const nativeOpinion = process.argv.includes('--native-opinion')
 const output = join(root, '.tmp/browser-agent-collaboration', foreground ? 'contextual-composer-foreground-proof' : 'contextual-composer-proof')
-assert.ok(process.argv.slice(2).every(arg => ['--baseline', '--foreground', '--capture-handoff'].includes(arg)), 'Unsupported contextual proof argument')
+assert.ok(process.argv.slice(2).every(arg => ['--baseline', '--foreground', '--capture-handoff', '--native-opinion'].includes(arg)), 'Unsupported contextual proof argument')
 assert.ok(!captureHandoff || foreground, 'External native capture needs the explicit foreground mode')
+assert.ok(!nativeOpinion || captureHandoff, 'The actual OS opinion uses the external native handoff')
 assert.ok(!foreground || process.platform === 'darwin', 'Exact native foreground capture currently uses the macOS window source')
 await mkdir(output, { recursive: true })
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), sources = new Map()
@@ -160,6 +162,7 @@ async function native(label, mutation) {
       execFileSync('/usr/bin/xcrun', ['swiftc', helper, '-o', join(directory, 'native-window')])
       env.AGENTMUX_CONTEXTUAL_FOREGROUND = '1'
       if (captureHandoff) env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF = '1'
+      if (nativeOpinion) env.AGENTMUX_CONTEXTUAL_NATIVE_OPINION = '1'
     }
     console.log(label + ': private native fixture ' + directory)
     const result = await execute(require('electron'), [join(directory, 'bootstrap.cjs')], env)

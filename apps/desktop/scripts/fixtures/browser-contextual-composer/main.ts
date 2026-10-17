@@ -61,6 +61,11 @@ async function run() {
   window = new BrowserWindow({ width: 1120, height: 760, show: false, title: 'Browser collaboration · private proof',
     webPreferences: { preload: join(directory, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
   const contents = window.webContents
+  const originalNativeSend = contents.sendInputEvent.bind(contents)
+  contents.sendInputEvent = input => {
+    ;(receipt.nativeOverlayForwarded ??= []).push({ input, receiverId: contents.id, windowId: window!.id })
+    originalNativeSend(input)
+  }
   contents.on('console-message', (event: any) => { if (event.level === 'error') console.error('Renderer:', event.message) })
   windows = new WorkbenchWindows(window, new WorkbenchWindowStore(join(directory, 'windows.json')), () => [{ x: 0, y: 0, width: 1600, height: 1000 }])
   access = createDesktopApplicationAccessOwner(runtime, join(directory, 'application-access.sqlite'))
@@ -79,7 +84,7 @@ async function run() {
   window.showInactive()
   if (process.env.AGENTMUX_CONTEXTUAL_FOREGROUND === '1') {
     window.show(); app.focus({ steal: true }); window.focus()
-    await until(() => window!.isFocused(), 'authorized private native foreground window')
+    if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF !== '1') await until(() => window!.isFocused(), 'authorized private native foreground window')
   }
   const evaluate = (expression: string) => contents.executeJavaScript(expression)
   await until(() => evaluate('Boolean(window.contextualProof)'), 'actual Renderer entry')
@@ -89,6 +94,13 @@ async function run() {
   await until(() => evaluate('contextualProof.facts().stage?.width > 0'), 'original mounted BrowserPane stage')
   const page = await until(() => window!.contentView.children.find(view => (view as WebContentsView).webContents?.getURL() === url) as WebContentsView | undefined, 'same actual native page')
   await until(() => page.webContents.executeJavaScript('Boolean(globalThis.pageProof)'), 'original native document')
+  if (process.env.AGENTMUX_CONTEXTUAL_CAPTURE_HANDOFF === '1') {
+    const sourceId = window.getMediaSourceId(), match = /^window:(\d+):\d+$/u.exec(sourceId)!
+    const native = JSON.parse(execFileSync(join(directory, 'native-window'), [match[1]!, String(process.pid)], { encoding: 'utf8' }))
+    await writeFile(join(directory, 'window-ready.json'), JSON.stringify({ native, sourceId, pid: process.pid, appPath: process.execPath.split('/Contents/MacOS/')[0], focused: window.isFocused() }))
+    console.log('native-window-ready')
+    await until(async () => { try { return JSON.parse(await readFile(join(directory, 'window-ready-response.json'), 'utf8')).ready === true } catch { return false } }, 'the exact CUA private window observation')
+  }
   void evaluate(`window.agentmux.browser.runScript('contextual-browser', 'await waitForElement("Continue collaboration", 25000); return "finished"', ${JSON.stringify({ id: session.agentSessionId, name: snapshot.label })}, 'contextual-browser-program')`).then(report => { receipt.browserProgram = report })
   await until(() => evaluate('contextualProof.facts().browser?.activity?.operation?.steps?.length > 0'), 'actual running Browser step')
   const before = await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,events:pageProof.events.slice()})')
@@ -155,12 +167,29 @@ async function run() {
       }
     }
   }
-  await click('button[aria-label="Message Browser operator"]')
+  const nativeOpinion = process.env.AGENTMUX_CONTEXTUAL_NATIVE_OPINION === '1'
+  async function requestNativeAction(id: string, selector: string, text?: string) {
+    const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)}),r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+    const bounds = window!.getBounds(), content = window!.getContentBounds(), zoom = contents.getZoomFactor()
+    const nativePoint = { x: point.x * zoom + content.x - bounds.x, y: point.y * zoom + content.y - bounds.y }
+    const request = { actionId: id, selector, text, point: nativePoint, pid: process.pid, sourceId: window!.getMediaSourceId(), browserControl: (await evaluate('contextualProof.facts()')).browser.control }
+    await writeFile(join(directory, 'action-request.json'), JSON.stringify(request))
+    console.log('native-action-ready:' + id)
+    ;(receipt.nativeActions ??= []).push(request)
+  }
+  if (nativeOpinion) await requestNativeAction('open-discussion', 'button[aria-label="Message Browser operator"]')
+  else await click('button[aria-label="Message Browser operator"]')
   await until(() => evaluate('document.querySelector(".browser-contextual-composer__source")?.textContent.includes("Original collaboration page")'), 'actual captured scene in original nonmodal discussion')
   const body = '  Keep this original opinion\n<amux>Authored example</amux>\n'
-  await evaluate(`document.querySelector(${JSON.stringify('textarea[aria-label="Opinion for Browser operator"]')}).focus()`)
-  await contents.debugger.sendCommand('Input.insertText', { text: body })
-  await click('.browser-contextual-composer .primary-button')
+  if (nativeOpinion) {
+    await requestNativeAction('write-opinion', 'textarea[aria-label="Opinion for Browser operator"]', body)
+    await until(() => evaluate(`document.querySelector(${JSON.stringify('textarea[aria-label="Opinion for Browser operator"]')}).value === ${JSON.stringify(body)}`), 'original opinion text through the actual native overlay')
+    await requestNativeAction('send-opinion', '.browser-contextual-composer .primary-button')
+  } else {
+    await evaluate(`document.querySelector(${JSON.stringify('textarea[aria-label="Opinion for Browser operator"]')}).focus()`)
+    await contents.debugger.sendCommand('Input.insertText', { text: body })
+    await click('.browser-contextual-composer .primary-button')
+  }
   const freeze = await until(() => receipt.ipc.find((call: any) => call.channel === 'browser:freezeInputContext' && call.result), 'actual GUI frozen operation ID')
   const operationId = freeze.args[0].operationId
   assert.equal(freeze.args[0].prompt, body, 'GUI must keep original authored bytes')
@@ -182,6 +211,11 @@ async function run() {
   const submit = receipt.ipc.find((call: any) => call.channel === 'sessions:submitPrompt' && call.args[2] === operationId)
   assert.ok(submit?.exactSender && submit.exactFrame, 'Original production preload reaches the trusted Main submit handler')
   assert.deepEqual(submit.args.at(-1), freeze.result.reference, 'Only the original typed capture reference crosses submit IPC')
+  if (nativeOpinion) {
+    assert.ok(receipt.nativeOverlayForwarded?.filter((item: any) => item.input.type === 'mouseDown').length >= 2,
+      'Native overlay pointer events must actually forward through the original Main native projection into its Renderer')
+    receipt.nativeOpinion = { passed: true, key, submit, forwarded: receipt.nativeOverlayForwarded.slice() }
+  }
   assert.equal(receipt.browserProgram, undefined, 'The original Browser program must still be running during live viewport checks')
   assert.deepEqual(await page.webContents.executeJavaScript('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,events:pageProof.events.slice()})'), before, 'Discussion must not change original live viewport, scroll or page input')
   const history = await core.readAgentSessionHistory({ hostId: 'local', agentSessionId: session.agentSessionId, source: 'captured', kind: 'user-message', query: body, limit: 10 })
