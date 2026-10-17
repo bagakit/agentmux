@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 /** Own only the current private product lifecycle, Inspector isolation and exact cleanup. */
 export async function runPrivateA2aProductScenario(scenario) {
 const root = process.env.AGENTMUX_A2A_PROOF_BUILD, evidence = resolve(process.argv[2])
-assert.ok(root?.startsWith('/private/tmp/amx-a2-') || root?.startsWith('/tmp/amx-a2-'))
+assert.ok(root && dirname(root) === await realpath(tmpdir()) && basename(root).startsWith('amx-a2-') && basename(root).length > 'amx-a2-'.length)
+assert.equal(await realpath(root), root)
 assert.equal(process.env.HOME, join(root, 'home'))
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const runtime = join(root, 'runtime'), state = join(runtime, 'state'), userData = join(root, 'user-data'), workspace = join(root, 'workspace')
