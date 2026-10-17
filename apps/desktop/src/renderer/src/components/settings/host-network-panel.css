@@ -37,3 +37,5 @@
 .host-network__address-list code { font: 11px/1.6 var(--font-mono); overflow-wrap: anywhere; user-select: text; }
 .host-network__boundary { font-size: 10px; }
 @container (max-width: 340px) { .host-network__policy dl { grid-template-columns: 1fr; gap: 8px; } .host-network__policy dl > div { grid-template-columns: 1fr 1fr; } .host-network__address-list > div { grid-template-columns: 1fr; gap: 5px; } }
+.host-network__addresses summary .host-network__interface-names { display: block; margin: 3px 0 0; color: var(--text-2); font: 10px/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.host-network__interface-addresses { display: grid; gap: 5px; min-width: 0; }

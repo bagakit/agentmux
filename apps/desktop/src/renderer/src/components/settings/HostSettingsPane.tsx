@@ -17,7 +17,9 @@ import { HostUpgradePanel } from './HostUpgradePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
 import { HostTopology } from './HostTopology'
 import { HostRuntimePanel } from './HostRuntimePanel'
-import { HostNetworkPanel, hostNetworkSummary } from './HostNetworkPanel'
+import { HostNetworkPanel } from './HostNetworkPanel'
+import { hostNetworkSummary } from './host-network-view'
+import { HostNetworkMap } from './HostNetworkMap'
 import { currentHostNetwork, useHostNetworkObservation } from './use-host-network-observation'
 import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
@@ -226,6 +228,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     }
   }
 
+  const selectedNetworkHost = hosts.find(host => host.id === selectedId)
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}>
       <div className="settings-pane-toolbar remote-management__toolbar">
@@ -240,6 +243,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       {filter.query.trim() ? <p className="remote-management__filter" role="status">{hosts.filter(host => matches(host.id)).length} of {hosts.length} configured environments match “{filter.query}”{selectedId && !matches(selectedId) ? ' · Selected environment remains open' : ''}</p> : null}
       <div className="settings-resource-split remote-management__body">
         {showTopology ? active ? <HostTopology selectedId={selectedId} onSelect={selectTopologyHost}
+          onOpenLink={() => { if (selectedNetworkHost) selectTopologyHost(selectedNetworkHost.id) }}
+          linkView={selectedNetworkHost ? <HostNetworkMap key={selectedNetworkHost.id} host={selectedNetworkHost} committed={config.hosts.find(host => host.id === selectedNetworkHost.id)} state={network.reads[selectedNetworkHost.id]} onRead={network.read} active={active && !pendingHostNavigation && panel === 'overview'} visible={network.visible} /> : null}
           items={hosts.filter(host => matches(host.id)).map(host => ({ host, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)

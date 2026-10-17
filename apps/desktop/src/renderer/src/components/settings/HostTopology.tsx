@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
-import { Handle, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Handle, Position, ReactFlow, type Edge, type Node, type NodeProps, type ReactFlowInstance, type Viewport } from '@xyflow/react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { HostCheckState } from '../../store'
@@ -55,12 +55,21 @@ function ManagementEntry({ data }: NodeProps<EntryNode>) {
 const nodeTypes = { host: HostTopologyNode, entry: ManagementEntry }
 
 /** A projection of configured routes. The graph owns viewport geometry, never Host or Runtime truth. */
-export const HostTopology = memo(function HostTopology({ items, selectedId, onSelect }: {
+export const HostTopology = memo(function HostTopology({ items, selectedId, onSelect, linkView, onOpenLink }: {
+  linkView?: ReactNode
+  onOpenLink?: () => void
   items: readonly HostTopologyItem[]
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
   const instance = useRef<ReactFlowInstance<TopologyNode, Edge> | null>(null)
+  const [scope, setScope] = useState<'fleet' | 'link'>('fleet')
+  const fleetViewport = useRef<Viewport | null>(null)
+  function changeScope(next: 'fleet' | 'link') {
+    if (scope === next) return
+    if (next === 'link') { fleetViewport.current = instance.current?.getViewport() ?? null; instance.current = null; onOpenLink?.() }
+    setScope(next)
+  }
   const topologyKey = JSON.stringify(items.map(item => item.host.id))
   const routeKey = JSON.stringify(items.map(item => [item.host.id, item.host.kind]))
   const firstNodes = useMemo(() => {
@@ -80,14 +89,17 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
   const fit = useCallback(() => { void instance.current?.fitView({ padding: .12, maxZoom: 1 }) }, [])
   // A new route/filter can change geometry. Checks, counters and selected state cannot reset the reader's viewport.
   useEffect(() => {
+    fleetViewport.current = null
     const frame = requestAnimationFrame(() => { void instance.current?.fitView({ nodes: firstNodes, padding: .12, minZoom: .55, maxZoom: 1 }) })
     return () => cancelAnimationFrame(frame)
   }, [topologyKey])
 
   return <div className="remote-topology" aria-label="Configured environment topology" data-host-topology>
-    <div className="remote-topology__caption"><span>CONNECTION MAP</span><small>Configured routes · check each environment</small></div>
+    <header className="remote-topology__header"><div className="remote-topology__caption"><span>ENVIRONMENT CONSOLE</span><small>{scope === 'fleet' ? 'Configured environments' : 'One selected connection'}</small></div>
+      {linkView ? <div className="remote-topology__scope" aria-label="Topology scope"><button type="button" aria-label="Fleet map" aria-pressed={scope === 'fleet'} onClick={() => changeScope('fleet')}>Fleet</button><button type="button" aria-label="Selected link" aria-pressed={scope === 'link'} onClick={() => changeScope('link')}>Selected link</button></div> : null}</header>
+    {scope === 'link' && linkView ? <div className="remote-topology__link">{linkView}</div> : <>
     <div className="remote-topology__viewport"><ReactFlow<TopologyNode, Edge> nodes={nodes} edges={edges} nodeTypes={nodeTypes}
-      onInit={value => { instance.current = value }} fitView fitViewOptions={{ nodes: firstNodes, padding: .12, minZoom: .55, maxZoom: 1 }}
+      onInit={value => { instance.current = value }} {...(fleetViewport.current ? { defaultViewport: fleetViewport.current } : {})} fitView={fleetViewport.current === null} fitViewOptions={{ nodes: firstNodes, padding: .12, minZoom: .55, maxZoom: 1 }}
       nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false}
       elementsSelectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.1} maxZoom={1.4}
       defaultEdgeOptions={{ style: { strokeWidth: 1.25 } }} proOptions={{ hideAttribution: true }}>
@@ -98,6 +110,6 @@ export const HostTopology = memo(function HostTopology({ items, selectedId, onSe
       <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => void instance.current?.zoomOut()}><ZoomOutIcon size={15} /></button>
       <button type="button" className="icon-button" aria-label="Fit all environments" onClick={fit}><FitIcon size={15} /></button>
     </div>
-    <p className="remote-topology__hint">Pan to explore · use the list to scan every environment</p>
+    <p className="remote-topology__hint">Pan to explore · use the list to scan every environment</p></>}
   </div>
 })
